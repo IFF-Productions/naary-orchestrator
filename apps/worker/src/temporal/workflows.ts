@@ -87,6 +87,11 @@ export async function runGraph(
       case "start":
       case "end":
         break;
+      case "webhookTrigger":
+        // Slice #4: the inbound event (the workflow input) is this node's output.
+        // Pure — no I/O; determinism boundary stays clean.
+        ctx[node.id] = ctx.__input;
+        break;
       case "agent": {
         // tenantId flows in workflow args (not a secret); the activity fetches
         // the tenant's key by tenantId. executionId comes from workflowInfo

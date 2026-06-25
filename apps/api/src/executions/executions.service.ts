@@ -12,7 +12,8 @@ import {
   TASK_QUEUE,
   type ExecutionState,
 } from "@naary/contracts";
-import { sampleGraph } from "@naary/dsl";
+import { sampleGraph, webhookSampleGraph } from "@naary/dsl";
+import type { GraphDef } from "@naary/dsl";
 import { getBudget } from "@naary/usage";
 import { connectTemporal } from "../temporal/client";
 
@@ -44,10 +45,37 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async start(tenantId: string): Promise<{ workflowId: string }> {
-    const workflowId = `exec-${tenantId}-${randomUUID()}`;
+    return this.startGraph(
+      `exec-${tenantId}`,
+      sampleGraph,
+      { message: "I was charged twice this month" },
+      tenantId,
+    );
+  }
+
+  /** Start a webhook-triggered run; the verified event becomes the trigger output. */
+  async startWebhook(
+    tenantId: string,
+    event: unknown,
+  ): Promise<{ workflowId: string }> {
+    return this.startGraph(
+      `wh-${tenantId}`,
+      webhookSampleGraph,
+      event,
+      tenantId,
+    );
+  }
+
+  private async startGraph(
+    prefix: string,
+    graph: GraphDef,
+    input: unknown,
+    tenantId: string,
+  ): Promise<{ workflowId: string }> {
+    const workflowId = `${prefix}-${randomUUID()}`;
 
     // Snapshot the tenant's caps at start and pass them as workflow args, so the
-    // workflow can enforce deterministically (no DB read in workflow code). The
+    // workflow enforces deterministically (no DB read in workflow code). The
     // circuit breaker always applies (default when no budget); the per-execution
     // cost cap applies only when a budget is set.
     const budget = await getBudget(tenantId);
@@ -56,8 +84,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     // the tenant's provider key by tenantId, inside the activity.
     await this.client.workflow.start(RUN_GRAPH_WORKFLOW, {
       args: [
-        sampleGraph,
-        { message: "I was charged twice this month" },
+        graph,
+        input,
         {
           tenantId,
           perExecutionCapUsd: budget?.perExecutionCapUsd,

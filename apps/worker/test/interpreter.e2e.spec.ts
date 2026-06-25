@@ -3,7 +3,7 @@ import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { approvalSignal, stateQuery, TASK_QUEUE } from "@naary/contracts";
-import { sampleGraph } from "@naary/dsl";
+import { sampleGraph, webhookSampleGraph } from "@naary/dsl";
 import type * as activities from "../src/temporal/activities";
 import { runGraph } from "../src/temporal/workflows";
 
@@ -150,6 +150,29 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       expect(result.status).toBe("budget_exceeded");
       // the agent did run (cost accumulated) before the cap stopped the next node
       expect(result.ctx.agent).toMatchObject({ status: "ok" });
+    });
+  });
+
+  it("webhook graph: the inbound event becomes the trigger node's output", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const event = { action: "opened", pull_request: { number: 42 } };
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [webhookSampleGraph, event, { tenantId: "t-wh" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-webhook",
+      });
+
+      await waitFor(
+        async () =>
+          (await handle.query(stateQuery)).status === "awaiting_approval",
+      );
+      const paused = await handle.query(stateQuery);
+      // the webhookTrigger node exposed the event as its output
+      expect(paused.ctx.trigger).toEqual(event);
+
+      await handle.signal(approvalSignal, { approved: true });
+      expect((await handle.result()).status).toBe("completed");
     });
   });
 

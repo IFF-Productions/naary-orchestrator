@@ -12,6 +12,42 @@ datasource db {
   // adapter passed to PrismaClient at runtime — not here.
 }
 
+// Slice #4 — external integrations.
+
+model WebhookEndpoint {
+  id            String   @id @default(uuid())
+  workflowId    String // which graph to start (graphs are hardcoded for now)
+  tenantId      String
+  provider      String // 'github' | 'atlassian' | 'generic'
+  signingSecret String // plain column per plan §4 (HMAC secret; never logged)
+  createdAt     DateTime @default(now())
+}
+
+// Delivery-id dedupe so provider retries don't start duplicate executions.
+model WebhookDelivery {
+  id         String   @id @default(uuid())
+  endpointId String
+  deliveryId String
+  createdAt  DateTime @default(now())
+
+  @@unique([endpointId, deliveryId])
+}
+
+model Connection {
+  id        String   @id @default(uuid())
+  tenantId  String
+  type      String // 'atlassian' | 'github' | 'custom'
+  label     String
+  serverUrl String // e.g. https://mcp.atlassian.com/v1/mcp
+  authMode  String // 'api_token' | 'pat' | 'oauth'
+  scopes    String[]
+  status    String   @default("connected") // 'connected' | 'needs_reauth' | 'error'
+  // secret/refresh token stored via the Slice #2 encrypted credential store, keyed by this id
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, type, label])
+}
+
 model TenantBudget {
   id                 String  @id @default(uuid())
   tenantId           String  @unique

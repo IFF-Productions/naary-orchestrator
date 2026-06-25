@@ -3,7 +3,13 @@
  * Platform-agnostic — no Temporal, no I/O. (CLAUDE.md: interpreter, not codegen.)
  */
 
-export type NodeType = "start" | "agent" | "humanApproval" | "end";
+export type NodeType =
+  | "start"
+  | "webhookTrigger" // Slice #4: entry node whose output is the inbound event
+  | "agent"
+  | "mcpTool" // Slice #4: calls a remote MCP server tool via a connection
+  | "humanApproval"
+  | "end";
 
 export interface NodeDef {
   id: string;
