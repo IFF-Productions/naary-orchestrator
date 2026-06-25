@@ -1,0 +1,46 @@
+// Prisma schema for naary-orchestrator (Slice #2).
+// Postgres owns DEFINITIONS and RECORDS (credentials, usage ledger); Temporal
+// owns execution STATE. Run from repo root: `pnpm db:migrate` / `pnpm db:generate`.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Prisma 7: connection url lives in prisma.config.ts (CLI) and the driver
+  // adapter passed to PrismaClient at runtime — not here.
+}
+
+model TenantCredential {
+  id              String    @id @default(uuid())
+  tenantId        String
+  provider        String // 'anthropic' | 'openai' | 'google' | 'ollama'
+  ciphertext      String // base64 AES-256-GCM ciphertext
+  iv              String // base64 nonce
+  authTag         String // base64 GCM auth tag
+  isValid         Boolean   @default(false)
+  lastValidatedAt DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@unique([tenantId, provider])
+}
+
+model UsageEvent {
+  id                String   @id @default(uuid())
+  tenantId          String
+  executionId       String // Temporal workflowId
+  nodeId            String
+  provider          String
+  model             String
+  inputTokens       Int
+  outputTokens      Int
+  totalTokens       Int
+  cachedInputTokens Int      @default(0)
+  reasoningTokens   Int      @default(0)
+  costUsd           Decimal  @db.Decimal(12, 6)
+  createdAt         DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([executionId])
+}

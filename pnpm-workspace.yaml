@@ -6,3 +6,6 @@ packages:
 allowBuilds:
   '@swc/core': true
   protobufjs: true
+  '@prisma/client': true
+  prisma: true
+  '@prisma/engines': true

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@naary/contracts": "workspace:*",
+    "@naary/db": "workspace:*",
     "@naary/dsl": "workspace:*",
     "@temporalio/activity": "^1.18.1",
     "@temporalio/worker": "^1.18.1",
