@@ -1,0 +1,26 @@
+{
+  "name": "naary-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Durable, platform-agnostic orchestrator for AI-agent + webhook workflows (Temporal interpreter spine).",
+  "packageManager": "pnpm@11.0.9",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b && pnpm -r run typecheck",
+    "test": "pnpm build && vitest run",
+    "test:watch": "vitest",
+    "worker": "pnpm --filter @naary/worker start",
+    "start": "pnpm --filter @naary/api start"
+  },
+  "devDependencies": {
+    "@swc/core": "^1.15.43",
+    "@types/node": "^26.0.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3",
+    "unplugin-swc": "^1.5.9",
+    "vitest": "^4.1.9"
+  }
+}

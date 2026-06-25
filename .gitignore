@@ -1,0 +1,10 @@
+node_modules/
+**/dist/
+*.log
+*.tsbuildinfo
+.pnpm-store/
+
+# Temporal dev-server persistent state (local only; see README durability runbook)
+temporal.db
+temporal.db-shm
+temporal.db-wal

@@ -1,0 +1,11 @@
+{
+  "name": "@naary/dsl",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Platform-agnostic graph DSL: node/edge/graph types and deterministic traversal. No Temporal, no I/O.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b"
+  }
+}

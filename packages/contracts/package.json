@@ -1,0 +1,14 @@
+{
+  "name": "@naary/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Execution protocol shared by worker + api: task queue, signal/query definitions, execution-state type. Client-safe.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@temporalio/workflow": "^1.18.1"
+  }
+}
