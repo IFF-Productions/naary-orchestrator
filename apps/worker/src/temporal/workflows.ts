@@ -11,7 +11,7 @@ import type { GraphDef } from "@naary/dsl";
 // Do NOT drop `type` — that would pull I/O code into the sandbox.
 import type * as activities from "./activities";
 
-const { runAgent } = wf.proxyActivities<typeof activities>({
+const { runAgent, callMcpTool } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },
 });
@@ -109,6 +109,21 @@ export async function runGraph(
         // Accumulate the cost the activity RETURNED — deterministic.
         costUsd += result.costUsd;
         ctx.__costUsd = costUsd;
+        break;
+      }
+      case "mcpTool": {
+        // Calls a remote MCP server tool via a connection. Token fetch + the
+        // HTTP call are I/O inside the activity; the workflow only passes
+        // tenantId + node config. No cost (counts toward stepCount only).
+        ctx[node.id] = await callMcpTool(
+          node.config as unknown as activities.McpToolConfig,
+          ctx.__input,
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
         break;
       }
       case "humanApproval":

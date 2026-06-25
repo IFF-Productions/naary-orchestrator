@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.87",
+    "@naary/connections": "workspace:*",
     "@naary/contracts": "workspace:*",
     "@naary/db": "workspace:*",
     "@naary/dsl": "workspace:*",
