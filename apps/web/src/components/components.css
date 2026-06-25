@@ -1,0 +1,639 @@
+/* ============================================================
+   Naary — component primitives. Class-based so :hover / :focus
+   are real. All values trace to design tokens.
+   ============================================================ */
+
+/* ---------- Button ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 15px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  transition: filter 0.14s ease, background 0.14s ease, border-color 0.14s ease,
+    color 0.14s ease;
+  text-decoration: none;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-sm {
+  height: 28px;
+  padding: 0 11px;
+  font-size: 11.5px;
+}
+.btn-lg {
+  height: 44px;
+  padding: 0 20px;
+  font-size: 13.5px;
+}
+.btn-icon {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+}
+.btn-icon.btn-sm {
+  width: 28px;
+  height: 28px;
+}
+.btn-block {
+  width: 100%;
+}
+
+.btn-primary {
+  background: linear-gradient(180deg, var(--brand-2), var(--brand));
+  border-color: color-mix(in srgb, var(--brand) 50%, transparent);
+  color: var(--brand-ink);
+  box-shadow: var(--shadow-brand);
+}
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.07);
+}
+.btn-secondary {
+  background: var(--surface);
+  border-color: var(--line-2);
+  color: var(--ink);
+  font-weight: var(--weight-medium);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--card-2);
+}
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-2);
+  font-weight: var(--weight-medium);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--card-2);
+  color: var(--ink);
+}
+.btn-danger {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--state-error) 50%, transparent);
+  color: #e5736f;
+}
+.btn-danger:hover:not(:disabled) {
+  background: var(--error-soft);
+}
+.btn-positive {
+  background: var(--positive-grad);
+  border-color: var(--positive);
+  color: #eafff2;
+}
+.btn-positive:hover:not(:disabled) {
+  filter: brightness(1.07);
+}
+
+/* ---------- Card ---------- */
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+.card-pad {
+  padding: 18px;
+}
+
+/* ---------- Section / mono label ---------- */
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.14em;
+  color: var(--ink-3);
+  text-transform: uppercase;
+}
+
+/* ---------- StatusPill ---------- */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  padding: 4px 11px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+.pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.pill-dot.live {
+  animation: naaryBlink 1.4s infinite;
+}
+.pill-idle {
+  color: var(--state-idle);
+  background: var(--idle-soft);
+}
+.pill-running {
+  color: var(--brand);
+  background: var(--running-soft);
+}
+.pill-paused {
+  color: var(--state-paused);
+  background: var(--paused-soft);
+}
+.pill-done {
+  color: var(--state-done);
+  background: var(--done-soft);
+}
+.pill-error {
+  color: var(--state-error);
+  background: var(--error-soft);
+}
+.pill-info {
+  color: var(--state-info);
+  background: var(--info-soft);
+}
+
+/* ---------- Inputs ---------- */
+.field-label {
+  font-size: 11.5px;
+  color: var(--ink-2);
+  margin-bottom: 6px;
+  display: block;
+}
+.input {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 38px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: 0 11px;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+.input::placeholder {
+  color: var(--ink-3);
+}
+.input:focus,
+.input.focused {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: var(--focus-ring);
+}
+.input-lg {
+  height: 42px;
+  border-radius: var(--radius-md);
+}
+.input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: 0 11px;
+  color: var(--ink-3);
+}
+.input-wrap .bare {
+  flex: 1;
+  height: 38px;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+.input-wrap .bare:focus {
+  outline: none;
+}
+.input-wrap:focus-within {
+  border-color: var(--brand);
+  box-shadow: var(--focus-ring);
+}
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+/* ---------- Select ---------- */
+.select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 38px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: 0 11px;
+  color: var(--ink);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.14s ease;
+}
+.select:hover {
+  border-color: var(--ink-3);
+}
+
+/* ---------- Switch ---------- */
+.switch {
+  width: 40px;
+  height: 23px;
+  border-radius: 13px;
+  background: var(--line-2);
+  position: relative;
+  cursor: pointer;
+  flex: none;
+  border: none;
+  padding: 0;
+  transition: background 0.16s ease;
+}
+.switch .knob {
+  position: absolute;
+  top: 2.5px;
+  left: 2.5px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--ink-3);
+  transition: transform 0.16s ease, background 0.16s ease;
+}
+.switch.on {
+  background: var(--brand);
+}
+.switch.on .knob {
+  transform: translateX(17px);
+  background: #fff;
+}
+
+/* ---------- Checkbox / Radio ---------- */
+.check {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-xs);
+  border: 1.5px solid var(--line-2);
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: transparent;
+  flex: none;
+  transition: all 0.14s ease;
+}
+.check.checked {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--brand-ink);
+}
+.radio {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-2);
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: none;
+  transition: all 0.14s ease;
+}
+.radio.checked {
+  border-color: var(--brand);
+}
+.radio.checked::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+
+/* ---------- SegmentedToggle ---------- */
+.segmented {
+  display: inline-flex;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  gap: 2px;
+}
+.segmented button {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: var(--weight-semibold);
+  color: var(--ink-2);
+  padding: 6px 16px;
+  border-radius: var(--radius-xs);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+.segmented button.active {
+  color: var(--ink);
+  background: var(--card-2);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* ---------- Avatar ---------- */
+.avatar {
+  border-radius: 50%;
+  flex: none;
+  background: linear-gradient(140deg, #3a4252, #252b36);
+  border: 1px solid var(--line-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: var(--weight-semibold);
+  color: var(--ink-2);
+  overflow: hidden;
+}
+
+/* ---------- Badge / Tag ---------- */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--weight-medium);
+  color: var(--ink-2);
+  border: 1px solid var(--line-2);
+  padding: 2px 7px;
+  border-radius: var(--radius-xs);
+}
+
+/* ---------- ProgressBar ---------- */
+.progress {
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  overflow: hidden;
+}
+.progress .fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--brand);
+}
+
+/* ---------- Table ---------- */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.tbl th {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.tbl td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+}
+.tbl tbody tr {
+  transition: background 0.12s ease;
+}
+.tbl tbody tr:hover {
+  background: var(--card-2);
+}
+.tbl tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* ---------- CodeBlock ---------- */
+.code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.65;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 13px 15px;
+  color: var(--ink-2);
+  overflow: auto;
+  white-space: pre;
+}
+
+/* ---------- NodeCard ---------- */
+.node {
+  width: 200px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  border-radius: var(--radius-lg);
+  position: relative;
+  box-shadow: var(--shadow-node);
+}
+.node .accent {
+  height: 2px;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+.node.selected {
+  box-shadow: 0 0 0 var(--ring-width)
+    color-mix(in srgb, var(--node-accent, var(--brand)) 20%, transparent);
+}
+.node .port {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--bg-2);
+  border: 1.5px solid var(--line-2);
+  top: 46px;
+}
+.node .port.in {
+  left: -6px;
+}
+.node .port.out {
+  right: -6px;
+}
+
+/* ---------- Tabs ---------- */
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.tabs button {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: var(--weight-medium);
+  color: var(--ink-2);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 10px 12px;
+  margin-bottom: -1px;
+  cursor: pointer;
+  transition: color 0.14s ease, border-color 0.14s ease;
+}
+.tabs button:hover {
+  color: var(--ink);
+}
+.tabs button.active {
+  color: var(--ink);
+  border-bottom-color: var(--brand);
+}
+
+/* ---------- EmptyState ---------- */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--ink-3);
+}
+.empty .badge {
+  width: 46px;
+  height: 46px;
+  border-radius: var(--radius-lg);
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-2);
+  margin-bottom: 14px;
+}
+
+/* ---------- Skeleton ---------- */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--card-2) 25%,
+    var(--line) 37%,
+    var(--card-2) 63%
+  );
+  background-size: 300% 100%;
+  animation: naaryShimmer 1.4s ease-in-out infinite;
+  border-radius: var(--radius-xs);
+}
+
+/* ---------- Tooltip ---------- */
+.tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.tooltip {
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--card-2);
+  border: 1px solid var(--line-2);
+  color: var(--ink);
+  font-size: 11.5px;
+  padding: 5px 9px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  box-shadow: var(--shadow-raised);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 50;
+}
+.tooltip-wrap:hover .tooltip {
+  opacity: 1;
+}
+
+/* ---------- Dialog / Drawer overlay ---------- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 7, 10, 0.6);
+  backdrop-filter: blur(2px);
+  display: flex;
+  z-index: 100;
+}
+.dialog {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-raised);
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  margin: auto;
+}
+.drawer {
+  background: var(--bg-2);
+  border-left: 1px solid var(--line);
+  box-shadow: var(--shadow-raised);
+  width: 420px;
+  max-width: 90vw;
+  margin-left: auto;
+  height: 100%;
+  overflow-y: auto;
+}
+
+/* ---------- Toast ---------- */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--card-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  padding: 11px 14px;
+  box-shadow: var(--shadow-raised);
+  font-size: 12.5px;
+  color: var(--ink);
+  min-width: 280px;
+}
+
+/* ---------- StatCard ---------- */
+.stat {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 16px 17px;
+}
+.stat .label {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.stat .value {
+  font-size: 26px;
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-tight);
+  margin-top: 6px;
+}
+.stat .delta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  margin-top: 6px;
+}
+.delta-up {
+  color: var(--state-done);
+}
+.delta-down {
+  color: var(--state-error);
+}
