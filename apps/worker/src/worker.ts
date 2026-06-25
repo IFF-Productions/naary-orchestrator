@@ -1,3 +1,4 @@
+import "./env"; // MUST be first — loads .env before @naary/* modules evaluate
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { TASK_QUEUE } from "@naary/contracts";
 import * as activities from "./temporal/activities";

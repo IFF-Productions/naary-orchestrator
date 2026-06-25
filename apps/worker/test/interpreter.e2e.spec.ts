@@ -4,13 +4,28 @@ import { Worker } from "@temporalio/worker";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { approvalSignal, stateQuery, TASK_QUEUE } from "@naary/contracts";
 import { sampleGraph } from "@naary/dsl";
-import * as activities from "../src/temporal/activities";
+import type * as activities from "../src/temporal/activities";
 import { runGraph } from "../src/temporal/workflows";
 
 // Temporal's own bundler (not vitest) processes this path, so it must be a real
 // absolute filesystem path. require.resolve() is intercepted under vitest and
 // fails here — use __dirname instead.
 const WORKFLOWS_PATH = path.join(__dirname, "../src/temporal/workflows.ts");
+
+// Mock runAgent so the e2e stays hermetic — no real LLM/key/DB. (The real agent
+// activity is unit-tested in agent.activity.spec.ts; live run is deferred until
+// a provider key is supplied.) Captures the meta to prove tenantId threading.
+const agentCalls: activities.AgentMeta[] = [];
+const mockActivities = {
+  runAgent: async (
+    _cfg: activities.AgentConfig,
+    _input: unknown,
+    meta: activities.AgentMeta,
+  ): Promise<activities.AgentResult> => {
+    agentCalls.push(meta);
+    return { status: "ok", output: { category: "billing", urgency: 3 } };
+  },
+};
 
 let env: TestWorkflowEnvironment;
 
@@ -27,7 +42,7 @@ function makeWorker(): Promise<Worker> {
     connection: env.nativeConnection,
     taskQueue: TASK_QUEUE,
     workflowsPath: WORKFLOWS_PATH,
-    activities,
+    activities: mockActivities,
   });
 }
 
@@ -50,7 +65,11 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
     const worker = await makeWorker();
     await worker.runUntil(async () => {
       const handle = await env.client.workflow.start(runGraph, {
-        args: [sampleGraph, { hello: "world" }],
+        args: [
+          sampleGraph,
+          { message: "double charged" },
+          { tenantId: "t-123" },
+        ],
         taskQueue: TASK_QUEUE,
         workflowId: "e2e-approve",
       });
@@ -63,8 +82,16 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       const paused = await handle.query(stateQuery);
       expect(paused.status).toBe("awaiting_approval");
       expect(paused.currentNodeId).toBe("approval");
-      // the stub agent ran before the pause
-      expect(String(paused.ctx.agent)).toContain("hello from stub agent");
+      // the agent ran before the pause and its structured output is in ctx
+      expect(paused.ctx.agent).toMatchObject({
+        status: "ok",
+        output: { category: "billing" },
+      });
+      // tenantId was threaded into the activity (never a secret in args)
+      expect(agentCalls[agentCalls.length - 1]).toMatchObject({
+        tenantId: "t-123",
+        nodeId: "agent",
+      });
 
       await handle.signal(approvalSignal, { approved: true });
 
@@ -77,7 +104,11 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
     const worker = await makeWorker();
     await worker.runUntil(async () => {
       const handle = await env.client.workflow.start(runGraph, {
-        args: [sampleGraph, { hello: "world" }],
+        args: [
+          sampleGraph,
+          { message: "double charged" },
+          { tenantId: "t-123" },
+        ],
         taskQueue: TASK_QUEUE,
         workflowId: "e2e-reject",
       });
