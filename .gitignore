@@ -4,6 +4,13 @@ node_modules/
 *.tsbuildinfo
 .pnpm-store/
 
+# Local secrets / env — never committed (commit .env.example instead)
+.env
+.env.local
+
+# Prisma generated client (regenerated on build; like dist)
+**/generated/
+
 # Temporal dev-server persistent state (local only; see README durability runbook)
 temporal.db
 temporal.db-shm

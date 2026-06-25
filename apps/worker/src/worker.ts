@@ -1,5 +1,7 @@
+import "./env"; // MUST be first — loads .env before @naary/* modules evaluate
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { TASK_QUEUE } from "@naary/contracts";
+import { createKeyEncryptor } from "@naary/secrets";
 import * as activities from "./temporal/activities";
 
 /**
@@ -10,6 +12,10 @@ import * as activities from "./temporal/activities";
  * durability runbook).
  */
 async function run(): Promise<void> {
+  // Fail fast at boot if ENCRYPTION_KEY is missing/invalid (mirrors the API),
+  // rather than discovering it on the first agent activity (a burned retry).
+  createKeyEncryptor();
+
   const address = process.env.TEMPORAL_ADDRESS ?? "localhost:7233";
   const connection = await NativeConnection.connect({ address });
   try {

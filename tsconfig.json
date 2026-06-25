@@ -2,6 +2,9 @@
   "files": [],
   "references": [
     { "path": "./packages/dsl" },
-    { "path": "./packages/contracts" }
+    { "path": "./packages/contracts" },
+    { "path": "./packages/db" },
+    { "path": "./packages/secrets" },
+    { "path": "./packages/usage" }
   ]
 }

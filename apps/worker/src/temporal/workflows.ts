@@ -11,7 +11,7 @@ import type { GraphDef } from "@naary/dsl";
 // Do NOT drop `type` — that would pull I/O code into the sandbox.
 import type * as activities from "./activities";
 
-const { runAgentStub } = wf.proxyActivities<typeof activities>({
+const { runAgent } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },
 });
@@ -19,6 +19,12 @@ const { runAgentStub } = wf.proxyActivities<typeof activities>({
 export interface RunGraphResult {
   status: ExecutionStatus;
   ctx: Record<string, unknown>;
+}
+
+/** Non-secret execution context. `tenantId` is fine in workflow args/history;
+ *  the provider KEY is never here — it's fetched inside the activity by tenantId. */
+export interface RunGraphCtx {
+  tenantId: string;
 }
 
 /**
@@ -30,6 +36,7 @@ export interface RunGraphResult {
 export async function runGraph(
   graph: GraphDef,
   input: unknown,
+  runCtx: RunGraphCtx,
 ): Promise<RunGraphResult> {
   const ctx: Record<string, unknown> = { __input: input };
   let approval: ApprovalInput | undefined;
@@ -51,9 +58,17 @@ export async function runGraph(
       case "end":
         break;
       case "agent":
-        ctx[node.id] = await runAgentStub(
-          node.config as { canned: string },
+        // tenantId flows in workflow args (not a secret); the activity fetches
+        // the tenant's key by tenantId. executionId comes from workflowInfo
+        // (deterministic, workflow-safe — no I/O).
+        ctx[node.id] = await runAgent(
+          node.config as unknown as activities.AgentConfig,
           ctx.__input,
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
         );
         break;
       case "humanApproval":

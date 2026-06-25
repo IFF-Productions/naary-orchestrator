@@ -1,3 +1,4 @@
+import "./env"; // MUST be first — loads .env before @naary/* modules evaluate
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";

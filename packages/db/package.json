@@ -1,0 +1,25 @@
+{
+  "name": "@naary/db",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prisma client + schema (tenant credentials, usage ledger). Consumed by worker activities + api — NEVER by workflow code.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "generate": "dotenv -e ../../.env -- prisma generate",
+    "migrate": "dotenv -e ../../.env -- prisma migrate dev",
+    "studio": "dotenv -e ../../.env -- prisma studio"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "7.8.0",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "@types/pg": "^8.20.0",
+    "dotenv-cli": "^11.0.0",
+    "prisma": "^7.8.0"
+  }
+}

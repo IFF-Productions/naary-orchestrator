@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: naary-postgres
+    restart: unless-stopped
+    environment:
+      # Values come from the repo-root .env (auto-loaded by docker compose).
+      # No defaults for the password — it must be set, so nothing secret-shaped
+      # is ever hardcoded here. See .env.example.
+      POSTGRES_USER: ${POSTGRES_USER:-naary}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (see .env.example)}
+      POSTGRES_DB: ${POSTGRES_DB:-naary_orchestrator}
+    ports:
+      - '5432:5432'
+    volumes:
+      - naary-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  naary-pgdata:
