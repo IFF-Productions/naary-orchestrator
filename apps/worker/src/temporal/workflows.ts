@@ -5,8 +5,8 @@ import type {
   ExecutionState,
   ExecutionStatus,
 } from "@naary/contracts";
-import { walk } from "@naary/dsl";
-import type { GraphDef } from "@naary/dsl";
+import { resolveMcpArguments, walk } from "@naary/dsl";
+import type { GraphDef, McpToolNodeConfig } from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
 // Do NOT drop `type` — that would pull I/O code into the sandbox.
 import type * as activities from "./activities";
@@ -112,11 +112,18 @@ export async function runGraph(
         break;
       }
       case "mcpTool": {
-        // Calls a remote MCP server tool via a connection. Token fetch + the
-        // HTTP call are I/O inside the activity; the workflow only passes
-        // tenantId + node config. No cost (counts toward stepCount only).
+        // Calls a remote MCP server tool via a connection. Resolving the tool
+        // arguments from upstream node outputs is deterministic graph-traversal
+        // work, so it happens HERE (not in the activity). Token fetch + the HTTP
+        // call are I/O inside the activity; the workflow passes tenantId + the
+        // resolved arguments. No cost (counts toward stepCount only).
+        const mcpCfg = node.config as unknown as McpToolNodeConfig;
         ctx[node.id] = await callMcpTool(
-          node.config as unknown as activities.McpToolConfig,
+          {
+            connectionId: mcpCfg.connectionId,
+            tool: mcpCfg.tool,
+            arguments: resolveMcpArguments(mcpCfg, ctx),
+          },
           ctx.__input,
           {
             tenantId: runCtx.tenantId,

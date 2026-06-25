@@ -204,10 +204,16 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       expect(paused.ctx.trigger).toEqual(event);
       expect(paused.ctx.agent).toMatchObject({ status: "ok" });
       expect(paused.ctx.comment).toMatchObject({ status: "ok" });
-      // the mcpTool used the configured GitHub connection + tool
+      // the mcpTool used the configured GitHub connection + tool, and the
+      // interpreter resolved its arguments from UPSTREAM outputs (not the raw
+      // event): pull number from the trigger, body from the agent's review.
       expect(mcpCalls[mcpCalls.length - 1]).toMatchObject({
         connectionId: "github",
         tool: "add_pull_request_comment",
+        arguments: {
+          pullNumber: 99,
+          body: { category: "billing", urgency: 3 },
+        },
       });
 
       await handle.signal(approvalSignal, { approved: true });

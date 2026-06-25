@@ -82,7 +82,16 @@ export const githubReviewGraph: GraphDef = {
     {
       id: "comment",
       type: "mcpTool",
-      config: { connectionId: "github", tool: "add_pull_request_comment" },
+      config: {
+        connectionId: "github",
+        tool: "add_pull_request_comment",
+        // The comment receives the AGENT's review + the PR number from the
+        // trigger event — not the raw webhook payload (Slice #4 input bindings).
+        argumentBindings: {
+          pullNumber: { from: "trigger", path: "pull_request.number" },
+          body: { from: "agent", path: "output" },
+        },
+      },
     },
     { id: "approval", type: "humanApproval" },
     { id: "end", type: "end" },
@@ -94,3 +103,19 @@ export const githubReviewGraph: GraphDef = {
     { from: "approval", to: "end" },
   ],
 };
+
+/**
+ * Maps a WebhookEndpoint's `workflowId` to the graph the ingress should start.
+ * (Graphs come from Postgres in a later slice — hardcoded here, like sampleGraph.)
+ * The ingress reads `endpoint.workflowId`, so registering an endpoint against
+ * "github-review" actually reaches the B5 reference flow.
+ */
+export const graphRegistry: Record<string, GraphDef> = {
+  "wf-default": webhookSampleGraph,
+  "github-review": githubReviewGraph,
+};
+
+/** Resolve a webhook endpoint's workflowId to its graph, or undefined if unknown. */
+export function getGraphForWorkflow(workflowId: string): GraphDef | undefined {
+  return graphRegistry[workflowId];
+}

@@ -12,7 +12,7 @@ import {
   TASK_QUEUE,
   type ExecutionState,
 } from "@naary/contracts";
-import { sampleGraph, webhookSampleGraph } from "@naary/dsl";
+import { sampleGraph } from "@naary/dsl";
 import type { GraphDef } from "@naary/dsl";
 import { getBudget } from "@naary/usage";
 import { connectTemporal } from "../temporal/client";
@@ -53,17 +53,15 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  /** Start a webhook-triggered run; the verified event becomes the trigger output. */
+  /** Start a webhook-triggered run; the verified event becomes the trigger output.
+   *  The graph is resolved from the endpoint's workflowId by the caller (so the
+   *  github-review reference flow is reachable, not just the default graph). */
   async startWebhook(
     tenantId: string,
+    graph: GraphDef,
     event: unknown,
   ): Promise<{ workflowId: string }> {
-    return this.startGraph(
-      `wh-${tenantId}`,
-      webhookSampleGraph,
-      event,
-      tenantId,
-    );
+    return this.startGraph(`wh-${tenantId}`, graph, event, tenantId);
   }
 
   private async startGraph(

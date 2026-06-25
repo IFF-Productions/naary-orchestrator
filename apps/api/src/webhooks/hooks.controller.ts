@@ -9,6 +9,7 @@ import {
   Req,
   UnauthorizedException,
 } from "@nestjs/common";
+import { getGraphForWorkflow } from "@naary/dsl";
 import { ExecutionsService } from "../executions/executions.service";
 import { type WebhookProvider, WebhookService } from "./webhook.service";
 
@@ -65,8 +66,19 @@ export class HooksController {
       return { status: "duplicate_ignored" }; // 2xx so the provider stops retrying
     }
 
+    // Select the graph from the endpoint's workflowId (so a github-review
+    // endpoint reaches the reference flow, not the default). Unknown id → 404
+    // rather than silently running the wrong graph.
+    const graph = getGraphForWorkflow(endpoint.workflowId);
+    if (!graph) {
+      throw new NotFoundException(
+        `No graph registered for workflowId '${endpoint.workflowId}'`,
+      );
+    }
+
     const { workflowId } = await this.executions.startWebhook(
       endpoint.tenantId,
+      graph,
       event,
     );
     return { status: "started", workflowId };

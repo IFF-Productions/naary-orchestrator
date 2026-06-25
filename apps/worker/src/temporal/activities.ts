@@ -235,7 +235,7 @@ export async function runAgent(
 export interface McpToolConfig {
   connectionId: string;
   tool: string;
-  /** Static arguments for the tool (input bindings from upstream are a later slice). */
+  /** Tool arguments, already resolved from upstream outputs by the interpreter. */
   arguments?: Record<string, unknown>;
 }
 
@@ -272,6 +272,16 @@ export async function callMcpTool(
       tool: cfg.tool,
       arguments: cfg.arguments ?? (input as Record<string, unknown>) ?? {},
     });
+    // A tool-level error (isError) is NOT success — surface it instead of
+    // letting the workflow proceed as if the call worked. Non-retryable: the
+    // same arguments usually fail the same way, so don't burn Temporal retries.
+    if (result.isError) {
+      throw ApplicationFailure.nonRetryable(
+        `MCP tool '${cfg.tool}' returned an error`,
+        "MCP_TOOL_ERROR",
+        { connectionId: cfg.connectionId, content: result.content },
+      );
+    }
     return { status: "ok", content: result.content };
   } catch (e) {
     if (

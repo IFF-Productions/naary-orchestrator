@@ -41,6 +41,21 @@ describe("callMcpTool activity", () => {
     });
   });
 
+  it("surfaces a tool-level error (isError) as a non-retryable failure, not success", async () => {
+    resolveMcpTarget.mockResolvedValue({
+      serverUrl: "https://mcp.atlassian.com/v1/mcp",
+      headers: { Authorization: "Bearer tok" },
+    });
+    mcpCall.mockResolvedValue({
+      content: [{ type: "text", text: "permission denied" }],
+      isError: true,
+    });
+
+    await expect(
+      callMcpTool(CFG, { summary: "bug" }, META),
+    ).rejects.toMatchObject({ nonRetryable: true, type: "MCP_TOOL_ERROR" });
+  });
+
   it("maps a missing/needs-reauth connection to a NON-retryable failure", async () => {
     resolveMcpTarget.mockRejectedValue(
       new MissingConnectionTokenError("conn-1"),

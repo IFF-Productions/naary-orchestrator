@@ -3,5 +3,8 @@ export {
   sampleGraph,
   webhookSampleGraph,
   githubReviewGraph,
+  graphRegistry,
+  getGraphForWorkflow,
 } from "./sample-graph";
+export { getByPath, resolveMcpArguments } from "./mcp-args";
 export { walk } from "./walk";

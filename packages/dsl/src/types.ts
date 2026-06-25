@@ -18,6 +18,26 @@ export interface NodeDef {
   config?: Record<string, unknown>;
 }
 
+/**
+ * Slice #4 — bind one MCP tool argument to an upstream node's output.
+ * `from` is the producing node id; `path` is an optional dotted path into that
+ * node's output (e.g. "pull_request.number", "output.category"). Resolved purely
+ * in the interpreter (deterministic graph-traversal work), never in the activity.
+ */
+export interface ArgBinding {
+  from: string;
+  path?: string;
+}
+
+export interface McpToolNodeConfig {
+  connectionId: string;
+  tool: string;
+  /** Static arguments, merged under any resolved bindings. */
+  arguments?: Record<string, unknown>;
+  /** argName → upstream output binding; overrides a static key of the same name. */
+  argumentBindings?: Record<string, ArgBinding>;
+}
+
 export interface EdgeDef {
   from: string;
   to: string;
