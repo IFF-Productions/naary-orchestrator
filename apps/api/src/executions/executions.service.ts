@@ -39,10 +39,16 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     await this.connection?.close();
   }
 
-  async start(): Promise<{ workflowId: string }> {
-    const workflowId = `exec-${randomUUID()}`;
+  async start(tenantId: string): Promise<{ workflowId: string }> {
+    const workflowId = `exec-${tenantId}-${randomUUID()}`;
+    // tenantId rides in workflow args (not a secret); the agent activity fetches
+    // the tenant's provider key by tenantId, inside the activity.
     await this.client.workflow.start(RUN_GRAPH_WORKFLOW, {
-      args: [sampleGraph, { hello: "world" }],
+      args: [
+        sampleGraph,
+        { message: "I was charged twice this month" },
+        { tenantId },
+      ],
       taskQueue: TASK_QUEUE,
       workflowId,
     });

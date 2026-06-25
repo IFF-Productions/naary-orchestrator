@@ -7,8 +7,8 @@ export class ExecutionsController {
   constructor(private readonly executions: ExecutionsService) {}
 
   @Post()
-  start(): Promise<{ workflowId: string }> {
-    return this.executions.start();
+  start(@Body() body: { tenantId: string }): Promise<{ workflowId: string }> {
+    return this.executions.start(body.tenantId);
   }
 
   @Post(":id/approve")
