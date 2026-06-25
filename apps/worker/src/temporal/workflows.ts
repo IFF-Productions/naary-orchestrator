@@ -22,9 +22,15 @@ export interface RunGraphResult {
 }
 
 /** Non-secret execution context. `tenantId` is fine in workflow args/history;
- *  the provider KEY is never here — it's fetched inside the activity by tenantId. */
+ *  the provider KEY is never here — it's fetched inside the activity by tenantId.
+ *
+ *  Budget caps are SNAPSHOTTED here at start (the api reads the tenant budget and
+ *  passes them in) so enforcement stays deterministic — no DB read in the workflow.
+ *  Enforcement is opt-in per cap: a cap that is undefined is not enforced. */
 export interface RunGraphCtx {
   tenantId: string;
+  perExecutionCapUsd?: number;
+  maxStepsPerRun?: number;
 }
 
 /**
@@ -43,6 +49,11 @@ export async function runGraph(
   let status: ExecutionStatus = "running";
   let currentNodeId = graph.startNodeId;
 
+  // Deterministic enforcement state: driven ONLY by activity-returned costs and
+  // a node counter — never a DB read in workflow code (CLAUDE.md rule 2; §3).
+  let costUsd = 0;
+  let stepCount = 0;
+
   wf.setHandler(approvalSignal, (s) => {
     approval = s;
   });
@@ -53,15 +64,34 @@ export async function runGraph(
 
   for (const node of walk(graph)) {
     currentNodeId = node.id;
+
+    // Circuit breaker + per-execution cap, checked before doing this node's work
+    // (so accumulated cost from prior agent nodes halts the next one cleanly).
+    stepCount++;
+    if (
+      runCtx.maxStepsPerRun !== undefined &&
+      stepCount > runCtx.maxStepsPerRun
+    ) {
+      status = "circuit_open";
+      return { status, ctx };
+    }
+    if (
+      runCtx.perExecutionCapUsd !== undefined &&
+      costUsd >= runCtx.perExecutionCapUsd
+    ) {
+      status = "budget_exceeded";
+      return { status, ctx };
+    }
+
     switch (node.type) {
       case "start":
       case "end":
         break;
-      case "agent":
+      case "agent": {
         // tenantId flows in workflow args (not a secret); the activity fetches
         // the tenant's key by tenantId. executionId comes from workflowInfo
         // (deterministic, workflow-safe — no I/O).
-        ctx[node.id] = await runAgent(
+        const result = await runAgent(
           node.config as unknown as activities.AgentConfig,
           ctx.__input,
           {
@@ -70,7 +100,12 @@ export async function runGraph(
             nodeId: node.id,
           },
         );
+        ctx[node.id] = result;
+        // Accumulate the cost the activity RETURNED — deterministic.
+        costUsd += result.costUsd;
+        ctx.__costUsd = costUsd;
         break;
+      }
       case "humanApproval":
         status = "awaiting_approval";
         await wf.condition(() => approval !== undefined); // durable pause

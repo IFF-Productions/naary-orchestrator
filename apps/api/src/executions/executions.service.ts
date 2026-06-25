@@ -13,7 +13,11 @@ import {
   type ExecutionState,
 } from "@naary/contracts";
 import { sampleGraph } from "@naary/dsl";
+import { getBudget } from "@naary/usage";
 import { connectTemporal } from "../temporal/client";
+
+/** Circuit breaker default when a tenant has no budget configured (safety net). */
+const DEFAULT_MAX_STEPS_PER_RUN = 50;
 
 /**
  * Wraps the Temporal client: start an execution, signal approval, query state.
@@ -41,13 +45,24 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
 
   async start(tenantId: string): Promise<{ workflowId: string }> {
     const workflowId = `exec-${tenantId}-${randomUUID()}`;
+
+    // Snapshot the tenant's caps at start and pass them as workflow args, so the
+    // workflow can enforce deterministically (no DB read in workflow code). The
+    // circuit breaker always applies (default when no budget); the per-execution
+    // cost cap applies only when a budget is set.
+    const budget = await getBudget(tenantId);
+
     // tenantId rides in workflow args (not a secret); the agent activity fetches
     // the tenant's provider key by tenantId, inside the activity.
     await this.client.workflow.start(RUN_GRAPH_WORKFLOW, {
       args: [
         sampleGraph,
         { message: "I was charged twice this month" },
-        { tenantId },
+        {
+          tenantId,
+          perExecutionCapUsd: budget?.perExecutionCapUsd,
+          maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
+        },
       ],
       taskQueue: TASK_QUEUE,
       workflowId,
