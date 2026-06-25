@@ -59,3 +59,38 @@ export const webhookSampleGraph: GraphDef = {
     { from: "approval", to: "end" },
   ],
 };
+
+/**
+ * Slice #4 B5 reference flow: GitHub PR webhook → agent reviews → MCP Tool node
+ * comments back via a GitHub connection → human approval before any merge.
+ * The mcpTool node's connectionId is per-tenant; set it to a real connection id.
+ */
+export const githubReviewGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "agent",
+      type: "agent",
+      config: {
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        systemPrompt:
+          "Review the pull request. Respond with a category and an urgency from 1-5.",
+      },
+    },
+    {
+      id: "comment",
+      type: "mcpTool",
+      config: { connectionId: "github", tool: "add_pull_request_comment" },
+    },
+    { id: "approval", type: "humanApproval" },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "agent" },
+    { from: "agent", to: "comment" },
+    { from: "comment", to: "approval" },
+    { from: "approval", to: "end" },
+  ],
+};
