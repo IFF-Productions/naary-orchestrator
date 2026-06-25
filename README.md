@@ -6,9 +6,71 @@ workflow interprets that graph** at runtime. The differentiator over n8n / Flowi
 Sim is **durable, long-running, human-in-the-loop execution** — flows that pause for
 days and survive crashes.
 
-This repo currently implements **Vertical Slice #1: the durable interpreter spine**
-(see `PLAN.md`). It proves the riskiest capability: a generic workflow that walks a
-graph, pauses durably for human approval, and resumes — surviving a worker crash.
+This repo implements **Slice #1: the durable interpreter spine** (`PLAN.md`) and
+**Slice #2: real agent + BYOK secrets + spend tracking** (`PLAN-SLICE-2.md`). Slice #1
+proves the riskiest capability — a generic workflow that walks a graph, pauses durably
+for human approval, and resumes, surviving a worker crash. Slice #2 makes the agent
+node real: it calls an LLM with each tenant's own provider key and records token spend.
+
+## BYOK secrets + spend (Slice #2)
+
+**Bring-your-own-key:** each tenant saves their own provider key; the orchestrator
+stores it encrypted and uses it on their behalf.
+
+```bash
+# 1. A tenant saves a provider key (validated, encrypted at rest, never echoed back)
+curl -XPOST localhost:3000/tenants/<tenantId>/credentials \
+  -H 'content-type: application/json' \
+  -d '{"provider":"anthropic","apiKey":"sk-ant-..."}'
+# -> {"id":"...","provider":"anthropic","isValid":true}   (isValid:false if the key fails validation)
+
+# 2. Start an execution for that tenant (tenantId is NOT a secret)
+curl -XPOST localhost:3000/executions -H 'content-type: application/json' -d '{"tenantId":"<tenantId>"}'
+
+# 3. The agent node calls the LLM with the tenant's key, then it pauses for approval; approve as in slice #1.
+
+# 4. See the spend
+curl 'localhost:3000/tenants/<tenantId>/usage'
+# -> {"totalCostUsd":0.0175,"totalTokens":1500,"byModel":[...],"events":[...]}
+```
+
+### Security model — secrets never enter Temporal
+
+- **Only `tenantId` flows through the workflow** (args/history). It is not a secret.
+- The provider **key is fetched INSIDE the agent activity** by `tenantId`, decrypted in
+  memory, used for the model call, and **never returned, logged, or put in a span**.
+  Temporal persists every workflow input to replayable history — a key as a workflow
+  arg would be written there, so it never is.
+- Keys are encrypted with **AES-256-GCM** (`@naary/secrets`) behind a `KeyEncryptor`
+  interface (swappable for AWS KMS later). `ENCRYPTION_KEY` (32-byte hex,
+  `openssl rand -hex 32`) is required at boot and never logged.
+- `@naary/db` / `@naary/secrets` / `@naary/usage` are imported by activities + the API
+  only — **never by `workflows.ts`** (Prisma's driver would break deterministic replay
+  and the workflow bundler). Enforced by the type-only activities import; verified by
+  inspecting the workflow bundle (no `@prisma`/`@naary/db` modules).
+
+### Billing fail-safe
+
+Every successful model call writes a `UsageEvent` (tokens + computed cost; **no prompt
+or completion text**). Cost uses `result.totalUsage` (sums across tool steps). The
+`ai@6` usage-undefined bug would silently bill **zero** — so when usage is missing we
+record a **non-zero fallback estimate** instead (CLAUDE.md rule 6). `ai` is pinned to an
+**exact** version for this reason.
+
+`401`/`403`/`429` from a tenant key map to **non-retryable** Temporal failures (don't
+burn retries on a key the user must fix); genuine transient errors retry.
+
+> ⚠️ **Known gap (deferred):** `UsageEvent` has no idempotency key on
+> `(executionId, nodeId)`. A transient failure *after* the model call (e.g. the DB
+> write fails) makes Temporal retry the whole activity — re-calling the LLM and writing
+> a second `UsageEvent`. The fix is idempotency keyed on execution+node; it's out of
+> this slice's scope (budget enforcement / fast-follow, PLAN-SLICE-2 §9).
+
+> **Deferred live verification:** the valid-key save (Task 2) and the full real-model
+> execution (Task 6) need a real provider key and are deferred. Everything is built and
+> tested with a mocked provider; the invalid-key path, encryption-at-rest, and the usage
+> endpoint are verified live. To run the real path: save a valid key via the credential
+> endpoint, then start an execution for that tenant.
 
 ## Layout (pnpm workspace)
 
