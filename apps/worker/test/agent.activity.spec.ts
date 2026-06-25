@@ -23,14 +23,20 @@ const SEED_KEY = "tenant-anthropic-key-value";
 
 const recordUsage = vi.fn();
 let getKey: () => Promise<string>;
+let getBudget: () => Promise<unknown>;
+let mtdSpend = 0;
 
 beforeEach(() => {
   generateText.mockReset();
   recordUsage.mockReset().mockResolvedValue({ id: "evt_1" });
   getKey = () => Promise.resolve(SEED_KEY);
+  getBudget = () => Promise.resolve(null); // no budget ⇒ no enforcement by default
+  mtdSpend = 0;
   __agentDeps.getCredentials = () =>
     ({ getDecryptedKey: () => getKey() }) as never;
   __agentDeps.recordUsage = recordUsage as never;
+  __agentDeps.getBudget = (() => getBudget()) as never;
+  __agentDeps.monthToDateSpend = (() => Promise.resolve(mtdSpend)) as never;
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -45,10 +51,13 @@ describe("runAgent", () => {
 
     const result = await runAgent(CFG, { msg: "double charged" }, META);
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       status: "ok",
       output: { category: "billing", urgency: 4 },
+      model: "claude-opus-4-8",
     });
+    // returns its own cost for the workflow to accumulate (Task 3)
+    expect(result.costUsd).toBeCloseTo(0.0175, 9);
     expect(recordUsage).toHaveBeenCalledOnce();
     const recorded = recordUsage.mock.calls[0][0];
     expect(recorded.usage.inputTokens).toBe(1000);
@@ -93,6 +102,48 @@ describe("runAgent", () => {
       nonRetryable: true,
     });
     expect(recordUsage).not.toHaveBeenCalled();
+  });
+
+  it("pre-flight: rejects (non-retryable BUDGET) over the monthly cap, no charge", async () => {
+    getBudget = () =>
+      Promise.resolve({
+        tenantId: "t1",
+        monthlyCapUsd: 0.001, // estimate (~0.0256 on opus) blows past this
+        perExecutionCapUsd: 1,
+        maxStepsPerRun: 50,
+        onBudgetExceeded: "reject",
+        fallbackModel: null,
+      });
+
+    await expect(runAgent(CFG, { msg: "x" }, META)).rejects.toMatchObject({
+      nonRetryable: true,
+      type: "BUDGET",
+    });
+    expect(generateText).not.toHaveBeenCalled();
+    expect(recordUsage).not.toHaveBeenCalled();
+  });
+
+  it("pre-flight: downgrades to the fallback model and records the fallback", async () => {
+    getBudget = () =>
+      Promise.resolve({
+        tenantId: "t1",
+        monthlyCapUsd: 0.001,
+        perExecutionCapUsd: 1,
+        maxStepsPerRun: 50,
+        onBudgetExceeded: "downgrade",
+        fallbackModel: "claude-haiku-4-5",
+      });
+    generateText.mockResolvedValue({
+      output: { category: "support", urgency: 2 },
+      text: '{"category":"support","urgency":2}',
+      totalUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+    });
+
+    const result = await runAgent(CFG, { msg: "x" }, META);
+
+    expect(result.model).toBe("claude-haiku-4-5");
+    expect(generateText).toHaveBeenCalledOnce();
+    expect(recordUsage.mock.calls[0][0].model).toBe("claude-haiku-4-5");
   });
 
   it("maps a missing credential to a NON-retryable AUTH failure", async () => {

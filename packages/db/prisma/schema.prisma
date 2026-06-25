@@ -12,6 +12,16 @@ datasource db {
   // adapter passed to PrismaClient at runtime — not here.
 }
 
+model TenantBudget {
+  id                 String  @id @default(uuid())
+  tenantId           String  @unique
+  monthlyCapUsd      Decimal @db.Decimal(12, 2)
+  perExecutionCapUsd Decimal @db.Decimal(12, 2)
+  maxStepsPerRun     Int     @default(50) // circuit breaker
+  onBudgetExceeded   String  @default("reject") // 'reject' | 'downgrade'
+  fallbackModel      String? // used when policy = 'downgrade'
+}
+
 model TenantCredential {
   id              String    @id @default(uuid())
   tenantId        String

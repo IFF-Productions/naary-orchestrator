@@ -16,7 +16,9 @@ export type ExecutionStatus =
   | "running"
   | "awaiting_approval"
   | "completed"
-  | "rejected";
+  | "rejected"
+  | "budget_exceeded" // per-execution cost cap hit (Slice #3)
+  | "circuit_open"; // max-step circuit breaker tripped (Slice #3)
 
 export interface ExecutionState {
   status: ExecutionStatus;

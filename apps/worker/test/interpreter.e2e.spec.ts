@@ -23,7 +23,12 @@ const mockActivities = {
     meta: activities.AgentMeta,
   ): Promise<activities.AgentResult> => {
     agentCalls.push(meta);
-    return { status: "ok", output: { category: "billing", urgency: 3 } };
+    return {
+      status: "ok",
+      output: { category: "billing", urgency: 3 },
+      model: "claude-opus-4-8",
+      costUsd: 0.01,
+    };
   },
 };
 
@@ -123,6 +128,47 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       // The workflow returns (does not throw) on rejection.
       const result = await handle.result();
       expect(result.status).toBe("rejected");
+    });
+  });
+
+  it("halts with budget_exceeded at the per-execution cap (terminal, not thrown)", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      // mock runAgent returns costUsd 0.01; cap 0.005 trips at the node AFTER the agent.
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          sampleGraph,
+          { message: "x" },
+          { tenantId: "t-cap", perExecutionCapUsd: 0.005, maxStepsPerRun: 50 },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-budget",
+      });
+
+      // Halts before the approval pause — assert the result directly, no signal.
+      const result = await handle.result();
+      expect(result.status).toBe("budget_exceeded");
+      // the agent did run (cost accumulated) before the cap stopped the next node
+      expect(result.ctx.agent).toMatchObject({ status: "ok" });
+    });
+  });
+
+  it("halts with circuit_open when the step counter exceeds maxStepsPerRun", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      // start(1), agent(2), approval(3) → 3 > 2 trips before the pause.
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          sampleGraph,
+          { message: "x" },
+          { tenantId: "t-cb", maxStepsPerRun: 2 },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-circuit",
+      });
+
+      const result = await handle.result();
+      expect(result.status).toBe("circuit_open");
     });
   });
 });

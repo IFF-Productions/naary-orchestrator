@@ -7,8 +7,16 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { ApplicationFailure } from "@temporalio/activity";
 import { CredentialsService, MissingCredentialError } from "@naary/secrets";
-import { recordUsage } from "@naary/usage";
+import {
+  computeCost,
+  estimateCallCost,
+  getBudget,
+  monthToDateSpend,
+  recordUsage,
+} from "@naary/usage";
 import { APICallError, Output, generateText, jsonSchema } from "ai";
+
+const MAX_OUTPUT_TOKENS = 1024;
 
 export interface AgentConfig {
   provider: string;
@@ -30,6 +38,10 @@ export interface AgentOutput {
 export interface AgentResult {
   status: "ok";
   output: AgentOutput;
+  /** The model that actually ran (may differ from cfg.model after a downgrade). */
+  model: string;
+  /** Cost of THIS call — the workflow accumulates these deterministically. */
+  costUsd: number;
 }
 
 // Slice #2 ships one structured-output schema. It can't ride in JSON graph
@@ -73,6 +85,8 @@ function buildModel(provider: string, model: string, apiKey: string) {
 export const __agentDeps = {
   getCredentials,
   recordUsage,
+  getBudget,
+  monthToDateSpend,
 };
 
 /** Crude char/4 token estimate — only used when the provider omits usage. */
@@ -105,12 +119,41 @@ export async function runAgent(
       .getCredentials()
       .getDecryptedKey(meta.tenantId, cfg.provider);
 
+    // Pre-flight budget check (I/O — reads the ledger). If month-to-date spend
+    // plus this call's estimate would breach the monthly cap, apply the policy:
+    // reject (non-retryable) or downgrade to a cheaper model. No budget set ⇒ no cap.
+    let model = cfg.model;
+    const budget = await __agentDeps.getBudget(meta.tenantId);
+    if (budget) {
+      const mtd = await __agentDeps.monthToDateSpend(meta.tenantId);
+      const estimate = estimateCallCost(
+        {
+          provider: cfg.provider,
+          model,
+          systemPrompt: cfg.systemPrompt,
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+        },
+        input,
+      );
+      if (mtd + estimate > budget.monthlyCapUsd) {
+        if (budget.onBudgetExceeded === "downgrade" && budget.fallbackModel) {
+          model = budget.fallbackModel;
+        } else {
+          throw ApplicationFailure.nonRetryable(
+            "Monthly budget exceeded",
+            "BUDGET",
+            { tenantId: meta.tenantId },
+          );
+        }
+      }
+    }
+
     const result = await generateText({
-      model: buildModel(cfg.provider, cfg.model, apiKey),
+      model: buildModel(cfg.provider, model, apiKey),
       system: cfg.systemPrompt,
       prompt: JSON.stringify(input),
       output: Output.object({ schema: outputSchema }),
-      maxOutputTokens: 1024,
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
     });
 
     // BILLING (CLAUDE.md rule 6): totalUsage sums across tool steps; guard the
@@ -138,11 +181,22 @@ export async function runAgent(
       executionId: meta.executionId,
       nodeId: meta.nodeId,
       provider: cfg.provider,
-      model: cfg.model,
+      model, // the model that actually ran (post-downgrade)
       usage,
     });
 
-    return { status: "ok", output: result.output };
+    // Same cost recordUsage computed — returned so the workflow can accumulate
+    // it deterministically (no DB read in workflow code).
+    const costUsd = computeCost({
+      provider: cfg.provider,
+      model,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cachedInputTokens: (usage as { cachedInputTokens?: number })
+        .cachedInputTokens,
+    });
+
+    return { status: "ok", output: result.output, model, costUsd };
   } catch (e) {
     if (e instanceof MissingCredentialError) {
       throw ApplicationFailure.nonRetryable(
