@@ -9,3 +9,4 @@ allowBuilds:
   '@prisma/client': true
   prisma: true
   '@prisma/engines': true
+  esbuild: true

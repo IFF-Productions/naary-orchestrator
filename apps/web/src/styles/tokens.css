@@ -1,0 +1,166 @@
+/* ============================================================
+   Naary — design tokens (ported verbatim from the Naary Design
+   System: colors, typography, spacing, effects, motion).
+   Dark-first; light theme via [data-theme="light"].
+   ============================================================ */
+
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+
+:root {
+  /* --- Base neutrals (dark) --- */
+  --bg: #0a0c11;
+  --bg-2: #0e1117;
+  --surface: #12151c;
+  --card: #151922;
+  --card-2: #1a1f29;
+  --line: #222834;
+  --line-2: #2c3542;
+
+  /* --- Content --- */
+  --ink: #e8ebf1;
+  --ink-2: #98a2b3;
+  --ink-3: #5c6573;
+
+  /* --- Brand: ember fire --- */
+  --brand: #f2622e;
+  --brand-2: #ff8a4c;
+  --brand-deep: #c8331f;
+  --brand-soft: rgba(242, 98, 46, 0.14);
+  --brand-ink: #fff3ec;
+  --brand-gradient: linear-gradient(90deg, #ffb347, #f2622e 50%, #c8331f);
+  --brand-radial: radial-gradient(120% 120% at 50% 120%, #ffb347, #f2622e 55%, #c8331f);
+
+  /* --- Run / status states (running ADOPTS the brand ember) --- */
+  --state-idle: #7b8493;
+  --state-running: var(--brand);
+  --state-paused: #e2a844;
+  --state-done: #46b06a;
+  --state-error: #e5484d;
+  --state-info: #5793ef;
+
+  --idle-soft: rgba(123, 132, 147, 0.14);
+  --running-soft: var(--brand-soft);
+  --paused-soft: rgba(226, 168, 68, 0.14);
+  --done-soft: rgba(70, 176, 106, 0.14);
+  --error-soft: rgba(229, 72, 77, 0.14);
+  --info-soft: rgba(87, 147, 239, 0.14);
+
+  /* --- Node type accents --- */
+  --node-trigger: #48b9c4;
+  --node-agent: #8d7cf2;
+  --node-mcp: #5793ef;
+  --node-router: #e2a844;
+  --node-approval: #e8825a;
+  --node-http: #52b56b;
+  --node-end: #7b8493;
+
+  /* --- Semantic action colors --- */
+  --positive: #2bbd66;
+  --positive-grad: linear-gradient(180deg, #2fae5f, #239350);
+
+  /* --- Type --- */
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  --text-display: 38px;
+  --text-xl: 28px;
+  --text-title: 21px;
+  --text-lg: 16px;
+  --text-md: 14px;
+  --text-body: 13px;
+  --text-sm: 12px;
+  --text-xs: 11px;
+  --text-2xs: 10px;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --leading-tight: 1.12;
+  --leading-snug: 1.35;
+  --leading-body: 1.55;
+
+  --tracking-tight: -0.02em;
+  --tracking-label: 0.12em;
+
+  /* --- Spacing (4px base grid) --- */
+  --space-0: 0;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 14px;
+  --space-8: 16px;
+  --space-10: 20px;
+  --space-12: 24px;
+  --space-14: 28px;
+  --space-16: 32px;
+  --space-20: 40px;
+
+  /* --- Radii --- */
+  --radius-xs: 5px;
+  --radius-sm: 7px;
+  --radius-md: 9px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 20px;
+  --radius-full: 999px;
+
+  /* --- Effects --- */
+  --shadow-card: 0 10px 30px -18px rgba(0, 0, 0, 0.75);
+  --shadow-raised: 0 16px 32px -14px rgba(0, 0, 0, 0.85);
+  --shadow-node: 0 10px 26px -14px rgba(0, 0, 0, 0.7);
+  --shadow-brand: 0 2px 12px -3px rgba(242, 98, 46, 0.55);
+  --glow-brand: 0 0 16px -2px rgba(242, 98, 46, 0.6);
+  --focus-ring: 0 0 0 3px rgba(242, 98, 46, 0.13);
+  --ring-width: 3px;
+}
+
+:root[data-theme="light"] {
+  --bg: #f4f6f9;
+  --bg-2: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-2: #f5f7fa;
+  --line: #e6e9ef;
+  --line-2: #d6dbe3;
+
+  --ink: #15191f;
+  --ink-2: #5a6472;
+  --ink-3: #9099a8;
+
+  --brand-soft: rgba(242, 98, 46, 0.1);
+  --idle-soft: rgba(123, 132, 147, 0.12);
+  --paused-soft: rgba(226, 168, 68, 0.14);
+  --done-soft: rgba(70, 176, 106, 0.12);
+  --error-soft: rgba(229, 72, 77, 0.1);
+  --info-soft: rgba(87, 147, 239, 0.1);
+
+  --shadow-card: 0 6px 22px -16px rgba(20, 30, 50, 0.4);
+  --shadow-raised: 0 10px 26px -14px rgba(20, 30, 50, 0.45);
+  --shadow-node: 0 6px 18px -12px rgba(20, 30, 50, 0.35);
+}
+
+/* ---- Motion (calm, slow — never bouncy) ---- */
+@keyframes naaryBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@keyframes naaryDash {
+  to { stroke-dashoffset: -20; }
+}
+@keyframes naaryPulseRing {
+  0% { box-shadow: 0 0 0 0 rgba(226, 168, 68, 0.4); }
+  70% { box-shadow: 0 0 0 9px rgba(226, 168, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(226, 168, 68, 0); }
+}
+@keyframes naaryShimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+@keyframes naarySpin {
+  to { transform: rotate(360deg); }
+}
