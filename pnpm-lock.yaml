@@ -47,6 +47,9 @@ importers:
       '@naary/secrets':
         specifier: workspace:*
         version: link:../../packages/secrets
+      '@naary/usage':
+        specifier: workspace:*
+        version: link:../../packages/usage
       '@nestjs/common':
         specifier: ^11.1.27
         version: 11.1.27(reflect-metadata@0.2.2)(rxjs@7.8.2)
