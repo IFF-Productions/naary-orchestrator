@@ -1,0 +1,32 @@
+import { NativeConnection, Worker } from "@temporalio/worker";
+import { TASK_QUEUE } from "@naary/contracts";
+import * as activities from "./temporal/activities";
+
+/**
+ * The worker process: stateless and disposable (CLAUDE.md Tier-1 rule 7).
+ * It bundles the deterministic workflow code, registers the activities, and
+ * polls the task queue. Execution STATE lives in Temporal, not here — which is
+ * why killing and restarting this process mid-pause is safe (see the README
+ * durability runbook).
+ */
+async function run(): Promise<void> {
+  const address = process.env.TEMPORAL_ADDRESS ?? "localhost:7233";
+  const connection = await NativeConnection.connect({ address });
+  try {
+    const worker = await Worker.create({
+      connection,
+      taskQueue: TASK_QUEUE,
+      workflowsPath: require.resolve("./temporal/workflows"),
+      activities,
+    });
+    console.log(`[worker] polling task queue '${TASK_QUEUE}' at ${address}`);
+    await worker.run();
+  } finally {
+    await connection.close();
+  }
+}
+
+run().catch((err) => {
+  console.error("[worker] fatal:", err);
+  process.exit(1);
+});
