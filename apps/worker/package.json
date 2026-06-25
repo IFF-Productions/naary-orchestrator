@@ -1,0 +1,19 @@
+{
+  "name": "@naary/worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Temporal worker: the generic runGraph interpreter workflow + activities. All side effects live here.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "start": "ts-node src/worker.ts"
+  },
+  "dependencies": {
+    "@naary/contracts": "workspace:*",
+    "@naary/dsl": "workspace:*",
+    "@temporalio/activity": "^1.18.1",
+    "@temporalio/worker": "^1.18.1",
+    "@temporalio/workflow": "^1.18.1"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "@naary/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Placeholder for the React Flow canvas UI (slice #5). Intentionally empty in slice #1.",
+  "scripts": {}
+}

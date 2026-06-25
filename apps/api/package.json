@@ -1,0 +1,25 @@
+{
+  "name": "@naary/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NestJS control plane: start / approve / get-state endpoints over the Temporal client.",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "ts-node src/main.ts"
+  },
+  "dependencies": {
+    "@naary/contracts": "workspace:*",
+    "@naary/dsl": "workspace:*",
+    "@nestjs/common": "^11.1.27",
+    "@nestjs/core": "^11.1.27",
+    "@nestjs/platform-express": "^11.1.27",
+    "@temporalio/client": "^1.18.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^11.1.27"
+  }
+}
