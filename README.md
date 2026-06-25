@@ -119,6 +119,60 @@ config, recorded in history → identical on replay).
 - **Pre-flight is an estimate** (char/4 input + assumed max output); the recorded
   `UsageEvent` is the **actual** cost.
 
+## External integrations (Slice #4)
+
+Workflows can be **triggered by** external platforms and **act on** them — one
+mechanism per direction so a third platform is config, not new code.
+
+### Inbound — webhook triggers (plain signed HTTP, not MCP)
+
+```bash
+# Register a trigger → returns a stable ingress path + signing secret (once)
+curl -XPOST localhost:3000/tenants/<id>/webhooks \
+  -H 'content-type: application/json' -d '{"workflowId":"wf-default","provider":"github"}'
+# -> {"endpointId":"...","ingressPath":"/hooks/<id>","signingSecret":"..."}
+```
+
+`POST /hooks/:endpointId` verifies the **GitHub HMAC-SHA256 signature over the raw
+body** (`rawBody:true`, length-guarded timing-safe compare; 401 on mismatch),
+**dedupes** on the delivery id (`@@unique` + P2002 → 2xx ignored), then starts the
+workflow with the event as the trigger node's output. Atlassian inbound signing is
+not GitHub-style and **fails closed** until verified against current docs.
+
+### Outbound — MCP Tool nodes
+
+A `Connection` (`POST /tenants/:id/connections`) points at a remote MCP server
+(`serverUrl`, e.g. GitHub/Atlassian's hosted `/mcp`). An `mcpTool` node calls a tool
+via the `callMcpTool` activity (Streamable HTTP). **Auth is split by where it happens:**
+
+- **PAT / api_token** — stored encrypted (slice-2 store), used as a `Bearer` header.
+- **OAuth 2.1** — interactive consent runs once in the web app (`/oauth/start` → browser
+  → `/oauth/callback`: Dynamic Client Registration + PKCE + `resource` + `offline_access`),
+  capturing an encrypted **refresh token**. The activity then refreshes
+  **non-interactively** at run time (cached access token + per-connection lock; rotated
+  refresh tokens are persisted before use). `invalid_grant` flips the connection to
+  `needs_reauth` and fails the activity **non-retryably**.
+
+Tokens are fetched/refreshed **inside the activity** by `connectionId` — only
+`tenantId`/`connectionId`/node config flow through workflow history; the MCP SDK never
+enters the deterministic workflow bundle (`import type` boundary, verified).
+
+The reference flow (`githubReviewGraph`): GitHub PR webhook → agent reviews →
+`mcpTool` comments back → human approval before any merge.
+
+### Honest limitations
+
+- **OAuth refresh lock is in-process only.** The access-token cache + per-connection
+  refresh lock serialize within ONE worker process; multiple workers can still race a
+  refresh (and with rotation, invalidate each other). A distributed lock / Temporal
+  serialization point is the real fix.
+- **Atlassian inbound webhooks** are not implemented (scheme differs from GitHub) — GitHub
+  is the verified reference; verify Atlassian's scheme against current docs before enabling.
+- **Browser consent (B3) is deferred-live** — the endpoints + token refresh are built and
+  tested (mock token server); the actual consent click needs a real OAuth app.
+- **MCP tool results** can exceed Temporal's ~2MB payload cap; large results should go to
+  object storage with a reference passed instead (not handled this slice).
+
 ## Layout (pnpm workspace)
 
 | Package | Role |
