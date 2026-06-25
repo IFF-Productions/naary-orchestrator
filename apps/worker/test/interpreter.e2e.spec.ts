@@ -3,7 +3,7 @@ import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { approvalSignal, stateQuery, TASK_QUEUE } from "@naary/contracts";
-import { sampleGraph } from "@naary/dsl";
+import { githubReviewGraph, sampleGraph, webhookSampleGraph } from "@naary/dsl";
 import type * as activities from "../src/temporal/activities";
 import { runGraph } from "../src/temporal/workflows";
 
@@ -30,7 +30,16 @@ const mockActivities = {
       costUsd: 0.01,
     };
   },
+  callMcpTool: async (
+    cfg: activities.McpToolConfig,
+    _input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.McpToolResult> => {
+    mcpCalls.push(cfg);
+    return { status: "ok", content: [{ type: "text", text: "commented" }] };
+  },
 };
+const mcpCalls: activities.McpToolConfig[] = [];
 
 let env: TestWorkflowEnvironment;
 
@@ -150,6 +159,65 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       expect(result.status).toBe("budget_exceeded");
       // the agent did run (cost accumulated) before the cap stopped the next node
       expect(result.ctx.agent).toMatchObject({ status: "ok" });
+    });
+  });
+
+  it("webhook graph: the inbound event becomes the trigger node's output", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const event = { action: "opened", pull_request: { number: 42 } };
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [webhookSampleGraph, event, { tenantId: "t-wh" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-webhook",
+      });
+
+      await waitFor(
+        async () =>
+          (await handle.query(stateQuery)).status === "awaiting_approval",
+      );
+      const paused = await handle.query(stateQuery);
+      // the webhookTrigger node exposed the event as its output
+      expect(paused.ctx.trigger).toEqual(event);
+
+      await handle.signal(approvalSignal, { approved: true });
+      expect((await handle.result()).status).toBe("completed");
+    });
+  });
+
+  it("B5 reference flow: webhook → agent → mcpTool → humanApproval composes", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const event = { action: "opened", pull_request: { number: 99 } };
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [githubReviewGraph, event, { tenantId: "t-ref" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-reference",
+      });
+
+      await waitFor(
+        async () =>
+          (await handle.query(stateQuery)).status === "awaiting_approval",
+      );
+      const paused = await handle.query(stateQuery);
+      // trigger → agent → mcpTool all ran before the approval pause
+      expect(paused.ctx.trigger).toEqual(event);
+      expect(paused.ctx.agent).toMatchObject({ status: "ok" });
+      expect(paused.ctx.comment).toMatchObject({ status: "ok" });
+      // the mcpTool used the configured GitHub connection + tool, and the
+      // interpreter resolved its arguments from UPSTREAM outputs (not the raw
+      // event): pull number from the trigger, body from the agent's review.
+      expect(mcpCalls[mcpCalls.length - 1]).toMatchObject({
+        connectionId: "github",
+        tool: "add_pull_request_comment",
+        arguments: {
+          pullNumber: 99,
+          body: { category: "billing", urgency: 3 },
+        },
+      });
+
+      await handle.signal(approvalSignal, { approved: true });
+      expect((await handle.result()).status).toBe("completed");
     });
   });
 

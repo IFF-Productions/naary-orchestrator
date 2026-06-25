@@ -5,13 +5,13 @@ import type {
   ExecutionState,
   ExecutionStatus,
 } from "@naary/contracts";
-import { walk } from "@naary/dsl";
-import type { GraphDef } from "@naary/dsl";
+import { resolveMcpArguments, walk } from "@naary/dsl";
+import type { GraphDef, McpToolNodeConfig } from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
 // Do NOT drop `type` — that would pull I/O code into the sandbox.
 import type * as activities from "./activities";
 
-const { runAgent } = wf.proxyActivities<typeof activities>({
+const { runAgent, callMcpTool } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },
 });
@@ -87,6 +87,11 @@ export async function runGraph(
       case "start":
       case "end":
         break;
+      case "webhookTrigger":
+        // Slice #4: the inbound event (the workflow input) is this node's output.
+        // Pure — no I/O; determinism boundary stays clean.
+        ctx[node.id] = ctx.__input;
+        break;
       case "agent": {
         // tenantId flows in workflow args (not a secret); the activity fetches
         // the tenant's key by tenantId. executionId comes from workflowInfo
@@ -104,6 +109,28 @@ export async function runGraph(
         // Accumulate the cost the activity RETURNED — deterministic.
         costUsd += result.costUsd;
         ctx.__costUsd = costUsd;
+        break;
+      }
+      case "mcpTool": {
+        // Calls a remote MCP server tool via a connection. Resolving the tool
+        // arguments from upstream node outputs is deterministic graph-traversal
+        // work, so it happens HERE (not in the activity). Token fetch + the HTTP
+        // call are I/O inside the activity; the workflow passes tenantId + the
+        // resolved arguments. No cost (counts toward stepCount only).
+        const mcpCfg = node.config as unknown as McpToolNodeConfig;
+        ctx[node.id] = await callMcpTool(
+          {
+            connectionId: mcpCfg.connectionId,
+            tool: mcpCfg.tool,
+            arguments: resolveMcpArguments(mcpCfg, ctx),
+          },
+          ctx.__input,
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
         break;
       }
       case "humanApproval":

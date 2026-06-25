@@ -1,3 +1,10 @@
 export * from "./types";
-export { sampleGraph } from "./sample-graph";
+export {
+  sampleGraph,
+  webhookSampleGraph,
+  githubReviewGraph,
+  graphRegistry,
+  getGraphForWorkflow,
+} from "./sample-graph";
+export { getByPath, resolveMcpArguments } from "./mcp-args";
 export { walk } from "./walk";

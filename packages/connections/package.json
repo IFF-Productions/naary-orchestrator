@@ -1,0 +1,19 @@
+{
+  "name": "@naary/connections",
+  "version": "0.1.0",
+  "private": true,
+  "description": "External MCP connections: model + service + auth resolution (PAT/OAuth). Consumed by worker activities + api — NEVER by workflow code.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@naary/db": "workspace:*",
+    "@naary/secrets": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0"
+  }
+}

@@ -6,6 +6,12 @@
  */
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { ApplicationFailure } from "@temporalio/activity";
+import {
+  MissingConnectionTokenError,
+  NeedsReauthError,
+  callMcpTool as mcpCall,
+  resolveMcpTarget,
+} from "@naary/connections";
 import { CredentialsService, MissingCredentialError } from "@naary/secrets";
 import {
   computeCost,
@@ -223,5 +229,71 @@ export async function runAgent(
     // Genuine transient error: rethrow BARE (no logging — AI-SDK errors can
     // carry request headers incl. the key) so Temporal's retry policy handles it.
     throw e;
+  }
+}
+
+export interface McpToolConfig {
+  connectionId: string;
+  tool: string;
+  /** Tool arguments, already resolved from upstream outputs by the interpreter. */
+  arguments?: Record<string, unknown>;
+}
+
+export interface McpToolResult {
+  status: "ok";
+  content: unknown;
+}
+
+/** Test seam: connection→target resolution + the MCP call, swappable in tests. */
+export const __mcpDeps = {
+  resolveMcpTarget,
+  callMcpTool: mcpCall,
+};
+
+/**
+ * MCP Tool node: resolve the connection's server URL + auth header IN-ACTIVITY
+ * (token never crosses the workflow boundary), call the remote tool, return its
+ * content. Missing-token / needs-reauth map to non-retryable (the user must fix
+ * the connection); transient errors retry.
+ */
+export async function callMcpTool(
+  cfg: McpToolConfig,
+  input: unknown,
+  meta: AgentMeta,
+): Promise<McpToolResult> {
+  try {
+    const target = await __mcpDeps.resolveMcpTarget(
+      meta.tenantId,
+      cfg.connectionId,
+    );
+    const result = await __mcpDeps.callMcpTool({
+      serverUrl: target.serverUrl,
+      headers: target.headers,
+      tool: cfg.tool,
+      arguments: cfg.arguments ?? (input as Record<string, unknown>) ?? {},
+    });
+    // A tool-level error (isError) is NOT success — surface it instead of
+    // letting the workflow proceed as if the call worked. Non-retryable: the
+    // same arguments usually fail the same way, so don't burn Temporal retries.
+    if (result.isError) {
+      throw ApplicationFailure.nonRetryable(
+        `MCP tool '${cfg.tool}' returned an error`,
+        "MCP_TOOL_ERROR",
+        { connectionId: cfg.connectionId, content: result.content },
+      );
+    }
+    return { status: "ok", content: result.content };
+  } catch (e) {
+    if (
+      e instanceof MissingConnectionTokenError ||
+      e instanceof NeedsReauthError
+    ) {
+      throw ApplicationFailure.nonRetryable(
+        "Connection needs re-authorization",
+        "CONNECTION_REAUTH",
+        { connectionId: cfg.connectionId },
+      );
+    }
+    throw e; // transient — let Temporal retry
   }
 }
