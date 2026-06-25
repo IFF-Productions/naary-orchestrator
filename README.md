@@ -72,6 +72,53 @@ burn retries on a key the user must fix); genuine transient errors retry.
 > endpoint are verified live. To run the real path: save a valid key via the credential
 > endpoint, then start an execution for that tenant.
 
+## Budget enforcement + circuit breaking (Slice #3)
+
+Slice #2 *records* spend; slice #3 *enforces* it via three mechanisms:
+
+```bash
+# Set a tenant's budget
+curl -XPUT localhost:3000/tenants/<id>/budget -H 'content-type: application/json' \
+  -d '{"monthlyCapUsd":50,"perExecutionCapUsd":0.25,"maxStepsPerRun":50,"onBudgetExceeded":"reject"}'
+
+# View budget + live month-to-date spend + remaining
+curl localhost:3000/tenants/<id>/budget
+# -> {"monthlyCapUsd":50,"mtdSpendUsd":3.25,"remainingUsd":46.75,"perExecutionCapUsd":0.25,...}
+```
+
+1. **Pre-flight cost check** (in the agent activity — it reads the ledger): before the
+   LLM call, if `monthToDateSpend + estimate > monthlyCap`, apply the policy —
+   `reject` (non-retryable `BUDGET` failure, no charge) or `downgrade` (swap to the
+   configured `fallbackModel` and record which model actually ran).
+2. **Per-execution cost cap** (in the **workflow**, deterministic): `runGraph`
+   accumulates the `costUsd` each agent activity **returns** and halts at
+   `status: "budget_exceeded"` when it reaches `perExecutionCapUsd`.
+3. **Circuit breaker** (workflow): a per-node `stepCount` halts a runaway graph at
+   `status: "circuit_open"` past `maxStepsPerRun`.
+
+Both workflow stops are **clean terminal statuses returned normally**, not thrown — the
+execution history stays tidy, and `GET /executions/:id` reflects the stop reason.
+
+### Determinism boundary
+
+Cumulative enforcement lives in the workflow and is driven **only** by activity-returned
+costs + a node counter — **never a DB read in workflow code** (CLAUDE.md rule 2). The
+caps themselves are **snapshotted at start**: `POST /executions` reads the tenant's
+budget and passes `perExecutionCapUsd` / `maxStepsPerRun` as workflow args (non-secret
+config, recorded in history → identical on replay).
+
+### Honest limitations
+
+- **Two enforcement points read the budget at different times, by design:** the
+  per-execution cap is snapshotted at start (workflow args); the monthly cap is read
+  **live** inside the activity (pre-flight). A mid-run budget change affects the next
+  call's pre-flight but not this run's per-execution cap.
+- **Eventual consistency / no reservation:** pre-flight reads month-to-date spend with
+  no locking, so **concurrent runs for one tenant can briefly overshoot** the monthly
+  cap. Acceptable for this slice; atomic reservation is a fast-follow (PLAN-SLICE-3 §8).
+- **Pre-flight is an estimate** (char/4 input + assumed max output); the recorded
+  `UsageEvent` is the **actual** cost.
+
 ## Layout (pnpm workspace)
 
 | Package | Role |
