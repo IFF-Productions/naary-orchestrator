@@ -1,3 +1,3 @@
-// Placeholder export — proves cross-package resolution in Task 0.
-// Replaced with the real graph DSL (types, sample-graph, walk) in Task 1.
-export const DSL_PACKAGE = "@naary/dsl" as const;
+export * from "./types";
+export { sampleGraph } from "./sample-graph";
+export { walk } from "./walk";
