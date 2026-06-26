@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { type AuthDeps, resolveAuthHeader } from "./auth";
 import { ConnectionService } from "./connection.service";
+import { assertEgressAllowed } from "./egress";
 
 export interface McpCallInput {
   serverUrl: string;
@@ -21,16 +22,16 @@ export interface McpCallResult {
  * client is always closed (finally) to avoid leaking the connection.
  */
 export async function callMcpTool(input: McpCallInput): Promise<McpCallResult> {
+  // SSRF guard at the egress point (defeats DNS rebinding): https + public host
+  // only, before the tenant's bearer token is sent anywhere.
+  const url = await assertEgressAllowed(input.serverUrl);
   const client = new Client(
     { name: "naary-orchestrator", version: "0.1.0" },
     { capabilities: {} },
   );
-  const transport = new StreamableHTTPClientTransport(
-    new URL(input.serverUrl),
-    {
-      requestInit: { headers: input.headers },
-    },
-  );
+  const transport = new StreamableHTTPClientTransport(url, {
+    requestInit: { headers: input.headers },
+  });
   try {
     await client.connect(transport);
     const result = await client.callTool({

@@ -7,6 +7,7 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { ApplicationFailure } from "@temporalio/activity";
 import {
+  BlockedEgressError,
   MissingConnectionTokenError,
   NeedsReauthError,
   callMcpTool as mcpCall,
@@ -316,6 +317,15 @@ export async function callMcpTool(
     // Our own deliberate failures (e.g. MCP_TOOL_ERROR) are already safe + correctly
     // non-retryable — pass them through untouched.
     if (e instanceof ApplicationFailure) throw e;
+    // A blocked egress target is a misconfiguration (SSRF guard) — retrying the
+    // same URL won't help, so fail non-retryable.
+    if (e instanceof BlockedEgressError) {
+      throw ApplicationFailure.nonRetryable(
+        "Connection target is not allowed",
+        "BLOCKED_EGRESS",
+        { connectionId: cfg.connectionId },
+      );
+    }
     if (
       e instanceof MissingConnectionTokenError ||
       e instanceof NeedsReauthError

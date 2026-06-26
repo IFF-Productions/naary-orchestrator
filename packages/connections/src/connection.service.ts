@@ -90,7 +90,15 @@ export class ConnectionService {
     return getPrisma().connection.findFirst({ where: { id, tenantId } });
   }
 
-  async setStatus(id: string, status: ConnectionStatus): Promise<void> {
-    await getPrisma().connection.update({ where: { id }, data: { status } });
+  async setStatus(
+    tenantId: string,
+    id: string,
+    status: ConnectionStatus,
+  ): Promise<void> {
+    // Tenant-scoped (Arch§3.7): updateMany so the composite where is allowed.
+    await getPrisma().connection.updateMany({
+      where: { id, tenantId },
+      data: { status },
+    });
   }
 }
