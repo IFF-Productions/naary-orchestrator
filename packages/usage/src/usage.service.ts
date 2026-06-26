@@ -37,20 +37,32 @@ export async function recordUsage(input: RecordUsageInput) {
     cachedInputTokens,
   });
 
-  return getPrisma().usageEvent.create({
-    data: {
-      tenantId: input.tenantId,
-      executionId: input.executionId,
-      nodeId: input.nodeId,
-      provider: input.provider,
-      model: input.model,
-      inputTokens,
-      outputTokens,
-      totalTokens,
-      cachedInputTokens,
-      reasoningTokens,
-      // Decimal(12,6) — fix to 6 places so we never lose sub-cent precision to float.
-      costUsd: new Prisma.Decimal(costUsd.toFixed(6)),
+  const data = {
+    tenantId: input.tenantId,
+    executionId: input.executionId,
+    nodeId: input.nodeId,
+    provider: input.provider,
+    model: input.model,
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    cachedInputTokens,
+    reasoningTokens,
+    // Decimal(12,6) — fix to 6 places so we never lose sub-cent precision to float.
+    costUsd: new Prisma.Decimal(costUsd.toFixed(6)),
+  };
+
+  // Idempotent on (executionId, nodeId): if the activity is retried after the
+  // model call already recorded usage, the upsert is a no-op (first write wins)
+  // — so a retry can never double-write the ledger or double-bill.
+  return getPrisma().usageEvent.upsert({
+    where: {
+      executionId_nodeId: {
+        executionId: input.executionId,
+        nodeId: input.nodeId,
+      },
     },
+    create: data,
+    update: {}, // keep the original record unchanged
   });
 }

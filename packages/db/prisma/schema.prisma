@@ -12,6 +12,28 @@ datasource db {
   // adapter passed to PrismaClient at runtime — not here.
 }
 
+// Security hardening — per-tenant API tokens authenticate the control plane;
+// Execution records bind a Temporal workflowId to its owning tenant.
+
+model ApiToken {
+  id         String    @id @default(uuid())
+  tenantId   String
+  tokenHash  String    @unique // sha256 hex of the bearer token; plaintext never stored
+  label      String
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+
+  @@index([tenantId])
+}
+
+model Execution {
+  workflowId String   @id // Temporal workflowId
+  tenantId   String
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId])
+}
+
 // Slice #4 — external integrations.
 
 model WebhookEndpoint {
@@ -87,6 +109,7 @@ model UsageEvent {
   costUsd           Decimal  @db.Decimal(12, 6)
   createdAt         DateTime @default(now())
 
+  @@unique([executionId, nodeId]) // idempotent ledger: a retried activity can't double-write
   @@index([tenantId, createdAt])
   @@index([executionId])
 }

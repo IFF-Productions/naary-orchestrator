@@ -11,6 +11,7 @@ import {
   completeConsent,
   startConsent,
 } from "@naary/connections";
+import { Public } from "../auth/public.decorator";
 
 /**
  * Interactive OAuth consent (B3) — runs once in the web app. `start` returns the
@@ -40,6 +41,7 @@ export class OAuthController {
     });
   }
 
+  @Public() // provider redirect target; the single-use `state` is its credential
   @Get("oauth/callback")
   callback(
     @Query("state") state: string,

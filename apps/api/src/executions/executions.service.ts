@@ -1,10 +1,16 @@
 import { randomUUID } from "node:crypto";
 import {
+  ForbiddenException,
   Injectable,
+  NotFoundException,
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
-import type { Client, Connection } from "@temporalio/client";
+import {
+  type Client,
+  type Connection,
+  WorkflowNotFoundError,
+} from "@temporalio/client";
 import {
   approvalSignal,
   RUN_GRAPH_WORKFLOW,
@@ -12,6 +18,7 @@ import {
   TASK_QUEUE,
   type ExecutionState,
 } from "@naary/contracts";
+import { getPrisma } from "@naary/db";
 import { sampleGraph } from "@naary/dsl";
 import type { GraphDef } from "@naary/dsl";
 import { getBudget } from "@naary/usage";
@@ -22,12 +29,11 @@ const DEFAULT_MAX_STEPS_PER_RUN = 50;
 
 /**
  * Wraps the Temporal client: start an execution, signal approval, query state.
- * The client connects once at boot and closes on shutdown (a per-request
- * connection would pass the curl flow but leak connections).
+ * The client connects once at boot and closes on shutdown.
  *
- * The workflow is started by its registered NAME (RUN_GRAPH_WORKFLOW), not by
- * importing runGraph from @naary/worker — that keeps the api decoupled from the
- * worker bundle; Temporal sends the name over the wire either way.
+ * Every run is recorded as an `Execution { workflowId, tenantId }` so the control
+ * plane can authorize `approve`/`getState` against the caller's tenant — a raw
+ * workflowId is never enough to act on a run.
  */
 @Injectable()
 export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
@@ -44,18 +50,21 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     await this.connection?.close();
   }
 
-  async start(tenantId: string): Promise<{ workflowId: string }> {
+  /** Manual start. `tenantId` comes from the authenticated principal (not the body);
+   *  `input` is the real workflow input, defaulting to a demo payload. */
+  async start(
+    tenantId: string,
+    input?: Record<string, unknown>,
+  ): Promise<{ workflowId: string }> {
     return this.startGraph(
       `exec-${tenantId}`,
       sampleGraph,
-      { message: "I was charged twice this month" },
+      input ?? { message: "I was charged twice this month" },
       tenantId,
     );
   }
 
-  /** Start a webhook-triggered run; the verified event becomes the trigger output.
-   *  The graph is resolved from the endpoint's workflowId by the caller (so the
-   *  github-review reference flow is reachable, not just the default graph). */
+  /** Start a webhook-triggered run; the verified event becomes the trigger output. */
   async startWebhook(
     tenantId: string,
     graph: GraphDef,
@@ -71,15 +80,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
   ): Promise<{ workflowId: string }> {
     const workflowId = `${prefix}-${randomUUID()}`;
-
-    // Snapshot the tenant's caps at start and pass them as workflow args, so the
-    // workflow enforces deterministically (no DB read in workflow code). The
-    // circuit breaker always applies (default when no budget); the per-execution
-    // cost cap applies only when a budget is set.
     const budget = await getBudget(tenantId);
 
-    // tenantId rides in workflow args (not a secret); the agent activity fetches
-    // the tenant's provider key by tenantId, inside the activity.
     await this.client.workflow.start(RUN_GRAPH_WORKFLOW, {
       args: [
         graph,
@@ -93,16 +95,46 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       taskQueue: TASK_QUEUE,
       workflowId,
     });
+
+    // Record ownership so approve/getState can be authorized by tenant.
+    await getPrisma().execution.create({ data: { workflowId, tenantId } });
     return { workflowId };
   }
 
-  async approve(id: string, approved: boolean): Promise<void> {
+  async approve(
+    id: string,
+    approved: boolean,
+    tenantId: string,
+  ): Promise<void> {
+    await this.assertOwner(id, tenantId);
     await this.client.workflow
       .getHandle(id)
       .signal(approvalSignal, { approved });
   }
 
-  async getState(id: string): Promise<ExecutionState> {
-    return this.client.workflow.getHandle(id).query(stateQuery);
+  async getState(id: string, tenantId: string): Promise<ExecutionState> {
+    await this.assertOwner(id, tenantId);
+    try {
+      return await this.client.workflow.getHandle(id).query(stateQuery);
+    } catch (e) {
+      if (e instanceof WorkflowNotFoundError) {
+        throw new NotFoundException("Execution not found");
+      }
+      throw e;
+    }
+  }
+
+  /** 404 if the execution is unknown, 403 if it belongs to another tenant. */
+  private async assertOwner(
+    workflowId: string,
+    tenantId: string,
+  ): Promise<void> {
+    const row = await getPrisma().execution.findUnique({
+      where: { workflowId },
+    });
+    if (!row) throw new NotFoundException("Execution not found");
+    if (row.tenantId !== tenantId) {
+      throw new ForbiddenException("Execution belongs to another tenant");
+    }
   }
 }

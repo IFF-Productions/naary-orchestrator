@@ -1,9 +1,6 @@
 import { Body, Controller, Param, Post } from "@nestjs/common";
-import {
-  type RegisteredWebhook,
-  WebhookService,
-  type WebhookProvider,
-} from "./webhook.service";
+import { type RegisteredWebhook, WebhookService } from "./webhook.service";
+import { RegisterWebhookDto } from "./register-webhook.dto";
 
 @Controller("tenants/:id/webhooks")
 export class WebhooksController {
@@ -13,7 +10,7 @@ export class WebhooksController {
   @Post()
   register(
     @Param("id") tenantId: string,
-    @Body() body: { workflowId: string; provider: WebhookProvider },
+    @Body() body: RegisterWebhookDto,
   ): Promise<RegisteredWebhook> {
     return this.webhooks.createEndpoint(
       tenantId,
