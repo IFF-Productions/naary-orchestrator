@@ -160,6 +160,10 @@ Ordered roughly by "blocks launch" → "hardening". Each item says **why** and *
 - [ ] **Usage-ledger reporting / export** for billing (ledger stores tokens+cost only —
       keep it that way; never prompt/completion text).
 - [ ] **Atlassian inbound webhooks** (only GitHub-style HMAC implemented today).
+- [ ] **`POST /executions/:id/approve` error mapping** — approving a closed/failed
+      workflow leaks an unhandled **500**. `getState` already maps
+      `WorkflowNotFoundError` → 404; the approve path should map signal-to-closed-run
+      errors the same way (404/409). (Surfaced by the docker-stack smoke test.)
 - [ ] **Backup/restore + DR runbook**; data-retention & privacy review.
 
 ---
