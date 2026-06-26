@@ -173,8 +173,12 @@ The reference flow (`githubReviewGraph`): GitHub PR webhook → agent reviews �
   is the verified reference; verify Atlassian's scheme against current docs before enabling.
 - **Browser consent (B3) is deferred-live** — the endpoints + token refresh are built and
   tested (mock token server); the actual consent click needs a real OAuth app.
-- **MCP tool results** can exceed Temporal's ~2MB payload cap; large results should go to
-  object storage with a reference passed instead (not handled this slice).
+- **Large MCP tool results are claim-checked** (Arch§4.6): a result over ~1MB is offloaded
+  to object storage (`@naary/storage`) and a small reference flows through Temporal instead,
+  staying under the ~2MB payload cap; the activity resolves references transparently when an
+  upstream output feeds a later tool. The `ObjectStore` interface is provider-agnostic —
+  **AWS S3** today (`STORAGE_PROVIDER=s3`), with a GCS implementation as the drop-in swap;
+  unset = in-memory (dev/tests).
 
 ## Durable graph versioning (Slice #5)
 

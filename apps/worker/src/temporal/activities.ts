@@ -15,6 +15,11 @@ import {
 } from "@naary/connections";
 import { CredentialsService, MissingCredentialError } from "@naary/secrets";
 import {
+  getObjectStore,
+  maybeOffload,
+  resolveClaimChecks,
+} from "@naary/storage";
+import {
   computeCost,
   estimateCallCost,
   getBudget,
@@ -364,15 +369,22 @@ export async function callMcpTool(
   meta: AgentMeta,
 ): Promise<McpToolResult> {
   try {
+    const store = getObjectStore();
     const target = await __mcpDeps.resolveMcpTarget(
       meta.tenantId,
       cfg.connectionId,
     );
+    // Resolve any claim-checked upstream args back to their real values before the
+    // call (Arch§4.6) — the workflow only ever carried the small reference.
+    const args = (await resolveClaimChecks(
+      cfg.arguments ?? (input as Record<string, unknown>) ?? {},
+      store,
+    )) as Record<string, unknown>;
     const result = await __mcpDeps.callMcpTool({
       serverUrl: target.serverUrl,
       headers: target.headers,
       tool: cfg.tool,
-      arguments: cfg.arguments ?? (input as Record<string, unknown>) ?? {},
+      arguments: args,
     });
     // A tool-level error (isError) is NOT success — surface it instead of
     // letting the workflow proceed as if the call worked. Non-retryable: the
@@ -384,7 +396,12 @@ export async function callMcpTool(
         { connectionId: cfg.connectionId, content: result.content },
       );
     }
-    return { status: "ok", content: result.content, costUsd: cfg.costUsd ?? 0 };
+    // Offload a large result to object storage and return a small reference, so it
+    // can't blow Temporal's ~2MB payload cap (Arch§4.6). Small results stay inline.
+    const content = await maybeOffload(result.content, store, {
+      keyPrefix: `mcp/${meta.tenantId}`,
+    });
+    return { status: "ok", content, costUsd: cfg.costUsd ?? 0 };
   } catch (e) {
     // Our own deliberate failures (e.g. MCP_TOOL_ERROR) are already safe + correctly
     // non-retryable — pass them through untouched.

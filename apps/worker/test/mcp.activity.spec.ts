@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MissingConnectionTokenError } from "@naary/connections";
+import {
+  __setObjectStore,
+  isClaimCheck,
+  MemoryObjectStore,
+  resolveClaimChecks,
+} from "@naary/storage";
 import { __mcpDeps, callMcpTool } from "../src/temporal/activities";
 
 const META = { tenantId: "t1", executionId: "exec-1", nodeId: "mcp" };
@@ -7,12 +13,15 @@ const CFG = { connectionId: "conn-1", tool: "createIssue" };
 
 const resolveMcpTarget = vi.fn();
 const mcpCall = vi.fn();
+let store: MemoryObjectStore;
 
 beforeEach(() => {
   resolveMcpTarget.mockReset();
   mcpCall.mockReset();
   __mcpDeps.resolveMcpTarget = resolveMcpTarget as never;
   __mcpDeps.callMcpTool = mcpCall as never;
+  store = new MemoryObjectStore();
+  __setObjectStore(store);
 });
 
 describe("callMcpTool activity", () => {
@@ -40,6 +49,23 @@ describe("callMcpTool activity", () => {
       headers: { Authorization: "Bearer tok" },
       tool: "createIssue",
     });
+  });
+
+  it("claim-checks a large result to object storage and returns a small reference (Arch§4.6)", async () => {
+    resolveMcpTarget.mockResolvedValue({
+      serverUrl: "https://x/mcp",
+      headers: {},
+    });
+    const bigContent = [{ type: "text", text: "z".repeat(1_100_000) }]; // > 1MB
+    mcpCall.mockResolvedValue({ content: bigContent, isError: false });
+
+    const result = await callMcpTool(CFG, {}, META);
+
+    // the returned content is a small claim-check reference, not the 1MB blob
+    expect(isClaimCheck(result.content)).toBe(true);
+    expect(JSON.stringify(result.content).length).toBeLessThan(500);
+    // and it resolves back to the original content
+    expect(await resolveClaimChecks(result.content, store)).toEqual(bigContent);
   });
 
   it("surfaces a tool-level error (isError) as a non-retryable failure, not success", async () => {
