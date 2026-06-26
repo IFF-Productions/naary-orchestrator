@@ -1,5 +1,6 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppShell } from "./app/AppShell";
+import { RequireAuth } from "./auth/RequireAuth";
 
 const lazy = (
   importer: () => Promise<Record<string, React.ComponentType>>,
@@ -18,47 +19,56 @@ export const router = createBrowserRouter([
     ...lazy(() => import("./screens/DesignSystemPage"), "DesignSystemPage"),
   },
   { path: "/auth", ...lazy(() => import("./screens/AuthPage"), "AuthPage") },
+  // Everything under here requires a Keycloak session or a pasted nry_ token.
   {
-    path: "/app/canvas",
-    ...lazy(() => import("./screens/CanvasPage"), "CanvasPage"),
-  },
-  {
-    path: "/app",
-    element: <AppShell />,
+    element: <RequireAuth />,
     children: [
       {
-        index: true,
-        ...lazy(() => import("./screens/app/Overview"), "Overview"),
+        path: "/app/canvas",
+        ...lazy(() => import("./screens/CanvasPage"), "CanvasPage"),
       },
       {
-        path: "workflows",
-        ...lazy(() => import("./screens/app/Workflows"), "Workflows"),
-      },
-      { path: "runs", ...lazy(() => import("./screens/app/Runs"), "Runs") },
-      {
-        path: "runs/:id",
-        ...lazy(() => import("./screens/app/RunDetail"), "RunDetail"),
-      },
-      {
-        path: "templates",
-        ...lazy(() => import("./screens/app/Templates"), "Templates"),
-      },
-      {
-        path: "integrations",
-        ...lazy(() => import("./screens/app/Integrations"), "Integrations"),
-      },
-      {
-        path: "observability",
-        ...lazy(() => import("./screens/app/Observability"), "Observability"),
-      },
-      {
-        path: "billing",
-        ...lazy(() => import("./screens/app/Billing"), "Billing"),
-      },
-      { path: "team", ...lazy(() => import("./screens/app/Team"), "Team") },
-      {
-        path: "settings",
-        ...lazy(() => import("./screens/app/Settings"), "Settings"),
+        path: "/app",
+        element: <AppShell />,
+        children: [
+          {
+            index: true,
+            ...lazy(() => import("./screens/app/Overview"), "Overview"),
+          },
+          {
+            path: "workflows",
+            ...lazy(() => import("./screens/app/Workflows"), "Workflows"),
+          },
+          { path: "runs", ...lazy(() => import("./screens/app/Runs"), "Runs") },
+          {
+            path: "runs/:id",
+            ...lazy(() => import("./screens/app/RunDetail"), "RunDetail"),
+          },
+          {
+            path: "templates",
+            ...lazy(() => import("./screens/app/Templates"), "Templates"),
+          },
+          {
+            path: "integrations",
+            ...lazy(() => import("./screens/app/Integrations"), "Integrations"),
+          },
+          {
+            path: "observability",
+            ...lazy(
+              () => import("./screens/app/Observability"),
+              "Observability",
+            ),
+          },
+          {
+            path: "billing",
+            ...lazy(() => import("./screens/app/Billing"), "Billing"),
+          },
+          { path: "team", ...lazy(() => import("./screens/app/Team"), "Team") },
+          {
+            path: "settings",
+            ...lazy(() => import("./screens/app/Settings"), "Settings"),
+          },
+        ],
       },
     ],
   },

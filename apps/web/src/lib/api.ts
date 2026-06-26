@@ -4,10 +4,11 @@
  * live state. In dev, Vite proxies /api → http://localhost:3000 (see
  * vite.config.ts), so the browser avoids CORS.
  *
- * Auth: every call carries the per-tenant API token as a bearer header; the
- * server resolves tenantId from the token, so the client never sends it.
+ * Auth: every call carries a bearer token — a fresh Keycloak (OIDC) access token
+ * when the user is logged in, else the pasted `nry_` API token (see getBearerToken).
+ * The server resolves tenantId from the token, so the client never sends it.
  */
-import { getToken } from "./auth";
+import { getBearerToken } from "./keycloak";
 
 /** Thrown on a 401 so screens can prompt the user to set their API token. */
 export class UnauthorizedError extends Error {
@@ -33,7 +34,7 @@ export interface ExecutionState {
 const BASE = "/api";
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getToken();
+  const token = await getBearerToken();
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {

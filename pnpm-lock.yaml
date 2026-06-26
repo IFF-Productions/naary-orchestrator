@@ -96,6 +96,9 @@ importers:
 
   apps/web:
     dependencies:
+      keycloak-js:
+        specifier: ^26.0.5
+        version: 26.2.4
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -2235,6 +2238,9 @@ packages:
     resolution: {integrity: sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==}
     engines: {node: '>=6'}
     hasBin: true
+
+  keycloak-js@26.2.4:
+    resolution: {integrity: sha512-PnXpR3ubETGOt0B/Qt2lxmPbkZr5bc3vlQsOqDoTPPQsZRp7JjhTKxlJ187uWh8qJhvBab6Gsjb06a8ayOPfuw==}
 
   libphonenumber-js@1.13.7:
     resolution: {integrity: sha512-rvr3HIMdOgzhz1RFGjftji+wjoAFlzhqCNqJOU/MKTZQ8d9NZxAR/tI+0weDicyoucqVR0U1GCniqHJ0f8aM2A==}
@@ -5229,6 +5235,8 @@ snapshots:
   json-schema@0.4.0: {}
 
   json5@2.2.3: {}
+
+  keycloak-js@26.2.4: {}
 
   libphonenumber-js@1.13.7: {}
 

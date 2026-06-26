@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../auth/AuthProvider";
 import { Button, Field, Icon, Logo, TextInput } from "../components";
 import { setToken } from "../lib/auth";
 
@@ -39,6 +40,7 @@ const stats = [
 
 export function AuthPage() {
   const navigate = useNavigate();
+  const { login } = useAuth();
   const [mode, setMode] = useState<Mode>("login");
   const [showPassword, setShowPassword] = useState(false);
   const [apiToken, setApiToken] = useState("");
@@ -258,8 +260,17 @@ export function AuthPage() {
             {copy.subtitle}
           </p>
 
-          {/* social buttons */}
+          {/* primary: real Keycloak (OIDC) login — Authorization Code + PKCE */}
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <Button
+              variant="primary"
+              block
+              iconRight="arrow-right"
+              onClick={() => login()}
+            >
+              Sign in with Keycloak
+            </Button>
+            {/* cosmetic placeholders — not wired to an IdP yet */}
             <Button variant="secondary" block onClick={() => navigate("/app")}>
               <GoogleGlyph />
               Continue with Google
