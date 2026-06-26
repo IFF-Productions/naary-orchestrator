@@ -38,9 +38,22 @@ export interface McpToolNodeConfig {
   argumentBindings?: Record<string, ArgBinding>;
 }
 
+/**
+ * Slice #6 — a structured, PURE edge predicate (never code/eval). Evaluated
+ * against the run `ctx` to decide whether to take the edge. `path` is a dotted
+ * path into ctx (e.g. "agent.output.category"); `op` compares the resolved value
+ * to `value`. An edge with no condition is unconditional (linear/parallel).
+ */
+export interface EdgeCondition {
+  path: string;
+  op: "eq" | "neq" | "in" | "exists" | "gt" | "lt";
+  value?: unknown;
+}
+
 export interface EdgeDef {
   from: string;
   to: string;
+  condition?: EdgeCondition;
 }
 
 export interface GraphDef {

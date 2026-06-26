@@ -18,7 +18,8 @@ export type ExecutionStatus =
   | "completed"
   | "rejected"
   | "budget_exceeded" // per-execution cost cap hit (Slice #3)
-  | "circuit_open"; // max-step circuit breaker tripped (Slice #3)
+  | "circuit_open" // max-step circuit breaker tripped (Slice #3)
+  | "invalid_graph"; // malformed graph (dangling edge / unknown node) — terminal, not retried (Slice #6)
 
 export interface ExecutionState {
   status: ExecutionStatus;
