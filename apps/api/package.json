@@ -24,7 +24,9 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "class-validator": "^0.14.2",
-    "class-transformer": "^0.5.1"
+    "class-transformer": "^0.5.1",
+    "helmet": "^8.0.0",
+    "@nestjs/throttler": "^6.4.0"
   },
   "devDependencies": {
     "@nestjs/testing": "^11.1.27"

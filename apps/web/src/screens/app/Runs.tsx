@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Icon, StatusPill } from "../../components";
-import { api } from "../../lib/api";
+import { api, UnauthorizedError } from "../../lib/api";
 import { runs as mockRuns, type RunRow } from "../../lib/mock";
 
 const COLS = ".9fr 1.7fr 1fr .8fr .8fr .8fr";
@@ -41,7 +41,7 @@ export function Runs() {
     setStarting(true);
     setError(null);
     try {
-      const { workflowId } = await api.startExecution("t-123");
+      const { workflowId } = await api.startExecution();
       setLiveRuns((prev) => [
         {
           id: workflowId,
@@ -58,7 +58,9 @@ export function Runs() {
       navigate(`/app/runs/${encodeURIComponent(workflowId)}`);
     } catch (e) {
       setError(
-        "Could not reach the control plane. Start it with `pnpm start` (apps/api) on :3000.",
+        e instanceof UnauthorizedError
+          ? "Not authenticated — set your API token on the sign-in screen."
+          : "Could not reach the control plane. Start it with `pnpm start` (apps/api) on :3000.",
       );
     } finally {
       setStarting(false);
