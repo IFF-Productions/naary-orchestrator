@@ -4,7 +4,6 @@
   "sslRequired": "external",
   "registrationAllowed": false,
   "accessTokenLifespan": 300,
-  "comment": "Local-dev realm for Naary. tenantId is carried on the `tenant` access-token claim (decision A), mapped from the user's `tenant` attribute. NOT for production: demo user/password below are well-known and for local development only.",
   "clients": [
     {
       "clientId": "naary-web",
