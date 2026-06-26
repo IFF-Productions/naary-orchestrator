@@ -9,9 +9,9 @@ import {
   Req,
   UnauthorizedException,
 } from "@nestjs/common";
-import { getGraphForWorkflow } from "@naary/dsl";
 import { Public } from "../auth/public.decorator";
 import { ExecutionsService } from "../executions/executions.service";
+import { GraphsService } from "../graphs/graphs.service";
 import { type WebhookProvider, WebhookService } from "./webhook.service";
 
 /** Express request augmented by NestFactory({ rawBody: true }). */
@@ -24,6 +24,7 @@ export class HooksController {
   constructor(
     private readonly webhooks: WebhookService,
     private readonly executions: ExecutionsService,
+    private readonly graphs: GraphsService,
   ) {}
 
   /**
@@ -68,19 +69,22 @@ export class HooksController {
       return { status: "duplicate_ignored" }; // 2xx so the provider stops retrying
     }
 
-    // Select the graph from the endpoint's workflowId (so a github-review
-    // endpoint reaches the reference flow, not the default). Unknown id → 404
-    // rather than silently running the wrong graph.
-    const graph = getGraphForWorkflow(endpoint.workflowId);
-    if (!graph) {
+    // Resolve the tenant's current graph version for this endpoint's workflowKey
+    // from Postgres (so a github-review endpoint reaches the reference flow, not
+    // the default). Unknown/unseeded key → 404. The snapshot is version-pinned.
+    const snapshot = await this.graphs.getLatest(
+      endpoint.tenantId,
+      endpoint.workflowId,
+    );
+    if (!snapshot) {
       throw new NotFoundException(
-        `No graph registered for workflowId '${endpoint.workflowId}'`,
+        `No graph seeded for workflowKey '${endpoint.workflowId}'`,
       );
     }
 
     const { workflowId } = await this.executions.startWebhook(
       endpoint.tenantId,
-      graph,
+      snapshot,
       event,
     );
     return { status: "started", workflowId };

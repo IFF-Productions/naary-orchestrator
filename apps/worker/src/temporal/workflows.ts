@@ -31,6 +31,10 @@ export interface RunGraphCtx {
   tenantId: string;
   perExecutionCapUsd?: number;
   maxStepsPerRun?: number;
+  /** The version-pinned graph snapshot this run executes (Slice #5). Carried in
+   *  history for traceability; the interpreter walks the passed graph as-is. */
+  graphContentHash?: string;
+  graphVersion?: number;
 }
 
 /**

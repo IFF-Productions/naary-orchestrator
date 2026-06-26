@@ -6,6 +6,7 @@ import { DbLifecycleService } from "./common/db-lifecycle.service";
 import { BudgetModule } from "./budget/budget.module";
 import { ConnectionsModule } from "./connections/connections.module";
 import { ExecutionsModule } from "./executions/executions.module";
+import { GraphsModule } from "./graphs/graphs.module";
 import { SecretsModule } from "./secrets/secrets.module";
 import { UsageModule } from "./usage/usage.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
@@ -16,6 +17,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     // protecting credential-save / execution-start / oauth / hooks from abuse.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     AuthModule,
+    GraphsModule,
     ExecutionsModule,
     SecretsModule,
     UsageModule,

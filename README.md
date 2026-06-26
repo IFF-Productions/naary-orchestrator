@@ -173,6 +173,23 @@ The reference flow (`githubReviewGraph`): GitHub PR webhook → agent reviews �
 - **MCP tool results** can exceed Temporal's ~2MB payload cap; large results should go to
   object storage with a reference passed instead (not handled this slice).
 
+## Durable graph versioning (Slice #5)
+
+Graphs are no longer hardcoded — they live in Postgres (`GraphDefinition`), versioned per
+`(tenantId, workflowKey)` and **content-hashed** (sha256 of a canonical, key-sorted
+serialization). At execution start the control plane loads the latest version and passes
+the **immutable graph snapshot** to the workflow as an arg, with the content hash + version
+recorded in a Temporal **memo**. Editing a flow creates a *new* version and cannot change
+an in-flight run (which carries its own snapshot). Re-saving an unchanged graph is a no-op
+(same hash → same version). Seed a tenant's graphs with
+`pnpm --filter @naary/api exec ts-node src/graphs/seed-graphs.ts <tenantId>`.
+
+- **Pass-by-value, not by-reference** — the full graph rides in the workflow arg (kept
+  small; the ~2MB Temporal payload cap is the documented bound, not solved here).
+- **Edge order is identity** — object-key order is canonicalized away, but node/edge array
+  order is semantic (`walk` takes the first declared edge), so reordering edges is a real
+  version change.
+
 ## Layout (pnpm workspace)
 
 | Package | Role |
