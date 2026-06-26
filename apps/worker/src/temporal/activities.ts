@@ -169,6 +169,35 @@ export async function runAgent(
       );
       if (mtd + estimate > budget.monthlyCapUsd) {
         if (budget.onBudgetExceeded === "downgrade" && budget.fallbackModel) {
+          // Re-validate the cheaper model (QA#6): it must be priced, and a fresh
+          // estimate with IT must actually fit the cap — otherwise a downgrade can
+          // still blow the budget (or, if the fallback is unpriced, spend money and
+          // then throw at billing time).
+          let fallbackEstimate: number;
+          try {
+            fallbackEstimate = estimateCallCost(
+              {
+                provider: cfg.provider,
+                model: budget.fallbackModel,
+                systemPrompt: cfg.systemPrompt,
+                maxOutputTokens: MAX_OUTPUT_TOKENS,
+              },
+              input,
+            );
+          } catch {
+            throw ApplicationFailure.nonRetryable(
+              "Configured fallback model has no pricing",
+              "FALLBACK_UNPRICED",
+              { tenantId: meta.tenantId },
+            );
+          }
+          if (mtd + fallbackEstimate > budget.monthlyCapUsd) {
+            throw ApplicationFailure.nonRetryable(
+              "Monthly budget exceeded (even after downgrade)",
+              "BUDGET",
+              { tenantId: meta.tenantId },
+            );
+          }
           model = budget.fallbackModel;
         } else {
           throw ApplicationFailure.nonRetryable(
@@ -190,6 +219,9 @@ export async function runAgent(
 
     // BILLING (CLAUDE.md rule 6): totalUsage sums across tool steps; guard the
     // ai@6 undefined-usage bug so we never silently record a free call.
+    // NOTE (QA#2): for Anthropic, `inputTokens` EXCLUDES cache-read tokens (those
+    // arrive separately as cachedInputTokens), so input and cached are independent
+    // billing buckets — computeCost must not subtract one from the other.
     const u = result.totalUsage ?? result.usage;
     const real = {
       inputTokens: u?.inputTokens ?? 0,

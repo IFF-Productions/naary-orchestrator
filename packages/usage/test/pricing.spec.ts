@@ -25,6 +25,22 @@ describe("computeCost", () => {
     expect(cost).toBeCloseTo(0.005, 9);
   });
 
+  it("does NOT double-count cached tokens — input and cache-read are separate buckets (QA#2)", () => {
+    // For Anthropic, the SDK's `inputTokens` EXCLUDES cache-read tokens (those are
+    // reported separately as cache_read_input_tokens), so input bills at the full
+    // rate and the cached portion ONLY at the cache rate — never both.
+    const cost = computeCost({
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      inputTokens: 1000, // 1000 * $5/MTok   = 0.005
+      outputTokens: 0,
+      cachedInputTokens: 10_000, // 10000 * $0.5/MTok = 0.005
+    });
+    expect(cost).toBeCloseTo(0.01, 9); // 0.005 + 0.005, cached counted once
+    // a double-count (cached also at full rate) would be ~0.06 — guard against it
+    expect(cost).toBeLessThan(0.02);
+  });
+
   it("prices a cheaper model lower for identical tokens", () => {
     const opus = computeCost({
       provider: "anthropic",

@@ -7,12 +7,13 @@ export async function monthToDateSpend(tenantId: string): Promise<number> {
   const monthStart = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
   );
-  const rows = await getPrisma().usageEvent.findMany({
+  // DB-side aggregate (QA#13): this runs on every pre-flight budget check, so we
+  // sum in Postgres instead of loading a month of rows into memory.
+  const agg = await getPrisma().usageEvent.aggregate({
     where: { tenantId, createdAt: { gte: monthStart } },
-    select: { costUsd: true },
+    _sum: { costUsd: true },
   });
-  const total = rows.reduce((sum, r) => sum + Number(r.costUsd), 0);
-  return Number(total.toFixed(6));
+  return Number(Number(agg._sum.costUsd ?? 0).toFixed(6));
 }
 
 /** Matches runAgent's maxOutputTokens — the worst-case output we'd pay for. */

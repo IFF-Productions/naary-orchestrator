@@ -1,6 +1,7 @@
-// Prisma schema for naary-orchestrator (Slice #2).
-// Postgres owns DEFINITIONS and RECORDS (credentials, usage ledger); Temporal
-// owns execution STATE. Run from repo root: `pnpm db:migrate` / `pnpm db:generate`.
+// Prisma schema for naary-orchestrator.
+// Postgres owns DEFINITIONS and RECORDS (api tokens, execution ownership, tenant
+// credentials, connections, webhooks, budgets, the usage ledger); Temporal owns
+// execution STATE. Run from repo root: `pnpm db:migrate` / `pnpm db:generate`.
 
 generator client {
   provider = "prisma-client-js"
