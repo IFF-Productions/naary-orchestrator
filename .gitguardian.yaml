@@ -1,0 +1,15 @@
+# GitGuardian configuration — https://docs.gitguardian.com/ggshield-docs/configuration
+#
+# The Keycloak realm export (infra/keycloak/realm-naary.json) and the README quick-start
+# ship an INTENTIONAL, well-known, NON-PRODUCTION demo-user password ("demo"). It exists
+# only so `docker compose up` gives a working local login (user `demo`, tenant `t-demo`).
+# It is not a real credential and never reaches production — production points OIDC_ISSUER
+# at a real Keycloak realm provisioned out-of-band. Suppress the false positive.
+version: 2
+secret:
+  ignored-matches:
+    - name: Keycloak local-dev demo user password (intentional test fixture, non-prod)
+      match: demo
+  ignored-paths:
+    # Realm export is local-dev config; real secrets never live here (they come from .env).
+    - infra/keycloak/realm-naary.json

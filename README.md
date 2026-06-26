@@ -251,6 +251,42 @@ curl localhost:3000/executions/<id>
 
 Send `{"approved":false}` instead and the run resolves to `status:"rejected"`.
 
+## Authentication — API tokens + Keycloak OIDC (dual auth)
+
+Every non-`@Public()` route requires `Authorization: Bearer <token>`. The global
+guard accepts **two** credential kinds and resolves both to a tenant:
+
+- **API tokens** (`nry_…`) — for services / CLI / CI. Hashed at rest; verified by
+  `ApiTokenService`. Always on.
+- **Keycloak OIDC JWTs** — for human users. The `tenantId` comes from the access
+  token's **`tenant` claim** (mapped from a user attribute in Keycloak), never from
+  the request path/body. **Off unless `OIDC_ISSUER` is set**, so API-token-only
+  deployments are unchanged.
+
+Tenant-scoped routes (`/tenants/:id/...`) additionally 403 if the path tenant differs
+from the authenticated tenant — same enforcement for both credential kinds.
+
+### Local Keycloak
+
+```bash
+# brings up Postgres + Keycloak (realm `naary` auto-imported from infra/keycloak)
+docker compose up -d            # Keycloak admin UI at http://localhost:8080
+
+# point the API at it (in .env), then restart `pnpm run start`:
+#   OIDC_ISSUER="http://localhost:8080/realms/naary"
+#   OIDC_AUDIENCE="naary-api"
+
+# get a token for the demo user (tenant=t-demo) via direct grant, then call the API:
+TOKEN=$(curl -s http://localhost:8080/realms/naary/protocol/openid-connect/token \
+  -d grant_type=password -d client_id=naary-web -d username=demo -d password=demo \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
+curl localhost:3000/executions -H "Authorization: Bearer $TOKEN"
+```
+
+The demo realm/user/passwords are **local-dev only** (well-known values). For real
+deployments, point `OIDC_ISSUER` at your own realm and provision the `tenant`
+attribute + protocol mapper there.
+
 ## Tests
 
 ```bash
