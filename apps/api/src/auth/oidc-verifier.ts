@@ -6,6 +6,15 @@ export interface OidcConfig {
   audience?: string;
   /** Claim that carries the tenant id (Keycloak protocol mapper). Default "tenant". */
   tenantClaim: string;
+  /**
+   * Where to fetch the realm JWKS, when it differs from `${issuer}/protocol/...`.
+   * Needed when the browser and the API reach Keycloak on different hostnames
+   * (e.g. dockerized API): tokens carry `iss = http://localhost:8080/...` (what the
+   * browser used), but the API must fetch keys over the docker network at
+   * `http://keycloak:8080/...`. JWKS content is host-independent, so the signature
+   * still validates. Unset → derived from the issuer (host-dev, where they match).
+   */
+  jwksUri?: string;
 }
 
 export interface OidcPrincipal {
@@ -38,6 +47,7 @@ export class OidcVerifier {
       // "" would make jose reject every token; treat empty as "no audience check".
       audience: process.env.OIDC_AUDIENCE || undefined,
       tenantClaim: process.env.OIDC_TENANT_CLAIM ?? "tenant",
+      jwksUri: process.env.OIDC_JWKS_URI || undefined,
     };
   }
 
@@ -49,9 +59,10 @@ export class OidcVerifier {
   async verify(token: string): Promise<OidcPrincipal | null> {
     if (!this.config) return null;
     if (!this.keySource) {
-      this.keySource = createRemoteJWKSet(
-        new URL(`${this.config.issuer}/protocol/openid-connect/certs`),
-      );
+      const jwksUri =
+        this.config.jwksUri ??
+        `${this.config.issuer}/protocol/openid-connect/certs`;
+      this.keySource = createRemoteJWKSet(new URL(jwksUri));
     }
     try {
       const { payload } = await jwtVerify(token, this.keySource, {

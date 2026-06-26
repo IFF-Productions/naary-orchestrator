@@ -84,6 +84,27 @@ describe("OidcVerifier", () => {
     expect(verifier().enabled).toBe(true);
   });
 
+  it("reads OIDC_JWKS_URI from env into the config (cross-host JWKS)", () => {
+    const saved = {
+      iss: process.env.OIDC_ISSUER,
+      jwks: process.env.OIDC_JWKS_URI,
+    };
+    const internalJwks =
+      "http://keycloak:8080/realms/naary/protocol/openid-connect/certs";
+    process.env.OIDC_ISSUER = ISSUER;
+    process.env.OIDC_JWKS_URI = internalJwks;
+    try {
+      const cfg = OidcVerifier.fromEnv();
+      expect(cfg?.issuer).toBe(ISSUER);
+      expect(cfg?.jwksUri).toBe(internalJwks);
+    } finally {
+      if (saved.iss === undefined) delete process.env.OIDC_ISSUER;
+      else process.env.OIDC_ISSUER = saved.iss;
+      if (saved.jwks === undefined) delete process.env.OIDC_JWKS_URI;
+      else process.env.OIDC_JWKS_URI = saved.jwks;
+    }
+  });
+
   it("returns { tenantId, subject } for a valid token", async () => {
     const p = await verifier().verify(
       await sign({ tenant: "t-42", sub: "u-7" }),

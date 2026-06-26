@@ -327,6 +327,22 @@ The demo realm/user/passwords are **local-dev only** (well-known values). For re
 deployments, point `OIDC_ISSUER` at your own realm and provision the `tenant`
 attribute + protocol mapper there.
 
+### Web login (SPA)
+
+The web app's sign-in screen has a **"Sign in with Keycloak"** button — an
+Authorization Code + PKCE login against the public `naary-web` client. The access
+token is attached to every API call and **silently refreshed** before expiry; on
+logout the session ends at Keycloak. The pasted `nry_` token remains a secondary
+("advanced") path for devs/CI. In the Docker stack OIDC is **on by default**:
+
+- The browser logs into Keycloak at `http://localhost:8080`, so tokens carry
+  `iss=localhost:8080`. The dockerized API validates that issuer but fetches the
+  JWKS over the docker network (`OIDC_JWKS_URI=http://keycloak:8080/...`) — JWKS is
+  host-independent, so signatures still validate (no `/etc/hosts` hack).
+- SPA Keycloak config is public and overridable via `VITE_KEYCLOAK_URL` /
+  `VITE_KEYCLOAK_REALM` / `VITE_KEYCLOAK_CLIENT_ID` (dev defaults:
+  `http://localhost:8080` / `naary` / `naary-web`).
+
 ## Tests
 
 ```bash

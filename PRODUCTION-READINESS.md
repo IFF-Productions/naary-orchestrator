@@ -118,11 +118,13 @@ Ordered roughly by "blocks launch" → "hardening". Each item says **why** and *
       replay test a required gate.
 
 ### B. Identity & auth (finish what #25 started)
-- [ ] **Live-test the Keycloak realm** — #25 ships the realm/compose/docs **config-only,
-      not booted**. Verify realm import, the `tenant` + audience mappers, and the token
-      flow end-to-end.
-- [ ] **Web-app OIDC login** (Phase 2) — `keycloak-js`/`oidc-client-ts`, token attach +
-      silent refresh in the SPA.
+- [x] **Live-test the Keycloak realm** — realm now boots & imports in the Docker stack;
+      the `tenant` + audience mappers and the token flow are verified end-to-end (the
+      dockerized API accepts a Keycloak token; tenant mismatch → 403).
+- [x] **Web-app OIDC login** (Phase 2) — `keycloak-js` Authorization Code + PKCE,
+      token attach + silent refresh in the SPA; `nry_` paste kept as a fallback.
+      (Remaining: **manual click-through QA** of the browser redirect — automated
+      verification covered init/build + token acceptance, not the interactive flow.)
 - [ ] **OAuth `state` session-binding** (Sec#3) — currently TTL + single-use; bind to the
       session, not just a tenant-prefixed state.
 - [ ] **Production Keycloak** — real realm, no demo user, MFA/policies, rotate the
