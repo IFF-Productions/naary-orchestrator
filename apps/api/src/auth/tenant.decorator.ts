@@ -1,9 +1,11 @@
 import { createParamDecorator, type ExecutionContext } from "@nestjs/common";
 
-/** The authenticated caller. `tenantId` is resolved from the API token by AuthGuard —
- *  never trusted from the request path/body. */
+/** The authenticated caller. `tenantId` is resolved by AuthGuard (from a Keycloak
+ *  JWT's `tenant` claim or an API token) — never trusted from the request path/body.
+ *  `subject` is the OIDC user id when authenticated via Keycloak. */
 export interface Principal {
   tenantId: string;
+  subject?: string;
 }
 
 export interface RequestWithPrincipal {

@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { ApiTokenService } from "./api-token.service";
+import { OidcVerifier } from "./oidc-verifier";
 import { IS_PUBLIC_KEY } from "./public.decorator";
 import type { Principal, RequestWithPrincipal } from "./tenant.decorator";
 
@@ -17,16 +18,18 @@ interface GuardRequest extends RequestWithPrincipal {
 }
 
 /**
- * Global bearer-token guard. Authenticates `Authorization: Bearer <token>` to a
- * tenant, attaches `req.principal`, and — for tenant-scoped routes mounted under
- * `/tenants/:id/...` — enforces that the path tenant equals the authenticated
- * tenant (403 on mismatch). Routes marked `@Public()` (webhook HMAC ingress, the
- * public OAuth redirect) are skipped.
+ * Global dual-auth guard. Authenticates `Authorization: Bearer <token>` to a
+ * tenant via EITHER a Keycloak OIDC JWT (human users — tenant from the `tenant`
+ * claim) OR a per-tenant API token (`nry_…`, for services/CLI/CI), attaches
+ * `req.principal`, and — for tenant-scoped routes under `/tenants/:id/...` —
+ * enforces that the path tenant equals the authenticated tenant (403 on mismatch).
+ * `@Public()` routes (webhook HMAC ingress, the OAuth redirect) are skipped.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
     private readonly tokens: ApiTokenService,
+    private readonly oidc: OidcVerifier,
     private readonly reflector: Reflector,
   ) {}
 
@@ -45,10 +48,16 @@ export class AuthGuard implements CanActivate {
         : undefined;
     if (!token) throw new UnauthorizedException("Missing bearer token");
 
-    const tenantId = await this.tokens.verify(token);
-    if (!tenantId) throw new UnauthorizedException("Invalid API token");
-
-    const principal: Principal = { tenantId };
+    // `nry_…` → API token (services/CLI); anything else → Keycloak JWT (humans).
+    let principal: Principal | undefined;
+    if (token.startsWith("nry_")) {
+      const tenantId = await this.tokens.verify(token);
+      if (tenantId) principal = { tenantId };
+    } else if (this.oidc.enabled) {
+      const p = await this.oidc.verify(token);
+      if (p) principal = { tenantId: p.tenantId, subject: p.subject };
+    }
+    if (!principal) throw new UnauthorizedException("Invalid credentials");
     req.principal = principal;
 
     // Tenant-scoped controllers are mounted under /tenants/:id/... — the path tenant
@@ -56,7 +65,11 @@ export class AuthGuard implements CanActivate {
     // Execution ownership record, since its :id is a workflowId, not a tenant.)
     const path = req.path ?? "";
     const pathTenant = req.params?.id;
-    if (path.startsWith("/tenants/") && pathTenant && pathTenant !== tenantId) {
+    if (
+      path.startsWith("/tenants/") &&
+      pathTenant &&
+      pathTenant !== principal.tenantId
+    ) {
       throw new ForbiddenException("Tenant mismatch");
     }
     return true;
