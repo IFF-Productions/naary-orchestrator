@@ -54,6 +54,9 @@ export interface AgentConfig {
   provider: string;
   model: string;
   systemPrompt: string;
+  /** Per-node structured-output JSON Schema (Slice #6 / QA#9). When set, the agent
+   *  is constrained to it; otherwise the default {category, urgency} schema. */
+  outputSchema?: Record<string, unknown>;
 }
 
 export interface AgentMeta {
@@ -69,7 +72,8 @@ export interface AgentOutput {
 
 export interface AgentResult {
   status: "ok";
-  output: AgentOutput;
+  /** The structured output; shape depends on the node's outputSchema (QA#9). */
+  output: Record<string, unknown>;
   /** The model that actually ran (may differ from cfg.model after a downgrade). */
   model: string;
   /** Cost of THIS call — the workflow accumulates these deterministically. */
@@ -80,7 +84,7 @@ export interface AgentResult {
 // config, so it lives here; per-node schema routing is a later slice. Using the
 // AI SDK's jsonSchema<T> (vs zod) gives an explicit output type and avoids a
 // TS2589 deep-instantiation blow-up in generateText's generics.
-const outputSchema = jsonSchema<AgentOutput>({
+const DEFAULT_OUTPUT_SCHEMA = {
   type: "object",
   properties: {
     category: { type: "string" },
@@ -88,7 +92,8 @@ const outputSchema = jsonSchema<AgentOutput>({
   },
   required: ["category", "urgency"],
   additionalProperties: false,
-});
+} as const;
+const defaultOutputSchema = jsonSchema<AgentOutput>(DEFAULT_OUTPUT_SCHEMA);
 
 // Constructed lazily so importing this module doesn't require ENCRYPTION_KEY
 // until an agent actually runs.
@@ -213,7 +218,14 @@ export async function runAgent(
       model: buildModel(cfg.provider, model, apiKey),
       system: cfg.systemPrompt,
       prompt: JSON.stringify(input),
-      output: Output.object({ schema: outputSchema }),
+      output: Output.object({
+        // Per-node schema when configured (QA#9), else the default shape.
+        schema: cfg.outputSchema
+          ? jsonSchema<Record<string, unknown>>(
+              cfg.outputSchema as Parameters<typeof jsonSchema>[0],
+            )
+          : defaultOutputSchema,
+      }),
       maxOutputTokens: MAX_OUTPUT_TOKENS,
     });
 
@@ -260,7 +272,12 @@ export async function runAgent(
         .cachedInputTokens,
     });
 
-    return { status: "ok", output: result.output, model, costUsd };
+    return {
+      status: "ok",
+      output: result.output as Record<string, unknown>,
+      model,
+      costUsd,
+    };
   } catch (e) {
     // Our own deliberate failures (BUDGET, UNSUPPORTED_PROVIDER, …) are already
     // safe + correctly (non-)retryable — pass them through untouched.
@@ -299,11 +316,16 @@ export interface McpToolConfig {
   tool: string;
   /** Tool arguments, already resolved from upstream outputs by the interpreter. */
   arguments?: Record<string, unknown>;
+  /** Flat per-call cost (Arch§4.6) — MCP tools have no token cost, so spend is
+   *  operator-configured. Returned + accumulated so tool spend hits the budget. */
+  costUsd?: number;
 }
 
 export interface McpToolResult {
   status: "ok";
   content: unknown;
+  /** Metered cost of this tool call — the workflow accumulates it (Arch§4.6). */
+  costUsd: number;
 }
 
 /** Test seam: connection→target resolution + the MCP call, swappable in tests. */
@@ -344,7 +366,7 @@ export async function callMcpTool(
         { connectionId: cfg.connectionId, content: result.content },
       );
     }
-    return { status: "ok", content: result.content };
+    return { status: "ok", content: result.content, costUsd: cfg.costUsd ?? 0 };
   } catch (e) {
     // Our own deliberate failures (e.g. MCP_TOOL_ERROR) are already safe + correctly
     // non-retryable — pass them through untouched.

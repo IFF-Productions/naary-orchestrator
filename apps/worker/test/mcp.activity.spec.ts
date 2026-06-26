@@ -31,6 +31,7 @@ describe("callMcpTool activity", () => {
     expect(result).toEqual({
       status: "ok",
       content: [{ type: "text", text: "ISSUE-1 created" }],
+      costUsd: 0, // no per-call cost configured
     });
     expect(resolveMcpTarget).toHaveBeenCalledWith("t1", "conn-1");
     // the resolved server URL + auth header are passed to the MCP call

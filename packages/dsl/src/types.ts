@@ -36,6 +36,8 @@ export interface McpToolNodeConfig {
   arguments?: Record<string, unknown>;
   /** argName → upstream output binding; overrides a static key of the same name. */
   argumentBindings?: Record<string, ArgBinding>;
+  /** Flat per-call cost metered into the run budget (Slice #6 / Arch§4.6). */
+  costUsd?: number;
 }
 
 /**
