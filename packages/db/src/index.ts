@@ -25,3 +25,11 @@ export function getPrisma(): PrismaClient {
   }
   return client;
 }
+
+/** Close the pg pool on shutdown (Arch§4.9). Safe to call when never connected. */
+export async function disconnectPrisma(): Promise<void> {
+  if (client) {
+    await client.$disconnect();
+    client = undefined;
+  }
+}

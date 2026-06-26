@@ -276,6 +276,9 @@ const encodeState = (tenantId: string) =>
 const tenantFromState = (state: string) => state.split(".")[0] ?? "";
 const stateKey = (state: string) => `oauth-state:${state}`;
 
+/** Consent must complete within this window; a leaked state expires (Sec#3). */
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
 /** Begin consent: discover → DCR → PKCE → persist state → return the authorize URL. */
 export async function startConsent(opts: {
   tenantId: string;
@@ -309,6 +312,7 @@ export async function startConsent(opts: {
       resource: opts.serverUrl,
       redirectUri: opts.redirectUri,
       scopes: meta.scopesSupported,
+      expiresAt: Date.now() + OAUTH_STATE_TTL_MS,
     }),
   );
   return {
@@ -349,7 +353,14 @@ export async function completeConsent(opts: {
     resource: string;
     redirectUri: string;
     scopes?: string[];
+    expiresAt?: number;
   };
+  // Reject a leaked/abandoned state past its TTL, and consume it so it can't be
+  // replayed (Sec#3). Remove before any token exchange.
+  if (typeof s.expiresAt === "number" && s.expiresAt < Date.now()) {
+    await store.remove(tenantId, stateKey(opts.state));
+    throw new Error("OAuth state expired");
+  }
   if (opts.iss && s.issuer && opts.iss !== s.issuer) {
     throw new Error("Issuer mismatch (RFC 9207)");
   }

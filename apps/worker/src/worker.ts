@@ -1,6 +1,7 @@
 import "./env"; // MUST be first — loads .env before @naary/* modules evaluate
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { TASK_QUEUE } from "@naary/contracts";
+import { disconnectPrisma } from "@naary/db";
 import { createKeyEncryptor } from "@naary/secrets";
 import * as activities from "./temporal/activities";
 
@@ -29,6 +30,7 @@ async function run(): Promise<void> {
     await worker.run();
   } finally {
     await connection.close();
+    await disconnectPrisma(); // close the pg pool the activities opened (Arch§4.9)
   }
 }
 
