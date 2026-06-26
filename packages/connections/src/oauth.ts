@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { SecretStore } from "@naary/secrets";
 import { ConnectionService, connectionSecretKey } from "./connection.service";
+import { assertEgressAllowed } from "./egress";
 import { NeedsReauthError } from "./errors";
 
 const b64url = (b: Buffer) => b.toString("base64url");
@@ -175,7 +176,7 @@ export async function getOAuthAccessToken(
       tokens = await refreshGrant(cfg, connectionId, fetchFn);
     } catch (e) {
       if (e instanceof NeedsReauthError) {
-        await connections.setStatus(connectionId, "needs_reauth");
+        await connections.setStatus(tenantId, connectionId, "needs_reauth");
       }
       throw e;
     }
@@ -222,11 +223,17 @@ export async function discoverOAuthMetadata(
   serverUrl: string,
   fetchFn: FetchFn = fetch,
 ): Promise<DiscoveredMetadata> {
-  const origin = new URL(serverUrl).origin;
+  // SSRF guard: both the resource origin and the authorization-server origin it
+  // returns are fetched server-side, so both must pass the egress allowlist.
+  const origin = (await assertEgressAllowed(new URL(serverUrl).origin)).origin;
   const prm = (await (
     await fetchFn(`${origin}/.well-known/oauth-protected-resource`)
   ).json()) as { authorization_servers?: string[] };
-  const asOrigin = new URL(prm.authorization_servers?.[0] ?? origin).origin;
+  const asOrigin = (
+    await assertEgressAllowed(
+      new URL(prm.authorization_servers?.[0] ?? origin).origin,
+    )
+  ).origin;
   const asm = (await (
     await fetchFn(`${asOrigin}/.well-known/oauth-authorization-server`)
   ).json()) as Record<string, unknown>;
@@ -378,6 +385,6 @@ export async function completeConsent(opts: {
     JSON.stringify(cfg),
   );
   await store.remove(tenantId, stateKey(opts.state));
-  await connections.setStatus(s.connectionId, "connected");
+  await connections.setStatus(tenantId, s.connectionId, "connected");
   return { connectionId: s.connectionId };
 }

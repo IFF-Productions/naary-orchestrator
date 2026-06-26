@@ -72,15 +72,13 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
 
   it("persists a ROTATED refresh token before returning", async () => {
     const { store, put } = fakeStore(baseCfg);
-    const fetchFn = vi
-      .fn()
-      .mockResolvedValue(
-        okJson({
-          access_token: "AT2",
-          refresh_token: "RT-rotated",
-          expires_in: 3600,
-        }),
-      );
+    const fetchFn = vi.fn().mockResolvedValue(
+      okJson({
+        access_token: "AT2",
+        refresh_token: "RT-rotated",
+        expires_in: 3600,
+      }),
+    );
     await getOAuthAccessToken("t1", CONN, {
       store,
       fetchFn,
@@ -95,13 +93,11 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
   it("flips to needs_reauth and throws on invalid_grant (400)", async () => {
     const { store } = fakeStore(baseCfg);
     const setStatus = vi.fn(async () => {});
-    const fetchFn = vi
-      .fn()
-      .mockResolvedValue({
-        ok: false,
-        status: 400,
-        json: async () => ({}),
-      } as Response);
+    const fetchFn = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({}),
+    } as Response);
     await expect(
       getOAuthAccessToken("t1", CONN, {
         store,
@@ -109,7 +105,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
         connections: { setStatus } as never,
       }),
     ).rejects.toBeInstanceOf(NeedsReauthError);
-    expect(setStatus).toHaveBeenCalledWith(CONN, "needs_reauth");
+    expect(setStatus).toHaveBeenCalledWith("t1", CONN, "needs_reauth");
   });
 
   it("serves a fresh token from cache (no second refresh)", async () => {
