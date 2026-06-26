@@ -20,5 +20,33 @@ services:
       timeout: 5s
       retries: 10
 
+  # Keycloak — OIDC identity provider for human logins (dual-auth alongside API
+  # tokens). Dev mode with the `naary` realm imported on start; the realm carries a
+  # `tenant` user-attribute mapper so access tokens include the tenantId claim.
+  # The admin password (no default) comes from the repo-root .env. See .env.example.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: naary-keycloak
+    restart: unless-stopped
+    command: ['start-dev', '--import-realm']
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in .env (see .env.example)}
+      KC_HEALTH_ENABLED: 'true'
+    ports:
+      - '8080:8080'
+    volumes:
+      - ./infra/keycloak:/opt/keycloak/data/import:ro
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'exec 3<>/dev/tcp/localhost/9000 && echo -e "GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 && grep -q "200 OK" <&3',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
 volumes:
   naary-pgdata:
