@@ -23,7 +23,8 @@ const mockActivities = {
     cfg: activities.McpToolConfig,
   ): Promise<activities.McpToolResult> => {
     mcpConns.push(cfg.connectionId);
-    return { status: "ok", content: [] };
+    // echo the configured per-call cost, like the real activity (Arch§4.6)
+    return { status: "ok", content: [], costUsd: cfg.costUsd ?? 0 };
   },
 };
 
@@ -147,6 +148,39 @@ describe("interpreter — branching / parallel / loop (Slice #6)", () => {
       return (await h.result()).status;
     });
     expect(status).toBe("circuit_open");
+  });
+
+  it("meters MCP tool cost into the per-execution budget (Arch§4.6)", async () => {
+    // two tool nodes at $0.30 each; cap $0.25 → the first accrues 0.30, then the
+    // cap trips at the second node (tool spend is now visible to the per-exec cap,
+    // mirroring the agent node's "stop-after-exceeding" semantics).
+    const graph: GraphDef = {
+      startNodeId: "t1n",
+      nodes: [
+        {
+          id: "t1n",
+          type: "mcpTool",
+          config: { connectionId: "c1", tool: "x", costUsd: 0.3 },
+        },
+        {
+          id: "t2n",
+          type: "mcpTool",
+          config: { connectionId: "c2", tool: "x", costUsd: 0.3 },
+        },
+      ],
+      edges: [{ from: "t1n", to: "t2n" }],
+    };
+    const worker = await makeWorker();
+    const status = await worker.runUntil(async () => {
+      const h = await env.client.workflow.start(runGraph, {
+        args: [graph, {}, { tenantId: "t1", perExecutionCapUsd: 0.25 }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-mcp-meter",
+      });
+      return (await h.result()).status;
+    });
+    expect(status).toBe("budget_exceeded");
+    expect(mcpConns).toEqual(["c1"]); // second tool never ran (cap tripped first)
   });
 
   it("a dangling edge yields a terminal invalid_graph (not an infinite retry)", async () => {

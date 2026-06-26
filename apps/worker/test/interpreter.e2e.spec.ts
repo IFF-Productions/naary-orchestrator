@@ -36,7 +36,11 @@ const mockActivities = {
     _meta: activities.AgentMeta,
   ): Promise<activities.McpToolResult> => {
     mcpCalls.push(cfg);
-    return { status: "ok", content: [{ type: "text", text: "commented" }] };
+    return {
+      status: "ok",
+      content: [{ type: "text", text: "commented" }],
+      costUsd: 0,
+    };
   },
 };
 const mcpCalls: activities.McpToolConfig[] = [];

@@ -119,11 +119,12 @@ export async function runGraph(
         // Resolving tool args from upstream outputs is deterministic graph work,
         // so it happens HERE; the I/O (token fetch + HTTP) is inside the activity.
         const mcpCfg = node.config as unknown as McpToolNodeConfig;
-        ctx[node.id] = await callMcpTool(
+        const toolResult = await callMcpTool(
           {
             connectionId: mcpCfg.connectionId,
             tool: mcpCfg.tool,
             arguments: resolveMcpArguments(mcpCfg, ctx),
+            costUsd: mcpCfg.costUsd,
           },
           ctx.__input,
           {
@@ -132,6 +133,11 @@ export async function runGraph(
             nodeId: node.id,
           },
         );
+        ctx[node.id] = toolResult;
+        // Meter tool spend into the run budget so the per-execution cap sees it
+        // (Arch§4.6) — commutative accumulation, same as the agent node.
+        costUsd += toolResult.costUsd;
+        ctx.__costUsd = costUsd;
         return null;
       }
       case "humanApproval":
