@@ -24,6 +24,31 @@ import { APICallError, Output, generateText, jsonSchema } from "ai";
 
 const MAX_OUTPUT_TOKENS = 1024;
 
+/**
+ * Sanitize a transient error before it leaves the activity. A thrown error is
+ * serialized into Temporal history + worker logs; AI-SDK `APICallError` carries
+ * `requestBodyValues` / URL / request headers that can include the `Authorization`
+ * (provider key) header. We rethrow a fresh, RETRYABLE `ApplicationFailure` that
+ * keeps only a status code + generic message — dropping every secret-bearing field —
+ * so retryability is preserved (CLAUDE.md: don't burn retries; don't leak secrets).
+ */
+export function toSanitizedRetryable(
+  e: unknown,
+  type: string,
+): ApplicationFailure {
+  if (APICallError.isInstance(e)) {
+    return ApplicationFailure.retryable(
+      `Provider request failed (status ${e.statusCode ?? "unknown"})`,
+      type,
+      { statusCode: e.statusCode },
+    );
+  }
+  // Non-provider transient (network blip, timeout): its message is safe, but wrap it
+  // so any structured/secret-bearing fields on the original object are not serialized.
+  const message = e instanceof Error ? e.message : "Transient activity error";
+  return ApplicationFailure.retryable(message, type);
+}
+
 export interface AgentConfig {
   provider: string;
   model: string;
@@ -204,6 +229,9 @@ export async function runAgent(
 
     return { status: "ok", output: result.output, model, costUsd };
   } catch (e) {
+    // Our own deliberate failures (BUDGET, UNSUPPORTED_PROVIDER, …) are already
+    // safe + correctly (non-)retryable — pass them through untouched.
+    if (e instanceof ApplicationFailure) throw e;
     if (e instanceof MissingCredentialError) {
       throw ApplicationFailure.nonRetryable(
         "Missing or invalid provider credential",
@@ -226,9 +254,10 @@ export async function runAgent(
         );
       }
     }
-    // Genuine transient error: rethrow BARE (no logging — AI-SDK errors can
-    // carry request headers incl. the key) so Temporal's retry policy handles it.
-    throw e;
+    // Genuine transient error: rethrow a SANITIZED retryable failure (the raw
+    // AI-SDK error can carry the key in request headers) so Temporal retries
+    // without that material ever reaching durable history/logs.
+    throw toSanitizedRetryable(e, "AGENT_TRANSIENT");
   }
 }
 
@@ -284,6 +313,9 @@ export async function callMcpTool(
     }
     return { status: "ok", content: result.content };
   } catch (e) {
+    // Our own deliberate failures (e.g. MCP_TOOL_ERROR) are already safe + correctly
+    // non-retryable — pass them through untouched.
+    if (e instanceof ApplicationFailure) throw e;
     if (
       e instanceof MissingConnectionTokenError ||
       e instanceof NeedsReauthError
@@ -294,6 +326,8 @@ export async function callMcpTool(
         { connectionId: cfg.connectionId },
       );
     }
-    throw e; // transient — let Temporal retry
+    // Transient: sanitized retryable (an MCP transport error can carry the
+    // connection's bearer token in its request fields).
+    throw toSanitizedRetryable(e, "MCP_TRANSIENT");
   }
 }
