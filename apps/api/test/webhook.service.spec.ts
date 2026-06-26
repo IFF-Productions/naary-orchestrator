@@ -5,11 +5,15 @@ import { AesGcmKeyEncryptor } from "@naary/secrets";
 const m = vi.hoisted(() => ({
   create: vi.fn(),
   deliveryCreate: vi.fn(),
+  deliveryDeleteMany: vi.fn(),
 }));
 vi.mock("@naary/db", () => ({
   getPrisma: () => ({
     webhookEndpoint: { create: m.create },
-    webhookDelivery: { create: m.deliveryCreate },
+    webhookDelivery: {
+      create: m.deliveryCreate,
+      deleteMany: m.deliveryDeleteMany,
+    },
   }),
 }));
 
@@ -28,6 +32,7 @@ const sign = (body: Buffer, secret: string) =>
 beforeEach(() => {
   m.create.mockReset();
   m.deliveryCreate.mockReset();
+  m.deliveryDeleteMany.mockReset().mockResolvedValue({ count: 0 });
 });
 
 describe("WebhookService.createEndpoint", () => {
@@ -98,6 +103,25 @@ describe("WebhookService.isDuplicateDelivery", () => {
 
     m.deliveryCreate.mockRejectedValueOnce({ code: "P2002" });
     expect(await svc.isDuplicateDelivery("ep_1", "delivery-abc")).toBe(true);
+  });
+
+  it("prunes this endpoint's dedupe rows past the retention window on a new delivery (Sec#9)", async () => {
+    m.deliveryCreate.mockResolvedValueOnce({ id: "d3" });
+    await svc.isDuplicateDelivery("ep_1", "delivery-new");
+
+    expect(m.deliveryDeleteMany).toHaveBeenCalledOnce();
+    const { where } = m.deliveryDeleteMany.mock.calls[0][0];
+    expect(where.endpointId).toBe("ep_1");
+    expect(where.createdAt.lt).toBeInstanceOf(Date);
+    // cutoff is ~30 days ago
+    const ageMs = Date.now() - (where.createdAt.lt as Date).getTime();
+    expect(ageMs).toBeGreaterThan(29 * 24 * 60 * 60 * 1000);
+  });
+
+  it("does NOT prune on a duplicate (P2002 short-circuits before retention)", async () => {
+    m.deliveryCreate.mockRejectedValueOnce({ code: "P2002" });
+    expect(await svc.isDuplicateDelivery("ep_1", "dup")).toBe(true);
+    expect(m.deliveryDeleteMany).not.toHaveBeenCalled();
   });
 
   it("rethrows non-P2002 errors (does not swallow real failures)", async () => {
