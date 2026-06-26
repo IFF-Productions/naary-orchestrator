@@ -10,6 +10,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { getGraphForWorkflow } from "@naary/dsl";
+import { Public } from "../auth/public.decorator";
 import { ExecutionsService } from "../executions/executions.service";
 import { type WebhookProvider, WebhookService } from "./webhook.service";
 
@@ -29,6 +30,7 @@ export class HooksController {
    * Webhook ingress: verify signature over the RAW body → dedupe on delivery id →
    * start the workflow with the event as the trigger node's output.
    */
+  @Public() // authenticated by HMAC signature over the raw body, not a bearer token
   @Post(":endpointId")
   @HttpCode(202)
   async ingress(

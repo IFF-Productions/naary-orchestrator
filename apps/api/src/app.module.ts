@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AuthModule } from "./auth/auth.module";
 import { BudgetModule } from "./budget/budget.module";
 import { ConnectionsModule } from "./connections/connections.module";
 import { ExecutionsModule } from "./executions/executions.module";
@@ -8,6 +9,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
 
 @Module({
   imports: [
+    AuthModule,
     ExecutionsModule,
     SecretsModule,
     UsageModule,

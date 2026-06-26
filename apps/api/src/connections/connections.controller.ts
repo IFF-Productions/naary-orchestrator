@@ -7,11 +7,8 @@ import {
   Param,
   Post,
 } from "@nestjs/common";
-import {
-  ConnectionService,
-  type ConnectionView,
-  type CreateConnectionInput,
-} from "@naary/connections";
+import { ConnectionService, type ConnectionView } from "@naary/connections";
+import { CreateConnectionDto } from "./create-connection.dto";
 
 @Controller("tenants/:id/connections")
 export class ConnectionsController {
@@ -20,7 +17,7 @@ export class ConnectionsController {
   @Post()
   create(
     @Param("id") tenantId: string,
-    @Body() body: CreateConnectionInput,
+    @Body() body: CreateConnectionDto,
   ): Promise<ConnectionView> {
     return this.connections.create(tenantId, body);
   }

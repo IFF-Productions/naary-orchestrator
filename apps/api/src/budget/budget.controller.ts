@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Put } from "@nestjs/common";
-import type { SetBudgetInput, TenantBudgetConfig } from "@naary/usage";
+import type { TenantBudgetConfig } from "@naary/usage";
+import { SetBudgetDto } from "./set-budget.dto";
 import { BudgetService, type BudgetView } from "./budget.service";
 
 @Controller("tenants/:id/budget")
@@ -14,7 +15,7 @@ export class BudgetController {
   @Put()
   set(
     @Param("id") id: string,
-    @Body() body: SetBudgetInput,
+    @Body() body: SetBudgetDto,
   ): Promise<TenantBudgetConfig> {
     return this.budget.set(id, body);
   }

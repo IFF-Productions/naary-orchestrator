@@ -22,7 +22,9 @@
     "@temporalio/client": "^1.18.1",
     "dotenv": "^17.4.2",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "class-validator": "^0.14.2",
+    "class-transformer": "^0.5.1"
   },
   "devDependencies": {
     "@nestjs/testing": "^11.1.27"
