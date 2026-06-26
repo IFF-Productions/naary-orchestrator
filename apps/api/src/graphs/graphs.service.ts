@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
-import { canonicalize, type GraphDef } from "@naary/dsl";
+import { canonicalize, type GraphDef, validateGraph } from "@naary/dsl";
 
 /** sha256 of the canonical (key-sorted) graph. Server-side — keeps `node:crypto`
  *  out of the DSL (which is bundled into the deterministic workflow). */
@@ -29,6 +29,13 @@ export class GraphsService {
     name: string,
     graph: GraphDef,
   ): Promise<GraphSnapshot> {
+    // Reject a malformed graph BEFORE it can be persisted/started (QA#8): the
+    // interpreter also guards at runtime (terminal invalid_graph), but catching it
+    // here keeps bad graphs out of the DB entirely.
+    const check = validateGraph(graph);
+    if (!check.valid) {
+      throw new BadRequestException(`Invalid graph: ${check.error}`);
+    }
     const contentHash = hashGraph(graph);
     const latest = await this.latestRow(tenantId, workflowKey);
     if (latest && latest.contentHash === contentHash) {
@@ -49,7 +56,11 @@ export class GraphsService {
         version,
       },
     });
-    return { graph: row.graph as unknown as GraphDef, contentHash, version: row.version };
+    return {
+      graph: row.graph as unknown as GraphDef,
+      contentHash,
+      version: row.version,
+    };
   }
 
   async getLatest(
