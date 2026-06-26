@@ -6,6 +6,7 @@
     { "path": "./packages/db" },
     { "path": "./packages/secrets" },
     { "path": "./packages/usage" },
-    { "path": "./packages/connections" }
+    { "path": "./packages/connections" },
+    { "path": "./packages/storage" }
   ]
 }
