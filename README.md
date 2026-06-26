@@ -291,6 +291,17 @@ curl localhost:3000/executions/<id>
 
 Send `{"approved":false}` instead and the run resolves to `status:"rejected"`.
 
+### The canvas (visual authoring → run)
+
+The web app's **Workflow canvas** (`/app/canvas`) is a drag-and-drop editor
+(react-flow): add nodes from the palette, connect handles, edit per-node config.
+A live status mirrors the server's `validateGraph`. **Run** compiles the canvas to
+a `GraphDef`, `POST /graphs` saves it (versioned, content-hashed) under the
+`canvas` workflowKey, then `POST /executions {workflowKey:"canvas"}` starts it and
+navigates to the run view. It seeds a credential-free `start → approval → end`
+graph, so a first Run completes (pauses at approval → Approve → done) without a
+BYOK LLM key. The compile logic is pure + unit-tested (`compile-graph.ts`).
+
 ## Authentication — API tokens + Keycloak OIDC (dual auth)
 
 Every non-`@Public()` route requires `Authorization: Bearer <token>`. The global

@@ -13,7 +13,7 @@ export class ExecutionsController {
     @TenantId() tenantId: string,
     @Body() body: StartExecutionDto,
   ): Promise<{ workflowId: string }> {
-    return this.executions.start(tenantId, body.input);
+    return this.executions.start(tenantId, body.input, body.workflowKey);
   }
 
   @Post(":id/approve")

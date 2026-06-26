@@ -55,18 +55,17 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Manual start. `tenantId` comes from the authenticated principal (not the body);
-   *  the graph is the tenant's current "default" version (must be seeded). */
+   *  runs the tenant's latest graph for `workflowKey` (default "default"; the canvas
+   *  saves + runs "canvas"). The chosen graph must already be saved. */
   async start(
     tenantId: string,
     input?: Record<string, unknown>,
+    workflowKey: string = DEFAULT_WORKFLOW_KEY,
   ): Promise<{ workflowId: string }> {
-    const snapshot = await this.graphs.getLatest(
-      tenantId,
-      DEFAULT_WORKFLOW_KEY,
-    );
+    const snapshot = await this.graphs.getLatest(tenantId, workflowKey);
     if (!snapshot) {
       throw new NotFoundException(
-        `No '${DEFAULT_WORKFLOW_KEY}' graph for this tenant — seed one first`,
+        `No '${workflowKey}' graph for this tenant — save one first`,
       );
     }
     return this.startGraph(
