@@ -20,6 +20,8 @@ import {
   getBudget,
   monthToDateSpend,
   recordUsage,
+  releaseReservation,
+  reserveBudget,
 } from "@naary/usage";
 import { APICallError, Output, generateText, jsonSchema } from "ai";
 
@@ -124,6 +126,8 @@ export const __agentDeps = {
   recordUsage,
   getBudget,
   monthToDateSpend,
+  reserveBudget,
+  releaseReservation,
 };
 
 /** Crude char/4 token estimate — only used when the provider omits usage. */
@@ -150,45 +154,44 @@ export async function runAgent(
   input: unknown,
   meta: AgentMeta,
 ): Promise<AgentResult> {
+  // Released in `finally` (Arch§4.3) — whether the call succeeds or throws — so a
+  // failed/retried activity never leaves a dangling reservation.
+  let reservationId: string | undefined;
   try {
     // In memory only — never returned from the activity, never logged.
     const apiKey = await __agentDeps
       .getCredentials()
       .getDecryptedKey(meta.tenantId, cfg.provider);
 
-    // Pre-flight budget check (I/O — reads the ledger). If month-to-date spend
-    // plus this call's estimate would breach the monthly cap, apply the policy:
-    // reject (non-retryable) or downgrade to a cheaper model. No budget set ⇒ no cap.
+    // Pre-flight budget enforcement via an atomic RESERVATION (Arch§4.3): reserve
+    // this call's estimated cost against the monthly cap BEFORE the LLM call, so
+    // concurrent runs for one tenant can't all overshoot. The reservation counts
+    // committed spend + other in-flight reservations. No budget set ⇒ no cap.
     let model = cfg.model;
     const budget = await __agentDeps.getBudget(meta.tenantId);
     if (budget) {
-      const mtd = await __agentDeps.monthToDateSpend(meta.tenantId);
-      const estimate = estimateCallCost(
-        {
-          provider: cfg.provider,
-          model,
-          systemPrompt: cfg.systemPrompt,
-          maxOutputTokens: MAX_OUTPUT_TOKENS,
-        },
-        input,
+      const estimateFor = (m: string) =>
+        estimateCallCost(
+          {
+            provider: cfg.provider,
+            model: m,
+            systemPrompt: cfg.systemPrompt,
+            maxOutputTokens: MAX_OUTPUT_TOKENS,
+          },
+          input,
+        );
+      let res = await __agentDeps.reserveBudget(
+        meta.tenantId,
+        estimateFor(model),
+        budget.monthlyCapUsd,
       );
-      if (mtd + estimate > budget.monthlyCapUsd) {
+      if (!res.ok) {
         if (budget.onBudgetExceeded === "downgrade" && budget.fallbackModel) {
-          // Re-validate the cheaper model (QA#6): it must be priced, and a fresh
-          // estimate with IT must actually fit the cap — otherwise a downgrade can
-          // still blow the budget (or, if the fallback is unpriced, spend money and
-          // then throw at billing time).
+          // Re-validate the cheaper model (QA#6): it must be priced AND its own
+          // reservation must fit the cap — else reject.
           let fallbackEstimate: number;
           try {
-            fallbackEstimate = estimateCallCost(
-              {
-                provider: cfg.provider,
-                model: budget.fallbackModel,
-                systemPrompt: cfg.systemPrompt,
-                maxOutputTokens: MAX_OUTPUT_TOKENS,
-              },
-              input,
-            );
+            fallbackEstimate = estimateFor(budget.fallbackModel);
           } catch {
             throw ApplicationFailure.nonRetryable(
               "Configured fallback model has no pricing",
@@ -196,7 +199,12 @@ export async function runAgent(
               { tenantId: meta.tenantId },
             );
           }
-          if (mtd + fallbackEstimate > budget.monthlyCapUsd) {
+          res = await __agentDeps.reserveBudget(
+            meta.tenantId,
+            fallbackEstimate,
+            budget.monthlyCapUsd,
+          );
+          if (!res.ok) {
             throw ApplicationFailure.nonRetryable(
               "Monthly budget exceeded (even after downgrade)",
               "BUDGET",
@@ -212,6 +220,7 @@ export async function runAgent(
           );
         }
       }
+      reservationId = res.id;
     }
 
     const result = await generateText({
@@ -308,6 +317,15 @@ export async function runAgent(
     // AI-SDK error can carry the key in request headers) so Temporal retries
     // without that material ever reaching durable history/logs.
     throw toSanitizedRetryable(e, "AGENT_TRANSIENT");
+  } finally {
+    // Reconcile: the actual cost is now a UsageEvent (on success) or the call
+    // failed — either way the estimate reservation is no longer needed. Best-
+    // effort; a missed release is reaped by the reservation TTL.
+    if (reservationId !== undefined) {
+      await __agentDeps
+        .releaseReservation(reservationId)
+        .catch(() => undefined);
+    }
   }
 }
 

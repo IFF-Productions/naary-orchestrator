@@ -132,3 +132,16 @@ model UsageEvent {
   @@index([tenantId, createdAt])
   @@index([executionId])
 }
+
+// In-flight cost reservations (Arch§4.3). A run reserves its estimated cost
+// BEFORE the LLM call and releases it after recording the actual UsageEvent, so
+// concurrent runs for one tenant can't all overshoot the monthly cap. Dangling
+// reservations (crash mid-call) stop counting after a short TTL.
+model UsageReservation {
+  id               String   @id @default(uuid())
+  tenantId         String
+  estimatedCostUsd Decimal  @db.Decimal(12, 6)
+  createdAt        DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+}

@@ -113,9 +113,12 @@ config, recorded in history → identical on replay).
   per-execution cap is snapshotted at start (workflow args); the monthly cap is read
   **live** inside the activity (pre-flight). A mid-run budget change affects the next
   call's pre-flight but not this run's per-execution cap.
-- **Eventual consistency / no reservation:** pre-flight reads month-to-date spend with
-  no locking, so **concurrent runs for one tenant can briefly overshoot** the monthly
-  cap. Acceptable for this slice; atomic reservation is a fast-follow (PLAN-SLICE-3 §8).
+- **Monthly cap uses atomic reservations** (Arch§4.3): before the LLM call a run
+  *reserves* its estimated cost in a transaction that counts committed spend + other
+  in-flight reservations, and releases it after recording the actual usage. Concurrent
+  runs for one tenant therefore see each other's reservations, so overshoot is bounded
+  to the small read-commit race window rather than unbounded. Dangling reservations
+  (a crash mid-call) stop counting after a 5-minute TTL.
 - **Pre-flight is an estimate** (char/4 input + assumed max output); the recorded
   `UsageEvent` is the **actual** cost.
 
