@@ -53,7 +53,7 @@ export class HooksController {
         provider,
         rawBody,
         signature,
-        endpoint.signingSecret,
+        this.webhooks.decryptSigningSecret(endpoint), // decrypt at-rest secret
       )
     ) {
       throw new UnauthorizedException("Invalid signature");

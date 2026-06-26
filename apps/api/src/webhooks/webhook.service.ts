@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { getPrisma, type WebhookEndpoint } from "@naary/db";
+import { type KeyEncryptor, createKeyEncryptor } from "@naary/secrets";
 
 export type WebhookProvider = "github" | "atlassian" | "generic";
 
@@ -21,9 +22,20 @@ export interface RegisteredWebhook {
 
 @Injectable()
 export class WebhookService {
+  // Lazily built so constructing the service doesn't require ENCRYPTION_KEY until
+  // a secret is actually encrypted/decrypted (keeps pure verify tests hermetic).
+  private _encryptor?: KeyEncryptor;
+  constructor(encryptor?: KeyEncryptor) {
+    this._encryptor = encryptor;
+  }
+  private get encryptor(): KeyEncryptor {
+    return (this._encryptor ??= createKeyEncryptor());
+  }
+
   /**
    * Register a webhook trigger: mint a signing secret + stable ingress path.
-   * The secret is a plain column (plan §4) used for HMAC verification — never logged.
+   * The secret is the HMAC key; it is stored ENCRYPTED at rest (Sec#8) and
+   * returned in plaintext exactly once so the user can configure the provider.
    */
   async createEndpoint(
     tenantId: string,
@@ -32,13 +44,24 @@ export class WebhookService {
   ): Promise<RegisteredWebhook> {
     const signingSecret = randomBytes(32).toString("hex");
     const row = await getPrisma().webhookEndpoint.create({
-      data: { tenantId, workflowId, provider, signingSecret },
+      data: {
+        tenantId,
+        workflowId,
+        provider,
+        // store the encrypted payload as a JSON blob in the existing column
+        signingSecret: JSON.stringify(this.encryptor.encrypt(signingSecret)),
+      },
     });
     return {
       endpointId: row.id,
       ingressPath: `/hooks/${row.id}`,
       signingSecret,
     };
+  }
+
+  /** Decrypt an endpoint's stored signing secret (in memory only; never logged). */
+  decryptSigningSecret(endpoint: WebhookEndpoint): string {
+    return this.encryptor.decrypt(JSON.parse(endpoint.signingSecret));
   }
 
   getEndpoint(endpointId: string): Promise<WebhookEndpoint | null> {

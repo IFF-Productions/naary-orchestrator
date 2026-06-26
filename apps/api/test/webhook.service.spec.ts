@@ -1,5 +1,6 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AesGcmKeyEncryptor } from "@naary/secrets";
 
 const m = vi.hoisted(() => ({
   create: vi.fn(),
@@ -14,7 +15,11 @@ vi.mock("@naary/db", () => ({
 
 import { WebhookService } from "../src/webhooks/webhook.service";
 
-const svc = new WebhookService();
+// Inject a real encryptor (random key) so createEndpoint can encrypt the secret
+// at rest without depending on a process ENCRYPTION_KEY.
+const svc = new WebhookService(
+  new AesGcmKeyEncryptor(randomBytes(32).toString("hex")),
+);
 const SECRET = "top-secret-hmac-key";
 const RAW = Buffer.from('{"action":"opened","number":42}');
 const sign = (body: Buffer, secret: string) =>
@@ -32,6 +37,19 @@ describe("WebhookService.createEndpoint", () => {
     expect(reg.endpointId).toBe("ep_1");
     expect(reg.ingressPath).toBe("/hooks/ep_1");
     expect(reg.signingSecret).toMatch(/^[0-9a-f]{64}$/); // 32 random bytes hex
+  });
+
+  it("stores the signing secret ENCRYPTED at rest and round-trips it (Sec#8)", async () => {
+    m.create.mockResolvedValue({ id: "ep_2" });
+    const reg = await svc.createEndpoint("t1", "wf-1", "github");
+    const stored = m.create.mock.calls[0][0].data.signingSecret as string;
+    // the persisted column is ciphertext, not the plaintext key
+    expect(stored).not.toContain(reg.signingSecret);
+    expect(JSON.parse(stored)).toHaveProperty("ciphertext");
+    // and it decrypts back for HMAC verification
+    expect(svc.decryptSigningSecret({ signingSecret: stored } as never)).toBe(
+      reg.signingSecret,
+    );
   });
 });
 
