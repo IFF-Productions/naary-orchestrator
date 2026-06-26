@@ -25,6 +25,8 @@ const recordUsage = vi.fn();
 let getKey: () => Promise<string>;
 let getBudget: () => Promise<unknown>;
 let mtdSpend = 0;
+const reserveBudget = vi.fn();
+const releaseReservation = vi.fn();
 
 beforeEach(() => {
   generateText.mockReset();
@@ -32,11 +34,16 @@ beforeEach(() => {
   getKey = () => Promise.resolve(SEED_KEY);
   getBudget = () => Promise.resolve(null); // no budget ⇒ no enforcement by default
   mtdSpend = 0;
+  // default: reservation succeeds (each budget test overrides as needed)
+  reserveBudget.mockReset().mockResolvedValue({ ok: true, id: "res_1" });
+  releaseReservation.mockReset().mockResolvedValue(undefined);
   __agentDeps.getCredentials = () =>
     ({ getDecryptedKey: () => getKey() }) as never;
   __agentDeps.recordUsage = recordUsage as never;
   __agentDeps.getBudget = (() => getBudget()) as never;
   __agentDeps.monthToDateSpend = (() => Promise.resolve(mtdSpend)) as never;
+  __agentDeps.reserveBudget = reserveBudget as never;
+  __agentDeps.releaseReservation = releaseReservation as never;
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -114,6 +121,7 @@ describe("runAgent", () => {
         onBudgetExceeded: "reject",
         fallbackModel: null,
       });
+    reserveBudget.mockResolvedValue({ ok: false }); // cap would be exceeded
 
     await expect(runAgent(CFG, { msg: "x" }, META)).rejects.toMatchObject({
       nonRetryable: true,
@@ -135,6 +143,10 @@ describe("runAgent", () => {
         onBudgetExceeded: "downgrade",
         fallbackModel: "claude-haiku-4-5",
       });
+    // primary reservation fails, fallback reservation succeeds
+    reserveBudget
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValueOnce({ ok: true, id: "res_fb" });
     generateText.mockResolvedValue({
       output: { category: "support", urgency: 2 },
       text: '{"category":"support","urgency":2}',
@@ -146,6 +158,8 @@ describe("runAgent", () => {
     expect(result.model).toBe("claude-haiku-4-5");
     expect(generateText).toHaveBeenCalledOnce();
     expect(recordUsage.mock.calls[0][0].model).toBe("claude-haiku-4-5");
+    // the fallback reservation is released after recording the actual usage
+    expect(releaseReservation).toHaveBeenCalledWith("res_fb");
   });
 
   it("pre-flight: rejects when even the fallback exceeds the cap (QA#6, no charge)", async () => {
@@ -158,6 +172,7 @@ describe("runAgent", () => {
         onBudgetExceeded: "downgrade",
         fallbackModel: "claude-haiku-4-5",
       });
+    reserveBudget.mockResolvedValue({ ok: false }); // both primary + fallback over
     await expect(runAgent(CFG, { msg: "x" }, META)).rejects.toMatchObject({
       nonRetryable: true,
       type: "BUDGET",
@@ -176,6 +191,7 @@ describe("runAgent", () => {
         onBudgetExceeded: "downgrade",
         fallbackModel: "made-up-model",
       });
+    reserveBudget.mockResolvedValue({ ok: false }); // primary over → tries fallback
     await expect(runAgent(CFG, { msg: "x" }, META)).rejects.toMatchObject({
       nonRetryable: true,
       type: "FALLBACK_UNPRICED",
