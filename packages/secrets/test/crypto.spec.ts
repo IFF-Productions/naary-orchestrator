@@ -47,4 +47,24 @@ describe("AesGcmKeyEncryptor", () => {
   it("rejects a master key that is not 32 bytes", () => {
     expect(() => new AesGcmKeyEncryptor("abcd")).toThrow(/32 bytes/);
   });
+
+  it("AAD binds ciphertext to its context (Sec#7): same aad round-trips, wrong aad throws", () => {
+    const enc = new AesGcmKeyEncryptor(masterKey);
+    const payload = enc.encrypt(SAMPLE_PLAINTEXT, "t1:anthropic");
+    expect(payload.keyVersion).toBe(2); // current AAD-bound format
+    expect(enc.decrypt(payload, "t1:anthropic")).toBe(SAMPLE_PLAINTEXT);
+    // a row swapped into another tenant's slot fails to decrypt
+    expect(() => enc.decrypt(payload, "t2:anthropic")).toThrow();
+    // and dropping the aad on a v2 payload also fails
+    expect(() => enc.decrypt(payload)).toThrow();
+  });
+
+  it("legacy (v1, no-AAD) payloads still decrypt without an aad — backward compatible", () => {
+    const enc = new AesGcmKeyEncryptor(masterKey);
+    const legacy = enc.encrypt(SAMPLE_PLAINTEXT); // no aad → keyVersion 1
+    expect(legacy.keyVersion).toBe(1);
+    expect(enc.decrypt(legacy)).toBe(SAMPLE_PLAINTEXT);
+    // passing an aad to a v1 payload is ignored (still decrypts)
+    expect(enc.decrypt(legacy, "t1:anthropic")).toBe(SAMPLE_PLAINTEXT);
+  });
 });
