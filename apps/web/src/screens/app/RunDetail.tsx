@@ -5,6 +5,7 @@ import type { RunState } from "../../components";
 import {
   api,
   statusToRunState,
+  UnauthorizedError,
   type ExecutionState,
   type ExecutionStatus,
 } from "../../lib/api";
@@ -58,8 +59,12 @@ function LiveRun({ id }: { id: string }) {
     try {
       setState(await api.getState(id));
       setError(null);
-    } catch {
-      setError("Could not reach the control plane (apps/api on :3000).");
+    } catch (e) {
+      setError(
+        e instanceof UnauthorizedError
+          ? "Not authenticated — set your API token on the sign-in screen."
+          : "Could not reach the control plane (apps/api on :3000).",
+      );
     }
   }, [id]);
 

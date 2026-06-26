@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Field, Icon, Logo, TextInput } from "../components";
+import { setToken } from "../lib/auth";
 
 type Mode = "login" | "signup";
 
@@ -40,7 +41,16 @@ export function AuthPage() {
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>("login");
   const [showPassword, setShowPassword] = useState(false);
+  const [apiToken, setApiToken] = useState("");
   const copy = COPY[mode];
+
+  // Prototype auth: store the pasted API token (if any) so live Runs calls carry
+  // the bearer header, then enter the app. A real login that issues the token is
+  // a later product step.
+  function enter(): void {
+    if (apiToken.trim()) setToken(apiToken);
+    navigate("/app");
+  }
 
   return (
     <div
@@ -348,13 +358,26 @@ export function AuthPage() {
             </Field>
           </div>
 
+          {/* API token — optional; enables live control-plane calls */}
+          <div style={{ marginTop: 13 }}>
+            <Field label="API token (optional — enables live runs)">
+              <TextInput
+                placeholder="nry_…  (paste a minted token)"
+                value={apiToken}
+                onChange={(e) => setApiToken(e.target.value)}
+                spellCheck={false}
+                autoComplete="off"
+              />
+            </Field>
+          </div>
+
           {/* submit */}
           <div style={{ marginTop: 22 }}>
             <Button
               variant="primary"
               block
               iconRight="arrow-right"
-              onClick={() => navigate("/app")}
+              onClick={enter}
             >
               {copy.cta}
             </Button>

@@ -4,9 +4,18 @@
  * live state. In dev, Vite proxies /api → http://localhost:3000 (see
  * vite.config.ts), so the browser avoids CORS.
  *
- * tenantId is NOT a secret (CLAUDE.md): it rides in the request body, and the
- * agent activity fetches the provider key by tenantId server-side.
+ * Auth: every call carries the per-tenant API token as a bearer header; the
+ * server resolves tenantId from the token, so the client never sends it.
  */
+import { getToken } from "./auth";
+
+/** Thrown on a 401 so screens can prompt the user to set their API token. */
+export class UnauthorizedError extends Error {
+  constructor() {
+    super("Not authenticated — set your API token on the sign-in screen.");
+    this.name = "UnauthorizedError";
+  }
+}
 export type ExecutionStatus =
   | "running"
   | "awaiting_approval"
@@ -24,10 +33,16 @@ export interface ExecutionState {
 const BASE = "/api";
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getToken();
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "content-type": "application/json" },
     ...init,
+    headers: {
+      "content-type": "application/json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...init?.headers,
+    },
   });
+  if (res.status === 401) throw new UnauthorizedError();
   if (!res.ok) {
     throw new Error(`${init?.method ?? "GET"} ${path} → ${res.status}`);
   }
@@ -35,11 +50,9 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  startExecution(tenantId: string): Promise<{ workflowId: string }> {
-    return http("/executions", {
-      method: "POST",
-      body: JSON.stringify({ tenantId }),
-    });
+  // tenantId is resolved from the token server-side — the body carries only input.
+  startExecution(): Promise<{ workflowId: string }> {
+    return http("/executions", { method: "POST", body: JSON.stringify({}) });
   },
   approve(id: string, approved: boolean): Promise<{ accepted: true }> {
     return http(`/executions/${encodeURIComponent(id)}/approve`, {
