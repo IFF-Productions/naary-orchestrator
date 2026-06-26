@@ -48,8 +48,11 @@ export class WebhookService {
         tenantId,
         workflowId,
         provider,
-        // store the encrypted payload as a JSON blob in the existing column
-        signingSecret: JSON.stringify(this.encryptor.encrypt(signingSecret)),
+        // store the encrypted payload as a JSON blob in the existing column;
+        // AAD-bound to the tenant (Sec#7)
+        signingSecret: JSON.stringify(
+          this.encryptor.encrypt(signingSecret, tenantId),
+        ),
       },
     });
     return {
@@ -61,7 +64,10 @@ export class WebhookService {
 
   /** Decrypt an endpoint's stored signing secret (in memory only; never logged). */
   decryptSigningSecret(endpoint: WebhookEndpoint): string {
-    return this.encryptor.decrypt(JSON.parse(endpoint.signingSecret));
+    return this.encryptor.decrypt(
+      JSON.parse(endpoint.signingSecret),
+      endpoint.tenantId,
+    );
   }
 
   getEndpoint(endpointId: string): Promise<WebhookEndpoint | null> {

@@ -105,6 +105,7 @@ model TenantCredential {
   ciphertext      String // base64 AES-256-GCM ciphertext
   iv              String // base64 nonce
   authTag         String // base64 GCM auth tag
+  keyVersion      Int       @default(1) // at-rest format: 1 = legacy (no AAD), 2 = AAD-bound (Sec#7)
   isValid         Boolean   @default(false)
   lastValidatedAt DateTime?
   createdAt       DateTime  @default(now())

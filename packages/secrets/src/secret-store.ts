@@ -15,8 +15,14 @@ export class SecretStore {
     this.encryptor = encryptor ?? createKeyEncryptor();
   }
 
+  /** AAD binds the ciphertext to its (tenant, key) slot (Sec#7) — a swapped row
+   *  fails to decrypt. */
+  private aad(tenantId: string, key: string): string {
+    return `${tenantId}:${key}`;
+  }
+
   async put(tenantId: string, key: string, plaintext: string): Promise<void> {
-    const enc = this.encryptor.encrypt(plaintext);
+    const enc = this.encryptor.encrypt(plaintext, this.aad(tenantId, key));
     await getPrisma().tenantCredential.upsert({
       where: { tenantId_provider: { tenantId, provider: key } },
       create: {
@@ -25,6 +31,7 @@ export class SecretStore {
         ciphertext: enc.ciphertext,
         iv: enc.iv,
         authTag: enc.authTag,
+        keyVersion: enc.keyVersion ?? 1,
         isValid: true,
         lastValidatedAt: new Date(),
       },
@@ -32,6 +39,7 @@ export class SecretStore {
         ciphertext: enc.ciphertext,
         iv: enc.iv,
         authTag: enc.authTag,
+        keyVersion: enc.keyVersion ?? 1,
         isValid: true,
         lastValidatedAt: new Date(),
       },
@@ -43,11 +51,15 @@ export class SecretStore {
       where: { tenantId_provider: { tenantId, provider: key } },
     });
     if (!row) return null;
-    return this.encryptor.decrypt({
-      ciphertext: row.ciphertext,
-      iv: row.iv,
-      authTag: row.authTag,
-    });
+    return this.encryptor.decrypt(
+      {
+        ciphertext: row.ciphertext,
+        iv: row.iv,
+        authTag: row.authTag,
+        keyVersion: row.keyVersion,
+      },
+      this.aad(tenantId, key),
+    );
   }
 
   async remove(tenantId: string, key: string): Promise<void> {

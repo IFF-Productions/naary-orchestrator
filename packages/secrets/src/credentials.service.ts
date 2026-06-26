@@ -54,7 +54,8 @@ export class CredentialsService {
     apiKey: string,
   ): Promise<SaveCredentialResult> {
     const isValid = await this.validate(provider, apiKey);
-    const enc = this.encryptor.encrypt(apiKey);
+    // AAD binds the ciphertext to this tenant+provider slot (Sec#7).
+    const enc = this.encryptor.encrypt(apiKey, `${tenantId}:${provider}`);
 
     const row = await getPrisma().tenantCredential.upsert({
       where: { tenantId_provider: { tenantId, provider } },
@@ -64,6 +65,7 @@ export class CredentialsService {
         ciphertext: enc.ciphertext,
         iv: enc.iv,
         authTag: enc.authTag,
+        keyVersion: enc.keyVersion ?? 1,
         isValid,
         lastValidatedAt: new Date(),
       },
@@ -71,6 +73,7 @@ export class CredentialsService {
         ciphertext: enc.ciphertext,
         iv: enc.iv,
         authTag: enc.authTag,
+        keyVersion: enc.keyVersion ?? 1,
         isValid,
         lastValidatedAt: new Date(),
       },
@@ -87,10 +90,14 @@ export class CredentialsService {
     if (!row || !row.isValid) {
       throw new MissingCredentialError(tenantId, provider);
     }
-    return this.encryptor.decrypt({
-      ciphertext: row.ciphertext,
-      iv: row.iv,
-      authTag: row.authTag,
-    });
+    return this.encryptor.decrypt(
+      {
+        ciphertext: row.ciphertext,
+        iv: row.iv,
+        authTag: row.authTag,
+        keyVersion: row.keyVersion,
+      },
+      `${tenantId}:${provider}`,
+    );
   }
 }

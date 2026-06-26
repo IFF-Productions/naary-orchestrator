@@ -46,10 +46,20 @@ describe("WebhookService.createEndpoint", () => {
     // the persisted column is ciphertext, not the plaintext key
     expect(stored).not.toContain(reg.signingSecret);
     expect(JSON.parse(stored)).toHaveProperty("ciphertext");
-    // and it decrypts back for HMAC verification
-    expect(svc.decryptSigningSecret({ signingSecret: stored } as never)).toBe(
-      reg.signingSecret,
-    );
+    // and it decrypts back for HMAC verification (AAD bound to the tenant, Sec#7)
+    expect(
+      svc.decryptSigningSecret({
+        signingSecret: stored,
+        tenantId: "t1",
+      } as never),
+    ).toBe(reg.signingSecret);
+    // a wrong-tenant AAD must fail to decrypt (row-swap detection)
+    expect(() =>
+      svc.decryptSigningSecret({
+        signingSecret: stored,
+        tenantId: "t2",
+      } as never),
+    ).toThrow();
   });
 });
 
