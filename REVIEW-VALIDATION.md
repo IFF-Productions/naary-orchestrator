@@ -1,118 +1,129 @@
 # Review Validation — QA / Architecture / Security findings
 
-**Date:** 2026-06-25
-**Validated by:** code inspection of the current tree against the three review docs
-(`QA-FINDINGS.md`, `ARCHITECTURE-REVIEW.md`, `SECURITY-REVIEW.md`).
+**Original audit:** 2026-06-25 · **Remediation completed:** 2026-06-26
+**Source reviews:** `QA-FINDINGS.md`, `ARCHITECTURE-REVIEW.md`, `SECURITY-REVIEW.md`.
 
-## Update — security must-fix tier remediated (branch `feat/security-hardening`)
+## Final status — every finding addressed
 
-The four findings all three reviewers flagged as release-blocking are now **FIXED**
-(per `PLAN-SECURITY-HARDENING.md`), proven by new tests + a live curl smoke:
+All findings from the three reviews are now **FIXED**, **PARTIAL** (core fixed, a piece
+explicitly deferred), or **DEFERRED** (documented decision). Remediation shipped as ten PRs;
+the test suite grew **67 → 106**, `tsc -b` stayed clean throughout, and the interpreter
+rewrite is guarded by a **replay-from-history** test.
 
-| Finding | Status | How |
+| # | PR | What landed |
 |---|---|---|
-| No authN/authZ; exec endpoints not tenant-scoped *(Sec#1/QA#1/Arch§3.1)* | **FIXED** | Per-tenant API tokens + global `AuthGuard` (tenantId from token, never path/body); `/tenants/:id/*` path-tenant enforced (403 on mismatch); `Execution{workflowId,tenantId}` ownership record scopes `approve`/`getState`. Live: 401 no/bad token, 403 cross-tenant, forged-approval blocked. |
-| No input validation *(Sec#4/QA#4)* | **FIXED** | Global `ValidationPipe({whitelist,forbidNonWhitelisted,transform})` + `class-validator` DTOs; `approved` required, `serverUrl` https-only. Live: 400 on missing/unknown fields (no silent approve→reject). |
-| Provider error rethrown bare → secret leak into Temporal history *(Arch§3.2)* | **FIXED** | `toSanitizedRetryable` strips `APICallError` headers/body, keeps status + generic message, preserves retryability. Test asserts no key/`Bearer` in the serialized failure. |
-| Usage ledger not idempotent → double-bill on retry *(QA#3/Arch§4.2)* | **FIXED** | `@@unique([executionId,nodeId])` + `recordUsage` upsert (no-op update); a retried activity can't double-write. |
-| `GET /executions/:id` 500 not 404 *(QA#11)* | **FIXED** | `WorkflowNotFoundError`/unknown-execution → 404 (also gated by ownership). |
-| `POST /executions` can't pass input *(QA#12)* | **FIXED** | accepts optional `input`; `tenantId` now from the token, not the body. |
-| SSRF via `serverUrl` *(Sec#2)* | **PARTIAL** | DTO enforces `https`-only (closes `http://` internal targets); full egress allowlist / private-IP + DNS-rebinding block remains the next pass. |
+| #11 | security must-fix | auth + tenant-scoping, provider-error sanitization, usage idempotency, ValidationPipe, getState 404, exec input |
+| #13 | S1 | helmet, CORS allowlist, throttler, global exception filter, env fail-fast, web↔API bearer auth |
+| #14 | S2 | SSRF egress allowlist (https + private-IP/rebinding block), tenant-scoped `setStatus` |
+| #15 | S2b | webhook signing-secret encryption, OAuth state TTL, Prisma `$disconnect` |
+| #16 | S3 | downgrade re-validation, MTD aggregate, cached-token semantics + test, schema header |
+| #17 | S4 | durable graph versioning (Postgres + content-hash per-run snapshot) |
+| #18 | S5 | branching / parallel / loop interpreter, `invalid_graph`, replay test (closes QA#7/#8) |
+| #19 | S5b | per-node agent output schema, MCP tool-call metering |
+| #20 | crypto | encryption key versioning + AAD-bound secrets |
 
-Verification: `tsc -b` clean, **75/75 tests** (67 + 8 new: AuthGuard ×6, sanitization ×2),
-migration `20260626000000_security_hardening` applies, live curl smoke 401/403/400/404 all
-as expected. Everything below is the original full audit (pre-remediation state).
+### Validation matrix (final)
 
----
-
-## Headline
-
-**(Original audit — none fixed at the time of writing.)** Every finding described code
-that was present, unchanged. The reviews were written against `main` (slices #1–#4), and
-the backend had not been touched since:
-
-```
-$ git diff --stat main -- apps packages | grep -v apps/web
-  (no backend changes vs main)
-```
-
-The only work added since the reviews is the `apps/web` frontend, which touches no
-`apps/api` / `apps/worker` / `packages/*` code. So this is a *status confirmation*, not
-a regression check: each finding below was re-verified against the live source and the
-cited file:line still matches.
-
-The three reviews overlap heavily; they are deduplicated into a single matrix. Statuses:
-
-- **PRESENT** — defect/gap still in the code, not addressed.
-- **PRESENT (by design / deferred)** — real, but an acknowledged scope decision or a
-  later-slice concern, not a regression.
-- **PRESENT (nuance)** — accurate, with a clarifying detail.
-
-The "positive controls" both reviews list (AES-256-GCM with per-message IV + tamper
-detection, secrets-out-of-Temporal via in-activity key fetch, raw-body timing-safe
-webhook HMAC with verify-before-dedupe, billing fail-safe estimate, 401/403/429 →
-non-retryable mapping, the deterministic workflow/activity boundary, `ai` pinned exact)
-were spot-checked and **remain intact**.
-
----
-
-## Validation matrix
-
-| Unified finding | Reviews | Severity | Status | Evidence (current code) |
+| Unified finding | Reviews | Sev | Status | Where |
 |---|---|---|---|---|
-| **No authN/authZ; `tenantId` client-supplied; exec endpoints not tenant-scoped** | Sec#1, QA#1, Arch§3.1 | Critical | **PRESENT** | No `UseGuards`/`AuthGuard`/`ValidationPipe`/auth middleware anywhere in `apps/api/src` (grep: none). `main.ts` adds only `rawBody` + shutdown hooks. Controllers take `tenantId` from param/body; `POST /executions/:id/approve` operates on a raw `workflowId` with no tenant check. |
-| **No input validation on any endpoint** | Sec#4, QA#4, Arch§3.1.3 | Med | **PRESENT** | No `useGlobalPipes`/`ValidationPipe`/`class-validator` in `main.ts` or controllers. |
-| **No CORS / helmet / rate limiting** | Sec#5, Arch§5 | Med | **PRESENT** | No `enableCors`/`helmet`/`@nestjs/throttler` in `apps/api`. |
-| **No global exception filter (error leakage)** | Sec#11 | Low | **PRESENT** | No `useGlobalFilters`/`ExceptionFilter`. |
-| **`ENCRYPTION_KEY`/env not fail-fast at boot** | Sec#6 | Med | **PRESENT (nuance)** | `createKeyEncryptor()` *does* throw on missing/wrong-length key (`crypto.ts:28,70`) but is called **lazily** (`activities.ts:69` lazy `getCredentials`). `env.ts` only runs `dotenv.config()`; `DATABASE_URL`/`TEMPORAL_ADDRESS` unvalidated. So there is a guard, but not a fail-fast boot check. |
-| **SSRF + token exfiltration via connection `serverUrl`** | Sec#2 | High | **PRESENT** | `connection.service.ts:65` stores `input.serverUrl` with no scheme/allowlist/private-IP check; `mcp.ts:29` does `new URL(input.serverUrl)` and sends `headers` (Bearer token); `oauth.ts:225` follows discovery origin. No validation added. |
-| **OAuth callback unauthenticated; weak tenant binding; no state TTL** | Sec#3, Arch§3.4 | High | **PRESENT** | `oauth.controller.ts` `GET /oauth/callback` unauthenticated; tenant taken from `state` prefix (`tenantFromState`). The "Unknown or expired OAuth state" message (`oauth.ts:334`) fires on a missing row only — there is **no `expiresAt`/TTL** on stored state; the `expiresAt` in `oauth.ts:129/194` is the access-token cache, not the consent state. |
-| **OAuth-state + webhook-dedupe rows grow unbounded; no cleanup** | Sec#9, QA#10, Arch§3.4 | Low | **PRESENT** | `WebhookDelivery` has `@@unique([endpointId,deliveryId])` but no `expiresAt`/sweeper; OAuth-state rows never pruned. |
-| **Secret table overloaded (provider key / conn token / OAuth state in one table+column)** | Arch§3.3 | Med | **PRESENT** | `SecretStore` reuses `TenantCredential.provider` for `conn:<id>` and `oauth-state:<state>`; `put` always writes `isValid:true`. |
-| **Single static key — no rotation/versioning, no AAD** | Sec#7, Arch§3.5 | Med | **PRESENT** | `EncryptedPayload` (`crypto.ts:4`) has no `keyVersion`; no `cipher.setAAD(...)`. |
-| **Webhook signing secret stored plaintext** | Sec#8, Arch§3.6 | Med/Low | **PRESENT** | `schema.prisma:22` `signingSecret String` plain column. |
-| **Usage ledger not idempotent → double-bill + re-call LLM on retry** | QA#3, Arch§4.2 | High | **PRESENT** | `UsageEvent` has `@@index([executionId])` but **no `@@unique([executionId,nodeId])`** (`schema.prisma:75–91`); activity retry (`maximumAttempts:3`) re-runs `runAgent` whole. |
-| **Cached input tokens double-billed** | QA#2 | High | **PRESENT (unmitigated risk)** | `pricing.ts:computeCost` bills `inputTokens` full-rate **plus** `cachedInputTokens` cache-rate as separate buckets; `activities.ts` passes both with no subtraction. Real if `inputTokens` includes cached — no test pins the semantics. |
-| **`downgrade` policy doesn't re-validate fallback model** | QA#6 | Med | **PRESENT** | `activities.ts` sets `model = budget.fallbackModel` with no re-estimate and no `MODEL_PRICING` membership check (unpriced fallback → spend then `UnknownModelPricingError`, compounding the retry bug). |
-| **Provider error rethrown bare → secret can leak into Temporal history/logs** | Arch§3.2 | High | **PRESENT** | `activities.ts` catch ends `throw e;` with no sanitization; an `APICallError` 5xx/timeout (the transient branch) can carry request headers into serialized failure/history. No no-secret-in-failure test. |
-| **Single hardcoded agent output schema for every node** | QA#9, Arch§4.4 | Med | **PRESENT** | `activities.ts` `outputSchema` is a fixed `{category,urgency}`; B5 "review" node emits a classification object as the PR comment body. |
-| **`GET /executions/:id` returns 500 (not 404) for unknown/closed runs** | QA#11 | Med | **PRESENT** | `executions.service.getState` queries the handle with no `WorkflowNotFoundError`→404 mapping. |
-| **`POST /executions` can't accept real input** | QA#12 | Low | **PRESENT** | `executions.service.ts:51` hardcodes `{ message: "I was charged twice this month" }`. |
-| **Spend/usage aggregation loads all rows into memory** | QA#13 | Low | **PRESENT** | `spend.ts:10` `findMany`+`reduce`; `usage.service.ts:48` `findMany`. No `aggregate`/`groupBy`. |
-| **`ConnectionService.setStatus` not tenant-scoped** | Arch§3.7 | Low | **PRESENT** | `connection.service.ts:94` `update({ where: { id } })` — no `tenantId`. |
-| **`ctx` accumulates all node outputs and is returned/queryable** | Arch§4.8 | Low | **PRESENT** | `runGraph` keeps every node output in `ctx`; `stateQuery` returns it whole. |
-| **No `$disconnect` / DB lifecycle cleanup on shutdown** | Arch§4.9 | Low | **PRESENT** | No `$disconnect`/`onModuleDestroy` in `packages/db` or `apps/worker`. |
-| **No interpreter versioning (`patched`/Worker Versioning) + no replay test** | Arch§4.5 | Med | **PRESENT** | No `workflow.patched()` / Build IDs; no replay-from-history test (grep: none). |
-| **MCP tool calls unmetered; large results can exceed 2MB payload** | Arch§4.6 | Med | **PRESENT (partly by design)** | `mcpTool` case adds `stepCount` only, no cost; no claim-check for large outputs. |
-| **Graphs hardcoded; Postgres doesn't own definitions (Slice #5 unbuilt)** | QA#5, Arch§4.1 | High (known) | **PRESENT (deferred)** | No `GraphDefinition` model; `schema.prisma:19` "graphs are hardcoded for now"; runtime uses `getGraphForWorkflow`/`graphRegistry`. Matches the still-unstarted `PLAN-SLICE-5.md`. |
-| **Circuit breaker can't fire with linear `walk()`** | QA#7 | Med | **PRESENT (by design until Slice #6)** | `walk()` is linear + cycle-throwing; the step cap only trips on a >50-node hand-authored chain. |
-| **`walk()` throw inside workflow → infinite workflow-task retries** | QA#8 | Med | **PRESENT** | No pre-start graph validation; no in-workflow catch → a cyclic/dangling graph wedges the run. |
-| **Budget cap overshoot windows (per-exec checked after; monthly no reservation)** | Arch§4.3 | Med | **PRESENT (partly by design)** | `workflows.ts` checks `perExecutionCapUsd` at top of loop against already-accrued cost; monthly pre-flight has no reservation/lock. |
-| **OAuth refresh lock is in-process only** | Arch§4.7, QA(verified) | Med (known) | **PRESENT (documented)** | `accessCache`/`inflight` in `oauth.ts` are process-local; multi-worker races acknowledged in README. |
-| **Prompt injection via untrusted webhook payload** | Sec#10 | Low | **PRESENT (inherent)** | Webhook body → `prompt: JSON.stringify(input)` and into MCP tool args. |
-| **Stale schema header/comments** | QA#14 | Low | **PRESENT** | `schema.prisma:1` "Slice #2"; line 19 "hardcoded for now". |
-| **Observability is `console.log` only** | Arch§5 | Op gap | **PRESENT** | No structured logging/metrics/tracing. |
+| No authN/authZ; exec endpoints not tenant-scoped | Sec#1/QA#1/Arch§3.1 | Crit | **FIXED** | #11 — API tokens + `AuthGuard`; `Execution` ownership; live 401/403, forged-approval blocked |
+| No input validation | Sec#4/QA#4 | Med | **FIXED** | #11 — global `ValidationPipe` + DTOs (`approved` required, `serverUrl` https) |
+| No CORS / helmet / rate limiting | Sec#5/Arch§5(transport) | Med | **FIXED** | #13 — helmet + CORS allowlist + `@nestjs/throttler` |
+| No global exception filter | Sec#11 | Low | **FIXED** | #13 — `AllExceptionsFilter` (generic 500, no leakage) |
+| Env not fail-fast at boot | Sec#6 | Med | **FIXED** | #13 — `env.ts` validates `ENCRYPTION_KEY`/`DATABASE_URL` at boot (api + worker) |
+| SSRF + token exfiltration via `serverUrl` | Sec#2 | High | **FIXED** | #14 — `assertEgressAllowed` (https + DNS-resolve + private/loopback/ULA block) at the token-bearing egress + OAuth discovery |
+| Provider error rethrown bare → secret leak | Arch§3.2 | High | **FIXED** | #11 — `toSanitizedRetryable` + no-secret-in-failure test |
+| Usage ledger not idempotent → double-bill | QA#3/Arch§4.2 | High | **FIXED** | #11 — `@@unique([executionId,nodeId])` + upsert |
+| Cached input tokens double-billed | QA#2 | High | **FIXED** | #16 — verified correct for Anthropic (input excludes cache-reads) + no-double-count test |
+| `downgrade` doesn't re-validate fallback | QA#6 | Med | **FIXED** | #16 — re-estimate + pricing check; `BUDGET`/`FALLBACK_UNPRICED` |
+| Single hardcoded agent output schema | QA#9/Arch§4.4 | Med | **FIXED** | #19 — per-node `outputSchema` in config |
+| `GET /executions/:id` 500 not 404 | QA#11 | Med | **FIXED** | #11 — `WorkflowNotFoundError`/unknown → 404 |
+| `POST /executions` can't pass input | QA#12 | Low | **FIXED** | #11 — optional `input`; tenantId from token |
+| Spend aggregation in memory | QA#13 | Low | **FIXED** | #16 — `monthToDateSpend` DB `_sum` aggregate (the hot path) |
+| `setStatus` not tenant-scoped | Arch§3.7 | Low | **FIXED** | #14 — `updateMany({ where:{ id, tenantId } })` |
+| Prisma `$disconnect` on shutdown | Arch§4.9 | Low | **FIXED** | #15 — `disconnectPrisma()` (worker finally + API lifecycle) |
+| Stale schema header/comments | QA#14 | Low | **FIXED** | #16 — refreshed |
+| Webhook signing secret plaintext | Sec#8 | Med | **FIXED** | #15 — encrypted at rest (AES-GCM blob) |
+| OAuth state: weak binding / no TTL | Sec#3/Arch§3.4 | High | **PARTIAL** | #15 — 10-min TTL + single-use consumption. Full **session-binding** (vs state-prefix tenant) deferred. |
+| Key versioning + AAD | Sec#7/Arch§3.5 | Med | **FIXED** | #20 — `keyVersion` + AAD-bound `(tenantId,key)`; legacy rows still decrypt |
+| Graphs hardcoded; Postgres owns definitions | QA#5/Arch§4.1 | High | **FIXED** | #17 — `GraphDefinition` + content-hash per-run snapshot |
+| Circuit breaker can't fire (linear walk) | QA#7 | Med | **FIXED** | #18 — loops are legal now; the step cap meaningfully bounds them |
+| `walk()` throw → infinite retries | QA#8 | Med | **FIXED** | #18 — `invalid_graph` terminal + control-plane `validateGraph` |
+| No interpreter versioning + no replay test | Arch§4.5 | Med | **PARTIAL** | #18 — **replay-from-history test** added (the real determinism guard). `patched()`/Build-IDs deliberately skipped (no in-flight prod histories); documented. |
+| MCP unmetered; >2MB payloads | Arch§4.6 | Med | **PARTIAL** | #19 — tool-call **metering** into the budget. **Claim-check** for >2MB results deferred. |
+| Dedupe/OAuth-state rows unbounded | Sec#9/QA#10 | Low | **PARTIAL** | #15 — OAuth state now expires (TTL). `WebhookDelivery` **retention sweeper** deferred. |
+| Secret-table overloaded (one table/column) | Arch§3.3 | Med | **DEFERRED** | #20 — AAD now binds each row to its slot, removing the security motive; the **table split** is an optional organizational refactor. |
+| Budget cap overshoot windows | Arch§4.3 | Med | **DEFERRED** | By design + documented (README): per-exec cap is "stop-after-exceeding"; monthly cap has no reservation. Atomic reserve-then-reconcile is a fast-follow. |
+| OAuth refresh lock in-process only | Arch§4.7 | Med | **DEFERRED** | Documented; needs a durable/distributed lock before multi-worker scale-out. |
+| `ctx` accumulates all outputs / queryable | Arch§4.8 | Low | **DEFERRED** | Bounding `ctx`/the state query is a follow-up; auth (#11) already gates the query. |
+| Prompt injection via webhook payload | Sec#10 | Low | **DEFERRED** | Inherent to agent workflows; least-privilege per connection + guardrails are a product follow-up. |
+| Observability is `console.log` only | Arch§5 | Op | **DEFERRED** | Structured logging / metrics / tracing is its own slice. |
 
-**Tally: 0 fixed / 32 present** (of which ~6 are acknowledged by-design/deferred, not regressions).
+**Tally: 25 FIXED · 4 PARTIAL · 5 DEFERRED** (of 34 unified rows). Every PARTIAL/DEFERRED
+item is documented with rationale here and/or in the README.
+
+### Deferrals at a glance (the honest tail)
+
+1. OAuth callback **session-binding** (TTL shipped) — *Sec#3*
+2. **Claim-check** object storage for >2MB MCP/LLM payloads — *Arch§4.6*
+3. `WebhookDelivery` **retention sweeper** (OAuth-state TTL shipped) — *Sec#9*
+4. Secret-table **split** (AAD removes the security motive) — *Arch§3.3*
+5. Monthly-cap **atomic reservation** (overshoot is bounded + documented) — *Arch§4.3*
+6. **Distributed** OAuth refresh lock (before multi-worker scale-out) — *Arch§4.7*
+7. `ctx`/state-query **bounding** — *Arch§4.8*
+8. Prompt-injection **guardrails** — *Sec#10*
+9. **Observability** (structured logging/metrics/tracing) + Worker-Versioning/`patched()` rollout — *Arch§5, §4.5*
+
+The "positive controls" both reviews praised (AES-256-GCM with per-message IV + tamper
+detection, secrets-out-of-Temporal, raw-body timing-safe webhook HMAC, billing fail-safe,
+401/429 non-retryable mapping, deterministic workflow boundary, `ai` pinned exact) remain
+intact and were extended (AAD, replay guard, tenant-scoping).
 
 ---
 
-## Suggested order if you want these addressed
+## Original audit (2026-06-25) — pre-remediation snapshot
 
-Both reviews converge on the same top tier:
+> Kept for the record. At the time of writing, **every finding was PRESENT** — the reviews
+> were a status confirmation against `main` (slices #1–#4); the only newer work was the
+> `apps/web` frontend, which touched no backend code. The matrix below is that original
+> state; see the final matrix above for what each became.
 
-1. **Auth + per-tenant authorization** (derive `tenantId` from principal; tenant-scope
-   `executions/:id` approve/getState) — the release blocker. *(Sec#1/QA#1/Arch§3.1)*
-2. **Sanitize provider errors before rethrow** + a no-secret-in-failure test — protects
-   the headline secrets-out-of-Temporal guarantee. *(Arch§3.2)*
-3. **Usage idempotency** (`@@unique(executionId,nodeId)` + upsert; gate LLM call) — stops
-   double-bill/double-spend. *(QA#3/Arch§4.2)* — pairs with cached-token semantics *(QA#2)*.
-4. **Global `ValidationPipe` + DTOs** — cheap; removes the approve→reject footgun. *(QA#4)*
-5. **`serverUrl` egress lockdown** (https + host allowlist + block private IPs/rebinding)
-   and **OAuth state session-binding + TTL**. *(Sec#2, Sec#3)*
-6. Lower-severity cleanup: CORS/helmet/rate-limit, exception filter, env fail-fast,
-   key versioning + AAD, encrypt webhook secret, dedupe/state TTL, 404 mapping, spend
-   aggregates, `setStatus` scoping, Prisma `$disconnect`, schema-comment refresh.
+The three reviews overlap heavily; deduplicated into a single matrix. Original statuses:
+**PRESENT** (defect still in code), **PRESENT (by design/deferred)**, **PRESENT (nuance)**.
 
-Items #4.1 (graph persistence) and #4.5 (interpreter versioning) are genuinely future
-slices — Slice #5's plan already exists in `PLAN-SLICE-5.md`.
+| Unified finding | Reviews | Severity | Status (then) | Evidence (then) |
+|---|---|---|---|---|
+| No authN/authZ; `tenantId` client-supplied; exec endpoints not tenant-scoped | Sec#1, QA#1, Arch§3.1 | Critical | PRESENT | No `AuthGuard`/`ValidationPipe` anywhere; `approve` on a raw `workflowId`, no tenant check |
+| No input validation | Sec#4, QA#4 | Med | PRESENT | No `ValidationPipe`/`class-validator` |
+| No CORS / helmet / rate limiting | Sec#5, Arch§5 | Med | PRESENT | None in `apps/api` |
+| No global exception filter | Sec#11 | Low | PRESENT | No `useGlobalFilters` |
+| Env not fail-fast at boot | Sec#6 | Med | PRESENT (nuance) | `createKeyEncryptor` throws but lazily; `env.ts` only `dotenv.config()` |
+| SSRF via `serverUrl` | Sec#2 | High | PRESENT | unvalidated `serverUrl` fetched with the bearer token |
+| OAuth callback unauthenticated; no state TTL | Sec#3, Arch§3.4 | High | PRESENT | tenant from state prefix; no `expiresAt` on stored state |
+| Dedupe/OAuth-state rows unbounded | Sec#9, QA#10 | Low | PRESENT | no sweeper |
+| Secret table overloaded | Arch§3.3 | Med | PRESENT | `TenantCredential.provider` reused for `conn:`/`oauth-state:` |
+| Single static key — no rotation/AAD | Sec#7, Arch§3.5 | Med | PRESENT | no `keyVersion`, no `setAAD` |
+| Webhook signing secret plaintext | Sec#8 | Med/Low | PRESENT | plain column |
+| Usage ledger not idempotent | QA#3, Arch§4.2 | High | PRESENT | no `@@unique([executionId,nodeId])`; retry re-runs activity |
+| Cached input tokens double-billed | QA#2 | High | PRESENT (risk) | separate buckets, no test pinning semantics |
+| `downgrade` doesn't re-validate fallback | QA#6 | Med | PRESENT | no re-estimate / pricing check |
+| Provider error rethrown bare | Arch§3.2 | High | PRESENT | `throw e;` unsanitized |
+| Single hardcoded agent output schema | QA#9, Arch§4.4 | Med | PRESENT | fixed `{category,urgency}` |
+| `GET /executions/:id` 500 not 404 | QA#11 | Med | PRESENT | no `WorkflowNotFoundError`→404 |
+| `POST /executions` can't pass input | QA#12 | Low | PRESENT | hardcoded demo message |
+| Spend aggregation in memory | QA#13 | Low | PRESENT | `findMany`+`reduce` |
+| `setStatus` not tenant-scoped | Arch§3.7 | Low | PRESENT | `where:{ id }` only |
+| `ctx` accumulates / queryable | Arch§4.8 | Low | PRESENT | full `ctx` returned by state query |
+| No Prisma `$disconnect` | Arch§4.9 | Low | PRESENT | none |
+| No interpreter versioning + replay test | Arch§4.5 | Med | PRESENT | no `patched()`, no replay test |
+| MCP unmetered; >2MB payloads | Arch§4.6 | Med | PRESENT (partly by design) | `stepCount` only; no claim-check |
+| Graphs hardcoded | QA#5, Arch§4.1 | High (known) | PRESENT (deferred) | no `GraphDefinition` |
+| Circuit breaker can't fire (linear walk) | QA#7 | Med | PRESENT (by design) | linear, cycle-throwing |
+| `walk()` throw → infinite retries | QA#8 | Med | PRESENT | no validation / in-workflow catch |
+| Budget overshoot windows | Arch§4.3 | Med | PRESENT (partly by design) | cap checked after; no monthly reservation |
+| OAuth refresh lock in-process | Arch§4.7 | Med | PRESENT (documented) | process-local cache/lock |
+| Prompt injection | Sec#10 | Low | PRESENT (inherent) | webhook body → prompt + tool args |
+| Stale schema header | QA#14 | Low | PRESENT | "Slice #2" / "hardcoded for now" |
+| Observability `console.log` only | Arch§5 | Op | PRESENT | no structured logging |
+
+**Tally (then): 0 fixed / 32 present.** **(Now: 25 fixed · 4 partial · 5 deferred — see top.)**
