@@ -105,10 +105,16 @@ export class WebhookService {
     return timingSafeEqual(a, b);
   }
 
+  /** Dedupe rows older than this are pruned (Sec#9) — providers don't replay
+   *  deliveries this old, so it doubles as the replay window. */
+  static readonly DEDUPE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
   /**
    * Record a delivery id; returns true if it was ALREADY seen (duplicate).
    * Relies on the @@unique([endpointId, deliveryId]) constraint — catches the
-   * specific Prisma P2002 so real errors still surface.
+   * specific Prisma P2002 so real errors still surface. On a NEW delivery it also
+   * opportunistically prunes this endpoint's dedupe rows past the retention window
+   * so the table can't grow unbounded (Sec#9) — best-effort, never fails ingress.
    */
   async isDuplicateDelivery(
     endpointId: string,
@@ -118,10 +124,17 @@ export class WebhookService {
       await getPrisma().webhookDelivery.create({
         data: { endpointId, deliveryId },
       });
-      return false;
     } catch (e) {
       if ((e as { code?: string }).code === "P2002") return true;
       throw e;
     }
+
+    const cutoff = new Date(Date.now() - WebhookService.DEDUPE_RETENTION_MS);
+    await getPrisma()
+      .webhookDelivery.deleteMany({
+        where: { endpointId, createdAt: { lt: cutoff } },
+      })
+      .catch(() => undefined); // retention is best-effort; don't fail the webhook
+    return false;
   }
 }
