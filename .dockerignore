@@ -1,0 +1,20 @@
+# Keep the build context small and secret-free.
+# .env MUST be excluded — it carries ENCRYPTION_KEY + DB/Keycloak passwords and
+# must never land in an image layer (CLAUDE.md security checklist).
+.env
+.env.*
+!.env.example
+
+**/node_modules
+**/dist
+**/.turbo
+**/*.tsbuildinfo
+
+.git
+.github
+*.md
+temporal.db
+temporal.db-*
+
+# Local web build output
+apps/web/dist

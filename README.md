@@ -205,7 +205,7 @@ an in-flight run (which carries its own snapshot). Re-saving an unchanged graph 
 | `packages/contracts` (`@naary/contracts`) | Execution protocol: `TASK_QUEUE`, `approvalSignal`, `stateQuery`, state types. Client-safe. |
 | `apps/worker` (`@naary/worker`) | Temporal worker: the `runGraph` interpreter workflow + activities. All side effects live here. |
 | `apps/api` (`@naary/api`) | NestJS control plane: start / approve / get-state over the Temporal client. |
-| `apps/web` (`@naary/web`) | Placeholder for the slice-#5 React Flow canvas (not built yet). |
+| `apps/web` (`@naary/web`) | React + Vite SPA (runs UI, run detail, canvas). Served by nginx in the Docker stack. |
 
 ## Prerequisites
 
@@ -215,7 +215,47 @@ an in-flight run (which carries its own snapshot). Re-saving an unchanged graph 
 
 ## Run it locally
 
-Three processes, in three terminals:
+### Option A — the whole stack in Docker (one command)
+
+Brings up Postgres, Keycloak, Temporal, DB migrations, the API, the worker, and
+the web app together. Requires Docker; no host Node/Temporal needed.
+
+```bash
+cp .env.example .env          # fill POSTGRES_PASSWORD, ENCRYPTION_KEY (openssl rand -hex 32),
+                              # KEYCLOAK_ADMIN_PASSWORD, and the matching DATABASE_URL
+docker compose up -d --build  # build images + start everything
+```
+
+| Service | URL |
+|---|---|
+| Web app | http://localhost:8081 |
+| API | http://localhost:3000 (`/healthz` is public) |
+| Temporal UI | http://localhost:8233 |
+| Keycloak | http://localhost:8080 |
+
+The `migrate` service applies Prisma migrations before the api/worker start; the
+api/worker wait on Temporal + Postgres healthchecks, so a cold `up` is ordered.
+Tear down with `docker compose down` (add `-v` to wipe Postgres + Temporal data).
+
+Seed a tenant's graphs + mint an API token (run inside the api container):
+
+```bash
+docker compose exec api pnpm --filter @naary/api exec ts-node src/graphs/seed-graphs.ts t-demo
+docker compose exec api pnpm --filter @naary/api exec ts-node src/auth/mint-token.ts t-demo
+# -> nry_…   then drive the API flow below with: -H "Authorization: Bearer nry_…"
+```
+
+> An `agent` node calls an LLM with the tenant's **own** key (BYOK) — seed one via
+> `POST /tenants/t-demo/credentials` (see below) for a run to get past the agent
+> node; without it the agent activity fails non-retryably (by design).
+
+> Inside the stack `OIDC_ISSUER` is left empty (API-token-only). The web-OIDC
+> slice turns Keycloak login on.
+
+### Option B — host processes (faster inner loop for backend dev)
+
+Three processes, in three terminals (Postgres + Keycloak still come from
+`docker compose up -d postgres keycloak`):
 
 ```bash
 # 1) Temporal dev server (persistent DB so server restarts survive too)

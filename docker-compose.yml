@@ -1,3 +1,17 @@
+# Shared runtime env for the backend services (api, worker, migrate). DATABASE_URL
+# targets the `postgres` SERVICE host (not localhost — that's for host-run dev), and
+# Temporal points at the `temporal` service. Secrets (ENCRYPTION_KEY, the DB
+# password) come from the repo-root .env at runtime — never baked into the image.
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql://${POSTGRES_USER:-naary}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-naary_orchestrator}?schema=public
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env (see .env.example)}
+  TEMPORAL_ADDRESS: temporal:7233
+  # Claim-check object storage (optional; unset = in-memory). Forwarded from .env
+  # so a real S3 bucket can be used without editing this file.
+  STORAGE_PROVIDER: ${STORAGE_PROVIDER:-}
+  S3_BUCKET: ${S3_BUCKET:-}
+  AWS_REGION: ${AWS_REGION:-}
+
 services:
   postgres:
     image: postgres:16
@@ -48,5 +62,128 @@ services:
       retries: 15
       start_period: 30s
 
+  # Temporal dev server (single binary, sqlite-backed) — the durable-execution
+  # spine. Not a production cluster (that's Temporal Cloud / self-hosted, see
+  # PRODUCTION-READINESS.md §3.A); fine for a local stack. UI at :8233.
+  temporal:
+    image: temporalio/temporal:latest
+    container_name: naary-temporal
+    restart: unless-stopped
+    # The image runs as uid 1000; the named `naary-temporal` volume is root-owned,
+    # so SQLite can't create its db file. Run as root for the dev stack so the
+    # persisted db is writable (dev-only; a real cluster uses external storage).
+    user: root
+    command:
+      [
+        'server',
+        'start-dev',
+        '--ip',
+        '0.0.0.0',
+        '--db-filename',
+        '/data/temporal.db',
+        '--log-level',
+        'warn',
+      ]
+    ports:
+      - '7233:7233' # gRPC — the api client + worker connect here
+      - '8233:8233' # Web UI
+    volumes:
+      - naary-temporal:/data
+    healthcheck:
+      test:
+        ['CMD', 'temporal', 'operator', 'cluster', 'health', '--address', '127.0.0.1:7233']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # One-shot: apply Prisma migrations, then exit. The api/worker wait for this to
+  # complete successfully so they never start against an un-migrated schema.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: naary-backend
+    container_name: naary-migrate
+    command: ['pnpm', '--filter', '@naary/db', 'exec', 'prisma', 'migrate', 'deploy']
+    environment:
+      <<: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  # NestJS control plane.
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: naary-backend
+    container_name: naary-api
+    restart: unless-stopped
+    command: ['pnpm', '--filter', '@naary/api', 'start']
+    environment:
+      <<: *backend-env
+      PORT: '3000'
+      # Allow the containerized web app (and the Vite dev server) as CORS origins.
+      CORS_ORIGINS: http://localhost:8081,http://localhost:5173
+      # OIDC stays OFF in this stack (empty issuer = API-token-only). The web-OIDC
+      # slice turns it on and points it at the keycloak service.
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-naary-api}
+      OIDC_TENANT_CLAIM: ${OIDC_TENANT_CLAIM:-tenant}
+    ports:
+      - '3000:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(\"http://localhost:3000/healthz\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # Temporal worker — the generic runGraph interpreter + activities. Stateless;
+  # scale by raising `replicas` (execution state lives in Temporal, not here).
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: naary-backend
+    container_name: naary-worker
+    restart: unless-stopped
+    command: ['pnpm', '--filter', '@naary/worker', 'start']
+    environment:
+      <<: *backend-env
+    depends_on:
+      temporal:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # Web app — Vite SPA built to static files, served by nginx (proxies /api → api).
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: naary-web
+    container_name: naary-web
+    restart: unless-stopped
+    ports:
+      - '8081:80'
+    depends_on:
+      api:
+        condition: service_started
+
 volumes:
   naary-pgdata:
+  naary-temporal:

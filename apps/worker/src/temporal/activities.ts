@@ -100,7 +100,15 @@ const DEFAULT_OUTPUT_SCHEMA = {
   required: ["category", "urgency"],
   additionalProperties: false,
 } as const;
-const defaultOutputSchema = jsonSchema<AgentOutput>(DEFAULT_OUTPUT_SCHEMA);
+// Typed as Record<string, unknown> (not AgentOutput) so it unifies with the
+// per-node schema branch below — `Output.object` needs one schema type, and the
+// result is returned as Record<string, unknown> anyway. The `as const` literal is
+// widened to the mutable JSONSchema7 the SDK expects (runtime schema unchanged).
+const defaultOutputSchema = jsonSchema<Record<string, unknown>>(
+  // `as const` (needed for the literal `type`/`additionalProperties` fields) makes
+  // this readonly; widen to the mutable JSONSchema7 the SDK wants via unknown.
+  DEFAULT_OUTPUT_SCHEMA as unknown as Parameters<typeof jsonSchema>[0],
+);
 
 // Constructed lazily so importing this module doesn't require ENCRYPTION_KEY
 // until an agent actually runs.

@@ -30,14 +30,21 @@ Set in `.env`: `POSTGRES_PASSWORD`, `KEYCLOAK_ADMIN_PASSWORD`, `ENCRYPTION_KEY`,
 matching `DATABASE_URL`. Leave `OIDC_ISSUER` **empty** for API-token-only mode, or set it
 to `http://localhost:8080/realms/naary` to turn on Keycloak login.
 
-### Bring up infra
+### Fastest path — the whole stack in Docker
 ```bash
-docker compose up -d          # Postgres (5432) + Keycloak (8080, realm `naary` auto-imported)
-pnpm --filter @naary/db exec prisma migrate deploy   # apply DB migrations
+docker compose up -d --build   # Postgres, Keycloak, Temporal, migrate, api, worker, web
 ```
+Web → http://localhost:8081 · API → http://localhost:3000 (`/healthz` public) ·
+Temporal UI → http://localhost:8233 · Keycloak → http://localhost:8080. The
+`migrate` service runs `prisma migrate deploy` before api/worker start. This is a
+dev stack (single-binary Temporal, ts-node runtime) — production images/cluster
+are §3.A below.
 
-### Run the three processes (three terminals)
+### Or run the processes on the host (backend inner loop)
 ```bash
+docker compose up -d postgres keycloak                       # just the datastores
+pnpm --filter @naary/db exec prisma migrate deploy           # apply DB migrations
+
 # 1) Temporal dev server (persistent DB so restarts survive)
 temporal server start-dev --db-filename temporal.db          # UI http://localhost:8233
 
