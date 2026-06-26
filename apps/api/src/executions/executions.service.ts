@@ -19,13 +19,15 @@ import {
   type ExecutionState,
 } from "@naary/contracts";
 import { getPrisma } from "@naary/db";
-import { sampleGraph } from "@naary/dsl";
-import type { GraphDef } from "@naary/dsl";
 import { getBudget } from "@naary/usage";
+import { type GraphSnapshot, GraphsService } from "../graphs/graphs.service";
 import { connectTemporal } from "../temporal/client";
 
 /** Circuit breaker default when a tenant has no budget configured (safety net). */
 const DEFAULT_MAX_STEPS_PER_RUN = 50;
+
+/** workflowKey of the demo graph that POST /executions starts. */
+const DEFAULT_WORKFLOW_KEY = "default";
 
 /**
  * Wraps the Temporal client: start an execution, signal approval, query state.
@@ -40,6 +42,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   private client!: Client;
   private connection!: Connection;
 
+  constructor(private readonly graphs: GraphsService) {}
+
   async onModuleInit(): Promise<void> {
     const { client, connection } = await connectTemporal();
     this.client = client;
@@ -51,49 +55,68 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Manual start. `tenantId` comes from the authenticated principal (not the body);
-   *  `input` is the real workflow input, defaulting to a demo payload. */
+   *  the graph is the tenant's current "default" version (must be seeded). */
   async start(
     tenantId: string,
     input?: Record<string, unknown>,
   ): Promise<{ workflowId: string }> {
+    const snapshot = await this.graphs.getLatest(
+      tenantId,
+      DEFAULT_WORKFLOW_KEY,
+    );
+    if (!snapshot) {
+      throw new NotFoundException(
+        `No '${DEFAULT_WORKFLOW_KEY}' graph for this tenant — seed one first`,
+      );
+    }
     return this.startGraph(
       `exec-${tenantId}`,
-      sampleGraph,
+      snapshot,
       input ?? { message: "I was charged twice this month" },
       tenantId,
     );
   }
 
-  /** Start a webhook-triggered run; the verified event becomes the trigger output. */
+  /** Start a webhook-triggered run; the verified event becomes the trigger output.
+   *  The caller resolved + snapshotted the graph from the DB. */
   async startWebhook(
     tenantId: string,
-    graph: GraphDef,
+    snapshot: GraphSnapshot,
     event: unknown,
   ): Promise<{ workflowId: string }> {
-    return this.startGraph(`wh-${tenantId}`, graph, event, tenantId);
+    return this.startGraph(`wh-${tenantId}`, snapshot, event, tenantId);
   }
 
   private async startGraph(
     prefix: string,
-    graph: GraphDef,
+    snapshot: GraphSnapshot,
     input: unknown,
     tenantId: string,
   ): Promise<{ workflowId: string }> {
     const workflowId = `${prefix}-${randomUUID()}`;
     const budget = await getBudget(tenantId);
 
+    // Pass the immutable graph SNAPSHOT (bytes that existed now); the content hash
+    // + version ride in the workflow ctx (history) and a Temporal memo so the run
+    // is traceable to its exact version and a later edit can't change it.
     await this.client.workflow.start(RUN_GRAPH_WORKFLOW, {
       args: [
-        graph,
+        snapshot.graph,
         input,
         {
           tenantId,
           perExecutionCapUsd: budget?.perExecutionCapUsd,
           maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
+          graphContentHash: snapshot.contentHash,
+          graphVersion: snapshot.version,
         },
       ],
       taskQueue: TASK_QUEUE,
       workflowId,
+      memo: {
+        graphContentHash: snapshot.contentHash,
+        graphVersion: snapshot.version,
+      },
     });
 
     // Record ownership so approve/getState can be authorized by tenant.

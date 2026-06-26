@@ -35,6 +35,23 @@ model Execution {
   @@index([tenantId])
 }
 
+// Versioned graph definitions (Slice #5). Postgres owns graph DEFINITIONS; each
+// run snapshots an immutable version (content-hashed) so editing a flow can't
+// corrupt an in-flight execution.
+model GraphDefinition {
+  id          String   @id @default(uuid())
+  tenantId    String
+  workflowKey String // stable key the trigger/registry referenced, e.g. "github-review"
+  name        String
+  graph       Json // the GraphDef
+  contentHash String // sha256 of canonical(graph)
+  version     Int // monotonically increasing per (tenantId, workflowKey)
+  createdAt   DateTime @default(now())
+
+  @@unique([tenantId, workflowKey, version])
+  @@index([tenantId, workflowKey])
+}
+
 // Slice #4 — external integrations.
 
 model WebhookEndpoint {

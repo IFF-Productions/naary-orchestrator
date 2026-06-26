@@ -8,3 +8,4 @@ export {
 } from "./sample-graph";
 export { getByPath, resolveMcpArguments } from "./mcp-args";
 export { walk } from "./walk";
+export { canonicalize } from "./canonical";
