@@ -124,10 +124,12 @@ describe("runAgent", () => {
   });
 
   it("pre-flight: downgrades to the fallback model and records the fallback", async () => {
+    // cap sits between the haiku estimate (~0.005) and the opus estimate (~0.026):
+    // opus over → downgrade; haiku fits → the call proceeds on haiku.
     getBudget = () =>
       Promise.resolve({
         tenantId: "t1",
-        monthlyCapUsd: 0.001,
+        monthlyCapUsd: 0.01,
         perExecutionCapUsd: 1,
         maxStepsPerRun: 50,
         onBudgetExceeded: "downgrade",
@@ -144,6 +146,41 @@ describe("runAgent", () => {
     expect(result.model).toBe("claude-haiku-4-5");
     expect(generateText).toHaveBeenCalledOnce();
     expect(recordUsage.mock.calls[0][0].model).toBe("claude-haiku-4-5");
+  });
+
+  it("pre-flight: rejects when even the fallback exceeds the cap (QA#6, no charge)", async () => {
+    getBudget = () =>
+      Promise.resolve({
+        tenantId: "t1",
+        monthlyCapUsd: 0.001, // below even the haiku estimate
+        perExecutionCapUsd: 1,
+        maxStepsPerRun: 50,
+        onBudgetExceeded: "downgrade",
+        fallbackModel: "claude-haiku-4-5",
+      });
+    await expect(runAgent(CFG, { msg: "x" }, META)).rejects.toMatchObject({
+      nonRetryable: true,
+      type: "BUDGET",
+    });
+    expect(generateText).not.toHaveBeenCalled();
+    expect(recordUsage).not.toHaveBeenCalled();
+  });
+
+  it("pre-flight: rejects FALLBACK_UNPRICED when the fallback model has no pricing (QA#6)", async () => {
+    getBudget = () =>
+      Promise.resolve({
+        tenantId: "t1",
+        monthlyCapUsd: 0.001,
+        perExecutionCapUsd: 1,
+        maxStepsPerRun: 50,
+        onBudgetExceeded: "downgrade",
+        fallbackModel: "made-up-model",
+      });
+    await expect(runAgent(CFG, { msg: "x" }, META)).rejects.toMatchObject({
+      nonRetryable: true,
+      type: "FALLBACK_UNPRICED",
+    });
+    expect(generateText).not.toHaveBeenCalled();
   });
 
   it("maps a missing credential to a NON-retryable AUTH failure", async () => {

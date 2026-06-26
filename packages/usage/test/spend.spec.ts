@@ -1,31 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const findMany = vi.fn();
+const aggregate = vi.fn();
 vi.mock("@naary/db", () => ({
-  getPrisma: () => ({ usageEvent: { findMany } }),
+  getPrisma: () => ({ usageEvent: { aggregate } }),
 }));
 
 import { estimateCallCost, monthToDateSpend } from "../src/spend";
 
-beforeEach(() => findMany.mockReset());
+beforeEach(() => aggregate.mockReset());
 
 describe("monthToDateSpend", () => {
-  it("sums costUsd for the tenant in the current month", async () => {
-    findMany.mockResolvedValue([
-      { costUsd: "0.0175" },
-      { costUsd: "0.0025" },
-      { costUsd: "1.5" },
-    ]);
+  it("returns the DB-side sum of costUsd for the current month", async () => {
+    aggregate.mockResolvedValue({ _sum: { costUsd: "1.52" } });
     expect(await monthToDateSpend("t1")).toBeCloseTo(1.52, 9);
 
-    // queried with a month-start lower bound
-    const where = findMany.mock.calls[0][0].where;
-    expect(where.tenantId).toBe("t1");
-    expect(where.createdAt.gte).toBeInstanceOf(Date);
+    // aggregated by tenant + month-start lower bound, summing costUsd in Postgres
+    const arg = aggregate.mock.calls[0][0];
+    expect(arg.where.tenantId).toBe("t1");
+    expect(arg.where.createdAt.gte).toBeInstanceOf(Date);
+    expect(arg._sum).toEqual({ costUsd: true });
   });
 
-  it("is 0 for a tenant with no usage", async () => {
-    findMany.mockResolvedValue([]);
+  it("is 0 for a tenant with no usage (null sum)", async () => {
+    aggregate.mockResolvedValue({ _sum: { costUsd: null } });
     expect(await monthToDateSpend("t1")).toBe(0);
   });
 });
