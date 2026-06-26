@@ -17,6 +17,7 @@
     "@naary/db": "workspace:*",
     "@naary/dsl": "workspace:*",
     "@naary/secrets": "workspace:*",
+    "@naary/storage": "workspace:*",
     "@naary/usage": "workspace:*",
     "@temporalio/activity": "^1.18.1",
     "@temporalio/worker": "^1.18.1",
