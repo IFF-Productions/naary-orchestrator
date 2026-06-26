@@ -8,6 +8,7 @@
  * when the user is logged in, else the pasted `nry_` API token (see getBearerToken).
  * The server resolves tenantId from the token, so the client never sends it.
  */
+import type { GraphDef } from "@naary/dsl";
 import { getBearerToken } from "./keycloak";
 
 /** Thrown on a 401 so screens can prompt the user to set their API token. */
@@ -51,9 +52,24 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  // tenantId is resolved from the token server-side — the body carries only input.
-  startExecution(): Promise<{ workflowId: string }> {
-    return http("/executions", { method: "POST", body: JSON.stringify({}) });
+  // Save a compiled graph under a workflowKey (versioned + content-hashed server-side).
+  saveGraph(
+    workflowKey: string,
+    name: string,
+    graph: GraphDef,
+  ): Promise<{ workflowKey: string; version: number; contentHash: string }> {
+    return http("/graphs", {
+      method: "POST",
+      body: JSON.stringify({ workflowKey, name, graph }),
+    });
+  },
+  // tenantId is resolved from the token server-side — the body carries only input
+  // and which stored graph (workflowKey) to run (default "default").
+  startExecution(workflowKey?: string): Promise<{ workflowId: string }> {
+    return http("/executions", {
+      method: "POST",
+      body: JSON.stringify(workflowKey ? { workflowKey } : {}),
+    });
   },
   approve(id: string, approved: boolean): Promise<{ accepted: true }> {
     return http(`/executions/${encodeURIComponent(id)}/approve`, {
