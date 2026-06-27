@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Icon } from "../../components";
+import { Button, Icon, StatusPill } from "../../components";
+import type { RunState } from "../../components";
 import { api, type RunSummary, UnauthorizedError } from "../../lib/api";
 
-const COLS = "1.6fr 1fr 0.5fr";
+const COLS = "1.5fr 1fr 0.9fr 0.7fr 0.7fr 0.4fr";
 
 /** Compact relative time from an ISO timestamp (no date lib). */
 function ago(iso: string): string {
@@ -17,10 +18,52 @@ function ago(iso: string): string {
   return `${Math.round(h / 24)}d ago`;
 }
 
+/** Run status → StatusPill state + human label. */
+const STATUS_UI: Record<string, { state: RunState; label: string }> = {
+  running: { state: "running", label: "Running" },
+  awaiting_approval: { state: "paused", label: "Awaiting approval" },
+  completed: { state: "done", label: "Completed" },
+  rejected: { state: "error", label: "Rejected" },
+  budget_exceeded: { state: "error", label: "Budget exceeded" },
+  circuit_open: { state: "error", label: "Circuit open" },
+  invalid_graph: { state: "error", label: "Invalid graph" },
+  failed: { state: "error", label: "Failed" },
+  timed_out: { state: "error", label: "Timed out" },
+  terminated: { state: "error", label: "Terminated" },
+  canceled: { state: "error", label: "Canceled" },
+  unknown: { state: "idle", label: "Unknown" },
+};
+function statusUi(s: string): { state: RunState; label: string } {
+  return STATUS_UI[s] ?? { state: "idle", label: s };
+}
+
+/** Filter tabs → which statuses they include (All = everything). */
+const FILTERS: { label: string; match: (s: string) => boolean }[] = [
+  { label: "All", match: () => true },
+  { label: "Awaiting", match: (s) => s === "awaiting_approval" },
+  { label: "Running", match: (s) => s === "running" },
+  { label: "Completed", match: (s) => s === "completed" },
+  {
+    label: "Failed",
+    match: (s) =>
+      [
+        "rejected",
+        "budget_exceeded",
+        "circuit_open",
+        "invalid_graph",
+        "failed",
+        "timed_out",
+        "terminated",
+        "canceled",
+      ].includes(s),
+  },
+];
+
 export function Runs() {
   const navigate = useNavigate();
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("All");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,9 +84,15 @@ export function Runs() {
     void load();
   }, []);
 
-  const rows = (runs ?? []).filter(
-    (r) => !query || r.workflowId.includes(query),
-  );
+  const activeFilter = FILTERS.find((f) => f.label === filter) ?? FILTERS[0];
+  const rows = (runs ?? [])
+    .filter((r) => activeFilter.match(r.status))
+    .filter(
+      (r) =>
+        !query ||
+        r.workflowId.includes(query) ||
+        (r.workflowKey ?? "").includes(query),
+    );
 
   async function startRun() {
     setStarting(true);
@@ -118,6 +167,41 @@ export function Runs() {
         }}
       >
         <div
+          style={{
+            display: "flex",
+            background: "var(--surface)",
+            border: "1px solid var(--line)",
+            borderRadius: 8,
+            padding: 3,
+            gap: 2,
+          }}
+        >
+          {FILTERS.map((f) => {
+            const active = f.label === filter;
+            const count = (runs ?? []).filter((r) => f.match(r.status)).length;
+            return (
+              <button
+                key={f.label}
+                type="button"
+                onClick={() => setFilter(f.label)}
+                style={{
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: active ? 600 : 400,
+                  color: active ? "var(--ink)" : "var(--ink-2)",
+                  background: active ? "var(--card-2)" : "transparent",
+                  padding: "5px 12px",
+                  borderRadius: 6,
+                }}
+              >
+                {f.label}
+                {runs ? ` ${count}` : ""}
+              </button>
+            );
+          })}
+        </div>
+        <div
           className="input-wrap"
           style={{ width: 260, height: 34, padding: "0 11px" }}
         >
@@ -125,7 +209,7 @@ export function Runs() {
           <input
             className="bare mono"
             style={{ height: 32, fontSize: 11.5 }}
-            placeholder="run id…"
+            placeholder="run id or workflow…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -149,6 +233,9 @@ export function Runs() {
           }}
         >
           <span>Run</span>
+          <span>Workflow</span>
+          <span>Status</span>
+          <span>Cost</span>
           <span>Started</span>
           <span />
         </div>
@@ -187,15 +274,36 @@ export function Runs() {
           >
             <span
               className="mono"
-              style={{ fontSize: 11.5, color: "var(--brand)" }}
+              style={{
+                fontSize: 11.5,
+                color: "var(--brand)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
             >
               {r.workflowId}
             </span>
             <span
               className="mono"
+              style={{ fontSize: 11, color: "var(--ink-2)" }}
+            >
+              {r.workflowKey ?? "—"}
+            </span>
+            <span>
+              <StatusPill {...statusUi(r.status)} />
+            </span>
+            <span
+              className="mono"
+              style={{ fontSize: 11, color: "var(--ink-2)" }}
+            >
+              {r.costUsd === null ? "—" : `$${r.costUsd.toFixed(4)}`}
+            </span>
+            <span
+              className="mono"
               style={{ fontSize: 11, color: "var(--ink-3)" }}
             >
-              {ago(r.createdAt)}
+              {ago(r.startedAt)}
             </span>
             <span style={{ textAlign: "right" }}>
               <Icon

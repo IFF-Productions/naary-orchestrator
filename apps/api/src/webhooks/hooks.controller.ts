@@ -86,6 +86,7 @@ export class HooksController {
       endpoint.tenantId,
       snapshot,
       event,
+      endpoint.workflowId, // the registry workflowKey this endpoint triggers
     );
     return { status: "started", workflowId };
   }

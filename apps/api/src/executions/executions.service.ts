@@ -18,6 +18,7 @@ import {
   stateQuery,
   TASK_QUEUE,
   type ExecutionState,
+  type ExecutionStatus,
 } from "@naary/contracts";
 import { getPrisma } from "@naary/db";
 import { getBudget } from "@naary/usage";
@@ -29,6 +30,44 @@ const DEFAULT_MAX_STEPS_PER_RUN = 50;
 
 /** workflowKey of the demo graph that POST /executions starts. */
 const DEFAULT_WORKFLOW_KEY = "default";
+
+/** A run in the list, with live status + accumulated cost from Temporal. */
+export interface RunSummary {
+  workflowId: string;
+  workflowKey: string | null;
+  /** App status (running | awaiting_approval | completed | rejected |
+   *  budget_exceeded | circuit_open | invalid_graph) or a Temporal close reason
+   *  (failed | timed_out | terminated | canceled) or "unknown" if unreachable. */
+  status:
+    | ExecutionStatus
+    | "failed"
+    | "timed_out"
+    | "terminated"
+    | "canceled"
+    | "unknown";
+  /** Accumulated run cost (from the workflow ctx), or null when unavailable. */
+  costUsd: number | null;
+  /** When the workflow started (Temporal), ISO. */
+  startedAt: string;
+  /** DB record time, ISO (kept for time-bucketed charts). */
+  createdAt: string;
+}
+
+/** Temporal closed-status name → our UI status string (COMPLETED handled via result()). */
+const TEMPORAL_CLOSED_STATUS: Record<string, RunSummary["status"]> = {
+  FAILED: "failed",
+  TIMED_OUT: "timed_out",
+  TERMINATED: "terminated",
+  CANCELLED: "canceled",
+  CANCELED: "canceled",
+  CONTINUED_AS_NEW: "running",
+};
+
+/** The workflow accumulates total run cost (agent + MCP tool) in ctx.__costUsd. */
+function costFromCtx(ctx: Record<string, unknown> | undefined): number | null {
+  const c = ctx?.__costUsd;
+  return typeof c === "number" ? c : null;
+}
 
 /**
  * Wraps the Temporal client: start an execution, signal approval, query state.
@@ -74,6 +113,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       snapshot,
       input ?? { message: "I was charged twice this month" },
       tenantId,
+      workflowKey,
     );
   }
 
@@ -83,8 +123,15 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
     snapshot: GraphSnapshot,
     event: unknown,
+    workflowKey: string,
   ): Promise<{ workflowId: string }> {
-    return this.startGraph(`wh-${tenantId}`, snapshot, event, tenantId);
+    return this.startGraph(
+      `wh-${tenantId}`,
+      snapshot,
+      event,
+      tenantId,
+      workflowKey,
+    );
   }
 
   private async startGraph(
@@ -92,6 +139,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     snapshot: GraphSnapshot,
     input: unknown,
     tenantId: string,
+    workflowKey: string,
   ): Promise<{ workflowId: string }> {
     const workflowId = `${prefix}-${randomUUID()}`;
     const budget = await getBudget(tenantId);
@@ -120,7 +168,9 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     });
 
     // Record ownership so approve/getState can be authorized by tenant.
-    await getPrisma().execution.create({ data: { workflowId, tenantId } });
+    await getPrisma().execution.create({
+      data: { workflowId, tenantId, workflowKey },
+    });
     return { workflowId };
   }
 
@@ -149,22 +199,79 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Recent runs for the tenant (newest first). Status lives in Temporal, not the
-   *  DB, so the list returns identity + start time; the detail view (getState)
-   *  reads live status. */
-  async list(
-    tenantId: string,
-    limit = 50,
-  ): Promise<{ workflowId: string; createdAt: string }[]> {
+  /**
+   * Recent runs for the tenant (newest first), enriched with LIVE status + cost
+   * read from Temporal (state lives there, not the DB). Per run: describe() tells
+   * us running-vs-closed + start time; a RUNNING run is queried for its app status
+   * (awaiting_approval, etc.) and accumulated cost; a CLOSED run's TRUE terminal
+   * status comes from result() (the workflow returns {status, ctx} — a rejected /
+   * budget_exceeded run is Temporal-COMPLETED, so describe() alone would wrongly
+   * read "completed"). Enrichment is best-effort + parallel; a run we can't reach
+   * falls back to "unknown" rather than failing the list. Bounded — a tenant
+   * search attribute + Temporal list() is the scaling follow-up.
+   */
+  async list(tenantId: string, limit = 50): Promise<RunSummary[]> {
     const rows = await getPrisma().execution.findMany({
       where: { tenantId },
       orderBy: { createdAt: "desc" },
-      take: Math.min(Math.max(limit, 1), 200),
+      take: Math.min(Math.max(limit, 1), 100),
     });
-    return rows.map((r) => ({
-      workflowId: r.workflowId,
-      createdAt: r.createdAt.toISOString(),
-    }));
+    return Promise.all(rows.map((r) => this.enrich(r)));
+  }
+
+  private async enrich(row: {
+    workflowId: string;
+    workflowKey: string | null;
+    createdAt: Date;
+  }): Promise<RunSummary> {
+    const base = {
+      workflowId: row.workflowId,
+      workflowKey: row.workflowKey,
+      createdAt: row.createdAt.toISOString(),
+      startedAt: row.createdAt.toISOString(),
+    };
+    try {
+      const handle = this.client.workflow.getHandle(row.workflowId);
+      const desc = await handle.describe();
+      const startedAt = desc.startTime?.toISOString() ?? base.startedAt;
+
+      if (desc.status.name === "RUNNING") {
+        try {
+          const state = await handle.query(stateQuery);
+          return {
+            ...base,
+            startedAt,
+            status: state.status,
+            costUsd: costFromCtx(state.ctx),
+          };
+        } catch {
+          return { ...base, startedAt, status: "running", costUsd: null };
+        }
+      }
+      if (desc.status.name === "COMPLETED") {
+        // The workflow RETURNS its terminal status (success / rejected /
+        // budget_exceeded / …) — result() recovers the truthful value.
+        const result = (await handle.result()) as {
+          status: ExecutionStatus;
+          ctx: Record<string, unknown>;
+        };
+        return {
+          ...base,
+          startedAt,
+          status: result.status,
+          costUsd: costFromCtx(result.ctx),
+        };
+      }
+      // FAILED / TIMED_OUT / TERMINATED / CANCELED / CONTINUED_AS_NEW
+      return {
+        ...base,
+        startedAt,
+        status: TEMPORAL_CLOSED_STATUS[desc.status.name] ?? "unknown",
+        costUsd: null,
+      };
+    } catch {
+      return { ...base, status: "unknown", costUsd: null };
+    }
   }
 
   async getState(id: string, tenantId: string): Promise<ExecutionState> {

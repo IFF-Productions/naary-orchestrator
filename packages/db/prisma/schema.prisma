@@ -28,9 +28,10 @@ model ApiToken {
 }
 
 model Execution {
-  workflowId String   @id // Temporal workflowId
-  tenantId   String
-  createdAt  DateTime @default(now())
+  workflowId  String   @id // Temporal workflowId
+  tenantId    String
+  workflowKey String? // the graph key this run started (null for pre-migration rows)
+  createdAt   DateTime @default(now())
 
   @@index([tenantId])
 }
