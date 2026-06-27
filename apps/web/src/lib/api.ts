@@ -27,7 +27,9 @@ export type ExecutionStatus =
   | "circuit_open";
 
 export interface ExecutionState {
-  status: ExecutionStatus;
+  /** Widened: a run can be Temporal-failed/terminated/unknown, not just an
+   *  ExecutionStatus. Rendered via runStatusUi (which takes any string). */
+  status: string;
   currentNodeId: string;
   ctx: Record<string, unknown>;
 }

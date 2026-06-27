@@ -316,6 +316,16 @@ export function CanvasPage() {
     );
   }
 
+  // Remove a node + any edges touching it (the modal's Delete button). Removing the
+  // node clears the selection, so the inspector modal closes on its own.
+  function deleteNode(id: string): void {
+    setNodes((ns) => ns.filter((n) => n.id !== id));
+    setEdges((es) => es.filter((e) => e.source !== id && e.target !== id));
+  }
+  function deleteEdge(id: string): void {
+    setEdges((es) => es.filter((e) => e.id !== id));
+  }
+
   function addNode(kind: NodeType) {
     const id = `${kind}-${crypto.randomUUID().slice(0, 8)}`;
     setNodes((ns) => [
@@ -614,6 +624,14 @@ export function CanvasPage() {
         <InspectorModal
           title={selected ? "Edit node" : "Edit branch condition"}
           onClose={closeInspector}
+          onDelete={
+            selected
+              ? () => deleteNode(selected.id)
+              : selectedEdge
+                ? () => deleteEdge(selectedEdge.id)
+                : undefined
+          }
+          deleteLabel={selected ? "Delete node" : "Delete edge"}
         >
           {selected ? (
             <ConfigPanel
@@ -643,10 +661,14 @@ export function CanvasPage() {
 function InspectorModal({
   title,
   onClose,
+  onDelete,
+  deleteLabel,
   children,
 }: {
   title: string;
   onClose: () => void;
+  onDelete?: () => void;
+  deleteLabel?: string;
   children: React.ReactNode;
 }) {
   useEffect(() => {
@@ -715,6 +737,20 @@ function InspectorModal({
           </button>
         </div>
         <div style={{ padding: 16, overflowY: "auto" }}>{children}</div>
+        {onDelete && (
+          <div
+            style={{
+              padding: "10px 16px",
+              borderTop: "1px solid var(--line)",
+              display: "flex",
+              justifyContent: "flex-end",
+            }}
+          >
+            <Button variant="danger" icon="trash" onClick={onDelete}>
+              {deleteLabel ?? "Delete"}
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );
