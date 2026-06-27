@@ -1,15 +1,20 @@
 import "./env"; // MUST be first — loads .env before @naary/* modules evaluate
+import { initMetrics } from "@naary/metrics";
 import { captureError, flushSentry, initSentry } from "@naary/observability";
 
 // Init Sentry before the worker boots. No-op unless SENTRY_DSN is set; events are
 // scrubbed of secrets. (Capture is I/O — it lives here + in activities, NEVER in
 // the deterministic workflow code.)
 initSentry({ component: "worker" });
+// Tag metrics with the component + collect default Node/process metrics.
+initMetrics({ component: "worker" });
 
+import { createServer } from "node:http";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { TASK_QUEUE } from "@naary/contracts";
 import { disconnectPrisma } from "@naary/db";
 import { createLogger } from "@naary/logging";
+import { metricsContentType, renderMetrics } from "@naary/metrics";
 import { createKeyEncryptor } from "@naary/secrets";
 import { temporalConnectionConfig } from "@naary/temporal-config";
 import * as activities from "./temporal/activities";
@@ -17,6 +22,34 @@ import * as activities from "./temporal/activities";
 // Structured logger for worker BOOT code only. NOT imported by workflows.ts —
 // logging is I/O and would break deterministic replay (CLAUDE.md Tier-1 rule 2).
 const log = createLogger({ component: "worker" });
+
+/** The worker has no HTTP server, so expose /metrics on its own small server for
+ *  Prometheus to scrape. Off if METRICS_PORT=0. */
+function startMetricsServer(): { close: () => void } | undefined {
+  const port = Number(process.env.METRICS_PORT ?? 9091);
+  if (!port) return undefined;
+  const server = createServer((req, res) => {
+    if (req.url === "/metrics") {
+      renderMetrics()
+        .then((text) => {
+          res.writeHead(200, { "content-type": metricsContentType });
+          res.end(text);
+        })
+        .catch(() => {
+          res.writeHead(500);
+          res.end();
+        });
+    } else if (req.url === "/healthz") {
+      res.writeHead(200);
+      res.end("ok");
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+  server.listen(port, () => log.info({ port }, "worker metrics server"));
+  return { close: () => server.close() };
+}
 
 /**
  * The worker process: stateless and disposable (CLAUDE.md Tier-1 rule 7).
@@ -29,6 +62,8 @@ async function run(): Promise<void> {
   // Fail fast at boot if ENCRYPTION_KEY is missing/invalid (mirrors the API),
   // rather than discovering it on the first agent activity (a burned retry).
   createKeyEncryptor();
+
+  const metricsServer = startMetricsServer();
 
   // Connection options (TLS / API-key / namespace) from env, defaulting to the
   // local dev server — Temporal Cloud needs only env, no code change.
@@ -51,6 +86,7 @@ async function run(): Promise<void> {
     log.info({ taskQueue: TASK_QUEUE, address, namespace }, "worker polling");
     await worker.run();
   } finally {
+    metricsServer?.close();
     await connection.close();
     await disconnectPrisma(); // close the pg pool the activities opened (Arch§4.9)
     await flushSentry();

@@ -1,10 +1,13 @@
 import "./env"; // MUST be first — loads + validates .env before @naary/* modules evaluate
 import "reflect-metadata";
+import { initMetrics } from "@naary/metrics";
 import { initSentry } from "@naary/observability";
 
 // Init Sentry before anything else so early errors are captured. No-op unless
 // SENTRY_DSN is set; events are scrubbed of secrets (see @naary/observability).
 initSentry({ component: "api" });
+// Tag metrics with the component + collect default Node/process metrics.
+initMetrics({ component: "api" });
 
 import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";

@@ -22,6 +22,7 @@ import {
 } from "@naary/contracts";
 import { getPrisma } from "@naary/db";
 import { getBudget } from "@naary/usage";
+import { executionsStarted } from "../common/metrics";
 import { type GraphSnapshot, GraphsService } from "../graphs/graphs.service";
 import { connectTemporal } from "../temporal/client";
 
@@ -197,6 +198,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     await getPrisma().execution.create({
       data: { workflowId, tenantId, workflowKey },
     });
+    executionsStarted.inc({ workflowKey });
     return { workflowId };
   }
 

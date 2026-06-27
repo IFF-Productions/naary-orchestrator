@@ -1,5 +1,6 @@
 import { Injectable, type NestMiddleware } from "@nestjs/common";
 import { type Logger, createLogger, newCorrelationId } from "@naary/logging";
+import { httpDuration, httpRequests } from "./metrics";
 
 /** Minimal shapes — avoids a hard dependency on the express types here. */
 interface Req {
@@ -36,15 +37,19 @@ export class RequestLoggerMiddleware implements NestMiddleware {
 
     const start = process.hrtime.bigint();
     res.on("finish", () => {
-      const durationMs =
-        Math.round(Number(process.hrtime.bigint() - start) / 1e4) / 100;
+      const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
+      const method = req.method ?? "UNKNOWN";
+      const status = String(res.statusCode);
+      // Low-cardinality labels only (method + status) — never the path (ids).
+      httpRequests.inc({ method, status });
+      httpDuration.observe({ method, status }, elapsedMs / 1000);
       this.logger.info(
         {
           requestId,
           method: req.method,
           path: req.originalUrl ?? req.url,
           statusCode: res.statusCode,
-          durationMs,
+          durationMs: Math.round(elapsedMs * 100) / 100,
           tenantId: req.principal?.tenantId,
         },
         "request",
