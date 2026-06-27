@@ -36,6 +36,19 @@ model Execution {
   @@index([tenantId])
 }
 
+// Recurring runs: a Temporal Schedule (cron) that starts a workflow. The row is
+// the tenant-scoped index/registry; Temporal owns the schedule + its firing.
+model Schedule {
+  id          String   @id // the Temporal scheduleId
+  tenantId    String
+  workflowKey String // which saved graph it runs
+  cron        String // cron expression
+  paused      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId])
+}
+
 // Versioned graph definitions (Slice #5). Postgres owns graph DEFINITIONS; each
 // run snapshots an immutable version (content-hashed) so editing a flow can't
 // corrupt an in-flight execution.

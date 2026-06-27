@@ -13,6 +13,10 @@ export const PAGE_META: Record<string, [string, string]> = {
     "Runs",
     "Durable execution history — including runs paused for human approval.",
   ],
+  "/app/schedules": [
+    "Schedules",
+    "Recurring runs — start a workflow on a cron (Temporal Schedules).",
+  ],
   "/app/templates": [
     "Templates",
     "Production-ready agent workflows you can fork in one click.",
