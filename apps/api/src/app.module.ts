@@ -14,6 +14,7 @@ import { ExecutionsModule } from "./executions/executions.module";
 import { GraphsModule } from "./graphs/graphs.module";
 import { HealthModule } from "./health/health.module";
 import { MembersModule } from "./members/members.module";
+import { SchedulesModule } from "./schedules/schedules.module";
 import { SecretsModule } from "./secrets/secrets.module";
 import { SettingsModule } from "./settings/settings.module";
 import { TemplatesModule } from "./templates/templates.module";
@@ -37,6 +38,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     MembersModule,
     SettingsModule,
     TemplatesModule,
+    SchedulesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

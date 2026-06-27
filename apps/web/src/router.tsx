@@ -41,6 +41,10 @@ export const router = createBrowserRouter([
           },
           { path: "runs", ...lazy(() => import("./screens/app/Runs"), "Runs") },
           {
+            path: "schedules",
+            ...lazy(() => import("./screens/app/Schedules"), "Schedules"),
+          },
+          {
             path: "runs/:id",
             ...lazy(() => import("./screens/app/RunDetail"), "RunDetail"),
           },

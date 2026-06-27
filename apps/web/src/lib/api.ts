@@ -195,7 +195,52 @@ export const api = {
   getBudget(tenantId: string): Promise<BudgetView> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/budget`);
   },
+  // --- Schedules (recurring runs, Temporal Schedules) ---
+  listSchedules(tenantId: string): Promise<ScheduleRow[]> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/schedules`);
+  },
+  createSchedule(
+    tenantId: string,
+    input: { workflowKey: string; cron: string },
+  ): Promise<ScheduleRow> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/schedules`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  setSchedulePaused(
+    tenantId: string,
+    scheduleId: string,
+    paused: boolean,
+  ): Promise<void> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/schedules/${encodeURIComponent(scheduleId)}/pause`,
+      { method: "PUT", body: JSON.stringify({ paused }) },
+    );
+  },
+  runScheduleNow(tenantId: string, scheduleId: string): Promise<void> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/schedules/${encodeURIComponent(scheduleId)}/trigger`,
+      { method: "POST" },
+    );
+  },
+  deleteSchedule(tenantId: string, scheduleId: string): Promise<void> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/schedules/${encodeURIComponent(scheduleId)}`,
+      { method: "DELETE" },
+    );
+  },
 };
+
+/** A recurring schedule (mirrors the API's ScheduleView). */
+export interface ScheduleRow {
+  id: string;
+  workflowKey: string;
+  cron: string;
+  paused: boolean;
+  createdAt: string;
+  nextRunAt: string | null;
+}
 
 /** A connected MCP server / app (mirrors the API's ConnectionView; Date → string over JSON). */
 export interface ConnectionRow {
