@@ -69,6 +69,18 @@ function costFromCtx(ctx: Record<string, unknown> | undefined): number | null {
   return typeof c === "number" ? c : null;
 }
 
+/** The Start node's configured sample input (used as the default manual-run input). */
+function startSampleInput(
+  graph: GraphSnapshot["graph"],
+): Record<string, unknown> | undefined {
+  const start = graph.nodes.find((n) => n.id === graph.startNodeId);
+  const sample = (start?.config as { sampleInput?: unknown } | undefined)
+    ?.sampleInput;
+  return sample && typeof sample === "object" && !Array.isArray(sample)
+    ? (sample as Record<string, unknown>)
+    : undefined;
+}
+
 /**
  * Wraps the Temporal client: start an execution, signal approval, query state.
  * The client connects once at boot and closes on shutdown.
@@ -108,10 +120,15 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         `No '${workflowKey}' graph for this tenant — save one first`,
       );
     }
+    // Default input precedence: explicit body input → the Start node's configured
+    // sampleInput → a generic fallback. Lets a workflow define realistic test data.
     return this.startGraph(
       `exec-${tenantId}`,
       snapshot,
-      input ?? { message: "I was charged twice this month" },
+      input ??
+        startSampleInput(snapshot.graph) ?? {
+          message: "I was charged twice this month",
+        },
       tenantId,
       workflowKey,
     );

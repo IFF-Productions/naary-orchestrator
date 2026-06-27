@@ -77,10 +77,11 @@ export async function runGraph(
   wf.setHandler(approvalSignal, (s) => {
     approval = s;
   });
-  wf.setHandler(
-    stateQuery,
-    (): ExecutionState => ({ status, currentNodeId, ctx }),
-  );
+  wf.setHandler(stateQuery, (): ExecutionState => ({
+    status,
+    currentNodeId,
+    ctx,
+  }));
 
   const nodeById = new Map<string, NodeDef>(graph.nodes.map((n) => [n.id, n]));
 
@@ -140,13 +141,28 @@ export async function runGraph(
         ctx.__costUsd = costUsd;
         return null;
       }
-      case "humanApproval":
+      case "humanApproval": {
         status = "awaiting_approval";
-        await wf.condition(() => approval !== undefined); // durable pause
+        // Optional auto-reject timeout (durable Temporal timer; deterministic).
+        const approvalCfg = (node.config ?? {}) as { timeoutHours?: number };
+        const timeoutMs =
+          typeof approvalCfg.timeoutHours === "number" &&
+          approvalCfg.timeoutHours > 0
+            ? approvalCfg.timeoutHours * 3_600_000
+            : undefined;
+        let decided = true;
+        if (timeoutMs !== undefined) {
+          // condition(fn, timeout) → true if signalled, false if it timed out.
+          decided = await wf.condition(() => approval !== undefined, timeoutMs);
+        } else {
+          await wf.condition(() => approval !== undefined); // wait forever
+        }
         status = "running";
+        if (!decided) return "rejected"; // timed out → auto-reject
         if (!approval!.approved) return "rejected";
         approval = undefined; // consume so a later loop iteration can pause again
         return null;
+      }
     }
     return null;
   }

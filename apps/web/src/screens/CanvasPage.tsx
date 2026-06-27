@@ -27,9 +27,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { NodeType } from "@naary/dsl";
 import { Button } from "../components";
-import { api, type GraphSummary, UnauthorizedError } from "../lib/api";
+import {
+  api,
+  type GraphSummary,
+  UnauthorizedError,
+  type WebhookRow,
+} from "../lib/api";
 import { compileGraph } from "../lib/compile-graph";
 import { decompileGraph } from "../lib/decompile-graph";
+import type { JsonSchemaObject } from "../lib/schema-fields";
+import { SchemaEditor } from "./canvas/SchemaFieldEditor";
 import {
   type CanvasEdge,
   type CanvasNode,
@@ -210,8 +217,24 @@ export function CanvasPage() {
   // The saved workflowKey (empty until first save of a NEW workflow → slug(name)).
   const [workflowKey, setWorkflowKey] = useState("");
   const [workflows, setWorkflows] = useState<GraphSummary[]>([]);
+  const [webhooks, setWebhooks] = useState<WebhookRow[]>([]);
 
   const keyParam = searchParams.get("key");
+
+  // Registered webhook endpoints (so a webhookTrigger node can show its hook URL).
+  useEffect(() => {
+    let live = true;
+    api
+      .getMe()
+      .then((me) => api.listWebhooks(me.tenantId))
+      .then((ws) => live && setWebhooks(ws))
+      .catch(() => {
+        /* unauthenticated / none — webhook node shows the register hint */
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   // Load the workflow list (for the selector) + open ?key= if present.
   useEffect(() => {
@@ -277,6 +300,21 @@ export function CanvasPage() {
 
   const selected = nodes.find((n) => n.selected);
   const selectedEdge = edges.find((e) => e.selected);
+
+  // Webhook endpoint URLs registered for THIS workflow (shown in the webhook node).
+  const hookUrls = webhooks
+    .filter((w) => workflowKey && w.workflowId === workflowKey)
+    .map((w) => `/hooks/${w.id}`);
+
+  // Close the inspector modal by clearing the react-flow selection.
+  function closeInspector(): void {
+    setNodes((ns) =>
+      ns.map((n) => (n.selected ? { ...n, selected: false } : n)),
+    );
+    setEdges((es) =>
+      es.map((e) => (e.selected ? { ...e, selected: false } : e)),
+    );
+  }
 
   function addNode(kind: NodeType) {
     const id = `${kind}-${crypto.randomUUID().slice(0, 8)}`;
@@ -569,16 +607,13 @@ export function CanvasPage() {
             <Controls />
           </ReactFlow>
         </div>
+      </div>
 
-        {/* config panel */}
-        <aside
-          style={{
-            width: 248,
-            padding: 16,
-            borderLeft: "1px solid var(--line)",
-            background: "var(--surface)",
-            overflowY: "auto",
-          }}
+      {/* node / edge editor — a modal so it has room for the richer config */}
+      {(selected || selectedEdge) && (
+        <InspectorModal
+          title={selected ? "Edit node" : "Edit branch condition"}
+          onClose={closeInspector}
         >
           {selected ? (
             <ConfigPanel
@@ -587,6 +622,7 @@ export function CanvasPage() {
               upstreamIds={nodes
                 .filter((n) => n.id !== selected.id)
                 .map((n) => n.id)}
+              hookUrls={hookUrls}
               onChange={(patch) => updateConfig(selected.id, patch)}
             />
           ) : selectedEdge ? (
@@ -596,12 +632,89 @@ export function CanvasPage() {
               onChange={(patch) => updateEdgeCondition(selectedEdge.id, patch)}
               onClear={() => clearEdgeCondition(selectedEdge.id)}
             />
-          ) : (
-            <div style={{ fontSize: 13, color: "var(--ink-3)" }}>
-              Select a node or edge to edit it.
-            </div>
-          )}
-        </aside>
+          ) : null}
+        </InspectorModal>
+      )}
+    </div>
+  );
+}
+
+/** Centered modal overlay for the node/edge editor; backdrop + Esc close it. */
+function InspectorModal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop click-to-close; Esc handled below
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 50,
+        padding: 24,
+      }}
+    >
+      <div
+        // biome-ignore lint/a11y/useKeyWithClickEvents: stop backdrop close when clicking inside
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 520,
+          maxWidth: "100%",
+          maxHeight: "85vh",
+          display: "flex",
+          flexDirection: "column",
+          background: "var(--surface)",
+          border: "1px solid var(--line)",
+          borderRadius: 12,
+          boxShadow: "0 12px 40px rgba(0,0,0,.4)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "12px 16px",
+            borderBottom: "1px solid var(--line)",
+          }}
+        >
+          <strong style={{ fontSize: 14 }}>{title}</strong>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            style={{
+              border: "1px solid var(--line-2)",
+              background: "var(--card)",
+              color: "var(--ink-2)",
+              borderRadius: 6,
+              cursor: "pointer",
+              padding: "2px 9px",
+              fontSize: 14,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+        <div style={{ padding: 16, overflowY: "auto" }}>{children}</div>
       </div>
     </div>
   );
@@ -626,10 +739,12 @@ interface BindingRow {
 function ConfigPanel({
   node,
   upstreamIds,
+  hookUrls,
   onChange,
 }: {
   node: Node<NaaryData>;
   upstreamIds: string[];
+  hookUrls: string[];
   onChange: (patch: Record<string, unknown>) => void;
 }) {
   const kind = node.data.kind;
@@ -770,12 +885,13 @@ function ConfigPanel({
             />
           </div>
 
-          <JsonField
-            label="Structured output (JSON Schema)"
-            value={obj("outputSchema")}
-            placeholder={'{\n  "type": "object",\n  "properties": { … }\n}'}
-            onChange={(v) => onChange({ outputSchema: v })}
-          />
+          <div>
+            <RowHead label="Structured output" value="fields" />
+            <SchemaEditor
+              schema={obj("outputSchema") as JsonSchemaObject | undefined}
+              onChange={(v) => onChange({ outputSchema: v })}
+            />
+          </div>
 
           <Labeled label="Max output tokens">
             <input
@@ -848,9 +964,100 @@ function ConfigPanel({
         </>
       )}
 
-      {kind !== "agent" && kind !== "mcpTool" && (
+      {kind === "humanApproval" && (
+        <>
+          <Labeled label="Approval title">
+            <input
+              value={str("title")}
+              onChange={(e) => onChange({ title: e.target.value })}
+              style={inputStyle}
+              placeholder="Approve refund?"
+            />
+          </Labeled>
+          <Labeled label="Instructions">
+            <textarea
+              value={str("instructions")}
+              onChange={(e) => onChange({ instructions: e.target.value })}
+              rows={3}
+              style={textareaStyle}
+              placeholder="What the approver should check…"
+            />
+          </Labeled>
+          <Labeled label="Auto-reject after (hours)">
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={num("timeoutHours") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  timeoutHours: e.target.value
+                    ? Number(e.target.value)
+                    : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="blank = wait forever"
+            />
+          </Labeled>
+        </>
+      )}
+
+      {kind === "start" && (
+        <JsonField
+          label="Sample input (JSON)"
+          value={obj("sampleInput")}
+          placeholder={'{\n  "message": "I was charged twice"\n}'}
+          onChange={(v) => onChange({ sampleInput: v })}
+        />
+      )}
+
+      {kind === "webhookTrigger" && <WebhookInfo hookUrls={hookUrls} />}
+
+      {kind === "end" && (
         <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
-          This node has no configuration.
+          The terminal node — no configuration.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Read-only webhook binding: the registered endpoint URL(s) for this workflow
+ *  (config lives in the registry, not the node). Empty → guidance to register. */
+function WebhookInfo({ hookUrls }: { hookUrls: string[] }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
+        This workflow is webhook-triggered. The inbound event becomes the
+        trigger output.
+      </div>
+      {hookUrls.length > 0 ? (
+        <div>
+          <RowHead label="Endpoint(s)" value={`${hookUrls.length}`} />
+          {hookUrls.map((u) => (
+            <div
+              key={u}
+              className="mono"
+              style={{
+                fontSize: 11,
+                color: "var(--ink)",
+                background: "var(--card-2)",
+                border: "1px solid var(--line-2)",
+                borderRadius: 6,
+                padding: "6px 8px",
+                marginBottom: 4,
+                wordBreak: "break-all",
+              }}
+            >
+              POST {u}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
+          No endpoint registered yet — add one on the Integrations screen (it'll
+          be bound to this workflow's key). Save the workflow first.
         </div>
       )}
     </div>
