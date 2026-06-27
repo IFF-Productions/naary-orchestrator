@@ -9,6 +9,13 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      // @naary/dsl ships CommonJS (dist), which leaks `exports` into the browser
+      // bundle (runtime "exports is not defined"). It's pure/platform-agnostic, so
+      // bundle it from TS SOURCE as ESM instead — no CJS interop needed. (Types
+      // still resolve via the package's dist .d.ts for tsc.)
+      "@naary/dsl": fileURLToPath(
+        new URL("../../packages/dsl/src/index.ts", import.meta.url),
+      ),
     },
   },
   server: {

@@ -297,10 +297,12 @@ The web app's **Workflow canvas** (`/app/canvas`) is a drag-and-drop editor
 (react-flow): add nodes from the palette, connect handles, edit per-node config,
 and set **edge conditions** (select an edge → path / op / value) to branch on prior
 node output — compiled to the DSL's `EdgeCondition` and honored by the interpreter.
-A live status mirrors the server's `validateGraph`. **Run** compiles the canvas to
-a `GraphDef`, `POST /graphs` saves it (versioned, content-hashed) under the
-`canvas` workflowKey, then `POST /executions {workflowKey:"canvas"}` starts it and
-navigates to the run view. It seeds a credential-free `start → approval → end`
+A live status mirrors the server's `validateGraph`. Workflows are **named**: pick a
+name (→ a stable `workflowKey`) or open an existing one from the selector or the
+**Workflows** screen (`GET /graphs` lists them; `GET /graphs/:key` opens one, auto-
+laid-out). **Save & run** compiles the canvas to a `GraphDef`, `POST /graphs` saves
+it (versioned, content-hashed) under its key, then `POST /executions {workflowKey}`
+starts it and navigates to the run view. It seeds a credential-free `start → approval → end`
 graph, so a first Run completes (pauses at approval → Approve → done) without a
 BYOK LLM key. The compile logic is pure + unit-tested (`compile-graph.ts`).
 

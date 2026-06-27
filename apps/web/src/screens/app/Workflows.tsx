@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Button,
@@ -8,7 +8,90 @@ import {
   SearchInput,
   StatusPill,
 } from "../../components";
+import { api, type GraphSummary } from "../../lib/api";
 import { workflows, type WorkflowRow } from "../../lib/mock";
+
+/** The tenant's real saved workflows (from POST /graphs via the canvas). Open one
+ *  to edit it on the canvas, or create a new one. The styled table below is still
+ *  prototype/mock data (run counts, success rates) not yet wired to the backend. */
+function SavedWorkflows() {
+  const navigate = useNavigate();
+  const [rows, setRows] = useState<GraphSummary[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    api
+      .listGraphs()
+      .then((ws) => live && setRows(ws))
+      .catch((e) => live && setErr(e instanceof Error ? e.message : "failed"));
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  return (
+    <Card style={{ padding: 16, marginBottom: 18 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 10,
+        }}
+      >
+        <strong style={{ fontSize: 14 }}>Saved workflows (live)</strong>
+        <Button
+          variant="secondary"
+          icon="plus"
+          onClick={() => navigate("/app/canvas")}
+        >
+          New on canvas
+        </Button>
+      </div>
+      {err && (
+        <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>
+          Sign in to see your saved workflows.
+        </div>
+      )}
+      {!err && rows?.length === 0 && (
+        <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>
+          No saved workflows yet — create one on the canvas.
+        </div>
+      )}
+      {!err && rows === null && (
+        <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Loading…</div>
+      )}
+      {rows?.map((w) => (
+        <div
+          key={w.workflowKey}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "9px 4px",
+            borderTop: "1px solid var(--line)",
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{w.name}</div>
+            <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+              {w.workflowKey} · v{w.version}
+            </div>
+          </div>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              navigate(`/app/canvas?key=${encodeURIComponent(w.workflowKey)}`)
+            }
+          >
+            Open
+          </Button>
+        </div>
+      ))}
+    </Card>
+  );
+}
 
 const FILTERS = [
   { label: "All", count: 28 },
@@ -59,6 +142,9 @@ export function Workflows() {
           New workflow
         </Button>
       </div>
+
+      {/* live: real saved workflows from the API */}
+      <SavedWorkflows />
 
       {/* filter bar */}
       <div

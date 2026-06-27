@@ -51,7 +51,28 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export interface GraphSummary {
+  workflowKey: string;
+  name: string;
+  version: number;
+  updatedAt: string;
+}
+export interface NamedGraph {
+  workflowKey: string;
+  name: string;
+  version: number;
+  graph: GraphDef;
+}
+
 export const api = {
+  // List the tenant's workflows (latest version per key).
+  listGraphs(): Promise<GraphSummary[]> {
+    return http("/graphs");
+  },
+  // Fetch one workflow's latest graph (to open in the canvas).
+  getGraph(workflowKey: string): Promise<NamedGraph> {
+    return http(`/graphs/${encodeURIComponent(workflowKey)}`);
+  },
   // Save a compiled graph under a workflowKey (versioned + content-hashed server-side).
   saveGraph(
     workflowKey: string,
