@@ -276,13 +276,30 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
 
   async getState(id: string, tenantId: string): Promise<ExecutionState> {
     await this.assertOwner(id, tenantId);
+    const handle = this.client.workflow.getHandle(id);
     try {
-      return await this.client.workflow.getHandle(id).query(stateQuery);
+      // Live path: a RUNNING workflow answers the state query directly.
+      return await handle.query(stateQuery);
     } catch (e) {
-      if (e instanceof WorkflowNotFoundError) {
-        throw new NotFoundException("Execution not found");
+      if (!(e instanceof WorkflowNotFoundError)) throw e;
+      // A CLOSED workflow can't be queried (gRPC NOT_FOUND → WorkflowNotFoundError).
+      // Recover its final state from the workflow's RETURN value: runGraph returns
+      // { status, ctx }. (assertOwner already passed, so the run exists in our DB.)
+      try {
+        const r = (await handle.result()) as {
+          status: ExecutionStatus;
+          ctx: Record<string, unknown>;
+        };
+        return { status: r.status, currentNodeId: "", ctx: r.ctx };
+      } catch (re) {
+        // result() also NOT_FOUND → the execution is truly gone from Temporal
+        // (e.g. retention expired). Re-throw anything else (failed/terminated runs
+        // surface their real error to the caller).
+        if (re instanceof WorkflowNotFoundError) {
+          throw new NotFoundException("Execution not found");
+        }
+        throw re;
       }
-      throw e;
     }
   }
 
