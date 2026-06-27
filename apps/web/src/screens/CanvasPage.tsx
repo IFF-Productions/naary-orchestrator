@@ -93,6 +93,7 @@ function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
   const kind = data.kind;
   const accent = ACCENT[kind];
   const isEntry = kind === "start" || kind === "webhookTrigger";
+  const subtitle = nodeSubtitle(kind, data.config);
   return (
     <div
       style={{
@@ -110,10 +111,53 @@ function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
     >
       {!isEntry && <Handle type="target" position={Position.Left} />}
       <div style={{ height: 4, background: accent }} />
-      <div style={{ padding: "9px 12px", fontWeight: 600 }}>{LABEL[kind]}</div>
+      <div
+        style={{
+          padding: subtitle ? "9px 12px 4px" : "9px 12px",
+          fontWeight: 600,
+        }}
+      >
+        {LABEL[kind]}
+      </div>
+      {subtitle && (
+        <div
+          className="mono"
+          style={{
+            padding: "0 12px 9px",
+            fontSize: 10,
+            color: "var(--ink-3)",
+            maxWidth: 180,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {subtitle}
+        </div>
+      )}
       {kind !== "end" && <Handle type="source" position={Position.Right} />}
     </div>
   );
+}
+
+/** A one-line config preview under the node title (model for agents, the tool for
+ *  mcpTool) — mirrors the design's nodes showing their key config. */
+function nodeSubtitle(
+  kind: NodeType,
+  config?: Record<string, unknown>,
+): string | undefined {
+  if (!config) return undefined;
+  if (kind === "agent") {
+    const model = config.model as string | undefined;
+    return model ? model.replace("claude-", "") : undefined;
+  }
+  if (kind === "mcpTool") {
+    const tool = config.tool as string | undefined;
+    const conn = config.connectionId as string | undefined;
+    if (tool && conn) return `${conn} · ${tool}`;
+    return tool || conn || undefined;
+  }
+  return undefined;
 }
 
 const nodeTypes = { naary: NaaryNode };
@@ -540,6 +584,9 @@ export function CanvasPage() {
             <ConfigPanel
               key={selected.id}
               node={selected}
+              upstreamIds={nodes
+                .filter((n) => n.id !== selected.id)
+                .map((n) => n.id)}
               onChange={(patch) => updateConfig(selected.id, patch)}
             />
           ) : selectedEdge ? (
@@ -560,39 +607,193 @@ export function CanvasPage() {
   );
 }
 
-/** Per-type config editor for the selected node. Only the types with meaningful
- *  config (agent, mcpTool) expose fields; others are structural. */
+/** Provider/model options the runtime actually supports today (buildModel is
+ *  anthropic-only — offering others would author nodes that fail at run time). */
+const PROVIDERS = ["anthropic"] as const;
+const MODELS: Record<string, string[]> = {
+  anthropic: ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"],
+};
+
+/** One upstream→argument binding row in the mcpTool editor. */
+interface BindingRow {
+  from: string;
+  path?: string;
+}
+
+/** Per-type config editor for the selected node — matches the design's inspector.
+ *  Only the types with meaningful config (agent, mcpTool) expose fields; others
+ *  are structural. Every field maps to a real DSL/runtime config key. */
 function ConfigPanel({
   node,
+  upstreamIds,
   onChange,
 }: {
   node: Node<NaaryData>;
+  upstreamIds: string[];
   onChange: (patch: Record<string, unknown>) => void;
 }) {
   const kind = node.data.kind;
   const config = node.data.config ?? {};
   const str = (k: string) => (config[k] as string | undefined) ?? "";
+  const num = (k: string) => config[k] as number | undefined;
+  const obj = (k: string) =>
+    (config[k] as Record<string, unknown> | undefined) ?? undefined;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div>
-        <div style={{ fontSize: 11, color: "var(--ink-3)" }}>NODE</div>
-        <div style={{ fontWeight: 600 }}>{LABEL[kind]}</div>
-        <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>
-          id: {node.id}
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+        <span
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 8,
+            flex: "none",
+            background: `color-mix(in srgb, ${ACCENT[kind]} 18%, transparent)`,
+            color: ACCENT[kind],
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: "currentColor",
+            }}
+          />
+        </span>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>{LABEL[kind]}</div>
+          <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
+            {kind} · {node.id}
+          </div>
         </div>
       </div>
 
       {kind === "agent" && (
-        <Labeled label="System prompt">
-          <textarea
-            value={str("systemPrompt")}
-            onChange={(e) => onChange({ systemPrompt: e.target.value })}
-            rows={5}
-            style={textareaStyle}
-            placeholder="You are a support triage agent…"
+        <>
+          <Labeled label="Provider">
+            <select
+              value={str("provider") || "anthropic"}
+              onChange={(e) => onChange({ provider: e.target.value })}
+              style={inputStyle}
+            >
+              {PROVIDERS.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </Labeled>
+
+          <Labeled label="Model">
+            <select
+              value={str("model") || MODELS.anthropic[0]}
+              onChange={(e) => onChange({ model: e.target.value })}
+              style={inputStyle}
+            >
+              {(MODELS[str("provider") || "anthropic"] ?? []).map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <div
+              style={{
+                display: "flex",
+                gap: 6,
+                marginTop: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              {(MODELS[str("provider") || "anthropic"] ?? []).map((m) => {
+                const active = (str("model") || MODELS.anthropic[0]) === m;
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => onChange({ model: m })}
+                    className="mono"
+                    style={{
+                      fontSize: 10.5,
+                      cursor: "pointer",
+                      border: `1px solid ${active ? ACCENT.agent : "var(--line-2)"}`,
+                      color: active ? ACCENT.agent : "var(--ink-2)",
+                      background: "var(--card)",
+                      padding: "3px 9px",
+                      borderRadius: 6,
+                    }}
+                  >
+                    {m.replace("claude-", "")}
+                  </button>
+                );
+              })}
+            </div>
+          </Labeled>
+
+          <div>
+            <RowHead
+              label="Temperature"
+              value={
+                num("temperature") === undefined
+                  ? "default"
+                  : (num("temperature") as number).toFixed(2)
+              }
+            />
+            <input
+              type="range"
+              min={0}
+              max={2}
+              step={0.05}
+              value={num("temperature") ?? 0}
+              onChange={(e) =>
+                onChange({ temperature: Number(e.target.value) })
+              }
+              style={{ width: "100%", accentColor: ACCENT.agent }}
+            />
+          </div>
+
+          <div>
+            <RowHead
+              label="System prompt"
+              value={`~${Math.ceil(str("systemPrompt").length / 4)} tok`}
+            />
+            <textarea
+              value={str("systemPrompt")}
+              onChange={(e) => onChange({ systemPrompt: e.target.value })}
+              rows={5}
+              style={textareaStyle}
+              placeholder="You are a support triage agent…"
+            />
+          </div>
+
+          <JsonField
+            label="Structured output (JSON Schema)"
+            value={obj("outputSchema")}
+            placeholder={'{\n  "type": "object",\n  "properties": { … }\n}'}
+            onChange={(v) => onChange({ outputSchema: v })}
           />
-        </Labeled>
+
+          <Labeled label="Max output tokens">
+            <input
+              type="number"
+              min={1}
+              value={num("maxOutputTokens") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  maxOutputTokens: e.target.value
+                    ? Number(e.target.value)
+                    : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="1024 (default)"
+            />
+          </Labeled>
+        </>
       )}
 
       {kind === "mcpTool" && (
@@ -613,6 +814,37 @@ function ConfigPanel({
               placeholder="add_pull_request_comment"
             />
           </Labeled>
+
+          <BindingsEditor
+            bindings={
+              obj("argumentBindings") as Record<string, BindingRow> | undefined
+            }
+            upstreamIds={upstreamIds}
+            onChange={(v) => onChange({ argumentBindings: v })}
+          />
+
+          <JsonField
+            label="Static arguments (JSON)"
+            value={obj("arguments")}
+            placeholder={'{\n  "state": "open"\n}'}
+            onChange={(v) => onChange({ arguments: v })}
+          />
+
+          <Labeled label="Cost (USD per call)">
+            <input
+              type="number"
+              min={0}
+              step={0.001}
+              value={num("costUsd") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  costUsd: e.target.value ? Number(e.target.value) : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="0.00"
+            />
+          </Labeled>
         </>
       )}
 
@@ -621,6 +853,217 @@ function ConfigPanel({
           This node has no configuration.
         </div>
       )}
+    </div>
+  );
+}
+
+/** Uppercase section label + a right-aligned mono value (design's field heads). */
+function RowHead({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 6,
+      }}
+    >
+      <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{label}</span>
+      <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+/** A JSON object field: edits as text, commits the parsed object on valid JSON,
+ *  shows an inline error otherwise (last valid value stays in the config). Empty
+ *  text clears the field (undefined). */
+function JsonField({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: Record<string, unknown> | undefined;
+  placeholder?: string;
+  onChange: (v: Record<string, unknown> | undefined) => void;
+}) {
+  const [text, setText] = useState(value ? JSON.stringify(value, null, 2) : "");
+  const [error, setError] = useState<string | null>(null);
+
+  function commit(next: string) {
+    setText(next);
+    const trimmed = next.trim();
+    if (!trimmed) {
+      setError(null);
+      onChange(undefined);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        Array.isArray(parsed)
+      ) {
+        setError("Must be a JSON object");
+        return;
+      }
+      setError(null);
+      onChange(parsed as Record<string, unknown>);
+    } catch {
+      setError("Invalid JSON");
+    }
+  }
+
+  return (
+    <div>
+      <RowHead label={label} value={error ? "⚠ error" : "JSON"} />
+      <textarea
+        value={text}
+        onChange={(e) => commit(e.target.value)}
+        rows={5}
+        spellCheck={false}
+        className="mono"
+        style={{
+          ...textareaStyle,
+          fontFamily: "var(--font-mono)",
+          fontSize: 11.5,
+          borderColor: error ? "var(--state-error)" : "var(--line-2)",
+        }}
+        placeholder={placeholder}
+      />
+      {error && (
+        <div
+          style={{ fontSize: 11, color: "var(--state-error)", marginTop: 4 }}
+        >
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Editor for mcpTool argumentBindings: argName → { from: nodeId, path? }. This is
+ *  how data threads between nodes (an arg bound to an upstream node's output). */
+function BindingsEditor({
+  bindings,
+  upstreamIds,
+  onChange,
+}: {
+  bindings: Record<string, BindingRow> | undefined;
+  upstreamIds: string[];
+  onChange: (v: Record<string, BindingRow> | undefined) => void;
+}) {
+  const entries = Object.entries(bindings ?? {});
+
+  function setEntry(oldName: string, name: string, row: BindingRow): void {
+    const next: Record<string, BindingRow> = {};
+    for (const [k, v] of entries) {
+      if (k === oldName) continue;
+      next[k] = v;
+    }
+    if (name.trim()) next[name.trim()] = row;
+    onChange(Object.keys(next).length ? next : undefined);
+  }
+  function remove(name: string): void {
+    const next = Object.fromEntries(entries.filter(([k]) => k !== name));
+    onChange(Object.keys(next).length ? next : undefined);
+  }
+  function add(): void {
+    const next = { ...(bindings ?? {}), "": { from: upstreamIds[0] ?? "" } };
+    onChange(next);
+  }
+
+  return (
+    <div>
+      <RowHead label="Argument bindings" value={`${entries.length} bound`} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {entries.map(([name, row], i) => (
+          <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional, names are editable/duplicable
+            key={i}
+            style={{
+              border: "1px solid var(--line)",
+              borderRadius: 8,
+              padding: 8,
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }}
+          >
+            <div style={{ display: "flex", gap: 6 }}>
+              <input
+                value={name}
+                onChange={(e) => setEntry(name, e.target.value, row)}
+                style={{ ...inputStyle, flex: 1 }}
+                placeholder="arg name"
+              />
+              <button
+                type="button"
+                aria-label="Remove binding"
+                onClick={() => remove(name)}
+                style={{
+                  border: "1px solid var(--line-2)",
+                  background: "var(--card)",
+                  color: "var(--ink-3)",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  padding: "0 9px",
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <select
+                value={row.from}
+                onChange={(e) =>
+                  setEntry(name, name, { ...row, from: e.target.value })
+                }
+                style={{ ...inputStyle, flex: 1 }}
+              >
+                {upstreamIds.length === 0 && (
+                  <option value="">(no nodes)</option>
+                )}
+                {upstreamIds.map((id) => (
+                  <option key={id} value={id}>
+                    {id}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={row.path ?? ""}
+                onChange={(e) =>
+                  setEntry(name, name, {
+                    ...row,
+                    path: e.target.value || undefined,
+                  })
+                }
+                style={{ ...inputStyle, flex: 1 }}
+                placeholder="path (e.g. output.category)"
+              />
+            </div>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={add}
+          style={{
+            border: "1px dashed var(--line-2)",
+            background: "transparent",
+            color: "var(--ink-2)",
+            borderRadius: 8,
+            padding: 8,
+            fontSize: 11.5,
+            cursor: "pointer",
+          }}
+        >
+          + Add binding
+        </button>
+      </div>
     </div>
   );
 }

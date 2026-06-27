@@ -71,6 +71,10 @@ export interface AgentConfig {
   /** Per-node structured-output JSON Schema (Slice #6 / QA#9). When set, the agent
    *  is constrained to it; otherwise the default {category, urgency} schema. */
   outputSchema?: Record<string, unknown>;
+  /** Sampling temperature (0–2). Omitted ⇒ provider default. */
+  temperature?: number;
+  /** Per-node output cap; omitted ⇒ MAX_OUTPUT_TOKENS. Also sizes the budget estimate. */
+  maxOutputTokens?: number;
 }
 
 export interface AgentMeta {
@@ -188,6 +192,9 @@ export async function runAgent(
     // concurrent runs for one tenant can't all overshoot. The reservation counts
     // committed spend + other in-flight reservations. No budget set ⇒ no cap.
     let model = cfg.model;
+    // Per-node output cap (sizes both the budget estimate and the actual call) and
+    // optional sampling temperature.
+    const maxOutputTokens = cfg.maxOutputTokens ?? MAX_OUTPUT_TOKENS;
     const budget = await __agentDeps.getBudget(meta.tenantId);
     if (budget) {
       const estimateFor = (m: string) =>
@@ -196,7 +203,7 @@ export async function runAgent(
             provider: cfg.provider,
             model: m,
             systemPrompt: cfg.systemPrompt,
-            maxOutputTokens: MAX_OUTPUT_TOKENS,
+            maxOutputTokens,
           },
           input,
         );
@@ -255,7 +262,10 @@ export async function runAgent(
             )
           : defaultOutputSchema,
       }),
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      maxOutputTokens,
+      ...(cfg.temperature !== undefined
+        ? { temperature: cfg.temperature }
+        : {}),
     });
 
     // BILLING (CLAUDE.md rule 6): totalUsage sums across tool steps; guard the
