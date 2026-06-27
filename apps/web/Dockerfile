@@ -8,6 +8,23 @@ FROM node:22-bookworm-slim AS build
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 WORKDIR /app
+
+# Firebase web config — Vite inlines VITE_* env at build time, so these must be
+# present BEFORE `vite build`. Passed as build args from docker-compose/.env
+# (public values; UNSET ⇒ the SPA's Firebase login is unavailable).
+ARG VITE_FIREBASE_API_KEY
+ARG VITE_FIREBASE_AUTH_DOMAIN
+ARG VITE_FIREBASE_PROJECT_ID
+ARG VITE_FIREBASE_STORAGE_BUCKET
+ARG VITE_FIREBASE_MESSAGING_SENDER_ID
+ARG VITE_FIREBASE_APP_ID
+ENV VITE_FIREBASE_API_KEY=$VITE_FIREBASE_API_KEY \
+  VITE_FIREBASE_AUTH_DOMAIN=$VITE_FIREBASE_AUTH_DOMAIN \
+  VITE_FIREBASE_PROJECT_ID=$VITE_FIREBASE_PROJECT_ID \
+  VITE_FIREBASE_STORAGE_BUCKET=$VITE_FIREBASE_STORAGE_BUCKET \
+  VITE_FIREBASE_MESSAGING_SENDER_ID=$VITE_FIREBASE_MESSAGING_SENDER_ID \
+  VITE_FIREBASE_APP_ID=$VITE_FIREBASE_APP_ID
+
 COPY . .
 # Install workspace deps, build the web app's workspace deps (@naary/dsl — its
 # dist/ is .dockerignore'd, and the web build is vite-only so it won't build deps

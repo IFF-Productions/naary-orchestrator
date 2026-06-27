@@ -9,7 +9,7 @@ export interface MemberView {
 }
 
 /** Workspace member directory, per tenant. Not the identity source of truth
- *  (that's Keycloak/API tokens) — a lightweight list for the Team screen. */
+ *  (that's Firebase/API tokens) — a lightweight list for the Team screen. */
 @Injectable()
 export class MembersService {
   async list(tenantId: string): Promise<MemberView[]> {

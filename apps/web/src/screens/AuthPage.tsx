@@ -40,18 +40,40 @@ const stats = [
 
 export function AuthPage() {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, loginEmail, signupEmail, configured } = useAuth();
   const [mode, setMode] = useState<Mode>("login");
   const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [apiToken, setApiToken] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const copy = COPY[mode];
 
-  // Prototype auth: store the pasted API token (if any) so live Runs calls carry
-  // the bearer header, then enter the app. A real login that issues the token is
-  // a later product step.
-  function enter(): void {
-    if (apiToken.trim()) setToken(apiToken);
-    navigate("/app");
+  // Email/password via Firebase. On success, onAuthStateChanged flips the session
+  // and RequireAuth lets /app render. The pasted `nry_` token is the secondary
+  // path (no Firebase needed): store it and enter directly.
+  async function submit(): Promise<void> {
+    setError(null);
+    if (apiToken.trim()) {
+      setToken(apiToken);
+      navigate("/app");
+      return;
+    }
+    if (!email.trim() || !password) {
+      setError("Enter your email and password, or paste an API token.");
+      return;
+    }
+    setBusy(true);
+    try {
+      if (mode === "signup") await signupEmail(email.trim(), password);
+      else await loginEmail(email.trim(), password);
+      navigate("/app");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Authentication failed.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -260,25 +282,34 @@ export function AuthPage() {
             {copy.subtitle}
           </p>
 
-          {/* primary: real Keycloak (OIDC) login — Authorization Code + PKCE */}
+          {/* primary: real Firebase Google sign-in (popup). Disabled when the build
+              has no Firebase config — then only the `nry_` token paste works. */}
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <Button
-              variant="primary"
+              variant="secondary"
               block
-              iconRight="arrow-right"
-              onClick={() => login()}
+              disabled={!configured || busy}
+              onClick={async () => {
+                setError(null);
+                try {
+                  await login();
+                  navigate("/app");
+                } catch (e) {
+                  setError(
+                    e instanceof Error ? e.message : "Google sign-in failed.",
+                  );
+                }
+              }}
             >
-              Sign in with Keycloak
-            </Button>
-            {/* cosmetic placeholders — not wired to an IdP yet */}
-            <Button variant="secondary" block onClick={() => navigate("/app")}>
               <GoogleGlyph />
               Continue with Google
             </Button>
-            <Button variant="secondary" block onClick={() => navigate("/app")}>
-              <GitHubGlyph />
-              Continue with GitHub
-            </Button>
+            {!configured && (
+              <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
+                Firebase login isn’t configured for this build — paste an API
+                token below to continue.
+              </div>
+            )}
           </div>
 
           {/* divider */}
@@ -313,6 +344,8 @@ export function AuthPage() {
                 type="email"
                 placeholder="you@company.com"
                 autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
               />
             </Field>
 
@@ -342,6 +375,8 @@ export function AuthPage() {
                     mode === "login" ? "current-password" : "new-password"
                   }
                   style={{ paddingRight: 38 }}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                 />
                 <button
                   type="button"
@@ -383,14 +418,26 @@ export function AuthPage() {
           </div>
 
           {/* submit */}
+          {error && (
+            <div
+              style={{
+                marginTop: 16,
+                fontSize: 12.5,
+                color: "var(--state-error)",
+              }}
+            >
+              {error}
+            </div>
+          )}
           <div style={{ marginTop: 22 }}>
             <Button
               variant="primary"
               block
               iconRight="arrow-right"
-              onClick={enter}
+              disabled={busy}
+              onClick={() => void submit()}
             >
-              {copy.cta}
+              {busy ? "…" : copy.cta}
             </Button>
           </div>
 
@@ -476,20 +523,6 @@ function GoogleGlyph() {
         fill="#1976D2"
         d="M43.611 20.083H42V20H24v8h11.303c-.792 2.237-2.231 4.166-4.087 5.571.001-.001.002-.001.003-.002l6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"
       />
-    </svg>
-  );
-}
-
-function GitHubGlyph() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.009-.866-.014-1.7-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.523 2 12 2z" />
     </svg>
   );
 }

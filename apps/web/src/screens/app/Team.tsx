@@ -77,7 +77,7 @@ export function Team() {
         </div>
         <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
           {members ? `${members.length} members · ` : ""}roles are advisory
-          metadata (auth itself is Keycloak / API tokens).
+          metadata (auth itself is Firebase / API tokens).
         </div>
       </div>
 

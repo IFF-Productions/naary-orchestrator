@@ -8,21 +8,21 @@ import type { Reflector } from "@nestjs/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiTokenService } from "../src/auth/api-token.service";
 import { AuthGuard } from "../src/auth/auth.guard";
-import type { OidcVerifier } from "../src/auth/oidc-verifier";
+import type { FirebaseVerifier } from "../src/auth/firebase-verifier";
 
 const verify = vi.fn();
-const oidcVerify = vi.fn();
+const firebaseVerify = vi.fn();
 const getAllAndOverride = vi.fn();
-let oidcEnabled = false;
+let firebaseEnabled = false;
 
 function makeGuard(): AuthGuard {
-  const oidc = {
+  const firebase = {
     get enabled() {
-      return oidcEnabled;
+      return firebaseEnabled;
     },
-    verify: oidcVerify,
-  } as unknown as OidcVerifier;
-  return new AuthGuard({ verify } as unknown as ApiTokenService, oidc, {
+    verify: firebaseVerify,
+  } as unknown as FirebaseVerifier;
+  return new AuthGuard({ verify } as unknown as ApiTokenService, firebase, {
     getAllAndOverride,
   } as unknown as Reflector);
 }
@@ -44,8 +44,8 @@ function ctx(req: FakeReq): ExecutionContext {
 
 beforeEach(() => {
   verify.mockReset();
-  oidcVerify.mockReset();
-  oidcEnabled = false;
+  firebaseVerify.mockReset();
+  firebaseEnabled = false;
   getAllAndOverride.mockReset().mockReturnValue(false);
 });
 
@@ -80,10 +80,10 @@ describe("AuthGuard", () => {
     };
     await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
     expect(req.principal).toEqual({ tenantId: "t-1" });
-    expect(oidcVerify).not.toHaveBeenCalled();
+    expect(firebaseVerify).not.toHaveBeenCalled();
   });
 
-  it("401s a non-`nry_` token when OIDC is disabled (no Keycloak configured)", async () => {
+  it("401s a non-`nry_` token when Firebase is disabled (no service account)", async () => {
     const req: FakeReq = {
       headers: { authorization: "Bearer some.jwt.token" },
     };
@@ -91,12 +91,12 @@ describe("AuthGuard", () => {
       UnauthorizedException,
     );
     expect(verify).not.toHaveBeenCalled();
-    expect(oidcVerify).not.toHaveBeenCalled();
+    expect(firebaseVerify).not.toHaveBeenCalled();
   });
 
-  it("attaches tenant + subject from a valid Keycloak JWT when OIDC is enabled", async () => {
-    oidcEnabled = true;
-    oidcVerify.mockResolvedValue({ tenantId: "t-9", subject: "user-42" });
+  it("attaches tenant + subject from a valid Firebase ID token when enabled", async () => {
+    firebaseEnabled = true;
+    firebaseVerify.mockResolvedValue({ tenantId: "t-9", subject: "user-42" });
     const req: FakeReq = {
       headers: { authorization: "Bearer header.payload.sig" },
       path: "/executions",
@@ -106,9 +106,9 @@ describe("AuthGuard", () => {
     expect(verify).not.toHaveBeenCalled();
   });
 
-  it("401s when an enabled OIDC verifier rejects the JWT", async () => {
-    oidcEnabled = true;
-    oidcVerify.mockResolvedValue(null);
+  it("401s when an enabled Firebase verifier rejects the token", async () => {
+    firebaseEnabled = true;
+    firebaseVerify.mockResolvedValue(null);
     await expect(
       makeGuard().canActivate(
         ctx({ headers: { authorization: "Bearer bad.jwt" } }),

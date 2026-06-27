@@ -1,29 +1,43 @@
 /**
- * Auth context: initializes Keycloak once on mount and exposes session state +
- * login/logout to the app. OIDC is the primary login; the pasted `nry_` token
+ * Auth context: subscribes to Firebase auth state and exposes session state +
+ * login/logout to the app. Firebase is the primary login; the pasted `nry_` token
  * (handled in lib/auth.ts) remains a secondary path, so the app still renders if
- * Keycloak is unreachable (init failure → ready, not authenticated).
+ * Firebase isn't configured (no project → ready, not authenticated).
  */
+import { type User, onAuthStateChanged } from "firebase/auth";
 import {
+  type ReactNode,
   createContext,
   useContext,
   useEffect,
   useState,
-  type ReactNode,
 } from "react";
-import { initKeycloak, keycloak } from "../lib/keycloak";
+import {
+  auth,
+  logout as fbLogout,
+  firebaseConfigured,
+  loginWithEmail,
+  loginWithGoogle,
+  signupWithEmail,
+} from "../lib/firebase";
 
 export interface AuthState {
-  /** Keycloak init has finished (success or failure) — gates protected routes. */
+  /** Firebase auth init has resolved (success or failure) — gates protected routes. */
   ready: boolean;
-  /** A Keycloak session is active. */
+  /** A Firebase session is active. */
   authenticated: boolean;
-  /** OIDC subject (user id) and tenant claim, when logged in. */
+  /** Firebase uid and tenant custom-claim, when signed in. */
   subject?: string;
   tenant?: string;
-  /** Start the Authorization Code + PKCE redirect, returning to the app after. */
-  login: () => void;
-  /** End the Keycloak session and return to the sign-in screen. */
+  /** True when a Firebase web config was provided at build time (else login is
+   *  unavailable and only the `nry_` token paste works). */
+  configured: boolean;
+  /** Primary login (Google popup); awaitable so callers can surface errors. */
+  login: () => Promise<void>;
+  /** Email/password sign-in + sign-up (used by the auth screen). */
+  loginEmail: (email: string, password: string) => Promise<void>;
+  signupEmail: (email: string, password: string) => Promise<void>;
+  /** End the Firebase session and return to the sign-in screen. */
   logout: () => void;
 }
 
@@ -31,36 +45,57 @@ const AuthContext = createContext<AuthState | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
-  const [authenticated, setAuthenticated] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [tenant, setTenant] = useState<string | undefined>(undefined);
 
   useEffect(() => {
-    let mounted = true;
-    initKeycloak()
-      .then((auth) => {
-        if (mounted) {
-          setAuthenticated(auth);
-          setReady(true);
+    // No Firebase config (build without VITE_FIREBASE_*) ⇒ no session to restore;
+    // mark ready so the app renders (the `nry_` token paste still works).
+    if (!auth) {
+      setReady(true);
+      return;
+    }
+    // Fires once with the restored session (or null) on load, then on every
+    // sign-in/out. Resolving it flips `ready` so routes stop waiting.
+    const unsub = onAuthStateChanged(
+      auth,
+      async (u) => {
+        setUser(u);
+        if (u) {
+          try {
+            const res = await u.getIdTokenResult();
+            setTenant(res.claims.tenant as string | undefined);
+          } catch {
+            setTenant(undefined);
+          }
+        } else {
+          setTenant(undefined);
         }
-      })
-      .catch(() => {
-        // Keycloak unreachable — still let the app load (token-paste fallback).
-        if (mounted) setReady(true);
-      });
-    return () => {
-      mounted = false;
-    };
+        setReady(true);
+      },
+      () => setReady(true), // init error — still let the app load (token fallback)
+    );
+    return unsub;
   }, []);
 
   const value: AuthState = {
     ready,
-    authenticated,
-    subject: keycloak.tokenParsed?.sub,
-    tenant: (keycloak.tokenParsed as Record<string, unknown> | undefined)
-      ?.tenant as string | undefined,
-    login: () =>
-      keycloak.login({ redirectUri: `${window.location.origin}/app` }),
-    logout: () =>
-      keycloak.logout({ redirectUri: `${window.location.origin}/auth` }),
+    authenticated: Boolean(user),
+    subject: user?.uid,
+    tenant,
+    configured: firebaseConfigured,
+    login: async () => {
+      await loginWithGoogle();
+    },
+    loginEmail: async (email, password) => {
+      await loginWithEmail(email, password);
+    },
+    signupEmail: async (email, password) => {
+      await signupWithEmail(email, password);
+    },
+    logout: () => {
+      void fbLogout();
+    },
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

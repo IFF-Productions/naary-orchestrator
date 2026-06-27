@@ -48,33 +48,10 @@ services:
       timeout: 5s
       retries: 10
 
-  # Keycloak — OIDC identity provider for human logins (dual-auth alongside API
-  # tokens). Dev mode with the `naary` realm imported on start; the realm carries a
-  # `tenant` user-attribute mapper so access tokens include the tenantId claim.
-  # The admin password (no default) comes from the repo-root .env. See .env.example.
-  keycloak:
-    image: quay.io/keycloak/keycloak:26.0
-    container_name: naary-keycloak
-    restart: unless-stopped
-    command: ['start-dev', '--import-realm']
-    environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in .env (see .env.example)}
-      KC_HEALTH_ENABLED: 'true'
-    ports:
-      - '8080:8080'
-    volumes:
-      - ./infra/keycloak:/opt/keycloak/data/import:ro
-    healthcheck:
-      test:
-        [
-          'CMD-SHELL',
-          'exec 3<>/dev/tcp/localhost/9000 && echo -e "GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 && grep -q "200 OK" <&3',
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 15
-      start_period: 30s
+  # Human login is Firebase Auth (replaced Keycloak). The browser authenticates
+  # directly with Firebase (Google-hosted); the API verifies the ID token with the
+  # Firebase Admin SDK — so there is no identity-provider container in the stack.
+  # See FIREBASE_* in .env.example and the api service below.
 
   # Temporal dev server (single binary, sqlite-backed) — the durable-execution
   # spine. Not a production cluster (that's Temporal Cloud / self-hosted, see
@@ -141,14 +118,14 @@ services:
       PORT: '3000'
       # Allow the containerized web app (and the Vite dev server) as CORS origins.
       CORS_ORIGINS: http://localhost:8081,http://localhost:5173
-      # OIDC ON for the container stack. The browser logs into Keycloak at
-      # localhost:8080, so tokens carry iss=localhost:8080; the API validates that
-      # issuer but fetches the JWKS over the docker network (keycloak:8080) — JWKS
-      # is host-independent, so signatures still validate. See oidc-verifier.ts.
-      OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:8080/realms/naary}
-      OIDC_JWKS_URI: ${OIDC_JWKS_URI:-http://keycloak:8080/realms/naary/protocol/openid-connect/certs}
-      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-naary-api}
-      OIDC_TENANT_CLAIM: ${OIDC_TENANT_CLAIM:-tenant}
+      # Firebase Auth (human login). The API verifies ID tokens with the Admin SDK,
+      # which REQUIRES a service account — provide it inline as
+      # FIREBASE_SERVICE_ACCOUNT_JSON (or a mounted file via
+      # GOOGLE_APPLICATION_CREDENTIALS). UNSET ⇒ Firebase auth is off (nry_ tokens
+      # still work). See firebase-verifier.ts.
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+      FIREBASE_SERVICE_ACCOUNT_JSON: ${FIREBASE_SERVICE_ACCOUNT_JSON:-}
+      FIREBASE_TENANT_CLAIM: ${FIREBASE_TENANT_CLAIM:-tenant}
     ports:
       - '3000:3000'
     depends_on:
@@ -188,10 +165,20 @@ services:
         condition: service_completed_successfully
 
   # Web app — Vite SPA built to static files, served by nginx (proxies /api → api).
+  # The Firebase web config is baked at BUILD time (Vite inlines VITE_* env), so it
+  # is passed as build args from .env. Public values (Firebase web keys are not
+  # secrets); UNSET ⇒ the SPA's Firebase login is unavailable (nry_ paste still works).
   web:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        VITE_FIREBASE_API_KEY: ${VITE_FIREBASE_API_KEY:-}
+        VITE_FIREBASE_AUTH_DOMAIN: ${VITE_FIREBASE_AUTH_DOMAIN:-}
+        VITE_FIREBASE_PROJECT_ID: ${VITE_FIREBASE_PROJECT_ID:-}
+        VITE_FIREBASE_STORAGE_BUCKET: ${VITE_FIREBASE_STORAGE_BUCKET:-}
+        VITE_FIREBASE_MESSAGING_SENDER_ID: ${VITE_FIREBASE_MESSAGING_SENDER_ID:-}
+        VITE_FIREBASE_APP_ID: ${VITE_FIREBASE_APP_ID:-}
     image: naary-web
     container_name: naary-web
     restart: unless-stopped
