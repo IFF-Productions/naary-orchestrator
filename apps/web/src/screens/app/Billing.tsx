@@ -314,7 +314,7 @@ function SpendByModelCard({
             const pct =
               totalCostUsd > 0 ? clampPct((m.costUsd / totalCostUsd) * 100) : 0;
             return (
-              <div key={m.model}>
+              <div key={`${m.model}-${i}`}>
                 <div
                   style={{
                     display: "flex",
