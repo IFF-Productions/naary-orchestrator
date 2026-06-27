@@ -26,6 +26,7 @@ const mockActivities = {
     // echo the configured per-call cost, like the real activity (Arch§4.6)
     return { status: "ok", content: [], costUsd: cfg.costUsd ?? 0 };
   },
+  recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
 };
 
 let env: TestWorkflowEnvironment;

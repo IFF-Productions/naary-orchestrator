@@ -85,6 +85,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
             sampleInput(snapshot.graph) ?? { message: "scheduled run" },
             {
               tenantId,
+              workflowKey,
               perExecutionCapUsd: budget?.perExecutionCapUsd,
               maxStepsPerRun:
                 budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
