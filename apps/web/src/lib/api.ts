@@ -68,7 +68,19 @@ export interface NamedGraph {
   graph: GraphDef;
 }
 
+export interface TemplateSummary {
+  key: string;
+  name: string;
+  description: string;
+  nodeCount: number;
+}
+
 export const api = {
+  // Built-in workflow templates (global, not tenant-scoped). The canvas opens one
+  // by its `key`.
+  listTemplates(): Promise<TemplateSummary[]> {
+    return http("/templates");
+  },
   // List the tenant's workflows (latest version per key).
   listGraphs(): Promise<GraphSummary[]> {
     return http("/graphs");

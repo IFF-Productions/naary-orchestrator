@@ -11,6 +11,7 @@ import { HealthModule } from "./health/health.module";
 import { MembersModule } from "./members/members.module";
 import { SecretsModule } from "./secrets/secrets.module";
 import { SettingsModule } from "./settings/settings.module";
+import { TemplatesModule } from "./templates/templates.module";
 import { UsageModule } from "./usage/usage.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
 
@@ -30,6 +31,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     ConnectionsModule,
     MembersModule,
     SettingsModule,
+    TemplatesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
