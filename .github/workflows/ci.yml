@@ -1,0 +1,52 @@
+name: CI
+
+# Gate every PR (and pushes to main) on typecheck + tests + web build. The test
+# suite mocks @naary/db, so no Postgres is needed; the Temporal e2e tests spin up
+# @temporalio/testing's in-process server. No secrets required — a dummy .env only
+# satisfies the prisma-generate dotenv wrapper (generate never connects).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.0.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # prisma generate runs via a `dotenv -e ../../.env` wrapper; provide a dummy
+      # .env so it resolves. Values are placeholders — generate doesn't connect, and
+      # the test suite mocks the DB. NOT real secrets.
+      - name: Seed a dummy .env for prisma generate
+        run: |
+          cat > .env <<'ENV'
+          DATABASE_URL="postgresql://ci:ci@localhost:5432/ci?schema=public"
+          ENCRYPTION_KEY="0000000000000000000000000000000000000000000000000000000000000000"
+          ENV
+
+      - name: Typecheck (tsc -b + per-package)
+        run: pnpm typecheck
+
+      - name: Test (build + vitest, incl. determinism replay + pause/resume)
+        run: pnpm test
+
+      - name: Web build (vite)
+        run: pnpm --filter @naary/web run build
