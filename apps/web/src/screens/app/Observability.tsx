@@ -15,6 +15,7 @@ import {
   type UsageReport,
   UnauthorizedError,
 } from "../../lib/api";
+import { RunVolumeChart, SpendChart } from "./charts";
 
 const cardStyle: React.CSSProperties = {
   background: "var(--card)",
@@ -96,7 +97,10 @@ export function Observability() {
   ];
 
   const byModel = usage?.byModel ?? [];
-  const maxModelTokens = byModel.reduce((m, r) => Math.max(m, r.totalTokens), 0);
+  const maxModelTokens = byModel.reduce(
+    (m, r) => Math.max(m, r.totalTokens),
+    0,
+  );
 
   return (
     <div style={{ padding: "22px 28px 40px", maxWidth: 1300 }}>
@@ -133,6 +137,19 @@ export function Observability() {
           {error}
         </div>
       )}
+
+      {/* ===== real charts (bucketed from runs + usage) ===== */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 14,
+          marginBottom: 16,
+        }}
+      >
+        <RunVolumeChart days={14} />
+        <SpendChart days={14} />
+      </div>
 
       {/* ===== stat row ===== */}
       <div
