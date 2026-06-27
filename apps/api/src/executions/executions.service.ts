@@ -53,6 +53,14 @@ export interface RunSummary {
   createdAt: string;
 }
 
+/** Live run detail — like ExecutionState but with the widened status (a run can be
+ *  Temporal-failed/terminated, which ExecutionStatus alone can't express). */
+export interface RunStateView {
+  status: RunSummary["status"];
+  currentNodeId: string;
+  ctx: Record<string, unknown>;
+}
+
 /** Temporal closed-status name → our UI status string (COMPLETED handled via result()). */
 const TEMPORAL_CLOSED_STATUS: Record<string, RunSummary["status"]> = {
   FAILED: "failed",
@@ -292,32 +300,55 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async getState(id: string, tenantId: string): Promise<ExecutionState> {
+  /**
+   * Live detail for a run. Mirrors list()'s truthful, never-500 status handling:
+   * describe() to learn the Temporal state, then a RUNNING run is queried, a
+   * COMPLETED run's terminal status + ctx come from result(), and a Temporal
+   * failure (FAILED/TIMED_OUT/TERMINATED/CANCELED) maps to a real status instead
+   * of throwing a 500. Only a truly-gone run is a 404.
+   */
+  async getState(id: string, tenantId: string): Promise<RunStateView> {
     await this.assertOwner(id, tenantId);
     const handle = this.client.workflow.getHandle(id);
     try {
-      // Live path: a RUNNING workflow answers the state query directly.
-      return await handle.query(stateQuery);
-    } catch (e) {
-      if (!(e instanceof WorkflowNotFoundError)) throw e;
-      // A CLOSED workflow can't be queried (gRPC NOT_FOUND → WorkflowNotFoundError).
-      // Recover its final state from the workflow's RETURN value: runGraph returns
-      // { status, ctx }. (assertOwner already passed, so the run exists in our DB.)
-      try {
-        const r = (await handle.result()) as {
-          status: ExecutionStatus;
-          ctx: Record<string, unknown>;
-        };
-        return { status: r.status, currentNodeId: "", ctx: r.ctx };
-      } catch (re) {
-        // result() also NOT_FOUND → the execution is truly gone from Temporal
-        // (e.g. retention expired). Re-throw anything else (failed/terminated runs
-        // surface their real error to the caller).
-        if (re instanceof WorkflowNotFoundError) {
-          throw new NotFoundException("Execution not found");
+      const desc = await handle.describe();
+      if (desc.status.name === "RUNNING") {
+        // Wrap the query (mirrors list()): a transient replay/worker hiccup must
+        // degrade to "running", never 500.
+        try {
+          const s = await handle.query(stateQuery);
+          return {
+            status: s.status,
+            currentNodeId: s.currentNodeId,
+            ctx: s.ctx,
+          };
+        } catch {
+          return { status: "running", currentNodeId: "", ctx: {} };
         }
-        throw re;
       }
+      if (desc.status.name === "COMPLETED") {
+        try {
+          const r = (await handle.result()) as {
+            status: ExecutionStatus;
+            ctx: Record<string, unknown>;
+          };
+          return { status: r.status, currentNodeId: "", ctx: r.ctx };
+        } catch {
+          return { status: "completed", currentNodeId: "", ctx: {} };
+        }
+      }
+      // Temporal-level failure (the workflow threw, was terminated, etc.) — there's
+      // no returned {status,ctx} to recover, so report the mapped close reason.
+      return {
+        status: TEMPORAL_CLOSED_STATUS[desc.status.name] ?? "unknown",
+        currentNodeId: "",
+        ctx: {},
+      };
+    } catch (e) {
+      if (e instanceof WorkflowNotFoundError) {
+        throw new NotFoundException("Execution not found");
+      }
+      throw e;
     }
   }
 

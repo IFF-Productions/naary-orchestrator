@@ -1,8 +1,7 @@
 import { Body, Controller, Get, HttpCode, Param, Post } from "@nestjs/common";
-import type { ExecutionState } from "@naary/contracts";
 import { TenantId } from "../auth/tenant.decorator";
 import { ApproveDto, StartExecutionDto } from "./execution.dto";
-import { ExecutionsService } from "./executions.service";
+import { ExecutionsService, type RunStateView } from "./executions.service";
 
 @Controller("executions")
 export class ExecutionsController {
@@ -39,7 +38,7 @@ export class ExecutionsController {
   getState(
     @TenantId() tenantId: string,
     @Param("id") id: string,
-  ): Promise<ExecutionState> {
+  ): Promise<RunStateView> {
     return this.executions.getState(id, tenantId);
   }
 }
