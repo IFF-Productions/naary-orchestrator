@@ -146,7 +146,9 @@ Ordered roughly by "blocks launch" → "hardening". Each item says **why** and *
 - [ ] **Alerting** — failed executions, budget-cap trips, auth failures, DLQ growth.
 
 ### E. Security hardening
-- [ ] **Resolve the 5 Dependabot alerts** (2 high, 3 moderate) on the default branch.
+- [x] **Resolve the 5 Dependabot alerts** (2 high, 3 moderate) — patched via
+      `pnpm-workspace.yaml` overrides (multer ≥2.2.0, protobufjs ≥7.6.3,
+      @hono/node-server ≥1.19.13); all transitive, minor/patch bumps. Suite green.
 - [ ] **GitGuardian** — resolve the intentional demo-secret finding in the dashboard
       (see PR #25 notes); add ggshield to CI as a real pre-merge gate.
 - [ ] **Prompt-injection guardrails** (Sec#10) — least-privilege per connection + input

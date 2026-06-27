@@ -10,3 +10,12 @@ allowBuilds:
   prisma: true
   '@prisma/engines': true
   esbuild: true
+
+# Force patched versions of transitive deps flagged by Dependabot (pnpm 11 reads
+# overrides from here, not package.json). All are minor/patch bumps:
+#   multer (high) via @nestjs/platform-express; protobufjs (high) via @temporalio;
+#   @hono/node-server (moderate). See PRODUCTION-READINESS §3.E.
+overrides:
+  multer: '>=2.2.0'
+  protobufjs: '>=7.6.3'
+  '@hono/node-server': '>=1.19.13'
