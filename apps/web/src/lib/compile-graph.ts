@@ -7,12 +7,18 @@
  * have exactly one `start`/`webhookTrigger` node — enforced here with a clear
  * message (validateGraph only checks the id resolves, not entry-node count).
  */
-import type { EdgeDef, GraphDef, NodeDef, NodeType } from "@naary/dsl";
+import type {
+  EdgeCondition,
+  EdgeDef,
+  GraphDef,
+  NodeDef,
+  NodeType,
+} from "@naary/dsl";
 // Namespace import: @naary/dsl ships CommonJS (its `export *` becomes __exportStar),
 // which rollup can't statically tree-shake for a named value import — but the
 // runtime namespace object carries `validateGraph`. (Types above are erased.)
 import * as dsl from "@naary/dsl";
-import type { CanvasEdge, CanvasNode } from "./graph-model";
+import type { CanvasEdge, CanvasNode, EdgeConditionDraft } from "./graph-model";
 
 export interface CompileResult {
   graph?: GraphDef;
@@ -49,10 +55,14 @@ export function compileGraph(
       ? { config: n.config }
       : {}),
   }));
-  const graphEdges: EdgeDef[] = edges.map((e) => ({
-    from: e.source,
-    to: e.target,
-  }));
+  const graphEdges: EdgeDef[] = edges.map((e) => {
+    const condition = buildCondition(e.condition);
+    return {
+      from: e.source,
+      to: e.target,
+      ...(condition ? { condition } : {}),
+    };
+  });
 
   const graph: GraphDef = {
     nodes: graphNodes,
@@ -63,4 +73,38 @@ export function compileGraph(
   const check = dsl.validateGraph(graph);
   if (!check.valid) return { error: check.error ?? "Invalid graph." };
   return { graph };
+}
+
+/** Editor draft → DSL EdgeCondition. A blank path means "unconditional" (omit).
+ *  `exists` carries no value; `in` becomes an array; numeric-looking values for
+ *  gt/lt/eq/neq/in are coerced to numbers/booleans so the interpreter's strict
+ *  comparisons (`===`, `>`) work (evaluateCondition in @naary/dsl). */
+function buildCondition(draft?: EdgeConditionDraft): EdgeCondition | undefined {
+  if (!draft || !draft.path.trim()) return undefined;
+  const base = { path: draft.path.trim(), op: draft.op };
+  switch (draft.op) {
+    case "exists":
+      return base;
+    case "in":
+      return {
+        ...base,
+        value: draft.value
+          .split(",")
+          .map((s) => coerce(s.trim()))
+          .filter((v) => v !== ""),
+      };
+    case "gt":
+    case "lt":
+      return { ...base, value: Number(draft.value) };
+    default:
+      return { ...base, value: coerce(draft.value) };
+  }
+}
+
+/** "true"/"false" → boolean, numeric string → number, else the trimmed string. */
+function coerce(s: string): string | number | boolean {
+  if (s === "true") return true;
+  if (s === "false") return false;
+  if (s !== "" && !Number.isNaN(Number(s))) return Number(s);
+  return s;
 }

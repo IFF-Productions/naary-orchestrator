@@ -294,7 +294,9 @@ Send `{"approved":false}` instead and the run resolves to `status:"rejected"`.
 ### The canvas (visual authoring → run)
 
 The web app's **Workflow canvas** (`/app/canvas`) is a drag-and-drop editor
-(react-flow): add nodes from the palette, connect handles, edit per-node config.
+(react-flow): add nodes from the palette, connect handles, edit per-node config,
+and set **edge conditions** (select an edge → path / op / value) to branch on prior
+node output — compiled to the DSL's `EdgeCondition` and honored by the interpreter.
 A live status mirrors the server's `validateGraph`. **Run** compiles the canvas to
 a `GraphDef`, `POST /graphs` saves it (versioned, content-hashed) under the
 `canvas` workflowKey, then `POST /executions {workflowKey:"canvas"}` starts it and
