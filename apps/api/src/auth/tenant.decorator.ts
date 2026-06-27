@@ -20,3 +20,11 @@ export const TenantId = createParamDecorator(
     return req.principal?.tenantId ?? "";
   },
 );
+
+/** Injects the full authenticated principal (tenantId + optional subject). */
+export const CurrentPrincipal = createParamDecorator(
+  (_data: unknown, ctx: ExecutionContext): Principal => {
+    const req = ctx.switchToHttp().getRequest<RequestWithPrincipal>();
+    return req.principal ?? { tenantId: "" };
+  },
+);

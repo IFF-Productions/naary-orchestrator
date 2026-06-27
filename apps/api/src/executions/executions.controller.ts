@@ -16,6 +16,14 @@ export class ExecutionsController {
     return this.executions.start(tenantId, body.input, body.workflowKey);
   }
 
+  /** Recent runs for the authenticated tenant (newest first). */
+  @Get()
+  listRuns(
+    @TenantId() tenantId: string,
+  ): Promise<{ workflowId: string; createdAt: string }[]> {
+    return this.executions.list(tenantId);
+  }
+
   @Post(":id/approve")
   @HttpCode(202) // explicit: NestJS would otherwise return 201 for a POST
   async approve(

@@ -101,7 +101,30 @@ export const api = {
   getState(id: string): Promise<ExecutionState> {
     return http(`/executions/${encodeURIComponent(id)}`);
   },
+  // Who am I — the SPA's tenantId (for tenant-scoped routes) + OIDC subject.
+  getMe(): Promise<{ tenantId: string; subject?: string }> {
+    return http("/me");
+  },
+  // Recent runs for the tenant (identity + start time; status is on the detail view).
+  listRuns(): Promise<RunSummary[]> {
+    return http("/executions");
+  },
+  // Usage ledger (tokens + cost only). Tenant-scoped — pass the tenantId from getMe().
+  getUsage(tenantId: string): Promise<UsageReport> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/usage`);
+  },
 };
+
+export interface RunSummary {
+  workflowId: string;
+  createdAt: string;
+}
+export interface UsageReport {
+  totalCostUsd: number;
+  totalTokens: number;
+  byModel: { model: string; tokens: number; costUsd: number }[];
+  events: unknown[];
+}
 
 /** Map a control-plane status to a design run-state token. */
 export function statusToRunState(

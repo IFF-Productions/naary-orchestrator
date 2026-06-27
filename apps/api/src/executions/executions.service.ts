@@ -149,6 +149,24 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Recent runs for the tenant (newest first). Status lives in Temporal, not the
+   *  DB, so the list returns identity + start time; the detail view (getState)
+   *  reads live status. */
+  async list(
+    tenantId: string,
+    limit = 50,
+  ): Promise<{ workflowId: string; createdAt: string }[]> {
+    const rows = await getPrisma().execution.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: "desc" },
+      take: Math.min(Math.max(limit, 1), 200),
+    });
+    return rows.map((r) => ({
+      workflowId: r.workflowId,
+      createdAt: r.createdAt.toISOString(),
+    }));
+  }
+
   async getState(id: string, tenantId: string): Promise<ExecutionState> {
     await this.assertOwner(id, tenantId);
     try {

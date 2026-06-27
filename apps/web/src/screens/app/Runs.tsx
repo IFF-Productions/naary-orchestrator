@@ -1,66 +1,61 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Icon, StatusPill } from "../../components";
-import { api, UnauthorizedError } from "../../lib/api";
-import { runs as mockRuns, type RunRow } from "../../lib/mock";
+import { Button, Icon } from "../../components";
+import { api, type RunSummary, UnauthorizedError } from "../../lib/api";
 
-const COLS = ".9fr 1.7fr 1fr .8fr .8fr .8fr";
-type FilterKey = "all" | "awaiting" | "running" | "failed";
+const COLS = "1.6fr 1fr 0.5fr";
 
-const FILTERS: { key: FilterKey; label: string; color?: string }[] = [
-  { key: "all", label: "All" },
-  { key: "awaiting", label: "Awaiting 7", color: "var(--state-paused)" },
-  { key: "running", label: "Running 4" },
-  { key: "failed", label: "Failed" },
-];
+/** Compact relative time from an ISO timestamp (no date lib). */
+function ago(iso: string): string {
+  const then = new Date(iso).getTime();
+  const s = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
 
 export function Runs() {
   const navigate = useNavigate();
-  const [filter, setFilter] = useState<FilterKey>("all");
+  const [runs, setRuns] = useState<RunSummary[] | null>(null);
   const [query, setQuery] = useState("");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Live runs started from the browser via POST /executions get prepended.
-  const [liveRuns, setLiveRuns] = useState<RunRow[]>([]);
 
-  const all = [...liveRuns, ...mockRuns];
-  const rows = all.filter((r) => {
-    if (
-      query &&
-      !r.id.includes(query) &&
-      !r.wf.toLowerCase().includes(query.toLowerCase())
-    )
-      return false;
-    if (filter === "awaiting") return r.awaiting;
-    if (filter === "running") return r.statusState === "running";
-    if (filter === "failed") return r.statusState === "error";
-    return true;
-  });
+  async function load() {
+    try {
+      setRuns(await api.listRuns());
+      setError(null);
+    } catch (e) {
+      setError(
+        e instanceof UnauthorizedError
+          ? "Not authenticated — sign in (or set an API token) to see runs."
+          : "Could not reach the control plane (apps/api on :3000).",
+      );
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const rows = (runs ?? []).filter(
+    (r) => !query || r.workflowId.includes(query),
+  );
 
   async function startRun() {
     setStarting(true);
     setError(null);
     try {
       const { workflowId } = await api.startExecution();
-      setLiveRuns((prev) => [
-        {
-          id: workflowId,
-          wf: "Live execution",
-          status: "Running",
-          statusState: "running",
-          awaiting: false,
-          steps: "—",
-          cost: "—",
-          started: "now",
-        },
-        ...prev,
-      ]);
       navigate(`/app/runs/${encodeURIComponent(workflowId)}`);
     } catch (e) {
       setError(
         e instanceof UnauthorizedError
-          ? "Not authenticated — set your API token on the sign-in screen."
-          : "Could not reach the control plane. Start it with `pnpm start` (apps/api) on :3000.",
+          ? "Not authenticated — sign in (or set an API token) first."
+          : "Could not start a run. Is the default graph seeded? (POST /executions)",
       );
     } finally {
       setStarting(false);
@@ -84,14 +79,16 @@ export function Runs() {
             Runs
           </div>
           <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
-            Durable execution log · 7 awaiting approval
+            Durable execution log{runs ? ` · ${runs.length} recent` : ""}
           </div>
         </div>
         <div style={{ display: "flex", gap: 9 }}>
           <Button icon="play" onClick={startRun} disabled={starting}>
             {starting ? "Starting…" : "Start test run"}
           </Button>
-          <Button icon="external">Export</Button>
+          <Button icon="refresh" onClick={() => void load()}>
+            Refresh
+          </Button>
         </div>
       </div>
 
@@ -112,7 +109,6 @@ export function Runs() {
         </div>
       )}
 
-      {/* filter pills + id search */}
       <div
         style={{
           display: "flex",
@@ -122,40 +118,8 @@ export function Runs() {
         }}
       >
         <div
-          style={{
-            display: "flex",
-            background: "var(--surface)",
-            border: "1px solid var(--line)",
-            borderRadius: 8,
-            padding: 3,
-            gap: 2,
-          }}
-        >
-          {FILTERS.map((f) => {
-            const active = filter === f.key;
-            return (
-              <button
-                key={f.key}
-                onClick={() => setFilter(f.key)}
-                style={{
-                  fontSize: 12,
-                  fontWeight: active ? 600 : 500,
-                  color: active ? "var(--ink)" : (f.color ?? "var(--ink-2)"),
-                  background: active ? "var(--card-2)" : "transparent",
-                  padding: "5px 12px",
-                  borderRadius: 6,
-                  border: "none",
-                  cursor: "pointer",
-                }}
-              >
-                {f.label}
-              </button>
-            );
-          })}
-        </div>
-        <div
           className="input-wrap"
-          style={{ width: 230, height: 34, padding: "0 11px" }}
+          style={{ width: 260, height: 34, padding: "0 11px" }}
         >
           <Icon name="search" size={14} style={{ color: "var(--ink-3)" }} />
           <input
@@ -168,7 +132,6 @@ export function Runs() {
         </div>
       </div>
 
-      {/* table */}
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         <div
           className="mono"
@@ -186,16 +149,31 @@ export function Runs() {
           }}
         >
           <span>Run</span>
-          <span>Workflow</span>
-          <span>Status</span>
-          <span>Steps</span>
-          <span>Cost</span>
           <span>Started</span>
+          <span />
         </div>
+
+        {runs === null && !error && (
+          <div
+            style={{ padding: "18px", fontSize: 12.5, color: "var(--ink-3)" }}
+          >
+            Loading…
+          </div>
+        )}
+        {runs?.length === 0 && (
+          <div
+            style={{ padding: "18px", fontSize: 12.5, color: "var(--ink-2)" }}
+          >
+            No runs yet — start one from the canvas or “Start test run”.
+          </div>
+        )}
+
         {rows.map((r) => (
           <div
-            key={r.id}
-            onClick={() => navigate(`/app/runs/${encodeURIComponent(r.id)}`)}
+            key={r.workflowId}
+            onClick={() =>
+              navigate(`/app/runs/${encodeURIComponent(r.workflowId)}`)
+            }
             className="run-row"
             style={{
               display: "grid",
@@ -205,47 +183,26 @@ export function Runs() {
               borderBottom: "1px solid var(--line)",
               alignItems: "center",
               cursor: "pointer",
-              background: r.awaiting ? "var(--paused-soft)" : undefined,
             }}
           >
             <span
               className="mono"
               style={{ fontSize: 11.5, color: "var(--brand)" }}
             >
-              {r.id}
-            </span>
-            <span
-              style={{
-                fontSize: 12.5,
-                color: "var(--ink)",
-                fontWeight: 500,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {r.wf}
-            </span>
-            <span>
-              <StatusPill state={r.statusState} label={r.status} />
-            </span>
-            <span
-              className="mono"
-              style={{ fontSize: 11.5, color: "var(--ink-2)" }}
-            >
-              {r.steps}
-            </span>
-            <span
-              className="mono"
-              style={{ fontSize: 11.5, color: "var(--ink-2)" }}
-            >
-              {r.cost}
+              {r.workflowId}
             </span>
             <span
               className="mono"
               style={{ fontSize: 11, color: "var(--ink-3)" }}
             >
-              {r.started}
+              {ago(r.createdAt)}
+            </span>
+            <span style={{ textAlign: "right" }}>
+              <Icon
+                name="chevron-right"
+                size={14}
+                style={{ color: "var(--ink-3)" }}
+              />
             </span>
           </div>
         ))}

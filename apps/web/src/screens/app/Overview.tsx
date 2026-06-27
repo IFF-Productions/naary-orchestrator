@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Button,
@@ -9,6 +9,7 @@ import {
   Table,
   type Column,
 } from "../../components";
+import { api } from "../../lib/api";
 import { runs, type RunRow } from "../../lib/mock";
 
 /* ------------------------------------------------------------------
@@ -150,7 +151,10 @@ export function Overview() {
         </Button>
       </div>
 
-      {/* ---- stat cards ---- */}
+      {/* ---- live metrics (real, from the control plane) ---- */}
+      <LiveStrip />
+
+      {/* ---- stat cards (prototype/illustrative) ---- */}
       <div
         style={{
           display: "grid",
@@ -605,6 +609,101 @@ export function Overview() {
 }
 
 /* ---------------- local presentational helpers ---------------- */
+
+/** Real metrics from the control plane: tenant, recent run count, usage cost +
+ *  tokens (usage ledger). Renders alongside the illustrative cards below. */
+function LiveStrip() {
+  const [tenant, setTenant] = useState<string | null>(null);
+  const [runCount, setRunCount] = useState<number | null>(null);
+  const [cost, setCost] = useState<number | null>(null);
+  const [tokens, setTokens] = useState<number | null>(null);
+  const [err, setErr] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const me = await api.getMe();
+        if (!live) return;
+        setTenant(me.tenantId);
+        const [runs, usage] = await Promise.all([
+          api.listRuns(),
+          api.getUsage(me.tenantId),
+        ]);
+        if (!live) return;
+        setRunCount(runs.length);
+        setCost(usage.totalCostUsd);
+        setTokens(usage.totalTokens);
+      } catch {
+        if (live) setErr(true);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const fmt = (n: number | null) => (n === null ? "…" : n.toLocaleString());
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(4,1fr)",
+        gap: 14,
+        marginBottom: 16,
+      }}
+    >
+      <LiveCard label="Tenant" value={err ? "—" : (tenant ?? "…")} mono />
+      <LiveCard label="Recent runs" value={err ? "—" : fmt(runCount)} />
+      <LiveCard
+        label="Spend (USD)"
+        value={err ? "—" : cost === null ? "…" : `$${cost.toFixed(4)}`}
+      />
+      <LiveCard label="Tokens" value={err ? "—" : fmt(tokens)} />
+    </div>
+  );
+}
+
+function LiveCard({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div style={{ ...cardStyle, padding: "15px 16px" }}>
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "var(--ink-3)",
+        }}
+      >
+        {label} · live
+      </div>
+      <div
+        className={mono ? "mono" : undefined}
+        style={{
+          fontSize: mono ? 15 : 24,
+          fontWeight: 700,
+          color: "var(--ink)",
+          marginTop: 8,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
 
 function StatHead({ label, children }: { label: string; children: ReactNode }) {
   return (
