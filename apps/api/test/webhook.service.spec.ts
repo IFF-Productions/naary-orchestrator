@@ -4,12 +4,13 @@ import { AesGcmKeyEncryptor } from "@naary/secrets";
 
 const m = vi.hoisted(() => ({
   create: vi.fn(),
+  findMany: vi.fn(),
   deliveryCreate: vi.fn(),
   deliveryDeleteMany: vi.fn(),
 }));
 vi.mock("@naary/db", () => ({
   getPrisma: () => ({
-    webhookEndpoint: { create: m.create },
+    webhookEndpoint: { create: m.create, findMany: m.findMany },
     webhookDelivery: {
       create: m.deliveryCreate,
       deleteMany: m.deliveryDeleteMany,
@@ -31,8 +32,38 @@ const sign = (body: Buffer, secret: string) =>
 
 beforeEach(() => {
   m.create.mockReset();
+  m.findMany.mockReset();
   m.deliveryCreate.mockReset();
   m.deliveryDeleteMany.mockReset().mockResolvedValue({ count: 0 });
+});
+
+describe("WebhookService.list", () => {
+  it("lists the tenant's endpoints newest-first WITHOUT the signing secret (Sec#8)", async () => {
+    const now = new Date();
+    m.findMany.mockResolvedValue([
+      { id: "ep_1", provider: "github", workflowId: "wf-1", createdAt: now },
+    ]);
+
+    const rows = await svc.list("t1");
+
+    // scoped to the tenant, ordered desc, and the secret is excluded at the
+    // query level so it can never reach the response.
+    const arg = m.findMany.mock.calls[0][0];
+    expect(arg.where).toEqual({ tenantId: "t1" });
+    expect(arg.orderBy).toEqual({ createdAt: "desc" });
+    expect(arg.select).toEqual({
+      id: true,
+      provider: true,
+      workflowId: true,
+      createdAt: true,
+    });
+    expect(arg.select).not.toHaveProperty("signingSecret");
+
+    expect(rows).toEqual([
+      { id: "ep_1", provider: "github", workflowId: "wf-1", createdAt: now },
+    ]);
+    expect(rows[0]).not.toHaveProperty("signingSecret");
+  });
 });
 
 describe("WebhookService.createEndpoint", () => {

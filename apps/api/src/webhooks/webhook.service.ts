@@ -20,6 +20,14 @@ export interface RegisteredWebhook {
   signingSecret: string;
 }
 
+/** Public view of a registered webhook — NEVER includes the signing secret. */
+export interface WebhookEndpointView {
+  id: string;
+  provider: string;
+  workflowId: string;
+  createdAt: Date;
+}
+
 @Injectable()
 export class WebhookService {
   // Lazily built so constructing the service doesn't require ENCRYPTION_KEY until
@@ -60,6 +68,19 @@ export class WebhookService {
       ingressPath: `/hooks/${row.id}`,
       signingSecret,
     };
+  }
+
+  /**
+   * List the tenant's registered webhook endpoints (newest first). The signing
+   * secret is excluded at the query level (`select`) so it never leaves the DB
+   * layer (Sec#8) — there is no path for it to reach the API response.
+   */
+  list(tenantId: string): Promise<WebhookEndpointView[]> {
+    return getPrisma().webhookEndpoint.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, provider: true, workflowId: true, createdAt: true },
+    });
   }
 
   /** Decrypt an endpoint's stored signing secret (in memory only; never logged). */
