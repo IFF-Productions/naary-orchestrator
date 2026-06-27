@@ -167,6 +167,28 @@ export const api = {
   listWebhooks(tenantId: string): Promise<WebhookRow[]> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/webhooks`);
   },
+  // Connect an MCP server / app. The token (PAT/api_token) is stored encrypted
+  // server-side; the returned view never echoes it.
+  createConnection(
+    tenantId: string,
+    input: ConnectionInput,
+  ): Promise<ConnectionRow> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/connections`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  // Register a webhook trigger. Returns the ingress path + signing secret ONCE —
+  // it is stored encrypted and never returned again, so surface it immediately.
+  createWebhook(
+    tenantId: string,
+    input: { workflowId: string; provider: string },
+  ): Promise<RegisteredWebhook> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/webhooks`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
   // --- Billing ---
   // Budget config + live month-to-date spend. Tenant-scoped. The server returns 404
   // (→ generic Error, not UnauthorizedError) when no budget is configured.
@@ -193,6 +215,23 @@ export interface WebhookRow {
   provider: string;
   workflowId: string;
   createdAt: string;
+}
+
+/** Input to connect a server (token stored encrypted server-side). */
+export interface ConnectionInput {
+  type: "github" | "atlassian" | "custom";
+  label: string;
+  serverUrl: string;
+  authMode: "api_token" | "pat" | "oauth";
+  scopes?: string[];
+  token?: string;
+}
+
+/** Returned ONCE when registering a webhook — the signing secret is not retrievable again. */
+export interface RegisteredWebhook {
+  endpointId: string;
+  ingressPath: string;
+  signingSecret: string;
 }
 
 export interface RunSummary {
