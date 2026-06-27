@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -129,9 +130,23 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
   ): Promise<void> {
     await this.assertOwner(id, tenantId);
-    await this.client.workflow
-      .getHandle(id)
-      .signal(approvalSignal, { approved });
+    try {
+      await this.client.workflow
+        .getHandle(id)
+        .signal(approvalSignal, { approved });
+    } catch (e) {
+      // Signaling a CLOSED workflow (already completed / rejected / failed) returns
+      // gRPC NOT_FOUND → WorkflowNotFoundError. The execution row exists (assertOwner
+      // passed), so it's not a 404 — it's a 409: the run is no longer awaiting
+      // approval. Mirrors getState's WorkflowNotFoundError handling, with the right
+      // semantics for a write. (Previously this leaked an unhandled 500.)
+      if (e instanceof WorkflowNotFoundError) {
+        throw new ConflictException(
+          "Execution is not awaiting approval (already completed, rejected, or failed).",
+        );
+      }
+      throw e;
+    }
   }
 
   async getState(id: string, tenantId: string): Promise<ExecutionState> {
