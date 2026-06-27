@@ -29,7 +29,12 @@ import type { NodeType } from "@naary/dsl";
 import { Button } from "../components";
 import { api, UnauthorizedError } from "../lib/api";
 import { compileGraph } from "../lib/compile-graph";
-import { type CanvasNode, NODE_KINDS } from "../lib/graph-model";
+import {
+  type CanvasNode,
+  CONDITION_OPS,
+  type EdgeConditionDraft,
+  NODE_KINDS,
+} from "../lib/graph-model";
 
 const WORKFLOW_KEY = "canvas";
 
@@ -82,6 +87,18 @@ function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
 
 const nodeTypes = { naary: NaaryNode };
 
+interface EdgeData extends Record<string, unknown> {
+  condition?: EdgeConditionDraft;
+}
+type FlowEdge = Edge<EdgeData>;
+
+/** Short label for a conditional edge (shown on the canvas). */
+function summarize(c?: EdgeConditionDraft): string | undefined {
+  if (!c || !c.path.trim()) return undefined;
+  if (c.op === "exists") return `${c.path} exists`;
+  return `${c.path} ${c.op} ${c.value}`;
+}
+
 const SEED_NODES: Node<NaaryData>[] = [
   {
     id: "start",
@@ -102,7 +119,7 @@ const SEED_NODES: Node<NaaryData>[] = [
     data: { kind: "end" },
   },
 ];
-const SEED_EDGES: Edge[] = [
+const SEED_EDGES: FlowEdge[] = [
   { id: "e1", source: "start", target: "approval" },
   { id: "e2", source: "approval", target: "end" },
 ];
@@ -110,7 +127,7 @@ const SEED_EDGES: Edge[] = [
 export function CanvasPage() {
   const navigate = useNavigate();
   const [nodes, setNodes] = useState<Node<NaaryData>[]>(SEED_NODES);
-  const [edges, setEdges] = useState<Edge[]>(SEED_EDGES);
+  const [edges, setEdges] = useState<FlowEdge[]>(SEED_EDGES);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -121,11 +138,11 @@ export function CanvasPage() {
   );
   const onEdgesChange = useCallback(
     (changes: Parameters<typeof applyEdgeChanges>[0]) =>
-      setEdges((es) => applyEdgeChanges(changes, es)),
+      setEdges((es) => applyEdgeChanges(changes, es) as FlowEdge[]),
     [],
   );
   const onConnect = useCallback(
-    (c: Connection) => setEdges((es) => addEdge(c, es)),
+    (c: Connection) => setEdges((es) => addEdge(c, es) as FlowEdge[]),
     [],
   );
 
@@ -141,11 +158,13 @@ export function CanvasPage() {
       id: e.id,
       source: e.source,
       target: e.target,
+      condition: e.data?.condition,
     }));
     return compileGraph(canvasNodes, canvasEdges);
   }, [nodes, edges]);
 
   const selected = nodes.find((n) => n.selected);
+  const selectedEdge = edges.find((e) => e.selected);
 
   function addNode(kind: NodeType) {
     const id = `${kind}-${crypto.randomUUID().slice(0, 8)}`;
@@ -172,6 +191,43 @@ export function CanvasPage() {
               data: { ...n.data, config: { ...n.data.config, ...patch } },
             }
           : n,
+      ),
+    );
+  }
+
+  function updateEdgeCondition(
+    edgeId: string,
+    patch: Partial<EdgeConditionDraft>,
+  ) {
+    setEdges((es) =>
+      es.map((e) => {
+        if (e.id !== edgeId) return e;
+        const condition: EdgeConditionDraft = {
+          path: "",
+          op: "eq",
+          value: "",
+          ...e.data?.condition,
+          ...patch,
+        };
+        return {
+          ...e,
+          data: { ...e.data, condition },
+          label: summarize(condition),
+        };
+      }),
+    );
+  }
+
+  function clearEdgeCondition(edgeId: string) {
+    setEdges((es) =>
+      es.map((e) =>
+        e.id === edgeId
+          ? {
+              ...e,
+              data: { ...e.data, condition: undefined },
+              label: undefined,
+            }
+          : e,
       ),
     );
   }
@@ -337,9 +393,16 @@ export function CanvasPage() {
               node={selected}
               onChange={(patch) => updateConfig(selected.id, patch)}
             />
+          ) : selectedEdge ? (
+            <EdgeConfigPanel
+              key={selectedEdge.id}
+              condition={selectedEdge.data?.condition}
+              onChange={(patch) => updateEdgeCondition(selectedEdge.id, patch)}
+              onClear={() => clearEdgeCondition(selectedEdge.id)}
+            />
           ) : (
             <div style={{ fontSize: 13, color: "var(--ink-3)" }}>
-              Select a node to edit its configuration.
+              Select a node or edge to edit it.
             </div>
           )}
         </aside>
@@ -408,6 +471,86 @@ function ConfigPanel({
         <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
           This node has no configuration.
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Edit the selected edge's branch condition. A blank path = unconditional edge
+ *  (the edge always fires); `exists` needs no value. Compiled by compile-graph. */
+function EdgeConfigPanel({
+  condition,
+  onChange,
+  onClear,
+}: {
+  condition?: EdgeConditionDraft;
+  onChange: (patch: Partial<EdgeConditionDraft>) => void;
+  onClear: () => void;
+}) {
+  const c = condition ?? { path: "", op: "eq" as const, value: "" };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div>
+        <div style={{ fontSize: 11, color: "var(--ink-3)" }}>EDGE</div>
+        <div style={{ fontWeight: 600 }}>Branch condition</div>
+        <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>
+          Blank path = always fires. The edge is taken when the predicate holds.
+        </div>
+      </div>
+
+      <Labeled label="Path (in ctx, e.g. agent.urgency)">
+        <input
+          value={c.path}
+          onChange={(e) => onChange({ path: e.target.value })}
+          style={inputStyle}
+          placeholder="agent.category"
+        />
+      </Labeled>
+
+      <Labeled label="Operator">
+        <select
+          value={c.op}
+          onChange={(e) =>
+            onChange({ op: e.target.value as EdgeConditionDraft["op"] })
+          }
+          style={inputStyle}
+        >
+          {CONDITION_OPS.map((op) => (
+            <option key={op} value={op}>
+              {op}
+            </option>
+          ))}
+        </select>
+      </Labeled>
+
+      {c.op !== "exists" && (
+        <Labeled label={c.op === "in" ? "Values (comma-separated)" : "Value"}>
+          <input
+            value={c.value}
+            onChange={(e) => onChange({ value: e.target.value })}
+            style={inputStyle}
+            placeholder={c.op === "in" ? "billing, refunds" : "billing"}
+          />
+        </Labeled>
+      )}
+
+      {condition?.path?.trim() && (
+        <button
+          type="button"
+          onClick={onClear}
+          style={{
+            alignSelf: "flex-start",
+            padding: "6px 10px",
+            borderRadius: 7,
+            border: "1px solid var(--line-2)",
+            background: "var(--card)",
+            color: "var(--ink-2)",
+            cursor: "pointer",
+            fontSize: 12,
+          }}
+        >
+          Clear condition (make unconditional)
+        </button>
       )}
     </div>
   );

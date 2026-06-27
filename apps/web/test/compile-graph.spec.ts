@@ -84,4 +84,69 @@ describe("compileGraph", () => {
     ];
     expect(compileGraph(nodes, []).error).toMatch(/duplicate node id/);
   });
+
+  describe("edge conditions", () => {
+    const nodes: CanvasNode[] = [
+      { id: "start", type: "start", position: at(0) },
+      { id: "a", type: "agent", position: at(1) },
+      { id: "end", type: "end", position: at(2) },
+    ];
+    const edge = (condition?: CanvasEdge["condition"]): CanvasEdge[] => [
+      { id: "e1", source: "start", target: "a" },
+      { id: "e2", source: "a", target: "end", condition },
+    ];
+    const condOf = (edges: CanvasEdge[]) =>
+      compileGraph(nodes, edges).graph?.edges.find((x) => x.to === "end")
+        ?.condition;
+
+    it("omits the condition for a blank path (unconditional edge)", () => {
+      expect(
+        condOf(edge({ path: "  ", op: "eq", value: "x" })),
+      ).toBeUndefined();
+      expect(condOf(edge(undefined))).toBeUndefined();
+    });
+
+    it("coerces a numeric value for gt/lt", () => {
+      expect(
+        condOf(edge({ path: "agent.urgency", op: "gt", value: "5" })),
+      ).toEqual({ path: "agent.urgency", op: "gt", value: 5 });
+    });
+
+    it("keeps a non-numeric eq value as a string", () => {
+      expect(
+        condOf(edge({ path: "agent.category", op: "eq", value: "billing" })),
+      ).toEqual({ path: "agent.category", op: "eq", value: "billing" });
+    });
+
+    it("coerces booleans", () => {
+      expect(
+        condOf(edge({ path: "agent.ok", op: "eq", value: "true" }))?.value,
+      ).toBe(true);
+    });
+
+    it("splits + coerces an `in` list into an array", () => {
+      expect(
+        condOf(
+          edge({
+            path: "agent.category",
+            op: "in",
+            value: "billing, 7, refunds",
+          }),
+        ),
+      ).toEqual({
+        path: "agent.category",
+        op: "in",
+        value: ["billing", 7, "refunds"],
+      });
+    });
+
+    it("emits no value for `exists`", () => {
+      expect(
+        condOf(edge({ path: "agent.output", op: "exists", value: "" })),
+      ).toEqual({
+        path: "agent.output",
+        op: "exists",
+      });
+    });
+  });
 });

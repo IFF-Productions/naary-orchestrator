@@ -3,7 +3,7 @@
  * by source/target) and compiles to the platform `@naary/dsl` GraphDef on save —
  * see compile-graph.ts. Positions are editor-only and don't reach the DSL.
  */
-import type { NodeType } from "@naary/dsl";
+import type { EdgeCondition, NodeType } from "@naary/dsl";
 
 export interface CanvasNode {
   id: string;
@@ -13,12 +13,31 @@ export interface CanvasNode {
   config?: Record<string, unknown>;
 }
 
+/** Editor form of an edge condition: `value` is the RAW input string (kept so the
+ *  text field edits smoothly); compile-graph parses it to the DSL value by `op`. */
+export interface EdgeConditionDraft {
+  path: string;
+  op: EdgeCondition["op"];
+  value: string;
+}
+
+export const CONDITION_OPS: EdgeCondition["op"][] = [
+  "eq",
+  "neq",
+  "gt",
+  "lt",
+  "in",
+  "exists",
+];
+
 export interface CanvasEdge {
   id: string;
   /** Source node id (compiles to edge.from). */
   source: string;
   /** Target node id (compiles to edge.to). */
   target: string;
+  /** Optional branch predicate; absent / blank path = unconditional edge. */
+  condition?: EdgeConditionDraft;
 }
 
 /** The node types a user can place, with display labels. Order = palette order. */
