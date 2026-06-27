@@ -7,6 +7,7 @@ import { APP_GUARD } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { AuthModule } from "./auth/auth.module";
 import { DbLifecycleService } from "./common/db-lifecycle.service";
+import { MetricsController } from "./common/metrics.controller";
 import { RequestLoggerMiddleware } from "./common/request-logger.middleware";
 import { BudgetModule } from "./budget/budget.module";
 import { ConnectionsModule } from "./connections/connections.module";
@@ -40,6 +41,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     TemplatesModule,
     SchedulesModule,
   ],
+  controllers: [MetricsController],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     DbLifecycleService,
@@ -47,8 +49,11 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    // Log every request (with a correlation id) — except the health probe, which
-    // Docker/k8s hit every few seconds and would otherwise flood the log.
-    consumer.apply(RequestLoggerMiddleware).exclude("healthz").forRoutes("*");
+    // Log + meter every request (with a correlation id) — except the health probe
+    // and the metrics scrape, which are hit constantly (flood the log / self-count).
+    consumer
+      .apply(RequestLoggerMiddleware)
+      .exclude("healthz", "metrics")
+      .forRoutes("*");
   }
 }

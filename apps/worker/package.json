@@ -27,7 +27,8 @@
     "zod": "^3.25.76",
     "@naary/observability": "workspace:*",
     "@naary/logging": "workspace:*",
-    "@naary/temporal-config": "workspace:*"
+    "@naary/temporal-config": "workspace:*",
+    "@naary/metrics": "workspace:*"
   },
   "devDependencies": {
     "@temporalio/testing": "^1.18.1"

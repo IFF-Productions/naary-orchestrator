@@ -25,6 +25,9 @@ x-backend-env: &backend-env
   SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0}
   # Structured JSON logging verbosity (trace|debug|info|warn|error|fatal).
   LOG_LEVEL: ${LOG_LEVEL:-info}
+  # Prometheus /metrics — the worker serves it on this port; the api serves it on
+  # its main port (3000). Set to 0 to disable the worker metrics server.
+  METRICS_PORT: ${METRICS_PORT:-9091}
 
 services:
   postgres:
@@ -158,6 +161,8 @@ services:
     command: ['pnpm', '--filter', '@naary/worker', 'start']
     environment:
       <<: *backend-env
+    ports:
+      - '9091:9091' # Prometheus /metrics scrape
     depends_on:
       temporal:
         condition: service_healthy

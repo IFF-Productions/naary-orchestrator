@@ -31,7 +31,8 @@
     "jose": "^5.9.6",
     "@naary/observability": "workspace:*",
     "@naary/logging": "workspace:*",
-    "@naary/temporal-config": "workspace:*"
+    "@naary/temporal-config": "workspace:*",
+    "@naary/metrics": "workspace:*"
   },
   "devDependencies": {
     "@nestjs/testing": "^11.1.27"

@@ -15,6 +15,13 @@ import {
 } from "@naary/connections";
 import { getPrisma } from "@naary/db";
 import { createLogger } from "@naary/logging";
+import {
+  activityDuration,
+  activityRuns,
+  agentTokens,
+  runCostUsd,
+  secondsSince,
+} from "../metrics";
 import { CredentialsService, MissingCredentialError } from "@naary/secrets";
 import {
   getObjectStore,
@@ -202,6 +209,7 @@ export async function runAgent(
   input: unknown,
   meta: AgentMeta,
 ): Promise<AgentResult> {
+  const startedAt = process.hrtime.bigint();
   // Released in `finally` (Arch§4.3) — whether the call succeeds or throws — so a
   // failed/retried activity never leaves a dangling reservation.
   let reservationId: string | undefined;
@@ -350,6 +358,12 @@ export async function runAgent(
       "agent node completed",
     );
 
+    activityRuns.inc({ activity: "runAgent", outcome: "ok" });
+    activityDuration.observe({ activity: "runAgent" }, secondsSince(startedAt));
+    agentTokens.inc({ kind: "input" }, usage.inputTokens);
+    agentTokens.inc({ kind: "output" }, usage.outputTokens);
+    if (costUsd > 0) runCostUsd.inc(costUsd);
+
     return {
       status: "ok",
       output: result.output as Record<string, unknown>,
@@ -357,6 +371,8 @@ export async function runAgent(
       costUsd,
     };
   } catch (e) {
+    activityRuns.inc({ activity: "runAgent", outcome: "error" });
+    activityDuration.observe({ activity: "runAgent" }, secondsSince(startedAt));
     // Our own deliberate failures (BUDGET, UNSUPPORTED_PROVIDER, …) are already
     // safe + correctly (non-)retryable — pass them through untouched.
     if (e instanceof ApplicationFailure) throw e;
@@ -432,6 +448,7 @@ export async function callMcpTool(
   input: unknown,
   meta: AgentMeta,
 ): Promise<McpToolResult> {
+  const startedAt = process.hrtime.bigint();
   try {
     const store = getObjectStore();
     const target = await __mcpDeps.resolveMcpTarget(
@@ -477,8 +494,19 @@ export async function callMcpTool(
       },
       "mcp tool completed",
     );
+    activityRuns.inc({ activity: "callMcpTool", outcome: "ok" });
+    activityDuration.observe(
+      { activity: "callMcpTool" },
+      secondsSince(startedAt),
+    );
+    if ((cfg.costUsd ?? 0) > 0) runCostUsd.inc(cfg.costUsd ?? 0);
     return { status: "ok", content, costUsd: cfg.costUsd ?? 0 };
   } catch (e) {
+    activityRuns.inc({ activity: "callMcpTool", outcome: "error" });
+    activityDuration.observe(
+      { activity: "callMcpTool" },
+      secondsSince(startedAt),
+    );
     // Our own deliberate failures (e.g. MCP_TOOL_ERROR) are already safe + correctly
     // non-retryable — pass them through untouched.
     if (e instanceof ApplicationFailure) throw e;
