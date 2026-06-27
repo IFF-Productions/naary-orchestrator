@@ -13,6 +13,7 @@ import {
   callMcpTool as mcpCall,
   resolveMcpTarget,
 } from "@naary/connections";
+import { createLogger } from "@naary/logging";
 import { CredentialsService, MissingCredentialError } from "@naary/secrets";
 import {
   getObjectStore,
@@ -31,6 +32,12 @@ import {
 import { APICallError, Output, generateText, jsonSchema } from "ai";
 
 const MAX_OUTPUT_TOKENS = 1024;
+
+// Activities run in the worker PROCESS (a side-effect zone), so structured
+// logging is fine here — unlike workflows.ts, which must stay deterministic.
+// Logs carry execution-correlated ids (executionId/nodeId/tenantId) and token/
+// cost numbers only — never prompts, completions, or keys (the logger scrubs).
+const log = createLogger({ component: "worker" });
 
 /**
  * Sanitize a transient error before it leaves the activity. A thrown error is
@@ -294,6 +301,21 @@ export async function runAgent(
         .cachedInputTokens,
     });
 
+    log.info(
+      {
+        activity: "runAgent",
+        executionId: meta.executionId,
+        nodeId: meta.nodeId,
+        tenantId: meta.tenantId,
+        provider: cfg.provider,
+        model,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        costUsd,
+      },
+      "agent node completed",
+    );
+
     return {
       status: "ok",
       output: result.output as Record<string, unknown>,
@@ -409,6 +431,18 @@ export async function callMcpTool(
     const content = await maybeOffload(result.content, store, {
       keyPrefix: `mcp/${meta.tenantId}`,
     });
+    log.info(
+      {
+        activity: "callMcpTool",
+        executionId: meta.executionId,
+        nodeId: meta.nodeId,
+        tenantId: meta.tenantId,
+        tool: cfg.tool,
+        connectionId: cfg.connectionId,
+        costUsd: cfg.costUsd ?? 0,
+      },
+      "mcp tool completed",
+    );
     return { status: "ok", content, costUsd: cfg.costUsd ?? 0 };
   } catch (e) {
     // Our own deliberate failures (e.g. MCP_TOOL_ERROR) are already safe + correctly

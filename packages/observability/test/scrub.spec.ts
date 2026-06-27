@@ -23,6 +23,13 @@ describe("redactString", () => {
       "workflow exec-t-demo-123 failed at node agent",
     );
   });
+  it("replaces a no-group match cleanly (no stray offset number)", () => {
+    // Regression: for patterns without a capture group, the replacer's 2nd arg is
+    // the match offset (a number), not a label — it must NOT be prepended.
+    const out = redactString("leaked sk-ant-aaaaaaaaaaaa here");
+    expect(out).toBe("leaked [REDACTED] here");
+    expect(out).not.toMatch(/\d\[REDACTED\]/);
+  });
 });
 
 describe("deepScrub", () => {

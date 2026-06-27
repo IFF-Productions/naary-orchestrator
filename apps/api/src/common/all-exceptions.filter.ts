@@ -4,8 +4,8 @@ import {
   type ExceptionFilter,
   HttpException,
   HttpStatus,
-  Logger,
 } from "@nestjs/common";
+import { type Logger, createLogger } from "@naary/logging";
 import { captureError } from "@naary/observability";
 
 interface Res {
@@ -15,6 +15,7 @@ interface Res {
 interface Req {
   method?: string;
   url?: string;
+  id?: string;
   principal?: { tenantId?: string };
 }
 
@@ -27,7 +28,7 @@ interface Req {
  */
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
-  private readonly logger = new Logger("Exception");
+  private readonly logger: Logger = createLogger({ component: "api" });
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
@@ -47,9 +48,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
       return;
     }
 
-    // Unexpected: do not serialize the error (no stack, no secret-bearing text).
-    // Report to Sentry (scrubbed) with the tenant tag for triage; log the route.
-    this.logger.error(`Unhandled error on ${req?.method} ${req?.url}`);
+    // Unexpected: do NOT serialize the error message/stack (a DB or provider
+    // error can embed secrets) — log only safe identifiers (route + ids) so the
+    // line ties to the request's access log via requestId. The full (scrubbed)
+    // exception goes to Sentry for triage.
+    this.logger.error(
+      {
+        requestId: req?.id,
+        tenantId: req?.principal?.tenantId,
+        method: req?.method,
+        path: req?.url,
+      },
+      "unhandled error",
+    );
     captureError(exception, {
       tenantId: req?.principal?.tenantId,
       where: `${req?.method} ${req?.url}`,

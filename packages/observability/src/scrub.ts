@@ -29,9 +29,12 @@ const PATTERNS: RegExp[] = [
 export function redactString(s: string): string {
   let out = s;
   for (const re of PATTERNS) {
-    out = out.replace(re, (m, p1?: string) =>
-      // key=value pattern keeps the label (group 1) and redacts the value
-      p1 !== undefined ? `${p1}${REDACTED}` : REDACTED,
+    out = out.replace(re, (_m, p1?: unknown) =>
+      // The key=value pattern has a capture group (the label) we keep, redacting
+      // only the value. For patterns WITHOUT a group, the replacer's 2nd arg is
+      // the match OFFSET (a number) — so only treat a STRING as the label;
+      // otherwise redact the whole match. (Number check guards the offset case.)
+      typeof p1 === "string" ? `${p1}${REDACTED}` : REDACTED,
     );
   }
   return out;

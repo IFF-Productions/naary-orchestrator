@@ -9,8 +9,13 @@ initSentry({ component: "worker" });
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { TASK_QUEUE } from "@naary/contracts";
 import { disconnectPrisma } from "@naary/db";
+import { createLogger } from "@naary/logging";
 import { createKeyEncryptor } from "@naary/secrets";
 import * as activities from "./temporal/activities";
+
+// Structured logger for worker BOOT code only. NOT imported by workflows.ts —
+// logging is I/O and would break deterministic replay (CLAUDE.md Tier-1 rule 2).
+const log = createLogger({ component: "worker" });
 
 /**
  * The worker process: stateless and disposable (CLAUDE.md Tier-1 rule 7).
@@ -33,7 +38,7 @@ async function run(): Promise<void> {
       workflowsPath: require.resolve("./temporal/workflows"),
       activities,
     });
-    console.log(`[worker] polling task queue '${TASK_QUEUE}' at ${address}`);
+    log.info({ taskQueue: TASK_QUEUE, address }, "worker polling");
     await worker.run();
   } finally {
     await connection.close();
@@ -43,7 +48,10 @@ async function run(): Promise<void> {
 }
 
 run().catch((err) => {
-  console.error("[worker] fatal:", err);
+  log.fatal(
+    { err: err instanceof Error ? err.message : String(err) },
+    "worker fatal",
+  );
   captureError(err, { where: "worker.run" });
   void flushSentry().finally(() => process.exit(1));
 });
