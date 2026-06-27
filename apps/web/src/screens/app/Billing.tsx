@@ -1,36 +1,106 @@
-import { Button, Card, ProgressBar, Table } from "../../components";
+import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
+import { Card, ProgressBar } from "../../components";
+import {
+  api,
+  UnauthorizedError,
+  type BudgetView,
+  type UsageReport,
+} from "../../lib/api";
 
-/* Billing & usage — ported from Naary.dc.html (lines 407–437). Plan, spend
-   cap and invoices. The DC subtitle mentions "usage by model" but the design
-   block ships no such section, so none is rendered here. */
+/* ------------------------------------------------------------------
+ * Billing & usage — wired to the control plane. On mount we resolve the
+ * tenant (getMe) then fetch the usage ledger (getUsage) and the budget
+ * view (getBudget) concurrently. The ledger stores tokens + cost only
+ * (no prompt/completion text) — that's by design, so this screen shows
+ * spend, tokens, a spend-by-model breakdown and the budget caps vs the
+ * live month-to-date spend.
+ *
+ * The mock plan/spend-cap/invoices that used to live here had no backing
+ * endpoint, so they're gone — every number below is real.
+ * ---------------------------------------------------------------- */
 
-const plan = {
-  name: "Scale",
-  meta: "$499/mo · billed monthly · renews May 1",
-  includedRuns: "100k / mo",
-  seats: "12 / 25",
-  overage: "$4 / 1k",
+const cardStyle: CSSProperties = {
+  background: "var(--card)",
+  border: "1px solid var(--line)",
+  borderRadius: 12,
+  boxShadow: "var(--shadow-card)",
 };
 
-const spendCap = {
-  used: "$1,284",
-  cap: "$3,000",
-  pct: 43,
-  note: "43% used · projected $2,470 by May 1",
-};
-
-interface Invoice {
-  period: string;
-  amount: string;
-  status: string;
-}
-const invoices: Invoice[] = [
-  { period: "March 2026", amount: "$2,704.00", status: "Paid" },
-  { period: "February 2026", amount: "$2,512.00", status: "Paid" },
-  { period: "January 2026", amount: "$2,488.00", status: "Paid" },
+/** Per-model accent colors, cycled for the spend-by-model bars. */
+const MODEL_COLORS = [
+  "var(--node-agent)",
+  "var(--state-info)",
+  "var(--node-trigger)",
+  "var(--state-done)",
+  "var(--brand)",
 ];
 
+function usd(n: number): string {
+  const small = n > 0 && n < 1;
+  return `$${n.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: small ? 4 : 2,
+  })}`;
+}
+
+function tokens(n: number): string {
+  return n.toLocaleString();
+}
+
+/** Clamp a percentage to [0, 100] (over-cap bars shouldn't overflow visually). */
+function clampPct(n: number): number {
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(100, n);
+}
+
+type Load =
+  | { kind: "loading" }
+  | { kind: "unauthorized" }
+  | { kind: "error"; message: string }
+  | {
+      kind: "ready";
+      tenantId: string;
+      usage: UsageReport;
+      budget: BudgetView | null;
+    };
+
 export function Billing() {
+  const [state, setState] = useState<Load>({ kind: "loading" });
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const me = await api.getMe();
+        // Usage is primary; a missing/unset budget (404 → generic Error) must
+        // degrade to a "no budget set" card rather than nuke the whole page.
+        // A 401 from either call still means "sign in", so re-throw it.
+        const [usage, budget] = await Promise.all([
+          api.getUsage(me.tenantId),
+          api.getBudget(me.tenantId).catch((e: unknown) => {
+            if (e instanceof UnauthorizedError) throw e;
+            return null;
+          }),
+        ]);
+        if (!live) return;
+        setState({ kind: "ready", tenantId: me.tenantId, usage, budget });
+      } catch (e) {
+        if (!live) return;
+        if (e instanceof UnauthorizedError) {
+          setState({ kind: "unauthorized" });
+        } else {
+          setState({
+            kind: "error",
+            message: e instanceof Error ? e.message : "Failed to load billing",
+          });
+        }
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
+
   return (
     <div style={{ padding: "22px 28px 40px", maxWidth: 1080 }}>
       {/* heading */}
@@ -46,258 +116,322 @@ export function Billing() {
           Billing &amp; usage
         </div>
         <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
-          Plan, spend caps, invoices and usage by model.
+          Spend, tokens, budget caps and usage by model — from the usage ledger.
         </div>
       </div>
 
-      {/* plan + spend cap */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1.3fr 1fr",
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
-        {/* current plan */}
-        <Card
-          pad={false}
-          style={{ padding: 20, position: "relative", overflow: "hidden" }}
-        >
-          <div
-            style={{
-              position: "absolute",
-              top: -30,
-              right: -30,
-              width: 140,
-              height: 140,
-              borderRadius: "50%",
-              background:
-                "radial-gradient(circle, rgba(242,98,46,.16), transparent 70%)",
-            }}
-          />
-          <div
-            className="mono"
-            style={{
-              fontSize: 10,
-              fontWeight: 600,
-              letterSpacing: "0.1em",
-              color: "var(--brand)",
-              textTransform: "uppercase",
-            }}
-          >
-            Current plan
-          </div>
-          <div
-            style={{
-              fontSize: 24,
-              fontWeight: 700,
-              color: "var(--ink)",
-              marginTop: 8,
-            }}
-          >
-            {plan.name}
-          </div>
-          <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 3 }}>
-            {plan.meta}
-          </div>
-          <div style={{ display: "flex", gap: 24, marginTop: 18 }}>
-            <PlanStat label="Included runs" value={plan.includedRuns} />
-            <PlanStat label="Seats" value={plan.seats} />
-            <PlanStat label="Overage" value={plan.overage} />
-          </div>
-          <Button variant="secondary" style={{ marginTop: 18 }}>
-            Manage plan
-          </Button>
-        </Card>
+      {state.kind === "loading" && <Notice>Loading billing…</Notice>}
 
-        {/* spend cap */}
-        <Card pad={false} style={{ padding: 20 }}>
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: "var(--ink)",
-              marginBottom: 4,
-            }}
-          >
-            Spend cap
-          </div>
-          <div
-            style={{ fontSize: 11.5, color: "var(--ink-3)", marginBottom: 16 }}
-          >
-            Runs pause automatically at the cap.
-          </div>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              fontSize: 12,
-              marginBottom: 7,
-            }}
-          >
-            <span style={{ color: "var(--ink-2)" }}>Used this month</span>
-            <span className="mono" style={{ color: "var(--ink)" }}>
-              {spendCap.used} / {spendCap.cap}
-            </span>
-          </div>
-          <ProgressBar
-            value={spendCap.pct}
-            color="linear-gradient(90deg,var(--brand-2),var(--brand))"
-          />
-          <div
-            className="mono"
-            style={{ marginTop: 8, fontSize: 10.5, color: "var(--ink-3)" }}
-          >
-            {spendCap.note}
-          </div>
-          {/* payment method */}
-          <div
-            style={{
-              marginTop: 16,
-              paddingTop: 15,
-              borderTop: "1px solid var(--line)",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            <span
-              className="mono"
-              style={{
-                width: 36,
-                height: 24,
-                borderRadius: 5,
-                background: "var(--card-2)",
-                border: "1px solid var(--line)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 9,
-                fontWeight: 700,
-                color: "var(--ink-2)",
-              }}
-            >
-              VISA
-            </span>
-            <span
-              className="mono"
-              style={{ fontSize: 12, color: "var(--ink-2)" }}
-            >
-              •••• 4242
-            </span>
-            <button
-              style={{
-                marginLeft: "auto",
-                fontSize: 11.5,
-                color: "var(--brand)",
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-                fontWeight: 600,
-              }}
-            >
-              Update
-            </button>
-          </div>
-        </Card>
-      </div>
+      {state.kind === "unauthorized" && (
+        <Notice>Sign in to view billing</Notice>
+      )}
 
-      {/* invoices */}
-      <Card pad={false} style={{ overflow: "hidden" }}>
-        <div
-          style={{
-            padding: "15px 18px 11px",
-            fontSize: 13,
-            fontWeight: 600,
-            color: "var(--ink)",
-          }}
-        >
-          Invoices
-        </div>
-        <Table<Invoice>
-          rowKey={(r) => r.period}
-          columns={[
-            {
-              key: "period",
-              header: "Period",
-              width: "calc((100% - 80px) / 3)",
-              render: (r) => (
-                <span style={{ color: "var(--ink)" }}>{r.period}</span>
-              ),
-            },
-            {
-              key: "amount",
-              header: "Amount",
-              width: "calc((100% - 80px) / 3)",
-              render: (r) => (
-                <span className="mono" style={{ color: "var(--ink-2)" }}>
-                  {r.amount}
-                </span>
-              ),
-            },
-            {
-              key: "status",
-              header: "Status",
-              width: "calc((100% - 80px) / 3)",
-              render: (r) => (
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: "var(--state-done)",
-                    background:
-                      "color-mix(in srgb, var(--state-done) 14%, transparent)",
-                    padding: "3px 10px",
-                    borderRadius: 20,
-                  }}
-                >
-                  {r.status}
-                </span>
-              ),
-            },
-            {
-              key: "pdf",
-              header: "",
-              width: 80,
-              render: () => (
-                <button
-                  className="mono"
-                  style={{
-                    fontSize: 11,
-                    color: "var(--brand)",
-                    background: "transparent",
-                    border: "none",
-                    cursor: "pointer",
-                  }}
-                >
-                  PDF
-                </button>
-              ),
-            },
-          ]}
-          rows={invoices}
-        />
-      </Card>
+      {state.kind === "error" && (
+        <Notice tone="error">
+          Couldn&apos;t load billing — {state.message}
+        </Notice>
+      )}
+
+      {state.kind === "ready" && (
+        <Ready usage={state.usage} budget={state.budget} />
+      )}
     </div>
   );
 }
 
-function PlanStat({ label, value }: { label: string; value: string }) {
+function Ready({
+  usage,
+  budget,
+}: {
+  usage: UsageReport;
+  budget: BudgetView | null;
+}) {
+  const hasUsage = usage.totalCostUsd > 0 || usage.totalTokens > 0;
+  const byModel = [...usage.byModel].sort((a, b) => b.costUsd - a.costUsd);
+
+  return (
+    <>
+      {/* headline stats */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3,1fr)",
+          gap: 14,
+          marginBottom: 16,
+        }}
+      >
+        <Stat label="Total spend" value={usd(usage.totalCostUsd)} />
+        <Stat label="Total tokens" value={tokens(usage.totalTokens)} />
+        <Stat
+          label="Models used"
+          value={usage.byModel.length.toLocaleString()}
+        />
+      </div>
+
+      {/* budget + spend by model */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1.1fr",
+          gap: 16,
+          marginBottom: 16,
+        }}
+      >
+        <BudgetCard budget={budget} />
+        <SpendByModelCard
+          rows={byModel}
+          totalCostUsd={usage.totalCostUsd}
+          hasUsage={hasUsage}
+        />
+      </div>
+    </>
+  );
+}
+
+/* ---------------- budget ---------------- */
+
+function BudgetCard({ budget }: { budget: BudgetView | null }) {
+  if (!budget) {
+    return (
+      <Card pad={false} style={{ padding: 20 }}>
+        <CardTitle>Budget</CardTitle>
+        <CardSub>Caps pause or downgrade runs automatically.</CardSub>
+        <div
+          style={{
+            marginTop: 16,
+            fontSize: 12.5,
+            color: "var(--ink-2)",
+          }}
+        >
+          No budget configured for this tenant yet.
+        </div>
+      </Card>
+    );
+  }
+
+  const pct = clampPct((budget.mtdSpendUsd / budget.monthlyCapUsd) * 100);
+  const over = budget.remainingUsd < 0;
+  const near = !over && pct >= 80;
+  const barColor = over
+    ? "var(--state-error)"
+    : near
+      ? "var(--state-paused)"
+      : "linear-gradient(90deg,var(--brand-2),var(--brand))";
+
+  return (
+    <Card pad={false} style={{ padding: 20 }}>
+      <CardTitle>Budget</CardTitle>
+      <CardSub>
+        {budget.onBudgetExceeded === "downgrade"
+          ? `Over cap, runs downgrade${budget.fallbackModel ? ` to ${budget.fallbackModel}` : ""}.`
+          : "Runs are rejected once the monthly cap is hit."}
+      </CardSub>
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          fontSize: 12,
+          marginTop: 16,
+          marginBottom: 7,
+        }}
+      >
+        <span style={{ color: "var(--ink-2)" }}>Spent this month</span>
+        <span className="mono" style={{ color: "var(--ink)" }}>
+          {usd(budget.mtdSpendUsd)} / {usd(budget.monthlyCapUsd)}
+        </span>
+      </div>
+      <ProgressBar value={pct} color={barColor} />
+      <div
+        className="mono"
+        style={{
+          marginTop: 8,
+          fontSize: 10.5,
+          color: over ? "var(--state-error)" : "var(--ink-3)",
+        }}
+      >
+        {over
+          ? `${usd(-budget.remainingUsd)} over cap · ${pct.toFixed(0)}% used`
+          : `${usd(budget.remainingUsd)} remaining · ${pct.toFixed(0)}% used`}
+      </div>
+
+      {/* caps + policy */}
+      <div
+        style={{
+          marginTop: 16,
+          paddingTop: 15,
+          borderTop: "1px solid var(--line)",
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 14,
+        }}
+      >
+        <KeyVal
+          label="Per-execution cap"
+          value={usd(budget.perExecutionCapUsd)}
+        />
+        <KeyVal
+          label="Max steps / run"
+          value={budget.maxStepsPerRun.toLocaleString()}
+        />
+        <KeyVal label="On exceeded" value={budget.onBudgetExceeded} />
+        <KeyVal label="Fallback model" value={budget.fallbackModel ?? "—"} />
+      </div>
+    </Card>
+  );
+}
+
+/* ---------------- spend by model ---------------- */
+
+function SpendByModelCard({
+  rows,
+  totalCostUsd,
+  hasUsage,
+}: {
+  rows: UsageReport["byModel"];
+  totalCostUsd: number;
+  hasUsage: boolean;
+}) {
+  return (
+    <Card pad={false} style={{ padding: 20 }}>
+      <CardTitle>Spend by model</CardTitle>
+      <CardSub>{`This tenant · ${usd(totalCostUsd)} total`}</CardSub>
+
+      {!hasUsage || rows.length === 0 ? (
+        <div style={{ marginTop: 16, fontSize: 12.5, color: "var(--ink-2)" }}>
+          No usage recorded yet.
+        </div>
+      ) : (
+        <div
+          style={{
+            marginTop: 16,
+            display: "flex",
+            flexDirection: "column",
+            gap: 14,
+          }}
+        >
+          {rows.map((m, i) => {
+            const pct =
+              totalCostUsd > 0 ? clampPct((m.costUsd / totalCostUsd) * 100) : 0;
+            return (
+              <div key={m.model}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: 12,
+                    marginBottom: 5,
+                  }}
+                >
+                  <span style={{ color: "var(--ink)", fontWeight: 500 }}>
+                    {m.model}
+                  </span>
+                  <span className="mono" style={{ color: "var(--ink-2)" }}>
+                    {usd(m.costUsd)}
+                  </span>
+                </div>
+                <ProgressBar
+                  value={pct}
+                  color={MODEL_COLORS[i % MODEL_COLORS.length]}
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/* ---------------- presentational helpers ---------------- */
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ ...cardStyle, padding: "15px 16px" }}>
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "var(--ink-3)",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        className="mono"
+        style={{
+          fontSize: 24,
+          fontWeight: 700,
+          color: "var(--ink)",
+          marginTop: 8,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function KeyVal({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{label}</div>
       <div
         className="mono"
         style={{
-          fontSize: 15,
+          fontSize: 13,
           fontWeight: 600,
           color: "var(--ink)",
           marginTop: 2,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
         }}
       >
         {value}
       </div>
+    </div>
+  );
+}
+
+function CardTitle({ children }: { children: ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 13,
+        fontWeight: 600,
+        color: "var(--ink)",
+        marginBottom: 4,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function CardSub({ children }: { children: ReactNode }) {
+  return (
+    <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{children}</div>
+  );
+}
+
+function Notice({ children, tone }: { children: ReactNode; tone?: "error" }) {
+  return (
+    <div
+      style={{
+        ...cardStyle,
+        padding: "28px 20px",
+        textAlign: "center",
+        fontSize: 13,
+        color: tone === "error" ? "var(--state-error)" : "var(--ink-2)",
+      }}
+    >
+      {children}
     </div>
   );
 }

@@ -113,6 +113,13 @@ export const api = {
   getUsage(tenantId: string): Promise<UsageReport> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/usage`);
   },
+  // Budget config + live month-to-date spend. Tenant-scoped — pass tenantId from
+  // getMe(). NOTE: the server returns 404 (→ generic Error, not UnauthorizedError)
+  // when no budget is configured, so callers should treat a thrown non-401 here as
+  // "no budget set" rather than a fatal failure.
+  getBudget(tenantId: string): Promise<BudgetView> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/budget`);
+  },
 };
 
 export interface RunSummary {
@@ -124,6 +131,26 @@ export interface UsageReport {
   totalTokens: number;
   byModel: { model: string; tokens: number; costUsd: number }[];
   events: unknown[];
+}
+
+/**
+ * GET /tenants/:id/budget — budget config plus live month-to-date spend.
+ * Mirrors the server's BudgetView (apps/api/src/budget/budget.service.ts):
+ * the persisted TenantBudgetConfig fields + the two view-only spend fields.
+ * Defined inline (not imported from @naary/usage) because that's a server-only
+ * package with Prisma deps that must not enter the web bundle.
+ */
+export interface BudgetView {
+  tenantId: string;
+  monthlyCapUsd: number;
+  perExecutionCapUsd: number;
+  maxStepsPerRun: number;
+  onBudgetExceeded: "reject" | "downgrade";
+  fallbackModel: string | null;
+  /** Spend so far this calendar month, in USD. */
+  mtdSpendUsd: number;
+  /** monthlyCapUsd − mtdSpendUsd (may be negative if over cap). */
+  remainingUsd: number;
 }
 
 /** Map a control-plane status to a design run-state token. */
