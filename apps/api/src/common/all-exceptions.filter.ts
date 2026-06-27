@@ -48,17 +48,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
       return;
     }
 
-    // Unexpected: do not serialize the error (no stack, no secret-bearing text).
-    // Report to Sentry (scrubbed) with the tenant tag for triage; log the route.
-    // The logger scrubs its args, so the error message is safe to attach for
-    // local triage (Sentry isn't always on); requestId ties it to the access log.
+    // Unexpected: do NOT serialize the error message/stack (a DB or provider
+    // error can embed secrets) — log only safe identifiers (route + ids) so the
+    // line ties to the request's access log via requestId. The full (scrubbed)
+    // exception goes to Sentry for triage.
     this.logger.error(
       {
         requestId: req?.id,
         tenantId: req?.principal?.tenantId,
         method: req?.method,
         path: req?.url,
-        err: exception instanceof Error ? exception.message : String(exception),
       },
       "unhandled error",
     );
