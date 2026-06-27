@@ -158,7 +158,36 @@ export const api = {
       body: JSON.stringify(patch),
     });
   },
+  // --- Integrations ---
+  // Connected MCP servers / apps for the tenant. Tenant-scoped — pass tenantId from getMe().
+  listConnections(tenantId: string): Promise<ConnectionRow[]> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/connections`);
+  },
+  // Registered webhook endpoints (never includes the signing secret). Tenant-scoped.
+  listWebhooks(tenantId: string): Promise<WebhookRow[]> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/webhooks`);
+  },
 };
+
+/** A connected MCP server / app (mirrors the API's ConnectionView; Date → string over JSON). */
+export interface ConnectionRow {
+  id: string;
+  type: "github" | "atlassian" | "custom";
+  label: string;
+  serverUrl: string;
+  authMode: "api_token" | "pat" | "oauth";
+  scopes: string[];
+  status: "connected" | "needs_reauth" | "error";
+  createdAt: string;
+}
+
+/** A registered webhook endpoint (no signing secret; Date → string over JSON). */
+export interface WebhookRow {
+  id: string;
+  provider: string;
+  workflowId: string;
+  createdAt: string;
+}
 
 export interface RunSummary {
   workflowId: string;
@@ -167,7 +196,13 @@ export interface RunSummary {
 export interface UsageReport {
   totalCostUsd: number;
   totalTokens: number;
-  byModel: { model: string; tokens: number; costUsd: number }[];
+  byModel: {
+    provider: string;
+    model: string;
+    calls: number;
+    totalTokens: number;
+    costUsd: number;
+  }[];
   events: unknown[];
 }
 export interface Member {

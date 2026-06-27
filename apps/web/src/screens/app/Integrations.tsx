@@ -1,5 +1,11 @@
-import { Icon, StatusPill } from "../../components";
-import { mcps, type McpRow } from "../../lib/mock";
+import { useEffect, useState } from "react";
+import { Icon, StatusPill, type RunState } from "../../components";
+import {
+  api,
+  type ConnectionRow,
+  type WebhookRow,
+  UnauthorizedError,
+} from "../../lib/api";
 
 /** Model providers — defined locally; the DC hard-codes these three + an "add" tile. */
 const providers: {
@@ -28,6 +34,24 @@ const providers: {
   },
 ];
 
+/** Map a connection's status to a StatusPill run-state token. */
+function connectionState(status: ConnectionRow["status"]): RunState {
+  switch (status) {
+    case "connected":
+      return "done";
+    case "needs_reauth":
+      return "info";
+    case "error":
+      return "error";
+  }
+}
+
+const CONNECTION_LABEL: Record<ConnectionRow["status"], string> = {
+  connected: "Connected",
+  needs_reauth: "Reauth",
+  error: "Error",
+};
+
 const monoLabel: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontSize: 10,
@@ -38,6 +62,39 @@ const monoLabel: React.CSSProperties = {
 };
 
 export function Integrations() {
+  const [connections, setConnections] = useState<ConnectionRow[] | null>(null);
+  const [webhooks, setWebhooks] = useState<WebhookRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const { tenantId } = await api.getMe();
+        const [conns, hooks] = await Promise.all([
+          api.listConnections(tenantId),
+          api.listWebhooks(tenantId),
+        ]);
+        if (!alive) return;
+        setConnections(conns);
+        setWebhooks(hooks);
+        setError(null);
+      } catch (e) {
+        if (!alive) return;
+        setError(
+          e instanceof UnauthorizedError
+            ? "Sign in to view integrations"
+            : "Could not reach the control plane (apps/api on :3000).",
+        );
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const loading = connections === null && webhooks === null && !error;
+
   return (
     <div style={{ padding: "22px 28px 40px", maxWidth: 1100 }}>
       {/* heading */}
@@ -56,6 +113,23 @@ export function Integrations() {
           MCP servers, model providers and connected apps.
         </div>
       </div>
+
+      {error && (
+        <div
+          style={{
+            marginBottom: 18,
+            padding: "9px 12px",
+            borderRadius: 8,
+            background: "var(--error-soft)",
+            border:
+              "1px solid color-mix(in srgb, var(--state-error) 40%, transparent)",
+            color: "var(--state-error)",
+            fontSize: 12,
+          }}
+        >
+          {error}
+        </div>
+      )}
 
       {/* ===== Model providers ===== */}
       <div style={{ ...monoLabel, marginBottom: 11 }}>Model providers</div>
@@ -163,7 +237,7 @@ export function Integrations() {
         </button>
       </div>
 
-      {/* ===== MCP servers ===== */}
+      {/* ===== MCP servers (connections) ===== */}
       <div
         style={{
           display: "flex",
@@ -204,18 +278,31 @@ export function Integrations() {
           borderRadius: 12,
           boxShadow: "var(--shadow-card)",
           overflow: "hidden",
+          marginBottom: 26,
         }}
       >
-        {mcps.map((m: McpRow, i) => (
+        {loading && (
+          <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-3)" }}>
+            Loading…
+          </div>
+        )}
+        {!loading && connections?.length === 0 && (
+          <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-2)" }}>
+            No connected servers yet — connect one to get started.
+          </div>
+        )}
+        {(connections ?? []).map((c, i) => (
           <div
-            key={m.name}
+            key={c.id}
             style={{
               display: "flex",
               alignItems: "center",
               gap: 13,
               padding: "13px 18px",
               borderBottom:
-                i < mcps.length - 1 ? "1px solid var(--line)" : undefined,
+                i < (connections?.length ?? 0) - 1
+                  ? "1px solid var(--line)"
+                  : undefined,
             }}
           >
             <span
@@ -239,19 +326,18 @@ export function Integrations() {
                 className="mono"
                 style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}
               >
-                {m.name}
+                {c.label}
               </div>
               <div
                 style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 1 }}
               >
-                {m.tools} tools · {m.url}
+                {c.type} · {c.serverUrl}
               </div>
             </div>
-            {m.status === "Connected" ? (
-              <StatusPill state="done" label="Connected" />
-            ) : (
-              <StatusPill state="error" label="Error" />
-            )}
+            <StatusPill
+              state={connectionState(c.status)}
+              label={CONNECTION_LABEL[c.status]}
+            />
             <button
               type="button"
               style={{
@@ -268,6 +354,75 @@ export function Integrations() {
             >
               Manage
             </button>
+          </div>
+        ))}
+      </div>
+
+      {/* ===== Webhook endpoints ===== */}
+      <div style={{ ...monoLabel, marginBottom: 11 }}>Webhook endpoints</div>
+      <div
+        style={{
+          background: "var(--card)",
+          border: "1px solid var(--line)",
+          borderRadius: 12,
+          boxShadow: "var(--shadow-card)",
+          overflow: "hidden",
+        }}
+      >
+        {loading && (
+          <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-3)" }}>
+            Loading…
+          </div>
+        )}
+        {!loading && webhooks?.length === 0 && (
+          <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-2)" }}>
+            No webhook endpoints yet — register one to trigger a workflow.
+          </div>
+        )}
+        {(webhooks ?? []).map((w, i) => (
+          <div
+            key={w.id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 13,
+              padding: "13px 18px",
+              borderBottom:
+                i < (webhooks?.length ?? 0) - 1
+                  ? "1px solid var(--line)"
+                  : undefined,
+            }}
+          >
+            <span
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 8,
+                background:
+                  "color-mix(in srgb, var(--node-trigger) 15%, transparent)",
+                color: "var(--node-trigger)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flex: "none",
+              }}
+            >
+              <Icon name="bolt" size={17} />
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                className="mono"
+                style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}
+              >
+                /hooks/{w.id}
+              </div>
+              <div
+                style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 1 }}
+              >
+                {w.provider} · {w.workflowId}
+              </div>
+            </div>
+            <StatusPill state="done" label="Active" />
           </div>
         ))}
       </div>
