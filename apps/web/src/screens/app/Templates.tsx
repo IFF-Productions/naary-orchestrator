@@ -1,9 +1,45 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Card, Icon, NODE_ACCENT } from "../../components";
-import { templates, type TemplateRow } from "../../lib/mock";
+import { Card, Icon, NODE_ACCENT, type NodeType } from "../../components";
+import { api, type TemplateSummary, UnauthorizedError } from "../../lib/api";
+
+// The API payload carries no presentation accent, so cycle the node palette by
+// index (mirrors the old mock) to keep each card visually distinct.
+const ACCENTS: NodeType[] = [
+  "trigger",
+  "agent",
+  "mcp",
+  "router",
+  "http",
+  "approval",
+];
 
 export function Templates() {
   const navigate = useNavigate();
+  const [templates, setTemplates] = useState<TemplateSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .listTemplates()
+      .then((rows) => {
+        if (!alive) return;
+        setTemplates(rows);
+        setError(null);
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setError(
+          e instanceof UnauthorizedError
+            ? "Not authenticated — sign in (or set an API token) to see templates."
+            : "Could not reach the control plane (apps/api on :3000).",
+        );
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   return (
     <div style={{ padding: "22px 28px 40px" }}>
@@ -24,28 +60,68 @@ export function Templates() {
         </div>
       </div>
 
+      {error && (
+        <div
+          style={{
+            marginBottom: 14,
+            padding: "9px 12px",
+            borderRadius: 8,
+            background: "var(--error-soft)",
+            border:
+              "1px solid color-mix(in srgb, var(--state-error) 40%, transparent)",
+            color: "var(--state-error)",
+            fontSize: 12,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      {templates === null && !error && (
+        <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Loading…</div>
+      )}
+
+      {templates?.length === 0 && (
+        <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>
+          No templates available.
+        </div>
+      )}
+
       {/* grid */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3,1fr)",
-          gap: 14,
-        }}
-      >
-        {templates.map((t) => (
-          <TemplateCard
-            key={t.name}
-            t={t}
-            onUse={() => navigate("/app/canvas")}
-          />
-        ))}
-      </div>
+      {templates && templates.length > 0 && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3,1fr)",
+            gap: 14,
+          }}
+        >
+          {templates.map((t, i) => (
+            <TemplateCard
+              key={t.key}
+              t={t}
+              accent={ACCENTS[i % ACCENTS.length]}
+              onUse={() =>
+                navigate(`/app/canvas?key=${encodeURIComponent(t.key)}`)
+              }
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function TemplateCard({ t, onUse }: { t: TemplateRow; onUse: () => void }) {
-  const accent = NODE_ACCENT[t.accent];
+function TemplateCard({
+  t,
+  accent: accentType,
+  onUse,
+}: {
+  t: TemplateSummary;
+  accent: NodeType;
+  onUse: () => void;
+}) {
+  const accent = NODE_ACCENT[accentType];
   return (
     <Card
       onClick={onUse}
@@ -91,7 +167,7 @@ function TemplateCard({ t, onUse }: { t: TemplateRow; onUse: () => void }) {
             borderRadius: 5,
           }}
         >
-          {t.nodes} nodes
+          {t.nodeCount} nodes
         </span>
       </div>
 
@@ -107,7 +183,7 @@ function TemplateCard({ t, onUse }: { t: TemplateRow; onUse: () => void }) {
           flex: 1,
         }}
       >
-        {t.desc}
+        {t.description}
       </div>
 
       {/* footer */}
@@ -123,7 +199,7 @@ function TemplateCard({ t, onUse }: { t: TemplateRow; onUse: () => void }) {
           className="mono"
           style={{ fontSize: 10.5, color: "var(--ink-3)" }}
         >
-          {t.tag}
+          {t.key}
         </span>
         <button
           type="button"

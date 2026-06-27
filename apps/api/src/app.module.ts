@@ -9,6 +9,7 @@ import { ExecutionsModule } from "./executions/executions.module";
 import { GraphsModule } from "./graphs/graphs.module";
 import { HealthModule } from "./health/health.module";
 import { SecretsModule } from "./secrets/secrets.module";
+import { TemplatesModule } from "./templates/templates.module";
 import { UsageModule } from "./usage/usage.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
 
@@ -26,6 +27,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     BudgetModule,
     WebhooksModule,
     ConnectionsModule,
+    TemplatesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
