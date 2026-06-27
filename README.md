@@ -217,12 +217,12 @@ an in-flight run (which carries its own snapshot). Re-saving an unchanged graph 
 
 ### Option A — the whole stack in Docker (one command)
 
-Brings up Postgres, Keycloak, Temporal, DB migrations, the API, the worker, and
-the web app together. Requires Docker; no host Node/Temporal needed.
+Brings up Postgres, Temporal, DB migrations, the API, the worker, and the web app
+together. Requires Docker; no host Node/Temporal needed.
 
 ```bash
 cp .env.example .env          # fill POSTGRES_PASSWORD, ENCRYPTION_KEY (openssl rand -hex 32),
-                              # KEYCLOAK_ADMIN_PASSWORD, and the matching DATABASE_URL
+                              # and the matching DATABASE_URL
 docker compose up -d --build  # build images + start everything
 ```
 
@@ -231,7 +231,6 @@ docker compose up -d --build  # build images + start everything
 | Web app | http://localhost:8081 |
 | API | http://localhost:3000 (`/healthz` is public) |
 | Temporal UI | http://localhost:8233 |
-| Keycloak | http://localhost:8080 |
 
 The `migrate` service applies Prisma migrations before the api/worker start; the
 api/worker wait on Temporal + Postgres healthchecks, so a cold `up` is ordered.
@@ -249,13 +248,15 @@ docker compose exec api pnpm --filter @naary/api exec ts-node src/auth/mint-toke
 > `POST /tenants/t-demo/credentials` (see below) for a run to get past the agent
 > node; without it the agent activity fails non-retryably (by design).
 
-> Inside the stack `OIDC_ISSUER` is left empty (API-token-only). The web-OIDC
-> slice turns Keycloak login on.
+> Inside the stack, browser login via Firebase Auth is **on only if a Firebase
+> service account is configured** (`FIREBASE_SERVICE_ACCOUNT_JSON` /
+> `GOOGLE_APPLICATION_CREDENTIALS`); otherwise the stack is API-token-only and the
+> `nry_` token below is the only way in. See the Authentication section.
 
 ### Option B — host processes (faster inner loop for backend dev)
 
-Three processes, in three terminals (Postgres + Keycloak still come from
-`docker compose up -d postgres keycloak`):
+Three processes, in three terminals (Postgres still comes from
+`docker compose up -d postgres`):
 
 ```bash
 # 1) Temporal dev server (persistent DB so server restarts survive too)
@@ -306,57 +307,62 @@ starts it and navigates to the run view. It seeds a credential-free `start → a
 graph, so a first Run completes (pauses at approval → Approve → done) without a
 BYOK LLM key. The compile logic is pure + unit-tested (`compile-graph.ts`).
 
-## Authentication — API tokens + Keycloak OIDC (dual auth)
+## Authentication — API tokens + Firebase Auth (dual auth)
 
 Every non-`@Public()` route requires `Authorization: Bearer <token>`. The global
 guard accepts **two** credential kinds and resolves both to a tenant:
 
 - **API tokens** (`nry_…`) — for services / CLI / CI. Hashed at rest; verified by
   `ApiTokenService`. Always on.
-- **Keycloak OIDC JWTs** — for human users. The `tenantId` comes from the access
-  token's **`tenant` claim** (mapped from a user attribute in Keycloak), never from
-  the request path/body. **Off unless `OIDC_ISSUER` is set**, so API-token-only
-  deployments are unchanged.
+- **Firebase ID tokens** — for human users. The API verifies them with the Firebase
+  Admin SDK, and the `tenantId` comes from a Firebase **`tenant` custom claim** on the
+  user, never from the request path/body. **Off unless a Firebase service account is
+  configured** (`FIREBASE_SERVICE_ACCOUNT_JSON` inline, or `GOOGLE_APPLICATION_CREDENTIALS`
+  pointing at a file), so API-token-only deployments are unchanged.
 
 Tenant-scoped routes (`/tenants/:id/...`) additionally 403 if the path tenant differs
 from the authenticated tenant — same enforcement for both credential kinds.
 
-### Local Keycloak
+### Local setup
+
+Firebase verification needs a **service account** for the Firebase project
+(`naary-7b78f`). Provide it to the API one of two ways and set the project id:
 
 ```bash
-# brings up Postgres + Keycloak (realm `naary` auto-imported from infra/keycloak)
-docker compose up -d            # Keycloak admin UI at http://localhost:8080
-
-# point the API at it (in .env), then restart `pnpm run start`:
-#   OIDC_ISSUER="http://localhost:8080/realms/naary"
-#   OIDC_AUDIENCE="naary-api"
-
-# get a token for the demo user (tenant=t-demo) via direct grant, then call the API:
-TOKEN=$(curl -s http://localhost:8080/realms/naary/protocol/openid-connect/token \
-  -d grant_type=password -d client_id=naary-web -d username=demo -d password=demo \
-  | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
-curl localhost:3000/executions -H "Authorization: Bearer $TOKEN"
+# in .env (API side):
+#   FIREBASE_PROJECT_ID="naary-7b78f"
+#   FIREBASE_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'   # inline JSON, OR
+#   GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account.json"   # file path
+#   FIREBASE_TENANT_CLAIM="tenant"                                   # (default)
 ```
 
-The demo realm/user/passwords are **local-dev only** (well-known values). For real
-deployments, point `OIDC_ISSUER` at your own realm and provision the `tenant`
-attribute + protocol mapper there.
+Assign a user's tenant by setting the `tenant` custom claim on their Firebase UID:
+
+```bash
+pnpm --filter @naary/api exec ts-node src/auth/set-tenant-claim.ts <firebaseUid> <tenantId>
+```
+
+> ⚠️ **No service account ⇒ no human browser login.** With Firebase auth off, the
+> local Docker stack has **no browser sign-in** — only `nry_` API tokens work. Mint
+> one for CLI/CI use with `mint-token.ts` (see the Docker quick-start above):
+>
+> ```bash
+> docker compose exec api pnpm --filter @naary/api exec ts-node src/auth/mint-token.ts t-demo
+> # -> nry_…   then: curl localhost:3000/executions -H "Authorization: Bearer nry_…"
+> ```
 
 ### Web login (SPA)
 
-The web app's sign-in screen has a **"Sign in with Keycloak"** button — an
-Authorization Code + PKCE login against the public `naary-web` client. The access
-token is attached to every API call and **silently refreshed** before expiry; on
-logout the session ends at Keycloak. The pasted `nry_` token remains a secondary
-("advanced") path for devs/CI. In the Docker stack OIDC is **on by default**:
+The web app's sign-in screen offers Firebase Auth: a **"Continue with Google"** button
+plus **email/password** fields (both via the Firebase JS SDK). On sign-in the SPA
+obtains a Firebase **ID token**, attaches it to every API call, and refreshes it before
+expiry. The pasted `nry_` token remains a secondary ("advanced") path for devs/CI.
 
-- The browser logs into Keycloak at `http://localhost:8080`, so tokens carry
-  `iss=localhost:8080`. The dockerized API validates that issuer but fetches the
-  JWKS over the docker network (`OIDC_JWKS_URI=http://keycloak:8080/...`) — JWKS is
-  host-independent, so signatures still validate (no `/etc/hosts` hack).
-- SPA Keycloak config is public and overridable via `VITE_KEYCLOAK_URL` /
-  `VITE_KEYCLOAK_REALM` / `VITE_KEYCLOAK_CLIENT_ID` (dev defaults:
-  `http://localhost:8080` / `naary` / `naary-web`).
+The SPA's public Firebase web config is **baked in at web build time** and overridable
+via `VITE_FIREBASE_API_KEY` / `VITE_FIREBASE_AUTH_DOMAIN` / `VITE_FIREBASE_PROJECT_ID` /
+`VITE_FIREBASE_STORAGE_BUCKET` / `VITE_FIREBASE_MESSAGING_SENDER_ID` /
+`VITE_FIREBASE_APP_ID` (project `naary-7b78f`). These are public client config, not
+secrets; the service account is API-side only.
 
 ## Tests
 

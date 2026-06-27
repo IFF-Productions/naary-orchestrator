@@ -10,6 +10,7 @@ allowBuilds:
   prisma: true
   '@prisma/engines': true
   esbuild: true
+  '@firebase/util': false
 
 # Force patched versions of transitive deps flagged by Dependabot (pnpm 11 reads
 # overrides from here, not package.json). All are minor/patch bumps:

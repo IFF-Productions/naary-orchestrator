@@ -14,7 +14,7 @@ open auth work (#25). Honest about what's done, what's stubbed, and what's not s
 ## 1. Running it locally
 
 ### Prerequisites
-- Node 20+, [pnpm](https://pnpm.io), Docker (for Postgres + Keycloak), and the
+- Node 20+, [pnpm](https://pnpm.io), Docker (for Postgres), and the
   [Temporal CLI](https://docs.temporal.io/cli) (`brew install temporal`).
 
 ### One-time setup
@@ -26,23 +26,25 @@ cp .env.example .env          # then fill in the values below
 openssl rand -hex 32          # paste into ENCRYPTION_KEY in .env
 ```
 
-Set in `.env`: `POSTGRES_PASSWORD`, `KEYCLOAK_ADMIN_PASSWORD`, `ENCRYPTION_KEY`, and the
-matching `DATABASE_URL`. Leave `OIDC_ISSUER` **empty** for API-token-only mode, or set it
-to `http://localhost:8080/realms/naary` to turn on Keycloak login.
+Set in `.env`: `POSTGRES_PASSWORD`, `ENCRYPTION_KEY`, and the matching `DATABASE_URL`.
+For human browser login, also set `FIREBASE_PROJECT_ID` (`naary-7b78f`) and a service
+account (`FIREBASE_SERVICE_ACCOUNT_JSON` inline, or `GOOGLE_APPLICATION_CREDENTIALS`
+file). Leave the service account **unset** for API-token-only mode (no browser login;
+`nry_` tokens only).
 
 ### Fastest path — the whole stack in Docker
 ```bash
-docker compose up -d --build   # Postgres, Keycloak, Temporal, migrate, api, worker, web
+docker compose up -d --build   # Postgres, Temporal, migrate, api, worker, web
 ```
 Web → http://localhost:8081 · API → http://localhost:3000 (`/healthz` public) ·
-Temporal UI → http://localhost:8233 · Keycloak → http://localhost:8080. The
+Temporal UI → http://localhost:8233. The
 `migrate` service runs `prisma migrate deploy` before api/worker start. This is a
 dev stack (single-binary Temporal, ts-node runtime) — production images/cluster
 are §3.A below.
 
 ### Or run the processes on the host (backend inner loop)
 ```bash
-docker compose up -d postgres keycloak                       # just the datastores
+docker compose up -d postgres                                # just the datastore
 pnpm --filter @naary/db exec prisma migrate deploy           # apply DB migrations
 
 # 1) Temporal dev server (persistent DB so restarts survive)
@@ -60,11 +62,10 @@ pnpm run start                                               # http://localhost:
 # API-token mode: mint a token (see ApiTokenService) and call:
 curl -XPOST localhost:3000/executions -H "Authorization: Bearer nry_…"
 
-# Keycloak mode: grab a demo token (user demo / tenant t-demo), then call the API
-TOKEN=$(curl -s http://localhost:8080/realms/naary/protocol/openid-connect/token \
-  -d grant_type=password -d client_id=naary-web -d username=demo -d password=demo \
-  | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
-curl localhost:3000/executions -H "Authorization: Bearer $TOKEN"
+# Firebase mode: humans sign in via the web app (Google / email+password), which
+# sends a Firebase ID token on each API call. Assign a user's tenant once with:
+#   pnpm --filter @naary/api exec ts-node src/auth/set-tenant-claim.ts <firebaseUid> <tenantId>
+# (Requires a configured Firebase service account; without one there is no browser login.)
 ```
 
 ### Tests
@@ -92,8 +93,9 @@ These are built and tested — not gaps:
   a flow creates a new version and can't corrupt in-flight runs.
 - **Large-payload claim-check** — >1MB activity results offload to object storage (S3),
   references pass through Temporal (stays under the ~2MB payload cap).
-- **Dual auth** — API tokens (`nry_…`) + Keycloak OIDC (tenant from the `tenant` claim);
-  tenant-scoped routes enforce path-tenant == token-tenant (403 on mismatch).
+- **Dual auth** — API tokens (`nry_…`) + Firebase Auth ID tokens (tenant from a Firebase
+  `tenant` custom claim, verified by the Firebase Admin SDK); tenant-scoped routes enforce
+  path-tenant == token-tenant (403 on mismatch).
 - **Webhook ingress** — HMAC-verified, fails closed; delivery-dedup with a retention sweeper.
 
 ---
@@ -115,25 +117,25 @@ Ordered roughly by "blocks launch" → "hardening". Each item says **why** and *
       connectivity itself is unverified (no account). Still to do: a Cloud/cluster
       namespace with retention + mTLS provisioned, and Worker Versioning / Build IDs
       for safe interpreter rollouts.
-- [ ] **Secrets management** — `ENCRYPTION_KEY` and DB/Keycloak creds in AWS Secrets
-      Manager / SSM, not `.env`. Plan **KMS-backed key wrapping + rotation** for the
-      master key (the code already supports key versions).
+- [ ] **Secrets management** — `ENCRYPTION_KEY`, DB creds, and the **Firebase service
+      account** in AWS Secrets Manager / SSM, not `.env`. Plan **KMS-backed key wrapping
+      + rotation** for the master key (the code already supports key versions).
 - [ ] **CI/CD** — there are currently **no GitHub Actions workflows**. Add: typecheck +
       `pnpm test` on PR, build/push images, run migrations, deploy. Make the determinism
       replay test a required gate.
 
-### B. Identity & auth (finish what #25 started)
-- [x] **Live-test the Keycloak realm** — realm now boots & imports in the Docker stack;
-      the `tenant` + audience mappers and the token flow are verified end-to-end (the
-      dockerized API accepts a Keycloak token; tenant mismatch → 403).
-- [x] **Web-app OIDC login** (Phase 2) — `keycloak-js` Authorization Code + PKCE,
-      token attach + silent refresh in the SPA; `nry_` paste kept as a fallback.
-      (Remaining: **manual click-through QA** of the browser redirect — automated
-      verification covered init/build + token acceptance, not the interactive flow.)
-- [ ] **OAuth `state` session-binding** (Sec#3) — currently TTL + single-use; bind to the
-      session, not just a tenant-prefixed state.
-- [ ] **Production Keycloak** — real realm, no demo user, MFA/policies, rotate the
-      `naary-api` audience, HTTPS-only, proper token lifespans.
+### B. Identity & auth
+- [x] **Firebase Auth for human login** — replaces Keycloak/OIDC. The SPA signs in with
+      the Firebase JS SDK (Google + email/password); the API verifies Firebase ID tokens
+      with the Firebase Admin SDK and reads the tenant from a `tenant` custom claim. Off
+      unless a service account is configured; `nry_` API tokens unchanged. *(Supersedes
+      the old Keycloak realm + web-OIDC items.)*
+- [ ] **OAuth `state` session-binding** (Sec#3) — for the **MCP connection OAuth** (not
+      user login): currently TTL + single-use; bind to the session, not just a
+      tenant-prefixed state.
+- [ ] **Production Firebase** — real Firebase project, restrict enabled sign-in providers,
+      enable **App Check**, rotate the service-account key, and set appropriate session /
+      token lifetimes.
 
 ### C. Scale & concurrency
 - [ ] **Distributed OAuth refresh lock** (Arch§4.7) — the token cache + refresh lock are
@@ -194,6 +196,7 @@ Ordered roughly by "blocks launch" → "hardening". Each item says **why** and *
 1. **CI/CD + infra + managed Postgres + Temporal Cloud** (A) — you can't ship without a
    deploy target and a pipeline.
 2. **Secrets management + KMS** (A) — before any real tenant key is stored.
-3. **Finish auth** (B) — live Keycloak test + web login, so humans can actually log in.
+3. **Production Firebase** (B) — real project + App Check + restricted providers, so
+   humans can safely log in.
 4. **Observability** (D) — you'll need it the moment real traffic hits.
 5. **Scale/concurrency** (C) and the **security tail** (E/F) — as load and tenants grow.

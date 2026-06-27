@@ -7,7 +7,7 @@ import {
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { ApiTokenService } from "./api-token.service";
-import { OidcVerifier } from "./oidc-verifier";
+import { FirebaseVerifier } from "./firebase-verifier";
 import { IS_PUBLIC_KEY } from "./public.decorator";
 import type { Principal, RequestWithPrincipal } from "./tenant.decorator";
 
@@ -19,17 +19,18 @@ interface GuardRequest extends RequestWithPrincipal {
 
 /**
  * Global dual-auth guard. Authenticates `Authorization: Bearer <token>` to a
- * tenant via EITHER a Keycloak OIDC JWT (human users — tenant from the `tenant`
- * claim) OR a per-tenant API token (`nry_…`, for services/CLI/CI), attaches
+ * tenant via EITHER a Firebase ID token (human users — tenant from the `tenant`
+ * custom claim) OR a per-tenant API token (`nry_…`, for services/CLI/CI), attaches
  * `req.principal`, and — for tenant-scoped routes under `/tenants/:id/...` —
  * enforces that the path tenant equals the authenticated tenant (403 on mismatch).
- * `@Public()` routes (webhook HMAC ingress, the OAuth redirect) are skipped.
+ * `@Public()` routes (webhook HMAC ingress, the MCP-connection OAuth redirect) are
+ * skipped — note that redirect is the connections OAuth, NOT user login.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
     private readonly tokens: ApiTokenService,
-    private readonly oidc: OidcVerifier,
+    private readonly firebase: FirebaseVerifier,
     private readonly reflector: Reflector,
   ) {}
 
@@ -48,13 +49,13 @@ export class AuthGuard implements CanActivate {
         : undefined;
     if (!token) throw new UnauthorizedException("Missing bearer token");
 
-    // `nry_…` → API token (services/CLI); anything else → Keycloak JWT (humans).
+    // `nry_…` → API token (services/CLI); anything else → Firebase ID token (humans).
     let principal: Principal | undefined;
     if (token.startsWith("nry_")) {
       const tenantId = await this.tokens.verify(token);
       if (tenantId) principal = { tenantId };
-    } else if (this.oidc.enabled) {
-      const p = await this.oidc.verify(token);
+    } else if (this.firebase.enabled) {
+      const p = await this.firebase.verify(token);
       if (p) principal = { tenantId: p.tenantId, subject: p.subject };
     }
     if (!principal) throw new UnauthorizedException("Invalid credentials");

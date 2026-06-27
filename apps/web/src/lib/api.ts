@@ -4,12 +4,12 @@
  * live state. In dev, Vite proxies /api → http://localhost:3000 (see
  * vite.config.ts), so the browser avoids CORS.
  *
- * Auth: every call carries a bearer token — a fresh Keycloak (OIDC) access token
- * when the user is logged in, else the pasted `nry_` API token (see getBearerToken).
- * The server resolves tenantId from the token, so the client never sends it.
+ * Auth: every call carries a bearer token — a fresh Firebase ID token when the
+ * user is signed in, else the pasted `nry_` API token (see getBearerToken). The
+ * server resolves tenantId from the token, so the client never sends it.
  */
 import type { GraphDef } from "@naary/dsl";
-import { getBearerToken } from "./keycloak";
+import { getBearerToken } from "./firebase";
 
 /** Thrown on a 401 so screens can prompt the user to set their API token. */
 export class UnauthorizedError extends Error {
