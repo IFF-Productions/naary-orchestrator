@@ -11,6 +11,7 @@ import { NestFactory } from "@nestjs/core";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/all-exceptions.filter";
+import { AppLogger } from "./common/app-logger";
 
 /** Browser origins allowed to call the API (the web app). Comma-separated env,
  *  defaults to the Vite dev server. */
@@ -24,7 +25,14 @@ function corsOrigins(): string[] {
 async function bootstrap(): Promise<void> {
   // rawBody: true exposes req.rawBody (Buffer) for webhook HMAC verification,
   // alongside normal JSON parsing — so existing JSON endpoints keep working.
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  // bufferLogs holds startup logs until our structured logger is installed so
+  // framework logs come out as JSON too (no console-text/JSON mix).
+  const appLogger = new AppLogger();
+  const app = await NestFactory.create(AppModule, {
+    rawBody: true,
+    bufferLogs: true,
+  });
+  app.useLogger(appLogger);
 
   // Security headers (Sec#5). API serves JSON only, so the helmet defaults are fine.
   app.use(helmet());
@@ -55,7 +63,7 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port);
-  console.log(`[api] listening on http://localhost:${port}`);
+  appLogger.pino.info({ port }, "api listening");
 }
 
 void bootstrap();

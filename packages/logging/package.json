@@ -1,0 +1,16 @@
+{
+  "name": "@naary/logging",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Structured JSON logging (pino) shared by api + worker. Correlation/tenant/execution IDs via child bindings; secrets scrubbed (reuses @naary/observability). Never imported by workflow code.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@naary/observability": "workspace:*",
+    "pino": "^9.6.0"
+  }
+}

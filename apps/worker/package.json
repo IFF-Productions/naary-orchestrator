@@ -25,7 +25,8 @@
     "ai": "6.0.210",
     "dotenv": "^17.4.2",
     "zod": "^3.25.76",
-    "@naary/observability": "workspace:*"
+    "@naary/observability": "workspace:*",
+    "@naary/logging": "workspace:*"
   },
   "devDependencies": {
     "@temporalio/testing": "^1.18.1"

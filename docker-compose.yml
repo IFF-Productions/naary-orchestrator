@@ -14,6 +14,8 @@ x-backend-env: &backend-env
   # Observability (Sentry) — OFF unless SENTRY_DSN is set. Events are scrubbed.
   SENTRY_DSN: ${SENTRY_DSN:-}
   SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0}
+  # Structured JSON logging verbosity (trace|debug|info|warn|error|fatal).
+  LOG_LEVEL: ${LOG_LEVEL:-info}
 
 services:
   postgres:

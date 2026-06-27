@@ -145,8 +145,15 @@ Ordered roughly by "blocks launch" → "hardening". Each item says **why** and *
       tenant/execution tags. A security-critical `beforeSend` scrubber drops
       sensitive keys + redacts secret-shaped substrings (unit-tested) so keys never
       reach telemetry. Optional perf tracing via `SENTRY_TRACES_SAMPLE_RATE`.
-- [ ] **Structured logging** (JSON, correlation/tenant/execution IDs, no secrets) —
-      still `console.log`; Sentry covers errors, not request/operational logs.
+- [x] **Structured logging** (JSON, correlation/tenant/execution IDs, no secrets) —
+      `@naary/logging` (pino) replaces `console.log` in the api + worker. Each API
+      request gets a correlation id (echoed as `x-request-id`) and an access-log line
+      (method/path/status/duration/tenant); activities log execution-correlated
+      completion lines (executionId/nodeId/tenantId + token/cost numbers, never
+      prompt/completion text). Both message and structured fields pass through the
+      audited `@naary/observability` scrubber, so secrets never reach the logs.
+      `LOG_LEVEL` controls verbosity. (NOT imported by `workflows.ts` — logging is
+      I/O and would break deterministic replay.)
 - [ ] **Metrics** — execution counts/latency, budget usage, activity retries, queue depth.
 - [ ] **Tracing** — full OpenTelemetry across API → Temporal → activities (Sentry
       tracing is a partial start).
