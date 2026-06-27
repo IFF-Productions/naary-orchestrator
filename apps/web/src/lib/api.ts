@@ -48,6 +48,10 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     throw new Error(`${init?.method ?? "GET"} ${path} → ${res.status}`);
   }
+  // 204 / empty body (e.g. DELETE) — nothing to parse.
+  if (res.status === 204 || res.headers.get("content-length") === "0") {
+    return undefined as T;
+  }
   return res.json() as Promise<T>;
 }
 
@@ -113,6 +117,35 @@ export const api = {
   getUsage(tenantId: string): Promise<UsageReport> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/usage`);
   },
+  // --- Team (members) ---
+  listMembers(tenantId: string): Promise<Member[]> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/members`);
+  },
+  addMember(tenantId: string, email: string, role?: string): Promise<Member> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/members`, {
+      method: "POST",
+      body: JSON.stringify({ email, ...(role ? { role } : {}) }),
+    });
+  },
+  removeMember(tenantId: string, memberId: string): Promise<void> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/members/${encodeURIComponent(memberId)}`,
+      { method: "DELETE" },
+    );
+  },
+  // --- Settings ---
+  getSettings(tenantId: string): Promise<TenantSettings> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/settings`);
+  },
+  saveSettings(
+    tenantId: string,
+    patch: TenantSettings,
+  ): Promise<TenantSettings> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/settings`, {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    });
+  },
 };
 
 export interface RunSummary {
@@ -124,6 +157,16 @@ export interface UsageReport {
   totalTokens: number;
   byModel: { model: string; tokens: number; costUsd: number }[];
   events: unknown[];
+}
+export interface Member {
+  id: string;
+  email: string;
+  role: string;
+  createdAt: string;
+}
+export interface TenantSettings {
+  displayName: string | null;
+  defaultModel: string | null;
 }
 
 /** Map a control-plane status to a design run-state token. */

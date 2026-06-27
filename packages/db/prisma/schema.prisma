@@ -145,3 +145,24 @@ model UsageReservation {
 
   @@index([tenantId, createdAt])
 }
+
+// Workspace members (Team screen). Lightweight directory keyed by tenant; auth
+// itself is Keycloak/API-token (this is not the identity source of truth).
+model Member {
+  id        String   @id @default(uuid())
+  tenantId  String
+  email     String
+  role      String   @default("member") // 'owner' | 'admin' | 'member'
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+}
+
+// Per-tenant settings (Settings screen). One row per tenant.
+model TenantSettings {
+  tenantId     String   @id
+  displayName  String?
+  defaultModel String? // e.g. 'claude-opus-4-8'
+  updatedAt    DateTime @default(now()) @updatedAt
+}
