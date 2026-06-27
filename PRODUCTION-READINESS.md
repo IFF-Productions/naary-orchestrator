@@ -107,9 +107,14 @@ Ordered roughly by "blocks launch" → "hardening". Each item says **why** and *
       ECS/EKS. The cloud abstraction already exists (ObjectStore → S3 now, GCS later).
 - [ ] **Managed Postgres** (RDS/Aurora) with backups, PITR, connection pooling (PgBouncer
       / RDS Proxy). Run `prisma migrate deploy` in a release step, not by hand.
-- [ ] **Temporal in production** — Temporal Cloud or self-hosted cluster (the local
-      `start-dev` single binary is not production). Configure namespaces, retention,
-      mTLS, and Worker Versioning / Build IDs for safe interpreter rollouts.
+- [~] **Temporal in production** — Temporal Cloud or self-hosted cluster (the local
+      `start-dev` single binary is not production). **Connection layer is ready**:
+      the api client + worker resolve address / namespace / TLS / API-key from env
+      via `@naary/temporal-config`, defaulting to the local dev server — so pointing
+      at Temporal Cloud (API-key or mTLS) is env-only, no code change. Cloud
+      connectivity itself is unverified (no account). Still to do: a Cloud/cluster
+      namespace with retention + mTLS provisioned, and Worker Versioning / Build IDs
+      for safe interpreter rollouts.
 - [ ] **Secrets management** — `ENCRYPTION_KEY` and DB/Keycloak creds in AWS Secrets
       Manager / SSM, not `.env`. Plan **KMS-backed key wrapping + rotation** for the
       master key (the code already supports key versions).

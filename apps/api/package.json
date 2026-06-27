@@ -29,7 +29,8 @@
     "@nestjs/throttler": "^6.4.0",
     "jose": "^5.9.6",
     "@naary/observability": "workspace:*",
-    "@naary/logging": "workspace:*"
+    "@naary/logging": "workspace:*",
+    "@naary/temporal-config": "workspace:*"
   },
   "devDependencies": {
     "@nestjs/testing": "^11.1.27"
