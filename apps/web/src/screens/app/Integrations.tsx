@@ -1,8 +1,15 @@
-import { useEffect, useState } from "react";
-import { Icon, StatusPill, type RunState } from "../../components";
+import { useCallback, useEffect, useState } from "react";
+import {
+  Button,
+  Card,
+  Icon,
+  StatusPill,
+  type RunState,
+} from "../../components";
 import {
   api,
   type ConnectionRow,
+  type RegisteredWebhook,
   type WebhookRow,
   UnauthorizedError,
 } from "../../lib/api";
@@ -62,36 +69,34 @@ const monoLabel: React.CSSProperties = {
 };
 
 export function Integrations() {
+  const [tenant, setTenant] = useState<string | null>(null);
   const [connections, setConnections] = useState<ConnectionRow[] | null>(null);
   const [webhooks, setWebhooks] = useState<WebhookRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const { tenantId } = await api.getMe();
-        const [conns, hooks] = await Promise.all([
-          api.listConnections(tenantId),
-          api.listWebhooks(tenantId),
-        ]);
-        if (!alive) return;
-        setConnections(conns);
-        setWebhooks(hooks);
-        setError(null);
-      } catch (e) {
-        if (!alive) return;
-        setError(
-          e instanceof UnauthorizedError
-            ? "Sign in to view integrations"
-            : "Could not reach the control plane (apps/api on :3000).",
-        );
-      }
-    })();
-    return () => {
-      alive = false;
-    };
+  const load = useCallback(async () => {
+    try {
+      const { tenantId } = await api.getMe();
+      setTenant(tenantId);
+      const [conns, hooks] = await Promise.all([
+        api.listConnections(tenantId),
+        api.listWebhooks(tenantId),
+      ]);
+      setConnections(conns);
+      setWebhooks(hooks);
+      setError(null);
+    } catch (e) {
+      setError(
+        e instanceof UnauthorizedError
+          ? "Sign in to view integrations"
+          : "Could not reach the control plane (apps/api on :3000).",
+      );
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const loading = connections === null && webhooks === null && !error;
 
@@ -130,6 +135,9 @@ export function Integrations() {
           {error}
         </div>
       )}
+
+      {/* ===== Add (real create actions) ===== */}
+      {tenant && <AddIntegrations tenant={tenant} onChanged={load} />}
 
       {/* ===== Model providers ===== */}
       <div style={{ ...monoLabel, marginBottom: 11 }}>Model providers</div>
@@ -427,5 +435,276 @@ export function Integrations() {
         ))}
       </div>
     </div>
+  );
+}
+
+/* ===== Real create actions: connect a server + register a webhook ===== */
+
+const fieldStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "7px 9px",
+  borderRadius: 7,
+  border: "1px solid var(--line-2)",
+  background: "var(--card)",
+  color: "var(--ink)",
+  fontSize: 13,
+};
+const fieldLabel: React.CSSProperties = {
+  fontSize: 11,
+  color: "var(--ink-2)",
+  display: "block",
+  marginBottom: 4,
+};
+
+function AddIntegrations({
+  tenant,
+  onChanged,
+}: {
+  tenant: string;
+  onChanged: () => Promise<void> | void;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: 14,
+        marginBottom: 26,
+      }}
+    >
+      <ConnectForm tenant={tenant} onChanged={onChanged} />
+      <WebhookForm tenant={tenant} onChanged={onChanged} />
+    </div>
+  );
+}
+
+function ConnectForm({
+  tenant,
+  onChanged,
+}: {
+  tenant: string;
+  onChanged: () => Promise<void> | void;
+}) {
+  const [label, setLabel] = useState("");
+  const [serverUrl, setServerUrl] = useState("");
+  const [type, setType] = useState<"github" | "atlassian" | "custom">("custom");
+  const [authMode, setAuthMode] = useState<"api_token" | "pat" | "oauth">(
+    "api_token",
+  );
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function submit() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.createConnection(tenant, {
+        type,
+        label: label.trim(),
+        serverUrl: serverUrl.trim(),
+        authMode,
+        ...(token.trim() ? { token: token.trim() } : {}),
+      });
+      setLabel("");
+      setServerUrl("");
+      setToken("");
+      setMsg("Connected ✓");
+      await onChanged();
+    } catch (e) {
+      setMsg(
+        e instanceof Error && /400/.test(e.message)
+          ? "Check the fields (server URL must be https)."
+          : "Could not connect the server.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ready = label.trim() && /^https:\/\//.test(serverUrl.trim());
+
+  return (
+    <Card style={{ padding: 16 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>
+        Connect a server
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <span style={fieldLabel}>Label</span>
+        <input
+          style={fieldStyle}
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="GitHub (prod)"
+        />
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <span style={fieldLabel}>Server URL (https)</span>
+        <input
+          style={fieldStyle}
+          value={serverUrl}
+          onChange={(e) => setServerUrl(e.target.value)}
+          placeholder="https://mcp.example.com"
+        />
+      </div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+        <div style={{ flex: 1 }}>
+          <span style={fieldLabel}>Type</span>
+          <select
+            style={fieldStyle}
+            value={type}
+            onChange={(e) =>
+              setType(e.target.value as "github" | "atlassian" | "custom")
+            }
+          >
+            <option value="custom">custom</option>
+            <option value="github">github</option>
+            <option value="atlassian">atlassian</option>
+          </select>
+        </div>
+        <div style={{ flex: 1 }}>
+          <span style={fieldLabel}>Auth</span>
+          <select
+            style={fieldStyle}
+            value={authMode}
+            onChange={(e) =>
+              setAuthMode(e.target.value as "api_token" | "pat" | "oauth")
+            }
+          >
+            <option value="api_token">api_token</option>
+            <option value="pat">pat</option>
+            <option value="oauth">oauth</option>
+          </select>
+        </div>
+      </div>
+      {authMode !== "oauth" && (
+        <div style={{ marginBottom: 12 }}>
+          <span style={fieldLabel}>Token (stored encrypted)</span>
+          <input
+            style={fieldStyle}
+            type="password"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            placeholder="ghp_… / api token"
+          />
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <Button
+          variant="primary"
+          disabled={busy || !ready}
+          onClick={() => void submit()}
+        >
+          {busy ? "Connecting…" : "Connect"}
+        </Button>
+        {msg && (
+          <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{msg}</span>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function WebhookForm({
+  tenant,
+  onChanged,
+}: {
+  tenant: string;
+  onChanged: () => Promise<void> | void;
+}) {
+  const [workflowId, setWorkflowId] = useState("");
+  const [provider, setProvider] = useState("github");
+  const [busy, setBusy] = useState(false);
+  const [registered, setRegistered] = useState<RegisteredWebhook | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function submit() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await api.createWebhook(tenant, {
+        workflowId: workflowId.trim(),
+        provider,
+      });
+      setRegistered(res);
+      setWorkflowId("");
+      await onChanged();
+    } catch {
+      setMsg("Could not register the webhook.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card style={{ padding: 16 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>
+        Register a webhook
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <span style={fieldLabel}>Workflow key (e.g. wf-default)</span>
+        <input
+          style={fieldStyle}
+          value={workflowId}
+          onChange={(e) => setWorkflowId(e.target.value)}
+          placeholder="wf-default"
+        />
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <span style={fieldLabel}>Provider</span>
+        <select
+          style={fieldStyle}
+          value={provider}
+          onChange={(e) => setProvider(e.target.value)}
+        >
+          <option value="github">github</option>
+          <option value="atlassian">atlassian</option>
+          <option value="generic">generic</option>
+        </select>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <Button
+          variant="primary"
+          disabled={busy || !workflowId.trim()}
+          onClick={() => void submit()}
+        >
+          {busy ? "Registering…" : "Register"}
+        </Button>
+        {msg && (
+          <span style={{ fontSize: 12, color: "var(--state-error)" }}>
+            {msg}
+          </span>
+        )}
+      </div>
+
+      {registered && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: 10,
+            borderRadius: 8,
+            background: "var(--card-2, var(--surface))",
+            border: "1px solid var(--line)",
+          }}
+        >
+          <div style={{ fontSize: 11, color: "var(--ink-2)", marginBottom: 6 }}>
+            Save this signing secret now — it is shown only once.
+          </div>
+          <div className="mono" style={{ fontSize: 11, marginBottom: 4 }}>
+            POST {registered.ingressPath}
+          </div>
+          <div
+            className="mono"
+            style={{
+              fontSize: 11,
+              wordBreak: "break-all",
+              color: "var(--brand)",
+            }}
+          >
+            {registered.signingSecret}
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
