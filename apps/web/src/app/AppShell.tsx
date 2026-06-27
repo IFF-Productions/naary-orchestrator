@@ -164,7 +164,11 @@ export function AppShell() {
             borderTop: "1px solid var(--line)",
             padding: 10,
             display: "flex",
+            // Collapsed: stack avatar + toggle vertically and center them so the
+            // toggle fits the 70px rail instead of overflowing the row.
+            flexDirection: collapsed ? "column" : "row",
             alignItems: "center",
+            justifyContent: "center",
             gap: 9,
           }}
         >
@@ -186,7 +190,16 @@ export function AppShell() {
           >
             MA
           </span>
-          <div style={{ flex: 1, minWidth: 0, opacity: labelOp }}>
+          {/* Label takes no space when collapsed (display none, not just opacity)
+              so it can't squeeze the toggle out of the rail. */}
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              opacity: labelOp,
+              display: collapsed ? "none" : "block",
+            }}
+          >
             <div
               style={{
                 fontSize: 12,
@@ -200,7 +213,7 @@ export function AppShell() {
             <div style={{ fontSize: 10, color: "var(--ink-3)" }}>Owner</div>
           </div>
           <button
-            title="Collapse"
+            title={collapsed ? "Expand" : "Collapse"}
             onClick={() => setCollapsed((c) => !c)}
             className="btn btn-secondary btn-icon btn-sm"
           >
