@@ -236,6 +236,13 @@ export interface RegisteredWebhook {
 
 export interface RunSummary {
   workflowId: string;
+  workflowKey: string | null;
+  /** Live status from Temporal: running | awaiting_approval | completed |
+   *  rejected | budget_exceeded | circuit_open | invalid_graph | failed |
+   *  timed_out | terminated | canceled | unknown. */
+  status: string;
+  costUsd: number | null;
+  startedAt: string;
   createdAt: string;
 }
 export interface UsageReport {
