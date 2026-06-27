@@ -11,6 +11,9 @@ x-backend-env: &backend-env
   STORAGE_PROVIDER: ${STORAGE_PROVIDER:-}
   S3_BUCKET: ${S3_BUCKET:-}
   AWS_REGION: ${AWS_REGION:-}
+  # Observability (Sentry) — OFF unless SENTRY_DSN is set. Events are scrubbed.
+  SENTRY_DSN: ${SENTRY_DSN:-}
+  SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0}
 
 services:
   postgres:

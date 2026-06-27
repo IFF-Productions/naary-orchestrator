@@ -1,4 +1,11 @@
 import "./env"; // MUST be first — loads .env before @naary/* modules evaluate
+import { captureError, flushSentry, initSentry } from "@naary/observability";
+
+// Init Sentry before the worker boots. No-op unless SENTRY_DSN is set; events are
+// scrubbed of secrets. (Capture is I/O — it lives here + in activities, NEVER in
+// the deterministic workflow code.)
+initSentry({ component: "worker" });
+
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { TASK_QUEUE } from "@naary/contracts";
 import { disconnectPrisma } from "@naary/db";
@@ -31,10 +38,12 @@ async function run(): Promise<void> {
   } finally {
     await connection.close();
     await disconnectPrisma(); // close the pg pool the activities opened (Arch§4.9)
+    await flushSentry();
   }
 }
 
 run().catch((err) => {
   console.error("[worker] fatal:", err);
-  process.exit(1);
+  captureError(err, { where: "worker.run" });
+  void flushSentry().finally(() => process.exit(1));
 });

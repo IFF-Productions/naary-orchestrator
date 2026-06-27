@@ -1,0 +1,15 @@
+{
+  "name": "@naary/observability",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sentry init + a security-critical event scrubber shared by api + worker. Errors only; never secrets (CLAUDE.md: keys never enter telemetry).",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@sentry/node": "^8.55.0"
+  }
+}

@@ -139,11 +139,18 @@ Ordered roughly by "blocks launch" → "hardening". Each item says **why** and *
 - [ ] **`ctx` / state-query bounding** (Arch§4.8) — `ctx` accumulates every node output;
       cap it (and the queryable state) for large graphs.
 
-### D. Observability (DEFERRED — currently `console.log` only)
-- [ ] **Structured logging** (JSON, correlation/tenant/execution IDs, no secrets).
+### D. Observability
+- [x] **Error monitoring (Sentry)** — `@naary/observability` inits Sentry in the API +
+      worker (OFF unless `SENTRY_DSN` set); 5xx/unexpected errors are captured with
+      tenant/execution tags. A security-critical `beforeSend` scrubber drops
+      sensitive keys + redacts secret-shaped substrings (unit-tested) so keys never
+      reach telemetry. Optional perf tracing via `SENTRY_TRACES_SAMPLE_RATE`.
+- [ ] **Structured logging** (JSON, correlation/tenant/execution IDs, no secrets) —
+      still `console.log`; Sentry covers errors, not request/operational logs.
 - [ ] **Metrics** — execution counts/latency, budget usage, activity retries, queue depth.
-- [ ] **Tracing** — OpenTelemetry across API → Temporal → activities.
-- [ ] **Alerting** — failed executions, budget-cap trips, auth failures, DLQ growth.
+- [ ] **Tracing** — full OpenTelemetry across API → Temporal → activities (Sentry
+      tracing is a partial start).
+- [ ] **Alerting** — wire Sentry alerts (+ failed executions, budget-cap trips, DLQ).
 
 ### E. Security hardening
 - [x] **Resolve the 5 Dependabot alerts** (2 high, 3 moderate) — patched via

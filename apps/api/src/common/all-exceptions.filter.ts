@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Logger,
 } from "@nestjs/common";
+import { captureError } from "@naary/observability";
 
 interface Res {
   status(code: number): Res;
@@ -14,6 +15,7 @@ interface Res {
 interface Req {
   method?: string;
   url?: string;
+  principal?: { tenantId?: string };
 }
 
 /**
@@ -46,7 +48,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     // Unexpected: do not serialize the error (no stack, no secret-bearing text).
+    // Report to Sentry (scrubbed) with the tenant tag for triage; log the route.
     this.logger.error(`Unhandled error on ${req?.method} ${req?.url}`);
+    captureError(exception, {
+      tenantId: req?.principal?.tenantId,
+      where: `${req?.method} ${req?.url}`,
+    });
     res
       .status(HttpStatus.INTERNAL_SERVER_ERROR)
       .json({ statusCode: 500, message: "Internal server error" });
