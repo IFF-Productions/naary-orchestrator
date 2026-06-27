@@ -11,6 +11,10 @@ import {
 } from "../../components";
 import { api } from "../../lib/api";
 import { runs, type RunRow } from "../../lib/mock";
+import {
+  RunVolumeChart as RealRunVolumeChart,
+  SpendChart as RealSpendChart,
+} from "./charts";
 
 /* ------------------------------------------------------------------
  * Overview — the operator dashboard. Ported faithfully from the
@@ -153,6 +157,19 @@ export function Overview() {
 
       {/* ---- live metrics (real, from the control plane) ---- */}
       <LiveStrip />
+
+      {/* ---- real charts (bucketed from runs + usage) ---- */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 14,
+          marginBottom: 16,
+        }}
+      >
+        <RealRunVolumeChart days={14} />
+        <RealSpendChart days={14} />
+      </div>
 
       {/* ---- stat cards (prototype/illustrative) ---- */}
       <div
