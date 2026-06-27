@@ -11,6 +11,7 @@ import { TASK_QUEUE } from "@naary/contracts";
 import { disconnectPrisma } from "@naary/db";
 import { createLogger } from "@naary/logging";
 import { createKeyEncryptor } from "@naary/secrets";
+import { temporalConnectionConfig } from "@naary/temporal-config";
 import * as activities from "./temporal/activities";
 
 // Structured logger for worker BOOT code only. NOT imported by workflows.ts —
@@ -29,16 +30,25 @@ async function run(): Promise<void> {
   // rather than discovering it on the first agent activity (a burned retry).
   createKeyEncryptor();
 
-  const address = process.env.TEMPORAL_ADDRESS ?? "localhost:7233";
-  const connection = await NativeConnection.connect({ address });
+  // Connection options (TLS / API-key / namespace) from env, defaulting to the
+  // local dev server — Temporal Cloud needs only env, no code change.
+  const { address, namespace, tls, apiKey, metadata } =
+    temporalConnectionConfig();
+  const connection = await NativeConnection.connect({
+    address,
+    tls,
+    apiKey,
+    metadata,
+  });
   try {
     const worker = await Worker.create({
       connection,
+      namespace,
       taskQueue: TASK_QUEUE,
       workflowsPath: require.resolve("./temporal/workflows"),
       activities,
     });
-    log.info({ taskQueue: TASK_QUEUE, address }, "worker polling");
+    log.info({ taskQueue: TASK_QUEUE, address, namespace }, "worker polling");
     await worker.run();
   } finally {
     await connection.close();

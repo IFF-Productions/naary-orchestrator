@@ -5,7 +5,16 @@
 x-backend-env: &backend-env
   DATABASE_URL: postgresql://${POSTGRES_USER:-naary}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-naary_orchestrator}?schema=public
   ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env (see .env.example)}
-  TEMPORAL_ADDRESS: temporal:7233
+  # Defaults to the in-stack dev server. Point at Temporal Cloud by overriding
+  # TEMPORAL_ADDRESS + setting TEMPORAL_NAMESPACE and an auth method in .env
+  # (TEMPORAL_API_KEY, or the mTLS cert/key paths). See @naary/temporal-config.
+  TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS:-temporal:7233}
+  TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-}
+  TEMPORAL_API_KEY: ${TEMPORAL_API_KEY:-}
+  TEMPORAL_TLS: ${TEMPORAL_TLS:-}
+  TEMPORAL_TLS_CERT_PATH: ${TEMPORAL_TLS_CERT_PATH:-}
+  TEMPORAL_TLS_KEY_PATH: ${TEMPORAL_TLS_KEY_PATH:-}
+  TEMPORAL_TLS_SERVER_NAME: ${TEMPORAL_TLS_SERVER_NAME:-}
   # Claim-check object storage (optional; unset = in-memory). Forwarded from .env
   # so a real S3 bucket can be used without editing this file.
   STORAGE_PROVIDER: ${STORAGE_PROVIDER:-}
