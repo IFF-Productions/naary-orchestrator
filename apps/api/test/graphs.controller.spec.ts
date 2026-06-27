@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { BadRequestException } from "@nestjs/common";
+import { BadRequestException, NotFoundException } from "@nestjs/common";
 import type { GraphDef } from "@naary/dsl";
 import { describe, expect, it, vi } from "vitest";
 import { SaveGraphDto } from "../src/graphs/graph.dto";
@@ -29,13 +29,11 @@ function dto(graph: unknown): SaveGraphDto {
 
 describe("GraphsController", () => {
   it("saves a well-formed graph and returns the version + hash", async () => {
-    const upsert = vi
-      .fn()
-      .mockResolvedValue({
-        graph: validGraph,
-        version: 3,
-        contentHash: "abc123",
-      });
+    const upsert = vi.fn().mockResolvedValue({
+      graph: validGraph,
+      version: 3,
+      contentHash: "abc123",
+    });
     const controller = new GraphsController({
       upsert,
     } as unknown as GraphsService);
@@ -66,5 +64,50 @@ describe("GraphsController", () => {
       controller.save("t-1", dto({ not: "a graph" })),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("lists the tenant's workflows", async () => {
+    const summaries = [
+      {
+        workflowKey: "canvas",
+        name: "Canvas draft",
+        version: 2,
+        updatedAt: "t",
+      },
+    ];
+    const list = vi.fn().mockResolvedValue(summaries);
+    const controller = new GraphsController({
+      list,
+    } as unknown as GraphsService);
+
+    expect(await controller.list("t-1")).toBe(summaries);
+    expect(list).toHaveBeenCalledWith("t-1");
+  });
+
+  it("gets a single workflow's latest graph", async () => {
+    const named = {
+      workflowKey: "canvas",
+      name: "Canvas draft",
+      version: 2,
+      graph: validGraph,
+    };
+    const getLatestNamed = vi.fn().mockResolvedValue(named);
+    const controller = new GraphsController({
+      getLatestNamed,
+    } as unknown as GraphsService);
+
+    expect(await controller.get("t-1", "canvas")).toBe(named);
+    expect(getLatestNamed).toHaveBeenCalledWith("t-1", "canvas");
+  });
+
+  it("404s when the workflowKey is unknown", async () => {
+    const getLatestNamed = vi.fn().mockResolvedValue(null);
+    const controller = new GraphsController({
+      getLatestNamed,
+    } as unknown as GraphsService);
+
+    await expect(controller.get("t-1", "nope")).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });

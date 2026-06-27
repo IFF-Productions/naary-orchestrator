@@ -23,20 +23,51 @@ import {
   Position,
   ReactFlow,
 } from "@xyflow/react";
-import { useCallback, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import type { NodeType } from "@naary/dsl";
 import { Button } from "../components";
-import { api, UnauthorizedError } from "../lib/api";
+import { api, type GraphSummary, UnauthorizedError } from "../lib/api";
 import { compileGraph } from "../lib/compile-graph";
+import { decompileGraph } from "../lib/decompile-graph";
 import {
+  type CanvasEdge,
   type CanvasNode,
   CONDITION_OPS,
   type EdgeConditionDraft,
   NODE_KINDS,
 } from "../lib/graph-model";
 
-const WORKFLOW_KEY = "canvas";
+const DEFAULT_KEY = "canvas";
+
+/** Stable workflowKey derived from a display name (for newly-created workflows). */
+function slugify(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || DEFAULT_KEY
+  );
+}
+
+function toFlowNodes(cs: CanvasNode[]): Node<NaaryData>[] {
+  return cs.map((c) => ({
+    id: c.id,
+    type: "naary",
+    position: c.position,
+    data: { kind: c.type, config: c.config },
+  }));
+}
+function toFlowEdges(cs: CanvasEdge[]): FlowEdge[] {
+  return cs.map((c) => ({
+    id: c.id,
+    source: c.source,
+    target: c.target,
+    data: { condition: c.condition },
+    label: summarize(c.condition),
+  }));
+}
 
 /** DSL node type → theme accent color (the design palette). */
 const ACCENT: Record<NodeType, string> = {
@@ -126,10 +157,47 @@ const SEED_EDGES: FlowEdge[] = [
 
 export function CanvasPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [nodes, setNodes] = useState<Node<NaaryData>[]>(SEED_NODES);
   const [edges, setEdges] = useState<FlowEdge[]>(SEED_EDGES);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [name, setName] = useState("Canvas draft");
+  // The saved workflowKey (empty until first save of a NEW workflow → slug(name)).
+  const [workflowKey, setWorkflowKey] = useState("");
+  const [workflows, setWorkflows] = useState<GraphSummary[]>([]);
+
+  const keyParam = searchParams.get("key");
+
+  // Load the workflow list (for the selector) + open ?key= if present.
+  useEffect(() => {
+    let live = true;
+    api
+      .listGraphs()
+      .then((ws) => live && setWorkflows(ws))
+      .catch(() => {
+        /* unauthenticated / offline — selector stays empty */
+      });
+    if (keyParam) {
+      api
+        .getGraph(keyParam)
+        .then((g) => {
+          if (!live) return;
+          const { nodes: cn, edges: ce } = decompileGraph(g.graph);
+          setNodes(toFlowNodes(cn));
+          setEdges(toFlowEdges(ce));
+          setName(g.name);
+          setWorkflowKey(g.workflowKey);
+          setStatus(null);
+        })
+        .catch(
+          () => live && setStatus(`Couldn't open workflow '${keyParam}'.`),
+        );
+    }
+    return () => {
+      live = false;
+    };
+  }, [keyParam]);
 
   const onNodesChange = useCallback(
     (changes: Parameters<typeof applyNodeChanges>[0]) =>
@@ -232,16 +300,45 @@ export function CanvasPage() {
     );
   }
 
-  async function run() {
+  /** The key to save/run under: an opened workflow's key, else slug(name). */
+  const activeKey = workflowKey || slugify(name);
+
+  function newWorkflow() {
+    setNodes(SEED_NODES);
+    setEdges(SEED_EDGES);
+    setName("Untitled workflow");
+    setWorkflowKey("");
+    setStatus(null);
+    if (keyParam) setSearchParams({}, { replace: true });
+  }
+
+  function openWorkflow(key: string) {
+    if (key) setSearchParams({ key }, { replace: true });
+    else newWorkflow();
+  }
+
+  async function save(): Promise<string | null> {
     if (!graph) {
       setStatus(error ?? "Graph is not runnable.");
-      return;
+      return null;
     }
+    const key = activeKey;
+    await api.saveGraph(key, name.trim() || "Untitled workflow", graph);
+    setWorkflowKey(key);
+    api
+      .listGraphs()
+      .then(setWorkflows)
+      .catch(() => {});
+    return key;
+  }
+
+  async function run() {
     setBusy(true);
     setStatus(null);
     try {
-      await api.saveGraph(WORKFLOW_KEY, "Canvas draft", graph);
-      const { workflowId } = await api.startExecution(WORKFLOW_KEY);
+      const key = await save();
+      if (!key) return;
+      const { workflowId } = await api.startExecution(key);
       navigate(`/app/runs/${encodeURIComponent(workflowId)}`);
     } catch (e) {
       if (e instanceof UnauthorizedError) {
@@ -249,6 +346,23 @@ export function CanvasPage() {
         return;
       }
       setStatus(e instanceof Error ? e.message : "Run failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveOnly() {
+    setBusy(true);
+    setStatus(null);
+    try {
+      const key = await save();
+      if (key) setStatus(`Saved as "${name}" (${key}).`);
+    } catch (e) {
+      if (e instanceof UnauthorizedError) {
+        navigate("/auth");
+        return;
+      }
+      setStatus(e instanceof Error ? e.message : "Save failed.");
     } finally {
       setBusy(false);
     }
@@ -278,7 +392,34 @@ export function CanvasPage() {
         <Button variant="secondary" onClick={() => navigate("/app")}>
           ← Back
         </Button>
-        <strong style={{ fontSize: 15 }}>Workflow canvas</strong>
+
+        {/* workflow selector */}
+        <select
+          value={keyParam ?? ""}
+          onChange={(e) => openWorkflow(e.target.value)}
+          style={{ ...headerInputStyle, maxWidth: 180 }}
+          title="Open a saved workflow"
+        >
+          <option value="">+ New workflow</option>
+          {workflows.map((w) => (
+            <option key={w.workflowKey} value={w.workflowKey}>
+              {w.name} (v{w.version})
+            </option>
+          ))}
+        </select>
+
+        {/* name */}
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Workflow name"
+          style={{ ...headerInputStyle, width: 170 }}
+          aria-label="Workflow name"
+        />
+        <span style={{ fontSize: 11, color: "var(--ink-3)" }}>
+          key: {activeKey}
+        </span>
+
         <span
           style={{
             fontSize: 12,
@@ -295,19 +436,27 @@ export function CanvasPage() {
             <span
               style={{
                 fontSize: 12,
-                color: "var(--state-error)",
+                color: "var(--ink-2)",
                 alignSelf: "center",
+                maxWidth: 280,
               }}
             >
               {status}
             </span>
           )}
           <Button
+            variant="secondary"
+            disabled={busy || !graph}
+            onClick={() => void saveOnly()}
+          >
+            Save
+          </Button>
+          <Button
             variant="primary"
             disabled={busy || !graph}
             onClick={() => void run()}
           >
-            {busy ? "Running…" : "Run"}
+            {busy ? "Running…" : "Save & run"}
           </Button>
         </div>
       </header>
@@ -584,4 +733,12 @@ const textareaStyle: React.CSSProperties = {
   ...inputStyle,
   resize: "vertical",
   fontFamily: "var(--font-sans)",
+};
+const headerInputStyle: React.CSSProperties = {
+  padding: "6px 9px",
+  borderRadius: 7,
+  border: "1px solid var(--line-2)",
+  background: "var(--card)",
+  color: "var(--ink)",
+  fontSize: 13,
 };

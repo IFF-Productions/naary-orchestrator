@@ -15,6 +15,14 @@ export interface GraphSnapshot {
   version: number;
 }
 
+/** Listing row: identity + latest version, no graph body. */
+export interface GraphSummary {
+  workflowKey: string;
+  name: string;
+  version: number;
+  updatedAt: string;
+}
+
 /**
  * Versioned graph store (Slice #5). `upsert` content-hashes the graph and only
  * bumps the version when the hash changes; `getLatest` returns the newest version
@@ -73,6 +81,48 @@ export class GraphsService {
           graph: row.graph as unknown as GraphDef,
           contentHash: row.contentHash,
           version: row.version,
+        }
+      : null;
+  }
+
+  /** One entry per workflowKey (its latest version), newest first — for the
+   *  Workflows list. Names/keys only; no graph bodies. */
+  async list(tenantId: string): Promise<GraphSummary[]> {
+    const rows = await getPrisma().graphDefinition.findMany({
+      where: { tenantId },
+      orderBy: { version: "desc" },
+    });
+    const latest = new Map<string, GraphSummary>();
+    for (const r of rows) {
+      if (!latest.has(r.workflowKey)) {
+        latest.set(r.workflowKey, {
+          workflowKey: r.workflowKey,
+          name: r.name,
+          version: r.version,
+          updatedAt: r.createdAt.toISOString(),
+        });
+      }
+    }
+    return [...latest.values()];
+  }
+
+  /** Latest graph for a key, WITH its name + version — for opening into the canvas. */
+  async getLatestNamed(
+    tenantId: string,
+    workflowKey: string,
+  ): Promise<{
+    workflowKey: string;
+    name: string;
+    version: number;
+    graph: GraphDef;
+  } | null> {
+    const row = await this.latestRow(tenantId, workflowKey);
+    return row
+      ? {
+          workflowKey,
+          name: row.name,
+          version: row.version,
+          graph: row.graph as unknown as GraphDef,
         }
       : null;
   }

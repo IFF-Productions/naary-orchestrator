@@ -1,8 +1,16 @@
-import { BadRequestException, Body, Controller, Post } from "@nestjs/common";
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  Post,
+} from "@nestjs/common";
 import type { GraphDef } from "@naary/dsl";
 import { TenantId } from "../auth/tenant.decorator";
 import { SaveGraphDto } from "./graph.dto";
-import { GraphsService } from "./graphs.service";
+import { type GraphSummary, GraphsService } from "./graphs.service";
 
 /**
  * Save a compiled graph from the canvas. tenantId comes from the token (never the
@@ -12,6 +20,30 @@ import { GraphsService } from "./graphs.service";
 @Controller("graphs")
 export class GraphsController {
   constructor(private readonly graphs: GraphsService) {}
+
+  /** List the tenant's workflows (one row per workflowKey, latest version). */
+  @Get()
+  list(@TenantId() tenantId: string): Promise<GraphSummary[]> {
+    return this.graphs.list(tenantId);
+  }
+
+  /** The latest graph for a workflowKey — used to open it in the canvas. */
+  @Get(":workflowKey")
+  async get(
+    @TenantId() tenantId: string,
+    @Param("workflowKey") workflowKey: string,
+  ): Promise<{
+    workflowKey: string;
+    name: string;
+    version: number;
+    graph: GraphDef;
+  }> {
+    const found = await this.graphs.getLatestNamed(tenantId, workflowKey);
+    if (!found) {
+      throw new NotFoundException(`No graph for workflowKey '${workflowKey}'`);
+    }
+    return found;
+  }
 
   @Post()
   async save(
