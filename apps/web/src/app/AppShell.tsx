@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "../auth/AuthProvider";
 import { Button, Icon, SearchInput } from "../components";
 import type { IconName } from "../components";
+import { clearToken } from "../lib/auth";
 import { PAGE_META } from "../lib/mock";
 import { useTheme } from "../theme";
 
@@ -19,7 +21,7 @@ const GROUPS: { heading: string; items: NavItemDef[] }[] = [
     items: [
       { to: "/app", label: "Overview", icon: "grid" },
       { to: "/app/workflows", label: "Workflows", icon: "workflow" },
-      { to: "/app/runs", label: "Runs", icon: "activity", badge: "7" },
+      { to: "/app/runs", label: "Runs", icon: "activity" },
       { to: "/app/templates", label: "Templates", icon: "template" },
     ],
   },
@@ -52,9 +54,19 @@ const FOOTER_ITEMS: NavItemDef[] = [
 export function AppShell() {
   const [collapsed, setCollapsed] = useState(false);
   const { theme, toggleTheme } = useTheme();
+  const { tenant, logout } = useAuth();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const [title, sub] = PAGE_META[pathname] ?? ["Naary", ""];
   const labelOp = collapsed ? 0 : 1;
+
+  // Sign out of BOTH session kinds: Firebase (if signed in) and the pasted
+  // `nry_` token, then return to the sign-in screen.
+  function handleLogout(): void {
+    logout();
+    clearToken();
+    navigate("/auth");
+  }
 
   return (
     <div
@@ -164,7 +176,11 @@ export function AppShell() {
             borderTop: "1px solid var(--line)",
             padding: 10,
             display: "flex",
+            // Collapsed: stack avatar + toggle vertically and center them so the
+            // toggle fits the 70px rail instead of overflowing the row.
+            flexDirection: collapsed ? "column" : "row",
             alignItems: "center",
+            justifyContent: "center",
             gap: 9,
           }}
         >
@@ -184,23 +200,47 @@ export function AppShell() {
               color: "var(--ink-2)",
             }}
           >
-            MA
+            {(tenant ?? "?")
+              .replace(/[^a-zA-Z0-9]/g, "")
+              .slice(0, 2)
+              .toUpperCase() || "?"}
           </span>
-          <div style={{ flex: 1, minWidth: 0, opacity: labelOp }}>
+          {/* Label takes no space when collapsed (display none, not just opacity)
+              so it can't squeeze the buttons out of the rail. */}
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              opacity: labelOp,
+              display: collapsed ? "none" : "block",
+            }}
+          >
             <div
               style={{
                 fontSize: 12,
                 fontWeight: 500,
                 color: "var(--ink)",
                 whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
               }}
             >
-              M. Alvarez
+              {tenant ?? "Signed in"}
             </div>
-            <div style={{ fontSize: 10, color: "var(--ink-3)" }}>Owner</div>
+            <div style={{ fontSize: 10, color: "var(--ink-3)" }}>
+              {tenant ? "Tenant" : "API token"}
+            </div>
           </div>
           <button
-            title="Collapse"
+            title="Sign out"
+            aria-label="Sign out"
+            onClick={handleLogout}
+            className="btn btn-secondary btn-icon btn-sm"
+          >
+            <Icon name="logout" size={14} />
+          </button>
+          <button
+            title={collapsed ? "Expand" : "Collapse"}
             onClick={() => setCollapsed((c) => !c)}
             className="btn btn-secondary btn-icon btn-sm"
           >
@@ -382,7 +422,9 @@ function NavRow({
     width: "100%",
     display: "flex",
     alignItems: "center",
-    gap: 11,
+    // Center the icon in the collapsed rail; left-align icon+label when expanded.
+    justifyContent: collapsed ? "center" : "flex-start",
+    gap: collapsed ? 0 : 11,
     padding: "9px 9px",
     borderRadius: 9,
     fontSize: 13,
@@ -390,12 +432,15 @@ function NavRow({
     textAlign: "left",
     cursor: "pointer",
   };
-  const content = (active: boolean) => (
+  const content = (_active: boolean) => (
     <>
       <Icon name={item.icon} size={17} />
-      <span style={{ opacity: labelOp, whiteSpace: "nowrap", flex: 1 }}>
-        {item.label}
-      </span>
+      {/* Hidden (not just transparent) when collapsed so it doesn't offset the icon. */}
+      {!collapsed && (
+        <span style={{ opacity: labelOp, whiteSpace: "nowrap", flex: 1 }}>
+          {item.label}
+        </span>
+      )}
       {item.badge && !collapsed && (
         <span
           className="mono"
@@ -421,6 +466,7 @@ function NavRow({
     <NavLink
       to={item.to}
       end={item.to === "/app"}
+      title={collapsed ? item.label : undefined}
       style={({ isActive }) => ({
         ...base,
         background: isActive ? "var(--brand-soft)" : "transparent",

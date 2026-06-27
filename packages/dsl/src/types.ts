@@ -29,6 +29,21 @@ export interface ArgBinding {
   path?: string;
 }
 
+/** Start node: an optional sample trigger input used for manual/test runs. */
+export interface StartNodeConfig {
+  sampleInput?: Record<string, unknown>;
+}
+
+/** Human-approval node config. The interpreter reads `timeoutHours` to bound the
+ *  durable wait (auto-reject on elapse); title/instructions are display-only (the
+ *  UI reads them from the graph). */
+export interface ApprovalNodeConfig {
+  title?: string;
+  instructions?: string;
+  /** Auto-reject if no decision within this many hours (omitted = wait forever). */
+  timeoutHours?: number;
+}
+
 export interface McpToolNodeConfig {
   connectionId: string;
   tool: string;

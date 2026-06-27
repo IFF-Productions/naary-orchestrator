@@ -69,6 +69,18 @@ function costFromCtx(ctx: Record<string, unknown> | undefined): number | null {
   return typeof c === "number" ? c : null;
 }
 
+/** The Start node's configured sample input (used as the default manual-run input). */
+function startSampleInput(
+  graph: GraphSnapshot["graph"],
+): Record<string, unknown> | undefined {
+  const start = graph.nodes.find((n) => n.id === graph.startNodeId);
+  const sample = (start?.config as { sampleInput?: unknown } | undefined)
+    ?.sampleInput;
+  return sample && typeof sample === "object" && !Array.isArray(sample)
+    ? (sample as Record<string, unknown>)
+    : undefined;
+}
+
 /**
  * Wraps the Temporal client: start an execution, signal approval, query state.
  * The client connects once at boot and closes on shutdown.
@@ -108,10 +120,15 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         `No '${workflowKey}' graph for this tenant — save one first`,
       );
     }
+    // Default input precedence: explicit body input → the Start node's configured
+    // sampleInput → a generic fallback. Lets a workflow define realistic test data.
     return this.startGraph(
       `exec-${tenantId}`,
       snapshot,
-      input ?? { message: "I was charged twice this month" },
+      input ??
+        startSampleInput(snapshot.graph) ?? {
+          message: "I was charged twice this month",
+        },
       tenantId,
       workflowKey,
     );
@@ -276,13 +293,30 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
 
   async getState(id: string, tenantId: string): Promise<ExecutionState> {
     await this.assertOwner(id, tenantId);
+    const handle = this.client.workflow.getHandle(id);
     try {
-      return await this.client.workflow.getHandle(id).query(stateQuery);
+      // Live path: a RUNNING workflow answers the state query directly.
+      return await handle.query(stateQuery);
     } catch (e) {
-      if (e instanceof WorkflowNotFoundError) {
-        throw new NotFoundException("Execution not found");
+      if (!(e instanceof WorkflowNotFoundError)) throw e;
+      // A CLOSED workflow can't be queried (gRPC NOT_FOUND → WorkflowNotFoundError).
+      // Recover its final state from the workflow's RETURN value: runGraph returns
+      // { status, ctx }. (assertOwner already passed, so the run exists in our DB.)
+      try {
+        const r = (await handle.result()) as {
+          status: ExecutionStatus;
+          ctx: Record<string, unknown>;
+        };
+        return { status: r.status, currentNodeId: "", ctx: r.ctx };
+      } catch (re) {
+        // result() also NOT_FOUND → the execution is truly gone from Temporal
+        // (e.g. retention expired). Re-throw anything else (failed/terminated runs
+        // surface their real error to the caller).
+        if (re instanceof WorkflowNotFoundError) {
+          throw new NotFoundException("Execution not found");
+        }
+        throw re;
       }
-      throw e;
     }
   }
 

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Icon, StatusPill } from "../../components";
-import type { RunState } from "../../components";
 import { api, type RunSummary, UnauthorizedError } from "../../lib/api";
+import { isFailure, runStatusUi } from "../../lib/run-status";
 
 const COLS = "1.5fr 1fr 0.9fr 0.7fr 0.7fr 0.4fr";
 
@@ -18,45 +18,13 @@ function ago(iso: string): string {
   return `${Math.round(h / 24)}d ago`;
 }
 
-/** Run status → StatusPill state + human label. */
-const STATUS_UI: Record<string, { state: RunState; label: string }> = {
-  running: { state: "running", label: "Running" },
-  awaiting_approval: { state: "paused", label: "Awaiting approval" },
-  completed: { state: "done", label: "Completed" },
-  rejected: { state: "error", label: "Rejected" },
-  budget_exceeded: { state: "error", label: "Budget exceeded" },
-  circuit_open: { state: "error", label: "Circuit open" },
-  invalid_graph: { state: "error", label: "Invalid graph" },
-  failed: { state: "error", label: "Failed" },
-  timed_out: { state: "error", label: "Timed out" },
-  terminated: { state: "error", label: "Terminated" },
-  canceled: { state: "error", label: "Canceled" },
-  unknown: { state: "idle", label: "Unknown" },
-};
-function statusUi(s: string): { state: RunState; label: string } {
-  return STATUS_UI[s] ?? { state: "idle", label: s };
-}
-
 /** Filter tabs → which statuses they include (All = everything). */
 const FILTERS: { label: string; match: (s: string) => boolean }[] = [
   { label: "All", match: () => true },
   { label: "Awaiting", match: (s) => s === "awaiting_approval" },
   { label: "Running", match: (s) => s === "running" },
   { label: "Completed", match: (s) => s === "completed" },
-  {
-    label: "Failed",
-    match: (s) =>
-      [
-        "rejected",
-        "budget_exceeded",
-        "circuit_open",
-        "invalid_graph",
-        "failed",
-        "timed_out",
-        "terminated",
-        "canceled",
-      ].includes(s),
-  },
+  { label: "Failed", match: isFailure },
 ];
 
 export function Runs() {
@@ -291,7 +259,7 @@ export function Runs() {
               {r.workflowKey ?? "—"}
             </span>
             <span>
-              <StatusPill {...statusUi(r.status)} />
+              <StatusPill {...runStatusUi(r.status)} />
             </span>
             <span
               className="mono"

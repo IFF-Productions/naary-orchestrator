@@ -1,116 +1,73 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  Button,
-  Card,
-  Icon,
-  NODE_ACCENT,
-  SearchInput,
-  StatusPill,
-} from "../../components";
-import { api, type GraphSummary } from "../../lib/api";
-import { workflows, type WorkflowRow } from "../../lib/mock";
+import { Button, Card, Icon, SearchInput, StatusPill } from "../../components";
+import { api, type GraphSummary, type RunSummary } from "../../lib/api";
+import { runStatusUi, successRate } from "../../lib/run-status";
 
-/** The tenant's real saved workflows (from POST /graphs via the canvas). Open one
- *  to edit it on the canvas, or create a new one. The styled table below is still
- *  prototype/mock data (run counts, success rates) not yet wired to the backend. */
-function SavedWorkflows() {
+/**
+ * Workflows — the tenant's saved graphs (from POST /graphs via the canvas), each
+ * with REAL recent-run stats derived from the runs list (run count, success rate,
+ * last status). Open one to edit it on the canvas, or create a new one.
+ */
+const GRID = "2.2fr 1fr 0.8fr 1fr 90px";
+
+interface Row {
+  graph: GraphSummary;
+  runs: number;
+  success: number | null;
+  lastStatus: string | null;
+}
+
+export function Workflows() {
   const navigate = useNavigate();
-  const [rows, setRows] = useState<GraphSummary[] | null>(null);
+  const [graphs, setGraphs] = useState<GraphSummary[] | null>(null);
+  const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [query, setQuery] = useState("");
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
-    api
-      .listGraphs()
-      .then((ws) => live && setRows(ws))
+    Promise.all([api.listGraphs(), api.listRuns().catch(() => [])])
+      .then(([gs, rs]) => {
+        if (!live) return;
+        setGraphs(gs);
+        setRuns(rs);
+      })
       .catch((e) => live && setErr(e instanceof Error ? e.message : "failed"));
     return () => {
       live = false;
     };
   }, []);
 
-  return (
-    <Card style={{ padding: 16, marginBottom: 18 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 10,
-        }}
-      >
-        <strong style={{ fontSize: 14 }}>Saved workflows (live)</strong>
-        <Button
-          variant="secondary"
-          icon="plus"
-          onClick={() => navigate("/app/canvas")}
-        >
-          New on canvas
-        </Button>
-      </div>
-      {err && (
-        <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>
-          Sign in to see your saved workflows.
-        </div>
-      )}
-      {!err && rows?.length === 0 && (
-        <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>
-          No saved workflows yet — create one on the canvas.
-        </div>
-      )}
-      {!err && rows === null && (
-        <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Loading…</div>
-      )}
-      {rows?.map((w) => (
-        <div
-          key={w.workflowKey}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            padding: "9px 4px",
-            borderTop: "1px solid var(--line)",
-          }}
-        >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>{w.name}</div>
-            <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
-              {w.workflowKey} · v{w.version}
-            </div>
-          </div>
-          <Button
-            variant="secondary"
-            onClick={() =>
-              navigate(`/app/canvas?key=${encodeURIComponent(w.workflowKey)}`)
-            }
-          >
-            Open
-          </Button>
-        </div>
-      ))}
-    </Card>
+  // Per-workflow stats from the runs list (newest-first), keyed by workflowKey.
+  const rows = useMemo<Row[]>(() => {
+    const byKey = new Map<string, RunSummary[]>();
+    for (const r of runs) {
+      if (!r.workflowKey) continue;
+      const arr = byKey.get(r.workflowKey) ?? [];
+      arr.push(r);
+      byKey.set(r.workflowKey, arr);
+    }
+    return (graphs ?? []).map((g) => {
+      const wr = byKey.get(g.workflowKey) ?? [];
+      return {
+        graph: g,
+        runs: wr.length,
+        success: successRate(wr.map((r) => r.status)),
+        lastStatus: wr[0]?.status ?? null,
+      };
+    });
+  }, [graphs, runs]);
+
+  const filtered = rows.filter(
+    (r) =>
+      !query ||
+      r.graph.name.toLowerCase().includes(query.toLowerCase()) ||
+      r.graph.workflowKey.includes(query),
   );
-}
-
-const FILTERS = [
-  { label: "All", count: 28 },
-  { label: "Active", count: 24 },
-  { label: "Paused", count: 3 },
-  { label: "Failing", count: 1 },
-  { label: "Drafts", count: 2 },
-];
-
-const GRID = "2.4fr 1fr 1fr .9fr 1fr 40px";
-
-export function Workflows() {
-  const navigate = useNavigate();
-  const [filter, setFilter] = useState("All");
-  const [query, setQuery] = useState("");
 
   return (
     <div style={{ padding: "22px 28px 40px" }}>
-      {/* header */}
       <div
         style={{
           display: "flex",
@@ -121,17 +78,13 @@ export function Workflows() {
       >
         <div>
           <div
-            style={{
-              fontSize: 21,
-              fontWeight: 700,
-              color: "var(--ink)",
-              letterSpacing: "-0.01em",
-            }}
+            style={{ fontSize: 21, fontWeight: 700, letterSpacing: "-0.01em" }}
           >
             Workflows
           </div>
           <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
-            28 workflows · 24 active · 1 failing
+            {graphs ? `${graphs.length} saved` : "…"}
+            {runs.length ? ` · ${runs.length} recent runs` : ""}
           </div>
         </div>
         <Button
@@ -143,51 +96,7 @@ export function Workflows() {
         </Button>
       </div>
 
-      {/* live: real saved workflows from the API */}
-      <SavedWorkflows />
-
-      {/* filter bar */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          marginBottom: 14,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            background: "var(--surface)",
-            border: "1px solid var(--line)",
-            borderRadius: 8,
-            padding: 3,
-            gap: 2,
-          }}
-        >
-          {FILTERS.map((f) => {
-            const active = f.label === filter;
-            return (
-              <button
-                key={f.label}
-                type="button"
-                onClick={() => setFilter(f.label)}
-                style={{
-                  border: "none",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: active ? 600 : 400,
-                  color: active ? "var(--ink)" : "var(--ink-2)",
-                  background: active ? "var(--card-2)" : "transparent",
-                  padding: "5px 12px",
-                  borderRadius: 6,
-                }}
-              >
-                {f.label} {f.count}
-              </button>
-            );
-          })}
-        </div>
+      <div style={{ marginBottom: 14 }}>
         <SearchInput
           placeholder="Filter by name…"
           kbd=""
@@ -195,14 +104,9 @@ export function Workflows() {
           onChange={setQuery}
           style={{ width: 240 }}
         />
-        <Button icon="filter" style={{ marginLeft: "auto" }} onClick={() => {}}>
-          Sort: Last run
-        </Button>
       </div>
 
-      {/* table */}
       <Card pad={false} style={{ overflow: "hidden" }}>
-        {/* header row */}
         <div
           className="mono"
           style={{
@@ -219,160 +123,106 @@ export function Workflows() {
           }}
         >
           <span>Workflow</span>
-          <span>Status</span>
-          <span>Trigger</span>
-          <span>Runs 7d</span>
+          <span>Last run</span>
+          <span>Runs</span>
           <span>Success</span>
           <span />
         </div>
-        {workflows.map((w) => (
-          <WorkflowRowItem
-            key={w.name}
-            w={w}
-            onOpen={() => navigate("/app/canvas")}
-          />
+
+        {err && (
+          <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-2)" }}>
+            Sign in to see your saved workflows.
+          </div>
+        )}
+        {!err && graphs === null && (
+          <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-3)" }}>
+            Loading…
+          </div>
+        )}
+        {!err && graphs?.length === 0 && (
+          <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-2)" }}>
+            No saved workflows yet — create one on the canvas.
+          </div>
+        )}
+
+        {filtered.map((r) => (
+          <div
+            key={r.graph.workflowKey}
+            onClick={() =>
+              navigate(
+                `/app/canvas?key=${encodeURIComponent(r.graph.workflowKey)}`,
+              )
+            }
+            className="run-row"
+            style={{
+              display: "grid",
+              gridTemplateColumns: GRID,
+              gap: 10,
+              padding: "13px 18px",
+              borderBottom: "1px solid var(--line)",
+              alignItems: "center",
+              cursor: "pointer",
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}
+              >
+                {r.graph.name}
+              </div>
+              <div
+                className="mono"
+                style={{ fontSize: 11, color: "var(--ink-3)" }}
+              >
+                {r.graph.workflowKey} · v{r.graph.version}
+              </div>
+            </div>
+            <span>
+              {r.lastStatus ? (
+                <StatusPill {...runStatusUi(r.lastStatus)} />
+              ) : (
+                <span style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
+                  No runs
+                </span>
+              )}
+            </span>
+            <span
+              className="mono"
+              style={{ fontSize: 12, color: "var(--ink)" }}
+            >
+              {r.runs}
+            </span>
+            <span
+              className="mono"
+              style={{ fontSize: 11.5, color: "var(--ink-2)" }}
+            >
+              {r.success === null ? "—" : `${Math.round(r.success)}%`}
+            </span>
+            <span style={{ textAlign: "right" }}>
+              <Button
+                variant="secondary"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate(
+                    `/app/canvas?key=${encodeURIComponent(r.graph.workflowKey)}`,
+                  );
+                }}
+              >
+                Open
+              </Button>
+            </span>
+          </div>
         ))}
       </Card>
-    </div>
-  );
-}
 
-function WorkflowRowItem({
-  w,
-  onOpen,
-}: {
-  w: WorkflowRow;
-  onOpen: () => void;
-}) {
-  const accent = NODE_ACCENT[w.accent];
-  return (
-    <div
-      onClick={onOpen}
-      style={{
-        display: "grid",
-        gridTemplateColumns: GRID,
-        gap: 10,
-        padding: "13px 18px",
-        borderBottom: "1px solid var(--line)",
-        alignItems: "center",
-        cursor: "pointer",
-      }}
-    >
-      {/* workflow name + icon */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 11,
-          minWidth: 0,
-        }}
-      >
-        <span
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: 8,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flex: "none",
-            background: `color-mix(in srgb, ${accent} 16%, transparent)`,
-            color: accent,
-          }}
-        >
-          <Icon name="workflow" size={15} />
-        </span>
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: "var(--ink)",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {w.name}
-          </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--ink-3)",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {w.desc}
-          </div>
-        </div>
+      <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 10 }}>
+        <Icon
+          name="info"
+          size={12}
+          style={{ verticalAlign: "-2px", marginRight: 5 }}
+        />
+        Run stats are computed from the {runs.length} most recent runs.
       </div>
-
-      {/* status */}
-      <span>
-        <StatusPill state={w.statusState} label={w.status} />
-      </span>
-
-      {/* trigger */}
-      <span className="mono" style={{ fontSize: 11.5, color: "var(--ink-2)" }}>
-        {w.trigger}
-      </span>
-
-      {/* runs */}
-      <span className="mono" style={{ fontSize: 12, color: "var(--ink)" }}>
-        {w.runs}
-      </span>
-
-      {/* success */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div
-          style={{
-            flex: 1,
-            height: 5,
-            borderRadius: 3,
-            background: "var(--line-2)",
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              height: "100%",
-              width: w.success,
-              background: w.successOk
-                ? "var(--state-done)"
-                : "var(--state-error)",
-            }}
-          />
-        </div>
-        <span
-          className="mono"
-          style={{ fontSize: 10.5, color: "var(--ink-2)" }}
-        >
-          {w.success}
-        </span>
-      </div>
-
-      {/* more */}
-      <button
-        type="button"
-        aria-label="More"
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: 28,
-          height: 28,
-          borderRadius: 6,
-          border: "none",
-          background: "transparent",
-          color: "var(--ink-3)",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <Icon name="more" size={15} />
-      </button>
     </div>
   );
 }
