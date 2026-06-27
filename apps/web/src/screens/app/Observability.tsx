@@ -96,7 +96,7 @@ export function Observability() {
   ];
 
   const byModel = usage?.byModel ?? [];
-  const maxModelTokens = byModel.reduce((m, r) => Math.max(m, r.tokens), 0);
+  const maxModelTokens = byModel.reduce((m, r) => Math.max(m, r.totalTokens), 0);
 
   return (
     <div style={{ padding: "22px 28px 40px", maxWidth: 1300 }}>
@@ -330,7 +330,7 @@ export function Observability() {
                     <ProgressBar
                       value={
                         maxModelTokens > 0
-                          ? (m.tokens / maxModelTokens) * 100
+                          ? (m.totalTokens / maxModelTokens) * 100
                           : 0
                       }
                     />
@@ -340,7 +340,7 @@ export function Observability() {
                   className="mono"
                   style={{ fontSize: 11.5, color: "var(--ink-2)" }}
                 >
-                  {fmtTokens(m.tokens)}
+                  {fmtTokens(m.totalTokens)}
                 </span>
                 <span
                   className="mono"
