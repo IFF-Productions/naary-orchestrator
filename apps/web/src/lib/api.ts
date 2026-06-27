@@ -48,6 +48,10 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     throw new Error(`${init?.method ?? "GET"} ${path} → ${res.status}`);
   }
+  // 204 / empty body (e.g. DELETE) — nothing to parse.
+  if (res.status === 204 || res.headers.get("content-length") === "0") {
+    return undefined as T;
+  }
   return res.json() as Promise<T>;
 }
 
@@ -64,7 +68,19 @@ export interface NamedGraph {
   graph: GraphDef;
 }
 
+export interface TemplateSummary {
+  key: string;
+  name: string;
+  description: string;
+  nodeCount: number;
+}
+
 export const api = {
+  // Built-in workflow templates (global, not tenant-scoped). The canvas opens one
+  // by its `key`.
+  listTemplates(): Promise<TemplateSummary[]> {
+    return http("/templates");
+  },
   // List the tenant's workflows (latest version per key).
   listGraphs(): Promise<GraphSummary[]> {
     return http("/graphs");
@@ -113,7 +129,71 @@ export const api = {
   getUsage(tenantId: string): Promise<UsageReport> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/usage`);
   },
+  // --- Team (members) ---
+  listMembers(tenantId: string): Promise<Member[]> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/members`);
+  },
+  addMember(tenantId: string, email: string, role?: string): Promise<Member> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/members`, {
+      method: "POST",
+      body: JSON.stringify({ email, ...(role ? { role } : {}) }),
+    });
+  },
+  removeMember(tenantId: string, memberId: string): Promise<void> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/members/${encodeURIComponent(memberId)}`,
+      { method: "DELETE" },
+    );
+  },
+  // --- Settings ---
+  getSettings(tenantId: string): Promise<TenantSettings> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/settings`);
+  },
+  saveSettings(
+    tenantId: string,
+    patch: TenantSettings,
+  ): Promise<TenantSettings> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/settings`, {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    });
+  },
+  // --- Integrations ---
+  // Connected MCP servers / apps for the tenant. Tenant-scoped — pass tenantId from getMe().
+  listConnections(tenantId: string): Promise<ConnectionRow[]> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/connections`);
+  },
+  // Registered webhook endpoints (never includes the signing secret). Tenant-scoped.
+  listWebhooks(tenantId: string): Promise<WebhookRow[]> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/webhooks`);
+  },
+  // --- Billing ---
+  // Budget config + live month-to-date spend. Tenant-scoped. The server returns 404
+  // (→ generic Error, not UnauthorizedError) when no budget is configured.
+  getBudget(tenantId: string): Promise<BudgetView> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/budget`);
+  },
 };
+
+/** A connected MCP server / app (mirrors the API's ConnectionView; Date → string over JSON). */
+export interface ConnectionRow {
+  id: string;
+  type: "github" | "atlassian" | "custom";
+  label: string;
+  serverUrl: string;
+  authMode: "api_token" | "pat" | "oauth";
+  scopes: string[];
+  status: "connected" | "needs_reauth" | "error";
+  createdAt: string;
+}
+
+/** A registered webhook endpoint (no signing secret; Date → string over JSON). */
+export interface WebhookRow {
+  id: string;
+  provider: string;
+  workflowId: string;
+  createdAt: string;
+}
 
 export interface RunSummary {
   workflowId: string;
@@ -122,8 +202,44 @@ export interface RunSummary {
 export interface UsageReport {
   totalCostUsd: number;
   totalTokens: number;
-  byModel: { model: string; tokens: number; costUsd: number }[];
+  byModel: {
+    provider: string;
+    model: string;
+    calls: number;
+    totalTokens: number;
+    costUsd: number;
+  }[];
   events: unknown[];
+}
+export interface Member {
+  id: string;
+  email: string;
+  role: string;
+  createdAt: string;
+}
+export interface TenantSettings {
+  displayName: string | null;
+  defaultModel: string | null;
+}
+
+/**
+ * GET /tenants/:id/budget — budget config plus live month-to-date spend.
+ * Mirrors the server's BudgetView (apps/api/src/budget/budget.service.ts):
+ * the persisted TenantBudgetConfig fields + the two view-only spend fields.
+ * Defined inline (not imported from @naary/usage) because that's a server-only
+ * package with Prisma deps that must not enter the web bundle.
+ */
+export interface BudgetView {
+  tenantId: string;
+  monthlyCapUsd: number;
+  perExecutionCapUsd: number;
+  maxStepsPerRun: number;
+  onBudgetExceeded: "reject" | "downgrade";
+  fallbackModel: string | null;
+  /** Spend so far this calendar month, in USD. */
+  mtdSpendUsd: number;
+  /** monthlyCapUsd − mtdSpendUsd (may be negative if over cap). */
+  remainingUsd: number;
 }
 
 /** Map a control-plane status to a design run-state token. */

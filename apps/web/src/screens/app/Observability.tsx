@@ -1,57 +1,20 @@
 /**
- * Observability — latency / cost / error-rate analytics (last 7 days).
- * All chart numbers are illustrative and defined locally (mock.ts is not edited).
+ * Observability — real-data analytics for the tenant.
+ * Driven by the control plane: recent runs (api.listRuns) + the usage ledger
+ * (api.getUsage, tenant-scoped via api.getMe). The ledger stores tokens + cost
+ * only, so we surface run counts, token/cost totals, the recent run list, and a
+ * per-model usage breakdown — no fabricated latency/error charts or per-run
+ * statuses (run status lives in Temporal, only on the run-detail view).
  */
-
-interface Stat {
-  label: string;
-  value: string;
-  unit: string;
-  delta: string;
-  /** literal arrow + semantic color, matching the DC (down latency = good/green). */
-  arrow: "up" | "down";
-  good: boolean;
-}
-
-const stats: Stat[] = [
-  {
-    label: "p95 latency",
-    value: "2.4",
-    unit: "s",
-    delta: "0.3s vs last week",
-    arrow: "down",
-    good: true,
-  },
-  {
-    label: "Error rate",
-    value: "1.3",
-    unit: "%",
-    delta: "0.2% vs last week",
-    arrow: "up",
-    good: false,
-  },
-  {
-    label: "Throughput",
-    value: "29.1",
-    unit: "k runs",
-    delta: "8% vs last week",
-    arrow: "up",
-    good: true,
-  },
-];
-
-interface ExpensiveRow {
-  wf: string;
-  runs: string;
-  avg: string;
-  total: string;
-}
-
-const expensive: ExpensiveRow[] = [
-  { wf: "Lead enrichment", runs: "880", avg: "$0.082", total: "$72.16" },
-  { wf: "Support router", runs: "2,310", avg: "$0.024", total: "$55.44" },
-  { wf: "Invoice extraction", runs: "412", avg: "$0.031", total: "$12.77" },
-];
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Icon, ProgressBar } from "../../components";
+import {
+  api,
+  type RunSummary,
+  type UsageReport,
+  UnauthorizedError,
+} from "../../lib/api";
 
 const cardStyle: React.CSSProperties = {
   background: "var(--card)",
@@ -60,7 +23,81 @@ const cardStyle: React.CSSProperties = {
   boxShadow: "var(--shadow-card)",
 };
 
+/** Compact relative time from an ISO timestamp (no date lib). */
+function ago(iso: string): string {
+  const then = new Date(iso).getTime();
+  const s = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
+function fmtUsd(n: number): string {
+  return `$${n.toFixed(2)}`;
+}
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return `${n}`;
+}
+
 export function Observability() {
+  const navigate = useNavigate();
+  const [runs, setRuns] = useState<RunSummary[] | null>(null);
+  const [usage, setUsage] = useState<UsageReport | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      try {
+        const { tenantId } = await api.getMe();
+        const [r, u] = await Promise.all([
+          api.listRuns(),
+          api.getUsage(tenantId),
+        ]);
+        if (cancelled) return;
+        setRuns(r);
+        setUsage(u);
+        setError(null);
+      } catch (e) {
+        if (cancelled) return;
+        setError(
+          e instanceof UnauthorizedError
+            ? "Sign in to view observability."
+            : "Could not reach the control plane (apps/api on :3000).",
+        );
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const stats = [
+    { label: "Recent runs", value: runs ? `${runs.length}` : "—" },
+    {
+      label: "Tokens used",
+      value: usage ? fmtTokens(usage.totalTokens) : "—",
+    },
+    {
+      label: "Total cost",
+      value: usage ? fmtUsd(usage.totalCostUsd) : "—",
+    },
+  ];
+
+  const byModel = usage?.byModel ?? [];
+  const maxModelTokens = byModel.reduce((m, r) => Math.max(m, r.totalTokens), 0);
+
   return (
     <div style={{ padding: "22px 28px 40px", maxWidth: 1300 }}>
       {/* heading */}
@@ -76,9 +113,26 @@ export function Observability() {
           Observability
         </div>
         <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
-          Latency, cost and error-rate analytics · last 7 days.
+          Runs and token/cost usage for your tenant.
         </div>
       </div>
+
+      {error && (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: "9px 12px",
+            borderRadius: 8,
+            background: "var(--error-soft)",
+            border:
+              "1px solid color-mix(in srgb, var(--state-error) 40%, transparent)",
+            color: "var(--state-error)",
+            fontSize: 12,
+          }}
+        >
+          {error}
+        </div>
+      )}
 
       {/* ===== stat row ===== */}
       <div
@@ -100,207 +154,203 @@ export function Observability() {
                 marginTop: 6,
               }}
             >
-              {s.value}
-              <span style={{ fontSize: 15, color: "var(--ink-2)" }}>
-                {s.unit}
-              </span>
-            </div>
-            <div
-              className="mono"
-              style={{
-                fontSize: 10.5,
-                color: s.good ? "var(--state-done)" : "var(--state-error)",
-                marginTop: 4,
-              }}
-            >
-              {s.arrow === "down" ? "▼" : "▲"} {s.delta}
+              {loading ? "…" : s.value}
             </div>
           </div>
         ))}
       </div>
 
-      {/* ===== latency + error charts ===== */}
+      {/* ===== recent runs + per-model usage ===== */}
       <div
         style={{
           display: "grid",
           gridTemplateColumns: "1fr 1fr",
           gap: 16,
-          marginBottom: 16,
         }}
       >
-        <div style={{ ...cardStyle, padding: 18 }}>
+        {/* recent runs */}
+        <div style={{ ...cardStyle, overflow: "hidden" }}>
           <div
             style={{
+              padding: "15px 18px 11px",
               fontSize: 13,
               fontWeight: 600,
               color: "var(--ink)",
-              marginBottom: 14,
             }}
           >
-            Latency (p50 / p95)
+            Recent runs
           </div>
-          <svg
-            width="100%"
-            height={150}
-            viewBox="0 0 560 150"
-            preserveAspectRatio="none"
-            style={{ display: "block", overflow: "visible" }}
-          >
-            <defs>
-              <linearGradient id="obs-lat" x1="0" y1="0" x2="0" y2="1">
-                <stop
-                  offset="0"
-                  stopColor="var(--state-info)"
-                  stopOpacity={0.25}
-                />
-                <stop
-                  offset="1"
-                  stopColor="var(--state-info)"
-                  stopOpacity={0}
-                />
-              </linearGradient>
-            </defs>
-            <line x1="0" y1="50" x2="560" y2="50" stroke="var(--line)" />
-            <line x1="0" y1="100" x2="560" y2="100" stroke="var(--line)" />
-            <path
-              d="M0 110 L80 95 L160 105 L240 80 L320 88 L400 70 L480 78 L560 60 L560 150 L0 150Z"
-              fill="url(#obs-lat)"
-            />
-            <polyline
-              points="0,110 80,95 160,105 240,80 320,88 400,70 480,78 560,60"
-              fill="none"
-              stroke="var(--state-info)"
-              strokeWidth={2}
-            />
-            <polyline
-              points="0,128 80,120 160,124 240,112 320,116 400,108 480,112 560,104"
-              fill="none"
-              stroke="var(--ink-3)"
-              strokeWidth={1.6}
-              strokeDasharray="4 4"
-            />
-          </svg>
-        </div>
-
-        <div style={{ ...cardStyle, padding: 18 }}>
           <div
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: "var(--ink)",
-              marginBottom: 14,
-            }}
-          >
-            Error rate
-          </div>
-          <svg
-            width="100%"
-            height={150}
-            viewBox="0 0 560 150"
-            preserveAspectRatio="none"
-            style={{ display: "block", overflow: "visible" }}
-          >
-            <defs>
-              <linearGradient id="obs-err" x1="0" y1="0" x2="0" y2="1">
-                <stop
-                  offset="0"
-                  stopColor="var(--state-error)"
-                  stopOpacity={0.25}
-                />
-                <stop
-                  offset="1"
-                  stopColor="var(--state-error)"
-                  stopOpacity={0}
-                />
-              </linearGradient>
-            </defs>
-            <line x1="0" y1="50" x2="560" y2="50" stroke="var(--line)" />
-            <line x1="0" y1="100" x2="560" y2="100" stroke="var(--line)" />
-            <path
-              d="M0 130 L80 125 L160 132 L240 120 L320 100 L400 118 L480 110 L560 122 L560 150 L0 150Z"
-              fill="url(#obs-err)"
-            />
-            <polyline
-              points="0,130 80,125 160,132 240,120 320,100 400,118 480,110 560,122"
-              fill="none"
-              stroke="var(--state-error)"
-              strokeWidth={2}
-            />
-          </svg>
-        </div>
-      </div>
-
-      {/* ===== most expensive workflows ===== */}
-      <div style={{ ...cardStyle, overflow: "hidden" }}>
-        <div
-          style={{
-            padding: "15px 18px 11px",
-            fontSize: 13,
-            fontWeight: 600,
-            color: "var(--ink)",
-          }}
-        >
-          Most expensive workflows
-        </div>
-        <div
-          className="mono"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "2fr 1fr 1fr 1fr",
-            gap: 10,
-            padding: "9px 18px",
-            borderTop: "1px solid var(--line)",
-            borderBottom: "1px solid var(--line)",
-            fontSize: 9.5,
-            fontWeight: 600,
-            letterSpacing: "0.08em",
-            color: "var(--ink-3)",
-            textTransform: "uppercase",
-          }}
-        >
-          <span>Workflow</span>
-          <span>Runs</span>
-          <span>Avg cost</span>
-          <span>Total</span>
-        </div>
-        {expensive.map((r, i) => (
-          <div
-            key={r.wf}
+            className="mono"
             style={{
               display: "grid",
-              gridTemplateColumns: "2fr 1fr 1fr 1fr",
+              gridTemplateColumns: "1.6fr 1fr 0.4fr",
               gap: 10,
-              padding: "12px 18px",
-              borderBottom:
-                i < expensive.length - 1 ? "1px solid var(--line)" : undefined,
-              alignItems: "center",
+              padding: "9px 18px",
+              borderTop: "1px solid var(--line)",
+              borderBottom: "1px solid var(--line)",
+              fontSize: 9.5,
+              fontWeight: 600,
+              letterSpacing: "0.08em",
+              color: "var(--ink-3)",
+              textTransform: "uppercase",
             }}
           >
-            <span
-              style={{ fontSize: 12.5, color: "var(--ink)", fontWeight: 500 }}
-            >
-              {r.wf}
-            </span>
-            <span
-              className="mono"
-              style={{ fontSize: 11.5, color: "var(--ink-2)" }}
-            >
-              {r.runs}
-            </span>
-            <span
-              className="mono"
-              style={{ fontSize: 11.5, color: "var(--ink-2)" }}
-            >
-              {r.avg}
-            </span>
-            <span
-              className="mono"
-              style={{ fontSize: 11.5, color: "var(--ink)" }}
-            >
-              {r.total}
-            </span>
+            <span>Run</span>
+            <span>Started</span>
+            <span />
           </div>
-        ))}
+
+          {loading && (
+            <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-3)" }}>
+              Loading…
+            </div>
+          )}
+          {!loading && !error && runs?.length === 0 && (
+            <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-2)" }}>
+              No runs yet — start one from the Runs screen.
+            </div>
+          )}
+          {!loading &&
+            (runs ?? []).map((r, i, arr) => (
+              <div
+                key={r.workflowId}
+                className="run-row"
+                onClick={() =>
+                  navigate(`/app/runs/${encodeURIComponent(r.workflowId)}`)
+                }
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1.6fr 1fr 0.4fr",
+                  gap: 10,
+                  padding: "12px 18px",
+                  borderBottom:
+                    i < arr.length - 1 ? "1px solid var(--line)" : undefined,
+                  alignItems: "center",
+                  cursor: "pointer",
+                }}
+              >
+                <span
+                  className="mono"
+                  style={{ fontSize: 11.5, color: "var(--brand)" }}
+                >
+                  {r.workflowId}
+                </span>
+                <span
+                  className="mono"
+                  style={{ fontSize: 11, color: "var(--ink-3)" }}
+                >
+                  {ago(r.createdAt)}
+                </span>
+                <span style={{ textAlign: "right" }}>
+                  <Icon
+                    name="chevron-right"
+                    size={14}
+                    style={{ color: "var(--ink-3)" }}
+                  />
+                </span>
+              </div>
+            ))}
+        </div>
+
+        {/* per-model usage */}
+        <div style={{ ...cardStyle, overflow: "hidden" }}>
+          <div
+            style={{
+              padding: "15px 18px 11px",
+              fontSize: 13,
+              fontWeight: 600,
+              color: "var(--ink)",
+            }}
+          >
+            Usage by model
+          </div>
+          <div
+            className="mono"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "2fr 1fr 1fr",
+              gap: 10,
+              padding: "9px 18px",
+              borderTop: "1px solid var(--line)",
+              borderBottom: "1px solid var(--line)",
+              fontSize: 9.5,
+              fontWeight: 600,
+              letterSpacing: "0.08em",
+              color: "var(--ink-3)",
+              textTransform: "uppercase",
+            }}
+          >
+            <span>Model</span>
+            <span>Tokens</span>
+            <span>Cost</span>
+          </div>
+
+          {loading && (
+            <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-3)" }}>
+              Loading…
+            </div>
+          )}
+          {!loading && !error && byModel.length === 0 && (
+            <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-2)" }}>
+              No usage recorded yet.
+            </div>
+          )}
+          {!loading &&
+            byModel.map((m, i) => (
+              <div
+                key={m.model}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "2fr 1fr 1fr",
+                  gap: 10,
+                  padding: "12px 18px",
+                  borderBottom:
+                    i < byModel.length - 1
+                      ? "1px solid var(--line)"
+                      : undefined,
+                  alignItems: "center",
+                }}
+              >
+                <span style={{ minWidth: 0 }}>
+                  <span
+                    style={{
+                      fontSize: 12.5,
+                      color: "var(--ink)",
+                      fontWeight: 500,
+                      display: "block",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {m.model}
+                  </span>
+                  <div style={{ marginTop: 6 }}>
+                    <ProgressBar
+                      value={
+                        maxModelTokens > 0
+                          ? (m.totalTokens / maxModelTokens) * 100
+                          : 0
+                      }
+                    />
+                  </div>
+                </span>
+                <span
+                  className="mono"
+                  style={{ fontSize: 11.5, color: "var(--ink-2)" }}
+                >
+                  {fmtTokens(m.totalTokens)}
+                </span>
+                <span
+                  className="mono"
+                  style={{ fontSize: 11.5, color: "var(--ink)" }}
+                >
+                  {fmtUsd(m.costUsd)}
+                </span>
+              </div>
+            ))}
+        </div>
       </div>
     </div>
   );
