@@ -42,6 +42,7 @@ const mockActivities = {
       costUsd: 0,
     };
   },
+  recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
 };
 const mcpCalls: activities.McpToolConfig[] = [];
 

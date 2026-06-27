@@ -170,6 +170,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         input,
         {
           tenantId,
+          workflowKey,
           perExecutionCapUsd: budget?.perExecutionCapUsd,
           maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
           graphContentHash: snapshot.contentHash,

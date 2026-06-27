@@ -11,7 +11,9 @@ import type { GraphDef, McpToolNodeConfig, NodeDef } from "@naary/dsl";
 // Do NOT drop `type` — that would pull I/O code into the sandbox.
 import type * as activities from "./activities";
 
-const { runAgent, callMcpTool } = wf.proxyActivities<typeof activities>({
+const { runAgent, callMcpTool, recordExecution } = wf.proxyActivities<
+  typeof activities
+>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },
 });
@@ -29,6 +31,8 @@ export interface RunGraphResult {
  *  Enforcement is opt-in per cap: a cap that is undefined is not enforced. */
 export interface RunGraphCtx {
   tenantId: string;
+  /** The saved-graph key this run executes — recorded for the Runs list. */
+  workflowKey?: string;
   perExecutionCapUsd?: number;
   maxStepsPerRun?: number;
   /** The version-pinned graph snapshot this run executes (Slice #5). Carried in
@@ -82,6 +86,19 @@ export async function runGraph(
     currentNodeId,
     ctx,
   }));
+
+  // Register run ownership so this run shows in the Runs list + is tenant-authorized
+  // — covers SCHEDULED runs (started by Temporal, with no API-side record). Only on
+  // first start (not continueAsNew). Behind a patched() gate so in-flight runs that
+  // predate this change don't hit a nondeterminism error on replay (CLAUDE.md:
+  // version interpreter changes with workflow.patched()).
+  if (!resume && wf.patched("record-execution-v1")) {
+    await recordExecution({
+      workflowId: wf.workflowInfo().workflowId,
+      tenantId: runCtx.tenantId,
+      workflowKey: runCtx.workflowKey,
+    });
+  }
 
   const nodeById = new Map<string, NodeDef>(graph.nodes.map((n) => [n.id, n]));
 

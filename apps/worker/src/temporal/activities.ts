@@ -13,6 +13,7 @@ import {
   callMcpTool as mcpCall,
   resolveMcpTarget,
 } from "@naary/connections";
+import { getPrisma } from "@naary/db";
 import { createLogger } from "@naary/logging";
 import { CredentialsService, MissingCredentialError } from "@naary/secrets";
 import {
@@ -81,6 +82,29 @@ export interface AgentMeta {
   tenantId: string;
   executionId: string;
   nodeId: string;
+}
+
+/**
+ * Record run ownership (tenant + workflowKey) so EVERY run — manual, webhook, or
+ * scheduled — appears in the Runs list and can be authorized by tenant. Idempotent
+ * upsert: manual/webhook runs are pre-created by the API (this is then a no-op);
+ * scheduled runs (started by Temporal) are created here. Called once at workflow
+ * start, behind a `patched()` gate so in-flight runs aren't broken on replay.
+ */
+export async function recordExecution(meta: {
+  workflowId: string;
+  tenantId: string;
+  workflowKey?: string;
+}): Promise<void> {
+  await getPrisma().execution.upsert({
+    where: { workflowId: meta.workflowId },
+    create: {
+      workflowId: meta.workflowId,
+      tenantId: meta.tenantId,
+      workflowKey: meta.workflowKey ?? null,
+    },
+    update: {}, // already recorded — don't clobber the original createdAt
+  });
 }
 
 export interface AgentOutput {
