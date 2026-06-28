@@ -114,6 +114,27 @@ export async function recordExecution(meta: {
   });
 }
 
+/**
+ * Push the run's current status + accumulated cost to its Execution row — the
+ * read-model the Runs list reads (so listing needs no per-run Temporal calls).
+ * Best-effort: a missing row (race before recordExecution) is ignored.
+ */
+export async function setExecutionStatus(meta: {
+  workflowId: string;
+  status: string;
+  costUsd?: number;
+}): Promise<void> {
+  await getPrisma()
+    .execution.update({
+      where: { workflowId: meta.workflowId },
+      data: {
+        status: meta.status,
+        ...(meta.costUsd !== undefined ? { costUsd: meta.costUsd } : {}),
+      },
+    })
+    .catch(() => undefined);
+}
+
 export interface AgentOutput {
   category: string;
   urgency: number;

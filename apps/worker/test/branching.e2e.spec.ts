@@ -27,6 +27,7 @@ const mockActivities = {
     return { status: "ok", content: [], costUsd: cfg.costUsd ?? 0 };
   },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
+  setExecutionStatus: async (): Promise<void> => undefined, // read-model push; no-op here
 };
 
 let env: TestWorkflowEnvironment;

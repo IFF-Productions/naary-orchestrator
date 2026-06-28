@@ -31,6 +31,10 @@ model Execution {
   workflowId  String   @id // Temporal workflowId
   tenantId    String
   workflowKey String? // the graph key this run started (null for pre-migration rows)
+  // Read-model projection pushed by the interpreter (Temporal stays the source of
+  // truth) so the Runs list is a single PG read — no per-run Temporal RPCs.
+  status      String   @default("running")
+  costUsd     Decimal? @db.Decimal(12, 6)
   createdAt   DateTime @default(now())
 
   @@index([tenantId])

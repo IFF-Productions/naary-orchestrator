@@ -11,12 +11,11 @@ import type { GraphDef, McpToolNodeConfig, NodeDef } from "@naary/dsl";
 // Do NOT drop `type` — that would pull I/O code into the sandbox.
 import type * as activities from "./activities";
 
-const { runAgent, callMcpTool, recordExecution } = wf.proxyActivities<
-  typeof activities
->({
-  startToCloseTimeout: "1 minute",
-  retry: { maximumAttempts: 3 },
-});
+const { runAgent, callMcpTool, recordExecution, setExecutionStatus } =
+  wf.proxyActivities<typeof activities>({
+    startToCloseTimeout: "1 minute",
+    retry: { maximumAttempts: 3 },
+  });
 
 export interface RunGraphResult {
   status: ExecutionStatus;
@@ -100,6 +99,19 @@ export async function runGraph(
     });
   }
 
+  // Push the current status + cost to the Execution read-model so the Runs list is
+  // a single PG read (no per-run Temporal calls). Gated by patched() so in-flight
+  // runs that predate this change stay replay-safe.
+  async function syncStatus(): Promise<void> {
+    if (wf.patched("exec-status-v1")) {
+      await setExecutionStatus({
+        workflowId: wf.workflowInfo().workflowId,
+        status,
+        costUsd,
+      });
+    }
+  }
+
   const nodeById = new Map<string, NodeDef>(graph.nodes.map((n) => [n.id, n]));
 
   /** Run one node's side effect. Returns a TERMINAL status to stop the whole run
@@ -160,6 +172,7 @@ export async function runGraph(
       }
       case "humanApproval": {
         status = "awaiting_approval";
+        await syncStatus(); // surface the pause in the Runs list / approval queue
         // Optional auto-reject timeout (durable Temporal timer; deterministic).
         const approvalCfg = (node.config ?? {}) as { timeoutHours?: number };
         const timeoutMs =
@@ -268,5 +281,6 @@ export async function runGraph(
 
   const terminal = await execChain(currentNodeId, true);
   status = terminal ?? "completed";
+  await syncStatus(); // final status + cost for the Runs list
   return { status, ctx };
 }
