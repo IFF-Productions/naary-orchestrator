@@ -236,6 +236,7 @@ export function Schedules() {
         {rows?.map((r) => (
           <div
             key={r.id}
+            data-testid="schedule-row"
             style={{
               display: "grid",
               gridTemplateColumns: COLS,
