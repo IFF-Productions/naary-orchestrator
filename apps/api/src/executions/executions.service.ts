@@ -72,10 +72,29 @@ const TEMPORAL_CLOSED_STATUS: Record<string, RunSummary["status"]> = {
   CONTINUED_AS_NEW: "running",
 };
 
-/** The workflow accumulates total run cost (agent + MCP tool) in ctx.__costUsd. */
-function costFromCtx(ctx: Record<string, unknown> | undefined): number | null {
-  const c = ctx?.__costUsd;
-  return typeof c === "number" ? c : null;
+/** Temporal FAILURE states only (for reconciling a stuck-non-terminal PG row). */
+const TEMPORAL_FAILED_STATUS: Record<string, RunSummary["status"]> = {
+  FAILED: "failed",
+  TIMED_OUT: "timed_out",
+  TERMINATED: "terminated",
+  CANCELLED: "canceled",
+  CANCELED: "canceled",
+};
+
+/** Run statuses that won't change again — the read-model is authoritative for these. */
+const TERMINAL_STATUSES = new Set([
+  "completed",
+  "rejected",
+  "budget_exceeded",
+  "circuit_open",
+  "invalid_graph",
+  "failed",
+  "timed_out",
+  "terminated",
+  "canceled",
+]);
+function isTerminalStatus(s: string): boolean {
+  return TERMINAL_STATUSES.has(s);
 }
 
 /** The Start node's configured sample input (used as the default manual-run input). */
@@ -228,15 +247,16 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Recent runs for the tenant (newest first), enriched with LIVE status + cost
-   * read from Temporal (state lives there, not the DB). Per run: describe() tells
-   * us running-vs-closed + start time; a RUNNING run is queried for its app status
-   * (awaiting_approval, etc.) and accumulated cost; a CLOSED run's TRUE terminal
-   * status comes from result() (the workflow returns {status, ctx} — a rejected /
-   * budget_exceeded run is Temporal-COMPLETED, so describe() alone would wrongly
-   * read "completed"). Enrichment is best-effort + parallel; a run we can't reach
-   * falls back to "unknown" rather than failing the list. Bounded — a tenant
-   * search attribute + Temporal list() is the scaling follow-up.
+   * Recent runs for the tenant (newest first). Reads the Execution READ-MODEL: the
+   * interpreter pushes status + accumulated cost to the row as a run progresses
+   * (see setExecutionStatus), so a terminal run needs ZERO Temporal calls — the
+   * key scaling win over the old per-run describe()+result() (which replayed each
+   * closed run's history).
+   *
+   * One reconcile: a run still marked non-terminal in PG that FAILED at the
+   * Temporal level (the workflow THREW, so it couldn't push a terminal status) is
+   * caught with a cheap describe() ONLY (no history replay). Genuinely
+   * running/awaiting runs keep their pushed status.
    */
   async list(tenantId: string, limit = 50): Promise<RunSummary[]> {
     const rows = await getPrisma().execution.findMany({
@@ -244,62 +264,35 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       orderBy: { createdAt: "desc" },
       take: Math.min(Math.max(limit, 1), 100),
     });
-    return Promise.all(rows.map((r) => this.enrich(r)));
-  }
-
-  private async enrich(row: {
-    workflowId: string;
-    workflowKey: string | null;
-    createdAt: Date;
-  }): Promise<RunSummary> {
-    const base = {
-      workflowId: row.workflowId,
-      workflowKey: row.workflowKey,
-      createdAt: row.createdAt.toISOString(),
-      startedAt: row.createdAt.toISOString(),
-    };
-    try {
-      const handle = this.client.workflow.getHandle(row.workflowId);
-      const desc = await handle.describe();
-      const startedAt = desc.startTime?.toISOString() ?? base.startedAt;
-
-      if (desc.status.name === "RUNNING") {
+    return Promise.all(
+      rows.map(async (r) => {
+        const startedAt = r.createdAt.toISOString();
+        const base = {
+          workflowId: r.workflowId,
+          workflowKey: r.workflowKey,
+          costUsd: r.costUsd !== null ? Number(r.costUsd) : null,
+          startedAt,
+          createdAt: startedAt,
+        };
+        if (isTerminalStatus(r.status)) {
+          return { ...base, status: r.status as RunSummary["status"] };
+        }
+        // Non-terminal in PG → reconcile against Temporal (cheap describe only) so
+        // a workflow that threw (Temporal-FAILED) isn't shown as forever-running.
         try {
-          const state = await handle.query(stateQuery);
+          const desc = await this.client.workflow
+            .getHandle(r.workflowId)
+            .describe();
+          const failed = TEMPORAL_FAILED_STATUS[desc.status.name];
           return {
             ...base,
-            startedAt,
-            status: state.status,
-            costUsd: costFromCtx(state.ctx),
+            status: failed ?? (r.status as RunSummary["status"]),
           };
         } catch {
-          return { ...base, startedAt, status: "running", costUsd: null };
+          return { ...base, status: r.status as RunSummary["status"] };
         }
-      }
-      if (desc.status.name === "COMPLETED") {
-        // The workflow RETURNS its terminal status (success / rejected /
-        // budget_exceeded / …) — result() recovers the truthful value.
-        const result = (await handle.result()) as {
-          status: ExecutionStatus;
-          ctx: Record<string, unknown>;
-        };
-        return {
-          ...base,
-          startedAt,
-          status: result.status,
-          costUsd: costFromCtx(result.ctx),
-        };
-      }
-      // FAILED / TIMED_OUT / TERMINATED / CANCELED / CONTINUED_AS_NEW
-      return {
-        ...base,
-        startedAt,
-        status: TEMPORAL_CLOSED_STATUS[desc.status.name] ?? "unknown",
-        costUsd: null,
-      };
-    } catch {
-      return { ...base, status: "unknown", costUsd: null };
-    }
+      }),
+    );
   }
 
   /**
