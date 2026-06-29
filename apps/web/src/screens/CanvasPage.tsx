@@ -220,6 +220,7 @@ export function CanvasPage() {
   const [webhooks, setWebhooks] = useState<WebhookRow[]>([]);
 
   const keyParam = searchParams.get("key");
+  const templateParam = searchParams.get("template");
 
   // Registered webhook endpoints (so a webhookTrigger node can show its hook URL).
   useEffect(() => {
@@ -245,7 +246,24 @@ export function CanvasPage() {
       .catch(() => {
         /* unauthenticated / offline — selector stays empty */
       });
-    if (keyParam) {
+    if (templateParam) {
+      // Fork a built-in template: load its graph as a NEW draft (workflowKey stays
+      // empty so Save creates a fresh workflow; name is prefilled + editable).
+      api
+        .getTemplate(templateParam)
+        .then((t) => {
+          if (!live) return;
+          const { nodes: cn, edges: ce } = decompileGraph(t.graph);
+          setNodes(toFlowNodes(cn));
+          setEdges(toFlowEdges(ce));
+          setName(t.name);
+          setWorkflowKey("");
+          setStatus(`Forked from template "${t.name}" — Save to keep it.`);
+        })
+        .catch(
+          () => live && setStatus(`Couldn't load template '${templateParam}'.`),
+        );
+    } else if (keyParam) {
       api
         .getGraph(keyParam)
         .then((g) => {
@@ -264,7 +282,7 @@ export function CanvasPage() {
     return () => {
       live = false;
     };
-  }, [keyParam]);
+  }, [keyParam, templateParam]);
 
   const onNodesChange = useCallback(
     (changes: Parameters<typeof applyNodeChanges>[0]) =>

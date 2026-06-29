@@ -76,12 +76,18 @@ export interface TemplateSummary {
   description: string;
   nodeCount: number;
 }
+export interface TemplateDetail extends TemplateSummary {
+  graph: GraphDef;
+}
 
 export const api = {
-  // Built-in workflow templates (global, not tenant-scoped). The canvas opens one
-  // by its `key`.
+  // Built-in workflow templates (global, not tenant-scoped).
   listTemplates(): Promise<TemplateSummary[]> {
     return http("/templates");
+  },
+  // A template + its graph — the canvas loads this as a new draft to fork.
+  getTemplate(key: string): Promise<TemplateDetail> {
+    return http(`/templates/${encodeURIComponent(key)}`);
   },
   // List the tenant's workflows (latest version per key).
   listGraphs(): Promise<GraphSummary[]> {

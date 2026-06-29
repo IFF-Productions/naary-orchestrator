@@ -1,4 +1,4 @@
-import { Controller, Get } from "@nestjs/common";
+import { Controller, Get, NotFoundException, Param } from "@nestjs/common";
 import type { GraphDef } from "@naary/dsl";
 import { githubReviewGraph, sampleGraph, webhookSampleGraph } from "@naary/dsl";
 
@@ -8,6 +8,11 @@ export interface TemplateSummary {
   name: string;
   description: string;
   nodeCount: number;
+}
+
+/** A template plus its graph — what "Use template" loads into the canvas. */
+export interface TemplateDetail extends TemplateSummary {
+  graph: GraphDef;
 }
 
 /**
@@ -60,5 +65,19 @@ export class TemplatesController {
       description,
       nodeCount: graph.nodes.length,
     }));
+  }
+
+  /** The template + its graph — the canvas loads this as a NEW draft to fork. */
+  @Get(":key")
+  get(@Param("key") key: string): TemplateDetail {
+    const t = TEMPLATES.find((x) => x.key === key);
+    if (!t) throw new NotFoundException(`Unknown template '${key}'`);
+    return {
+      key: t.key,
+      name: t.name,
+      description: t.description,
+      nodeCount: t.graph.nodes.length,
+      graph: t.graph,
+    };
   }
 }
