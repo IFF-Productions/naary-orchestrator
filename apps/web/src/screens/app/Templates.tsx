@@ -102,7 +102,7 @@ export function Templates() {
               t={t}
               accent={ACCENTS[i % ACCENTS.length]}
               onUse={() =>
-                navigate(`/app/canvas?key=${encodeURIComponent(t.key)}`)
+                navigate(`/app/canvas?template=${encodeURIComponent(t.key)}`)
               }
             />
           ))}
