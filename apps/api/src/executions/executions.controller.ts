@@ -1,7 +1,11 @@
 import { Body, Controller, Get, HttpCode, Param, Post } from "@nestjs/common";
 import { TenantId } from "../auth/tenant.decorator";
 import { ApproveDto, StartExecutionDto } from "./execution.dto";
-import { ExecutionsService, type RunStateView } from "./executions.service";
+import {
+  ExecutionsService,
+  type RunEvent,
+  type RunStateView,
+} from "./executions.service";
 
 @Controller("executions")
 export class ExecutionsController {
@@ -40,5 +44,14 @@ export class ExecutionsController {
     @Param("id") id: string,
   ): Promise<RunStateView> {
     return this.executions.getState(id, tenantId);
+  }
+
+  /** The run's execution log (curated Temporal history). */
+  @Get(":id/history")
+  history(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+  ): Promise<RunEvent[]> {
+    return this.executions.history(id, tenantId);
   }
 }
