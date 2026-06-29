@@ -81,6 +81,95 @@ const TEMPORAL_FAILED_STATUS: Record<string, RunSummary["status"]> = {
   CANCELED: "canceled",
 };
 
+/** One entry in a run's execution log (derived from a Temporal history event). */
+export interface RunEvent {
+  id: number;
+  /** Coarse kind for the UI icon/colour. */
+  kind:
+    | "started"
+    | "activity"
+    | "signal"
+    | "timer"
+    | "completed"
+    | "error"
+    | "continued";
+  label: string;
+  at: string | null;
+  detail?: string;
+}
+
+/** The subset of Temporal history-event fields we read (one attrs object is set). */
+interface RawHistoryEvent {
+  eventId?: number | string | { toString(): string };
+  eventTime?: {
+    seconds?: number | string | { toString(): string };
+    nanos?: number;
+  };
+  workflowExecutionStartedEventAttributes?: unknown;
+  activityTaskScheduledEventAttributes?: { activityType?: { name?: string } };
+  activityTaskCompletedEventAttributes?: unknown;
+  activityTaskFailedEventAttributes?: { failure?: { message?: string } };
+  workflowExecutionSignaledEventAttributes?: { signalName?: string };
+  timerStartedEventAttributes?: unknown;
+  timerFiredEventAttributes?: unknown;
+  workflowExecutionCompletedEventAttributes?: unknown;
+  workflowExecutionFailedEventAttributes?: { failure?: { message?: string } };
+  workflowExecutionContinuedAsNewEventAttributes?: unknown;
+}
+
+function mapHistoryEvent(e: RawHistoryEvent): RunEvent | null {
+  const id = Number(e.eventId ?? 0);
+  const at = e.eventTime?.seconds
+    ? new Date(
+        Number(e.eventTime.seconds) * 1000 + (e.eventTime.nanos ?? 0) / 1e6,
+      ).toISOString()
+    : null;
+  const base = { id, at };
+  if (e.workflowExecutionStartedEventAttributes)
+    return { ...base, kind: "started", label: "Run started" };
+  if (e.activityTaskScheduledEventAttributes)
+    return {
+      ...base,
+      kind: "activity",
+      label: `Activity: ${e.activityTaskScheduledEventAttributes.activityType?.name ?? "?"}`,
+    };
+  if (e.activityTaskCompletedEventAttributes)
+    return { ...base, kind: "activity", label: "Activity completed" };
+  if (e.activityTaskFailedEventAttributes)
+    return {
+      ...base,
+      kind: "error",
+      label: "Activity failed",
+      detail: e.activityTaskFailedEventAttributes.failure?.message,
+    };
+  if (e.workflowExecutionSignaledEventAttributes)
+    return {
+      ...base,
+      kind: "signal",
+      label: `Signal: ${e.workflowExecutionSignaledEventAttributes.signalName ?? "?"}`,
+    };
+  if (e.timerStartedEventAttributes)
+    return {
+      ...base,
+      kind: "timer",
+      label: "Timer started (approval timeout)",
+    };
+  if (e.timerFiredEventAttributes)
+    return { ...base, kind: "timer", label: "Timer fired" };
+  if (e.workflowExecutionCompletedEventAttributes)
+    return { ...base, kind: "completed", label: "Run completed" };
+  if (e.workflowExecutionFailedEventAttributes)
+    return {
+      ...base,
+      kind: "error",
+      label: "Run failed",
+      detail: e.workflowExecutionFailedEventAttributes.failure?.message,
+    };
+  if (e.workflowExecutionContinuedAsNewEventAttributes)
+    return { ...base, kind: "continued", label: "Continued as new" };
+  return null; // workflow-task / marker / version noise — skip
+}
+
 /** Run statuses that won't change again — the read-model is authoritative for these. */
 const TERMINAL_STATUSES = new Set([
   "completed",
@@ -345,6 +434,32 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       }
       throw e;
     }
+  }
+
+  /**
+   * The run's execution log — a curated timeline from the workflow's Temporal
+   * history (the durable record of what happened). We map by event TYPE (which
+   * `*EventAttributes` is present) + read only plain fields (activity name, signal
+   * name, failure message — already sanitized at the activity) — no payload
+   * decoding, so nothing secret-bearing is surfaced.
+   */
+  async history(id: string, tenantId: string): Promise<RunEvent[]> {
+    await this.assertOwner(id, tenantId);
+    let h: { events?: unknown[] | null };
+    try {
+      h = await this.client.workflow.getHandle(id).fetchHistory();
+    } catch (e) {
+      if (e instanceof WorkflowNotFoundError) {
+        throw new NotFoundException("Execution not found");
+      }
+      throw e;
+    }
+    const out: RunEvent[] = [];
+    for (const raw of h.events ?? []) {
+      const ev = mapHistoryEvent(raw as RawHistoryEvent);
+      if (ev) out.push(ev);
+    }
+    return out;
   }
 
   /** 404 if the execution is unknown, 403 if it belongs to another tenant. */

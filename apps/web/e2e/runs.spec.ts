@@ -24,4 +24,10 @@ test("start a run, approve it, and see it complete", async ({ page }) => {
     timeout: 15_000,
   });
   await expect(approve).toBeHidden();
+
+  // The execution log (curated Temporal history) shows the run's events.
+  await expect(page.getByText("Execution log")).toBeVisible();
+  await expect(page.getByText("Run started")).toBeVisible();
+  await expect(page.getByText("Run completed")).toBeVisible();
+  await expect(page.getByText("Signal: approval")).toBeVisible();
 });

@@ -34,6 +34,22 @@ export interface ExecutionState {
   ctx: Record<string, unknown>;
 }
 
+/** One entry in a run's execution log (mirrors the API's RunEvent). */
+export interface RunEvent {
+  id: number;
+  kind:
+    | "started"
+    | "activity"
+    | "signal"
+    | "timer"
+    | "completed"
+    | "error"
+    | "continued";
+  label: string;
+  at: string | null;
+  detail?: string;
+}
+
 const BASE = "/api";
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
@@ -118,6 +134,10 @@ export const api = {
   },
   getState(id: string): Promise<ExecutionState> {
     return http(`/executions/${encodeURIComponent(id)}`);
+  },
+  // The run's execution log (curated Temporal history).
+  getRunHistory(id: string): Promise<RunEvent[]> {
+    return http(`/executions/${encodeURIComponent(id)}/history`);
   },
   // Who am I — the SPA's tenantId (for tenant-scoped routes) + OIDC subject.
   getMe(): Promise<{ tenantId: string; subject?: string }> {
