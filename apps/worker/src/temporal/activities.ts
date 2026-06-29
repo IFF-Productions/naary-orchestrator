@@ -235,16 +235,21 @@ export async function runAgent(
   // failed/retried activity never leaves a dangling reservation.
   let reservationId: string | undefined;
   try {
+    // Defaults for graphs whose agent node didn't persist provider/model (e.g. the
+    // canvas inspector showed the default but the user never changed the dropdown).
+    // anthropic is the only supported provider today; opus is a safe default model.
+    const provider = cfg.provider?.trim() || "anthropic";
+
     // In memory only — never returned from the activity, never logged.
     const apiKey = await __agentDeps
       .getCredentials()
-      .getDecryptedKey(meta.tenantId, cfg.provider);
+      .getDecryptedKey(meta.tenantId, provider);
 
     // Pre-flight budget enforcement via an atomic RESERVATION (Arch§4.3): reserve
     // this call's estimated cost against the monthly cap BEFORE the LLM call, so
     // concurrent runs for one tenant can't all overshoot. The reservation counts
     // committed spend + other in-flight reservations. No budget set ⇒ no cap.
-    let model = cfg.model;
+    let model = cfg.model?.trim() || "claude-opus-4-8";
     // Per-node output cap (sizes both the budget estimate and the actual call) and
     // optional sampling temperature.
     const maxOutputTokens = cfg.maxOutputTokens ?? MAX_OUTPUT_TOKENS;
@@ -253,7 +258,7 @@ export async function runAgent(
       const estimateFor = (m: string) =>
         estimateCallCost(
           {
-            provider: cfg.provider,
+            provider,
             model: m,
             systemPrompt: cfg.systemPrompt,
             maxOutputTokens,
@@ -304,7 +309,7 @@ export async function runAgent(
     }
 
     const result = await generateText({
-      model: buildModel(cfg.provider, model, apiKey),
+      model: buildModel(provider, model, apiKey),
       system: cfg.systemPrompt,
       prompt: JSON.stringify(input),
       output: Output.object({
@@ -348,7 +353,7 @@ export async function runAgent(
       tenantId: meta.tenantId,
       executionId: meta.executionId,
       nodeId: meta.nodeId,
-      provider: cfg.provider,
+      provider,
       model, // the model that actually ran (post-downgrade)
       usage,
     });
@@ -356,7 +361,7 @@ export async function runAgent(
     // Same cost recordUsage computed — returned so the workflow can accumulate
     // it deterministically (no DB read in workflow code).
     const costUsd = computeCost({
-      provider: cfg.provider,
+      provider,
       model,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
@@ -370,7 +375,7 @@ export async function runAgent(
         executionId: meta.executionId,
         nodeId: meta.nodeId,
         tenantId: meta.tenantId,
-        provider: cfg.provider,
+        provider,
         model,
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,

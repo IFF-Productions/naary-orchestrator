@@ -346,6 +346,12 @@ export function CanvasPage() {
 
   function addNode(kind: NodeType) {
     const id = `${kind}-${crypto.randomUUID().slice(0, 8)}`;
+    // Seed agent defaults so a node the user never opens still runs (provider/model
+    // are otherwise only written to config when the inspector dropdowns change).
+    const config: Record<string, unknown> | undefined =
+      kind === "agent"
+        ? { provider: "anthropic", model: "claude-opus-4-8" }
+        : undefined;
     setNodes((ns) => [
       ...ns,
       {
@@ -355,7 +361,7 @@ export function CanvasPage() {
           x: 160 + (ns.length % 5) * 40,
           y: 300 + (ns.length % 3) * 30,
         },
-        data: { kind },
+        data: { kind, config },
       },
     ]);
   }
