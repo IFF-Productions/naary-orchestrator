@@ -39,6 +39,13 @@ export const router = createBrowserRouter([
             path: "workflows",
             ...lazy(() => import("./screens/app/Workflows"), "Workflows"),
           },
+          {
+            path: "workflows/:key",
+            ...lazy(
+              () => import("./screens/app/WorkflowDetail"),
+              "WorkflowDetail",
+            ),
+          },
           { path: "runs", ...lazy(() => import("./screens/app/Runs"), "Runs") },
           {
             path: "schedules",

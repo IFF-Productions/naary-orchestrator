@@ -150,7 +150,7 @@ export function Workflows() {
             key={r.graph.workflowKey}
             onClick={() =>
               navigate(
-                `/app/canvas?key=${encodeURIComponent(r.graph.workflowKey)}`,
+                `/app/workflows/${encodeURIComponent(r.graph.workflowKey)}`,
               )
             }
             className="run-row"
