@@ -82,6 +82,20 @@ export class CredentialsService {
     return { id: row.id, provider, isValid };
   }
 
+  /** The tenant's configured *model* providers — names + validity only, NEVER key
+   *  material. Connection secrets share this table under a `conn:` namespace; they
+   *  are not model providers, so they're excluded. */
+  async listProviders(
+    tenantId: string,
+  ): Promise<{ provider: string; isValid: boolean }[]> {
+    const rows = await getPrisma().tenantCredential.findMany({
+      where: { tenantId, NOT: { provider: { startsWith: "conn:" } } },
+      select: { provider: true, isValid: true },
+      orderBy: { provider: "asc" },
+    });
+    return rows.map((r) => ({ provider: r.provider, isValid: r.isValid }));
+  }
+
   /** Decrypt and return the plaintext key (in memory only). Throws if absent/invalid. */
   async getDecryptedKey(tenantId: string, provider: string): Promise<string> {
     const row = await getPrisma().tenantCredential.findUnique({

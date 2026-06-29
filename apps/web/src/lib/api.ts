@@ -96,6 +96,12 @@ export interface TemplateDetail extends TemplateSummary {
   graph: GraphDef;
 }
 
+/** A configured provider key (names + validity only — the key is never returned). */
+export interface ProviderCredential {
+  provider: string;
+  isValid: boolean;
+}
+
 export const api = {
   // Built-in workflow templates (global, not tenant-scoped).
   listTemplates(): Promise<TemplateSummary[]> {
@@ -187,6 +193,21 @@ export const api = {
     });
   },
   // --- Integrations ---
+  // Provider API keys (BYOK). The key is NEVER returned — list yields names + validity.
+  listCredentials(tenantId: string): Promise<ProviderCredential[]> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/credentials`);
+  },
+  // Save/replace a provider key. Validated against the provider + encrypted at rest.
+  saveCredential(
+    tenantId: string,
+    provider: string,
+    apiKey: string,
+  ): Promise<{ id: string; provider: string; isValid: boolean }> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/credentials`, {
+      method: "POST",
+      body: JSON.stringify({ provider, apiKey }),
+    });
+  },
   // Connected MCP servers / apps for the tenant. Tenant-scoped — pass tenantId from getMe().
   listConnections(tenantId: string): Promise<ConnectionRow[]> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/connections`);
