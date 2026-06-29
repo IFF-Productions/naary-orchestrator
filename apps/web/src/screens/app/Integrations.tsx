@@ -9,35 +9,47 @@ import {
 import {
   api,
   type ConnectionRow,
+  type ProviderCredential,
   type RegisteredWebhook,
   type WebhookRow,
   UnauthorizedError,
 } from "../../lib/api";
 
-/** Model providers — defined locally; the DC hard-codes these three + an "add" tile. */
+/** Model providers — defined locally; the DC hard-codes these three + an "add" tile.
+ *  `supported` gates BYOK: only providers the backend can validate + run today
+ *  accept a key. The rest render as "Coming soon" so the UI never promises a
+ *  connection the agent activity can't honor. */
 const providers: {
+  key: string; // the backend provider id (BYOK credential slot)
   initial: string;
   name: string;
   models: string;
   color: string;
+  supported: boolean;
 }[] = [
   {
+    key: "anthropic",
     initial: "A",
     name: "Anthropic",
-    models: "Claude Sonnet, Opus, Haiku",
+    models: "Claude Opus, Sonnet, Haiku",
     color: "var(--node-agent)",
+    supported: true,
   },
   {
+    key: "openai",
     initial: "O",
     name: "OpenAI",
     models: "GPT-4o, GPT-4.1, o3",
     color: "var(--state-done)",
+    supported: false,
   },
   {
+    key: "google",
     initial: "G",
     name: "Google",
     models: "Gemini 2.5 Pro / Flash",
     color: "var(--node-trigger)",
+    supported: false,
   },
 ];
 
@@ -72,18 +84,21 @@ export function Integrations() {
   const [tenant, setTenant] = useState<string | null>(null);
   const [connections, setConnections] = useState<ConnectionRow[] | null>(null);
   const [webhooks, setWebhooks] = useState<WebhookRow[] | null>(null);
+  const [credentials, setCredentials] = useState<ProviderCredential[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const { tenantId } = await api.getMe();
       setTenant(tenantId);
-      const [conns, hooks] = await Promise.all([
+      const [conns, hooks, creds] = await Promise.all([
         api.listConnections(tenantId),
         api.listWebhooks(tenantId),
+        api.listCredentials(tenantId).catch(() => []),
       ]);
       setConnections(conns);
       setWebhooks(hooks);
+      setCredentials(creds);
       setError(null);
     } catch (e) {
       setError(
@@ -150,62 +165,15 @@ export function Integrations() {
         }}
       >
         {providers.map((p) => (
-          <div
-            key={p.name}
-            style={{
-              background: "var(--card)",
-              border: "1px solid var(--line)",
-              borderRadius: 11,
-              padding: 15,
-              boxShadow: "var(--shadow-card)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
-              <span
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 8,
-                  background: `color-mix(in srgb, ${p.color} 16%, transparent)`,
-                  color: p.color,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontWeight: 700,
-                  fontSize: 14,
-                }}
-              >
-                {p.initial}
-              </span>
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: "var(--state-done)",
-                }}
-              />
-            </div>
-            <div
-              style={{
-                fontSize: 13,
-                fontWeight: 600,
-                color: "var(--ink)",
-                marginTop: 11,
-              }}
-            >
-              {p.name}
-            </div>
-            <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>
-              {p.models}
-            </div>
-          </div>
+          <ProviderCard
+            key={p.key}
+            p={p}
+            tenant={tenant}
+            connected={credentials.some(
+              (c) => c.provider === p.key && c.isValid,
+            )}
+            onSaved={load}
+          />
         ))}
 
         {/* add local model */}
@@ -706,5 +674,177 @@ function WebhookForm({
         </div>
       )}
     </Card>
+  );
+}
+
+/** A model-provider card with REAL connected status + a BYOK key form. */
+function ProviderCard({
+  p,
+  tenant,
+  connected,
+  onSaved,
+}: {
+  p: {
+    key: string;
+    initial: string;
+    name: string;
+    models: string;
+    color: string;
+    supported: boolean;
+  };
+  tenant: string | null;
+  connected: boolean;
+  onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [apiKey, setApiKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    if (!tenant || !apiKey.trim()) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.saveCredential(tenant, p.key, apiKey.trim());
+      setApiKey("");
+      setOpen(false);
+      onSaved();
+    } catch {
+      setErr("Key rejected — check it's a valid key for this provider.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        background: "var(--card)",
+        border: "1px solid var(--line)",
+        borderRadius: 11,
+        padding: 15,
+        boxShadow: "var(--shadow-card)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <span
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 8,
+            background: `color-mix(in srgb, ${p.color} 16%, transparent)`,
+            color: p.color,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontWeight: 700,
+            fontSize: 14,
+          }}
+        >
+          {p.initial}
+        </span>
+        <span
+          title={connected ? "Key configured" : "No key"}
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            background: connected ? "var(--state-done)" : "var(--line-2)",
+          }}
+        />
+      </div>
+      <div
+        style={{
+          fontSize: 13,
+          fontWeight: 600,
+          color: "var(--ink)",
+          marginTop: 11,
+        }}
+      >
+        {p.name}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>
+        {p.models}
+      </div>
+
+      {!p.supported ? (
+        <div
+          style={{
+            marginTop: 11,
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: "var(--ink-3)",
+          }}
+        >
+          Coming soon
+        </div>
+      ) : open ? (
+        <div style={{ marginTop: 10 }}>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={`${p.name} API key`}
+            autoComplete="off"
+            style={{
+              width: "100%",
+              padding: "6px 8px",
+              borderRadius: 7,
+              border: "1px solid var(--line-2)",
+              background: "var(--bg)",
+              color: "var(--ink)",
+              fontSize: 12,
+            }}
+          />
+          {err && (
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--state-error)",
+                marginTop: 5,
+              }}
+            >
+              {err}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+            <Button variant="primary" size="sm" onClick={save} disabled={busy}>
+              {busy ? "Saving…" : "Save key"}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setOpen(false)}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          style={{
+            marginTop: 11,
+            background: "transparent",
+            border: "none",
+            padding: 0,
+            cursor: "pointer",
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: "var(--brand)",
+          }}
+        >
+          {connected ? "Update key" : "Add key"}
+        </button>
+      )}
+    </div>
   );
 }
