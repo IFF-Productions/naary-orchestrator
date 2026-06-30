@@ -1,0 +1,66 @@
+# Dev override — live-reload the API (and worker) on source edits, in-container.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d api
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d api worker
+#
+# How it works (and why it's shaped this way):
+#  - We bind-mount SOURCE TREES ONLY (every apps/*/src and packages/*/src), never
+#    node_modules or dist. The host is macOS; the image's node_modules carry
+#    Linux-native binaries (Prisma engine, esbuild). A full-repo bind mount would
+#    shadow them with macOS builds and break the container — mounting just src
+#    keeps the image's deps + built dist intact while host edits flow in live.
+#  - `tsc -b --watch` rebuilds every @naary/* package's dist incrementally on
+#    change. This is REQUIRED: workspace deps resolve through dist/index.js, so a
+#    plain `ts-node`/`node --watch` on the app would never see edits to an
+#    imported package like @naary/secrets.
+#  - The app itself is NOT compiled — it runs through `ts-node` (same as the prod
+#    `start` script), so edits to the app's own src take effect on the next
+#    restart with no build step. `node --watch-path` restarts it when the app src
+#    OR any package's freshly-rebuilt dist changes.
+#  - The packages' dist already exists in the image from the build, so the app
+#    starts immediately; tsc --watch just keeps dist in sync with src edits.
+#
+# Trade-off vs prod compose: identical runtime (ts-node), just wrapped in a
+# watcher + a package build-watch. Use plain `docker compose up` (no -f override)
+# for the non-watching run.
+
+services:
+  api:
+    working_dir: /app/apps/api
+    command:
+      - sh
+      - -c
+      - 'pnpm -w exec tsc -b --watch --preserveWatchOutput & exec node --watch-path=/app/apps/api/src --watch-path=/app/packages -r ts-node/register src/main.ts'
+    volumes:
+      - ./apps/api/src:/app/apps/api/src
+      - ./packages/connections/src:/app/packages/connections/src
+      - ./packages/contracts/src:/app/packages/contracts/src
+      - ./packages/db/src:/app/packages/db/src
+      - ./packages/dsl/src:/app/packages/dsl/src
+      - ./packages/logging/src:/app/packages/logging/src
+      - ./packages/metrics/src:/app/packages/metrics/src
+      - ./packages/observability/src:/app/packages/observability/src
+      - ./packages/secrets/src:/app/packages/secrets/src
+      - ./packages/storage/src:/app/packages/storage/src
+      - ./packages/temporal-config/src:/app/packages/temporal-config/src
+      - ./packages/usage/src:/app/packages/usage/src
+
+  worker:
+    working_dir: /app/apps/worker
+    command:
+      - sh
+      - -c
+      - 'pnpm -w exec tsc -b --watch --preserveWatchOutput & exec node --watch-path=/app/apps/worker/src --watch-path=/app/packages -r ts-node/register src/worker.ts'
+    volumes:
+      - ./apps/worker/src:/app/apps/worker/src
+      - ./packages/connections/src:/app/packages/connections/src
+      - ./packages/contracts/src:/app/packages/contracts/src
+      - ./packages/db/src:/app/packages/db/src
+      - ./packages/dsl/src:/app/packages/dsl/src
+      - ./packages/logging/src:/app/packages/logging/src
+      - ./packages/metrics/src:/app/packages/metrics/src
+      - ./packages/observability/src:/app/packages/observability/src
+      - ./packages/secrets/src:/app/packages/secrets/src
+      - ./packages/storage/src:/app/packages/storage/src
+      - ./packages/temporal-config/src:/app/packages/temporal-config/src
+      - ./packages/usage/src:/app/packages/usage/src
