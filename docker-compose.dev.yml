@@ -23,6 +23,15 @@
 # Trade-off vs prod compose: identical runtime (ts-node), just wrapped in a
 # watcher + a package build-watch. Use plain `docker compose up` (no -f override)
 # for the non-watching run.
+#
+# WEB (the SPA) is deliberately NOT hot-reloaded here: its container is nginx
+# serving a static `vite build`, not a long-running node process, so a src bind
+# mount wouldn't reload anything. For a hot-reloading web dev loop, run Vite on the
+# HOST instead — `pnpm dev:web` (vite dev server on :5173). It already proxies
+# /api → the dockerized control plane on :3000 (vite.config.ts), and :5173 is in
+# the API's CORS_ORIGINS, so it works against the `pnpm dev` backend out of the
+# box. The web *container* (:8081) stays a production-parity build — rebuild it
+# with `pnpm dev:build` to pick up web changes there.
 
 services:
   api:
