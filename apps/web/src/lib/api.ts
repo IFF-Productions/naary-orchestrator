@@ -227,6 +227,13 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
+  // Disconnect (delete) a connection. Also removes its stored secret server-side.
+  deleteConnection(tenantId: string, connectionId: string): Promise<void> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/connections/${encodeURIComponent(connectionId)}`,
+      { method: "DELETE" },
+    );
+  },
   // Register a webhook trigger. Returns the ingress path + signing secret ONCE —
   // it is stored encrypted and never returned again, so surface it immediately.
   createWebhook(
@@ -291,13 +298,19 @@ export interface ScheduleRow {
   nextRunAt: string | null;
 }
 
-/** A connected MCP server / app (mirrors the API's ConnectionView; Date → string over JSON). */
+/** Connection type — MCP/app servers plus SQL databases (the sqlQuery node). */
+export type ConnectionType =
+  "github" | "atlassian" | "custom" | "postgres" | "mssql";
+export type ConnectionAuthMode =
+  "api_token" | "pat" | "oauth" | "connection_string";
+
+/** A connected MCP server / app / database (mirrors the API's ConnectionView; Date → string over JSON). */
 export interface ConnectionRow {
   id: string;
-  type: "github" | "atlassian" | "custom";
+  type: ConnectionType;
   label: string;
   serverUrl: string;
-  authMode: "api_token" | "pat" | "oauth";
+  authMode: ConnectionAuthMode;
   scopes: string[];
   status: "connected" | "needs_reauth" | "error";
   createdAt: string;
@@ -311,13 +324,15 @@ export interface WebhookRow {
   createdAt: string;
 }
 
-/** Input to connect a server (token stored encrypted server-side). */
+/** Input to connect a server or database (token/DSN stored encrypted server-side). */
 export interface ConnectionInput {
-  type: "github" | "atlassian" | "custom";
+  type: ConnectionType;
   label: string;
+  /** Non-secret: an https endpoint (MCP) or a display host (DB). Never the DSN. */
   serverUrl: string;
-  authMode: "api_token" | "pat" | "oauth";
+  authMode: ConnectionAuthMode;
   scopes?: string[];
+  /** The secret: a PAT/api token (MCP) or the full connection string/DSN (DB). */
   token?: string;
 }
 

@@ -36,3 +36,38 @@ test.describe("integrations — model provider keys", () => {
     await expect(page.getByPlaceholder("Anthropic API key")).toHaveCount(0);
   });
 });
+
+/**
+ * Connection management — the "Connect a database" card (postgres/mssql) that
+ * feeds the SQL Query node. UI gating only (no real DB / no mutation): the card
+ * exposes engine/host/DSN fields, and the engine selector swaps the DSN hint.
+ */
+test.describe("integrations — database connections", () => {
+  test("Connect a database card exposes engine/host/DSN; engine toggles the DSN hint", async ({
+    page,
+  }) => {
+    await page.goto("/app/integrations");
+
+    await expect(
+      page.getByText("Connect a database", { exact: true }),
+    ).toBeVisible();
+
+    // Non-secret host + the secret DSN field (its placeholder is the postgres DSN).
+    await expect(page.getByPlaceholder("localhost:5432")).toBeVisible();
+    await expect(
+      page.getByPlaceholder("postgres://user:pass@host:5432/db"),
+    ).toBeVisible();
+
+    // The engine selector is the only <select> offering both postgres and mssql.
+    const engine = page.locator(
+      'select:has(option[value="postgres"]):has(option[value="mssql"])',
+    );
+    await expect(engine).toBeVisible();
+
+    // Switching to mssql swaps the DSN placeholder to the ADO connection-string form.
+    await engine.selectOption("mssql");
+    await expect(
+      page.getByPlaceholder(/Server=host;Database=db/),
+    ).toBeVisible();
+  });
+});
