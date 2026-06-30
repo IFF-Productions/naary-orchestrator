@@ -153,6 +153,44 @@ export const httpEnrichGraph: GraphDef = {
 };
 
 /**
+ * SQL node demo: a webhook event triggers a read-only lookup against a tenant
+ * database; the rows feed an agent summary. The `userId` param is bound from the
+ * event (never built into the SQL text). `connectionId` points at a `postgres`/
+ * `mssql` connection whose DSN is stored as a secret.
+ */
+export const sqlEnrichGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "lookup",
+      type: "sqlQuery",
+      config: {
+        connectionId: "app-db",
+        sql: "SELECT id, email, plan FROM users WHERE id = $1",
+        paramBindings: { 1: { from: "trigger", path: "userId" } },
+      },
+    },
+    {
+      id: "summarize",
+      type: "agent",
+      config: {
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        systemPrompt:
+          "Summarize the user record. Respond with a category and an urgency from 1-5.",
+      },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "lookup" },
+    { from: "lookup", to: "summarize" },
+    { from: "summarize", to: "end" },
+  ],
+};
+
+/**
  * Maps a WebhookEndpoint's `workflowId` to the graph the ingress should start.
  * (Graphs come from Postgres in a later slice — hardcoded here, like sampleGraph.)
  * The ingress reads `endpoint.workflowId`, so registering an endpoint against
@@ -162,6 +200,7 @@ export const graphRegistry: Record<string, GraphDef> = {
   "wf-default": webhookSampleGraph,
   "github-review": githubReviewGraph,
   "http-enrich": httpEnrichGraph,
+  "sql-enrich": sqlEnrichGraph,
 };
 
 /** Resolve a webhook endpoint's workflowId to its graph, or undefined if unknown. */

@@ -9,6 +9,7 @@ export type NodeType =
   | "agent"
   | "mcpTool" // Slice #4: calls a remote MCP server tool via a connection
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}
+  | "sqlQuery" // runs a read-only query against a tenant DB; output is {rows,rowCount}
   | "humanApproval"
   | "end";
 
@@ -92,6 +93,32 @@ export interface HttpRequestNodeConfig {
   timeoutMs?: number;
   /** Flat per-call cost metered into the run budget (Arch§4.6) — HTTP has no
    *  token cost, so spend is operator-configured. */
+  costUsd?: number;
+}
+
+/**
+ * SQL query node — run a single READ-ONLY query against a tenant's database
+ * (Postgres or MSSQL; the engine comes from the connection, not here). Output is
+ * `{ rows, rowCount }`.
+ *
+ * SECURITY: the `sql` text is STATIC and passed verbatim — bindings fill the
+ * positional `params` array ONLY, never the query string (anything else
+ * reintroduces SQL injection). Auth is the connection's DSN, resolved + used IN
+ * the activity (never in this config, which rides in workflow history).
+ * Placeholder style is engine-specific: `$1..$n` (Postgres) / `@p1..@pn` (MSSQL).
+ */
+export interface SqlQueryNodeConfig {
+  /** A `postgres`/`mssql` connection; its stored DSN is read in-activity. */
+  connectionId: string;
+  /** Static query text with positional placeholders. Never built from bindings. */
+  sql: string;
+  /** Static positional parameter values (the base for bindings). */
+  params?: unknown[];
+  /** 1-based param index → upstream output binding; fills/overrides that position. */
+  paramBindings?: Record<number, ArgBinding>;
+  /** Per-query timeout (ms) — Postgres statement_timeout / MSSQL request timeout. */
+  statementTimeoutMs?: number;
+  /** Flat per-call cost metered into the run budget (Arch§4.6). */
   costUsd?: number;
 }
 

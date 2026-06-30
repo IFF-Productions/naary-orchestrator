@@ -1,20 +1,53 @@
-import { IsIn, IsNotEmpty, IsOptional, IsString, IsUrl } from "class-validator";
+import {
+  IsIn,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Validate,
+  type ValidationArguments,
+  ValidatorConstraint,
+  type ValidatorConstraintInterface,
+} from "class-validator";
 import type { CreateConnectionInput } from "@naary/connections";
 
+const DB_TYPES = ["postgres", "mssql"];
+
+/**
+ * serverUrl is validated by connection kind:
+ *  - MCP/HTTP connections: an https URL (https-only closes the trivial http://
+ *    internal-target SSRF vector; the full egress block is the separate Sec#2 item).
+ *  - DB connections (postgres/mssql): a NON-SECRET display host — the real DSN (with
+ *    password) rides in `token` — so only a non-empty string is required.
+ */
+@ValidatorConstraint({ name: "connectionServerUrl", async: false })
+class ConnectionServerUrlConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown, args: ValidationArguments): boolean {
+    if (typeof value !== "string" || value.length === 0) return false;
+    const type = (args.object as { type?: string }).type;
+    if (type && DB_TYPES.includes(type)) return true;
+    try {
+      return new URL(value).protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+  defaultMessage(): string {
+    return "serverUrl must be an https URL (or a non-empty host for database connections)";
+  }
+}
+
 export class CreateConnectionDto implements CreateConnectionInput {
-  @IsIn(["atlassian", "github", "custom"])
+  @IsIn(["atlassian", "github", "custom", "postgres", "mssql"])
   type!: CreateConnectionInput["type"];
 
   @IsString()
   @IsNotEmpty()
   label!: string;
 
-  // https-only closes the most trivial SSRF vector (http:// internal targets);
-  // a full egress allowlist / private-IP block is the separate Sec#2 item.
-  @IsUrl({ protocols: ["https"], require_protocol: true })
+  @Validate(ConnectionServerUrlConstraint)
   serverUrl!: string;
 
-  @IsIn(["api_token", "pat", "oauth"])
+  @IsIn(["api_token", "pat", "oauth", "connection_string"])
   authMode!: CreateConnectionInput["authMode"];
 
   @IsOptional()

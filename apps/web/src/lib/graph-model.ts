@@ -47,6 +47,7 @@ export const NODE_KINDS: { type: NodeType; label: string }[] = [
   { type: "agent", label: "Agent" },
   { type: "mcpTool", label: "MCP Tool" },
   { type: "httpRequest", label: "HTTP Request" },
+  { type: "sqlQuery", label: "SQL Query" },
   { type: "humanApproval", label: "Approval" },
   { type: "end", label: "End" },
 ];
