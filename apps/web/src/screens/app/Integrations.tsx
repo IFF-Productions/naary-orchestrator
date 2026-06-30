@@ -86,6 +86,7 @@ export function Integrations() {
   const [webhooks, setWebhooks] = useState<WebhookRow[] | null>(null);
   const [credentials, setCredentials] = useState<ProviderCredential[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -316,6 +317,23 @@ export function Integrations() {
             />
             <button
               type="button"
+              disabled={disconnecting === c.id}
+              onClick={() => {
+                if (!tenant || disconnecting) return;
+                if (
+                  !window.confirm(
+                    `Disconnect "${c.label}"? This removes its stored secret.`,
+                  )
+                ) {
+                  return;
+                }
+                setDisconnecting(c.id);
+                void api
+                  .deleteConnection(tenant, c.id)
+                  .then(() => load())
+                  .catch(() => setError("Could not disconnect the connection."))
+                  .finally(() => setDisconnecting(null));
+              }}
               style={{
                 height: 28,
                 padding: "0 12px",
@@ -324,11 +342,12 @@ export function Integrations() {
                 background: "var(--surface)",
                 color: "var(--ink-2)",
                 fontSize: 11.5,
-                cursor: "pointer",
+                cursor: disconnecting === c.id ? "default" : "pointer",
+                opacity: disconnecting === c.id ? 0.6 : 1,
                 fontFamily: "inherit",
               }}
             >
-              Manage
+              {disconnecting === c.id ? "Disconnecting…" : "Disconnect"}
             </button>
           </div>
         ))}
@@ -435,14 +454,131 @@ function AddIntegrations({
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr 1fr",
+        gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
         gap: 14,
         marginBottom: 26,
       }}
     >
       <ConnectForm tenant={tenant} onChanged={onChanged} />
+      <DatabaseForm tenant={tenant} onChanged={onChanged} />
       <WebhookForm tenant={tenant} onChanged={onChanged} />
     </div>
+  );
+}
+
+/** Connect a SQL database (postgres/mssql) for the SQL Query node. The connection
+ *  string (DSN) is the secret → stored encrypted as the connection token; the host
+ *  is a non-secret display value. The DSN is NEVER placed in serverUrl. */
+function DatabaseForm({
+  tenant,
+  onChanged,
+}: {
+  tenant: string;
+  onChanged: () => Promise<void> | void;
+}) {
+  const [label, setLabel] = useState("");
+  const [engine, setEngine] = useState<"postgres" | "mssql">("postgres");
+  const [host, setHost] = useState("");
+  const [dsn, setDsn] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function submit() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.createConnection(tenant, {
+        type: engine,
+        label: label.trim(),
+        serverUrl: host.trim(), // non-secret display host
+        authMode: "connection_string",
+        token: dsn.trim(), // the secret DSN (stored encrypted server-side)
+      });
+      setLabel("");
+      setHost("");
+      setDsn("");
+      setMsg("Connected ✓");
+      await onChanged();
+    } catch (e) {
+      setMsg(
+        e instanceof Error && /400/.test(e.message)
+          ? "Check the fields."
+          : "Could not connect the database.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ready = Boolean(label.trim() && host.trim() && dsn.trim());
+  const dsnPlaceholder =
+    engine === "postgres"
+      ? "postgres://user:pass@host:5432/db"
+      : "Server=host;Database=db;User Id=…;Password=…";
+
+  return (
+    <Card style={{ padding: 16 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>
+        Connect a database
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <span style={fieldLabel}>Label</span>
+        <input
+          style={fieldStyle}
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="app-db"
+        />
+      </div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+        <div style={{ flex: 1 }}>
+          <span style={fieldLabel}>Engine</span>
+          <select
+            style={fieldStyle}
+            value={engine}
+            onChange={(e) => setEngine(e.target.value as "postgres" | "mssql")}
+          >
+            <option value="postgres">postgres</option>
+            <option value="mssql">mssql</option>
+          </select>
+        </div>
+        <div style={{ flex: 1 }}>
+          <span style={fieldLabel}>Host (display)</span>
+          <input
+            style={fieldStyle}
+            value={host}
+            onChange={(e) => setHost(e.target.value)}
+            placeholder="localhost:5432"
+          />
+        </div>
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <span style={fieldLabel}>Connection string (stored encrypted)</span>
+        <input
+          style={fieldStyle}
+          type="password"
+          value={dsn}
+          onChange={(e) => setDsn(e.target.value)}
+          placeholder={dsnPlaceholder}
+        />
+      </div>
+      <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 12 }}>
+        Used by the SQL Query node (read-only). The connection string is stored
+        encrypted and never shown again.
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <Button
+          variant="primary"
+          disabled={busy || !ready}
+          onClick={() => void submit()}
+        >
+          {busy ? "Connecting…" : "Connect"}
+        </Button>
+        {msg && (
+          <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{msg}</span>
+        )}
+      </div>
+    </Card>
   );
 }
 
