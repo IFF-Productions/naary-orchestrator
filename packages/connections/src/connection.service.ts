@@ -1,9 +1,18 @@
 import { type Connection, getPrisma } from "@naary/db";
 import { SecretStore } from "@naary/secrets";
+import { MissingConnectionTokenError } from "./errors";
 
-export type ConnectionType = "github" | "atlassian" | "custom";
-export type AuthMode = "api_token" | "pat" | "oauth";
+export type ConnectionType =
+  "github" | "atlassian" | "custom" | "postgres" | "mssql";
+export type AuthMode = "api_token" | "pat" | "oauth" | "connection_string";
 export type ConnectionStatus = "connected" | "needs_reauth" | "error";
+
+/** Connection types that are SQL databases (the engine the sqlQuery node uses). */
+export type DbEngine = "postgres" | "mssql";
+const DB_ENGINES: ReadonlySet<string> = new Set<DbEngine>([
+  "postgres",
+  "mssql",
+]);
 
 export interface CreateConnectionInput {
   type: ConnectionType;
@@ -101,4 +110,31 @@ export class ConnectionService {
       data: { status },
     });
   }
+}
+
+/**
+ * Resolve a SQL-database connection to its engine + DSN (sibling of
+ * resolveMcpTarget). The DSN is the stored secret (full connection string,
+ * including password) — read here, used in-activity only, NEVER returned to a
+ * caller boundary, logged, or put in workflow history. Throws if the connection
+ * is unknown, not a DB type, or has no stored DSN.
+ */
+export async function resolveDbConnection(
+  tenantId: string,
+  connectionId: string,
+  store: SecretStore = new SecretStore(),
+): Promise<{ engine: DbEngine; dsn: string }> {
+  const conn = await getPrisma().connection.findFirst({
+    where: { id: connectionId, tenantId },
+    select: { type: true },
+  });
+  if (!conn) throw new Error(`Unknown connection '${connectionId}'`);
+  if (!DB_ENGINES.has(conn.type)) {
+    throw new Error(
+      `Connection '${connectionId}' is not a SQL database connection`,
+    );
+  }
+  const dsn = await store.get(tenantId, connectionSecretKey(connectionId));
+  if (!dsn) throw new MissingConnectionTokenError(connectionId);
+  return { engine: conn.type as DbEngine, dsn };
 }

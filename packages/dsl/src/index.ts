@@ -4,11 +4,13 @@ export {
   webhookSampleGraph,
   githubReviewGraph,
   httpEnrichGraph,
+  sqlEnrichGraph,
   graphRegistry,
   getGraphForWorkflow,
 } from "./sample-graph";
 export { getByPath, resolveMcpArguments } from "./mcp-args";
 export { resolveHttpRequest, type ResolvedHttpRequest } from "./http-request";
+export { resolveSqlQuery, type ResolvedSqlQuery } from "./sql-query";
 export { walk } from "./walk";
 export { canonicalize } from "./canonical";
 export {

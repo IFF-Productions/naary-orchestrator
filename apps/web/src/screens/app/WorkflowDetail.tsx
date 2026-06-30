@@ -28,6 +28,7 @@ const ACCENT: Record<NodeType, string> = {
   agent: "var(--node-agent)",
   mcpTool: "var(--node-mcp)",
   httpRequest: "var(--node-http, #2f9e8f)",
+  sqlQuery: "var(--node-sql, #b06fd6)",
   humanApproval: "var(--node-approval)",
   end: "var(--node-end)",
 };

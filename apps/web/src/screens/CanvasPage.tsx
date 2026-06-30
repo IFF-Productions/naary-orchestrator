@@ -83,6 +83,7 @@ const ACCENT: Record<NodeType, string> = {
   agent: "var(--node-agent)",
   mcpTool: "var(--node-mcp)",
   httpRequest: "var(--node-http, #2f9e8f)",
+  sqlQuery: "var(--node-sql, #b06fd6)",
   humanApproval: "var(--node-approval)",
   end: "var(--node-end)",
 };
@@ -171,6 +172,15 @@ function nodeSubtitle(
     if (!url) return method;
     const short = url.replace(/^https?:\/\//, "");
     return `${method} ${short}`;
+  }
+  if (kind === "sqlQuery") {
+    const conn = config.connectionId as string | undefined;
+    const sql = config.sql as string | undefined;
+    const snippet = sql
+      ? sql.replace(/\s+/g, " ").trim().slice(0, 32)
+      : undefined;
+    if (conn && snippet) return `${conn} · ${snippet}`;
+    return conn || snippet || undefined;
   }
   return undefined;
 }
@@ -1153,6 +1163,87 @@ function ConfigPanel({
         </>
       )}
 
+      {kind === "sqlQuery" && (
+        <>
+          <Labeled label="Database connection id">
+            <input
+              value={str("connectionId")}
+              onChange={(e) => onChange({ connectionId: e.target.value })}
+              style={inputStyle}
+              placeholder="my-postgres"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            A <code>postgres</code> or <code>mssql</code> connection. Read-only
+            — the query runs in a transaction that's always rolled back.
+          </div>
+
+          <div>
+            <RowHead label="SQL" value="read-only" />
+            <textarea
+              value={str("sql")}
+              onChange={(e) => onChange({ sql: e.target.value })}
+              rows={5}
+              style={textareaStyle}
+              placeholder={"SELECT id, email FROM users WHERE id = $1"}
+            />
+          </div>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            Placeholders are engine-specific: <code>$1, $2…</code> (Postgres) or{" "}
+            <code>@p1, @p2…</code> (MSSQL). Bindings fill the values — never
+            build SQL from upstream output.
+          </div>
+
+          <BindingsEditor
+            bindings={
+              obj("paramBindings") as Record<string, BindingRow> | undefined
+            }
+            upstreamIds={upstreamIds}
+            onChange={(v) => onChange({ paramBindings: v })}
+          />
+
+          <JsonArrayField
+            label="Static params (JSON array)"
+            value={config.params as unknown[] | undefined}
+            placeholder={"[\n  42\n]"}
+            onChange={(v) => onChange({ params: v })}
+          />
+
+          <Labeled label="Statement timeout (ms)">
+            <input
+              type="number"
+              min={1}
+              value={num("statementTimeoutMs") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  statementTimeoutMs: e.target.value
+                    ? Number(e.target.value)
+                    : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="30000 (default)"
+            />
+          </Labeled>
+
+          <Labeled label="Cost (USD per call)">
+            <input
+              type="number"
+              min={0}
+              step={0.001}
+              value={num("costUsd") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  costUsd: e.target.value ? Number(e.target.value) : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="0.00"
+            />
+          </Labeled>
+        </>
+      )}
+
       {kind === "humanApproval" && (
         <>
           <Labeled label="Approval title">
@@ -1321,6 +1412,70 @@ function JsonField({
         value={text}
         onChange={(e) => commit(e.target.value)}
         rows={5}
+        spellCheck={false}
+        className="mono"
+        style={{
+          ...textareaStyle,
+          fontFamily: "var(--font-mono)",
+          fontSize: 11.5,
+          borderColor: error ? "var(--state-error)" : "var(--line-2)",
+        }}
+        placeholder={placeholder}
+      />
+      {error && (
+        <div
+          style={{ fontSize: 11, color: "var(--state-error)", marginTop: 4 }}
+        >
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Like JsonField, but the value must be a JSON ARRAY (the sqlQuery params list). */
+function JsonArrayField({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: unknown[] | undefined;
+  placeholder?: string;
+  onChange: (v: unknown[] | undefined) => void;
+}) {
+  const [text, setText] = useState(value ? JSON.stringify(value, null, 2) : "");
+  const [error, setError] = useState<string | null>(null);
+
+  function commit(next: string) {
+    setText(next);
+    const trimmed = next.trim();
+    if (!trimmed) {
+      setError(null);
+      onChange(undefined);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (!Array.isArray(parsed)) {
+        setError("Must be a JSON array");
+        return;
+      }
+      setError(null);
+      onChange(parsed as unknown[]);
+    } catch {
+      setError("Invalid JSON");
+    }
+  }
+
+  return (
+    <div>
+      <RowHead label={label} value={error ? "⚠ error" : "JSON"} />
+      <textarea
+        value={text}
+        onChange={(e) => commit(e.target.value)}
+        rows={3}
         spellCheck={false}
         className="mono"
         style={{

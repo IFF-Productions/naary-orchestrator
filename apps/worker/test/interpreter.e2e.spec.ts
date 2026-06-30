@@ -51,11 +51,25 @@ const mockActivities = {
     httpCalls.push(cfg);
     return httpResponse;
   },
+  callSqlQuery: async (
+    cfg: activities.SqlQueryConfig,
+    _input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.SqlQueryResult> => {
+    sqlCalls.push(cfg);
+    return {
+      status: "ok",
+      rows: [{ id: 7, email: "a@b.co" }],
+      rowCount: 1,
+      costUsd: 0,
+    };
+  },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
   setExecutionStatus: async (): Promise<void> => undefined, // read-model push; no-op here
 };
 const mcpCalls: activities.McpToolConfig[] = [];
 const httpCalls: activities.HttpRequestConfig[] = [];
+const sqlCalls: activities.SqlQueryConfig[] = [];
 // Mutable so each test fixes the HTTP node's response (status drives the branch).
 let httpResponse: activities.HttpRequestResult = {
   status: "ok",
@@ -100,6 +114,28 @@ const httpBranchGraph: GraphDef = {
       condition: { path: "http.status", op: "gt", value: 399 },
     },
     { from: "errAgent", to: "done" },
+  ],
+};
+
+// webhook → sqlQuery → end. Proves the node dispatches and rows land in ctx.
+const sqlGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "lookup",
+      type: "sqlQuery",
+      config: {
+        connectionId: "db-1",
+        sql: "SELECT id, email FROM users WHERE id = $1",
+        paramBindings: { 1: { from: "trigger", path: "userId" } },
+      },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "lookup" },
+    { from: "lookup", to: "end" },
   ],
 };
 
@@ -331,6 +367,27 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       expect(result.ctx.http).toMatchObject({ status: 503 });
       // ≥400 edge was taken → the error-path agent ran
       expect(result.ctx.errAgent).toMatchObject({ status: "ok" });
+    });
+  });
+
+  it("sqlQuery: resolves params from upstream + exposes {rows,rowCount} in ctx", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [sqlGraph, { userId: 7 }, { tenantId: "t-sql" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-sql",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(result.ctx.lookup).toEqual({
+        rows: [{ id: 7, email: "a@b.co" }],
+        rowCount: 1,
+      });
+      // the $1 param was resolved from the trigger's userId (binding, not the sql text)
+      const call = sqlCalls[sqlCalls.length - 1];
+      expect(call.sql).toBe("SELECT id, email FROM users WHERE id = $1");
+      expect(call.params).toEqual([7]);
     });
   });
 

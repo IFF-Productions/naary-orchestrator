@@ -8,6 +8,7 @@
     { "path": "./packages/usage" },
     { "path": "./packages/connections" },
     { "path": "./packages/storage" },
+    { "path": "./packages/sql" },
     { "path": "./packages/observability" },
     { "path": "./packages/logging" },
     { "path": "./packages/temporal-config" },

@@ -5,12 +5,18 @@ import type {
   ExecutionState,
   ExecutionStatus,
 } from "@naary/contracts";
-import { nextNodes, resolveHttpRequest, resolveMcpArguments } from "@naary/dsl";
+import {
+  nextNodes,
+  resolveHttpRequest,
+  resolveMcpArguments,
+  resolveSqlQuery,
+} from "@naary/dsl";
 import type {
   GraphDef,
   HttpRequestNodeConfig,
   McpToolNodeConfig,
   NodeDef,
+  SqlQueryNodeConfig,
 } from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
 // Do NOT drop `type` — that would pull I/O code into the sandbox.
@@ -28,6 +34,15 @@ const { runAgent, callMcpTool, recordExecution, setExecutionStatus } =
 // a non-idempotent POST/PUT/PATCH/DELETE. The activity's AbortController is the real
 // deadline; this timeout is just the outer backstop.
 const { callHttpRequest } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "150 seconds",
+  retry: { maximumAttempts: 3 },
+});
+
+// Same reasoning as callHttpRequest: the per-query timeout (≤ MAX_SQL_TIMEOUT_MS,
+// clamped in the activity) is the real deadline; the start-to-close sits above it so
+// Temporal doesn't kill + retry a slow-but-running query. (Reads are idempotent, but
+// keeping the driver as the deadline avoids spurious retries of expensive queries.)
+const { callSqlQuery } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "150 seconds",
   retry: { maximumAttempts: 3 },
 });
@@ -205,6 +220,26 @@ export async function runGraph(
           headers: result.headers,
           body: result.body,
         };
+        costUsd += result.costUsd;
+        ctx.__costUsd = costUsd;
+        return null;
+      }
+      case "sqlQuery": {
+        // Param binding is deterministic graph work (pure ctx path-reads); the DSN
+        // read + DB query (read-only) are in the activity. The sql text is never
+        // built from bindings — only the params array (no SQL injection).
+        const sqlCfg = node.config as unknown as SqlQueryNodeConfig;
+        const result = await callSqlQuery(
+          resolveSqlQuery(sqlCfg, ctx),
+          ctx.__input,
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
+        // Expose {rows, rowCount} so edges branch on `<nodeId>.rowCount`.
+        ctx[node.id] = { rows: result.rows, rowCount: result.rowCount };
         costUsd += result.costUsd;
         ctx.__costUsd = costUsd;
         return null;
