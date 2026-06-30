@@ -105,6 +105,54 @@ export const githubReviewGraph: GraphDef = {
 };
 
 /**
+ * HTTP node demo: a webhook event triggers an enrichment GET against a REST API;
+ * the graph branches on the response status — a 2xx feeds an agent summary, a
+ * non-2xx routes straight to end. Shows the httpRequest node + status branching.
+ * `connectionId` is optional; set it to a tenant connection for authenticated APIs.
+ */
+export const httpEnrichGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "fetch",
+      type: "httpRequest",
+      config: {
+        method: "GET",
+        url: "https://api.github.com/repos/temporalio/temporal",
+        headers: { Accept: "application/vnd.github+json" },
+      },
+    },
+    {
+      id: "summarize",
+      type: "agent",
+      config: {
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        systemPrompt:
+          "Summarize the fetched JSON. Respond with a category and an urgency from 1-5.",
+      },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "fetch" },
+    // 2xx → summarize; anything ≥400 → end (skip the agent).
+    {
+      from: "fetch",
+      to: "summarize",
+      condition: { path: "fetch.status", op: "lt", value: 400 },
+    },
+    {
+      from: "fetch",
+      to: "end",
+      condition: { path: "fetch.status", op: "gt", value: 399 },
+    },
+    { from: "summarize", to: "end" },
+  ],
+};
+
+/**
  * Maps a WebhookEndpoint's `workflowId` to the graph the ingress should start.
  * (Graphs come from Postgres in a later slice — hardcoded here, like sampleGraph.)
  * The ingress reads `endpoint.workflowId`, so registering an endpoint against
@@ -113,6 +161,7 @@ export const githubReviewGraph: GraphDef = {
 export const graphRegistry: Record<string, GraphDef> = {
   "wf-default": webhookSampleGraph,
   "github-review": githubReviewGraph,
+  "http-enrich": httpEnrichGraph,
 };
 
 /** Resolve a webhook endpoint's workflowId to its graph, or undefined if unknown. */

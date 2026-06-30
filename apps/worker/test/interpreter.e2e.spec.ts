@@ -4,6 +4,7 @@ import { Worker } from "@temporalio/worker";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { approvalSignal, stateQuery, TASK_QUEUE } from "@naary/contracts";
 import { githubReviewGraph, sampleGraph, webhookSampleGraph } from "@naary/dsl";
+import type { GraphDef } from "@naary/dsl";
 import type * as activities from "../src/temporal/activities";
 import { runGraph } from "../src/temporal/workflows";
 
@@ -42,10 +43,65 @@ const mockActivities = {
       costUsd: 0,
     };
   },
+  callHttpRequest: async (
+    cfg: activities.HttpRequestConfig,
+    _input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.HttpRequestResult> => {
+    httpCalls.push(cfg);
+    return httpResponse;
+  },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
   setExecutionStatus: async (): Promise<void> => undefined, // read-model push; no-op here
 };
 const mcpCalls: activities.McpToolConfig[] = [];
+const httpCalls: activities.HttpRequestConfig[] = [];
+// Mutable so each test fixes the HTTP node's response (status drives the branch).
+let httpResponse: activities.HttpRequestResult = {
+  status: "ok",
+  httpStatus: 200,
+  headers: {},
+  body: { ok: true },
+  costUsd: 0,
+};
+
+// webhook → httpRequest → branch on status: <400 ends; ≥400 routes to an agent.
+const httpBranchGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "http",
+      type: "httpRequest",
+      config: { method: "GET", url: "https://api.example.com/x" },
+    },
+    {
+      id: "errAgent",
+      type: "agent",
+      config: {
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        systemPrompt: "handle the error",
+      },
+    },
+    { id: "ok", type: "end" },
+    { id: "done", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "http" },
+    {
+      from: "http",
+      to: "ok",
+      condition: { path: "http.status", op: "lt", value: 400 },
+    },
+    {
+      from: "http",
+      to: "errAgent",
+      condition: { path: "http.status", op: "gt", value: 399 },
+    },
+    { from: "errAgent", to: "done" },
+  ],
+};
 
 let env: TestWorkflowEnvironment;
 
@@ -224,6 +280,57 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
 
       await handle.signal(approvalSignal, { approved: true });
       expect((await handle.result()).status).toBe("completed");
+    });
+  });
+
+  it("httpRequest: exposes {status,headers,body} in ctx; a 2xx takes the success edge", async () => {
+    httpResponse = {
+      status: "ok",
+      httpStatus: 200,
+      headers: { "content-type": "application/json" },
+      body: { ok: true },
+      costUsd: 0,
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [httpBranchGraph, { hello: "world" }, { tenantId: "t-http" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-http-ok",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      // node output is the structured response — the graph branches on .status
+      expect(result.ctx.http).toEqual({
+        status: 200,
+        headers: { "content-type": "application/json" },
+        body: { ok: true },
+      });
+      // success edge (<400) was taken → the error-path agent never ran
+      expect(result.ctx.errAgent).toBeUndefined();
+    });
+  });
+
+  it("httpRequest: a >=400 status routes down the error edge (branching on .status)", async () => {
+    httpResponse = {
+      status: "ok",
+      httpStatus: 503,
+      headers: {},
+      body: { error: "unavailable" },
+      costUsd: 0,
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [httpBranchGraph, {}, { tenantId: "t-http-err" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-http-err",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(result.ctx.http).toMatchObject({ status: 503 });
+      // ≥400 edge was taken → the error-path agent ran
+      expect(result.ctx.errAgent).toMatchObject({ status: "ok" });
     });
   });
 

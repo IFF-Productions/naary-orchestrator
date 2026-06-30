@@ -82,6 +82,7 @@ const ACCENT: Record<NodeType, string> = {
   webhookTrigger: "var(--node-trigger)",
   agent: "var(--node-agent)",
   mcpTool: "var(--node-mcp)",
+  httpRequest: "var(--node-http, #2f9e8f)",
   humanApproval: "var(--node-approval)",
   end: "var(--node-end)",
 };
@@ -163,6 +164,13 @@ function nodeSubtitle(
     const conn = config.connectionId as string | undefined;
     if (tool && conn) return `${conn} · ${tool}`;
     return tool || conn || undefined;
+  }
+  if (kind === "httpRequest") {
+    const method = (config.method as string | undefined) ?? "GET";
+    const url = config.url as string | undefined;
+    if (!url) return method;
+    const short = url.replace(/^https?:\/\//, "");
+    return `${method} ${short}`;
   }
   return undefined;
 }
@@ -351,7 +359,9 @@ export function CanvasPage() {
     const config: Record<string, unknown> | undefined =
       kind === "agent"
         ? { provider: "anthropic", model: "claude-opus-4-8" }
-        : undefined;
+        : kind === "httpRequest"
+          ? { method: "GET" }
+          : undefined;
     setNodes((ns) => [
       ...ns,
       {
@@ -1005,6 +1015,125 @@ function ConfigPanel({
             placeholder={'{\n  "state": "open"\n}'}
             onChange={(v) => onChange({ arguments: v })}
           />
+
+          <Labeled label="Cost (USD per call)">
+            <input
+              type="number"
+              min={0}
+              step={0.001}
+              value={num("costUsd") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  costUsd: e.target.value ? Number(e.target.value) : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="0.00"
+            />
+          </Labeled>
+        </>
+      )}
+
+      {kind === "httpRequest" && (
+        <>
+          <Labeled label="Method">
+            <select
+              value={str("method") || "GET"}
+              onChange={(e) => onChange({ method: e.target.value })}
+              style={inputStyle}
+            >
+              {["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </Labeled>
+          <Labeled label="URL">
+            <input
+              value={str("url")}
+              onChange={(e) => onChange({ url: e.target.value })}
+              style={inputStyle}
+              placeholder="https://api.example.com/v1/things"
+            />
+          </Labeled>
+
+          <BindingsEditor
+            bindings={
+              obj("argumentBindings") as Record<string, BindingRow> | undefined
+            }
+            upstreamIds={upstreamIds}
+            onChange={(v) => onChange({ argumentBindings: v })}
+          />
+
+          <JsonField
+            label="Query params (JSON)"
+            value={obj("query")}
+            placeholder={'{\n  "q": "open"\n}'}
+            onChange={(v) => onChange({ query: v })}
+          />
+          <JsonField
+            label="Headers (JSON, non-secret)"
+            value={obj("headers")}
+            placeholder={'{\n  "Accept": "application/json"\n}'}
+            onChange={(v) => onChange({ headers: v })}
+          />
+          <JsonField
+            label="Body (JSON)"
+            value={obj("body")}
+            placeholder={'{\n  "title": "hello"\n}'}
+            onChange={(v) => onChange({ body: v })}
+          />
+
+          <Labeled label="Auth connection id (optional)">
+            <input
+              value={str("connectionId")}
+              onChange={(e) => onChange({ connectionId: e.target.value })}
+              style={inputStyle}
+              placeholder="my-api"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            Auth is attached server-side from the connection — never put tokens
+            in the headers above (they'd be stored in the run history).
+          </div>
+
+          <Labeled label="Timeout (ms)">
+            <input
+              type="number"
+              min={1}
+              value={num("timeoutMs") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  timeoutMs: e.target.value
+                    ? Number(e.target.value)
+                    : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="30000 (default)"
+            />
+          </Labeled>
+
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 12,
+              color: "var(--ink-2)",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={Boolean(config.failOnErrorStatus)}
+              onChange={(e) =>
+                onChange({ failOnErrorStatus: e.target.checked })
+              }
+            />
+            Fail the node on status ≥ 400 (otherwise branch on{" "}
+            <code>.status</code>)
+          </label>
 
           <Labeled label="Cost (USD per call)">
             <input
