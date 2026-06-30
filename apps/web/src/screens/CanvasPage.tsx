@@ -236,6 +236,10 @@ export function CanvasPage() {
   const [workflowKey, setWorkflowKey] = useState("");
   const [workflows, setWorkflows] = useState<GraphSummary[]>([]);
   const [webhooks, setWebhooks] = useState<WebhookRow[]>([]);
+  // Optional per-run input (JSON) — overrides the Start node's sampleInput for the
+  // next run. Blank ⇒ the server falls back to the sample (api.startExecution).
+  const [showInput, setShowInput] = useState(false);
+  const [runInput, setRunInput] = useState("");
 
   const keyParam = searchParams.get("key");
   const templateParam = searchParams.get("template");
@@ -469,12 +473,32 @@ export function CanvasPage() {
   }
 
   async function run() {
+    // Parse the optional run input BEFORE any save, so a malformed payload doesn't
+    // mutate state. Blank ⇒ undefined (server uses the Start node's sampleInput).
+    let input: Record<string, unknown> | undefined;
+    if (showInput && runInput.trim()) {
+      try {
+        const parsed = JSON.parse(runInput);
+        if (
+          typeof parsed !== "object" ||
+          parsed === null ||
+          Array.isArray(parsed)
+        ) {
+          setStatus("Run input must be a JSON object.");
+          return;
+        }
+        input = parsed as Record<string, unknown>;
+      } catch {
+        setStatus("Run input is not valid JSON.");
+        return;
+      }
+    }
     setBusy(true);
     setStatus(null);
     try {
       const key = await save();
       if (!key) return;
-      const { workflowId } = await api.startExecution(key);
+      const { workflowId } = await api.startExecution(key, input);
       navigate(`/app/runs/${encodeURIComponent(workflowId)}`);
     } catch (e) {
       if (e instanceof UnauthorizedError) {
@@ -582,6 +606,13 @@ export function CanvasPage() {
           )}
           <Button
             variant="secondary"
+            disabled={busy}
+            onClick={() => setShowInput((s) => !s)}
+          >
+            {showInput ? "Hide input" : "Input"}
+          </Button>
+          <Button
+            variant="secondary"
             disabled={busy || !graph}
             onClick={() => void saveOnly()}
           >
@@ -596,6 +627,40 @@ export function CanvasPage() {
           </Button>
         </div>
       </header>
+
+      {showInput && (
+        <div
+          style={{
+            padding: "10px 16px",
+            borderBottom: "1px solid var(--line)",
+            background: "var(--surface)",
+          }}
+        >
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 4 }}>
+            Run input (JSON) — overrides the Start node's sample input for this
+            run; leave blank to use the sample.
+          </div>
+          <textarea
+            value={runInput}
+            onChange={(e) => setRunInput(e.target.value)}
+            rows={3}
+            spellCheck={false}
+            className="mono"
+            placeholder={'{\n  "message": "I was charged twice"\n}'}
+            style={{
+              width: "100%",
+              fontFamily: "var(--font-mono)",
+              fontSize: 11.5,
+              padding: "7px 9px",
+              borderRadius: 7,
+              border: "1px solid var(--line-2)",
+              background: "var(--card)",
+              color: "var(--ink)",
+              resize: "vertical",
+            }}
+          />
+        </div>
+      )}
 
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* palette */}

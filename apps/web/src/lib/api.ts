@@ -130,12 +130,20 @@ export const api = {
       body: JSON.stringify({ workflowKey, name, graph }),
     });
   },
-  // tenantId is resolved from the token server-side — the body carries only input
-  // and which stored graph (workflowKey) to run (default "default").
-  startExecution(workflowKey?: string): Promise<{ workflowId: string }> {
+  // tenantId is resolved from the token server-side — the body carries only the
+  // optional run input + which stored graph (workflowKey) to run (default "default").
+  // `input` overrides the Start node's sampleInput for this run; omit it to use the
+  // sample (server-side precedence: body.input → Start sampleInput → fallback).
+  startExecution(
+    workflowKey?: string,
+    input?: Record<string, unknown>,
+  ): Promise<{ workflowId: string }> {
+    const body: { workflowKey?: string; input?: Record<string, unknown> } = {};
+    if (workflowKey) body.workflowKey = workflowKey;
+    if (input !== undefined) body.input = input;
     return http("/executions", {
       method: "POST",
-      body: JSON.stringify(workflowKey ? { workflowKey } : {}),
+      body: JSON.stringify(body),
     });
   },
   approve(id: string, approved: boolean): Promise<{ accepted: true }> {
