@@ -16,7 +16,11 @@
     "test": "pnpm build && vitest run",
     "test:watch": "vitest",
     "worker": "pnpm --filter @naary/worker start",
-    "start": "pnpm --filter @naary/api start"
+    "start": "pnpm --filter @naary/api start",
+    "dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d",
+    "dev:build": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build",
+    "dev:logs": "docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f api worker",
+    "dev:down": "docker compose -f docker-compose.yml -f docker-compose.dev.yml down"
   },
   "devDependencies": {
     "@swc/core": "^1.15.43",
