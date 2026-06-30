@@ -8,6 +8,7 @@ export type NodeType =
   | "webhookTrigger" // Slice #4: entry node whose output is the inbound event
   | "agent"
   | "mcpTool" // Slice #4: calls a remote MCP server tool via a connection
+  | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}
   | "humanApproval"
   | "end";
 
@@ -52,6 +53,45 @@ export interface McpToolNodeConfig {
   /** argName → upstream output binding; overrides a static key of the same name. */
   argumentBindings?: Record<string, ArgBinding>;
   /** Flat per-call cost metered into the run budget (Slice #6 / Arch§4.6). */
+  costUsd?: number;
+}
+
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+/**
+ * HTTP Request node — call a plain HTTP/REST endpoint. Output is the structured
+ * response `{ status, headers, body }`, so the graph branches on it via an
+ * `EdgeCondition` on `<nodeId>.status`.
+ *
+ * SECURITY (CLAUDE.md Tier-1 rule 4 / Sec#2): this `config` rides in the graph
+ * snapshot → Temporal history. Auth material must NEVER live here — it comes only
+ * via `connectionId`, resolved + attached IN the activity. Treat `headers`/`url`/
+ * `body` as non-secret; the UI offers a connection picker, not a free-text
+ * Authorization field. The egress (SSRF) check runs in the activity on the
+ * fully-resolved URL.
+ */
+export interface HttpRequestNodeConfig {
+  method: HttpMethod;
+  /** Target URL (https only — enforced by the egress guard at call time). */
+  url: string;
+  /** Static, NON-SECRET headers. Auth must come via `connectionId`, not here. */
+  headers?: Record<string, string>;
+  /** Static query params, appended to the URL. */
+  query?: Record<string, string>;
+  /** JSON request body (object or string). Ignored for GET. */
+  body?: unknown;
+  /** field path (e.g. "url", "body.userId", "query.q", "headers.X-Trace") →
+   *  upstream output binding; overrides the static value at that path. */
+  argumentBindings?: Record<string, ArgBinding>;
+  /** Optional connection supplying the auth header (resolved in-activity). */
+  connectionId?: string;
+  /** When true, a response status ≥ 400 fails the node (non-retryable) instead of
+   *  being returned for the graph to branch on. Default false. */
+  failOnErrorStatus?: boolean;
+  /** Abort the request after this many ms (default applied in the activity). */
+  timeoutMs?: number;
+  /** Flat per-call cost metered into the run budget (Arch§4.6) — HTTP has no
+   *  token cost, so spend is operator-configured. */
   costUsd?: number;
 }
 

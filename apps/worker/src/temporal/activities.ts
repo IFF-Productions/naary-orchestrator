@@ -10,7 +10,9 @@ import {
   BlockedEgressError,
   MissingConnectionTokenError,
   NeedsReauthError,
+  assertEgressAllowed,
   callMcpTool as mcpCall,
+  resolveAuthHeader,
   resolveMcpTarget,
 } from "@naary/connections";
 import { getPrisma } from "@naary/db";
@@ -559,4 +561,210 @@ export async function callMcpTool(
     // connection's bearer token in its request fields).
     throw toSanitizedRetryable(e, "MCP_TRANSIENT");
   }
+}
+
+const DEFAULT_HTTP_TIMEOUT_MS = 30_000;
+/** Hard cap on the per-request deadline. MUST stay below the callHttpRequest
+ *  proxy's startToCloseTimeout (150s) so the AbortController — not Temporal — is
+ *  the real deadline; otherwise a slow request would be killed + RETRIED (Temporal),
+ *  duplicating non-idempotent writes. */
+const MAX_HTTP_TIMEOUT_MS = 120_000;
+
+/** A resolved HTTP request (bindings already applied by the interpreter). Mirrors
+ *  @naary/dsl's ResolvedHttpRequest — kept independent so workflow↔activity stays
+ *  type-only. NO secrets: the auth header is attached here, from `connectionId`. */
+export interface HttpRequestConfig {
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  url: string;
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+  body?: unknown;
+  connectionId?: string;
+  failOnErrorStatus?: boolean;
+  timeoutMs?: number;
+  costUsd?: number;
+}
+
+export interface HttpRequestResult {
+  status: "ok";
+  /** HTTP response status code — the graph branches on this (e.g. status gt 399). */
+  httpStatus: number;
+  headers: Record<string, string>;
+  body: unknown;
+  /** Metered cost of this call — the workflow accumulates it (Arch§4.6). */
+  costUsd: number;
+}
+
+/** Test seam: the network call + connection/egress resolution, swappable in tests. */
+export const __httpDeps = {
+  fetch: (...args: Parameters<typeof fetch>) => fetch(...args),
+  resolveAuthHeader,
+  assertEgressAllowed,
+};
+
+/**
+ * HTTP Request node: call a plain HTTP/REST endpoint and return the structured
+ * response so the graph can branch on `.httpStatus`. Auth (if any) is resolved
+ * from `connectionId` IN-ACTIVITY — the token never crosses the workflow boundary.
+ *
+ * Behavior contract: a non-2xx response is NOT an error by default — it's returned
+ * for the graph to branch on. Only transport/DNS/timeout failures throw (retryable);
+ * a blocked egress target (SSRF guard) throws non-retryable. `failOnErrorStatus`
+ * opts a flow into a hard non-retryable fail on status ≥ 400.
+ */
+export async function callHttpRequest(
+  cfg: HttpRequestConfig,
+  input: unknown,
+  meta: AgentMeta,
+): Promise<HttpRequestResult> {
+  void input; // entry-node input flows via bindings, not directly into the request
+  const startedAt = process.hrtime.bigint();
+  let host = "unknown";
+  try {
+    const store = getObjectStore();
+
+    // Auth comes ONLY from the connection, resolved in-memory here (never in config,
+    // never in workflow history). Static config headers are non-secret; the auth
+    // header takes precedence over any same-named static header.
+    const authHeaders = cfg.connectionId
+      ? await __httpDeps.resolveAuthHeader(meta.tenantId, cfg.connectionId)
+      : {};
+    const headers: Record<string, string> = {
+      ...(cfg.headers ?? {}),
+      ...authHeaders,
+    };
+
+    // Append static query params, then SSRF-guard the FULLY-RESOLVED URL at call
+    // time (https + public host only; defeats DNS rebinding + upstream-built hosts).
+    let rawUrl = cfg.url;
+    const qs = new URLSearchParams(cfg.query ?? {}).toString();
+    if (qs) rawUrl += (rawUrl.includes("?") ? "&" : "?") + qs;
+    const url = await __httpDeps.assertEgressAllowed(rawUrl);
+    host = url.host;
+
+    // A claim-checked upstream value (e.g. a large bound body) is resolved back to
+    // its real value before the call — the workflow only carried the small reference.
+    const resolvedBody = await resolveClaimChecks(cfg.body, store);
+
+    const init: RequestInit = { method: cfg.method, headers };
+    if (cfg.method !== "GET" && resolvedBody !== undefined) {
+      if (typeof resolvedBody === "string") {
+        init.body = resolvedBody;
+      } else {
+        init.body = JSON.stringify(resolvedBody);
+        if (!("content-type" in mapKeysLower(headers))) {
+          headers["Content-Type"] = "application/json";
+        }
+      }
+    }
+
+    // Bound the request with a deadline so a hung server can't pin the activity.
+    const controller = new AbortController();
+    const timeoutMs = Math.min(
+      cfg.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS,
+      MAX_HTTP_TIMEOUT_MS,
+    );
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let res: Response;
+    try {
+      res = await __httpDeps.fetch(url, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const contentType = res.headers.get("content-type") ?? "";
+    const raw = await res.text();
+    let body: unknown = raw;
+    if (contentType.includes("json")) {
+      try {
+        body = raw.length > 0 ? JSON.parse(raw) : null;
+      } catch {
+        body = raw; // malformed JSON — hand back the text rather than failing
+      }
+    }
+
+    if (cfg.failOnErrorStatus && res.status >= 400) {
+      throw ApplicationFailure.nonRetryable(
+        `HTTP request returned status ${res.status}`,
+        "HTTP_ERROR_STATUS",
+        { httpStatus: res.status },
+      );
+    }
+
+    // Offload a large body so it can't blow Temporal's ~2MB payload cap (Arch§4.6).
+    const offloaded = await maybeOffload(body, store, {
+      keyPrefix: `http/${meta.tenantId}`,
+    });
+    // Drop response-side credentials (Set-Cookie) before the headers land in ctx →
+    // Temporal history. The rest (content-type, etc.) is useful for branching.
+    const responseHeaders: Record<string, string> = {};
+    for (const [k, v] of res.headers.entries()) {
+      if (k.toLowerCase() === "set-cookie") continue;
+      responseHeaders[k] = v;
+    }
+
+    log.info(
+      {
+        activity: "callHttpRequest",
+        executionId: meta.executionId,
+        nodeId: meta.nodeId,
+        tenantId: meta.tenantId,
+        method: cfg.method,
+        host,
+        httpStatus: res.status,
+        costUsd: cfg.costUsd ?? 0,
+      },
+      "http request completed",
+    );
+    activityRuns.inc({ activity: "callHttpRequest", outcome: "ok" });
+    activityDuration.observe(
+      { activity: "callHttpRequest" },
+      secondsSince(startedAt),
+    );
+    if ((cfg.costUsd ?? 0) > 0) runCostUsd.inc(cfg.costUsd ?? 0);
+    return {
+      status: "ok",
+      httpStatus: res.status,
+      headers: responseHeaders,
+      body: offloaded,
+      costUsd: cfg.costUsd ?? 0,
+    };
+  } catch (e) {
+    activityRuns.inc({ activity: "callHttpRequest", outcome: "error" });
+    activityDuration.observe(
+      { activity: "callHttpRequest" },
+      secondsSince(startedAt),
+    );
+    // Our own deliberate failures (HTTP_ERROR_STATUS) are already safe — pass through.
+    if (e instanceof ApplicationFailure) throw e;
+    // A blocked egress target is a misconfiguration (SSRF guard) — retrying the same
+    // URL won't help, so fail non-retryable (mirrors the mcpTool handling).
+    if (e instanceof BlockedEgressError) {
+      throw ApplicationFailure.nonRetryable(
+        "Request target is not allowed",
+        "BLOCKED_EGRESS",
+        { host },
+      );
+    }
+    if (
+      e instanceof MissingConnectionTokenError ||
+      e instanceof NeedsReauthError
+    ) {
+      throw ApplicationFailure.nonRetryable(
+        "Connection needs re-authorization",
+        "CONNECTION_REAUTH",
+        { connectionId: cfg.connectionId },
+      );
+    }
+    // Transient (network blip, DNS, abort/timeout): sanitized retryable so a request
+    // object carrying the auth header can't be serialized into history.
+    throw toSanitizedRetryable(e, "HTTP_TRANSIENT");
+  }
+}
+
+/** Lower-case header keys for case-insensitive presence checks (HTTP is case-insensitive). */
+function mapKeysLower(h: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of Object.keys(h)) out[k.toLowerCase()] = h[k];
+  return out;
 }

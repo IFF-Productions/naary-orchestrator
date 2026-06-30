@@ -27,6 +27,7 @@ const ACCENT: Record<NodeType, string> = {
   webhookTrigger: "var(--node-trigger)",
   agent: "var(--node-agent)",
   mcpTool: "var(--node-mcp)",
+  httpRequest: "var(--node-http, #2f9e8f)",
   humanApproval: "var(--node-approval)",
   end: "var(--node-end)",
 };

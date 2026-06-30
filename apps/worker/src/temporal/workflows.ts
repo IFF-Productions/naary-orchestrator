@@ -5,8 +5,13 @@ import type {
   ExecutionState,
   ExecutionStatus,
 } from "@naary/contracts";
-import { nextNodes, resolveMcpArguments } from "@naary/dsl";
-import type { GraphDef, McpToolNodeConfig, NodeDef } from "@naary/dsl";
+import { nextNodes, resolveHttpRequest, resolveMcpArguments } from "@naary/dsl";
+import type {
+  GraphDef,
+  HttpRequestNodeConfig,
+  McpToolNodeConfig,
+  NodeDef,
+} from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
 // Do NOT drop `type` — that would pull I/O code into the sandbox.
 import type * as activities from "./activities";
@@ -16,6 +21,16 @@ const { runAgent, callMcpTool, recordExecution, setExecutionStatus } =
     startToCloseTimeout: "1 minute",
     retry: { maximumAttempts: 3 },
   });
+
+// The HTTP node's request deadline is user-configurable (up to MAX_HTTP_TIMEOUT_MS,
+// clamped in the activity), so it needs a start-to-close strictly ABOVE that cap —
+// otherwise Temporal would kill a slow-but-running request and RETRY it, duplicating
+// a non-idempotent POST/PUT/PATCH/DELETE. The activity's AbortController is the real
+// deadline; this timeout is just the outer backstop.
+const { callHttpRequest } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "150 seconds",
+  retry: { maximumAttempts: 3 },
+});
 
 export interface RunGraphResult {
   status: ExecutionStatus;
@@ -167,6 +182,30 @@ export async function runGraph(
         // Meter tool spend into the run budget so the per-execution cap sees it
         // (Arch§4.6) — commutative accumulation, same as the agent node.
         costUsd += toolResult.costUsd;
+        ctx.__costUsd = costUsd;
+        return null;
+      }
+      case "httpRequest": {
+        // Binding resolution is deterministic graph work (pure ctx path-reads), so
+        // it runs HERE; the I/O (auth fetch, egress check, fetch) is in the activity.
+        const httpCfg = node.config as unknown as HttpRequestNodeConfig;
+        const result = await callHttpRequest(
+          resolveHttpRequest(httpCfg, ctx),
+          ctx.__input,
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
+        // Expose the response as {status, headers, body} so edges branch on
+        // `<nodeId>.status` (the HTTP code), per the node's behavior contract.
+        ctx[node.id] = {
+          status: result.httpStatus,
+          headers: result.headers,
+          body: result.body,
+        };
+        costUsd += result.costUsd;
         ctx.__costUsd = costUsd;
         return null;
       }

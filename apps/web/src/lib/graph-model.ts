@@ -46,6 +46,7 @@ export const NODE_KINDS: { type: NodeType; label: string }[] = [
   { type: "webhookTrigger", label: "Webhook" },
   { type: "agent", label: "Agent" },
   { type: "mcpTool", label: "MCP Tool" },
+  { type: "httpRequest", label: "HTTP Request" },
   { type: "humanApproval", label: "Approval" },
   { type: "end", label: "End" },
 ];
