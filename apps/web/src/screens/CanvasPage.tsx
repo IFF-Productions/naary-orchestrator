@@ -85,6 +85,8 @@ const ACCENT: Record<NodeType, string> = {
   httpRequest: "var(--node-http, #2f9e8f)",
   sqlQuery: "var(--node-sql, #b06fd6)",
   set: "var(--node-set, #d98a3d)",
+  renameKeys: "var(--node-rename, #c9803e)",
+  dateTime: "var(--node-datetime, #6f8fd6)",
   merge: "var(--node-merge, #3fae86)",
   executeSubWorkflow: "var(--node-subflow, #5b8def)",
   wait: "var(--node-wait, #8a8f98)",
@@ -198,6 +200,14 @@ function nodeSubtitle(
   if (kind === "merge") {
     const mode = (config.mode as string | undefined) ?? "array";
     return `join · ${mode}`;
+  }
+  if (kind === "renameKeys") {
+    const from = config.from as string | undefined;
+    return from ? `from ${from}` : undefined;
+  }
+  if (kind === "dateTime") {
+    const src = config.source;
+    return src && src !== "now" ? "from upstream" : "now";
   }
   if (kind === "executeSubWorkflow") {
     const key = config.workflowKey as string | undefined;
@@ -1360,6 +1370,80 @@ function ConfigPanel({
             placeholder={'{\n  "status": "reviewed"\n}'}
             onChange={(v) => onChange({ fields: v })}
           />
+        </>
+      )}
+
+      {kind === "renameKeys" && (
+        <>
+          <Labeled label="Source node id">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="upstream-node-id"
+            />
+          </Labeled>
+          <Labeled label="Source path (optional)">
+            <input
+              value={str("path")}
+              onChange={(e) => onChange({ path: e.target.value })}
+              style={inputStyle}
+              placeholder="output"
+            />
+          </Labeled>
+          <JsonField
+            label="Rename (JSON: oldKey → newKey)"
+            value={obj("rename")}
+            placeholder={'{\n  "user_id": "userId"\n}'}
+            onChange={(v) => onChange({ rename: v })}
+          />
+          <JsonArrayField
+            label="Drop keys (JSON array)"
+            value={config.drop as unknown[] | undefined}
+            placeholder={'[\n  "internal"\n]'}
+            onChange={(v) => onChange({ drop: v })}
+          />
+        </>
+      )}
+
+      {kind === "dateTime" && (
+        <>
+          <Labeled label="Source node id (blank = current time)">
+            <input
+              value={
+                typeof config.source === "object" && config.source
+                  ? ((config.source as { from?: string }).from ?? "")
+                  : ""
+              }
+              onChange={(e) =>
+                onChange({
+                  source: e.target.value ? { from: e.target.value } : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="(now)"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+            Blank = the current time (read server-side). Otherwise bind an
+            upstream epoch-ms or ISO value to do timestamp math on. Output is{" "}
+            <code>{node.id}.iso</code> / <code>{node.id}.epochMs</code>.
+          </div>
+          <Labeled label="Add seconds (may be negative)">
+            <input
+              type="number"
+              value={num("addSeconds") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  addSeconds: e.target.value
+                    ? Number(e.target.value)
+                    : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="0"
+            />
+          </Labeled>
         </>
       )}
 

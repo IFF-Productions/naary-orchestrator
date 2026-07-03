@@ -142,6 +142,36 @@ export async function setExecutionStatus(meta: {
     .catch(() => undefined);
 }
 
+export interface DateTimeResult {
+  /** ISO-8601 string (UTC). */
+  iso: string;
+  /** Milliseconds since the Unix epoch. */
+  epochMs: number;
+}
+
+/**
+ * dateTime node — resolve a base time (the current clock when `base` is null, else
+ * a passed epoch-ms number / ISO string) and apply an optional offset. The CLOCK
+ * READ is the non-deterministic part, which is exactly why this is an activity and
+ * not workflow code (CLAUDE.md rule 2/3). No secrets, no egress.
+ */
+export async function computeDateTime(input: {
+  base: string | number | null;
+  addSeconds?: number;
+}): Promise<DateTimeResult> {
+  let baseMs: number;
+  if (input.base === null || input.base === undefined) {
+    baseMs = Date.now();
+  } else if (typeof input.base === "number") {
+    baseMs = input.base;
+  } else {
+    const parsed = Date.parse(input.base);
+    baseMs = Number.isNaN(parsed) ? Date.now() : parsed;
+  }
+  const epochMs = baseMs + (input.addSeconds ?? 0) * 1000;
+  return { iso: new Date(epochMs).toISOString(), epochMs };
+}
+
 /** A child graph resolved for an executeSubWorkflow node, pinned to its version. */
 export interface SubWorkflowGraph {
   graph: GraphDef;

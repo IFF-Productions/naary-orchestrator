@@ -49,6 +49,8 @@ export const NODE_KINDS: { type: NodeType; label: string }[] = [
   { type: "httpRequest", label: "HTTP Request" },
   { type: "sqlQuery", label: "SQL Query" },
   { type: "set", label: "Edit Fields" },
+  { type: "renameKeys", label: "Rename Keys" },
+  { type: "dateTime", label: "Date & Time" },
   { type: "merge", label: "Merge" },
   { type: "executeSubWorkflow", label: "Sub-workflow" },
   { type: "wait", label: "Wait" },

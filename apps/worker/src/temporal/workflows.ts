@@ -6,20 +6,24 @@ import type {
   ExecutionStatus,
 } from "@naary/contracts";
 import {
+  getByPath,
   nextNodes,
   resolveHttpRequest,
   resolveMcpArguments,
+  resolveRenameKeys,
   resolveSet,
   resolveSqlQuery,
   resolveSubWorkflowInput,
 } from "@naary/dsl";
 import type {
+  DateTimeNodeConfig,
   ExecuteSubWorkflowNodeConfig,
   GraphDef,
   HttpRequestNodeConfig,
   McpToolNodeConfig,
   MergeNodeConfig,
   NodeDef,
+  RenameKeysNodeConfig,
   SetNodeConfig,
   SqlQueryNodeConfig,
   StopAndErrorNodeConfig,
@@ -34,6 +38,7 @@ const {
   callMcpTool,
   recordExecution,
   setExecutionStatus,
+  computeDateTime,
   resolveSubWorkflowGraph,
 } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
@@ -292,6 +297,29 @@ export async function runGraph(
         // Output IS the built object, so edges/nodes read `<nodeId>.<field>`.
         const setCfg = node.config as unknown as SetNodeConfig;
         ctx[node.id] = resolveSet(setCfg, ctx);
+        return null;
+      }
+      case "renameKeys": {
+        // Pure node: reshape an upstream object's keys, entirely in the interpreter.
+        const rkCfg = node.config as unknown as RenameKeysNodeConfig;
+        ctx[node.id] = resolveRenameKeys(rkCfg, ctx);
+        return null;
+      }
+      case "dateTime": {
+        // The base value is resolved deterministically here (pure ctx read); the
+        // CLOCK READ (when source is "now") happens in the activity, since time is
+        // non-deterministic and must not touch workflow code.
+        const dtCfg = node.config as unknown as DateTimeNodeConfig;
+        const src = dtCfg.source;
+        const base =
+          !src || src === "now"
+            ? null
+            : ((getByPath(ctx[src.from], src.path) ?? null) as
+                string | number | null);
+        ctx[node.id] = await computeDateTime({
+          base,
+          addSeconds: dtCfg.addSeconds,
+        });
         return null;
       }
       case "merge": {

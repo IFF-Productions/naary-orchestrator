@@ -64,6 +64,15 @@ const mockActivities = {
       costUsd: 0,
     };
   },
+  computeDateTime: async (input: {
+    base: string | number | null;
+    addSeconds?: number;
+  }): Promise<activities.DateTimeResult> => {
+    // Deterministic stand-in for the clock read (base=null → fixed epoch).
+    const baseMs = input.base === null ? 1_700_000_000_000 : Number(input.base);
+    const epochMs = baseMs + (input.addSeconds ?? 0) * 1000;
+    return { iso: new Date(epochMs).toISOString(), epochMs };
+  },
   resolveSubWorkflowGraph: async (meta: {
     tenantId: string;
     workflowKey: string;
@@ -278,6 +287,35 @@ function diamondGraph(mode: "array" | "object"): GraphDef {
     ],
   };
 }
+
+// webhook → renameKeys → dateTime → end. renameKeys remaps the trigger's keys;
+// dateTime adds an offset to a bound epoch (deterministic via the mock).
+const transformGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "renamed",
+      type: "renameKeys",
+      config: {
+        from: "trigger",
+        rename: { user_id: "userId" },
+        drop: ["secret"],
+      },
+    },
+    {
+      id: "when",
+      type: "dateTime",
+      config: { source: { from: "trigger", path: "ts" }, addSeconds: 60 },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "renamed" },
+    { from: "renamed", to: "when" },
+    { from: "when", to: "end" },
+  ],
+};
 
 let env: TestWorkflowEnvironment;
 
@@ -781,6 +819,31 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       // only branch A fired → merge stranded at 1/2 → surfaced, not "completed"
       expect(result.status).toBe("invalid_graph");
       expect(result.ctx.join).toBeUndefined();
+    });
+  });
+
+  it("renameKeys + dateTime: reshape keys (pure) then timestamp math (activity)", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          transformGraph,
+          { user_id: "u-9", email: "x@y.co", secret: "hide", ts: 1_000_000 },
+          { tenantId: "t-transform" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-transform",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      // renameKeys: user_id→userId, dropped secret, kept email + ts (unmapped)
+      expect(result.ctx.renamed).toEqual({
+        userId: "u-9",
+        email: "x@y.co",
+        ts: 1_000_000,
+      });
+      // dateTime: base 1_000_000 + 60s = 1_060_000 ms
+      expect(result.ctx.when).toMatchObject({ epochMs: 1_060_000 });
     });
   });
 

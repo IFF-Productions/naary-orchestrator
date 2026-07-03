@@ -12,6 +12,8 @@ import { expect, test } from "@playwright/test";
 // palette label → a distinctive label rendered in that node's config inspector.
 const NEW_NODES = [
   { label: "Edit Fields", field: "Static fields (JSON)" },
+  { label: "Rename Keys", field: "Drop keys (JSON array)" },
+  { label: "Date & Time", field: "Add seconds (may be negative)" },
   { label: "Merge", field: "Combine mode" },
   { label: "Wait", field: "Wait (seconds)" },
   { label: "Stop & Error", field: "Error message" },
@@ -47,9 +49,9 @@ test("run-through: a graph using set → merge → wait completes end-to-end", a
   page,
 }) => {
   // The "e2e-nodes" workflow is seeded by global-setup: start fans out to two set
-  // nodes, they join at a merge, then a short wait, then end. No LLM key, no
-  // approval — it just runs to completion, exercising the new nodes in the real
-  // Temporal interpreter.
+  // nodes → merge → dateTime → renameKeys → wait → end. No LLM key, no approval —
+  // it runs to completion, exercising set/merge/dateTime/renameKeys/wait in the
+  // real Temporal interpreter.
   await page.goto("/app/workflows/e2e-nodes");
   await page.getByRole("button", { name: "Run now" }).click();
 
