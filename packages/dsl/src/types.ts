@@ -11,6 +11,8 @@ export type NodeType =
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}
   | "sqlQuery" // runs a read-only query against a tenant DB; output is {rows,rowCount}
   | "set" // builds a plain object from static fields + upstream bindings (pure, no I/O)
+  | "renameKeys" // pure: remap/drop keys of an upstream object
+  | "dateTime" // current time / timestamp math via an activity (clock read is I/O)
   | "merge" // fan-in join: run once after all inbound branches arrive; combine outputs
   | "executeSubWorkflow" // runs another saved graph as a child run; output is {status,output}
   | "wait" // durable delay (Temporal timer); no output
@@ -166,6 +168,35 @@ export interface ExecuteSubWorkflowNodeConfig {
   input?: Record<string, unknown>;
   /** dotted input path → upstream output binding; fills/overrides that path. */
   inputBindings?: Record<string, ArgBinding>;
+}
+
+/**
+ * Rename Keys node — reshape an upstream object by renaming and/or dropping its
+ * top-level keys. PURE (deterministic ctx read, no I/O). Output is the reshaped
+ * object; downstream reads `<nodeId>.<newKey>`.
+ */
+export interface RenameKeysNodeConfig {
+  /** Upstream node id whose output object to reshape. */
+  from: string;
+  /** Optional dotted path into that output to pick the object to reshape. */
+  path?: string;
+  /** oldKey → newKey. Keys not listed are kept as-is (unless dropped). */
+  rename?: Record<string, string>;
+  /** Top-level keys to remove from the output. */
+  drop?: string[];
+}
+
+/**
+ * Date & Time node — output the current time, or do timestamp math on an upstream
+ * value. The clock read is non-deterministic, so it runs in an ACTIVITY (CLAUDE.md
+ * rule 2/3: time out of workflow code). Output is `{ iso, epochMs }`.
+ */
+export interface DateTimeNodeConfig {
+  /** "now" (default) reads the clock in-activity; or bind an upstream epoch-ms
+   *  number / ISO string to operate on instead. */
+  source?: "now" | ArgBinding;
+  /** Seconds to add to the base (may be negative). */
+  addSeconds?: number;
 }
 
 /**
