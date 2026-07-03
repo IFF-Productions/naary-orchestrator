@@ -11,6 +11,7 @@ export type NodeType =
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}
   | "sqlQuery" // runs a read-only query against a tenant DB; output is {rows,rowCount}
   | "set" // builds a plain object from static fields + upstream bindings (pure, no I/O)
+  | "executeSubWorkflow" // runs another saved graph as a child run; output is {status,ctx}
   | "humanApproval"
   | "end";
 
@@ -140,6 +141,28 @@ export interface SetNodeConfig {
   /** dotted field path (e.g. "user.id", "total") → upstream output binding;
    *  overrides the static value at that path. */
   fieldBindings?: Record<string, ArgBinding>;
+}
+
+/**
+ * Execute Sub-workflow node — run another of the tenant's saved graphs as a
+ * durable CHILD run, wait for it, and expose its result. Output is
+ * `{ status, output }` — the child's terminal status + a bounded projection of its
+ * node outputs (internal `__*` keys dropped) — so the parent graph can branch on
+ * `<nodeId>.status` and read child results via `<nodeId>.output.*`.
+ *
+ * The child graph is resolved by `workflowKey` (latest version) IN an activity
+ * (I/O), then launched with `wf.executeChild` (deterministic). Only `workflowKey`
+ * — never a secret — lives in this config. The child input is built purely in the
+ * interpreter from `input` + `inputBindings`; when neither is set the child
+ * receives the parent's trigger input.
+ */
+export interface ExecuteSubWorkflowNodeConfig {
+  /** The saved-graph key to run as a child (this tenant's latest version). */
+  workflowKey: string;
+  /** Static base for the child's input object. */
+  input?: Record<string, unknown>;
+  /** dotted input path → upstream output binding; fills/overrides that path. */
+  inputBindings?: Record<string, ArgBinding>;
 }
 
 /**
