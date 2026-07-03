@@ -308,7 +308,7 @@ export interface ScheduleRow {
 
 /** Connection type — MCP/app servers plus SQL databases (the sqlQuery node). */
 export type ConnectionType =
-  "github" | "atlassian" | "custom" | "postgres" | "mssql" | "signing";
+  "github" | "atlassian" | "custom" | "postgres" | "mssql" | "signing" | "smtp";
 export type ConnectionAuthMode =
   "api_token" | "pat" | "oauth" | "connection_string";
 

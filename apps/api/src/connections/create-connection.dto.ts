@@ -12,7 +12,7 @@ import type { CreateConnectionInput } from "@naary/connections";
 
 // Types whose serverUrl is a NON-SECRET display label (host / name), not an https
 // URL — the real secret (DSN / signing key) rides in `token`.
-const NON_URL_TYPES = ["postgres", "mssql", "signing"];
+const NON_URL_TYPES = ["postgres", "mssql", "signing", "smtp"];
 
 /**
  * serverUrl is validated by connection kind:
@@ -39,7 +39,15 @@ class ConnectionServerUrlConstraint implements ValidatorConstraintInterface {
 }
 
 export class CreateConnectionDto implements CreateConnectionInput {
-  @IsIn(["atlassian", "github", "custom", "postgres", "mssql", "signing"])
+  @IsIn([
+    "atlassian",
+    "github",
+    "custom",
+    "postgres",
+    "mssql",
+    "signing",
+    "smtp",
+  ])
   type!: CreateConnectionInput["type"];
 
   @IsString()

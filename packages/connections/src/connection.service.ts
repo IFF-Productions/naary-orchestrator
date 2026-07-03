@@ -3,7 +3,7 @@ import { SecretStore } from "@naary/secrets";
 import { MissingConnectionTokenError } from "./errors";
 
 export type ConnectionType =
-  "github" | "atlassian" | "custom" | "postgres" | "mssql" | "signing";
+  "github" | "atlassian" | "custom" | "postgres" | "mssql" | "signing" | "smtp";
 export type AuthMode = "api_token" | "pat" | "oauth" | "connection_string";
 export type ConnectionStatus = "connected" | "needs_reauth" | "error";
 
@@ -162,4 +162,28 @@ export async function resolveSigningKey(
   const key = await store.get(tenantId, connectionSecretKey(connectionId));
   if (!key) throw new MissingConnectionTokenError(connectionId);
   return key;
+}
+
+/**
+ * Resolve an `smtp` connection's secret SMTP URI (e.g. `smtps://user:pass@host:465`)
+ * for the sendEmail node. Same shape + invariants as {@link resolveDbConnection}:
+ * the URI (with credentials) is read here and used in-activity only — NEVER returned
+ * to a caller boundary, logged, or put in workflow history.
+ */
+export async function resolveSmtpUri(
+  tenantId: string,
+  connectionId: string,
+  store: SecretStore = new SecretStore(),
+): Promise<string> {
+  const conn = await getPrisma().connection.findFirst({
+    where: { id: connectionId, tenantId },
+    select: { type: true },
+  });
+  if (!conn) throw new Error(`Unknown connection '${connectionId}'`);
+  if (conn.type !== "smtp") {
+    throw new Error(`Connection '${connectionId}' is not an smtp connection`);
+  }
+  const uri = await store.get(tenantId, connectionSecretKey(connectionId));
+  if (!uri) throw new MissingConnectionTokenError(connectionId);
+  return uri;
 }

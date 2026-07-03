@@ -64,6 +64,31 @@ type Lookup = (host: string) => Promise<{ address: string }[]>;
 const defaultLookup: Lookup = (host) => lookup(host, { all: true });
 
 /**
+ * Resolve a bare host and reject if any address is private/loopback/link-local/
+ * reserved — the SSRF guard for NON-HTTP outbound (e.g. an SMTP host), where the
+ * https-only `assertEgressAllowed` doesn't apply. Checks at call time to defeat DNS
+ * rebinding. `resolve` is injectable for tests.
+ */
+export async function assertHostPublic(
+  host: string,
+  resolve: Lookup = defaultLookup,
+): Promise<void> {
+  const h = host.replace(/^\[|\]$/g, ""); // strip IPv6 brackets
+  if (!h) throw new BlockedEgressError("empty host");
+  const addresses = isIP(h) ? [h] : (await resolve(h)).map((a) => a.address);
+  if (addresses.length === 0) {
+    throw new BlockedEgressError("host did not resolve");
+  }
+  for (const ip of addresses) {
+    if (isBlockedIp(ip)) {
+      throw new BlockedEgressError(
+        "host resolves to a private/reserved address",
+      );
+    }
+  }
+}
+
+/**
  * Validate an outbound URL: must be https, and every resolved address must be
  * public. Returns the parsed URL on success; throws BlockedEgressError otherwise.
  * `resolve` is injectable for tests.

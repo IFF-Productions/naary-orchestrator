@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertEgressAllowed,
+  assertHostPublic,
   BlockedEgressError,
   isBlockedIp,
 } from "../src/egress";
@@ -73,5 +74,40 @@ describe("assertEgressAllowed", () => {
     );
     expect(url.protocol).toBe("https:");
     expect(url.hostname).toBe("mcp.example.com");
+  });
+});
+
+describe("assertHostPublic (SMTP / non-HTTP SSRF guard)", () => {
+  it("passes for a host that resolves to a public address", async () => {
+    await expect(
+      assertHostPublic("smtp.example.com", resolvesTo("93.184.216.34")),
+    ).resolves.toBeUndefined();
+  });
+
+  it("passes for a public IP literal (no DNS)", async () => {
+    await expect(assertHostPublic("8.8.8.8")).resolves.toBeUndefined();
+  });
+
+  it("blocks private/loopback/link-local IP literals", async () => {
+    for (const host of ["127.0.0.1", "169.254.169.254", "10.0.0.5", "[::1]"]) {
+      await expect(assertHostPublic(host), host).rejects.toBeInstanceOf(
+        BlockedEgressError,
+      );
+    }
+  });
+
+  it("blocks a hostname that RESOLVES to a private address (DNS-rebinding class)", async () => {
+    await expect(
+      assertHostPublic("evil.example.com", resolvesTo("169.254.169.254")),
+    ).rejects.toBeInstanceOf(BlockedEgressError);
+  });
+
+  it("blocks a host that does not resolve, and an empty host", async () => {
+    await expect(
+      assertHostPublic("nope.example.com", async () => []),
+    ).rejects.toBeInstanceOf(BlockedEgressError);
+    await expect(assertHostPublic("")).rejects.toBeInstanceOf(
+      BlockedEgressError,
+    );
   });
 });
