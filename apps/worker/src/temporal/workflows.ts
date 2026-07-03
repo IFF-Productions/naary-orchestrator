@@ -18,6 +18,7 @@ import type {
   GraphDef,
   HttpRequestNodeConfig,
   McpToolNodeConfig,
+  MergeNodeConfig,
   NodeDef,
   SetNodeConfig,
   SqlQueryNodeConfig,
@@ -99,6 +100,9 @@ export interface ResumeState {
   costUsd: number;
   stepCount: number;
   startNodeId: string;
+  /** Fan-in arrival counts per merge node id (Slice N5). Carried so a run that
+   *  continueAsNews mid-join resumes its counts. Plain object (CAN-safe). */
+  mergeArrivals?: Record<string, number>;
 }
 
 /**
@@ -125,6 +129,25 @@ export async function runGraph(
   // a node counter — never a DB read in workflow code (CLAUDE.md rule 2; §3).
   let costUsd = resume?.costUsd ?? 0;
   let stepCount = resume?.stepCount ?? 0;
+
+  // Fan-in join state (Slice N5). `mergeParents` maps a merge node id → its inbound
+  // parents' ids in DECLARED edge order (its length is the expected in-degree);
+  // precomputed once from the graph (deterministic, pure). `mergeArrivals` counts
+  // how many inbound branches have reached each merge so far — the last to arrive
+  // runs it. Only nodes of type "merge" participate, so other multi-inbound nodes
+  // (e.g. loop back-edges) keep their existing behavior.
+  const mergeParents = new Map<string, string[]>();
+  for (const n of graph.nodes) {
+    if (n.type === "merge") {
+      mergeParents.set(
+        n.id,
+        graph.edges.filter((e) => e.to === n.id).map((e) => e.from),
+      );
+    }
+  }
+  const mergeArrivals: Record<string, number> = resume?.mergeArrivals
+    ? { ...resume.mergeArrivals }
+    : {};
 
   wf.setHandler(approvalSignal, (s) => {
     approval = s;
@@ -269,6 +292,23 @@ export async function runGraph(
         // Output IS the built object, so edges/nodes read `<nodeId>.<field>`.
         const setCfg = node.config as unknown as SetNodeConfig;
         ctx[node.id] = resolveSet(setCfg, ctx);
+        return null;
+      }
+      case "merge": {
+        // Fan-in join. Only REACHED here on the LAST inbound arrival (execChain
+        // absorbs earlier ones), so all inbound parents have run — combine their
+        // outputs from ctx. Pure: no I/O, no cost. `<mergeId>` holds the combined
+        // value; downstream reads `<mergeId>.0`/`.1` (array) or fields (object).
+        const mergeCfg = (node.config ?? {}) as MergeNodeConfig;
+        const parents = mergeParents.get(node.id) ?? [];
+        const inputs = parents.map((p) => ctx[p]);
+        ctx[node.id] =
+          mergeCfg.mode === "object"
+            ? Object.assign(
+                {},
+                ...inputs.filter((i) => i !== null && typeof i === "object"),
+              )
+            : inputs;
         return null;
       }
       case "executeSubWorkflow": {
@@ -423,6 +463,20 @@ export async function runGraph(
       }
       currentNodeId = current;
 
+      // Fan-in join gate (Slice N5): when a branch reaches a merge, record its
+      // arrival; if not all inbound branches are in yet, ABSORB this branch (stop
+      // here — a sibling will complete the join). Only the LAST arrival falls
+      // through to run the merge + continue downstream, so the merge and everything
+      // after it execute exactly once. (Determinism: arrival order under the
+      // Promise.all fan-out is fixed by microtask/activity-completion order, which
+      // Temporal replays identically.)
+      if (node.type === "merge") {
+        const expected = mergeParents.get(current)?.length ?? 0;
+        const arrived = (mergeArrivals[current] ?? 0) + 1;
+        mergeArrivals[current] = arrived;
+        if (arrived < expected) return null;
+      }
+
       const terminal = await execNode(node);
       if (terminal !== null) return terminal;
 
@@ -449,6 +503,7 @@ export async function runGraph(
             costUsd,
             stepCount,
             startNodeId: current,
+            mergeArrivals,
           });
         }
       } else {
@@ -470,6 +525,25 @@ export async function runGraph(
 
   const terminal = await execChain(currentNodeId, true);
   status = terminal ?? "completed";
+
+  // Fail LOUD on a stranded fan-in join (Slice N5): if a merge received SOME but
+  // not all of its inbound branches, the join never fired and everything after it
+  // was silently skipped — reporting "completed" would look like success while
+  // having done nothing. This happens when a conditional path UPSTREAM of a merge
+  // branch prevents that branch from arriving (validateGraph only blocks conditional
+  // edges DIRECTLY into a merge). Surface it as a terminal invalid_graph instead of
+  // a clean completion. (Only overrides a would-be success — a real terminal status
+  // from the run itself wins.)
+  if (terminal === null) {
+    for (const [mergeId, parents] of mergeParents) {
+      const arrived = mergeArrivals[mergeId] ?? 0;
+      if (arrived > 0 && arrived < parents.length) {
+        status = "invalid_graph";
+        break;
+      }
+    }
+  }
+
   await syncStatus(); // final status + cost for the Runs list
   return { status, ctx };
 }

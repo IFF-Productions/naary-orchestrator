@@ -11,6 +11,7 @@ export type NodeType =
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}
   | "sqlQuery" // runs a read-only query against a tenant DB; output is {rows,rowCount}
   | "set" // builds a plain object from static fields + upstream bindings (pure, no I/O)
+  | "merge" // fan-in join: run once after all inbound branches arrive; combine outputs
   | "executeSubWorkflow" // runs another saved graph as a child run; output is {status,output}
   | "wait" // durable delay (Temporal timer); no output
   | "stopAndError" // terminal: fail the run with a message
@@ -165,6 +166,24 @@ export interface ExecuteSubWorkflowNodeConfig {
   input?: Record<string, unknown>;
   /** dotted input path → upstream output binding; fills/overrides that path. */
   inputBindings?: Record<string, ArgBinding>;
+}
+
+/**
+ * Merge node — fan-IN join. A node with N inbound edges; the interpreter runs it
+ * ONCE, when the last inbound branch arrives, and writes a combined output to
+ * `ctx[mergeId]`. Lets the diamond pattern (fan-out → parallel work → recombine)
+ * work without duplicating the merge or its downstream.
+ *
+ * PURE: deterministic graph work (no I/O, no secrets) — the combine reads the
+ * inbound parents' outputs from ctx. v1 supports UNCONDITIONAL fan-in only
+ * (a conditional edge into a merge is rejected by `validateGraph`, since a branch
+ * that never fires would strand the join); loops back through a merge are undefined.
+ */
+export interface MergeNodeConfig {
+  /** How to combine the inbound parents' outputs. "array" (default) →
+   *  `[parent1, …, parentN]` in declared inbound-edge order; "object" →
+   *  `Object.assign({}, …parents)`. */
+  mode?: "array" | "object";
 }
 
 /**

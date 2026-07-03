@@ -12,33 +12,42 @@
 
 /** Node types our DSL interpreter supports today (packages/dsl types.ts). */
 export type DslNodeType =
-  | 'start'
-  | 'webhookTrigger'
-  | 'agent'
-  | 'mcpTool'
-  | 'httpRequest'
-  | 'sqlQuery'
-  | 'humanApproval'
-  | 'end';
+  | "start"
+  | "webhookTrigger"
+  | "agent"
+  | "mcpTool"
+  | "httpRequest"
+  | "sqlQuery"
+  | "set"
+  | "merge"
+  | "wait"
+  | "stopAndError"
+  | "executeSubWorkflow"
+  | "humanApproval"
+  | "end";
+
+/** '*schedule' = covered as a platform feature (Temporal Schedules /
+ *  SchedulesService), not an in-graph node. */
+export type PlatformFeatureRef = "*schedule";
 
 /** '*edges' = handled by EdgeConditions on the graph, not a node. */
-export type DslCoverageRef = DslNodeType | '*edges';
+export type DslCoverageRef = DslNodeType | "*edges" | PlatformFeatureRef;
 
 export type CoreNodeGroup =
-  | 'Triggers'
-  | 'Flow control'
-  | 'HTTP & API'
-  | 'Agent & AI'
-  | 'Human in the loop'
-  | 'Data transformation'
-  | 'Code & scripting'
-  | 'Files & binary'
-  | 'Communication'
-  | 'Utility & security'
-  | 'Internal / dev-only'
-  | 'Organization';
+  | "Triggers"
+  | "Flow control"
+  | "HTTP & API"
+  | "Agent & AI"
+  | "Human in the loop"
+  | "Data transformation"
+  | "Code & scripting"
+  | "Files & binary"
+  | "Communication"
+  | "Utility & security"
+  | "Internal / dev-only"
+  | "Organization";
 
-export type Coverage = 'covered' | 'partial' | 'gap' | 'na';
+export type Coverage = "covered" | "partial" | "gap" | "na";
 
 export interface CoreNodeType {
   /** n8n display name. */
@@ -55,95 +64,621 @@ export interface CoreNodeType {
 
 export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
   // ── Triggers
-  { name: 'Manual Trigger', slug: 'manual-trigger', n8nNode: 'ManualTrigger', group: 'Triggers', mapsTo: ['start'], coverage: 'covered' },
-  { name: 'Webhook', slug: 'webhook', n8nNode: 'Webhook', group: 'Triggers', mapsTo: ['webhookTrigger'], coverage: 'covered' },
-  { name: 'Schedule Trigger', slug: 'schedule', n8nNode: 'Schedule', group: 'Triggers', mapsTo: [], coverage: 'gap', note: 'No time-based start; would ride a Temporal schedule/cron.' },
-  { name: 'Cron (legacy)', slug: 'cron', n8nNode: 'Cron', group: 'Triggers', mapsTo: [], coverage: 'gap', note: 'Legacy scheduler; same gap as Schedule Trigger.' },
-  { name: 'Interval', slug: 'interval', n8nNode: 'Interval', group: 'Triggers', mapsTo: [], coverage: 'gap', note: 'Fixed-interval start; same gap as Schedule.' },
-  { name: 'n8n Trigger', slug: 'n-8n-trigger', n8nNode: 'N8nTrigger', group: 'Triggers', mapsTo: [], coverage: 'gap', note: 'Fires on internal platform events.' },
-  { name: 'Workflow Trigger', slug: 'workflow-trigger', n8nNode: 'WorkflowTrigger', group: 'Triggers', mapsTo: [], coverage: 'gap', note: 'Fires on workflow lifecycle events.' },
-  { name: 'Error Trigger', slug: 'error-trigger', n8nNode: 'ErrorTrigger', group: 'Triggers', mapsTo: [], coverage: 'gap', note: 'No dedicated error-handling entrypoint yet.' },
-  { name: 'SSE Trigger', slug: 'sse-trigger', n8nNode: 'SseTrigger', group: 'Triggers', mapsTo: [], coverage: 'gap', note: 'Server-sent-events source.' },
-  { name: 'Local File Trigger', slug: 'local-file-trigger', n8nNode: 'LocalFileTrigger', group: 'Triggers', mapsTo: [], coverage: 'gap', note: 'Filesystem watch; out of scope for a durable cloud runtime.' },
-  { name: 'Email Trigger (IMAP)', slug: 'email-read-imap', n8nNode: 'EmailReadImap', group: 'Triggers', mapsTo: [], coverage: 'gap', note: 'Inbound email start.' },
+  {
+    name: "Manual Trigger",
+    slug: "manual-trigger",
+    n8nNode: "ManualTrigger",
+    group: "Triggers",
+    mapsTo: ["start"],
+    coverage: "covered",
+  },
+  {
+    name: "Webhook",
+    slug: "webhook",
+    n8nNode: "Webhook",
+    group: "Triggers",
+    mapsTo: ["webhookTrigger"],
+    coverage: "covered",
+  },
+  {
+    name: "Schedule Trigger",
+    slug: "schedule",
+    n8nNode: "Schedule",
+    group: "Triggers",
+    mapsTo: ["*schedule"],
+    coverage: "covered",
+    note: "Covered as a platform feature — Temporal Schedules (SchedulesService + Schedules UI), a cron bound to a saved workflow, not an in-graph node.",
+  },
+  {
+    name: "Cron (legacy)",
+    slug: "cron",
+    n8nNode: "Cron",
+    group: "Triggers",
+    mapsTo: ["*schedule"],
+    coverage: "covered",
+    note: "Covered via Temporal Schedules (cron expressions); same feature as Schedule Trigger.",
+  },
+  {
+    name: "Interval",
+    slug: "interval",
+    n8nNode: "Interval",
+    group: "Triggers",
+    mapsTo: ["*schedule"],
+    coverage: "covered",
+    note: "Covered via Temporal Schedules; same feature as Schedule Trigger.",
+  },
+  {
+    name: "n8n Trigger",
+    slug: "n-8n-trigger",
+    n8nNode: "N8nTrigger",
+    group: "Triggers",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Fires on internal platform events.",
+  },
+  {
+    name: "Workflow Trigger",
+    slug: "workflow-trigger",
+    n8nNode: "WorkflowTrigger",
+    group: "Triggers",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Fires on workflow lifecycle events.",
+  },
+  {
+    name: "Error Trigger",
+    slug: "error-trigger",
+    n8nNode: "ErrorTrigger",
+    group: "Triggers",
+    mapsTo: [],
+    coverage: "gap",
+    note: "No dedicated error-handling entrypoint yet.",
+  },
+  {
+    name: "SSE Trigger",
+    slug: "sse-trigger",
+    n8nNode: "SseTrigger",
+    group: "Triggers",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Server-sent-events source.",
+  },
+  {
+    name: "Local File Trigger",
+    slug: "local-file-trigger",
+    n8nNode: "LocalFileTrigger",
+    group: "Triggers",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Filesystem watch; out of scope for a durable cloud runtime.",
+  },
+  {
+    name: "Email Trigger (IMAP)",
+    slug: "email-read-imap",
+    n8nNode: "EmailReadImap",
+    group: "Triggers",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Inbound email start.",
+  },
   // ── Flow control
-  { name: 'If', slug: 'if', n8nNode: 'If', group: 'Flow control', mapsTo: ['*edges'], coverage: 'partial', note: 'Branching is expressed as EdgeConditions, not a node.' },
-  { name: 'Switch', slug: 'switch', n8nNode: 'Switch', group: 'Flow control', mapsTo: ['*edges'], coverage: 'partial', note: 'Multi-way branch via EdgeConditions on node output.' },
-  { name: 'Filter', slug: 'filter', n8nNode: 'Filter', group: 'Flow control', mapsTo: [], coverage: 'gap', note: 'Per-item drop/keep; we have no item-collection model.' },
-  { name: 'Merge', slug: 'merge', n8nNode: 'Merge', group: 'Flow control', mapsTo: [], coverage: 'gap', note: 'No join node to recombine parallel branches.' },
-  { name: 'Loop Over Items (Split in Batches)', slug: 'split-in-batches', n8nNode: 'SplitInBatches', group: 'Flow control', mapsTo: [], coverage: 'gap', note: 'No looping/iteration primitive.' },
-  { name: 'Wait', slug: 'wait', n8nNode: 'Wait', group: 'Flow control', mapsTo: ['humanApproval'], coverage: 'partial', note: 'We have durable waits only via humanApproval; no generic timed delay.' },
-  { name: 'Execute Sub-workflow', slug: 'execute-workflow', n8nNode: 'ExecuteWorkflow', group: 'Flow control', mapsTo: [], coverage: 'gap', note: 'No sub-workflow/call-graph node — notable roadmap item.' },
-  { name: 'Respond to Webhook', slug: 'respond-to-webhook', n8nNode: 'RespondToWebhook', group: 'Flow control', mapsTo: [], coverage: 'gap', note: 'No synchronous webhook response pairing.' },
-  { name: 'Stop and Error', slug: 'stop-and-error', n8nNode: 'StopAndError', group: 'Flow control', mapsTo: [], coverage: 'gap', note: 'No explicit fail-the-run node.' },
-  { name: 'No Operation', slug: 'no-op', n8nNode: 'NoOp', group: 'Flow control', mapsTo: [], coverage: 'na', note: 'Pass-through; trivial, not a real gap.' },
+  {
+    name: "If",
+    slug: "if",
+    n8nNode: "If",
+    group: "Flow control",
+    mapsTo: ["*edges"],
+    coverage: "partial",
+    note: "Branching is expressed as EdgeConditions, not a node.",
+  },
+  {
+    name: "Switch",
+    slug: "switch",
+    n8nNode: "Switch",
+    group: "Flow control",
+    mapsTo: ["*edges"],
+    coverage: "partial",
+    note: "Multi-way branch via EdgeConditions on node output.",
+  },
+  {
+    name: "Filter",
+    slug: "filter",
+    n8nNode: "Filter",
+    group: "Flow control",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Per-item drop/keep; we have no item-collection model.",
+  },
+  {
+    name: "Merge",
+    slug: "merge",
+    n8nNode: "Merge",
+    group: "Flow control",
+    mapsTo: ["merge"],
+    coverage: "covered",
+    note: "merge node — fan-in join (array/object combine). v1 supports unconditional fan-in; conditional/loop joins out of scope.",
+  },
+  {
+    name: "Loop Over Items (Split in Batches)",
+    slug: "split-in-batches",
+    n8nNode: "SplitInBatches",
+    group: "Flow control",
+    mapsTo: [],
+    coverage: "gap",
+    note: "No looping/iteration primitive.",
+  },
+  {
+    name: "Wait",
+    slug: "wait",
+    n8nNode: "Wait",
+    group: "Flow control",
+    mapsTo: ["wait"],
+    coverage: "covered",
+    note: "wait node — durable timed delay via wf.sleep (plus humanApproval for signal-based waits).",
+  },
+  {
+    name: "Execute Sub-workflow",
+    slug: "execute-workflow",
+    n8nNode: "ExecuteWorkflow",
+    group: "Flow control",
+    mapsTo: ["executeSubWorkflow"],
+    coverage: "covered",
+    note: "executeSubWorkflow node — runs a saved graph as a durable child run; bounded {status,output} projection; depth-capped.",
+  },
+  {
+    name: "Respond to Webhook",
+    slug: "respond-to-webhook",
+    n8nNode: "RespondToWebhook",
+    group: "Flow control",
+    mapsTo: [],
+    coverage: "gap",
+    note: "No synchronous webhook response pairing.",
+  },
+  {
+    name: "Stop and Error",
+    slug: "stop-and-error",
+    n8nNode: "StopAndError",
+    group: "Flow control",
+    mapsTo: ["stopAndError"],
+    coverage: "covered",
+    note: "stopAndError node — terminal, fails the run with a message (non-retryable ApplicationFailure).",
+  },
+  {
+    name: "No Operation",
+    slug: "no-op",
+    n8nNode: "NoOp",
+    group: "Flow control",
+    mapsTo: [],
+    coverage: "na",
+    note: "Pass-through; trivial, not a real gap.",
+  },
   // ── HTTP & API
-  { name: 'HTTP Request', slug: 'http-request', n8nNode: 'HttpRequest', group: 'HTTP & API', mapsTo: ['httpRequest'], coverage: 'covered' },
-  { name: 'GraphQL', slug: 'graph-q-l', n8nNode: 'GraphQL', group: 'HTTP & API', mapsTo: ['httpRequest'], coverage: 'partial', note: 'GraphQL reachable via httpRequest; no dedicated node.' },
+  {
+    name: "HTTP Request",
+    slug: "http-request",
+    n8nNode: "HttpRequest",
+    group: "HTTP & API",
+    mapsTo: ["httpRequest"],
+    coverage: "covered",
+  },
+  {
+    name: "GraphQL",
+    slug: "graph-q-l",
+    n8nNode: "GraphQL",
+    group: "HTTP & API",
+    mapsTo: ["httpRequest"],
+    coverage: "partial",
+    note: "GraphQL reachable via httpRequest; no dedicated node.",
+  },
   // ── Agent & AI
-  { name: 'Message an Agent', slug: 'message-an-agent', n8nNode: 'MessageAnAgent', group: 'Agent & AI', mapsTo: ['agent'], coverage: 'partial', note: 'Our agent node is the LLM call; no multi-agent messaging.' },
-  { name: 'AI Transform', slug: 'ai-transform', n8nNode: 'AiTransform', group: 'Agent & AI', mapsTo: ['agent'], coverage: 'partial', note: 'LLM-assisted field transform; approximate with an agent node.' },
-  { name: 'Evaluation', slug: 'evaluation', n8nNode: 'Evaluation', group: 'Agent & AI', mapsTo: [], coverage: 'gap', note: 'LLM output evaluation/scoring.' },
+  {
+    name: "Message an Agent",
+    slug: "message-an-agent",
+    n8nNode: "MessageAnAgent",
+    group: "Agent & AI",
+    mapsTo: ["agent"],
+    coverage: "partial",
+    note: "Our agent node is the LLM call; no multi-agent messaging.",
+  },
+  {
+    name: "AI Transform",
+    slug: "ai-transform",
+    n8nNode: "AiTransform",
+    group: "Agent & AI",
+    mapsTo: ["agent"],
+    coverage: "partial",
+    note: "LLM-assisted field transform; approximate with an agent node.",
+  },
+  {
+    name: "Evaluation",
+    slug: "evaluation",
+    n8nNode: "Evaluation",
+    group: "Agent & AI",
+    mapsTo: [],
+    coverage: "gap",
+    note: "LLM output evaluation/scoring.",
+  },
   // ── Human in the loop
-  { name: 'n8n Form', slug: 'form', n8nNode: 'Form', group: 'Human in the loop', mapsTo: ['humanApproval'], coverage: 'partial', note: 'Form collects input mid-run; humanApproval is the closest durable-wait primitive.' },
+  {
+    name: "n8n Form",
+    slug: "form",
+    n8nNode: "Form",
+    group: "Human in the loop",
+    mapsTo: ["humanApproval"],
+    coverage: "partial",
+    note: "Form collects input mid-run; humanApproval is the closest durable-wait primitive.",
+  },
   // ── Data transformation
-  { name: 'Edit Fields (Set)', slug: 'set', n8nNode: 'Set', group: 'Data transformation', mapsTo: [], coverage: 'gap', note: 'No field-mapping/shape node — significant gap.' },
-  { name: 'Item Lists / Split Out / Aggregate', slug: 'item-lists', n8nNode: 'ItemLists', group: 'Data transformation', mapsTo: [], coverage: 'gap', note: 'No item-collection transforms.' },
-  { name: 'Rename Keys', slug: 'rename-keys', n8nNode: 'RenameKeys', group: 'Data transformation', mapsTo: [], coverage: 'gap' },
-  { name: 'Compare Datasets', slug: 'compare-datasets', n8nNode: 'CompareDatasets', group: 'Data transformation', mapsTo: [], coverage: 'gap' },
-  { name: 'Date & Time', slug: 'date-time', n8nNode: 'DateTime', group: 'Data transformation', mapsTo: [], coverage: 'gap', note: 'No date manipulation helper.' },
-  { name: 'Markdown', slug: 'markdown', n8nNode: 'Markdown', group: 'Data transformation', mapsTo: [], coverage: 'gap', note: 'Markdown<->HTML conversion.' },
-  { name: 'HTML', slug: 'html', n8nNode: 'Html', group: 'Data transformation', mapsTo: [], coverage: 'gap', note: 'HTML template/extract.' },
-  { name: 'HTML Extract (legacy)', slug: 'html-extract', n8nNode: 'HtmlExtract', group: 'Data transformation', mapsTo: [], coverage: 'gap' },
-  { name: 'XML', slug: 'xml', n8nNode: 'Xml', group: 'Data transformation', mapsTo: [], coverage: 'gap', note: 'XML<->JSON conversion.' },
-  { name: 'Transform', slug: 'transform', n8nNode: 'Transform', group: 'Data transformation', mapsTo: [], coverage: 'gap', note: 'Generic item transform.' },
-  { name: 'Data Table', slug: 'data-table', n8nNode: 'DataTable', group: 'Data transformation', mapsTo: [], coverage: 'gap', note: "n8n's built-in row store; sqlQuery targets external DBs instead." },
+  {
+    name: "Edit Fields (Set)",
+    slug: "set",
+    n8nNode: "Set",
+    group: "Data transformation",
+    mapsTo: ["set"],
+    coverage: "covered",
+    note: "set node — builds an object from static fields + upstream bindings (replace-only).",
+  },
+  {
+    name: "Item Lists / Split Out / Aggregate",
+    slug: "item-lists",
+    n8nNode: "ItemLists",
+    group: "Data transformation",
+    mapsTo: [],
+    coverage: "gap",
+    note: "No item-collection transforms.",
+  },
+  {
+    name: "Rename Keys",
+    slug: "rename-keys",
+    n8nNode: "RenameKeys",
+    group: "Data transformation",
+    mapsTo: [],
+    coverage: "gap",
+  },
+  {
+    name: "Compare Datasets",
+    slug: "compare-datasets",
+    n8nNode: "CompareDatasets",
+    group: "Data transformation",
+    mapsTo: [],
+    coverage: "gap",
+  },
+  {
+    name: "Date & Time",
+    slug: "date-time",
+    n8nNode: "DateTime",
+    group: "Data transformation",
+    mapsTo: [],
+    coverage: "gap",
+    note: "No date manipulation helper.",
+  },
+  {
+    name: "Markdown",
+    slug: "markdown",
+    n8nNode: "Markdown",
+    group: "Data transformation",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Markdown<->HTML conversion.",
+  },
+  {
+    name: "HTML",
+    slug: "html",
+    n8nNode: "Html",
+    group: "Data transformation",
+    mapsTo: [],
+    coverage: "gap",
+    note: "HTML template/extract.",
+  },
+  {
+    name: "HTML Extract (legacy)",
+    slug: "html-extract",
+    n8nNode: "HtmlExtract",
+    group: "Data transformation",
+    mapsTo: [],
+    coverage: "gap",
+  },
+  {
+    name: "XML",
+    slug: "xml",
+    n8nNode: "Xml",
+    group: "Data transformation",
+    mapsTo: [],
+    coverage: "gap",
+    note: "XML<->JSON conversion.",
+  },
+  {
+    name: "Transform",
+    slug: "transform",
+    n8nNode: "Transform",
+    group: "Data transformation",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Generic item transform.",
+  },
+  {
+    name: "Data Table",
+    slug: "data-table",
+    n8nNode: "DataTable",
+    group: "Data transformation",
+    mapsTo: [],
+    coverage: "gap",
+    note: "n8n's built-in row store; sqlQuery targets external DBs instead.",
+  },
   // ── Code & scripting
-  { name: 'Code', slug: 'code', n8nNode: 'Code', group: 'Code & scripting', mapsTo: [], coverage: 'gap', note: 'No sandboxed inline code node — deliberate (determinism); would need a sandboxed activity.' },
-  { name: 'Function (legacy)', slug: 'function', n8nNode: 'Function', group: 'Code & scripting', mapsTo: [], coverage: 'gap', note: 'Legacy code node.' },
-  { name: 'Function Item (legacy)', slug: 'function-item', n8nNode: 'FunctionItem', group: 'Code & scripting', mapsTo: [], coverage: 'gap', note: 'Legacy per-item code node.' },
+  {
+    name: "Code",
+    slug: "code",
+    n8nNode: "Code",
+    group: "Code & scripting",
+    mapsTo: [],
+    coverage: "gap",
+    note: "No sandboxed inline code node — deliberate (determinism); would need a sandboxed activity.",
+  },
+  {
+    name: "Function (legacy)",
+    slug: "function",
+    n8nNode: "Function",
+    group: "Code & scripting",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Legacy code node.",
+  },
+  {
+    name: "Function Item (legacy)",
+    slug: "function-item",
+    n8nNode: "FunctionItem",
+    group: "Code & scripting",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Legacy per-item code node.",
+  },
   // ── Files & binary
-  { name: 'Read/Write Files from Disk', slug: 'files', n8nNode: 'Files', group: 'Files & binary', mapsTo: [], coverage: 'gap', note: 'Local disk I/O; large payloads should go to object storage per CLAUDE.md.' },
-  { name: 'Read Binary File', slug: 'read-binary-file', n8nNode: 'ReadBinaryFile', group: 'Files & binary', mapsTo: [], coverage: 'gap' },
-  { name: 'Read Binary Files', slug: 'read-binary-files', n8nNode: 'ReadBinaryFiles', group: 'Files & binary', mapsTo: [], coverage: 'gap' },
-  { name: 'Write Binary File', slug: 'write-binary-file', n8nNode: 'WriteBinaryFile', group: 'Files & binary', mapsTo: [], coverage: 'gap' },
-  { name: 'Convert to/from Binary Data', slug: 'move-binary-data', n8nNode: 'MoveBinaryData', group: 'Files & binary', mapsTo: [], coverage: 'gap' },
-  { name: 'Spreadsheet File (CSV/XLSX)', slug: 'spreadsheet-file', n8nNode: 'SpreadsheetFile', group: 'Files & binary', mapsTo: [], coverage: 'gap', note: 'CSV/XLSX parse+generate.' },
-  { name: 'Read PDF', slug: 'read-pdf', n8nNode: 'ReadPdf', group: 'Files & binary', mapsTo: [], coverage: 'gap' },
-  { name: 'Edit Image', slug: 'edit-image', n8nNode: 'EditImage', group: 'Files & binary', mapsTo: [], coverage: 'gap' },
-  { name: 'Compression', slug: 'compression', n8nNode: 'Compression', group: 'Files & binary', mapsTo: [], coverage: 'gap', note: 'Zip/unzip.' },
-  { name: 'iCalendar', slug: 'i-calendar', n8nNode: 'ICalendar', group: 'Files & binary', mapsTo: [], coverage: 'gap', note: 'Generate .ics files.' },
+  {
+    name: "Read/Write Files from Disk",
+    slug: "files",
+    n8nNode: "Files",
+    group: "Files & binary",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Local disk I/O; large payloads should go to object storage per CLAUDE.md.",
+  },
+  {
+    name: "Read Binary File",
+    slug: "read-binary-file",
+    n8nNode: "ReadBinaryFile",
+    group: "Files & binary",
+    mapsTo: [],
+    coverage: "gap",
+  },
+  {
+    name: "Read Binary Files",
+    slug: "read-binary-files",
+    n8nNode: "ReadBinaryFiles",
+    group: "Files & binary",
+    mapsTo: [],
+    coverage: "gap",
+  },
+  {
+    name: "Write Binary File",
+    slug: "write-binary-file",
+    n8nNode: "WriteBinaryFile",
+    group: "Files & binary",
+    mapsTo: [],
+    coverage: "gap",
+  },
+  {
+    name: "Convert to/from Binary Data",
+    slug: "move-binary-data",
+    n8nNode: "MoveBinaryData",
+    group: "Files & binary",
+    mapsTo: [],
+    coverage: "gap",
+  },
+  {
+    name: "Spreadsheet File (CSV/XLSX)",
+    slug: "spreadsheet-file",
+    n8nNode: "SpreadsheetFile",
+    group: "Files & binary",
+    mapsTo: [],
+    coverage: "gap",
+    note: "CSV/XLSX parse+generate.",
+  },
+  {
+    name: "Read PDF",
+    slug: "read-pdf",
+    n8nNode: "ReadPdf",
+    group: "Files & binary",
+    mapsTo: [],
+    coverage: "gap",
+  },
+  {
+    name: "Edit Image",
+    slug: "edit-image",
+    n8nNode: "EditImage",
+    group: "Files & binary",
+    mapsTo: [],
+    coverage: "gap",
+  },
+  {
+    name: "Compression",
+    slug: "compression",
+    n8nNode: "Compression",
+    group: "Files & binary",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Zip/unzip.",
+  },
+  {
+    name: "iCalendar",
+    slug: "i-calendar",
+    n8nNode: "ICalendar",
+    group: "Files & binary",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Generate .ics files.",
+  },
   // ── Communication
-  { name: 'Send Email (SMTP)', slug: 'email-send', n8nNode: 'EmailSend', group: 'Communication', mapsTo: [], coverage: 'gap', note: 'Outbound SMTP; could be a dedicated node or via MCP/httpRequest.' },
-  { name: 'RSS Read', slug: 'rss-feed-read', n8nNode: 'RssFeedRead', group: 'Communication', mapsTo: [], coverage: 'gap', note: 'Fetch/parse RSS.' },
+  {
+    name: "Send Email (SMTP)",
+    slug: "email-send",
+    n8nNode: "EmailSend",
+    group: "Communication",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Outbound SMTP; could be a dedicated node or via MCP/httpRequest.",
+  },
+  {
+    name: "RSS Read",
+    slug: "rss-feed-read",
+    n8nNode: "RssFeedRead",
+    group: "Communication",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Fetch/parse RSS.",
+  },
   // ── Utility & security
-  { name: 'Crypto', slug: 'crypto', n8nNode: 'Crypto', group: 'Utility & security', mapsTo: [], coverage: 'gap', note: 'Hash/HMAC/sign helpers.' },
-  { name: 'JWT', slug: 'jwt', n8nNode: 'Jwt', group: 'Utility & security', mapsTo: [], coverage: 'gap', note: 'JWT sign/verify.' },
-  { name: 'TOTP', slug: 'totp', n8nNode: 'Totp', group: 'Utility & security', mapsTo: [], coverage: 'gap', note: 'TOTP code generation.' },
-  { name: 'SSH', slug: 'ssh', n8nNode: 'Ssh', group: 'Utility & security', mapsTo: [], coverage: 'gap', note: 'Remote command over SSH.' },
-  { name: 'Execute Command', slug: 'execute-command', n8nNode: 'ExecuteCommand', group: 'Utility & security', mapsTo: [], coverage: 'gap', note: 'Shell exec on the host; disallowed by our activity model.' },
+  {
+    name: "Crypto",
+    slug: "crypto",
+    n8nNode: "Crypto",
+    group: "Utility & security",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Hash/HMAC/sign helpers.",
+  },
+  {
+    name: "JWT",
+    slug: "jwt",
+    n8nNode: "Jwt",
+    group: "Utility & security",
+    mapsTo: [],
+    coverage: "gap",
+    note: "JWT sign/verify.",
+  },
+  {
+    name: "TOTP",
+    slug: "totp",
+    n8nNode: "Totp",
+    group: "Utility & security",
+    mapsTo: [],
+    coverage: "gap",
+    note: "TOTP code generation.",
+  },
+  {
+    name: "SSH",
+    slug: "ssh",
+    n8nNode: "Ssh",
+    group: "Utility & security",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Remote command over SSH.",
+  },
+  {
+    name: "Execute Command",
+    slug: "execute-command",
+    n8nNode: "ExecuteCommand",
+    group: "Utility & security",
+    mapsTo: [],
+    coverage: "gap",
+    note: "Shell exec on the host; disallowed by our activity model.",
+  },
   // ── Internal / dev-only
-  { name: 'DebugHelper', slug: 'debug-helper', n8nNode: 'DebugHelper', group: 'Internal / dev-only', mapsTo: [], coverage: 'na', note: 'n8n dev/test helper.' },
-  { name: 'Simulate', slug: 'simulate', n8nNode: 'Simulate', group: 'Internal / dev-only', mapsTo: [], coverage: 'na', note: 'Test scaffolding node.' },
-  { name: 'E2E Test', slug: 'e-2e-test', n8nNode: 'E2eTest', group: 'Internal / dev-only', mapsTo: [], coverage: 'na', note: "n8n's own e2e test node." },
-  { name: 'Dynamic Credential Check', slug: 'dynamic-credential-check', n8nNode: 'DynamicCredentialCheck', group: 'Internal / dev-only', mapsTo: [], coverage: 'na', note: 'Internal credential test.' },
-  { name: 'Execution Data', slug: 'execution-data', n8nNode: 'ExecutionData', group: 'Internal / dev-only', mapsTo: [], coverage: 'na', note: 'Annotate execution metadata.' },
-  { name: 'Time Saved', slug: 'time-saved', n8nNode: 'TimeSaved', group: 'Internal / dev-only', mapsTo: [], coverage: 'na', note: 'Internal metrics node.' },
-  { name: 'Customer Datastore (training)', slug: 'n-8n-training-customer-datastore', n8nNode: 'N8nTrainingCustomerDatastore', group: 'Internal / dev-only', mapsTo: [], coverage: 'na', note: 'Tutorial/training node.' },
-  { name: 'Customer Messenger (training)', slug: 'n-8n-training-customer-messenger', n8nNode: 'N8nTrainingCustomerMessenger', group: 'Internal / dev-only', mapsTo: [], coverage: 'na', note: 'Tutorial/training node.' },
+  {
+    name: "DebugHelper",
+    slug: "debug-helper",
+    n8nNode: "DebugHelper",
+    group: "Internal / dev-only",
+    mapsTo: [],
+    coverage: "na",
+    note: "n8n dev/test helper.",
+  },
+  {
+    name: "Simulate",
+    slug: "simulate",
+    n8nNode: "Simulate",
+    group: "Internal / dev-only",
+    mapsTo: [],
+    coverage: "na",
+    note: "Test scaffolding node.",
+  },
+  {
+    name: "E2E Test",
+    slug: "e-2e-test",
+    n8nNode: "E2eTest",
+    group: "Internal / dev-only",
+    mapsTo: [],
+    coverage: "na",
+    note: "n8n's own e2e test node.",
+  },
+  {
+    name: "Dynamic Credential Check",
+    slug: "dynamic-credential-check",
+    n8nNode: "DynamicCredentialCheck",
+    group: "Internal / dev-only",
+    mapsTo: [],
+    coverage: "na",
+    note: "Internal credential test.",
+  },
+  {
+    name: "Execution Data",
+    slug: "execution-data",
+    n8nNode: "ExecutionData",
+    group: "Internal / dev-only",
+    mapsTo: [],
+    coverage: "na",
+    note: "Annotate execution metadata.",
+  },
+  {
+    name: "Time Saved",
+    slug: "time-saved",
+    n8nNode: "TimeSaved",
+    group: "Internal / dev-only",
+    mapsTo: [],
+    coverage: "na",
+    note: "Internal metrics node.",
+  },
+  {
+    name: "Customer Datastore (training)",
+    slug: "n-8n-training-customer-datastore",
+    n8nNode: "N8nTrainingCustomerDatastore",
+    group: "Internal / dev-only",
+    mapsTo: [],
+    coverage: "na",
+    note: "Tutorial/training node.",
+  },
+  {
+    name: "Customer Messenger (training)",
+    slug: "n-8n-training-customer-messenger",
+    n8nNode: "N8nTrainingCustomerMessenger",
+    group: "Internal / dev-only",
+    mapsTo: [],
+    coverage: "na",
+    note: "Tutorial/training node.",
+  },
   // ── Organization
-  { name: 'Sticky Note', slug: 'sticky-note', n8nNode: 'StickyNote', group: 'Organization', mapsTo: [], coverage: 'na', note: 'Editor-only canvas annotation; no runtime behavior.' },
+  {
+    name: "Sticky Note",
+    slug: "sticky-note",
+    n8nNode: "StickyNote",
+    group: "Organization",
+    mapsTo: [],
+    coverage: "na",
+    note: "Editor-only canvas annotation; no runtime behavior.",
+  },
 ];
 
 /** Capabilities n8n has as first-class nodes that our DSL lacks (excludes 'na'). */
 export function dslGaps(): CoreNodeType[] {
-  return N8N_CORE_NODE_TYPES.filter((n) => n.coverage === 'gap');
+  return N8N_CORE_NODE_TYPES.filter((n) => n.coverage === "gap");
 }
 
 /** Coverage rollup across the core node types. */
 export function coverageSummary(): Record<Coverage, number> {
-  return N8N_CORE_NODE_TYPES.reduce(
-    (acc, n) => ((acc[n.coverage] += 1), acc),
-    { covered: 0, partial: 0, gap: 0, na: 0 } as Record<Coverage, number>,
-  );
+  return N8N_CORE_NODE_TYPES.reduce((acc, n) => ((acc[n.coverage] += 1), acc), {
+    covered: 0,
+    partial: 0,
+    gap: 0,
+    na: 0,
+  } as Record<Coverage, number>);
 }

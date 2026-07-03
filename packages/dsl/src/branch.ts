@@ -72,12 +72,24 @@ export function validateGraph(graph: GraphDef): GraphValidation {
       error: `startNodeId '${graph.startNodeId}' is not a node`,
     };
   }
+  // Merge (fan-in join) supports UNCONDITIONAL inbound only: a conditional edge into
+  // a merge could fail to fire, stranding the join (it would wait for a branch that
+  // never arrives). Reject it here so the footgun can't reach a run (v1 limitation).
+  const mergeIds = new Set(
+    graph.nodes.filter((n) => n.type === "merge").map((n) => n.id),
+  );
   for (const edge of graph.edges) {
     if (!ids.has(edge.from)) {
       return { valid: false, error: `edge.from '${edge.from}' is not a node` };
     }
     if (!ids.has(edge.to)) {
       return { valid: false, error: `edge.to '${edge.to}' is not a node` };
+    }
+    if (edge.condition && mergeIds.has(edge.to)) {
+      return {
+        valid: false,
+        error: `conditional edge into merge node '${edge.to}' is not supported (merge requires unconditional fan-in)`,
+      };
     }
   }
   return { valid: true };
