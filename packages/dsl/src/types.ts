@@ -11,7 +11,9 @@ export type NodeType =
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}
   | "sqlQuery" // runs a read-only query against a tenant DB; output is {rows,rowCount}
   | "set" // builds a plain object from static fields + upstream bindings (pure, no I/O)
-  | "executeSubWorkflow" // runs another saved graph as a child run; output is {status,ctx}
+  | "executeSubWorkflow" // runs another saved graph as a child run; output is {status,output}
+  | "wait" // durable delay (Temporal timer); no output
+  | "stopAndError" // terminal: fail the run with a message
   | "humanApproval"
   | "end";
 
@@ -163,6 +165,26 @@ export interface ExecuteSubWorkflowNodeConfig {
   input?: Record<string, unknown>;
   /** dotted input path → upstream output binding; fills/overrides that path. */
   inputBindings?: Record<string, ArgBinding>;
+}
+
+/**
+ * Wait node — pause the run for a fixed duration, then continue. Backed by a
+ * durable Temporal timer (`wf.sleep`), so the pause survives worker crashes and
+ * costs nothing while waiting — never a busy-loop (CLAUDE.md rule 5). No output.
+ */
+export interface WaitNodeConfig {
+  /** How long to pause, in seconds. <= 0 / omitted = no wait (pass through). */
+  durationSeconds?: number;
+}
+
+/**
+ * Stop and Error node — terminate the run as a failure with a message. Terminal:
+ * nothing downstream runs. The message is static, non-secret display text (it
+ * surfaces in the run's history/timeline).
+ */
+export interface StopAndErrorNodeConfig {
+  /** Shown as the run's failure reason. */
+  message?: string;
 }
 
 /**

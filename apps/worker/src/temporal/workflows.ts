@@ -21,6 +21,8 @@ import type {
   NodeDef,
   SetNodeConfig,
   SqlQueryNodeConfig,
+  StopAndErrorNodeConfig,
+  WaitNodeConfig,
 } from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
 // Do NOT drop `type` — that would pull I/O code into the sandbox.
@@ -335,6 +337,27 @@ export async function runGraph(
         }
         ctx[node.id] = { status: result.status, output };
         return null;
+      }
+      case "wait": {
+        // Durable delay via a Temporal timer — survives crashes, costs nothing
+        // while waiting, and replays deterministically (no wall-clock, no
+        // sleep-loop). Skip a non-positive duration so the node just passes through.
+        const waitCfg = node.config as unknown as WaitNodeConfig;
+        const secs = waitCfg.durationSeconds ?? 0;
+        if (secs > 0) await wf.sleep(secs * 1000);
+        return null;
+      }
+      case "stopAndError": {
+        // Terminal failure: throw a non-retryable ApplicationFailure so the run
+        // ends as FAILED (surfaced in the Runs list + timeline) rather than
+        // burning Temporal task retries. The message is static, non-secret text.
+        const errCfg = node.config as unknown as StopAndErrorNodeConfig;
+        throw wf.ApplicationFailure.nonRetryable(
+          errCfg.message && errCfg.message.trim()
+            ? errCfg.message
+            : "Workflow stopped by a Stop and Error node",
+          "STOP_AND_ERROR",
+        );
       }
       case "humanApproval": {
         status = "awaiting_approval";

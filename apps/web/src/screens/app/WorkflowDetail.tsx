@@ -31,6 +31,8 @@ const ACCENT: Record<NodeType, string> = {
   sqlQuery: "var(--node-sql, #b06fd6)",
   set: "var(--node-set, #d98a3d)",
   executeSubWorkflow: "var(--node-subflow, #5b8def)",
+  wait: "var(--node-wait, #8a8f98)",
+  stopAndError: "var(--node-error, #d6584f)",
   humanApproval: "var(--node-approval)",
   end: "var(--node-end)",
 };

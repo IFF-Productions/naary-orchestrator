@@ -86,6 +86,8 @@ const ACCENT: Record<NodeType, string> = {
   sqlQuery: "var(--node-sql, #b06fd6)",
   set: "var(--node-set, #d98a3d)",
   executeSubWorkflow: "var(--node-subflow, #5b8def)",
+  wait: "var(--node-wait, #8a8f98)",
+  stopAndError: "var(--node-error, #d6584f)",
   humanApproval: "var(--node-approval)",
   end: "var(--node-end)",
 };
@@ -195,6 +197,14 @@ function nodeSubtitle(
   if (kind === "executeSubWorkflow") {
     const key = config.workflowKey as string | undefined;
     return key ? `↳ ${key}` : undefined;
+  }
+  if (kind === "wait") {
+    const secs = config.durationSeconds as number | undefined;
+    return secs && secs > 0 ? `${secs}s` : undefined;
+  }
+  if (kind === "stopAndError") {
+    const msg = config.message as string | undefined;
+    return msg ? msg.slice(0, 32) : undefined;
   }
   return undefined;
 }
@@ -1381,6 +1391,48 @@ function ConfigPanel({
           />
           <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
             Leave input empty to forward this run's trigger input to the child.
+          </div>
+        </>
+      )}
+
+      {kind === "wait" && (
+        <>
+          <Labeled label="Wait (seconds)">
+            <input
+              type="number"
+              min={0}
+              value={num("durationSeconds") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  durationSeconds: e.target.value
+                    ? Number(e.target.value)
+                    : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="0"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+            Pauses the run with a durable timer — it survives restarts and costs
+            nothing while waiting.
+          </div>
+        </>
+      )}
+
+      {kind === "stopAndError" && (
+        <>
+          <Labeled label="Error message">
+            <input
+              value={str("message")}
+              onChange={(e) => onChange({ message: e.target.value })}
+              style={inputStyle}
+              placeholder="Stopped: unexpected input"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+            Ends the run as <strong>failed</strong> with this message. Nothing
+            downstream runs.
           </div>
         </>
       )}

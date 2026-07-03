@@ -218,6 +218,38 @@ const subParentGraph: GraphDef = {
   ],
 };
 
+// webhook → wait → end. A tiny durable delay, then completes.
+const waitGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    { id: "pause", type: "wait", config: { durationSeconds: 0.05 } },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "pause" },
+    { from: "pause", to: "end" },
+  ],
+};
+
+// webhook → stopAndError. The node throws → the run fails at the Temporal level.
+const stopGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "boom",
+      type: "stopAndError",
+      config: { message: "halt: bad input" },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "boom" },
+    { from: "boom", to: "end" },
+  ],
+};
+
 let env: TestWorkflowEnvironment;
 
 beforeAll(async () => {
@@ -569,6 +601,40 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       expect((result.ctx.sub as { status: string }).status).toBe(
         "invalid_graph",
       );
+    });
+  });
+
+  it("wait: pauses on a durable timer, then completes", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [waitGraph, { hi: 1 }, { tenantId: "t-wait" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-wait",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+    });
+  });
+
+  it("stopAndError: fails the run at the Temporal level with the configured message", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [stopGraph, {}, { tenantId: "t-stop" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-stop",
+      });
+      // The node throws a non-retryable ApplicationFailure → the workflow FAILS
+      // (result() rejects). The configured message rides in the underlying
+      // ApplicationFailure (WorkflowFailedError.cause), not the top-level error.
+      const err = await handle.result().then(
+        () => {
+          throw new Error("expected the run to fail");
+        },
+        (e: unknown) => e as { cause?: { message?: string } },
+      );
+      expect(err.cause?.message).toMatch(/halt: bad input/);
     });
   });
 
