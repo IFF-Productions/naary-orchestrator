@@ -84,6 +84,7 @@ const ACCENT: Record<NodeType, string> = {
   mcpTool: "var(--node-mcp)",
   httpRequest: "var(--node-http, #2f9e8f)",
   sqlQuery: "var(--node-sql, #b06fd6)",
+  set: "var(--node-set, #d98a3d)",
   humanApproval: "var(--node-approval)",
   end: "var(--node-end)",
 };
@@ -181,6 +182,14 @@ function nodeSubtitle(
       : undefined;
     if (conn && snippet) return `${conn} · ${snippet}`;
     return conn || snippet || undefined;
+  }
+  if (kind === "set") {
+    const fields = (config.fields as Record<string, unknown> | undefined) ?? {};
+    const binds =
+      (config.fieldBindings as Record<string, unknown> | undefined) ?? {};
+    const keys = new Set([...Object.keys(fields), ...Object.keys(binds)]);
+    const n = keys.size;
+    return n ? `${n} field${n === 1 ? "" : "s"}` : undefined;
   }
   return undefined;
 }
@@ -1306,6 +1315,31 @@ function ConfigPanel({
               placeholder="0.00"
             />
           </Labeled>
+        </>
+      )}
+
+      {kind === "set" && (
+        <>
+          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+            Builds a plain object passed downstream. The output <em>is</em> this
+            object — bindings fill/override fields from upstream outputs. Read a
+            field later as <code>{node.id}.fieldName</code>.
+          </div>
+
+          <BindingsEditor
+            bindings={
+              obj("fieldBindings") as Record<string, BindingRow> | undefined
+            }
+            upstreamIds={upstreamIds}
+            onChange={(v) => onChange({ fieldBindings: v })}
+          />
+
+          <JsonField
+            label="Static fields (JSON)"
+            value={obj("fields")}
+            placeholder={'{\n  "status": "reviewed"\n}'}
+            onChange={(v) => onChange({ fields: v })}
+          />
         </>
       )}
 

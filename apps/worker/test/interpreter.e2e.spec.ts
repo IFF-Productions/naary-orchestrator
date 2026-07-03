@@ -139,6 +139,28 @@ const sqlGraph: GraphDef = {
   ],
 };
 
+// webhook → set → end. The set node builds an object from static fields + a
+// binding to the trigger output; its output IS that object (replace-only).
+const setGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "shape",
+      type: "set",
+      config: {
+        fields: { status: "reviewed" },
+        fieldBindings: { userId: { from: "trigger", path: "userId" } },
+      },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "shape" },
+    { from: "shape", to: "end" },
+  ],
+};
+
 let env: TestWorkflowEnvironment;
 
 beforeAll(async () => {
@@ -388,6 +410,21 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       const call = sqlCalls[sqlCalls.length - 1];
       expect(call.sql).toBe("SELECT id, email FROM users WHERE id = $1");
       expect(call.params).toEqual([7]);
+    });
+  });
+
+  it("set: builds its output object from static fields + upstream bindings (pure, no activity)", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [setGraph, { userId: "u-42" }, { tenantId: "t-set" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-set",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      // output IS the built object; the binding filled userId from the trigger
+      expect(result.ctx.shape).toEqual({ status: "reviewed", userId: "u-42" });
     });
   });
 
