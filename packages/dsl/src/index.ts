@@ -14,6 +14,12 @@ export { resolveSqlQuery, type ResolvedSqlQuery } from "./sql-query";
 export { resolveSet } from "./set-node";
 export { resolveRenameKeys } from "./rename-keys";
 export { resolveSubWorkflowInput } from "./sub-workflow";
+export {
+  resolveHmac,
+  resolveJwt,
+  type ResolvedHmac,
+  type ResolvedJwt,
+} from "./signing";
 export { walk } from "./walk";
 export { canonicalize } from "./canonical";
 export {

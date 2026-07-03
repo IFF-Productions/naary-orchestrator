@@ -10,7 +10,9 @@ import {
 } from "class-validator";
 import type { CreateConnectionInput } from "@naary/connections";
 
-const DB_TYPES = ["postgres", "mssql"];
+// Types whose serverUrl is a NON-SECRET display label (host / name), not an https
+// URL — the real secret (DSN / signing key) rides in `token`.
+const NON_URL_TYPES = ["postgres", "mssql", "signing"];
 
 /**
  * serverUrl is validated by connection kind:
@@ -24,7 +26,7 @@ class ConnectionServerUrlConstraint implements ValidatorConstraintInterface {
   validate(value: unknown, args: ValidationArguments): boolean {
     if (typeof value !== "string" || value.length === 0) return false;
     const type = (args.object as { type?: string }).type;
-    if (type && DB_TYPES.includes(type)) return true;
+    if (type && NON_URL_TYPES.includes(type)) return true;
     try {
       return new URL(value).protocol === "https:";
     } catch {
@@ -37,7 +39,7 @@ class ConnectionServerUrlConstraint implements ValidatorConstraintInterface {
 }
 
 export class CreateConnectionDto implements CreateConnectionInput {
-  @IsIn(["atlassian", "github", "custom", "postgres", "mssql"])
+  @IsIn(["atlassian", "github", "custom", "postgres", "mssql", "signing"])
   type!: CreateConnectionInput["type"];
 
   @IsString()

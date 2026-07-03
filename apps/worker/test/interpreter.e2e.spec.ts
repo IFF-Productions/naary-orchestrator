@@ -82,9 +82,31 @@ const mockActivities = {
       meta.workflowKey === "reject-flow" ? subRejectChildGraph : subChildGraph;
     return { graph, contentHash: "child-hash", version: 1 };
   },
+  callHmac: async (
+    cfg: activities.ResolvedHmac,
+    _input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.HmacResult> => {
+    hmacCalls.push(cfg);
+    return {
+      status: "ok",
+      digest: `digest(${JSON.stringify(cfg.payload)})`,
+      costUsd: 0,
+    };
+  },
+  callJwt: async (
+    cfg: activities.ResolvedJwt,
+    _input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.JwtResult> => {
+    jwtCalls.push(cfg);
+    return { status: "ok", token: "jwt.token.sig", costUsd: 0 };
+  },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
   setExecutionStatus: async (): Promise<void> => undefined, // read-model push; no-op here
 };
+const hmacCalls: activities.ResolvedHmac[] = [];
+const jwtCalls: activities.ResolvedJwt[] = [];
 const subResolveCalls: { tenantId: string; workflowKey: string }[] = [];
 const mcpCalls: activities.McpToolConfig[] = [];
 const httpCalls: activities.HttpRequestConfig[] = [];
@@ -314,6 +336,37 @@ const transformGraph: GraphDef = {
     { from: "trigger", to: "renamed" },
     { from: "renamed", to: "when" },
     { from: "when", to: "end" },
+  ],
+};
+
+// webhook → hmac → jwt → end. Signs the trigger body, then mints a token whose
+// `sub` binds from the trigger. Both resolve their key in-activity (mocked here).
+const signingGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "sig",
+      type: "hmac",
+      config: {
+        connectionId: "sign-1",
+        payloadBinding: { from: "trigger", path: "body" },
+      },
+    },
+    {
+      id: "tok",
+      type: "jwt",
+      config: {
+        connectionId: "sign-1",
+        claimsBindings: { sub: { from: "trigger", path: "userId" } },
+      },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "sig" },
+    { from: "sig", to: "tok" },
+    { from: "tok", to: "end" },
   ],
 };
 
@@ -844,6 +897,35 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       });
       // dateTime: base 1_000_000 + 60s = 1_060_000 ms
       expect(result.ctx.when).toMatchObject({ epochMs: 1_060_000 });
+    });
+  });
+
+  it("hmac + jwt: sign payload then mint a token (keys resolved in-activity)", async () => {
+    hmacCalls.length = 0;
+    jwtCalls.length = 0;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          signingGraph,
+          { body: { amount: 5 }, userId: "u-7" },
+          { tenantId: "t-sign" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-signing",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      // hmac received the RAW bound payload (stringify happens in-activity); output
+      // is just the digest (no key)
+      expect(hmacCalls[0]).toMatchObject({
+        connectionId: "sign-1",
+        payload: { amount: 5 },
+      });
+      expect(result.ctx.sig).toEqual({ digest: 'digest({"amount":5})' });
+      // jwt resolved the `sub` claim from the trigger; output is the token
+      expect(jwtCalls[0].claims).toMatchObject({ sub: "u-7" });
+      expect(result.ctx.tok).toEqual({ token: "jwt.token.sig" });
     });
   });
 

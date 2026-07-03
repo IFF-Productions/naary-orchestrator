@@ -8,7 +8,9 @@ import type {
 import {
   getByPath,
   nextNodes,
+  resolveHmac,
   resolveHttpRequest,
+  resolveJwt,
   resolveMcpArguments,
   resolveRenameKeys,
   resolveSet,
@@ -19,7 +21,9 @@ import type {
   DateTimeNodeConfig,
   ExecuteSubWorkflowNodeConfig,
   GraphDef,
+  HmacNodeConfig,
   HttpRequestNodeConfig,
+  JwtNodeConfig,
   McpToolNodeConfig,
   MergeNodeConfig,
   NodeDef,
@@ -40,6 +44,8 @@ const {
   setExecutionStatus,
   computeDateTime,
   resolveSubWorkflowGraph,
+  callHmac,
+  callJwt,
 } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },
@@ -337,6 +343,28 @@ export async function runGraph(
                 ...inputs.filter((i) => i !== null && typeof i === "object"),
               )
             : inputs;
+        return null;
+      }
+      case "hmac": {
+        // Binding resolution is deterministic (pure ctx read); the key fetch +
+        // signing happen in the activity (the key never enters workflow history).
+        const hmacCfg = node.config as unknown as HmacNodeConfig;
+        const result = await callHmac(resolveHmac(hmacCfg, ctx), ctx.__input, {
+          tenantId: runCtx.tenantId,
+          executionId: wf.workflowInfo().workflowId,
+          nodeId: node.id,
+        });
+        ctx[node.id] = { digest: result.digest };
+        return null;
+      }
+      case "jwt": {
+        const jwtCfg = node.config as unknown as JwtNodeConfig;
+        const result = await callJwt(resolveJwt(jwtCfg, ctx), ctx.__input, {
+          tenantId: runCtx.tenantId,
+          executionId: wf.workflowInfo().workflowId,
+          nodeId: node.id,
+        });
+        ctx[node.id] = { token: result.token };
         return null;
       }
       case "executeSubWorkflow": {
