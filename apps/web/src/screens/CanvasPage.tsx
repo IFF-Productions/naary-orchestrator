@@ -85,6 +85,7 @@ const ACCENT: Record<NodeType, string> = {
   httpRequest: "var(--node-http, #2f9e8f)",
   sqlQuery: "var(--node-sql, #b06fd6)",
   set: "var(--node-set, #d98a3d)",
+  merge: "var(--node-merge, #3fae86)",
   executeSubWorkflow: "var(--node-subflow, #5b8def)",
   wait: "var(--node-wait, #8a8f98)",
   stopAndError: "var(--node-error, #d6584f)",
@@ -193,6 +194,10 @@ function nodeSubtitle(
     const keys = new Set([...Object.keys(fields), ...Object.keys(binds)]);
     const n = keys.size;
     return n ? `${n} field${n === 1 ? "" : "s"}` : undefined;
+  }
+  if (kind === "merge") {
+    const mode = (config.mode as string | undefined) ?? "array";
+    return `join · ${mode}`;
   }
   if (kind === "executeSubWorkflow") {
     const key = config.workflowKey as string | undefined;
@@ -1355,6 +1360,27 @@ function ConfigPanel({
             placeholder={'{\n  "status": "reviewed"\n}'}
             onChange={(v) => onChange({ fields: v })}
           />
+        </>
+      )}
+
+      {kind === "merge" && (
+        <>
+          <Labeled label="Combine mode">
+            <select
+              value={str("mode") || "array"}
+              onChange={(e) => onChange({ mode: e.target.value })}
+              style={inputStyle}
+            >
+              <option value="array">Array — [input1, input2, …]</option>
+              <option value="object">Object — merge fields together</option>
+            </select>
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+            Joins parallel branches: runs once, after <em>all</em> inbound
+            branches arrive, and combines their outputs into{" "}
+            <code>{node.id}</code>. Inbound edges must be unconditional (no
+            branch conditions into a merge).
+          </div>
         </>
       )}
 

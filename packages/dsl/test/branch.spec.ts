@@ -126,4 +126,41 @@ describe("validateGraph", () => {
       }).valid,
     ).toBe(false);
   });
+
+  it("accepts unconditional fan-in into a merge node", () => {
+    const diamond: GraphDef = {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        { id: "a", type: "set" },
+        { id: "b", type: "set" },
+        { id: "m", type: "merge" },
+      ],
+      edges: [
+        { from: "s", to: "a" },
+        { from: "s", to: "b" },
+        { from: "a", to: "m" },
+        { from: "b", to: "m" },
+      ],
+    };
+    expect(validateGraph(diamond).valid).toBe(true);
+  });
+
+  it("rejects a conditional edge into a merge node (v1 fan-in must be unconditional)", () => {
+    const bad: GraphDef = {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        { id: "a", type: "set" },
+        { id: "m", type: "merge" },
+      ],
+      edges: [
+        { from: "s", to: "a" },
+        { from: "a", to: "m", condition: { path: "a.ok", op: "exists" } },
+      ],
+    };
+    const res = validateGraph(bad);
+    expect(res.valid).toBe(false);
+    expect(res.error).toMatch(/merge/);
+  });
 });

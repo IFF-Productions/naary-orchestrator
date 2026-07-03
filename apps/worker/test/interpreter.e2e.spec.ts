@@ -250,6 +250,35 @@ const stopGraph: GraphDef = {
   ],
 };
 
+// Diamond join: trigger fans out (unconditional) to two set nodes, both feed a
+// merge, then a single agent runs downstream. Proves the merge runs ONCE and its
+// downstream isn't duplicated.
+function diamondGraph(mode: "array" | "object"): GraphDef {
+  return {
+    startNodeId: "trigger",
+    nodes: [
+      { id: "trigger", type: "webhookTrigger" },
+      { id: "a", type: "set", config: { fields: { a: 1 } } },
+      { id: "b", type: "set", config: { fields: { b: 2 } } },
+      { id: "join", type: "merge", config: { mode } },
+      {
+        id: "after",
+        type: "agent",
+        config: { provider: "anthropic", model: "claude-opus-4-8" },
+      },
+      { id: "end", type: "end" },
+    ],
+    edges: [
+      { from: "trigger", to: "a" },
+      { from: "trigger", to: "b" },
+      { from: "a", to: "join" },
+      { from: "b", to: "join" },
+      { from: "join", to: "after" },
+      { from: "after", to: "end" },
+    ],
+  };
+}
+
 let env: TestWorkflowEnvironment;
 
 beforeAll(async () => {
@@ -635,6 +664,123 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
         (e: unknown) => e as { cause?: { message?: string } },
       );
       expect(err.cause?.message).toMatch(/halt: bad input/);
+    });
+  });
+
+  it("merge (array): joins parallel branches once, combining their outputs in edge order", async () => {
+    const before = agentCalls.filter((c) => c.nodeId === "after").length;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [diamondGraph("array"), {}, { tenantId: "t-merge" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-merge-array",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      // combined output = [parentA, parentB] in declared inbound-edge order
+      expect(result.ctx.join).toEqual([{ a: 1 }, { b: 2 }]);
+      // the post-merge agent ran EXACTLY ONCE — the join didn't duplicate downstream
+      const after = agentCalls.filter((c) => c.nodeId === "after").length;
+      expect(after - before).toBe(1);
+      expect(result.ctx.after).toMatchObject({ status: "ok" });
+    });
+  });
+
+  it("merge (object): combines the inbound parents' outputs into one object", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [diamondGraph("object"), {}, { tenantId: "t-merge-obj" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-merge-object",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(result.ctx.join).toEqual({ a: 1, b: 2 });
+    });
+  });
+
+  it("merge: waits for a genuinely-async inbound branch (agent) before firing", async () => {
+    // One branch runs an agent (real activity await), the other is pure — the join
+    // must wait for the slow branch, not fire on lucky microtask ordering.
+    const asyncDiamond: GraphDef = {
+      startNodeId: "trigger",
+      nodes: [
+        { id: "trigger", type: "webhookTrigger" },
+        {
+          id: "slow",
+          type: "agent",
+          config: { provider: "anthropic", model: "claude-opus-4-8" },
+        },
+        { id: "fast", type: "set", config: { fields: { b: 2 } } },
+        { id: "join", type: "merge", config: { mode: "array" } },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "trigger", to: "slow" },
+        { from: "trigger", to: "fast" },
+        { from: "slow", to: "join" },
+        { from: "fast", to: "join" },
+        { from: "join", to: "end" },
+      ],
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [asyncDiamond, {}, { tenantId: "t-merge-async" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-merge-async",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      // join[0] = the agent branch's output, join[1] = the pure branch's
+      const join = result.ctx.join as unknown[];
+      expect(join[0]).toMatchObject({ status: "ok" });
+      expect(join[1]).toEqual({ b: 2 });
+    });
+  });
+
+  it("merge: a stranded join (one inbound branch gated off upstream) fails invalid_graph, not silent success", async () => {
+    // Both edges INTO the merge are unconditional (validateGraph passes), but a
+    // conditional edge UPSTREAM routes only one branch — so the merge gets 1 of 2
+    // arrivals and never fires. This must NOT report a clean completion.
+    const strandedGraph: GraphDef = {
+      startNodeId: "trigger",
+      nodes: [
+        { id: "trigger", type: "webhookTrigger" },
+        { id: "a", type: "set", config: { fields: { a: 1 } } },
+        { id: "b", type: "set", config: { fields: { b: 2 } } },
+        { id: "join", type: "merge" },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        {
+          from: "trigger",
+          to: "a",
+          condition: { path: "__input.go", op: "eq", value: true },
+        },
+        {
+          from: "trigger",
+          to: "b",
+          condition: { path: "__input.go", op: "eq", value: false },
+        },
+        { from: "a", to: "join" },
+        { from: "b", to: "join" },
+        { from: "join", to: "end" },
+      ],
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [strandedGraph, { go: true }, { tenantId: "t-merge-strand" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-merge-strand",
+      });
+      const result = await handle.result();
+      // only branch A fired → merge stranded at 1/2 → surfaced, not "completed"
+      expect(result.status).toBe("invalid_graph");
+      expect(result.ctx.join).toBeUndefined();
     });
   });
 
