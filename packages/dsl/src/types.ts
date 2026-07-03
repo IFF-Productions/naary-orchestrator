@@ -14,6 +14,8 @@ export type NodeType =
   | "renameKeys" // pure: remap/drop keys of an upstream object
   | "dateTime" // current time / timestamp math via an activity (clock read is I/O)
   | "merge" // fan-in join: run once after all inbound branches arrive; combine outputs
+  | "hmac" // signs a payload with a `signing` connection's key (activity); output is the digest
+  | "jwt" // mints an HS256 JWT signed by a `signing` connection's key (activity)
   | "executeSubWorkflow" // runs another saved graph as a child run; output is {status,output}
   | "wait" // durable delay (Temporal timer); no output
   | "stopAndError" // terminal: fail the run with a message
@@ -197,6 +199,42 @@ export interface DateTimeNodeConfig {
   source?: "now" | ArgBinding;
   /** Seconds to add to the base (may be negative). */
   addSeconds?: number;
+}
+
+/**
+ * HMAC node — sign a payload with a `signing` connection's secret key. The KEY is
+ * never in config (only `connectionId`); it's read + used IN the activity
+ * (CLAUDE.md rule 4). Output is `{ digest }` (the MAC, hex/base64). `payload` is
+ * static; `payloadBinding` overrides it from an upstream output (objects are
+ * JSON-stringified before signing).
+ */
+export interface HmacNodeConfig {
+  /** A `signing` connection; its stored key is read in-activity. */
+  connectionId: string;
+  algorithm?: "sha256" | "sha1";
+  /** Static payload to sign (string, or object → JSON). */
+  payload?: unknown;
+  /** Upstream binding whose value replaces `payload`. */
+  payloadBinding?: ArgBinding;
+  /** Output digest encoding. Default "hex". */
+  encoding?: "hex" | "base64";
+}
+
+/**
+ * JWT node — mint an HS256 JSON Web Token signed by a `signing` connection's key
+ * (read + used IN the activity, never in config). Output is `{ token }`. `claims`
+ * is the static payload; each `claimsBindings` entry fills/overrides a claim from
+ * an upstream output. `iat`/`exp` are set by the signer.
+ */
+export interface JwtNodeConfig {
+  /** A `signing` connection; its stored key is the HS256 secret. */
+  connectionId: string;
+  /** Static claims (the base payload). */
+  claims?: Record<string, unknown>;
+  /** claim path → upstream output binding; fills/overrides that claim. */
+  claimsBindings?: Record<string, ArgBinding>;
+  /** Token lifetime in seconds (sets `exp`). Omitted = no expiry. */
+  expiresInSeconds?: number;
 }
 
 /**

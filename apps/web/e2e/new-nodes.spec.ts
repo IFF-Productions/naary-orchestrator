@@ -18,6 +18,8 @@ const NEW_NODES = [
   { label: "Wait", field: "Wait (seconds)" },
   { label: "Stop & Error", field: "Error message" },
   { label: "Sub-workflow", field: "Sub-workflow key" },
+  { label: "HMAC", field: "Algorithm" },
+  { label: "JWT", field: "Expires in (seconds, optional)" },
 ];
 
 for (const n of NEW_NODES) {

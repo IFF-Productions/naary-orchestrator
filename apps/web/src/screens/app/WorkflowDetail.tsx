@@ -33,6 +33,8 @@ const ACCENT: Record<NodeType, string> = {
   renameKeys: "var(--node-rename, #c9803e)",
   dateTime: "var(--node-datetime, #6f8fd6)",
   merge: "var(--node-merge, #3fae86)",
+  hmac: "var(--node-hmac, #a86fd6)",
+  jwt: "var(--node-jwt, #7a6fd6)",
   executeSubWorkflow: "var(--node-subflow, #5b8def)",
   wait: "var(--node-wait, #8a8f98)",
   stopAndError: "var(--node-error, #d6584f)",

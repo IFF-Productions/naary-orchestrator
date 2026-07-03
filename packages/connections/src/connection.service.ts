@@ -3,7 +3,7 @@ import { SecretStore } from "@naary/secrets";
 import { MissingConnectionTokenError } from "./errors";
 
 export type ConnectionType =
-  "github" | "atlassian" | "custom" | "postgres" | "mssql";
+  "github" | "atlassian" | "custom" | "postgres" | "mssql" | "signing";
 export type AuthMode = "api_token" | "pat" | "oauth" | "connection_string";
 export type ConnectionStatus = "connected" | "needs_reauth" | "error";
 
@@ -137,4 +137,29 @@ export async function resolveDbConnection(
   const dsn = await store.get(tenantId, connectionSecretKey(connectionId));
   if (!dsn) throw new MissingConnectionTokenError(connectionId);
   return { engine: conn.type as DbEngine, dsn };
+}
+
+/**
+ * Resolve a `signing` connection's secret key for the hmac/jwt nodes. Same shape +
+ * invariants as {@link resolveDbConnection}: the key is read here and used
+ * in-activity only — NEVER returned to a caller boundary, logged, or put in
+ * workflow history. Throws if the connection is unknown, not a signing type, or has
+ * no stored key.
+ */
+export async function resolveSigningKey(
+  tenantId: string,
+  connectionId: string,
+  store: SecretStore = new SecretStore(),
+): Promise<string> {
+  const conn = await getPrisma().connection.findFirst({
+    where: { id: connectionId, tenantId },
+    select: { type: true },
+  });
+  if (!conn) throw new Error(`Unknown connection '${connectionId}'`);
+  if (conn.type !== "signing") {
+    throw new Error(`Connection '${connectionId}' is not a signing connection`);
+  }
+  const key = await store.get(tenantId, connectionSecretKey(connectionId));
+  if (!key) throw new MissingConnectionTokenError(connectionId);
+  return key;
 }

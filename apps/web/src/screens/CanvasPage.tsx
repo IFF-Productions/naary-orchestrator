@@ -88,6 +88,8 @@ const ACCENT: Record<NodeType, string> = {
   renameKeys: "var(--node-rename, #c9803e)",
   dateTime: "var(--node-datetime, #6f8fd6)",
   merge: "var(--node-merge, #3fae86)",
+  hmac: "var(--node-hmac, #a86fd6)",
+  jwt: "var(--node-jwt, #7a6fd6)",
   executeSubWorkflow: "var(--node-subflow, #5b8def)",
   wait: "var(--node-wait, #8a8f98)",
   stopAndError: "var(--node-error, #d6584f)",
@@ -208,6 +210,10 @@ function nodeSubtitle(
   if (kind === "dateTime") {
     const src = config.source;
     return src && src !== "now" ? "from upstream" : "now";
+  }
+  if (kind === "hmac" || kind === "jwt") {
+    const conn = config.connectionId as string | undefined;
+    return conn || undefined;
   }
   if (kind === "executeSubWorkflow") {
     const key = config.workflowKey as string | undefined;
@@ -1465,6 +1471,106 @@ function ConfigPanel({
             <code>{node.id}</code>. Inbound edges must be unconditional (no
             branch conditions into a merge).
           </div>
+        </>
+      )}
+
+      {kind === "hmac" && (
+        <>
+          <Labeled label="Signing connection id">
+            <input
+              value={str("connectionId")}
+              onChange={(e) => onChange({ connectionId: e.target.value })}
+              style={inputStyle}
+              placeholder="my-signing-key"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            A <code>signing</code> connection — its key is read server-side,
+            never stored in the graph. Output is <code>{node.id}.digest</code>.
+          </div>
+          <Labeled label="Algorithm">
+            <select
+              value={str("algorithm") || "sha256"}
+              onChange={(e) => onChange({ algorithm: e.target.value })}
+              style={inputStyle}
+            >
+              <option value="sha256">sha256</option>
+              <option value="sha1">sha1</option>
+            </select>
+          </Labeled>
+          <Labeled label="Encoding">
+            <select
+              value={str("encoding") || "hex"}
+              onChange={(e) => onChange({ encoding: e.target.value })}
+              style={inputStyle}
+            >
+              <option value="hex">hex</option>
+              <option value="base64">base64</option>
+            </select>
+          </Labeled>
+          <BindingsEditor
+            bindings={
+              config.payloadBinding
+                ? { payload: config.payloadBinding as BindingRow }
+                : undefined
+            }
+            upstreamIds={upstreamIds}
+            onChange={(v) =>
+              onChange({ payloadBinding: v ? Object.values(v)[0] : undefined })
+            }
+          />
+          <JsonField
+            label="Static payload (JSON, optional)"
+            value={obj("payload")}
+            placeholder={'{\n  "amount": 100\n}'}
+            onChange={(v) => onChange({ payload: v })}
+          />
+        </>
+      )}
+
+      {kind === "jwt" && (
+        <>
+          <Labeled label="Signing connection id">
+            <input
+              value={str("connectionId")}
+              onChange={(e) => onChange({ connectionId: e.target.value })}
+              style={inputStyle}
+              placeholder="my-signing-key"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            HS256, signed by a <code>signing</code> connection's key (read
+            server-side). Output is <code>{node.id}.token</code>.
+          </div>
+          <BindingsEditor
+            bindings={
+              obj("claimsBindings") as Record<string, BindingRow> | undefined
+            }
+            upstreamIds={upstreamIds}
+            onChange={(v) => onChange({ claimsBindings: v })}
+          />
+          <JsonField
+            label="Static claims (JSON)"
+            value={obj("claims")}
+            placeholder={'{\n  "sub": "user-1"\n}'}
+            onChange={(v) => onChange({ claims: v })}
+          />
+          <Labeled label="Expires in (seconds, optional)">
+            <input
+              type="number"
+              min={1}
+              value={num("expiresInSeconds") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  expiresInSeconds: e.target.value
+                    ? Number(e.target.value)
+                    : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="3600"
+            />
+          </Labeled>
         </>
       )}
 

@@ -461,6 +461,7 @@ function AddIntegrations({
     >
       <ConnectForm tenant={tenant} onChanged={onChanged} />
       <DatabaseForm tenant={tenant} onChanged={onChanged} />
+      <SigningForm tenant={tenant} onChanged={onChanged} />
       <WebhookForm tenant={tenant} onChanged={onChanged} />
     </div>
   );
@@ -573,6 +574,90 @@ function DatabaseForm({
           onClick={() => void submit()}
         >
           {busy ? "Connecting…" : "Connect"}
+        </Button>
+        {msg && (
+          <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{msg}</span>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function SigningForm({
+  tenant,
+  onChanged,
+}: {
+  tenant: string;
+  onChanged: () => Promise<void> | void;
+}) {
+  const [label, setLabel] = useState("");
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function submit() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.createConnection(tenant, {
+        type: "signing",
+        label: label.trim(),
+        serverUrl: label.trim(), // non-secret display name (signing keys have no host)
+        authMode: "api_token",
+        token: key.trim(), // the secret signing key (stored encrypted server-side)
+      });
+      setLabel("");
+      setKey("");
+      setMsg("Saved ✓");
+      await onChanged();
+    } catch (e) {
+      setMsg(
+        e instanceof Error && /400/.test(e.message)
+          ? "Check the fields."
+          : "Could not save the signing key.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ready = Boolean(label.trim() && key.trim());
+
+  return (
+    <Card style={{ padding: 16 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>
+        Add a signing key
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <span style={fieldLabel}>Label</span>
+        <input
+          style={fieldStyle}
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="webhook-signing"
+        />
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <span style={fieldLabel}>Signing key (stored encrypted)</span>
+        <input
+          style={fieldStyle}
+          type="password"
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          placeholder="a long random secret"
+        />
+      </div>
+      <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 12 }}>
+        Used by the HMAC and JWT nodes to sign payloads. The key is stored
+        encrypted and never shown again.
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <Button
+          variant="primary"
+          disabled={busy || !ready}
+          onClick={() => void submit()}
+        >
+          {busy ? "Saving…" : "Save"}
         </Button>
         {msg && (
           <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{msg}</span>

@@ -4,11 +4,15 @@
  * in the worker PROCESS, never in the deterministic workflow bundle — workflows.ts
  * imports it type-only.
  */
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { ApplicationFailure } from "@temporalio/activity";
+import { SignJWT } from "jose";
 import { canonicalize } from "@naary/dsl";
-import type { GraphDef } from "@naary/dsl";
+import type { GraphDef, ResolvedHmac, ResolvedJwt } from "@naary/dsl";
+// Re-export so the interpreter e2e can reference these as activities.* (the hmac/
+// jwt activity args are the DSL's Resolved* types).
+export type { ResolvedHmac, ResolvedJwt } from "@naary/dsl";
 import {
   BlockedEgressError,
   MissingConnectionTokenError,
@@ -17,6 +21,7 @@ import {
   callMcpTool as mcpCall,
   resolveAuthHeader,
   resolveDbConnection,
+  resolveSigningKey,
   resolveMcpTarget,
 } from "@naary/connections";
 import { getAdapter } from "@naary/sql";
@@ -206,6 +211,122 @@ export async function resolveSubWorkflowGraph(meta: {
     .update(canonicalize(graph))
     .digest("hex");
   return { graph, contentHash, version: row.version };
+}
+
+// Signing key resolution is the injectable I/O seam for the hmac/jwt activities
+// (swapped in unit tests so no DB/secret store is needed).
+export const __signingDeps = { resolveSigningKey };
+
+/** Map a missing/invalid signing key to a clear non-retryable failure; anything
+ *  else is a sanitized transient (never leaks the key). */
+function toSigningFailure(e: unknown, type: string): ApplicationFailure {
+  if (e instanceof ApplicationFailure) return e;
+  if (
+    e instanceof MissingConnectionTokenError ||
+    e instanceof NeedsReauthError
+  ) {
+    return ApplicationFailure.nonRetryable(
+      "Signing connection has no usable key — reconnect it",
+      "CONNECTION_REAUTH",
+    );
+  }
+  return toSanitizedRetryable(e, type);
+}
+
+export interface HmacResult {
+  status: "ok";
+  digest: string;
+  costUsd: number;
+}
+
+/** Coerce a rehydrated payload to the bytes that get signed (objects → JSON). */
+function toSignedString(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+/**
+ * hmac node — sign the resolved payload with the `signing` connection's key. The
+ * key is read here and used in memory only (never returned/logged/in history). A
+ * bound payload that was claim-checked upstream is rehydrated FIRST, so we sign the
+ * real data, not the `{__claimCheck}` reference (mirrors callSqlQuery/callHttpRequest).
+ */
+export async function callHmac(
+  cfg: ResolvedHmac,
+  _input: unknown,
+  meta: AgentMeta,
+): Promise<HmacResult> {
+  const startedAt = process.hrtime.bigint();
+  try {
+    const store = getObjectStore();
+    const key = await __signingDeps.resolveSigningKey(
+      meta.tenantId,
+      cfg.connectionId,
+    );
+    const payload = toSignedString(
+      await resolveClaimChecks(cfg.payload, store),
+    );
+    const digest = createHmac(cfg.algorithm, key)
+      .update(payload)
+      .digest(cfg.encoding);
+    activityRuns.inc({ activity: "callHmac", outcome: "ok" });
+    activityDuration.observe({ activity: "callHmac" }, secondsSince(startedAt));
+    return { status: "ok", digest, costUsd: 0 };
+  } catch (e) {
+    activityRuns.inc({ activity: "callHmac", outcome: "error" });
+    activityDuration.observe({ activity: "callHmac" }, secondsSince(startedAt));
+    throw toSigningFailure(e, "HMAC_ERROR");
+  }
+}
+
+export interface JwtResult {
+  status: "ok";
+  token: string;
+  costUsd: number;
+}
+
+/**
+ * jwt node — mint an HS256 JWT from the resolved claims, signed by the `signing`
+ * connection's key. `iat` is stamped; `exp` set when `expiresInSeconds` is given.
+ */
+export async function callJwt(
+  cfg: ResolvedJwt,
+  _input: unknown,
+  meta: AgentMeta,
+): Promise<JwtResult> {
+  const startedAt = process.hrtime.bigint();
+  try {
+    const store = getObjectStore();
+    const key = await __signingDeps.resolveSigningKey(
+      meta.tenantId,
+      cfg.connectionId,
+    );
+    // Rehydrate any claim-checked bound claim value before signing (so the token
+    // carries the real data, not a `{__claimCheck}` reference).
+    const claims = (await resolveClaimChecks(cfg.claims, store)) as Record<
+      string,
+      unknown
+    >;
+    const secret = new TextEncoder().encode(key);
+    let signer = new SignJWT(claims)
+      .setProtectedHeader({ alg: "HS256" })
+      .setIssuedAt();
+    if (cfg.expiresInSeconds && cfg.expiresInSeconds > 0) {
+      signer = signer.setExpirationTime(
+        new Date(Date.now() + cfg.expiresInSeconds * 1000),
+      );
+    }
+    const token = await signer.sign(secret);
+    activityRuns.inc({ activity: "callJwt", outcome: "ok" });
+    activityDuration.observe({ activity: "callJwt" }, secondsSince(startedAt));
+    return { status: "ok", token, costUsd: 0 };
+  } catch (e) {
+    activityRuns.inc({ activity: "callJwt", outcome: "error" });
+    activityDuration.observe({ activity: "callJwt" }, secondsSince(startedAt));
+    throw toSigningFailure(e, "JWT_ERROR");
+  }
 }
 
 export interface AgentOutput {
