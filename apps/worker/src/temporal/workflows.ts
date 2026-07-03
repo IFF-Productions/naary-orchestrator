@@ -11,8 +11,10 @@ import {
   resolveMcpArguments,
   resolveSet,
   resolveSqlQuery,
+  resolveSubWorkflowInput,
 } from "@naary/dsl";
 import type {
+  ExecuteSubWorkflowNodeConfig,
   GraphDef,
   HttpRequestNodeConfig,
   McpToolNodeConfig,
@@ -24,11 +26,20 @@ import type {
 // Do NOT drop `type` — that would pull I/O code into the sandbox.
 import type * as activities from "./activities";
 
-const { runAgent, callMcpTool, recordExecution, setExecutionStatus } =
-  wf.proxyActivities<typeof activities>({
-    startToCloseTimeout: "1 minute",
-    retry: { maximumAttempts: 3 },
-  });
+const {
+  runAgent,
+  callMcpTool,
+  recordExecution,
+  setExecutionStatus,
+  resolveSubWorkflowGraph,
+} = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "1 minute",
+  retry: { maximumAttempts: 3 },
+});
+
+/** Max sub-workflow nesting depth (a run at this depth refuses to spawn children).
+ *  Bounds accidental/infinite recursion — a saved graph that calls itself. */
+const MAX_SUBWORKFLOW_DEPTH = 5;
 
 // The HTTP node's request deadline is user-configurable (up to MAX_HTTP_TIMEOUT_MS,
 // clamped in the activity), so it needs a start-to-close strictly ABOVE that cap —
@@ -73,6 +84,10 @@ export interface RunGraphCtx {
   /** Force continueAsNew after this many steps (Slice #6) — deterministic, for
    *  long loops + tests. When unset, only Temporal's continueAsNewSuggested trips. */
   continueAsNewAfterSteps?: number;
+  /** Nesting depth for executeSubWorkflow runs (top-level = 0/undefined). A child
+   *  run is spawned with depth+1; the interpreter refuses to nest past
+   *  MAX_SUBWORKFLOW_DEPTH so a self-referential graph can't recurse forever. */
+  subWorkflowDepth?: number;
 }
 
 /** Carried across continueAsNew so a long/looping run resumes with state intact
@@ -252,6 +267,73 @@ export async function runGraph(
         // Output IS the built object, so edges/nodes read `<nodeId>.<field>`.
         const setCfg = node.config as unknown as SetNodeConfig;
         ctx[node.id] = resolveSet(setCfg, ctx);
+        return null;
+      }
+      case "executeSubWorkflow": {
+        const subCfg = node.config as unknown as ExecuteSubWorkflowNodeConfig;
+        // Recursion guard FIRST — never launch below the nesting cap (a graph that
+        // calls itself would otherwise recurse forever). Reuses the circuit-breaker
+        // terminal status (same "runaway protection tripped" intent).
+        const depth = runCtx.subWorkflowDepth ?? 0;
+        if (depth >= MAX_SUBWORKFLOW_DEPTH) return "circuit_open";
+
+        // Resolve the child input deterministically (pure ctx path-reads). When the
+        // node configures no input, forward the parent's own trigger input.
+        const childInput = resolveSubWorkflowInput(subCfg, ctx) ?? ctx.__input;
+
+        // Fetch + version-snapshot the child graph IN the activity (I/O). Pinning
+        // the hash/version means a later edit to the child can't alter this run.
+        const snapshot = await resolveSubWorkflowGraph({
+          tenantId: runCtx.tenantId,
+          workflowKey: subCfg.workflowKey,
+        });
+
+        // Launch the child as a durable child workflow (deterministic). The id is
+        // deterministic (+stepCount so a looped node spawns distinct children).
+        // Default ParentClosePolicy is TERMINATE — the child dies with the parent.
+        // The child records its own Execution row (recordExecution), so it appears
+        // as its own run in the Runs list. Budget: the child gets the parent's
+        // REMAINING per-execution cap; its cost is metered back below.
+        const result = await wf.executeChild(runGraph, {
+          workflowId: `${wf.workflowInfo().workflowId}-sub-${node.id}-${stepCount}`,
+          args: [
+            snapshot.graph,
+            childInput,
+            {
+              tenantId: runCtx.tenantId,
+              workflowKey: subCfg.workflowKey,
+              perExecutionCapUsd:
+                runCtx.perExecutionCapUsd !== undefined
+                  ? Math.max(0, runCtx.perExecutionCapUsd - costUsd)
+                  : undefined,
+              maxStepsPerRun: runCtx.maxStepsPerRun,
+              graphContentHash: snapshot.contentHash,
+              graphVersion: snapshot.version,
+              subWorkflowDepth: depth + 1,
+            } satisfies RunGraphCtx,
+          ],
+        });
+
+        // Meter child spend into the parent budget (commutative sum, like agent/
+        // mcp/http).
+        const childCost =
+          typeof result.ctx.__costUsd === "number" ? result.ctx.__costUsd : 0;
+        costUsd += childCost;
+        ctx.__costUsd = costUsd;
+
+        // Expose a BOUNDED projection so the parent graph can branch on
+        // `<nodeId>.status` and read child node outputs via `<nodeId>.output.*`.
+        // We deliberately do NOT copy the child's whole ctx verbatim: drop the
+        // internal `__*` bookkeeping (`__input` duplicates the input we passed;
+        // `__costUsd` is already metered above). Each child node output is
+        // individually claim-checked (≤1MB) upstream, and the depth cap bounds
+        // nesting, so this payload — which rides in parent history / the
+        // continueAsNew snapshot — stays bounded (CLAUDE.md: pass refs, not blobs).
+        const output: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(result.ctx)) {
+          if (!k.startsWith("__")) output[k] = v;
+        }
+        ctx[node.id] = { status: result.status, output };
         return null;
       }
       case "humanApproval": {

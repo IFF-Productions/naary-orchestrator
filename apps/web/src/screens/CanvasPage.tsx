@@ -85,6 +85,7 @@ const ACCENT: Record<NodeType, string> = {
   httpRequest: "var(--node-http, #2f9e8f)",
   sqlQuery: "var(--node-sql, #b06fd6)",
   set: "var(--node-set, #d98a3d)",
+  executeSubWorkflow: "var(--node-subflow, #5b8def)",
   humanApproval: "var(--node-approval)",
   end: "var(--node-end)",
 };
@@ -190,6 +191,10 @@ function nodeSubtitle(
     const keys = new Set([...Object.keys(fields), ...Object.keys(binds)]);
     const n = keys.size;
     return n ? `${n} field${n === 1 ? "" : "s"}` : undefined;
+  }
+  if (kind === "executeSubWorkflow") {
+    const key = config.workflowKey as string | undefined;
+    return key ? `↳ ${key}` : undefined;
   }
   return undefined;
 }
@@ -1340,6 +1345,43 @@ function ConfigPanel({
             placeholder={'{\n  "status": "reviewed"\n}'}
             onChange={(v) => onChange({ fields: v })}
           />
+        </>
+      )}
+
+      {kind === "executeSubWorkflow" && (
+        <>
+          <Labeled label="Sub-workflow key">
+            <input
+              value={str("workflowKey")}
+              onChange={(e) => onChange({ workflowKey: e.target.value })}
+              style={inputStyle}
+              placeholder="my-saved-workflow"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+            Runs that saved graph's latest version as a child run (its own row
+            in Runs). Read the result later as <code>{node.id}.status</code> /{" "}
+            <code>{node.id}.output.*</code>. Nesting is capped to prevent
+            recursion.
+          </div>
+
+          <BindingsEditor
+            bindings={
+              obj("inputBindings") as Record<string, BindingRow> | undefined
+            }
+            upstreamIds={upstreamIds}
+            onChange={(v) => onChange({ inputBindings: v })}
+          />
+
+          <JsonField
+            label="Static input (JSON)"
+            value={obj("input")}
+            placeholder={'{\n  "message": "hello"\n}'}
+            onChange={(v) => onChange({ input: v })}
+          />
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            Leave input empty to forward this run's trigger input to the child.
+          </div>
         </>
       )}
 

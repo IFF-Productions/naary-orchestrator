@@ -4,8 +4,11 @@
  * in the worker PROCESS, never in the deterministic workflow bundle — workflows.ts
  * imports it type-only.
  */
+import { createHash } from "node:crypto";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { ApplicationFailure } from "@temporalio/activity";
+import { canonicalize } from "@naary/dsl";
+import type { GraphDef } from "@naary/dsl";
 import {
   BlockedEgressError,
   MissingConnectionTokenError,
@@ -137,6 +140,42 @@ export async function setExecutionStatus(meta: {
       },
     })
     .catch(() => undefined);
+}
+
+/** A child graph resolved for an executeSubWorkflow node, pinned to its version. */
+export interface SubWorkflowGraph {
+  graph: GraphDef;
+  contentHash: string;
+  version: number;
+}
+
+/**
+ * Resolve the child graph for an `executeSubWorkflow` node: fetch the tenant's
+ * latest saved graph for `workflowKey` and snapshot its content hash + version, so
+ * the parent run pins an immutable child version (a later edit can't corrupt an
+ * in-flight parent — same guarantee as top-level start). The DB read (I/O) lives
+ * here, never in the deterministic workflow. A missing graph is a user error (save
+ * it first) → non-retryable, so we don't burn Temporal retries on it.
+ */
+export async function resolveSubWorkflowGraph(meta: {
+  tenantId: string;
+  workflowKey: string;
+}): Promise<SubWorkflowGraph> {
+  const row = await getPrisma().graphDefinition.findFirst({
+    where: { tenantId: meta.tenantId, workflowKey: meta.workflowKey },
+    orderBy: { version: "desc" },
+  });
+  if (!row) {
+    throw ApplicationFailure.nonRetryable(
+      `No saved graph for workflowKey '${meta.workflowKey}' — save it before calling it as a sub-workflow`,
+      "SUBWORKFLOW_GRAPH_NOT_FOUND",
+    );
+  }
+  const graph = row.graph as unknown as GraphDef;
+  const contentHash = createHash("sha256")
+    .update(canonicalize(graph))
+    .digest("hex");
+  return { graph, contentHash, version: row.version };
 }
 
 export interface AgentOutput {

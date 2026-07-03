@@ -64,9 +64,19 @@ const mockActivities = {
       costUsd: 0,
     };
   },
+  resolveSubWorkflowGraph: async (meta: {
+    tenantId: string;
+    workflowKey: string;
+  }): Promise<activities.SubWorkflowGraph> => {
+    subResolveCalls.push(meta);
+    const graph =
+      meta.workflowKey === "reject-flow" ? subRejectChildGraph : subChildGraph;
+    return { graph, contentHash: "child-hash", version: 1 };
+  },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
   setExecutionStatus: async (): Promise<void> => undefined, // read-model push; no-op here
 };
+const subResolveCalls: { tenantId: string; workflowKey: string }[] = [];
 const mcpCalls: activities.McpToolConfig[] = [];
 const httpCalls: activities.HttpRequestConfig[] = [];
 const sqlCalls: activities.SqlQueryConfig[] = [];
@@ -158,6 +168,53 @@ const setGraph: GraphDef = {
   edges: [
     { from: "trigger", to: "shape" },
     { from: "shape", to: "end" },
+  ],
+};
+
+// The child graph a sub-workflow node runs: webhook → agent → end. The agent is
+// mocked (cost 0.01), so completing it proves cost is metered back to the parent.
+const subChildGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "worker",
+      type: "agent",
+      config: { provider: "anthropic", model: "claude-opus-4-8" },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "worker" },
+    { from: "worker", to: "end" },
+  ],
+};
+
+// A child that ends non-completed SYNCHRONOUSLY: a dangling edge → the interpreter
+// returns the terminal "invalid_graph" (no timer/signal needed, so it works under
+// the non-time-skipping local test env). The parent should surface this status,
+// not crash on it.
+const subRejectChildGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [{ id: "trigger", type: "webhookTrigger" }],
+  edges: [{ from: "trigger", to: "ghost" }], // "ghost" node does not exist
+};
+
+// Parent: webhook → executeSubWorkflow → end. Runs subChildGraph as a child.
+const subParentGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "sub",
+      type: "executeSubWorkflow",
+      config: { workflowKey: "child-flow" },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "sub" },
+    { from: "sub", to: "end" },
   ],
 };
 
@@ -425,6 +482,93 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       expect(result.status).toBe("completed");
       // output IS the built object; the binding filled userId from the trigger
       expect(result.ctx.shape).toEqual({ status: "reviewed", userId: "u-42" });
+    });
+  });
+
+  it("executeSubWorkflow: runs the child, exposes {status,ctx}, and meters child cost into the parent", async () => {
+    subResolveCalls.length = 0;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [subParentGraph, { message: "go" }, { tenantId: "t-sub" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-subworkflow",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      // the child graph was resolved by workflowKey (in the activity)
+      expect(subResolveCalls[subResolveCalls.length - 1]).toEqual({
+        tenantId: "t-sub",
+        workflowKey: "child-flow",
+      });
+      // the node output exposes the child's terminal status + its ctx
+      const sub = result.ctx.sub as {
+        status: string;
+        output: Record<string, unknown>;
+      };
+      expect(sub.status).toBe("completed");
+      expect(sub.output.worker).toMatchObject({ status: "ok" });
+      // internal bookkeeping keys are NOT copied into the parent (bounded payload)
+      expect(sub.output.__input).toBeUndefined();
+      expect(sub.output.__costUsd).toBeUndefined();
+      // the child's agent cost (mock 0.01) was metered into the PARENT budget
+      expect(result.ctx.__costUsd).toBeCloseTo(0.01, 5);
+    });
+  });
+
+  it("executeSubWorkflow: refuses to launch past the nesting cap (circuit_open, child never resolved)", async () => {
+    subResolveCalls.length = 0;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      // Start already at the max depth → the node trips the guard before any I/O.
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          subParentGraph,
+          { message: "go" },
+          { tenantId: "t-depth", subWorkflowDepth: 5 },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-subworkflow-depth",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("circuit_open");
+      // guard fired BEFORE resolving/launching the child
+      expect(subResolveCalls).toHaveLength(0);
+      expect(result.ctx.sub).toBeUndefined();
+    });
+  });
+
+  it("executeSubWorkflow: a child that ends non-completed surfaces as a branchable status (parent doesn't crash)", async () => {
+    const rejectParentGraph: GraphDef = {
+      startNodeId: "trigger",
+      nodes: [
+        { id: "trigger", type: "webhookTrigger" },
+        {
+          id: "sub",
+          type: "executeSubWorkflow",
+          config: { workflowKey: "reject-flow" },
+        },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "trigger", to: "sub" },
+        { from: "sub", to: "end" },
+      ],
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [rejectParentGraph, { message: "go" }, { tenantId: "t-sub-rej" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-subworkflow-reject",
+      });
+      const result = await handle.result();
+      // the child ended non-completed, but the PARENT completed — the child's
+      // terminal status is exposed (branchable), not propagated as a parent failure
+      expect(result.status).toBe("completed");
+      expect((result.ctx.sub as { status: string }).status).toBe(
+        "invalid_graph",
+      );
     });
   });
 
