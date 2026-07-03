@@ -9,6 +9,7 @@ import {
   nextNodes,
   resolveHttpRequest,
   resolveMcpArguments,
+  resolveSet,
   resolveSqlQuery,
 } from "@naary/dsl";
 import type {
@@ -16,6 +17,7 @@ import type {
   HttpRequestNodeConfig,
   McpToolNodeConfig,
   NodeDef,
+  SetNodeConfig,
   SqlQueryNodeConfig,
 } from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
@@ -242,6 +244,14 @@ export async function runGraph(
         ctx[node.id] = { rows: result.rows, rowCount: result.rowCount };
         costUsd += result.costUsd;
         ctx.__costUsd = costUsd;
+        return null;
+      }
+      case "set": {
+        // Pure node: build the output object from static fields + upstream
+        // bindings entirely in the interpreter (deterministic, no I/O, no cost).
+        // Output IS the built object, so edges/nodes read `<nodeId>.<field>`.
+        const setCfg = node.config as unknown as SetNodeConfig;
+        ctx[node.id] = resolveSet(setCfg, ctx);
         return null;
       }
       case "humanApproval": {

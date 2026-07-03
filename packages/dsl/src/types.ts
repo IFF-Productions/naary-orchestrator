@@ -10,6 +10,7 @@ export type NodeType =
   | "mcpTool" // Slice #4: calls a remote MCP server tool via a connection
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}
   | "sqlQuery" // runs a read-only query against a tenant DB; output is {rows,rowCount}
+  | "set" // builds a plain object from static fields + upstream bindings (pure, no I/O)
   | "humanApproval"
   | "end";
 
@@ -120,6 +121,25 @@ export interface SqlQueryNodeConfig {
   statementTimeoutMs?: number;
   /** Flat per-call cost metered into the run budget (Arch§4.6). */
   costUsd?: number;
+}
+
+/**
+ * Set (Edit Fields) node — build a plain JSON object to pass downstream. Output is
+ * exactly the built object (REPLACE-only: there is no implicit "input" to merge
+ * with — bind explicitly from an upstream node id if you want a prior value).
+ * Downstream nodes read fields via `<nodeId>.<field>`.
+ *
+ * PURE: this is deterministic graph work (no I/O, no secrets), resolved in the
+ * interpreter like `resolveMcpArguments`/`resolveHttpRequest`. `fields` is the
+ * static base; each `fieldBindings` entry fills/overrides the value at its dotted
+ * path from an upstream output.
+ */
+export interface SetNodeConfig {
+  /** Static base object (the values typed into the node). */
+  fields?: Record<string, unknown>;
+  /** dotted field path (e.g. "user.id", "total") → upstream output binding;
+   *  overrides the static value at that path. */
+  fieldBindings?: Record<string, ArgBinding>;
 }
 
 /**

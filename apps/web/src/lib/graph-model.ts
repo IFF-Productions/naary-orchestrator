@@ -48,6 +48,7 @@ export const NODE_KINDS: { type: NodeType; label: string }[] = [
   { type: "mcpTool", label: "MCP Tool" },
   { type: "httpRequest", label: "HTTP Request" },
   { type: "sqlQuery", label: "SQL Query" },
+  { type: "set", label: "Edit Fields" },
   { type: "humanApproval", label: "Approval" },
   { type: "end", label: "End" },
 ];
