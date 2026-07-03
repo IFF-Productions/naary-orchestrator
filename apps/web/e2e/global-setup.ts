@@ -57,6 +57,40 @@ async function globalSetup(_config: FullConfig): Promise<void> {
     }),
   }).catch(() => undefined);
 
+  // Seed a RUNNABLE new-node graph (no LLM key, no approval) that exercises the
+  // set → merge (diamond) → wait nodes end-to-end, so the run-through e2e can start
+  // it and watch it complete. workflowKey "e2e-nodes".
+  await fetch(`${API_BASE}/graphs`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      workflowKey: "e2e-nodes",
+      name: "E2E new nodes",
+      graph: {
+        startNodeId: "s",
+        nodes: [
+          { id: "s", type: "start" },
+          { id: "a", type: "set", config: { fields: { a: 1 } } },
+          { id: "b", type: "set", config: { fields: { b: 2 } } },
+          { id: "m", type: "merge", config: { mode: "array" } },
+          { id: "w", type: "wait", config: { durationSeconds: 1 } },
+          { id: "e", type: "end" },
+        ],
+        edges: [
+          { from: "s", to: "a" },
+          { from: "s", to: "b" },
+          { from: "a", to: "m" },
+          { from: "b", to: "m" },
+          { from: "m", to: "w" },
+          { from: "w", to: "e" },
+        ],
+      },
+    }),
+  }).catch(() => undefined);
+
   const authDir = path.resolve(cwd, "e2e/.auth");
   mkdirSync(authDir, { recursive: true });
   writeFileSync(
