@@ -80,6 +80,22 @@ describe("resolveAggregate", () => {
     ).toEqual({ result: "Cy" });
   });
 
+  it("min / max / avg over a numeric field (non-numeric ignored)", () => {
+    expect(
+      resolveAggregate({ ...base, operation: "min", field: "age" }, ctx),
+    ).toEqual({ result: 20 });
+    expect(
+      resolveAggregate({ ...base, operation: "max", field: "age" }, ctx),
+    ).toEqual({ result: 41 });
+    expect(
+      resolveAggregate({ ...base, operation: "avg", field: "age" }, ctx).result,
+    ).toBeCloseTo(32.33, 2);
+    // no numeric values → undefined
+    expect(
+      resolveAggregate({ ...base, operation: "min", field: "name" }, ctx),
+    ).toEqual({ result: undefined });
+  });
+
   it("guards a non-array source (count 0, collect [])", () => {
     expect(
       resolveAggregate(

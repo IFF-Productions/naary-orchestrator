@@ -1490,7 +1490,16 @@ function ConfigPanel({
               onChange={(e) => onChange({ operation: e.target.value })}
               style={inputStyle}
             >
-              {["collect", "count", "sum", "first", "last"].map((o) => (
+              {[
+                "collect",
+                "count",
+                "sum",
+                "min",
+                "max",
+                "avg",
+                "first",
+                "last",
+              ].map((o) => (
                 <option key={o} value={o}>
                   {o}
                 </option>
