@@ -763,10 +763,19 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
         nodeId: "agent",
       });
 
-      await handle.signal(approvalSignal, { approved: true });
+      await handle.signal(approvalSignal, {
+        approved: true,
+        comment: "looks good",
+      });
 
       const result = await handle.result();
       expect(result.status).toBe("completed");
+      // the decision + reviewer note are recorded on the node's output (durable,
+      // branchable downstream as approval.approved / approval.comment)
+      expect(result.ctx.approval).toEqual({
+        approved: true,
+        comment: "looks good",
+      });
     });
   });
 

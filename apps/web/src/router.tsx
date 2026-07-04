@@ -48,6 +48,10 @@ export const router = createBrowserRouter([
           },
           { path: "runs", ...lazy(() => import("./screens/app/Runs"), "Runs") },
           {
+            path: "approvals",
+            ...lazy(() => import("./screens/app/Approvals"), "Approvals"),
+          },
+          {
             path: "schedules",
             ...lazy(() => import("./screens/app/Schedules"), "Schedules"),
           },

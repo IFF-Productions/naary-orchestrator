@@ -64,6 +64,17 @@ export interface RunStateView {
   ctx: Record<string, unknown>;
 }
 
+/** A run paused at a humanApproval node, enriched with the node's prompt (resolved
+ *  from the stored graph) so the approvals inbox can show WHAT is being approved. */
+export interface AwaitingApproval {
+  workflowId: string;
+  workflowKey: string | null;
+  nodeId: string;
+  title: string;
+  instructions: string | null;
+  createdAt: string;
+}
+
 /** Temporal closed-status name → our UI status string (COMPLETED handled via result()). */
 const TEMPORAL_CLOSED_STATUS: Record<string, RunSummary["status"]> = {
   FAILED: "failed",
@@ -371,12 +382,13 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     id: string,
     approved: boolean,
     tenantId: string,
+    comment?: string,
   ): Promise<void> {
     await this.assertOwner(id, tenantId);
     try {
       await this.client.workflow
         .getHandle(id)
-        .signal(approvalSignal, { approved });
+        .signal(approvalSignal, { approved, ...(comment ? { comment } : {}) });
     } catch (e) {
       // Signaling a CLOSED workflow (already completed / rejected / failed) returns
       // gRPC NOT_FOUND → WorkflowNotFoundError. The execution row exists (assertOwner
@@ -390,6 +402,73 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       }
       throw e;
     }
+  }
+
+  /**
+   * The tenant's runs currently paused for human approval, each enriched with the
+   * approval node's prompt (title/instructions) resolved from the stored graph — so
+   * the inbox shows WHAT is being approved, not just that something is waiting.
+   *
+   * Starts from the read-model (status = awaiting_approval), then confirms each is
+   * STILL awaiting via a live query (a run may have been decided since the row was
+   * written) and reads its current node. Bounded by the number of paused runs.
+   */
+  async listAwaiting(tenantId: string): Promise<AwaitingApproval[]> {
+    const rows = await getPrisma().execution.findMany({
+      where: { tenantId, status: "awaiting_approval" },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+    const items = await Promise.all(
+      rows.map(async (r): Promise<AwaitingApproval | null> => {
+        let currentNodeId = "";
+        try {
+          const s = await this.client.workflow
+            .getHandle(r.workflowId)
+            .query(stateQuery);
+          // Decided/advanced since the read-model write, or closed → not awaiting.
+          if (s.status !== "awaiting_approval") return null;
+          currentNodeId = s.currentNodeId;
+        } catch {
+          return null; // closed/gone
+        }
+        const prompt = await this.approvalPrompt(
+          tenantId,
+          r.workflowKey,
+          currentNodeId,
+        );
+        return {
+          workflowId: r.workflowId,
+          workflowKey: r.workflowKey,
+          nodeId: currentNodeId,
+          title: prompt.title,
+          instructions: prompt.instructions,
+          createdAt: r.createdAt.toISOString(),
+        };
+      }),
+    );
+    return items.filter((x): x is AwaitingApproval => x !== null);
+  }
+
+  /** Resolve a humanApproval node's title/instructions from the tenant's stored graph. */
+  private async approvalPrompt(
+    tenantId: string,
+    workflowKey: string | null,
+    nodeId: string,
+  ): Promise<{ title: string; instructions: string | null }> {
+    if (!workflowKey) return { title: "Approval required", instructions: null };
+    const snap = await this.graphs
+      .getLatest(tenantId, workflowKey)
+      .catch(() => null);
+    const node = snap?.graph.nodes.find((n) => n.id === nodeId);
+    const cfg = (node?.config ?? {}) as {
+      title?: string;
+      instructions?: string;
+    };
+    return {
+      title: cfg.title?.trim() || "Approval required",
+      instructions: cfg.instructions?.trim() || null,
+    };
   }
 
   /**

@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, Post } from "@nestjs/common";
 import { TenantId } from "../auth/tenant.decorator";
 import { ApproveDto, StartExecutionDto } from "./execution.dto";
 import {
+  type AwaitingApproval,
   ExecutionsService,
   type RunEvent,
   type RunStateView,
@@ -27,6 +28,13 @@ export class ExecutionsController {
     return this.executions.list(tenantId);
   }
 
+  /** The tenant's runs paused for approval, each with its prompt (the inbox). Must
+   *  be declared BEFORE `@Get(":id")` so "awaiting" isn't captured as an :id. */
+  @Get("awaiting")
+  awaiting(@TenantId() tenantId: string): Promise<AwaitingApproval[]> {
+    return this.executions.listAwaiting(tenantId);
+  }
+
   @Post(":id/approve")
   @HttpCode(202) // explicit: NestJS would otherwise return 201 for a POST
   async approve(
@@ -34,7 +42,7 @@ export class ExecutionsController {
     @Param("id") id: string,
     @Body() body: ApproveDto,
   ): Promise<{ accepted: true }> {
-    await this.executions.approve(id, body.approved, tenantId);
+    await this.executions.approve(id, body.approved, tenantId, body.comment);
     return { accepted: true };
   }
 

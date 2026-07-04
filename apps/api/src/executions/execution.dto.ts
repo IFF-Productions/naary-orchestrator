@@ -16,4 +16,9 @@ export class StartExecutionDto {
 export class ApproveDto {
   @IsBoolean()
   approved!: boolean;
+
+  /** Optional reviewer note recorded with the decision (approve or reject). */
+  @IsOptional()
+  @IsString()
+  comment?: string;
 }
