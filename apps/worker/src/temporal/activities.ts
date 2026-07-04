@@ -9,16 +9,23 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { ApplicationFailure } from "@temporalio/activity";
 import { SignJWT, importPKCS8 } from "jose";
 import nodemailer from "nodemailer";
+import { XMLParser } from "fast-xml-parser";
 import { canonicalize } from "@naary/dsl";
 import type {
   GraphDef,
   ResolvedHmac,
   ResolvedJwt,
+  ResolvedRss,
   ResolvedSendEmail,
 } from "@naary/dsl";
 // Re-export so the interpreter e2e can reference these as activities.* (the hmac/
-// jwt/sendEmail activity args are the DSL's Resolved* types).
-export type { ResolvedHmac, ResolvedJwt, ResolvedSendEmail } from "@naary/dsl";
+// jwt/sendEmail/rss activity args are the DSL's Resolved* types).
+export type {
+  ResolvedHmac,
+  ResolvedJwt,
+  ResolvedRss,
+  ResolvedSendEmail,
+} from "@naary/dsl";
 import {
   BlockedEgressError,
   MissingConnectionTokenError,
@@ -527,6 +534,118 @@ export async function callSendEmail(
       "SEND_EMAIL_ERROR",
       { connectionId: cfg.connectionId },
     );
+  }
+}
+
+export interface RssItem {
+  title: string;
+  link: string;
+  summary: string;
+  published: string;
+  id: string;
+}
+export interface RssResult {
+  status: "ok";
+  items: RssItem[];
+  count: number;
+  costUsd: number;
+}
+
+const DEFAULT_RSS_TIMEOUT_MS = 15_000;
+const MAX_RSS_TIMEOUT_MS = 30_000;
+const MAX_RSS_ITEMS = 100; // feeds are small; bound the inline payload anyway.
+
+// Injectable I/O seam for the rssRead activity (swapped in unit tests).
+export const __rssDeps = {
+  fetch: (url: string, init?: RequestInit) => fetch(url, init),
+  assertEgressAllowed,
+};
+
+/** Flatten an XML text node (fast-xml-parser may give a string or {#text}). */
+function xmlText(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "object" && "#text" in (v as Record<string, unknown>)) {
+    return String((v as Record<string, unknown>)["#text"]);
+  }
+  return typeof v === "object" ? "" : String(v);
+}
+
+/** Normalize RSS 2.0 `channel.item` or Atom `feed.entry` into items. */
+function normalizeFeed(parsed: Record<string, unknown>): RssItem[] {
+  const rss = parsed.rss as { channel?: { item?: unknown } } | undefined;
+  const feed = parsed.feed as { entry?: unknown } | undefined;
+  const raw = rss?.channel?.item ?? feed?.entry ?? [];
+  const arr = Array.isArray(raw) ? raw : [raw];
+  return arr
+    .filter(Boolean)
+    .slice(0, MAX_RSS_ITEMS)
+    .map((it) => {
+      const item = it as Record<string, unknown>;
+      // Atom <link href="…"> vs RSS <link>text</link>.
+      const rawLink = item.link as unknown;
+      const link =
+        typeof rawLink === "string"
+          ? rawLink
+          : xmlText((rawLink as Record<string, unknown>)?.["@_href"]) ||
+            xmlText(rawLink);
+      return {
+        title: xmlText(item.title),
+        link,
+        summary: xmlText(item.description ?? item.summary ?? item.content),
+        published: xmlText(item.pubDate ?? item.published ?? item.updated),
+        id: xmlText(item.guid ?? item.id) || link,
+      };
+    });
+}
+
+/**
+ * rssRead node — fetch an RSS/Atom feed (egress-guarded, https + public host) and
+ * parse it into normalized items. No secrets; the URL is non-secret.
+ */
+export async function callRssRead(
+  cfg: ResolvedRss,
+  _input: unknown,
+  meta: AgentMeta,
+): Promise<RssResult> {
+  const startedAt = process.hrtime.bigint();
+  void meta;
+  try {
+    await __rssDeps.assertEgressAllowed(cfg.url); // https + public (SSRF guard)
+    const controller = new AbortController();
+    const timeoutMs = Math.min(
+      cfg.timeoutMs ?? DEFAULT_RSS_TIMEOUT_MS,
+      MAX_RSS_TIMEOUT_MS,
+    );
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let xml: string;
+    try {
+      const res = await __rssDeps.fetch(cfg.url, { signal: controller.signal });
+      xml = await res.text();
+    } finally {
+      clearTimeout(timer);
+    }
+    const parsed = new XMLParser({ ignoreAttributes: false }).parse(xml) as
+      Record<string, unknown> | undefined;
+    const items = parsed ? normalizeFeed(parsed) : [];
+    activityRuns.inc({ activity: "callRssRead", outcome: "ok" });
+    activityDuration.observe(
+      { activity: "callRssRead" },
+      secondsSince(startedAt),
+    );
+    return { status: "ok", items, count: items.length, costUsd: 0 };
+  } catch (e) {
+    activityRuns.inc({ activity: "callRssRead", outcome: "error" });
+    activityDuration.observe(
+      { activity: "callRssRead" },
+      secondsSince(startedAt),
+    );
+    if (e instanceof ApplicationFailure) throw e;
+    if (e instanceof BlockedEgressError) {
+      throw ApplicationFailure.nonRetryable(e.message, "EGRESS_BLOCKED");
+    }
+    // Fetch/parse failure — the feed URL is non-secret, so a sanitized retryable is fine.
+    throw toSanitizedRetryable(e, "RSS_READ_ERROR");
   }
 }
 

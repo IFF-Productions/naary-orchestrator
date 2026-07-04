@@ -21,6 +21,7 @@ export type NodeType =
   | "jwt" // mints an HS256 JWT signed by a `signing` connection's key (activity)
   | "totp" // generates the current RFC-6238 TOTP code from a `signing` connection's seed
   | "sendEmail" // sends an email via an `smtp` connection (activity)
+  | "rssRead" // fetches + parses an RSS/Atom feed (egress-guarded activity); output is {items}
   | "executeSubWorkflow" // runs another saved graph as a child run; output is {status,output}
   | "forEach" // runs a saved graph once per array item (child run per item); output is an array
   | "wait" // durable delay (Temporal timer); no output
@@ -356,6 +357,22 @@ export interface ForEachNodeConfig {
   from: string;
   /** Optional dotted path into that output to reach the array. */
   path?: string;
+}
+
+/**
+ * RSS Read node — fetch an RSS 2.0 / Atom feed and parse it into normalized items
+ * `{ title, link, summary, published, id }`. The fetch + parse (I/O) run in an
+ * ACTIVITY, egress-guarded (https + public host) like httpRequest. Output is
+ * `{ items, count }`. `url` is non-secret; `urlBinding` can override it from an
+ * upstream output.
+ */
+export interface RssReadNodeConfig {
+  /** Feed URL (https). */
+  url: string;
+  /** Upstream binding whose value replaces `url`. */
+  urlBinding?: ArgBinding;
+  /** Abort the fetch after this many ms (default applied in the activity). */
+  timeoutMs?: number;
 }
 
 /**

@@ -16,6 +16,7 @@ import {
   resolveJwt,
   resolveMcpArguments,
   resolveRenameKeys,
+  resolveRss,
   resolveSendEmail,
   resolveSet,
   resolveSqlQuery,
@@ -36,6 +37,7 @@ import type {
   MergeNodeConfig,
   NodeDef,
   RenameKeysNodeConfig,
+  RssReadNodeConfig,
   SendEmailNodeConfig,
   SetNodeConfig,
   SqlQueryNodeConfig,
@@ -96,6 +98,13 @@ const { callSqlQuery } = wf.proxyActivities<typeof activities>({
 const { callSendEmail } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "60 seconds",
   retry: { maximumAttempts: 1 },
+});
+
+// Read-only feed fetch — idempotent, so normal retries are fine. Its own block so
+// the start-to-close sits above the fetch timeout (same reasoning as http/sql).
+const { callRssRead } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "60 seconds",
+  retry: { maximumAttempts: 3 },
 });
 
 export interface RunGraphResult {
@@ -438,6 +447,19 @@ export async function runGraph(
         ctx[node.id] = { messageId: result.messageId };
         costUsd += result.costUsd;
         ctx.__costUsd = costUsd;
+        return null;
+      }
+      case "rssRead": {
+        // URL resolution is deterministic (pure ctx read); the fetch + XML parse
+        // (I/O, egress-guarded) run in the activity. Output {items, count} so
+        // downstream filter/listOps/aggregate can operate on `<nodeId>.items`.
+        const rssCfg = node.config as unknown as RssReadNodeConfig;
+        const result = await callRssRead(resolveRss(rssCfg, ctx), ctx.__input, {
+          tenantId: runCtx.tenantId,
+          executionId: wf.workflowInfo().workflowId,
+          nodeId: node.id,
+        });
+        ctx[node.id] = { items: result.items, count: result.count };
         return null;
       }
       case "executeSubWorkflow": {

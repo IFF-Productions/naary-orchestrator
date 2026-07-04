@@ -27,6 +27,7 @@ export type DslNodeType =
   | "stopAndError"
   | "executeSubWorkflow"
   | "forEach"
+  | "rssRead"
   | "humanApproval"
   | "end";
 
@@ -537,9 +538,9 @@ export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
     slug: "rss-feed-read",
     n8nNode: "RssFeedRead",
     group: "Communication",
-    mapsTo: [],
-    coverage: "gap",
-    note: "Fetch/parse RSS.",
+    mapsTo: ["rssRead"],
+    coverage: "covered",
+    note: "rssRead node — fetches + parses an RSS/Atom feed (egress-guarded) into an items array.",
   },
   // ── Utility & security
   {
