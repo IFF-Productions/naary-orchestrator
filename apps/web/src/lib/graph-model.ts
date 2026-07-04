@@ -97,6 +97,9 @@ export const NODE_KINDS: NodeKind[] = [
   { type: "sqlQuery", label: "SQL Query", group: "Data sources", accent: "var(--node-sql, #b06fd6)",
     description: "Run a read-only query against your database.",
     defaultConfig: { connectionId: "", sql: "SELECT 1" } },
+  { type: "sqlExec", label: "SQL Write", group: "Data sources", accent: "var(--node-sqlexec, #c05fa6)",
+    description: "Write to your database (INSERT/UPDATE/DELETE) in a transaction.",
+    defaultConfig: { connectionId: "", sql: "UPDATE users SET seen = true WHERE id = $1" } },
   { type: "rssRead", label: "RSS Read", group: "Data sources", accent: "var(--node-rss, #d98a5a)",
     description: "Fetch and parse an RSS/Atom feed into a list of items.",
     defaultConfig: { url: "https://hnrss.org/frontpage" } },
@@ -211,7 +214,7 @@ export function nodeSubtitle(
     const short = url.replace(/^https?:\/\//, "");
     return `${method} ${short}`;
   }
-  if (kind === "sqlQuery") {
+  if (kind === "sqlQuery" || kind === "sqlExec") {
     const conn = config.connectionId as string | undefined;
     const sql = config.sql as string | undefined;
     const snippet = sql

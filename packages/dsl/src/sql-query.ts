@@ -1,5 +1,5 @@
 import { getByPath } from "./mcp-args";
-import type { SqlQueryNodeConfig } from "./types";
+import type { SqlExecNodeConfig, SqlQueryNodeConfig } from "./types";
 
 /**
  * A sqlQuery node's concrete query after binding resolution — the plain object the
@@ -38,4 +38,19 @@ export function resolveSqlQuery(
     statementTimeoutMs: config.statementTimeoutMs,
     costUsd: config.costUsd,
   };
+}
+
+/**
+ * A sqlExec node's concrete write after binding resolution. Same shape + rules as
+ * ResolvedSqlQuery (bindings only fill positional params, never the SQL text).
+ */
+export type ResolvedSqlExec = ResolvedSqlQuery;
+
+/** Resolve a sqlExec node's params — identical binding rules to resolveSqlQuery
+ *  (positional params only; the SQL text is passed through untouched). */
+export function resolveSqlExec(
+  config: SqlExecNodeConfig,
+  ctx: Record<string, unknown>,
+): ResolvedSqlExec {
+  return resolveSqlQuery(config as SqlQueryNodeConfig, ctx);
 }

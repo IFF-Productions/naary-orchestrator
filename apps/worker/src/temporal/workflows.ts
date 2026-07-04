@@ -26,6 +26,7 @@ import {
   resolveSendEmail,
   resolveSet,
   resolveSqlQuery,
+  resolveSqlExec,
   resolveSubWorkflowInput,
   resolveWebhookResponse,
 } from "@naary/dsl";
@@ -52,6 +53,7 @@ import type {
   SendEmailNodeConfig,
   SetNodeConfig,
   SqlQueryNodeConfig,
+  SqlExecNodeConfig,
   StopAndErrorNodeConfig,
   TotpNodeConfig,
   WaitNodeConfig,
@@ -104,6 +106,14 @@ const { callHttpRequest } = wf.proxyActivities<typeof activities>({
 const { callSqlQuery } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "150 seconds",
   retry: { maximumAttempts: 3 },
+});
+
+// A WRITE is NOT idempotent — a retry after a partial/ambiguous first attempt could
+// double-write. So sqlExec runs AT-MOST-ONCE (maximumAttempts: 1), like callSendEmail:
+// a failure fails the node rather than risk applying the statement twice.
+const { callSqlExec } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "150 seconds",
+  retry: { maximumAttempts: 1 },
 });
 
 // Sending email is NOT idempotent — a retry after a first attempt already handed the
@@ -384,6 +394,26 @@ export async function runGraph(
         );
         // Expose {rows, rowCount} so edges branch on `<nodeId>.rowCount`.
         ctx[node.id] = { rows: result.rows, rowCount: result.rowCount };
+        costUsd += result.costUsd;
+        ctx.__costUsd = costUsd;
+        return null;
+      }
+      case "sqlExec": {
+        // A WRITE (INSERT/UPDATE/DELETE). Same binding rules as sqlQuery (params only,
+        // never the SQL text); the DSN read + transactional write are in the activity,
+        // which runs at-most-once (writes aren't idempotent).
+        const execCfg = node.config as unknown as SqlExecNodeConfig;
+        const result = await callSqlExec(
+          resolveSqlExec(execCfg, ctx),
+          ctx.__input,
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
+        // Expose {rowsAffected} so edges branch on `<nodeId>.rowsAffected`.
+        ctx[node.id] = { rowsAffected: result.rowsAffected };
         costUsd += result.costUsd;
         ctx.__costUsd = costUsd;
         return null;

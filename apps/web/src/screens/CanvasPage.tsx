@@ -1371,7 +1371,7 @@ function ConfigPanel({
         </>
       )}
 
-      {kind === "sqlQuery" && (
+      {(kind === "sqlQuery" || kind === "sqlExec") && (
         <>
           <Labeled label="Database connection id">
             <input
@@ -1382,24 +1382,34 @@ function ConfigPanel({
             />
           </Labeled>
           <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
-            A <code>postgres</code> or <code>mssql</code> connection. Read-only
-            — the query runs in a transaction that's always rolled back.
+            A <code>postgres</code>, <code>mssql</code>, or <code>mysql</code>{" "}
+            connection.{" "}
+            {kind === "sqlExec"
+              ? "Writes run in a transaction (commit on success, rollback on error). At-most-once — never retried."
+              : "Read-only — the query runs in a transaction that's always rolled back."}
           </div>
 
           <div>
-            <RowHead label="SQL" value="read-only" />
+            <RowHead
+              label="SQL"
+              value={kind === "sqlExec" ? "write" : "read-only"}
+            />
             <textarea
               value={str("sql")}
               onChange={(e) => onChange({ sql: e.target.value })}
               rows={5}
               style={textareaStyle}
-              placeholder={"SELECT id, email FROM users WHERE id = $1"}
+              placeholder={
+                kind === "sqlExec"
+                  ? "UPDATE users SET seen = true WHERE id = $1"
+                  : "SELECT id, email FROM users WHERE id = $1"
+              }
             />
           </div>
           <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
-            Placeholders are engine-specific: <code>$1, $2…</code> (Postgres) or{" "}
-            <code>@p1, @p2…</code> (MSSQL). Bindings fill the values — never
-            build SQL from upstream output.
+            Placeholders are engine-specific: <code>$1, $2…</code> (Postgres),{" "}
+            <code>@p1, @p2…</code> (MSSQL), or <code>?</code> (MySQL). Bindings
+            fill the values — never build SQL from upstream output.
           </div>
 
           <BindingsEditor

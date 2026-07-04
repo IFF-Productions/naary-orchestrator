@@ -12,7 +12,9 @@ import {
 } from "@naary/storage";
 import {
   __sqlDeps,
+  type SqlExecConfig,
   type SqlQueryConfig,
+  callSqlExec,
   callSqlQuery,
   dsnHost,
 } from "../src/temporal/activities";
@@ -182,5 +184,56 @@ describe("dsnHost", () => {
   });
   it("returns null for an unparseable DSN", () => {
     expect(dsnHost("not a dsn")).toBeNull();
+  });
+});
+
+describe("callSqlExec activity (write)", () => {
+  const EXEC: SqlExecConfig = {
+    connectionId: "db-1",
+    sql: "UPDATE users SET seen = true WHERE id = $1",
+    params: [7],
+  };
+  const runWrite = vi.fn();
+
+  beforeEach(() => {
+    runWrite.mockReset();
+    __sqlDeps.getAdapter = (() => ({ engine: "postgres", runWrite })) as never;
+  });
+
+  it("runs the write and returns rowsAffected", async () => {
+    runWrite.mockResolvedValue({ rowsAffected: 3 });
+
+    const result = await callSqlExec(EXEC, {}, META);
+
+    expect(result).toEqual({ status: "ok", rowsAffected: 3, costUsd: 0 });
+    expect(runWrite).toHaveBeenCalledWith(
+      "postgres://user:secret@db.internal:5432/app",
+      "UPDATE users SET seen = true WHERE id = $1",
+      [7],
+      { timeoutMs: 30_000 },
+    );
+  });
+
+  it("maps a DB error to a NON-retryable failure (writes are at-most-once, never looped)", async () => {
+    runWrite.mockRejectedValue(Object.assign(new Error("boom"), { code: "23505" }));
+
+    await expect(callSqlExec(EXEC, {}, META)).rejects.toMatchObject({
+      nonRetryable: true,
+      type: "SQL_EXEC_ERROR",
+    });
+  });
+
+  it("rejects an internal DSN host before connecting (SSRF S-3) and never writes", async () => {
+    resolveDbConnection.mockResolvedValue({
+      engine: "postgres",
+      dsn: "postgres://u:p@10.0.0.5:5432/app",
+    });
+    __sqlDeps.assertHostPublic = assertHostPublic as never; // real guard
+
+    await expect(callSqlExec(EXEC, {}, META)).rejects.toMatchObject({
+      type: "EGRESS_BLOCKED",
+      nonRetryable: true,
+    });
+    expect(runWrite).not.toHaveBeenCalled();
   });
 });

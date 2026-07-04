@@ -479,7 +479,9 @@ function DatabaseForm({
   onChanged: () => Promise<void> | void;
 }) {
   const [label, setLabel] = useState("");
-  const [engine, setEngine] = useState<"postgres" | "mssql">("postgres");
+  const [engine, setEngine] = useState<"postgres" | "mssql" | "mysql">(
+    "postgres",
+  );
   const [host, setHost] = useState("");
   const [dsn, setDsn] = useState("");
   const [busy, setBusy] = useState(false);
@@ -516,7 +518,9 @@ function DatabaseForm({
   const dsnPlaceholder =
     engine === "postgres"
       ? "postgres://user:pass@host:5432/db"
-      : "Server=host;Database=db;User Id=…;Password=…";
+      : engine === "mysql"
+        ? "mysql://user:pass@host:3306/db"
+        : "Server=host;Database=db;User Id=…;Password=…";
 
   return (
     <Card style={{ padding: 16 }}>
@@ -538,10 +542,13 @@ function DatabaseForm({
           <select
             style={fieldStyle}
             value={engine}
-            onChange={(e) => setEngine(e.target.value as "postgres" | "mssql")}
+            onChange={(e) =>
+              setEngine(e.target.value as "postgres" | "mssql" | "mysql")
+            }
           >
             <option value="postgres">postgres</option>
             <option value="mssql">mssql</option>
+            <option value="mysql">mysql</option>
           </select>
         </div>
         <div style={{ flex: 1 }}>

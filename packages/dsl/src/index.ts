@@ -17,7 +17,12 @@ export {
 } from "./templates";
 export { getByPath, resolveMcpArguments } from "./mcp-args";
 export { resolveHttpRequest, type ResolvedHttpRequest } from "./http-request";
-export { resolveSqlQuery, type ResolvedSqlQuery } from "./sql-query";
+export {
+  resolveSqlQuery,
+  type ResolvedSqlQuery,
+  resolveSqlExec,
+  type ResolvedSqlExec,
+} from "./sql-query";
 export { resolveSet } from "./set-node";
 export { resolveRenameKeys } from "./rename-keys";
 export {
