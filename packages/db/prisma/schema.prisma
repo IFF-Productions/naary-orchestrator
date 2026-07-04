@@ -37,7 +37,9 @@ model Execution {
   costUsd     Decimal? @db.Decimal(12, 6)
   createdAt   DateTime @default(now())
 
-  @@index([tenantId])
+  // The Runs list is `where {tenantId} orderBy createdAt desc` — a composite lets PG
+  // satisfy the filter AND the sort from one index (audit A-4).
+  @@index([tenantId, createdAt])
 }
 
 // Recurring runs: a Temporal Schedule (cron) that starts a workflow. The row is
@@ -101,6 +103,9 @@ model WebhookDelivery {
   createdAt  DateTime @default(now())
 
   @@unique([endpointId, deliveryId])
+  // The retention prune is `where {endpointId, createdAt < cutoff}` — index the
+  // range so the sweep doesn't scan the endpoint's whole delivery history (A-4).
+  @@index([endpointId, createdAt])
 }
 
 model Connection {
