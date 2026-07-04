@@ -902,6 +902,7 @@ function WebhookForm({
   const [busy, setBusy] = useState(false);
   const [registered, setRegistered] = useState<RegisteredWebhook | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   async function submit() {
     setBusy(true);
@@ -963,34 +964,117 @@ function WebhookForm({
       </div>
 
       {registered && (
-        <div
-          style={{
-            marginTop: 12,
-            padding: 10,
-            borderRadius: 8,
-            background: "var(--card-2, var(--surface))",
-            border: "1px solid var(--line)",
-          }}
-        >
-          <div style={{ fontSize: 11, color: "var(--ink-2)", marginBottom: 6 }}>
-            Save this signing secret now — it is shown only once.
-          </div>
-          <div className="mono" style={{ fontSize: 11, marginBottom: 4 }}>
-            POST {registered.ingressPath}
-          </div>
-          <div
-            className="mono"
-            style={{
-              fontSize: 11,
-              wordBreak: "break-all",
-              color: "var(--brand)",
-            }}
-          >
-            {registered.signingSecret}
-          </div>
-        </div>
+        <WebhookHowTo
+          registered={registered}
+          copied={copied}
+          setCopied={setCopied}
+        />
       )}
     </Card>
+  );
+}
+
+/** Shown once after registering: the secret + a ready-to-run signed curl. The
+ *  webhook is authenticated by an HMAC-SHA256 signature over the RAW body. */
+function WebhookHowTo({
+  registered,
+  copied,
+  setCopied,
+}: {
+  registered: RegisteredWebhook;
+  copied: boolean;
+  setCopied: (v: boolean) => void;
+}) {
+  const curl = [
+    "# 1. your API host + a JSON body (any shape — it becomes the trigger output)",
+    "API=<YOUR_API_URL>",
+    `BODY='{"hello":"world"}'`,
+    "",
+    "# 2. sign the RAW body with the signing secret (HMAC-SHA256, hex)",
+    `SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "${registered.signingSecret}" -r | cut -d' ' -f1)"`,
+    "",
+    "# 3. POST it",
+    `curl -X POST "$API${registered.ingressPath}" \\`,
+    '  -H "content-type: application/json" \\',
+    '  -H "X-Hub-Signature-256: $SIG" \\',
+    '  -H "x-delivery-id: $(uuidgen)" \\',
+    '  --data-binary "$BODY"',
+  ].join("\n");
+
+  async function copy(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(curl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable — the command is still visible to copy manually */
+    }
+  }
+
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        padding: 10,
+        borderRadius: 8,
+        background: "var(--card-2, var(--surface))",
+        border: "1px solid var(--line)",
+      }}
+    >
+      <div style={{ fontSize: 11, color: "var(--ink-2)", marginBottom: 6 }}>
+        Save this signing secret now — it is shown <strong>only once</strong>.
+        The webhook is authenticated by an{" "}
+        <strong>HMAC-SHA256 signature over the raw body</strong> (no bearer
+        token).
+      </div>
+      <div className="mono" style={{ fontSize: 11, marginBottom: 4 }}>
+        POST {registered.ingressPath}
+      </div>
+      <div
+        className="mono"
+        style={{ fontSize: 11, wordBreak: "break-all", color: "var(--brand)" }}
+      >
+        {registered.signingSecret}
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          margin: "12px 0 4px",
+        }}
+      >
+        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)" }}>
+          Trigger it (copy &amp; run)
+        </div>
+        <Button variant="secondary" onClick={() => void copy()}>
+          {copied ? "Copied ✓" : "Copy curl"}
+        </Button>
+      </div>
+      <pre
+        className="mono"
+        style={{
+          margin: 0,
+          padding: 10,
+          borderRadius: 6,
+          background: "var(--surface)",
+          border: "1px solid var(--line)",
+          fontSize: 10.5,
+          lineHeight: 1.5,
+          overflowX: "auto",
+          whiteSpace: "pre",
+          color: "var(--ink)",
+        }}
+      >
+        {curl}
+      </pre>
+      <div style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 6 }}>
+        Replace <code>&lt;YOUR_API_URL&gt;</code> with your API host. Sign the
+        exact bytes you send. A repeat with the same <code>x-delivery-id</code>{" "}
+        is ignored.
+      </div>
+    </div>
   );
 }
 
