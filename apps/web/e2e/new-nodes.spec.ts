@@ -11,6 +11,7 @@ import { expect, test } from "@playwright/test";
 
 // palette label → a distinctive label rendered in that node's config inspector.
 const NEW_NODES = [
+  { label: "Error Trigger", field: "Error handler entry" },
   { label: "Edit Fields", field: "Static fields (JSON)" },
   { label: "Rename Keys", field: "Drop keys (JSON array)" },
   { label: "Filter", field: "Item path" },

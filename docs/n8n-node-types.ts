@@ -14,15 +14,22 @@
 export type DslNodeType =
   | "start"
   | "webhookTrigger"
+  | "errorTrigger"
   | "agent"
   | "mcpTool"
   | "httpRequest"
   | "sqlQuery"
   | "set"
+  | "renameKeys"
+  | "dateTime"
   | "merge"
   | "filter"
   | "aggregate"
   | "listOps"
+  | "hmac"
+  | "jwt"
+  | "totp"
+  | "sendEmail"
   | "wait"
   | "stopAndError"
   | "code"
@@ -137,9 +144,9 @@ export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
     slug: "error-trigger",
     n8nNode: "ErrorTrigger",
     group: "Triggers",
-    mapsTo: [],
-    coverage: "gap",
-    note: "No dedicated error-handling entrypoint yet.",
+    mapsTo: ["errorTrigger"],
+    coverage: "covered",
+    note: "errorTrigger entry node — a failing run auto-starts its bound error-handler graph (detached, ParentClosePolicy.ABANDON) with the failure context; loop-guarded.",
   },
   {
     name: "SSE Trigger",
@@ -339,8 +346,9 @@ export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
     slug: "rename-keys",
     n8nNode: "RenameKeys",
     group: "Data transformation",
-    mapsTo: [],
-    coverage: "gap",
+    mapsTo: ["renameKeys"],
+    coverage: "covered",
+    note: "renameKeys node — remap/drop an upstream object's keys (pure).",
   },
   {
     name: "Compare Datasets",
@@ -355,9 +363,9 @@ export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
     slug: "date-time",
     n8nNode: "DateTime",
     group: "Data transformation",
-    mapsTo: [],
-    coverage: "gap",
-    note: "No date manipulation helper.",
+    mapsTo: ["dateTime"],
+    coverage: "covered",
+    note: "dateTime node — current time / timestamp math (clock read is an activity).",
   },
   {
     name: "Markdown",
@@ -531,9 +539,9 @@ export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
     slug: "email-send",
     n8nNode: "EmailSend",
     group: "Communication",
-    mapsTo: [],
-    coverage: "gap",
-    note: "Outbound SMTP; could be a dedicated node or via MCP/httpRequest.",
+    mapsTo: ["sendEmail"],
+    coverage: "covered",
+    note: "sendEmail node — outbound SMTP via an `smtp` connection (SSRF-guarded, at-most-once).",
   },
   {
     name: "RSS Read",
@@ -550,27 +558,27 @@ export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
     slug: "crypto",
     n8nNode: "Crypto",
     group: "Utility & security",
-    mapsTo: [],
-    coverage: "gap",
-    note: "Hash/HMAC/sign helpers.",
+    mapsTo: ["hmac"],
+    coverage: "partial",
+    note: "hmac node signs via a `signing` connection; plain hashing/other algos are follow-ups.",
   },
   {
     name: "JWT",
     slug: "jwt",
     n8nNode: "Jwt",
     group: "Utility & security",
-    mapsTo: [],
-    coverage: "gap",
-    note: "JWT sign/verify.",
+    mapsTo: ["jwt"],
+    coverage: "covered",
+    note: "jwt node — mints HS256/RS256 tokens via a `signing` connection.",
   },
   {
     name: "TOTP",
     slug: "totp",
     n8nNode: "Totp",
     group: "Utility & security",
-    mapsTo: [],
-    coverage: "gap",
-    note: "TOTP code generation.",
+    mapsTo: ["totp"],
+    coverage: "covered",
+    note: "totp node — RFC-6238 code generation from a `signing` connection seed.",
   },
   {
     name: "SSH",

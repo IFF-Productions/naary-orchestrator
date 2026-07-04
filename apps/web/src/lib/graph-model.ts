@@ -61,6 +61,7 @@ export const NODE_KINDS: {
 }[] = [
   { type: "start", label: "Start", group: "Triggers" },
   { type: "webhookTrigger", label: "Webhook", group: "Triggers" },
+  { type: "errorTrigger", label: "Error Trigger", group: "Triggers" },
   { type: "agent", label: "Agent", group: "AI & Tools" },
   { type: "mcpTool", label: "MCP Tool", group: "AI & Tools" },
   { type: "httpRequest", label: "HTTP Request", group: "Data sources" },

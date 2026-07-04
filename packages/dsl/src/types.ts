@@ -6,6 +6,7 @@
 export type NodeType =
   | "start"
   | "webhookTrigger" // Slice #4: entry node whose output is the inbound event
+  | "errorTrigger" // entry node for an error-handler graph; output is the failure context
   | "agent"
   | "mcpTool" // Slice #4: calls a remote MCP server tool via a connection
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}

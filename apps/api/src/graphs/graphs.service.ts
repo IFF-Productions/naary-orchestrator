@@ -133,4 +133,34 @@ export class GraphsService {
       orderBy: { version: "desc" },
     });
   }
+
+  /** The workflowKey of this workflow's error handler, or null if none is bound. */
+  async getErrorHandler(
+    tenantId: string,
+    workflowKey: string,
+  ): Promise<string | null> {
+    const row = await getPrisma().errorHandler.findUnique({
+      where: { tenantId_workflowKey: { tenantId, workflowKey } },
+    });
+    return row?.errorWorkflowKey ?? null;
+  }
+
+  /** Bind (or, with null, clear) this workflow's error handler. */
+  async setErrorHandler(
+    tenantId: string,
+    workflowKey: string,
+    errorWorkflowKey: string | null,
+  ): Promise<void> {
+    if (!errorWorkflowKey) {
+      await getPrisma().errorHandler.deleteMany({
+        where: { tenantId, workflowKey },
+      });
+      return;
+    }
+    await getPrisma().errorHandler.upsert({
+      where: { tenantId_workflowKey: { tenantId, workflowKey } },
+      create: { tenantId, workflowKey, errorWorkflowKey },
+      update: { errorWorkflowKey },
+    });
+  }
 }

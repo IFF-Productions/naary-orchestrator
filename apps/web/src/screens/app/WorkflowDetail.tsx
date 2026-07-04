@@ -25,6 +25,7 @@ import { NODE_KINDS } from "../../lib/graph-model";
 const ACCENT: Record<NodeType, string> = {
   start: "var(--node-trigger)",
   webhookTrigger: "var(--node-trigger)",
+  errorTrigger: "var(--node-error, #d6584f)",
   agent: "var(--node-agent)",
   mcpTool: "var(--node-mcp)",
   httpRequest: "var(--node-http, #2f9e8f)",
@@ -62,7 +63,10 @@ interface ViewData extends Record<string, unknown> {
 /** Read-only node (no editing). Handles anchor the existing edges. */
 function ViewNode({ data }: NodeProps<Node<ViewData>>) {
   const accent = ACCENT[data.kind];
-  const isEntry = data.kind === "start" || data.kind === "webhookTrigger";
+  const isEntry =
+    data.kind === "start" ||
+    data.kind === "webhookTrigger" ||
+    data.kind === "errorTrigger";
   return (
     <div
       style={{
@@ -128,6 +132,8 @@ export function WorkflowDetail() {
   const [g, setG] = useState<NamedGraph | null>(null);
   const [webhooks, setWebhooks] = useState<WebhookRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [workflows, setWorkflows] = useState<{ workflowKey: string }[]>([]);
+  const [errWk, setErrWk] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -148,10 +154,23 @@ export function WorkflowDetail() {
       .then((me) => api.listWebhooks(me.tenantId))
       .then((ws) => live && setWebhooks(ws))
       .catch(() => undefined);
+    api
+      .listGraphs()
+      .then((ws) => live && setWorkflows(ws))
+      .catch(() => undefined);
+    api
+      .getErrorHandler(key)
+      .then((r) => live && setErrWk(r.errorWorkflowKey))
+      .catch(() => undefined);
     return () => {
       live = false;
     };
   }, [key]);
+
+  async function bindErrorHandler(value: string | null): Promise<void> {
+    setErrWk(value);
+    await api.setErrorHandler(key, value).catch(() => undefined);
+  }
 
   const flow = g ? toFlow(g.graph) : null;
   const entry = g?.graph.nodes.find((n) => n.id === g.graph.startNodeId);
@@ -334,6 +353,50 @@ export function WorkflowDetail() {
               </li>
             )}
           </ul>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: "var(--ink)",
+              marginTop: 14,
+            }}
+          >
+            Error workflow
+          </div>
+          <p
+            style={{
+              fontSize: 12,
+              color: "var(--ink-2)",
+              lineHeight: 1.6,
+              margin: "6px 0 8px",
+            }}
+          >
+            If this workflow fails, run this handler (a graph that starts with
+            an <strong>Error Trigger</strong>) with the failure context.
+          </p>
+          <select
+            aria-label="Error workflow"
+            value={errWk ?? ""}
+            onChange={(e) => void bindErrorHandler(e.target.value || null)}
+            style={{
+              width: "100%",
+              padding: "7px 9px",
+              borderRadius: 8,
+              border: "1px solid var(--line-2)",
+              background: "var(--card)",
+              color: "var(--ink)",
+              fontSize: 12.5,
+            }}
+          >
+            <option value="">— none —</option>
+            {workflows
+              .filter((w) => w.workflowKey !== key)
+              .map((w) => (
+                <option key={w.workflowKey} value={w.workflowKey}>
+                  {w.workflowKey}
+                </option>
+              ))}
+          </select>
           <div
             style={{
               fontSize: 12,
