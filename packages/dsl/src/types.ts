@@ -12,6 +12,7 @@ export type NodeType =
   | "mcpTool" // Slice #4: calls a remote MCP server tool via a connection
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}
   | "sqlQuery" // runs a read-only query against a tenant DB; output is {rows,rowCount}
+  | "sqlExec" // runs a WRITE (INSERT/UPDATE/DELETE) in a txn; output is {rowsAffected}
   | "set" // builds a plain object from static fields + upstream bindings (pure, no I/O)
   | "renameKeys" // pure: remap/drop keys of an upstream object
   | "filter" // pure: keep array items matching a per-item predicate
@@ -141,6 +142,28 @@ export interface SqlQueryNodeConfig {
   /** Per-query timeout (ms) — Postgres statement_timeout / MSSQL request timeout. */
   statementTimeoutMs?: number;
   /** Flat per-call cost metered into the run budget (Arch§4.6). */
+  costUsd?: number;
+}
+
+/**
+ * sqlExec node — a WRITE (INSERT/UPDATE/DELETE) against a tenant database, run inside
+ * a transaction that COMMITs on success and ROLLBACKs on error. Same binding rules as
+ * sqlQuery (bindings only fill positional params, never the SQL text). SEPARATE from
+ * sqlQuery on purpose: a write node is a clear, explicit intent the reviewer/canvas can
+ * see. The activity runs AT-MOST-ONCE (writes aren't idempotent — no Temporal retries).
+ */
+export interface SqlExecNodeConfig {
+  /** A `postgres`/`mssql`/`mysql` connection; its stored DSN is read in-activity. */
+  connectionId: string;
+  /** Static write statement with positional placeholders. Never built from bindings. */
+  sql: string;
+  /** Static positional parameter values (the base for bindings). */
+  params?: unknown[];
+  /** 1-based param index → upstream output binding; fills/overrides that position. */
+  paramBindings?: Record<number, ArgBinding>;
+  /** Per-statement timeout (ms). */
+  statementTimeoutMs?: number;
+  /** Flat per-call cost metered into the run budget. */
   costUsd?: number;
 }
 

@@ -52,4 +52,24 @@ export const mssqlAdapter: SqlEngineAdapter = {
       await pool.close();
     }
   },
+  async runWrite(dsn, sql, params, opts) {
+    const pool = __mssqlDeps.createPool(dsn, opts.timeoutMs);
+    await pool.connect();
+    try {
+      const tx = new Transaction(pool);
+      await tx.begin();
+      const request = new Request(tx);
+      params.forEach((p, i) => request.input(`p${i + 1}`, p));
+      try {
+        const result = await request.query(sql);
+        await tx.commit();
+        return { rowsAffected: result.rowsAffected?.[0] ?? 0 };
+      } catch (e) {
+        await tx.rollback().catch(() => undefined);
+        throw e;
+      }
+    } finally {
+      await pool.close();
+    }
+  },
 };

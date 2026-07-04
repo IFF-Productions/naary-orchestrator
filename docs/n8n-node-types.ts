@@ -20,6 +20,7 @@ export type DslNodeType =
   | "mcpTool"
   | "httpRequest"
   | "sqlQuery"
+  | "sqlExec"
   | "set"
   | "renameKeys"
   | "dateTime"

@@ -42,6 +42,7 @@ vi.mock("mssql", () => {
 });
 
 import { augmentMssqlDsn, mssqlAdapter } from "../src/mssql";
+import { __mysqlDeps, mysqlAdapter } from "../src/mysql";
 import { __pgDeps, postgresAdapter } from "../src/postgres";
 
 afterEach(() => {
@@ -126,5 +127,80 @@ describe("mssqlAdapter", () => {
       "rollback",
       "close",
     ]);
+  });
+});
+
+describe("postgresAdapter.runWrite", () => {
+  it("runs the write in a txn that COMMITs, returns rowsAffected, closes", async () => {
+    const calls: string[] = [];
+    __pgDeps.createClient = () => ({
+      connect: async () => undefined,
+      query: async (text: string) => {
+        calls.push(text);
+        return text.startsWith("UPDATE")
+          ? { rows: [], rowCount: 2 }
+          : { rows: [], rowCount: 0 };
+      },
+      end: async () => calls.push("END"),
+    });
+    const res = await postgresAdapter.runWrite("dsn", "UPDATE t SET x=1", [], {
+      timeoutMs: 1000,
+    });
+    expect(res).toEqual({ rowsAffected: 2 });
+    expect(calls).toEqual(["BEGIN", "UPDATE t SET x=1", "COMMIT", "END"]);
+  });
+
+  it("ROLLBACKs and rethrows when the write fails (nothing persists)", async () => {
+    const calls: string[] = [];
+    __pgDeps.createClient = () => ({
+      connect: async () => undefined,
+      query: async (text: string) => {
+        calls.push(text);
+        if (text.startsWith("UPDATE")) throw new Error("constraint");
+        return { rows: [], rowCount: 0 };
+      },
+      end: async () => calls.push("END"),
+    });
+    await expect(
+      postgresAdapter.runWrite("dsn", "UPDATE t SET x=1", [], { timeoutMs: 1000 }),
+    ).rejects.toThrow("constraint");
+    expect(calls).toContain("ROLLBACK");
+    expect(calls).toContain("END"); // still closed
+  });
+});
+
+describe("mysqlAdapter", () => {
+  function fakeConn(rowsOrResult: unknown, log: string[]) {
+    return {
+      query: async (sql: string) => {
+        log.push(sql);
+        return [rowsOrResult, []] as [unknown, unknown];
+      },
+      end: async () => log.push("end"),
+    };
+  }
+
+  it("reads inside a READ ONLY transaction and rolls back", async () => {
+    const log: string[] = [];
+    __mysqlDeps.createConnection = async () => fakeConn([{ id: 1 }], log);
+    const res = await mysqlAdapter.runReadOnly("mysql://x", "SELECT 1", [], {
+      timeoutMs: 1000,
+    });
+    expect(res).toEqual({ rows: [{ id: 1 }], rowCount: 1 });
+    expect(log).toContain("START TRANSACTION READ ONLY");
+    expect(log).toContain("ROLLBACK");
+    expect(log).toContain("end");
+  });
+
+  it("writes inside a transaction that COMMITs and returns affectedRows", async () => {
+    const log: string[] = [];
+    __mysqlDeps.createConnection = async () =>
+      fakeConn({ affectedRows: 4 }, log);
+    const res = await mysqlAdapter.runWrite("mysql://x", "DELETE FROM t", [], {
+      timeoutMs: 1000,
+    });
+    expect(res).toEqual({ rowsAffected: 4 });
+    expect(log).toContain("START TRANSACTION");
+    expect(log).toContain("COMMIT");
   });
 });

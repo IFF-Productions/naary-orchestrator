@@ -3,15 +3,23 @@ import { SecretStore } from "@naary/secrets";
 import { MissingConnectionTokenError } from "./errors";
 
 export type ConnectionType =
-  "github" | "atlassian" | "custom" | "postgres" | "mssql" | "signing" | "smtp";
+  | "github"
+  | "atlassian"
+  | "custom"
+  | "postgres"
+  | "mssql"
+  | "mysql"
+  | "signing"
+  | "smtp";
 export type AuthMode = "api_token" | "pat" | "oauth" | "connection_string";
 export type ConnectionStatus = "connected" | "needs_reauth" | "error";
 
-/** Connection types that are SQL databases (the engine the sqlQuery node uses). */
-export type DbEngine = "postgres" | "mssql";
+/** Connection types that are SQL databases (the engine the sqlQuery/sqlExec nodes use). */
+export type DbEngine = "postgres" | "mssql" | "mysql";
 const DB_ENGINES: ReadonlySet<string> = new Set<DbEngine>([
   "postgres",
   "mssql",
+  "mysql",
 ]);
 
 export interface CreateConnectionInput {

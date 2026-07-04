@@ -69,6 +69,14 @@ const mockActivities = {
       costUsd: 0,
     };
   },
+  callSqlExec: async (
+    cfg: activities.SqlExecConfig,
+    _input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.SqlExecResult> => {
+    sqlExecCalls.push(cfg);
+    return { status: "ok", rowsAffected: 2, costUsd: 0 };
+  },
   computeDateTime: async (input: {
     base: string | number | null;
     addSeconds?: number;
@@ -219,6 +227,7 @@ const subResolveCalls: { tenantId: string; workflowKey: string }[] = [];
 const mcpCalls: activities.McpToolConfig[] = [];
 const httpCalls: activities.HttpRequestConfig[] = [];
 const sqlCalls: activities.SqlQueryConfig[] = [];
+const sqlExecCalls: activities.SqlExecConfig[] = [];
 // Mutable so each test fixes the HTTP node's response (status drives the branch).
 let httpResponse: activities.HttpRequestResult = {
   status: "ok",
@@ -285,6 +294,29 @@ const sqlGraph: GraphDef = {
   edges: [
     { from: "trigger", to: "lookup" },
     { from: "lookup", to: "end" },
+  ],
+};
+
+// webhook → sqlExec (write) → end. Proves the write node dispatches + rowsAffected
+// lands in ctx (params bound the same way as sqlQuery).
+const sqlExecGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "write",
+      type: "sqlExec",
+      config: {
+        connectionId: "db-1",
+        sql: "UPDATE users SET seen = true WHERE id = $1",
+        paramBindings: { 1: { from: "trigger", path: "userId" } },
+      },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "write" },
+    { from: "write", to: "end" },
   ],
 };
 
@@ -1014,6 +1046,23 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       const call = sqlCalls[sqlCalls.length - 1];
       expect(call.sql).toBe("SELECT id, email FROM users WHERE id = $1");
       expect(call.params).toEqual([7]);
+    });
+  });
+
+  it("sqlExec: runs the write + exposes {rowsAffected}; params bound like sqlQuery", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [sqlExecGraph, { userId: 7 }, { tenantId: "t-sqlexec" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-sqlexec",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(result.ctx.write).toEqual({ rowsAffected: 2 });
+      const call = sqlExecCalls[sqlExecCalls.length - 1];
+      expect(call.sql).toBe("UPDATE users SET seen = true WHERE id = $1");
+      expect(call.params).toEqual([7]); // bound from trigger.userId, not the SQL text
     });
   });
 

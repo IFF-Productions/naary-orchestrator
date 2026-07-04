@@ -40,4 +40,19 @@ export const postgresAdapter: SqlEngineAdapter = {
       await client.end();
     }
   },
+  async runWrite(dsn, sql, params, opts) {
+    const client = __pgDeps.createClient(dsn, opts.timeoutMs);
+    await client.connect();
+    try {
+      await client.query("BEGIN");
+      const res = await client.query(sql, params);
+      await client.query("COMMIT");
+      return { rowsAffected: res.rowCount ?? 0 };
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw e;
+    } finally {
+      await client.end();
+    }
+  },
 };

@@ -1768,3 +1768,111 @@ export async function callSqlQuery(
     );
   }
 }
+
+export interface SqlExecConfig {
+  connectionId: string;
+  sql: string;
+  params: unknown[];
+  statementTimeoutMs?: number;
+  costUsd?: number;
+}
+
+export interface SqlExecResult {
+  status: "ok";
+  rowsAffected: number;
+  costUsd: number;
+}
+
+/**
+ * SQL Exec node: run ONE write (INSERT/UPDATE/DELETE) against a tenant database inside
+ * a transaction (COMMIT on success, ROLLBACK on error) and return the affected row
+ * count. Same DSN-in-activity + SSRF guard + binding rules as callSqlQuery.
+ *
+ * Writes are NOT idempotent, so this activity is registered AT-MOST-ONCE (retry: 1):
+ * a partial/ambiguous failure fails the node rather than risk a double-write. Every
+ * error is therefore NON-retryable here (surfaced generically so the DSN never leaks).
+ */
+export async function callSqlExec(
+  cfg: SqlExecConfig,
+  input: unknown,
+  meta: AgentMeta,
+): Promise<SqlExecResult> {
+  void input;
+  const startedAt = process.hrtime.bigint();
+  try {
+    const store = getObjectStore();
+    const { engine, dsn } = await __sqlDeps.resolveDbConnection(
+      meta.tenantId,
+      cfg.connectionId,
+    );
+    const dbHost = dsnHost(dsn);
+    if (dbHost) await __sqlDeps.assertHostPublic(dbHost);
+    const params = (await resolveClaimChecks(
+      cfg.params ?? [],
+      store,
+    )) as unknown[];
+    const timeoutMs = Math.min(
+      cfg.statementTimeoutMs ?? DEFAULT_SQL_TIMEOUT_MS,
+      MAX_SQL_TIMEOUT_MS,
+    );
+    const result = await __sqlDeps
+      .getAdapter(engine)
+      .runWrite(dsn, cfg.sql, params, { timeoutMs });
+
+    log.info(
+      {
+        activity: "callSqlExec",
+        executionId: meta.executionId,
+        nodeId: meta.nodeId,
+        tenantId: meta.tenantId,
+        engine,
+        connectionId: cfg.connectionId,
+        rowsAffected: result.rowsAffected,
+        costUsd: cfg.costUsd ?? 0,
+      },
+      "sql exec completed",
+    );
+    activityRuns.inc({ activity: "callSqlExec", outcome: "ok" });
+    activityDuration.observe(
+      { activity: "callSqlExec" },
+      secondsSince(startedAt),
+    );
+    if ((cfg.costUsd ?? 0) > 0) runCostUsd.inc(cfg.costUsd ?? 0);
+    return {
+      status: "ok",
+      rowsAffected: result.rowsAffected,
+      costUsd: cfg.costUsd ?? 0,
+    };
+  } catch (e) {
+    activityRuns.inc({ activity: "callSqlExec", outcome: "error" });
+    activityDuration.observe(
+      { activity: "callSqlExec" },
+      secondsSince(startedAt),
+    );
+    if (e instanceof ApplicationFailure) throw e;
+    if (e instanceof BlockedEgressError) {
+      throw ApplicationFailure.nonRetryable(e.message, "EGRESS_BLOCKED", {
+        connectionId: cfg.connectionId,
+      });
+    }
+    if (
+      e instanceof MissingConnectionTokenError ||
+      e instanceof NeedsReauthError ||
+      (e as { code?: unknown }).code === MSSQL_AUTH_CODE
+    ) {
+      throw ApplicationFailure.nonRetryable(
+        "Connection needs re-authorization",
+        "CONNECTION_REAUTH",
+        { connectionId: cfg.connectionId },
+      );
+    }
+    // At-most-once: surface the code if we have one, else a generic failure. NEVER
+    // retryable — a retry could double-write. The driver message (DSN/host) is dropped.
+    const code = sqlErrorCode(e);
+    throw ApplicationFailure.nonRetryable(
+      code ? `SQL write failed (code ${code})` : "SQL write failed",
+      "SQL_EXEC_ERROR",
+      { connectionId: cfg.connectionId, ...(code ? { code } : {}) },
+    );
+  }
+}
