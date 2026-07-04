@@ -20,6 +20,7 @@ const NEW_NODES = [
   { label: "Sub-workflow", field: "Sub-workflow key" },
   { label: "HMAC", field: "Algorithm" },
   { label: "JWT", field: "Expires in (seconds, optional)" },
+  { label: "TOTP", field: "Period (seconds)" },
   { label: "Send Email", field: "SMTP connection id" },
 ];
 

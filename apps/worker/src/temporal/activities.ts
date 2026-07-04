@@ -337,6 +337,94 @@ export async function callJwt(
   }
 }
 
+/** Decode an RFC-4648 base32 string (the TOTP seed) to bytes. Case-insensitive,
+ *  ignores whitespace and padding. Throws on an invalid character (message carries
+ *  no secret). */
+function base32Decode(input: string): Buffer {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const clean = input.replace(/[=\s]/g, "").toUpperCase();
+  let bits = 0;
+  let value = 0;
+  const out: number[] = [];
+  for (const c of clean) {
+    const idx = alphabet.indexOf(c);
+    if (idx === -1) throw new Error("invalid base32 TOTP seed");
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return Buffer.from(out);
+}
+
+/** RFC-4226 HOTP → the `digits`-length code for `counter`. */
+function hotp(
+  secret: Buffer,
+  counter: number,
+  digits: number,
+  algorithm: string,
+): string {
+  const buf = Buffer.alloc(8);
+  buf.writeBigUInt64BE(BigInt(counter));
+  const mac = createHmac(algorithm, secret).update(buf).digest();
+  const offset = mac[mac.length - 1] & 0x0f;
+  const bin =
+    ((mac[offset] & 0x7f) << 24) |
+    ((mac[offset + 1] & 0xff) << 16) |
+    ((mac[offset + 2] & 0xff) << 8) |
+    (mac[offset + 3] & 0xff);
+  return (bin % 10 ** digits).toString().padStart(digits, "0");
+}
+
+export interface TotpConfig {
+  connectionId: string;
+  digits?: number;
+  period?: number;
+  algorithm?: "sha1" | "sha256" | "sha512";
+}
+
+export interface TotpResult {
+  status: "ok";
+  code: string;
+  costUsd: number;
+}
+
+// Injectable seam: the seed resolver + the clock (so tests are deterministic).
+export const __totpDeps = { resolveSigningKey, now: () => Date.now() };
+
+/**
+ * totp node — generate the current RFC-6238 code from a `signing` connection's
+ * base32 seed. The seed is read + used here only (never returned/logged/in
+ * history); the clock read is why this is an activity, not workflow code.
+ */
+export async function callTotp(
+  cfg: TotpConfig,
+  _input: unknown,
+  meta: AgentMeta,
+): Promise<TotpResult> {
+  const startedAt = process.hrtime.bigint();
+  try {
+    const seed = await __totpDeps.resolveSigningKey(
+      meta.tenantId,
+      cfg.connectionId,
+    );
+    const secret = base32Decode(seed);
+    const period = cfg.period && cfg.period > 0 ? cfg.period : 30;
+    const digits = cfg.digits && cfg.digits > 0 ? cfg.digits : 6;
+    const counter = Math.floor(__totpDeps.now() / 1000 / period);
+    const code = hotp(secret, counter, digits, cfg.algorithm ?? "sha1");
+    activityRuns.inc({ activity: "callTotp", outcome: "ok" });
+    activityDuration.observe({ activity: "callTotp" }, secondsSince(startedAt));
+    return { status: "ok", code, costUsd: 0 };
+  } catch (e) {
+    activityRuns.inc({ activity: "callTotp", outcome: "error" });
+    activityDuration.observe({ activity: "callTotp" }, secondsSince(startedAt));
+    throw toSigningFailure(e, "TOTP_ERROR");
+  }
+}
+
 export interface SendEmailResult {
   status: "ok";
   messageId: string;
