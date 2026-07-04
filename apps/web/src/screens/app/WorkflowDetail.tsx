@@ -302,11 +302,28 @@ export function WorkflowDetail() {
               <li>
                 <strong>Webhook</strong> —{" "}
                 {hookUrls.length > 0 ? (
-                  hookUrls.map((u) => (
-                    <code key={u} style={{ fontSize: 11 }}>
-                      POST {u}
-                    </code>
-                  ))
+                  <>
+                    {hookUrls.map((u) => (
+                      <code key={u} style={{ fontSize: 11 }}>
+                        POST {u}
+                      </code>
+                    ))}
+                    <div
+                      style={{
+                        fontSize: 11.5,
+                        color: "var(--ink-3)",
+                        marginTop: 4,
+                      }}
+                    >
+                      Signed <code>POST</code>: send{" "}
+                      <code>
+                        X-Hub-Signature-256: sha256=&lt;HMAC-SHA256(body,
+                        secret)&gt;
+                      </code>{" "}
+                      over the raw body. The full copy-run <code>curl</code> is
+                      shown when you register the endpoint (Integrations).
+                    </div>
+                  </>
                 ) : (
                   <>register an endpoint on the Integrations screen.</>
                 )}
