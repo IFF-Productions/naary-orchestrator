@@ -289,6 +289,18 @@ export async function startConsent(opts: {
   fetchFn?: FetchFn;
 }): Promise<{ authorizeUrl: string }> {
   const store = opts.store ?? new SecretStore();
+  // Audit S-5: opportunistically sweep this tenant's abandoned (never-completed)
+  // consent states — their row is older than the consent TTL. Decryption-free,
+  // best-effort (never block starting a new consent on a sweep hiccup).
+  try {
+    await store.prunePrefixOlderThan?.(
+      opts.tenantId,
+      "oauth-state:",
+      OAUTH_STATE_TTL_MS,
+    );
+  } catch {
+    /* best-effort storage hygiene */
+  }
   const meta = await discoverOAuthMetadata(opts.serverUrl, opts.fetchFn);
   const reg = meta.registrationEndpoint
     ? await registerClient(

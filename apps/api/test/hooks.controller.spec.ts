@@ -22,19 +22,32 @@ function makeDeps(graphNodes: { type: string }[]) {
   };
   const res = { status: vi.fn(), set: vi.fn() };
   const req = { rawBody: Buffer.from("{}") };
+  // a present signature header (verifySignature is mocked to accept it)
+  const headers = { "x-hub-signature-256": "sha256=deadbeef" };
   const controller = new HooksController(
     webhooks as never,
     executions as never,
     graphs as never,
   );
-  return { controller, executions, res, req };
+  return { controller, webhooks, executions, res, req, headers };
 }
 
 describe("HooksController.ingress", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  it("S-4: an unsigned request is rejected BEFORE any DB read/decrypt", async () => {
+    const { controller, webhooks, req, res } = makeDeps([
+      { type: "webhookTrigger" },
+    ]);
+    await expect(
+      controller.ingress("ep-1", req as never, {}, {}, res as never), // no signature header
+    ).rejects.toMatchObject({ status: 401 });
+    expect(webhooks.getEndpoint).not.toHaveBeenCalled();
+    expect(webhooks.decryptSigningSecret).not.toHaveBeenCalled();
+  });
+
   it("respondToWebhook graph → returns the node's response with its status + headers", async () => {
-    const { controller, executions, res, req } = makeDeps([
+    const { controller, executions, res, req, headers } = makeDeps([
       { type: "webhookTrigger" },
       { type: "respondToWebhook" },
     ]);
@@ -51,7 +64,7 @@ describe("HooksController.ingress", () => {
       "ep-1",
       req as never,
       {},
-      {},
+      headers,
       res as never,
     );
     expect(res.status).toHaveBeenCalledWith(201);
@@ -61,7 +74,7 @@ describe("HooksController.ingress", () => {
   });
 
   it("respondToWebhook graph that never responds → falls back to 202 started", async () => {
-    const { controller, executions, res, req } = makeDeps([
+    const { controller, executions, res, req, headers } = makeDeps([
       { type: "respondToWebhook" },
     ]);
     executions.startWebhookAwaitResponse.mockResolvedValue({
@@ -72,7 +85,7 @@ describe("HooksController.ingress", () => {
       "ep-1",
       req as never,
       {},
-      {},
+      headers,
       res as never,
     );
     expect(res.status).not.toHaveBeenCalled(); // @HttpCode(202) applies
@@ -80,7 +93,7 @@ describe("HooksController.ingress", () => {
   });
 
   it("no respondToWebhook node → fire-and-forget 202 (never awaits a response)", async () => {
-    const { controller, executions, res, req } = makeDeps([
+    const { controller, executions, res, req, headers } = makeDeps([
       { type: "agent" },
       { type: "end" },
     ]);
@@ -88,7 +101,7 @@ describe("HooksController.ingress", () => {
       "ep-1",
       req as never,
       {},
-      {},
+      headers,
       res as never,
     );
     expect(executions.startWebhookAwaitResponse).not.toHaveBeenCalled();
