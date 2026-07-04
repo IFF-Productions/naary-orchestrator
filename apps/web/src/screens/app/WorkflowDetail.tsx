@@ -40,6 +40,7 @@ const ACCENT: Record<NodeType, string> = {
   totp: "var(--node-totp, #9a6fc6)",
   sendEmail: "var(--node-email, #4f9ad6)",
   executeSubWorkflow: "var(--node-subflow, #5b8def)",
+  forEach: "var(--node-foreach, #5b6fd6)",
   wait: "var(--node-wait, #8a8f98)",
   stopAndError: "var(--node-error, #d6584f)",
   humanApproval: "var(--node-approval)",

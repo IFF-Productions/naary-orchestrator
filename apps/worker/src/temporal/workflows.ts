@@ -25,6 +25,7 @@ import type {
   DateTimeNodeConfig,
   ExecuteSubWorkflowNodeConfig,
   FilterNodeConfig,
+  ForEachNodeConfig,
   GraphDef,
   HmacNodeConfig,
   HttpRequestNodeConfig,
@@ -62,6 +63,10 @@ const {
 /** Max sub-workflow nesting depth (a run at this depth refuses to spawn children).
  *  Bounds accidental/infinite recursion — a saved graph that calls itself. */
 const MAX_SUBWORKFLOW_DEPTH = 5;
+
+/** Max items a single forEach will fan out to (child run per item). An array larger
+ *  than this trips the circuit breaker — filter/limit upstream first. */
+const MAX_FOREACH_ITEMS = 100;
 
 // The HTTP node's request deadline is user-configurable (up to MAX_HTTP_TIMEOUT_MS,
 // clamped in the activity), so it needs a start-to-close strictly ABOVE that cap —
@@ -492,6 +497,82 @@ export async function runGraph(
           if (!k.startsWith("__")) output[k] = v;
         }
         ctx[node.id] = { status: result.status, output };
+        return null;
+      }
+      case "forEach": {
+        // Map an array by running a saved graph once per item as a durable child
+        // run. Same machinery as executeSubWorkflow, looped: depth guard + item cap
+        // bound the fan-out; children run concurrently; results stay in item order.
+        const feCfg = node.config as unknown as ForEachNodeConfig;
+        const depth = runCtx.subWorkflowDepth ?? 0;
+        if (depth >= MAX_SUBWORKFLOW_DEPTH) return "circuit_open";
+
+        const raw = getByPath(ctx[feCfg.from], feCfg.path);
+        const items = Array.isArray(raw) ? raw : [];
+        if (items.length === 0) {
+          ctx[node.id] = [];
+          return null;
+        }
+        // Explicit runaway guard — never fan out past the cap (no silent truncation).
+        if (items.length > MAX_FOREACH_ITEMS) return "circuit_open";
+
+        // Resolve the child graph ONCE (same workflowKey for every item), then launch
+        // one child per item with the item as its input.
+        const snapshot = await resolveSubWorkflowGraph({
+          tenantId: runCtx.tenantId,
+          workflowKey: feCfg.workflowKey,
+        });
+        const parentId = wf.workflowInfo().workflowId;
+        const childCap =
+          runCtx.perExecutionCapUsd !== undefined
+            ? Math.max(0, runCtx.perExecutionCapUsd - costUsd)
+            : undefined;
+
+        // Each child is wrapped so a THROWN child (a stopAndError node, or a
+        // non-retryable activity error) becomes a failed ENTRY — not a rejected
+        // Promise.all that would kill the whole batch (child failure ≠ parent crash,
+        // same contract as executeSubWorkflow; a RETURNED terminal status already
+        // resolves normally). Catching a deterministic rejection stays replay-safe.
+        const settled = await Promise.all(
+          items.map((item, i) =>
+            wf
+              .executeChild(runGraph, {
+                workflowId: `${parentId}-foreach-${node.id}-${stepCount}-${i}`,
+                args: [
+                  snapshot.graph,
+                  item,
+                  {
+                    tenantId: runCtx.tenantId,
+                    workflowKey: feCfg.workflowKey,
+                    perExecutionCapUsd: childCap,
+                    maxStepsPerRun: runCtx.maxStepsPerRun,
+                    graphContentHash: snapshot.contentHash,
+                    graphVersion: snapshot.version,
+                    subWorkflowDepth: depth + 1,
+                  } satisfies RunGraphCtx,
+                ],
+              })
+              .then((r) => ({ ok: true as const, r }))
+              .catch(() => ({ ok: false as const })),
+          ),
+        );
+
+        // Meter every completed child's cost into the parent (commutative sum) and
+        // collect the bounded {status, output} projection per item, in ARRAY ORDER.
+        // A child that threw surfaces as { status: "failed" } so the graph can branch
+        // on `<nodeId>.N.status` without the batch dying.
+        const collected = settled.map((s) => {
+          if (!s.ok) return { status: "failed", output: {} };
+          const r = s.r;
+          costUsd += typeof r.ctx.__costUsd === "number" ? r.ctx.__costUsd : 0;
+          const output: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(r.ctx)) {
+            if (!k.startsWith("__")) output[k] = v;
+          }
+          return { status: r.status as string, output };
+        });
+        ctx.__costUsd = costUsd;
+        ctx[node.id] = collected;
         return null;
       }
       case "wait": {

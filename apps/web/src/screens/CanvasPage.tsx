@@ -95,6 +95,7 @@ const ACCENT: Record<NodeType, string> = {
   totp: "var(--node-totp, #9a6fc6)",
   sendEmail: "var(--node-email, #4f9ad6)",
   executeSubWorkflow: "var(--node-subflow, #5b8def)",
+  forEach: "var(--node-foreach, #5b6fd6)",
   wait: "var(--node-wait, #8a8f98)",
   stopAndError: "var(--node-error, #d6584f)",
   humanApproval: "var(--node-approval)",
@@ -234,6 +235,10 @@ function nodeSubtitle(
   if (kind === "executeSubWorkflow") {
     const key = config.workflowKey as string | undefined;
     return key ? `↳ ${key}` : undefined;
+  }
+  if (kind === "forEach") {
+    const key = config.workflowKey as string | undefined;
+    return key ? `⟳ ${key}` : undefined;
   }
   if (kind === "wait") {
     const secs = config.durationSeconds as number | undefined;
@@ -1810,6 +1815,41 @@ function ConfigPanel({
           />
           <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
             Leave input empty to forward this run's trigger input to the child.
+          </div>
+        </>
+      )}
+
+      {kind === "forEach" && (
+        <>
+          <Labeled label="Sub-workflow key (run per item)">
+            <input
+              value={str("workflowKey")}
+              onChange={(e) => onChange({ workflowKey: e.target.value })}
+              style={inputStyle}
+              placeholder="process-one-item"
+            />
+          </Labeled>
+          <Labeled label="Array source node id">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="upstream-node-id"
+            />
+          </Labeled>
+          <Labeled label="Array path (optional)">
+            <input
+              value={str("path")}
+              onChange={(e) => onChange({ path: e.target.value })}
+              style={inputStyle}
+              placeholder="rows"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            Runs that saved workflow once per array item (item = the child's
+            input), concurrently. Output is an array of{" "}
+            <code>{node.id}.N.status</code> / <code>.output</code>, one per
+            item. Capped at 100 items — filter first if larger.
           </div>
         </>
       )}
