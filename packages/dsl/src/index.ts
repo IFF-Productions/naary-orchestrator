@@ -8,6 +8,13 @@ export {
   graphRegistry,
   getGraphForWorkflow,
 } from "./sample-graph";
+export {
+  feedDigestGraph,
+  supportReplyGraph,
+  dbReportGraph,
+  moderationGraph,
+  apiEnrichGraph,
+} from "./templates";
 export { getByPath, resolveMcpArguments } from "./mcp-args";
 export { resolveHttpRequest, type ResolvedHttpRequest } from "./http-request";
 export { resolveSqlQuery, type ResolvedSqlQuery } from "./sql-query";

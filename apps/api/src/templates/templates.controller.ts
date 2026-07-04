@@ -1,6 +1,15 @@
 import { Controller, Get, NotFoundException, Param } from "@nestjs/common";
 import type { GraphDef } from "@naary/dsl";
-import { githubReviewGraph, sampleGraph, webhookSampleGraph } from "@naary/dsl";
+import {
+  apiEnrichGraph,
+  dbReportGraph,
+  feedDigestGraph,
+  githubReviewGraph,
+  moderationGraph,
+  sampleGraph,
+  supportReplyGraph,
+  webhookSampleGraph,
+} from "@naary/dsl";
 
 /** A built-in workflow template, surfaced to the Templates screen. */
 export interface TemplateSummary {
@@ -47,6 +56,41 @@ const TEMPLATES: {
     description:
       "Reviews a pull request, comments back via an MCP connection, then requires approval before merge.",
     graph: githubReviewGraph,
+  },
+  {
+    key: "feed-digest",
+    name: "Feed digest by email",
+    description:
+      "Pull an RSS/Atom feed, let an agent write a skimmable digest, and email it. Point it at any feed + SMTP connection; pair with a schedule for a daily digest.",
+    graph: feedDigestGraph,
+  },
+  {
+    key: "support-reply",
+    name: "Support reply with sign-off",
+    description:
+      "A new ticket comes in, an agent drafts a reply, a human reviews and approves it, then it's emailed. AI does the work; a person stays in the loop.",
+    graph: supportReplyGraph,
+  },
+  {
+    key: "db-report",
+    name: "Scheduled database report",
+    description:
+      "Run a read-only query against your database, turn the rows into a plain-language summary, and email it. Pair with a schedule for a daily/weekly report.",
+    graph: dbReportGraph,
+  },
+  {
+    key: "moderation",
+    name: "Content moderation gate",
+    description:
+      "Classify user-submitted content; clean submissions are accepted instantly, flagged ones route to a human before publishing.",
+    graph: moderationGraph,
+  },
+  {
+    key: "api-enrich",
+    name: "API enrichment",
+    description:
+      "When a webhook fires, call a REST API and let an agent summarize the response. A starting point for 'when X happens, look up Y'.",
+    graph: apiEnrichGraph,
   },
 ];
 
