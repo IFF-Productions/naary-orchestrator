@@ -86,6 +86,8 @@ const ACCENT: Record<NodeType, string> = {
   sqlQuery: "var(--node-sql, #b06fd6)",
   set: "var(--node-set, #d98a3d)",
   renameKeys: "var(--node-rename, #c9803e)",
+  filter: "var(--node-filter, #3f9e8f)",
+  aggregate: "var(--node-aggregate, #b0863e)",
   dateTime: "var(--node-datetime, #6f8fd6)",
   merge: "var(--node-merge, #3fae86)",
   hmac: "var(--node-hmac, #a86fd6)",
@@ -208,6 +210,14 @@ function nodeSubtitle(
   if (kind === "renameKeys") {
     const from = config.from as string | undefined;
     return from ? `from ${from}` : undefined;
+  }
+  if (kind === "filter") {
+    const c = config.condition as { path?: string; op?: string } | undefined;
+    return c?.path ? `${c.path} ${c.op ?? ""}`.trim() : undefined;
+  }
+  if (kind === "aggregate") {
+    const op = config.operation as string | undefined;
+    return op || undefined;
   }
   if (kind === "dateTime") {
     const src = config.source;
@@ -1418,6 +1428,84 @@ function ConfigPanel({
         </>
       )}
 
+      {kind === "filter" && (
+        <>
+          <Labeled label="Array source node id">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="upstream-node-id"
+            />
+          </Labeled>
+          <Labeled label="Array path (optional)">
+            <input
+              value={str("path")}
+              onChange={(e) => onChange({ path: e.target.value })}
+              style={inputStyle}
+              placeholder="rows"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            Keeps array items matching the predicate below (paths are relative
+            to each item). Output is the filtered array.
+          </div>
+          <ConditionEditor
+            condition={
+              config.condition as
+                { path?: string; op?: string; value?: unknown } | undefined
+            }
+            onChange={(c) => onChange({ condition: c })}
+          />
+        </>
+      )}
+
+      {kind === "aggregate" && (
+        <>
+          <Labeled label="Array source node id">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="upstream-node-id"
+            />
+          </Labeled>
+          <Labeled label="Array path (optional)">
+            <input
+              value={str("path")}
+              onChange={(e) => onChange({ path: e.target.value })}
+              style={inputStyle}
+              placeholder="rows"
+            />
+          </Labeled>
+          <Labeled label="Operation">
+            <select
+              value={str("operation") || "collect"}
+              onChange={(e) => onChange({ operation: e.target.value })}
+              style={inputStyle}
+            >
+              {["collect", "count", "sum", "first", "last"].map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </Labeled>
+          <Labeled label="Field (item path, optional)">
+            <input
+              value={str("field")}
+              onChange={(e) => onChange({ field: e.target.value })}
+              style={inputStyle}
+              placeholder="email"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            Collapses the array into <code>{node.id}.result</code>. For
+            collect/sum, pick a field from each item.
+          </div>
+        </>
+      )}
+
       {kind === "dateTime" && (
         <>
           <Labeled label="Source node id (blank = current time)">
@@ -1890,6 +1978,86 @@ function RowHead({ label, value }: { label: string; value: string }) {
 /** A JSON object field: edits as text, commits the parsed object on valid JSON,
  *  shows an inline error otherwise (last valid value stays in the config). Empty
  *  text clears the field (undefined). */
+/** "true"/"false" → boolean, numeric string → number, else the trimmed string.
+ *  Mirrors compile-graph's edge-condition coercion so the filter predicate's typed
+ *  comparisons (===, >) work. */
+function coerceCond(s: string): string | number | boolean {
+  if (s === "true") return true;
+  if (s === "false") return false;
+  if (s !== "" && !Number.isNaN(Number(s))) return Number(s);
+  return s;
+}
+
+/** Editor for a structured predicate (path/op/value) stored as a DSL EdgeCondition
+ *  on the filter node's config. Coerces the value on change (like the edge editor). */
+function ConditionEditor({
+  condition,
+  onChange,
+}: {
+  condition?: { path?: string; op?: string; value?: unknown };
+  onChange: (c: { path: string; op: string; value?: unknown }) => void;
+}) {
+  const path = condition?.path ?? "";
+  const op = (condition?.op as EdgeConditionDraft["op"]) ?? "eq";
+  const valStr = Array.isArray(condition?.value)
+    ? (condition?.value as unknown[]).join(", ")
+    : condition?.value === undefined || condition?.value === null
+      ? ""
+      : String(condition?.value);
+
+  function build(nextPath: string, nextOp: string, nextVal: string): void {
+    const c: { path: string; op: string; value?: unknown } = {
+      path: nextPath,
+      op: nextOp,
+    };
+    if (nextOp === "in") {
+      c.value = nextVal
+        .split(",")
+        .map((s) => coerceCond(s.trim()))
+        .filter((v) => v !== "");
+    } else if (nextOp !== "exists") {
+      c.value = coerceCond(nextVal);
+    }
+    onChange(c);
+  }
+
+  return (
+    <>
+      <Labeled label="Item path">
+        <input
+          value={path}
+          onChange={(e) => build(e.target.value, op, valStr)}
+          style={inputStyle}
+          placeholder="active"
+        />
+      </Labeled>
+      <Labeled label="Operator">
+        <select
+          value={op}
+          onChange={(e) => build(path, e.target.value, valStr)}
+          style={inputStyle}
+        >
+          {CONDITION_OPS.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      </Labeled>
+      {op !== "exists" && (
+        <Labeled label={op === "in" ? "Values (comma-separated)" : "Value"}>
+          <input
+            value={valStr}
+            onChange={(e) => build(path, op, e.target.value)}
+            style={inputStyle}
+            placeholder={op === "in" ? "active, pending" : "true"}
+          />
+        </Labeled>
+      )}
+    </>
+  );
+}
+
 function JsonField({
   label,
   value,

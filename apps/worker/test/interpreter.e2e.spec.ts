@@ -427,6 +427,35 @@ const totpGraph: GraphDef = {
   ],
 };
 
+// webhook → filter → aggregate → end. The trigger carries an array; filter keeps
+// active items, aggregate collects their names. Both are pure (no activity).
+const arrayGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "actives",
+      type: "filter",
+      config: {
+        from: "trigger",
+        path: "users",
+        condition: { path: "active", op: "eq", value: true },
+      },
+    },
+    {
+      id: "names",
+      type: "aggregate",
+      config: { from: "actives", operation: "collect", field: "name" },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "actives" },
+    { from: "actives", to: "names" },
+    { from: "names", to: "end" },
+  ],
+};
+
 let env: TestWorkflowEnvironment;
 
 beforeAll(async () => {
@@ -1020,6 +1049,36 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       expect(result.status).toBe("completed");
       expect(totpCalls[0]).toMatchObject({ connectionId: "sign-1", digits: 6 });
       expect(result.ctx.code).toEqual({ code: "123456" });
+    });
+  });
+
+  it("filter + aggregate: subset an array then collapse it (pure, arrays as values)", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          arrayGraph,
+          {
+            users: [
+              { name: "Ada", active: true },
+              { name: "Bo", active: false },
+              { name: "Cy", active: true },
+            ],
+          },
+          { tenantId: "t-arr" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-array",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      // filter kept the active items (its output IS the filtered array)
+      expect(result.ctx.actives).toEqual([
+        { name: "Ada", active: true },
+        { name: "Cy", active: true },
+      ]);
+      // aggregate collected their names into { result }
+      expect(result.ctx.names).toEqual({ result: ["Ada", "Cy"] });
     });
   });
 

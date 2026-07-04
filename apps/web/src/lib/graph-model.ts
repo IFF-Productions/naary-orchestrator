@@ -50,6 +50,8 @@ export const NODE_KINDS: { type: NodeType; label: string }[] = [
   { type: "sqlQuery", label: "SQL Query" },
   { type: "set", label: "Edit Fields" },
   { type: "renameKeys", label: "Rename Keys" },
+  { type: "filter", label: "Filter" },
+  { type: "aggregate", label: "Aggregate" },
   { type: "dateTime", label: "Date & Time" },
   { type: "merge", label: "Merge" },
   { type: "hmac", label: "HMAC" },
