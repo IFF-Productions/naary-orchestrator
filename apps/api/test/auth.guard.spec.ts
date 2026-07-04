@@ -137,4 +137,30 @@ describe("AuthGuard", () => {
     };
     await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
   });
+
+  it("still 403s a cross-tenant path UNDER A GLOBAL PREFIX (no silent bypass)", async () => {
+    // A prefix must not disable tenant isolation. Enforcement keys off the /tenants/
+    // segment by pattern, not a path prefix, and doesn't rely on req.params.
+    verify.mockResolvedValue("t-1");
+    const req: FakeReq = {
+      headers: { authorization: "Bearer nry_good" },
+      path: "/api/tenants/t-OTHER/credentials",
+      params: {},
+    };
+    await expect(makeGuard().canActivate(ctx(req))).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it("does NOT apply the tenant check to a non-tenant route (executions/:id is a workflowId)", async () => {
+    // /executions/<workflowId> self-scopes by the ownership record; the :id is NOT a
+    // tenant, so the /tenants/ pattern must not match it and 403 every run lookup.
+    verify.mockResolvedValue("t-1");
+    const req: FakeReq = {
+      headers: { authorization: "Bearer nry_good" },
+      path: "/executions/wh-t-1-abc123",
+      params: { id: "wh-t-1-abc123" },
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+  });
 });
