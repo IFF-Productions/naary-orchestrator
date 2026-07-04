@@ -27,6 +27,7 @@ export type NodeType =
   | "wait" // durable delay (Temporal timer); no output
   | "stopAndError" // terminal: fail the run with a message
   | "respondToWebhook" // sets the HTTP response the webhook ingress returns (pure)
+  | "code" // runs sandboxed user JS (QuickJS/WASM activity); output is its return value
   | "humanApproval"
   | "end";
 
@@ -392,6 +393,23 @@ export interface RespondToWebhookNodeConfig {
   bodyBinding?: ArgBinding;
   /** Static, non-secret response headers. */
   headers?: Record<string, string>;
+}
+
+/**
+ * Code node — run arbitrary user JavaScript in a sandbox (QuickJS compiled to WASM;
+ * no host access, memory + wall-clock capped). It runs in an ACTIVITY (QuickJS has
+ * Date/Math.random → non-deterministic). The code executes as
+ * `(function($input,$ctx){ <code> })(...)` — `$input` is the run's entry input,
+ * `$ctx` is a `{nodeId: output}` map of upstream outputs — and its RETURN VALUE
+ * becomes this node's output. No secrets, no network.
+ */
+export interface CodeNodeConfig {
+  /** The user JavaScript. Use `return <value>` to produce the node's output. */
+  code: string;
+  /** Wall-clock cap in ms (default 2000, capped at 5000). */
+  timeoutMs?: number;
+  /** Memory cap in MB (default 64, capped at 128). */
+  memoryMb?: number;
 }
 
 /**

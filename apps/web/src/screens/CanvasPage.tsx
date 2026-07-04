@@ -102,6 +102,7 @@ const ACCENT: Record<NodeType, string> = {
   wait: "var(--node-wait, #8a8f98)",
   stopAndError: "var(--node-error, #d6584f)",
   respondToWebhook: "var(--node-respond, #3f8fae)",
+  code: "var(--node-code, #6f7a8f)",
   humanApproval: "var(--node-approval)",
   end: "var(--node-end)",
 };
@@ -258,6 +259,12 @@ function nodeSubtitle(
   }
   if (kind === "respondToWebhook") {
     return `HTTP ${(config.statusCode as number | undefined) ?? 200}`;
+  }
+  if (kind === "code") {
+    const c = config.code as string | undefined;
+    if (!c) return "JS";
+    const lines = c.split("\n").length;
+    return `JS · ${lines} line${lines === 1 ? "" : "s"}`;
   }
   return undefined;
 }
@@ -2119,6 +2126,66 @@ function ConfigPanel({
             For webhook-triggered graphs: returns this response to the caller
             synchronously, then the run continues. Bind <code>body</code> from
             an upstream output to override the static JSON.
+          </div>
+        </>
+      )}
+
+      {kind === "code" && (
+        <>
+          <div>
+            <RowHead label="JavaScript" value="sandboxed" />
+            <textarea
+              value={str("code")}
+              onChange={(e) => onChange({ code: e.target.value })}
+              rows={8}
+              spellCheck={false}
+              className="mono"
+              style={{ ...textareaStyle, fontFamily: "monospace" }}
+              placeholder={
+                "// $input = trigger input, $ctx = upstream outputs\nreturn { total: $input.a + $input.b };"
+              }
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Labeled label="Timeout ms (≤5000)">
+              <input
+                type="number"
+                min={1}
+                max={5000}
+                value={num("timeoutMs") ?? ""}
+                onChange={(e) =>
+                  onChange({
+                    timeoutMs: e.target.value
+                      ? Number(e.target.value)
+                      : undefined,
+                  })
+                }
+                style={inputStyle}
+                placeholder="2000"
+              />
+            </Labeled>
+            <Labeled label="Memory MB (≤128)">
+              <input
+                type="number"
+                min={1}
+                max={128}
+                value={num("memoryMb") ?? ""}
+                onChange={(e) =>
+                  onChange({
+                    memoryMb: e.target.value
+                      ? Number(e.target.value)
+                      : undefined,
+                  })
+                }
+                style={inputStyle}
+                placeholder="64"
+              />
+            </Labeled>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            Runs in a QuickJS/WASM sandbox — no network, no filesystem, capped
+            time + memory. <code>return</code> a value; it becomes{" "}
+            <code>{node.id}</code>'s output.
           </div>
         </>
       )}

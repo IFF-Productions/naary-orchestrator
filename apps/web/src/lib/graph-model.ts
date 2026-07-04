@@ -78,6 +78,7 @@ export const NODE_KINDS: {
   { type: "wait", label: "Wait", group: "Flow" },
   { type: "stopAndError", label: "Stop & Error", group: "Flow" },
   { type: "respondToWebhook", label: "Respond", group: "Flow" },
+  { type: "code", label: "Code", group: "Flow" },
   { type: "humanApproval", label: "Approval", group: "Flow" },
   { type: "hmac", label: "HMAC", group: "Crypto" },
   { type: "jwt", label: "JWT", group: "Crypto" },
