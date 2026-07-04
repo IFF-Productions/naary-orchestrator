@@ -139,9 +139,22 @@ const mockActivities = {
     ];
     return { status: "ok", items, count: items.length, costUsd: 0 };
   },
+  callCode: async (
+    cfg: activities.CodeNodeConfig,
+    input: activities.CodeInput,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.CodeResult> => {
+    codeCalls.push({ cfg, input });
+    // Echo back what the interpreter handed the sandbox (proves the snapshot).
+    return { status: "ok", result: { got: input }, costUsd: 0 };
+  },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
   setExecutionStatus: async (): Promise<void> => undefined, // read-model push; no-op here
 };
+const codeCalls: {
+  cfg: activities.CodeNodeConfig;
+  input: activities.CodeInput;
+}[] = [];
 const totpCalls: activities.TotpConfig[] = [];
 const rssCalls: activities.ResolvedRss[] = [];
 const emailCalls: activities.ResolvedSendEmail[] = [];
@@ -564,6 +577,23 @@ const respondGraph: GraphDef = {
   edges: [
     { from: "trigger", to: "respond" },
     { from: "respond", to: "end" },
+  ],
+};
+
+// webhook → set(shape) → code → end. Proves the interpreter hands the code node the
+// entry input as $input and a __-stripped snapshot of upstream outputs as $ctx.
+const codeGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    { id: "shape", type: "set", config: { fields: { k: 1 } } },
+    { id: "compute", type: "code", config: { code: "return $input" } },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "shape" },
+    { from: "shape", to: "compute" },
+    { from: "compute", to: "end" },
   ],
 };
 
@@ -1320,6 +1350,28 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       expect(response).toEqual({
         statusCode: 201,
         body: { hello: "world" }, // bound from the trigger, overriding static body
+      });
+    });
+  });
+
+  it("code: interpreter passes $input (entry) + $ctx (upstream snapshot) and stores the result", async () => {
+    codeCalls.length = 0;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [codeGraph, { a: 9 }, { tenantId: "t-code" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-code",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      // $input is the entry input; $ctx carries the upstream `shape` output; no __*.
+      expect(codeCalls[0].input.input).toEqual({ a: 9 });
+      expect(codeCalls[0].input.ctx.shape).toEqual({ k: 1 });
+      expect(Object.keys(codeCalls[0].input.ctx)).not.toContain("__input");
+      // the activity's return value is the node output
+      expect(result.ctx.compute).toEqual({
+        got: { input: { a: 9 }, ctx: expect.any(Object) },
       });
     });
   });

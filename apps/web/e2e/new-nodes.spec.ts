@@ -21,6 +21,7 @@ const NEW_NODES = [
   { label: "Wait", field: "Wait (seconds)" },
   { label: "Stop & Error", field: "Error message" },
   { label: "Respond", field: "Status code" },
+  { label: "Code", field: "JavaScript" },
   { label: "Sub-workflow", field: "Sub-workflow key" },
   { label: "For Each", field: "Sub-workflow key (run per item)" },
   { label: "HMAC", field: "Algorithm" },
@@ -80,7 +81,9 @@ test("palette groups + search filter the node list", async ({ page }) => {
   await expect(page.getByText("Transform", { exact: true })).toBeVisible();
   // search narrows to matching nodes
   await page.getByLabel("Search nodes").fill("jwt");
-  await expect(page.getByRole("button", { name: "JWT", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "JWT", exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Filter", exact: true }),
   ).toHaveCount(0);

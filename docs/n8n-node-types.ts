@@ -25,6 +25,7 @@ export type DslNodeType =
   | "listOps"
   | "wait"
   | "stopAndError"
+  | "code"
   | "executeSubWorkflow"
   | "forEach"
   | "rssRead"
@@ -417,9 +418,9 @@ export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
     slug: "code",
     n8nNode: "Code",
     group: "Code & scripting",
-    mapsTo: [],
-    coverage: "gap",
-    note: "No sandboxed inline code node — deliberate (determinism); would need a sandboxed activity.",
+    mapsTo: ["code"],
+    coverage: "covered",
+    note: "code node — user JS in a QuickJS/WASM sandbox (activity, since QuickJS is non-deterministic); no host access, memory + wall-clock capped.",
   },
   {
     name: "Function (legacy)",

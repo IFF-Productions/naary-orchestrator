@@ -32,6 +32,7 @@
     "fast-xml-parser": "^5.9.3",
     "jose": "^5.10.0",
     "nodemailer": "^9.0.3",
+    "quickjs-emscripten": "^0.32.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

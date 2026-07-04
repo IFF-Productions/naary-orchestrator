@@ -30,6 +30,7 @@ import {
 } from "@naary/dsl";
 import type {
   AggregateNodeConfig,
+  CodeNodeConfig,
   DateTimeNodeConfig,
   ExecuteSubWorkflowNodeConfig,
   FilterNodeConfig,
@@ -112,6 +113,13 @@ const { callSendEmail } = wf.proxyActivities<typeof activities>({
 const { callRssRead } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "60 seconds",
   retry: { maximumAttempts: 3 },
+});
+
+// Sandboxed user JS. The activity caps wall-clock at ≤5s; the start-to-close sits
+// above that. User-code failures are non-retryable in the activity, so 1 attempt.
+const { callCode } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "30 seconds",
+  retry: { maximumAttempts: 1 },
 });
 
 export interface RunGraphResult {
@@ -645,6 +653,27 @@ export async function runGraph(
         const rwCfg = node.config as unknown as RespondToWebhookNodeConfig;
         webhookResponse = resolveWebhookResponse(rwCfg, ctx);
         ctx[node.id] = { statusCode: webhookResponse.statusCode };
+        return null;
+      }
+      case "code": {
+        // Sandboxed user JS runs in the activity (QuickJS is non-deterministic).
+        // Pass the entry input + a __-stripped snapshot of upstream outputs; the
+        // code's return value becomes this node's output.
+        const codeCfg = node.config as unknown as CodeNodeConfig;
+        const snapshot: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(ctx)) {
+          if (!k.startsWith("__")) snapshot[k] = v;
+        }
+        const result = await callCode(
+          codeCfg,
+          { input: ctx.__input, ctx: snapshot },
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
+        ctx[node.id] = result.result;
         return null;
       }
       case "humanApproval": {

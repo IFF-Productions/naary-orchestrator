@@ -82,6 +82,14 @@ async function globalSetup(_config: FullConfig): Promise<void> {
             type: "renameKeys",
             config: { from: "a", rename: { a: "alpha" } },
           },
+          {
+            id: "c",
+            type: "code",
+            config: {
+              // real QuickJS/WASM run in the worker container — reads $ctx, returns
+              code: "return { doubled: ($ctx.a.a || 0) * 2, has: typeof $ctx.rk === 'object' };",
+            },
+          },
           { id: "w", type: "wait", config: { durationSeconds: 1 } },
           { id: "e", type: "end" },
         ],
@@ -92,7 +100,8 @@ async function globalSetup(_config: FullConfig): Promise<void> {
           { from: "b", to: "m" },
           { from: "m", to: "dt" },
           { from: "dt", to: "rk" },
-          { from: "rk", to: "w" },
+          { from: "rk", to: "c" },
+          { from: "c", to: "w" },
           { from: "w", to: "e" },
         ],
       },
