@@ -67,178 +67,94 @@ export interface NodeKind {
   label: string;
   group: NodeGroup;
   accent: string;
+  /** One-line, plain-language description shown in the palette + config panel. */
+  description: string;
+  /** Working example config a freshly-placed node starts with, so a non-technical
+   *  user sees filled-in fields instead of blanks. Omitted = no config. */
+  defaultConfig?: Record<string, unknown>;
 }
 
+// prettier-ignore
 export const NODE_KINDS: NodeKind[] = [
-  {
-    type: "start",
-    label: "Start",
-    group: "Triggers",
-    accent: "var(--node-trigger)",
-  },
-  {
-    type: "webhookTrigger",
-    label: "Webhook",
-    group: "Triggers",
-    accent: "var(--node-trigger)",
-  },
-  {
-    type: "errorTrigger",
-    label: "Error Trigger",
-    group: "Triggers",
-    accent: "var(--node-error, #d6584f)",
-  },
-  {
-    type: "agent",
-    label: "Agent",
-    group: "AI & Tools",
-    accent: "var(--node-agent)",
-  },
-  {
-    type: "mcpTool",
-    label: "MCP Tool",
-    group: "AI & Tools",
-    accent: "var(--node-mcp)",
-  },
-  {
-    type: "httpRequest",
-    label: "HTTP Request",
-    group: "Data sources",
-    accent: "var(--node-http, #2f9e8f)",
-  },
-  {
-    type: "sqlQuery",
-    label: "SQL Query",
-    group: "Data sources",
-    accent: "var(--node-sql, #b06fd6)",
-  },
-  {
-    type: "rssRead",
-    label: "RSS Read",
-    group: "Data sources",
-    accent: "var(--node-rss, #d98a5a)",
-  },
-  {
-    type: "set",
-    label: "Edit Fields",
-    group: "Transform",
-    accent: "var(--node-set, #d98a3d)",
-  },
-  {
-    type: "renameKeys",
-    label: "Rename Keys",
-    group: "Transform",
-    accent: "var(--node-rename, #c9803e)",
-  },
-  {
-    type: "filter",
-    label: "Filter",
-    group: "Transform",
-    accent: "var(--node-filter, #3f9e8f)",
-  },
-  {
-    type: "aggregate",
-    label: "Aggregate",
-    group: "Transform",
-    accent: "var(--node-aggregate, #b0863e)",
-  },
-  {
-    type: "listOps",
-    label: "List Ops",
-    group: "Transform",
-    accent: "var(--node-listops, #4f9e7f)",
-  },
-  {
-    type: "compareDatasets",
-    label: "Compare Datasets",
-    group: "Transform",
-    accent: "var(--node-compare, #7f8f4f)",
-  },
-  {
-    type: "xml",
-    label: "XML",
-    group: "Transform",
-    accent: "var(--node-xml, #8f6f4f)",
-  },
-  {
-    type: "dateTime",
-    label: "Date & Time",
-    group: "Transform",
-    accent: "var(--node-datetime, #6f8fd6)",
-  },
-  {
-    type: "merge",
-    label: "Merge",
-    group: "Flow",
-    accent: "var(--node-merge, #3fae86)",
-  },
-  {
-    type: "forEach",
-    label: "For Each",
-    group: "Flow",
-    accent: "var(--node-foreach, #5b6fd6)",
-  },
-  {
-    type: "executeSubWorkflow",
-    label: "Sub-workflow",
-    group: "Flow",
-    accent: "var(--node-subflow, #5b8def)",
-  },
-  {
-    type: "wait",
-    label: "Wait",
-    group: "Flow",
-    accent: "var(--node-wait, #8a8f98)",
-  },
-  {
-    type: "stopAndError",
-    label: "Stop & Error",
-    group: "Flow",
-    accent: "var(--node-error, #d6584f)",
-  },
-  {
-    type: "respondToWebhook",
-    label: "Respond",
-    group: "Flow",
-    accent: "var(--node-respond, #3f8fae)",
-  },
-  {
-    type: "code",
-    label: "Code",
-    group: "Flow",
-    accent: "var(--node-code, #6f7a8f)",
-  },
-  {
-    type: "humanApproval",
-    label: "Approval",
-    group: "Flow",
-    accent: "var(--node-approval)",
-  },
-  {
-    type: "hmac",
-    label: "HMAC",
-    group: "Crypto",
-    accent: "var(--node-hmac, #a86fd6)",
-  },
-  {
-    type: "jwt",
-    label: "JWT",
-    group: "Crypto",
-    accent: "var(--node-jwt, #7a6fd6)",
-  },
-  {
-    type: "totp",
-    label: "TOTP",
-    group: "Crypto",
-    accent: "var(--node-totp, #9a6fc6)",
-  },
-  {
-    type: "sendEmail",
-    label: "Send Email",
-    group: "Comms",
-    accent: "var(--node-email, #4f9ad6)",
-  },
-  { type: "end", label: "End", group: "Terminal", accent: "var(--node-end)" },
+  { type: "start", label: "Start", group: "Triggers", accent: "var(--node-trigger)",
+    description: "Starts the workflow when you run it or on a schedule." },
+  { type: "webhookTrigger", label: "Webhook", group: "Triggers", accent: "var(--node-trigger)",
+    description: "Starts the workflow when an external service calls its webhook URL." },
+  { type: "errorTrigger", label: "Error Trigger", group: "Triggers", accent: "var(--node-error, #d6584f)",
+    description: "Entry point for an error-handler workflow; runs when another flow fails." },
+  { type: "agent", label: "Agent", group: "AI & Tools", accent: "var(--node-agent)",
+    description: "Ask an AI model to work with the data — summarize, classify, or draft.",
+    defaultConfig: { provider: "anthropic", model: "claude-opus-4-8", systemPrompt: "You are a helpful assistant. Summarize the input in one paragraph." } },
+  { type: "mcpTool", label: "MCP Tool", group: "AI & Tools", accent: "var(--node-mcp)",
+    description: "Call a tool on a connected service (e.g. GitHub, Jira) via MCP.",
+    defaultConfig: { connectionId: "", tool: "" } },
+  { type: "httpRequest", label: "HTTP Request", group: "Data sources", accent: "var(--node-http, #2f9e8f)",
+    description: "Call any REST API and use the response in later steps.",
+    defaultConfig: { method: "GET", url: "https://api.example.com/resource" } },
+  { type: "sqlQuery", label: "SQL Query", group: "Data sources", accent: "var(--node-sql, #b06fd6)",
+    description: "Run a read-only query against your database.",
+    defaultConfig: { connectionId: "", sql: "SELECT 1" } },
+  { type: "rssRead", label: "RSS Read", group: "Data sources", accent: "var(--node-rss, #d98a5a)",
+    description: "Fetch and parse an RSS/Atom feed into a list of items.",
+    defaultConfig: { url: "https://hnrss.org/frontpage" } },
+  { type: "set", label: "Edit Fields", group: "Transform", accent: "var(--node-set, #d98a3d)",
+    description: "Build or reshape an object from fixed values and upstream data.",
+    defaultConfig: { fields: {} } },
+  { type: "renameKeys", label: "Rename Keys", group: "Transform", accent: "var(--node-rename, #c9803e)",
+    description: "Rename or drop fields on an object." },
+  { type: "filter", label: "Filter", group: "Transform", accent: "var(--node-filter, #3f9e8f)",
+    description: "Keep only the array items that match a condition." },
+  { type: "aggregate", label: "Aggregate", group: "Transform", accent: "var(--node-aggregate, #b0863e)",
+    description: "Collapse an array — count, sum, first, last, or collect.",
+    defaultConfig: { operation: "collect" } },
+  { type: "listOps", label: "List Ops", group: "Transform", accent: "var(--node-listops, #4f9e7f)",
+    description: "Sort, limit, or de-duplicate an array." },
+  { type: "compareDatasets", label: "Compare Datasets", group: "Transform", accent: "var(--node-compare, #7f8f4f)",
+    description: "Diff two lists by a key — what was added, removed, or changed." },
+  { type: "xml", label: "XML", group: "Transform", accent: "var(--node-xml, #8f6f4f)",
+    description: "Convert XML to data, or data to XML.",
+    defaultConfig: { operation: "parse" } },
+  { type: "dateTime", label: "Date & Time", group: "Transform", accent: "var(--node-datetime, #6f8fd6)",
+    description: "Get the current time or do date math.",
+    defaultConfig: { source: "now" } },
+  { type: "merge", label: "Merge", group: "Flow", accent: "var(--node-merge, #3fae86)",
+    description: "Wait for several branches to finish, then combine their results.",
+    defaultConfig: { mode: "array" } },
+  { type: "forEach", label: "For Each", group: "Flow", accent: "var(--node-foreach, #5b6fd6)",
+    description: "Run a saved workflow once for each item in a list.",
+    defaultConfig: { workflowKey: "" } },
+  { type: "executeSubWorkflow", label: "Sub-workflow", group: "Flow", accent: "var(--node-subflow, #5b8def)",
+    description: "Run another saved workflow and use its result.",
+    defaultConfig: { workflowKey: "" } },
+  { type: "wait", label: "Wait", group: "Flow", accent: "var(--node-wait, #8a8f98)",
+    description: "Pause the workflow for a set time — survives restarts.",
+    defaultConfig: { durationSeconds: 60 } },
+  { type: "stopAndError", label: "Stop & Error", group: "Flow", accent: "var(--node-error, #d6584f)",
+    description: "Stop the workflow and mark the run failed.",
+    defaultConfig: { message: "Stopped by the workflow" } },
+  { type: "respondToWebhook", label: "Respond", group: "Flow", accent: "var(--node-respond, #3f8fae)",
+    description: "Send an HTTP response back to the webhook caller.",
+    defaultConfig: { statusCode: 200 } },
+  { type: "code", label: "Code", group: "Flow", accent: "var(--node-code, #6f7a8f)",
+    description: "Run a small piece of sandboxed JavaScript.",
+    defaultConfig: { code: "return input;" } },
+  { type: "humanApproval", label: "Approval", group: "Flow", accent: "var(--node-approval)",
+    description: "Pause until a person approves or rejects — can wait for days.",
+    defaultConfig: { title: "Approve this step", instructions: "" } },
+  { type: "hmac", label: "HMAC", group: "Crypto", accent: "var(--node-hmac, #a86fd6)",
+    description: "Sign data with a secret key (HMAC).",
+    defaultConfig: { connectionId: "" } },
+  { type: "jwt", label: "JWT", group: "Crypto", accent: "var(--node-jwt, #7a6fd6)",
+    description: "Create a signed JWT token.",
+    defaultConfig: { connectionId: "" } },
+  { type: "totp", label: "TOTP", group: "Crypto", accent: "var(--node-totp, #9a6fc6)",
+    description: "Generate a one-time passcode (TOTP).",
+    defaultConfig: { connectionId: "" } },
+  { type: "sendEmail", label: "Send Email", group: "Comms", accent: "var(--node-email, #4f9ad6)",
+    description: "Send an email through an SMTP connection.",
+    defaultConfig: { connectionId: "", subject: "" } },
+  { type: "end", label: "End", group: "Terminal", accent: "var(--node-end)",
+    description: "Marks the end of the workflow." },
 ];
 
 /** DSL node type → theme accent color, derived from the one registry above. */
@@ -250,6 +166,20 @@ export const ACCENT = Object.fromEntries(
 export const NODE_LABEL = Object.fromEntries(
   NODE_KINDS.map((k) => [k.type, k.label]),
 ) as Record<NodeType, string>;
+
+/** DSL node type → plain-language description, derived from the one registry. */
+export const NODE_DESCRIPTION = Object.fromEntries(
+  NODE_KINDS.map((k) => [k.type, k.description]),
+) as Record<NodeType, string>;
+
+/** A fresh copy of the working example config a newly-placed node starts with
+ *  (undefined = no config). Copied so canvas edits never mutate the registry. */
+export function defaultConfigFor(
+  type: NodeType,
+): Record<string, unknown> | undefined {
+  const dc = NODE_KINDS.find((k) => k.type === type)?.defaultConfig;
+  return dc ? structuredClone(dc) : undefined;
+}
 
 /**
  * One-line node subtitle for the canvas + run view (a compact echo of the node's
