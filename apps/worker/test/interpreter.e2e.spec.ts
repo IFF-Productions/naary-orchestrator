@@ -129,6 +129,14 @@ const mockActivities = {
     totpCalls.push(cfg);
     return { status: "ok", code: "123456", costUsd: 0 };
   },
+  callXml: async (
+    cfg: activities.XmlConfig,
+    input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.XmlResult> => {
+    xmlCalls.push({ cfg, input });
+    return { status: "ok", result: { parsed: input }, costUsd: 0 };
+  },
   callRssRead: async (
     cfg: activities.ResolvedRss,
     _input: unknown,
@@ -158,6 +166,7 @@ const codeCalls: {
   input: activities.CodeInput;
 }[] = [];
 const totpCalls: activities.TotpConfig[] = [];
+const xmlCalls: { cfg: activities.XmlConfig; input: unknown }[] = [];
 const rssCalls: activities.ResolvedRss[] = [];
 const emailCalls: activities.ResolvedSendEmail[] = [];
 const hmacCalls: activities.ResolvedHmac[] = [];
@@ -628,6 +637,46 @@ const codeGraph: GraphDef = {
     { from: "trigger", to: "shape" },
     { from: "shape", to: "compute" },
     { from: "compute", to: "end" },
+  ],
+};
+
+// webhook → compareDatasets(old vs new by id) → end. Pure — no activity.
+const compareGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "diff",
+      type: "compareDatasets",
+      config: {
+        a: { from: "trigger", path: "old" },
+        b: { from: "trigger", path: "new" },
+        key: "id",
+      },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "diff" },
+    { from: "diff", to: "end" },
+  ],
+};
+
+// webhook → xml(parse) → end. The parse runs in the (mocked) activity.
+const xmlGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "x",
+      type: "xml",
+      config: { operation: "parse", from: "trigger", path: "body" },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "x" },
+    { from: "x", to: "end" },
   ],
 };
 
@@ -1557,6 +1606,57 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       expect(
         subResolveCalls.filter((c) => c.workflowKey === "err-flow"),
       ).toHaveLength(1);
+    });
+  });
+
+  it("compareDatasets: diffs two upstream arrays by key (pure)", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          compareGraph,
+          {
+            old: [
+              { id: 1, v: "a" },
+              { id: 2, v: "b" },
+            ],
+            new: [
+              { id: 2, v: "B" },
+              { id: 3, v: "c" },
+            ],
+          },
+          { tenantId: "t-cmp" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-compare",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(result.ctx.diff).toEqual({
+        added: [{ id: 3, v: "c" }],
+        removed: [{ id: 1, v: "a" }],
+        changed: [{ key: 2, a: { id: 2, v: "b" }, b: { id: 2, v: "B" } }],
+        same: [],
+      });
+    });
+  });
+
+  it("xml: interpreter passes the operation + input to the activity, stores the result", async () => {
+    xmlCalls.length = 0;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [xmlGraph, { body: "<n>1</n>" }, { tenantId: "t-xml" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-xml",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(xmlCalls[0]).toMatchObject({
+        cfg: { operation: "parse" },
+        input: "<n>1</n>",
+      });
+      expect(result.ctx.x).toEqual({ parsed: "<n>1</n>" });
     });
   });
 

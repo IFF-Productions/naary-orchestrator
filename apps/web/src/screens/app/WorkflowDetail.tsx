@@ -35,6 +35,8 @@ const ACCENT: Record<NodeType, string> = {
   filter: "var(--node-filter, #3f9e8f)",
   aggregate: "var(--node-aggregate, #b0863e)",
   listOps: "var(--node-listops, #4f9e7f)",
+  compareDatasets: "var(--node-compare, #7f8f4f)",
+  xml: "var(--node-xml, #8f6f4f)",
   dateTime: "var(--node-datetime, #6f8fd6)",
   merge: "var(--node-merge, #3fae86)",
   hmac: "var(--node-hmac, #a86fd6)",

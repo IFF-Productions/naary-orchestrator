@@ -91,6 +91,8 @@ const ACCENT: Record<NodeType, string> = {
   filter: "var(--node-filter, #3f9e8f)",
   aggregate: "var(--node-aggregate, #b0863e)",
   listOps: "var(--node-listops, #4f9e7f)",
+  compareDatasets: "var(--node-compare, #7f8f4f)",
+  xml: "var(--node-xml, #8f6f4f)",
   dateTime: "var(--node-datetime, #6f8fd6)",
   merge: "var(--node-merge, #3fae86)",
   hmac: "var(--node-hmac, #a86fd6)",
@@ -223,9 +225,13 @@ function nodeSubtitle(
     const c = config.condition as { path?: string; op?: string } | undefined;
     return c?.path ? `${c.path} ${c.op ?? ""}`.trim() : undefined;
   }
-  if (kind === "aggregate" || kind === "listOps") {
+  if (kind === "aggregate" || kind === "listOps" || kind === "xml") {
     const op = config.operation as string | undefined;
     return op || undefined;
+  }
+  if (kind === "compareDatasets") {
+    const k = config.key as string | undefined;
+    return k ? `by ${k}` : undefined;
   }
   if (kind === "dateTime") {
     const src = config.source;
@@ -1659,6 +1665,118 @@ function ConfigPanel({
           <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
             Outputs the resulting array. sort/dedupe use the field (whole item
             if blank); limit takes the first N.
+          </div>
+        </>
+      )}
+
+      {kind === "compareDatasets" && (
+        <>
+          <Labeled label="A — source node id">
+            <input
+              value={(config.a as BindingRow | undefined)?.from ?? ""}
+              onChange={(e) =>
+                onChange({
+                  a: {
+                    ...(config.a as BindingRow | undefined),
+                    from: e.target.value,
+                  },
+                })
+              }
+              style={inputStyle}
+              placeholder="baseline-node"
+            />
+          </Labeled>
+          <Labeled label="A — array path (optional)">
+            <input
+              value={(config.a as BindingRow | undefined)?.path ?? ""}
+              onChange={(e) =>
+                onChange({
+                  a: {
+                    ...(config.a as BindingRow | undefined),
+                    path: e.target.value || undefined,
+                  },
+                })
+              }
+              style={inputStyle}
+              placeholder="rows"
+            />
+          </Labeled>
+          <Labeled label="B — source node id">
+            <input
+              value={(config.b as BindingRow | undefined)?.from ?? ""}
+              onChange={(e) =>
+                onChange({
+                  b: {
+                    ...(config.b as BindingRow | undefined),
+                    from: e.target.value,
+                  },
+                })
+              }
+              style={inputStyle}
+              placeholder="comparison-node"
+            />
+          </Labeled>
+          <Labeled label="B — array path (optional)">
+            <input
+              value={(config.b as BindingRow | undefined)?.path ?? ""}
+              onChange={(e) =>
+                onChange({
+                  b: {
+                    ...(config.b as BindingRow | undefined),
+                    path: e.target.value || undefined,
+                  },
+                })
+              }
+              style={inputStyle}
+              placeholder="rows"
+            />
+          </Labeled>
+          <Labeled label="Key field (identifies a row)">
+            <input
+              value={str("key")}
+              onChange={(e) => onChange({ key: e.target.value })}
+              style={inputStyle}
+              placeholder="id"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            Diffs A vs B by the key → <code>{node.id}.added</code> /{" "}
+            <code>.removed</code> / <code>.changed</code> / <code>.same</code>.
+          </div>
+        </>
+      )}
+
+      {kind === "xml" && (
+        <>
+          <Labeled label="Operation">
+            <select
+              value={str("operation") || "parse"}
+              onChange={(e) => onChange({ operation: e.target.value })}
+              style={inputStyle}
+            >
+              <option value="parse">parse (XML → object)</option>
+              <option value="build">build (object → XML)</option>
+            </select>
+          </Labeled>
+          <Labeled label="Source node id">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="upstream-node-id"
+            />
+          </Labeled>
+          <Labeled label="Path (optional)">
+            <input
+              value={str("path")}
+              onChange={(e) => onChange({ path: e.target.value })}
+              style={inputStyle}
+              placeholder="body"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            parse → <code>{node.id}</code> is the object; build →{" "}
+            <code>{node.id}.xml</code> is the string.
           </div>
         </>
       )}

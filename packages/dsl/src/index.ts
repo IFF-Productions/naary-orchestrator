@@ -13,7 +13,12 @@ export { resolveHttpRequest, type ResolvedHttpRequest } from "./http-request";
 export { resolveSqlQuery, type ResolvedSqlQuery } from "./sql-query";
 export { resolveSet } from "./set-node";
 export { resolveRenameKeys } from "./rename-keys";
-export { resolveFilter, resolveAggregate, resolveListOps } from "./array-nodes";
+export {
+  resolveFilter,
+  resolveAggregate,
+  resolveListOps,
+  resolveCompareDatasets,
+} from "./array-nodes";
 export { resolveSubWorkflowInput } from "./sub-workflow";
 export {
   resolveHmac,

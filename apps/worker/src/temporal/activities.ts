@@ -9,7 +9,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { ApplicationFailure } from "@temporalio/activity";
 import { SignJWT, importPKCS8 } from "jose";
 import nodemailer from "nodemailer";
-import { XMLParser } from "fast-xml-parser";
+import { XMLBuilder, XMLParser } from "fast-xml-parser";
 import { getQuickJS, shouldInterruptAfterDeadline } from "quickjs-emscripten";
 import { canonicalize } from "@naary/dsl";
 import type {
@@ -649,6 +649,57 @@ export async function callRssRead(
     }
     // Fetch/parse failure — the feed URL is non-secret, so a sanitized retryable is fine.
     throw toSanitizedRetryable(e, "RSS_READ_ERROR");
+  }
+}
+
+export interface XmlConfig {
+  operation: "parse" | "build";
+}
+export interface XmlResult {
+  status: "ok";
+  result: unknown;
+  costUsd: number;
+}
+
+/**
+ * xml node — parse an XML string → object, or build an object → XML string. Pure
+ * transform (no secrets, no egress), but runs in an activity to keep the parser out
+ * of the deterministic workflow bundle. Claim-checked input is rehydrated first; a
+ * large result is offloaded.
+ */
+export async function callXml(
+  cfg: XmlConfig,
+  input: unknown,
+  meta: AgentMeta,
+): Promise<XmlResult> {
+  const startedAt = process.hrtime.bigint();
+  const store = getObjectStore();
+  const value = await resolveClaimChecks(input, store);
+  try {
+    let result: unknown;
+    if (cfg.operation === "build") {
+      const xml = new XMLBuilder({
+        ignoreAttributes: false,
+        format: true,
+      }).build(value);
+      result = { xml };
+    } else {
+      result = new XMLParser({ ignoreAttributes: false }).parse(String(value));
+    }
+    const offloaded = await maybeOffload(result, store, {
+      keyPrefix: `xml/${meta.tenantId}`,
+    });
+    activityRuns.inc({ activity: "callXml", outcome: "ok" });
+    activityDuration.observe({ activity: "callXml" }, secondsSince(startedAt));
+    return { status: "ok", result: offloaded, costUsd: 0 };
+  } catch {
+    activityRuns.inc({ activity: "callXml", outcome: "error" });
+    activityDuration.observe({ activity: "callXml" }, secondsSince(startedAt));
+    // Parser/builder errors are the user's data problem — non-retryable, no secrets.
+    throw ApplicationFailure.nonRetryable(
+      `XML ${cfg.operation} failed`,
+      "XML_ERROR",
+    );
   }
 }
 
