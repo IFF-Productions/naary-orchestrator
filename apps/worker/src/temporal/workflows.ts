@@ -150,6 +150,12 @@ export interface RunGraphCtx {
    *  run is spawned with depth+1; the interpreter refuses to nest past
    *  MAX_SUBWORKFLOW_DEPTH so a self-referential graph can't recurse forever. */
   subWorkflowDepth?: number;
+  /** The saved-graph key to run (detached) if THIS run fails — an error-handler
+   *  workflow. Resolved + started in-activity on failure. */
+  errorWorkflowKey?: string;
+  /** True when this run IS an error-handler (started by another run's failure).
+   *  Suppresses re-firing a handler so a failing handler can't loop. */
+  isErrorHandler?: boolean;
 }
 
 /** Carried across continueAsNew so a long/looping run resumes with state intact
@@ -259,6 +265,11 @@ export async function runGraph(
         return null;
       case "webhookTrigger":
         // Slice #4: the inbound event (the workflow input) is this node's output.
+        ctx[node.id] = ctx.__input;
+        return null;
+      case "errorTrigger":
+        // Entry node of an error-handler graph — its output is the failure context
+        // the interpreter passed as this run's input.
         ctx[node.id] = ctx.__input;
         return null;
       case "agent": {
@@ -800,27 +811,100 @@ export async function runGraph(
     return null;
   }
 
-  const terminal = await execChain(currentNodeId, true);
-  status = terminal ?? "completed";
+  // Wrap the walk so BOTH failure surfaces are observable in one place: a RETURNED
+  // terminal status (rejected/budget_exceeded/circuit_open/invalid_graph) and a
+  // THROWN ApplicationFailure (stopAndError, non-retryable activity errors) that
+  // would otherwise escape runGraph entirely.
+  let threw: unknown;
+  try {
+    const terminal = await execChain(currentNodeId, true);
+    status = terminal ?? "completed";
 
-  // Fail LOUD on a stranded fan-in join (Slice N5): if a merge received SOME but
-  // not all of its inbound branches, the join never fired and everything after it
-  // was silently skipped — reporting "completed" would look like success while
-  // having done nothing. This happens when a conditional path UPSTREAM of a merge
-  // branch prevents that branch from arriving (validateGraph only blocks conditional
-  // edges DIRECTLY into a merge). Surface it as a terminal invalid_graph instead of
-  // a clean completion. (Only overrides a would-be success — a real terminal status
-  // from the run itself wins.)
-  if (terminal === null) {
-    for (const [mergeId, parents] of mergeParents) {
-      const arrived = mergeArrivals[mergeId] ?? 0;
-      if (arrived > 0 && arrived < parents.length) {
-        status = "invalid_graph";
-        break;
+    // Fail LOUD on a stranded fan-in join (Slice N5): if a merge received SOME but
+    // not all of its inbound branches, the join never fired and everything after it
+    // was silently skipped — reporting "completed" would look like success while
+    // having done nothing. This happens when a conditional path UPSTREAM of a merge
+    // branch prevents that branch from arriving (validateGraph only blocks conditional
+    // edges DIRECTLY into a merge). Surface it as a terminal invalid_graph instead of
+    // a clean completion. (Only overrides a would-be success — a real terminal status
+    // from the run itself wins.)
+    if (terminal === null) {
+      for (const [mergeId, parents] of mergeParents) {
+        const arrived = mergeArrivals[mergeId] ?? 0;
+        if (arrived > 0 && arrived < parents.length) {
+          status = "invalid_graph";
+          break;
+        }
       }
+    }
+  } catch (e) {
+    // Framework control-flow signals are NOT app failures and must propagate
+    // untouched: continueAsNew (a long run unwinding to resume — the CAN call lives
+    // inside execChain) and cancellation. Catching either would fire the handler +
+    // issue commands mid-unwind (determinism hazard).
+    if (e instanceof wf.ContinueAsNew || wf.isCancellation(e)) throw e;
+    threw = e;
+  }
+
+  // On failure, start the tenant's error-handler graph (if bound) as a DETACHED child
+  // — ParentClosePolicy.ABANDON so it survives THIS run failing. Loop-guarded
+  // (a handler run never fires its own handler) and patched so in-flight runs that
+  // predate this don't diverge on replay. A missing handler / start failure must
+  // never mask the original error.
+  const isFailure =
+    threw !== undefined ||
+    status === "rejected" ||
+    status === "budget_exceeded" ||
+    status === "circuit_open" ||
+    status === "invalid_graph";
+  if (
+    isFailure &&
+    runCtx.errorWorkflowKey &&
+    !runCtx.isErrorHandler &&
+    wf.patched("onerror-handler-v1")
+  ) {
+    try {
+      const handler = await resolveSubWorkflowGraph({
+        tenantId: runCtx.tenantId,
+        workflowKey: runCtx.errorWorkflowKey,
+      });
+      const parentId = wf.workflowInfo().workflowId;
+      const errorPayload = {
+        failedWorkflowId: parentId,
+        workflowKey: runCtx.workflowKey,
+        status: threw !== undefined ? "failed" : status,
+        error:
+          threw !== undefined
+            ? {
+                message: threw instanceof Error ? threw.message : String(threw),
+                type:
+                  threw instanceof wf.ApplicationFailure
+                    ? threw.type
+                    : undefined,
+              }
+            : undefined,
+      };
+      await wf.startChild(runGraph, {
+        workflowId: `${parentId}-onerror`,
+        parentClosePolicy: wf.ParentClosePolicy.ABANDON,
+        args: [
+          handler.graph,
+          errorPayload,
+          {
+            tenantId: runCtx.tenantId,
+            workflowKey: runCtx.errorWorkflowKey,
+            isErrorHandler: true,
+            graphContentHash: handler.contentHash,
+            graphVersion: handler.version,
+          } satisfies RunGraphCtx,
+        ],
+      });
+    } catch {
+      // swallow — never mask the original failure with a handler problem
     }
   }
 
+  if (threw !== undefined) throw threw; // preserve FAILED semantics (no syncStatus)
   await syncStatus(); // final status + cost for the Runs list
   return { status, ctx };
 }

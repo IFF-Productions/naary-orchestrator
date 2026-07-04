@@ -88,7 +88,9 @@ const mockActivities = {
         ? subRejectChildGraph
         : meta.workflowKey === "throw-flow"
           ? subThrowChildGraph
-          : subChildGraph;
+          : meta.workflowKey === "err-flow"
+            ? errorHandlerGraph
+            : subChildGraph;
     return { graph, contentHash: "child-hash", version: 1 };
   },
   callHmac: async (
@@ -297,6 +299,38 @@ const subRejectChildGraph: GraphDef = {
   startNodeId: "trigger",
   nodes: [{ id: "trigger", type: "webhookTrigger" }],
   edges: [{ from: "trigger", to: "ghost" }], // "ghost" node does not exist
+};
+
+// An error-handler graph: errorTrigger → end. Its errorTrigger output is the failure
+// context the interpreter hands it, so ctx.et === the error payload after it runs.
+const errorHandlerGraph: GraphDef = {
+  startNodeId: "et",
+  nodes: [
+    { id: "et", type: "errorTrigger" },
+    { id: "end", type: "end" },
+  ],
+  edges: [{ from: "et", to: "end" }],
+};
+
+// A top-level graph that THROWS (webhook → stopAndError).
+const throwGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    { id: "boom", type: "stopAndError", config: { message: "kaboom" } },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "boom" },
+    { from: "boom", to: "end" },
+  ],
+};
+
+// A top-level graph that RETURNS a failure status (dangling edge → invalid_graph).
+const danglingGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [{ id: "trigger", type: "webhookTrigger" }],
+  edges: [{ from: "trigger", to: "ghost" }],
 };
 
 // Parent: webhook → executeSubWorkflow → end. Runs subChildGraph as a child.
@@ -1373,6 +1407,156 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       expect(result.ctx.compute).toEqual({
         got: { input: { a: 9 }, ctx: expect.any(Object) },
       });
+    });
+  });
+
+  it("error-handler: a THROWN failure starts the detached handler with the error payload", async () => {
+    subResolveCalls.length = 0;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const parentId = "e2e-onerror-thrown";
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          throwGraph,
+          { x: 1 },
+          {
+            tenantId: "t-err",
+            workflowKey: "wk-a",
+            errorWorkflowKey: "err-flow",
+          },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: parentId,
+      });
+      await expect(handle.result()).rejects.toThrow(); // the parent FAILS
+      // the detached handler ran with the failure context as its errorTrigger output
+      const child = env.client.workflow.getHandle(`${parentId}-onerror`);
+      const childResult = (await child.result()) as {
+        status: string;
+        ctx: Record<string, { failedWorkflowId?: string }>;
+      };
+      expect(childResult.status).toBe("completed");
+      expect(childResult.ctx.et).toMatchObject({
+        failedWorkflowId: parentId,
+        workflowKey: "wk-a",
+        status: "failed",
+        error: { type: "STOP_AND_ERROR" },
+      });
+    });
+  });
+
+  it("error-handler: a RETURNED failure status (invalid_graph) also starts the handler", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const parentId = "e2e-onerror-returned";
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          danglingGraph,
+          {},
+          {
+            tenantId: "t-err",
+            workflowKey: "wk-b",
+            errorWorkflowKey: "err-flow",
+          },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: parentId,
+      });
+      const result = await handle.result(); // RETURNS (doesn't reject)
+      expect(result.status).toBe("invalid_graph");
+      const child = env.client.workflow.getHandle(`${parentId}-onerror`);
+      const childResult = (await child.result()) as {
+        ctx: Record<string, { status?: string }>;
+      };
+      expect(childResult.ctx.et).toMatchObject({
+        failedWorkflowId: parentId,
+        status: "invalid_graph",
+      });
+    });
+  });
+
+  it("error-handler: does NOT fire for a handler run (loop guard) or a completed run", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      // (a) a FAILING run that is itself a handler → no nested handler
+      subResolveCalls.length = 0;
+      const h1 = await env.client.workflow.start(runGraph, {
+        args: [
+          throwGraph,
+          {},
+          {
+            tenantId: "t-err",
+            workflowKey: "wk-h",
+            errorWorkflowKey: "err-flow",
+            isErrorHandler: true,
+          },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-onerror-loopguard",
+      });
+      await expect(h1.result()).rejects.toThrow();
+      expect(subResolveCalls.some((c) => c.workflowKey === "err-flow")).toBe(
+        false,
+      ); // handler never resolved
+
+      // (b) a COMPLETED run with a handler bound → no handler
+      subResolveCalls.length = 0;
+      const h2 = await env.client.workflow.start(runGraph, {
+        args: [
+          setGraph,
+          { userId: "u" },
+          {
+            tenantId: "t-err",
+            workflowKey: "wk-ok",
+            errorWorkflowKey: "err-flow",
+          },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-onerror-completed",
+      });
+      const r2 = await h2.result();
+      expect(r2.status).toBe("completed");
+      expect(subResolveCalls.some((c) => c.workflowKey === "err-flow")).toBe(
+        false,
+      );
+    });
+  });
+
+  it("error-handler: continueAsNew is NOT mistaken for a failure (handler fires once, at the real failure)", async () => {
+    // self-loop that continueAsNews every 2 steps until the circuit breaker trips.
+    // With an errorWorkflowKey bound, each CAN boundary throws to unwind — the catch
+    // must re-throw it, NOT treat it as a failure. The run must still resume across
+    // CANs and reach circuit_open, and the handler must fire exactly ONCE (for that
+    // real terminal failure), never per-CAN-boundary.
+    subResolveCalls.length = 0;
+    const loopGraph: GraphDef = {
+      startNodeId: "loop",
+      nodes: [{ id: "loop", type: "start" }],
+      edges: [{ from: "loop", to: "loop" }],
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          loopGraph,
+          {},
+          {
+            tenantId: "t-err",
+            workflowKey: "wk-loop",
+            errorWorkflowKey: "err-flow",
+            maxStepsPerRun: 5,
+            continueAsNewAfterSteps: 2,
+          },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-onerror-can",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("circuit_open"); // resumed cleanly across CANs
+      // handler resolved exactly once (the real failure), not once per CAN boundary
+      expect(
+        subResolveCalls.filter((c) => c.workflowKey === "err-flow"),
+      ).toHaveLength(1);
     });
   });
 

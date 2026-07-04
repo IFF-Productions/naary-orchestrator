@@ -25,6 +25,7 @@ import { NODE_KINDS } from "../../lib/graph-model";
 const ACCENT: Record<NodeType, string> = {
   start: "var(--node-trigger)",
   webhookTrigger: "var(--node-trigger)",
+  errorTrigger: "var(--node-error, #d6584f)",
   agent: "var(--node-agent)",
   mcpTool: "var(--node-mcp)",
   httpRequest: "var(--node-http, #2f9e8f)",
@@ -62,7 +63,7 @@ interface ViewData extends Record<string, unknown> {
 /** Read-only node (no editing). Handles anchor the existing edges. */
 function ViewNode({ data }: NodeProps<Node<ViewData>>) {
   const accent = ACCENT[data.kind];
-  const isEntry = data.kind === "start" || data.kind === "webhookTrigger";
+  const isEntry = data.kind === "start" || data.kind === "webhookTrigger" || data.kind === "errorTrigger";
   return (
     <div
       style={{

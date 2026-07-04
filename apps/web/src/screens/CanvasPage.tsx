@@ -81,6 +81,7 @@ function toFlowEdges(cs: CanvasEdge[]): FlowEdge[] {
 const ACCENT: Record<NodeType, string> = {
   start: "var(--node-trigger)",
   webhookTrigger: "var(--node-trigger)",
+  errorTrigger: "var(--node-error, #d6584f)",
   agent: "var(--node-agent)",
   mcpTool: "var(--node-mcp)",
   httpRequest: "var(--node-http, #2f9e8f)",
@@ -120,7 +121,8 @@ interface NaaryData extends Record<string, unknown> {
 function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
   const kind = data.kind;
   const accent = ACCENT[kind];
-  const isEntry = kind === "start" || kind === "webhookTrigger";
+  const isEntry =
+    kind === "start" || kind === "webhookTrigger" || kind === "errorTrigger";
   const subtitle = nodeSubtitle(kind, data.config);
   return (
     <div
@@ -2239,6 +2241,21 @@ function ConfigPanel({
       )}
 
       {kind === "webhookTrigger" && <WebhookInfo hookUrls={hookUrls} />}
+
+      {kind === "errorTrigger" && (
+        <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.6 }}>
+          <div
+            style={{ fontWeight: 600, color: "var(--ink-2)", marginBottom: 4 }}
+          >
+            Error handler entry
+          </div>
+          Start a graph with this node, then set it as another workflow's{" "}
+          <strong>error workflow</strong>. When that workflow fails, this graph
+          runs with the failure context as input —{" "}
+          <code>{node.id}.failedWorkflowId</code>, <code>.status</code>,{" "}
+          <code>.error</code>.
+        </div>
+      )}
 
       {kind === "end" && (
         <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
