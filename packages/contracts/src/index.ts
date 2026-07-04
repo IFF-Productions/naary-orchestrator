@@ -29,6 +29,8 @@ export interface ExecutionState {
 
 export interface ApprovalInput {
   approved: boolean;
+  /** Optional reviewer note recorded with the decision (approve or reject). */
+  comment?: string;
 }
 
 /** Human approval: delivered as a Signal, awaited via condition() in the workflow. */

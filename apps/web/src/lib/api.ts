@@ -169,11 +169,19 @@ export const api = {
       body: JSON.stringify(body),
     });
   },
-  approve(id: string, approved: boolean): Promise<{ accepted: true }> {
+  approve(
+    id: string,
+    approved: boolean,
+    comment?: string,
+  ): Promise<{ accepted: true }> {
     return http(`/executions/${encodeURIComponent(id)}/approve`, {
       method: "POST",
-      body: JSON.stringify({ approved }),
+      body: JSON.stringify({ approved, ...(comment ? { comment } : {}) }),
     });
+  },
+  // The tenant's runs paused for approval, each with its prompt (approvals inbox).
+  listAwaitingApprovals(): Promise<AwaitingApproval[]> {
+    return http("/executions/awaiting");
   },
   getState(id: string): Promise<ExecutionState> {
     return http(`/executions/${encodeURIComponent(id)}`);
@@ -372,6 +380,16 @@ export interface RegisteredWebhook {
   endpointId: string;
   ingressPath: string;
   signingSecret: string;
+}
+
+/** A run paused at an approval, enriched with the node's prompt (approvals inbox). */
+export interface AwaitingApproval {
+  workflowId: string;
+  workflowKey: string | null;
+  nodeId: string;
+  title: string;
+  instructions: string | null;
+  createdAt: string;
 }
 
 export interface RunSummary {

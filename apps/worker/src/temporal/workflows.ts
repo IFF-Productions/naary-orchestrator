@@ -802,7 +802,20 @@ export async function runGraph(
           await wf.condition(() => approval !== undefined); // wait forever
         }
         status = "running";
-        if (!decided) return "rejected"; // timed out → auto-reject
+        // Record the decision + reason on the node's output so it's durable, visible
+        // in the run, and branchable downstream (<nodeId>.approved / .comment). A ctx
+        // write is in-workflow state — no new command, so it stays replay-safe.
+        if (!decided) {
+          ctx[node.id] = {
+            approved: false,
+            comment: "Auto-rejected: no decision before the timeout.",
+          };
+          return "rejected"; // timed out → auto-reject
+        }
+        ctx[node.id] = {
+          approved: approval!.approved,
+          comment: approval!.comment ?? null,
+        };
         if (!approval!.approved) return "rejected";
         approval = undefined; // consume so a later loop iteration can pause again
         return null;
