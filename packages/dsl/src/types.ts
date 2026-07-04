@@ -208,7 +208,8 @@ export interface FilterNodeConfig {
 }
 
 /** Aggregate operations over an upstream array. */
-export type AggregateOp = "collect" | "count" | "sum" | "first" | "last";
+export type AggregateOp =
+  "collect" | "count" | "sum" | "min" | "max" | "avg" | "first" | "last";
 
 /**
  * Aggregate node — collapse an upstream ARRAY into a single value. PURE. `collect`

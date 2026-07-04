@@ -55,6 +55,17 @@ export function resolveAggregate(
           return acc + (Number.isFinite(n) ? n : 0);
         }, 0),
       };
+    case "min":
+    case "max":
+    case "avg": {
+      const nums = arr
+        .map((item) => Number(pick(item)))
+        .filter((n) => Number.isFinite(n));
+      if (nums.length === 0) return { result: undefined };
+      if (config.operation === "min") return { result: Math.min(...nums) };
+      if (config.operation === "max") return { result: Math.max(...nums) };
+      return { result: nums.reduce((a, b) => a + b, 0) / nums.length };
+    }
     case "first":
       return { result: arr.length ? pick(arr[0]) : undefined };
     case "last":
