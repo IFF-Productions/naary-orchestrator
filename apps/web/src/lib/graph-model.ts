@@ -41,29 +41,46 @@ export interface CanvasEdge {
 }
 
 /** The node types a user can place, with display labels. Order = palette order. */
-export const NODE_KINDS: { type: NodeType; label: string }[] = [
-  { type: "start", label: "Start" },
-  { type: "webhookTrigger", label: "Webhook" },
-  { type: "agent", label: "Agent" },
-  { type: "mcpTool", label: "MCP Tool" },
-  { type: "httpRequest", label: "HTTP Request" },
-  { type: "sqlQuery", label: "SQL Query" },
-  { type: "set", label: "Edit Fields" },
-  { type: "renameKeys", label: "Rename Keys" },
-  { type: "filter", label: "Filter" },
-  { type: "aggregate", label: "Aggregate" },
-  { type: "listOps", label: "List Ops" },
-  { type: "dateTime", label: "Date & Time" },
-  { type: "merge", label: "Merge" },
-  { type: "hmac", label: "HMAC" },
-  { type: "jwt", label: "JWT" },
-  { type: "totp", label: "TOTP" },
-  { type: "sendEmail", label: "Send Email" },
-  { type: "rssRead", label: "RSS Read" },
-  { type: "executeSubWorkflow", label: "Sub-workflow" },
-  { type: "forEach", label: "For Each" },
-  { type: "wait", label: "Wait" },
-  { type: "stopAndError", label: "Stop & Error" },
-  { type: "humanApproval", label: "Approval" },
-  { type: "end", label: "End" },
+/** Palette categories, in display order. */
+export const NODE_GROUPS = [
+  "Triggers",
+  "AI & Tools",
+  "Data sources",
+  "Transform",
+  "Flow",
+  "Crypto",
+  "Comms",
+  "Terminal",
+] as const;
+export type NodeGroup = (typeof NODE_GROUPS)[number];
+
+export const NODE_KINDS: {
+  type: NodeType;
+  label: string;
+  group: NodeGroup;
+}[] = [
+  { type: "start", label: "Start", group: "Triggers" },
+  { type: "webhookTrigger", label: "Webhook", group: "Triggers" },
+  { type: "agent", label: "Agent", group: "AI & Tools" },
+  { type: "mcpTool", label: "MCP Tool", group: "AI & Tools" },
+  { type: "httpRequest", label: "HTTP Request", group: "Data sources" },
+  { type: "sqlQuery", label: "SQL Query", group: "Data sources" },
+  { type: "rssRead", label: "RSS Read", group: "Data sources" },
+  { type: "set", label: "Edit Fields", group: "Transform" },
+  { type: "renameKeys", label: "Rename Keys", group: "Transform" },
+  { type: "filter", label: "Filter", group: "Transform" },
+  { type: "aggregate", label: "Aggregate", group: "Transform" },
+  { type: "listOps", label: "List Ops", group: "Transform" },
+  { type: "dateTime", label: "Date & Time", group: "Transform" },
+  { type: "merge", label: "Merge", group: "Flow" },
+  { type: "forEach", label: "For Each", group: "Flow" },
+  { type: "executeSubWorkflow", label: "Sub-workflow", group: "Flow" },
+  { type: "wait", label: "Wait", group: "Flow" },
+  { type: "stopAndError", label: "Stop & Error", group: "Flow" },
+  { type: "humanApproval", label: "Approval", group: "Flow" },
+  { type: "hmac", label: "HMAC", group: "Crypto" },
+  { type: "jwt", label: "JWT", group: "Crypto" },
+  { type: "totp", label: "TOTP", group: "Crypto" },
+  { type: "sendEmail", label: "Send Email", group: "Comms" },
+  { type: "end", label: "End", group: "Terminal" },
 ];

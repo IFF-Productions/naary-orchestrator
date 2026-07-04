@@ -42,6 +42,7 @@ import {
   type CanvasNode,
   CONDITION_OPS,
   type EdgeConditionDraft,
+  NODE_GROUPS,
   NODE_KINDS,
 } from "../lib/graph-model";
 
@@ -304,6 +305,7 @@ export function CanvasPage() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [name, setName] = useState("Canvas draft");
+  const [paletteQuery, setPaletteQuery] = useState("");
   // The saved workflowKey (empty until first save of a NEW workflow → slug(name)).
   const [workflowKey, setWorkflowKey] = useState("");
   const [workflows, setWorkflows] = useState<GraphSummary[]>([]);
@@ -750,26 +752,78 @@ export function CanvasPage() {
           <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 2 }}>
             ADD NODE
           </div>
-          {NODE_KINDS.map((k) => (
-            <button
-              type="button"
-              key={k.type}
-              onClick={() => addNode(k.type)}
-              style={{
-                textAlign: "left",
-                padding: "8px 10px",
-                borderRadius: 8,
-                border: "1px solid var(--line-2)",
-                borderLeft: `3px solid ${ACCENT[k.type]}`,
-                background: "var(--card)",
-                color: "var(--ink)",
-                cursor: "pointer",
-                fontSize: 13,
-              }}
-            >
-              {k.label}
-            </button>
-          ))}
+          <input
+            value={paletteQuery}
+            onChange={(e) => setPaletteQuery(e.target.value)}
+            placeholder="Search nodes…"
+            aria-label="Search nodes"
+            style={{
+              padding: "6px 9px",
+              borderRadius: 8,
+              border: "1px solid var(--line-2)",
+              background: "var(--card)",
+              color: "var(--ink)",
+              fontSize: 12.5,
+            }}
+          />
+          <div
+            style={{
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
+            {NODE_GROUPS.map((group) => {
+              const q = paletteQuery.trim().toLowerCase();
+              const items = NODE_KINDS.filter(
+                (k) =>
+                  k.group === group &&
+                  (!q ||
+                    k.label.toLowerCase().includes(q) ||
+                    k.type.toLowerCase().includes(q)),
+              );
+              if (items.length === 0) return null;
+              return (
+                <div
+                  key={group}
+                  style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                >
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      letterSpacing: 0.4,
+                      textTransform: "uppercase",
+                      color: "var(--ink-3)",
+                    }}
+                  >
+                    {group}
+                  </div>
+                  {items.map((k) => (
+                    <button
+                      type="button"
+                      key={k.type}
+                      onClick={() => addNode(k.type)}
+                      style={{
+                        textAlign: "left",
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        border: "1px solid var(--line-2)",
+                        borderLeft: `3px solid ${ACCENT[k.type]}`,
+                        background: "var(--card)",
+                        color: "var(--ink)",
+                        cursor: "pointer",
+                        fontSize: 13,
+                      }}
+                    >
+                      {k.label}
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
           <div
             style={{
               marginTop: "auto",
