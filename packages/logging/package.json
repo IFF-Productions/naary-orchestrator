@@ -11,6 +11,9 @@
   },
   "dependencies": {
     "@naary/observability": "workspace:*",
-    "pino": "^9.6.0"
+    "pino": "^10.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0"
   }
 }

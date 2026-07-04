@@ -16,6 +16,8 @@ minimumReleaseAgeExclude:
   - '@ai-sdk/anthropic@4.0.8'
   - '@ai-sdk/gateway@4.0.12'
   - ai@7.0.15
+  - undici@8.7.0
+  - protobufjs@8.6.6
 
 # Force patched versions of transitive deps flagged by Dependabot (pnpm 11 reads
 # overrides from here, not package.json). All are minor/patch bumps:
@@ -23,5 +25,5 @@ minimumReleaseAgeExclude:
 #   @hono/node-server (moderate). See PRODUCTION-READINESS §3.E.
 overrides:
   multer: '>=2.2.0'
-  protobufjs: '>=7.6.3'
-  '@hono/node-server': '>=1.19.13'
+  protobufjs: '>=8.6.6'
+  '@hono/node-server': '>=2.0.8'

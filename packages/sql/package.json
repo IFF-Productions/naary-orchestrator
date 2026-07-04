@@ -10,12 +10,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "mssql": "^11.0.1",
+    "mssql": "^12.7.0",
     "pg": "^8.22.0"
   },
   "devDependencies": {
-    "@types/mssql": "^9.1.5",
-    "@types/node": "^26.0.0",
-    "@types/pg": "^8.11.10"
+    "@types/mssql": "^12.3.0",
+    "@types/node": "^26.1.0",
+    "@types/pg": "^8.20.0"
   }
 }
