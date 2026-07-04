@@ -64,13 +64,14 @@ export class AuthGuard implements CanActivate {
     // Tenant-scoped controllers are mounted under /tenants/:id/... — the path tenant
     // must match the token's tenant. (executions/:id is scoped separately, by the
     // Execution ownership record, since its :id is a workflowId, not a tenant.)
-    const path = req.path ?? "";
-    const pathTenant = req.params?.id;
-    if (
-      path.startsWith("/tenants/") &&
-      pathTenant &&
-      pathTenant !== principal.tenantId
-    ) {
+    //
+    // Extract the tenant segment by PATTERN, not `path.startsWith("/tenants/")`: a
+    // future `setGlobalPrefix()` or an ingress that doesn't strip a prefix would make
+    // the path `/api/tenants/...`, and a prefix check would silently skip enforcement
+    // for ALL tenant-scoped controllers at once. The pattern matches the segment
+    // wherever it sits, and does not depend on `req.params` being populated.
+    const tenantInPath = /(?:^|\/)tenants\/([^/]+)/.exec(req.path ?? "");
+    if (tenantInPath && tenantInPath[1] !== principal.tenantId) {
       throw new ForbiddenException("Tenant mismatch");
     }
     return true;
