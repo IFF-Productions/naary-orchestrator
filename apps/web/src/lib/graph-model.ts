@@ -52,6 +52,7 @@ export const NODE_KINDS: { type: NodeType; label: string }[] = [
   { type: "renameKeys", label: "Rename Keys" },
   { type: "filter", label: "Filter" },
   { type: "aggregate", label: "Aggregate" },
+  { type: "listOps", label: "List Ops" },
   { type: "dateTime", label: "Date & Time" },
   { type: "merge", label: "Merge" },
   { type: "hmac", label: "HMAC" },

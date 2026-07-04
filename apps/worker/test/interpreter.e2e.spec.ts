@@ -486,15 +486,21 @@ const arrayGraph: GraphDef = {
       },
     },
     {
+      id: "sorted",
+      type: "listOps",
+      config: { from: "actives", operation: "sort", field: "name" },
+    },
+    {
       id: "names",
       type: "aggregate",
-      config: { from: "actives", operation: "collect", field: "name" },
+      config: { from: "sorted", operation: "collect", field: "name" },
     },
     { id: "end", type: "end" },
   ],
   edges: [
     { from: "trigger", to: "actives" },
-    { from: "actives", to: "names" },
+    { from: "actives", to: "sorted" },
+    { from: "sorted", to: "names" },
     { from: "names", to: "end" },
   ],
 };

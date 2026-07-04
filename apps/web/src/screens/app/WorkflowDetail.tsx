@@ -33,6 +33,7 @@ const ACCENT: Record<NodeType, string> = {
   renameKeys: "var(--node-rename, #c9803e)",
   filter: "var(--node-filter, #3f9e8f)",
   aggregate: "var(--node-aggregate, #b0863e)",
+  listOps: "var(--node-listops, #4f9e7f)",
   dateTime: "var(--node-datetime, #6f8fd6)",
   merge: "var(--node-merge, #3fae86)",
   hmac: "var(--node-hmac, #a86fd6)",

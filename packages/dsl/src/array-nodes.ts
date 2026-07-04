@@ -1,6 +1,10 @@
 import { evaluateCondition } from "./branch";
 import { getByPath } from "./mcp-args";
-import type { AggregateNodeConfig, FilterNodeConfig } from "./types";
+import type {
+  AggregateNodeConfig,
+  FilterNodeConfig,
+  ListOpsNodeConfig,
+} from "./types";
 
 /** Read the array an array-node operates on from ctx (non-array → []). */
 function readArray(
@@ -61,5 +65,51 @@ export function resolveAggregate(
       return { result: arr.length ? pick(arr[arr.length - 1]) : undefined };
     default:
       return { result: undefined };
+  }
+}
+
+/**
+ * List Ops node — sort / limit / dedupe an upstream array → array. Pure + total
+ * (non-array source → []). Sort/dedupe use `field` (item-relative) or the whole
+ * item; sort compares numbers numerically, otherwise as strings.
+ */
+export function resolveListOps(
+  config: ListOpsNodeConfig,
+  ctx: Record<string, unknown>,
+): unknown[] {
+  const arr = readArray(config.from, config.path, ctx);
+  const pick = (item: unknown): unknown =>
+    config.field ? getByPath(item, config.field) : item;
+
+  switch (config.operation) {
+    case "limit": {
+      const n = config.count && config.count > 0 ? config.count : 0;
+      return arr.slice(0, n);
+    }
+    case "dedupe": {
+      const seen = new Set<string>();
+      const out: unknown[] = [];
+      for (const item of arr) {
+        const key = JSON.stringify(pick(item) ?? null);
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push(item);
+        }
+      }
+      return out;
+    }
+    case "sort": {
+      const dir = config.order === "desc" ? -1 : 1;
+      return [...arr].sort((a, b) => {
+        const av = pick(a);
+        const bv = pick(b);
+        if (typeof av === "number" && typeof bv === "number") {
+          return (av - bv) * dir;
+        }
+        return String(av).localeCompare(String(bv)) * dir;
+      });
+    }
+    default:
+      return arr;
   }
 }

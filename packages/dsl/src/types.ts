@@ -14,6 +14,7 @@ export type NodeType =
   | "renameKeys" // pure: remap/drop keys of an upstream object
   | "filter" // pure: keep array items matching a per-item predicate
   | "aggregate" // pure: collapse an array (collect/count/sum/first/last)
+  | "listOps" // pure: sort / limit / dedupe an array → array
   | "dateTime" // current time / timestamp math via an activity (clock read is I/O)
   | "merge" // fan-in join: run once after all inbound branches arrive; combine outputs
   | "hmac" // signs a payload with a `signing` connection's key (activity); output is the digest
@@ -210,6 +211,25 @@ export interface FilterNodeConfig {
 
 /** Aggregate operations over an upstream array. */
 export type AggregateOp = "collect" | "count" | "sum" | "first" | "last";
+
+/**
+ * List Ops node — reshape an upstream ARRAY into another array. PURE. `sort` orders
+ * by `field` (item-relative dotted path; whole item if omitted) ascending/descending
+ * (numbers numerically, else by string); `limit` takes the first `count`; `dedupe`
+ * removes duplicates by `field` value (or whole-item JSON when omitted), keeping
+ * first occurrence. Output is the resulting array; non-array source → [].
+ */
+export interface ListOpsNodeConfig {
+  from: string;
+  path?: string;
+  operation: "sort" | "limit" | "dedupe";
+  /** Item-relative field for sort/dedupe. */
+  field?: string;
+  /** Sort direction (default "asc"). */
+  order?: "asc" | "desc";
+  /** Max items for limit. */
+  count?: number;
+}
 
 /**
  * Aggregate node — collapse an upstream ARRAY into a single value. PURE. `collect`

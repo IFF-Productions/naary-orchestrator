@@ -15,6 +15,7 @@ const NEW_NODES = [
   { label: "Rename Keys", field: "Drop keys (JSON array)" },
   { label: "Filter", field: "Item path" },
   { label: "Aggregate", field: "Operation" },
+  { label: "List Ops", field: "Count (limit)" },
   { label: "Date & Time", field: "Add seconds (may be negative)" },
   { label: "Merge", field: "Combine mode" },
   { label: "Wait", field: "Wait (seconds)" },
