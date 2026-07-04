@@ -119,6 +119,22 @@ export const api = {
   getGraph(workflowKey: string): Promise<NamedGraph> {
     return http(`/graphs/${encodeURIComponent(workflowKey)}`);
   },
+  // The workflowKey of this workflow's error handler (null if none).
+  getErrorHandler(
+    workflowKey: string,
+  ): Promise<{ errorWorkflowKey: string | null }> {
+    return http(`/graphs/${encodeURIComponent(workflowKey)}/error-handler`);
+  },
+  // Bind (or clear, with null) this workflow's error handler.
+  setErrorHandler(
+    workflowKey: string,
+    errorWorkflowKey: string | null,
+  ): Promise<{ errorWorkflowKey: string | null }> {
+    return http(`/graphs/${encodeURIComponent(workflowKey)}/error-handler`, {
+      method: "PUT",
+      body: JSON.stringify({ errorWorkflowKey }),
+    });
+  },
   // Save a compiled graph under a workflowKey (versioned + content-hashed server-side).
   saveGraph(
     workflowKey: string,

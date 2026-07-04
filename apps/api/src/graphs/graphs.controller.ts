@@ -6,6 +6,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Put,
 } from "@nestjs/common";
 import type { GraphDef } from "@naary/dsl";
 import { TenantId } from "../auth/tenant.decorator";
@@ -43,6 +44,37 @@ export class GraphsController {
       throw new NotFoundException(`No graph for workflowKey '${workflowKey}'`);
     }
     return found;
+  }
+
+  /** The workflowKey of this workflow's error handler (null if none). */
+  @Get(":workflowKey/error-handler")
+  async getErrorHandler(
+    @TenantId() tenantId: string,
+    @Param("workflowKey") workflowKey: string,
+  ): Promise<{ errorWorkflowKey: string | null }> {
+    return {
+      errorWorkflowKey: await this.graphs.getErrorHandler(
+        tenantId,
+        workflowKey,
+      ),
+    };
+  }
+
+  /** Bind (or clear, with null/empty) this workflow's error handler. */
+  @Put(":workflowKey/error-handler")
+  async setErrorHandler(
+    @TenantId() tenantId: string,
+    @Param("workflowKey") workflowKey: string,
+    @Body() body: { errorWorkflowKey?: string | null },
+  ): Promise<{ errorWorkflowKey: string | null }> {
+    const value = body.errorWorkflowKey?.trim() || null;
+    if (value === workflowKey) {
+      throw new BadRequestException(
+        "A workflow cannot be its own error handler",
+      );
+    }
+    await this.graphs.setErrorHandler(tenantId, workflowKey, value);
+    return { errorWorkflowKey: value };
   }
 
   @Post()

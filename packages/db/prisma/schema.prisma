@@ -70,6 +70,18 @@ model GraphDefinition {
   @@index([tenantId, workflowKey])
 }
 
+/** Per-workflow error-handler binding: when the run for `workflowKey` fails, the
+ *  interpreter starts the graph saved under `errorWorkflowKey` (detached) with the
+ *  failure context. One row per (tenant, workflowKey); absence = no handler. */
+model ErrorHandler {
+  tenantId         String
+  workflowKey      String
+  errorWorkflowKey String
+  updatedAt        DateTime @default(now()) @updatedAt
+
+  @@id([tenantId, workflowKey])
+}
+
 // Slice #4 — external integrations.
 
 model WebhookEndpoint {

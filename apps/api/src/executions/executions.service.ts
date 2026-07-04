@@ -327,6 +327,12 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   ): Promise<{ workflowId: string }> {
     const workflowId = `${prefix}-${randomUUID()}`;
     const budget = await getBudget(tenantId);
+    // Bind the current error handler (if any) at start — the interpreter starts it
+    // detached on failure. Read now (deterministic in-workflow needs it via args).
+    const errorWorkflowKey = await this.graphs.getErrorHandler(
+      tenantId,
+      workflowKey,
+    );
 
     // Pass the immutable graph SNAPSHOT (bytes that existed now); the content hash
     // + version ride in the workflow ctx (history) and a Temporal memo so the run
@@ -342,6 +348,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
           graphContentHash: snapshot.contentHash,
           graphVersion: snapshot.version,
+          ...(errorWorkflowKey ? { errorWorkflowKey } : {}),
         },
       ],
       taskQueue: TASK_QUEUE,
