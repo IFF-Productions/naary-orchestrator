@@ -55,6 +55,20 @@ model Schedule {
   @@index([tenantId])
 }
 
+// Change-detection cursor for a pollTrigger node. One row per (tenant, workflow,
+// node): the last-seen change key. A poll run compares the freshly-fetched key to
+// this and only fires downstream when it differs, then upserts the new key. Keyed by
+// workflowKey (not executionId) so it persists ACROSS the scheduled runs.
+model PollState {
+  tenantId    String
+  workflowKey String
+  nodeId      String
+  lastKey     String // sha256 of the change value (or the whole body)
+  updatedAt   DateTime @updatedAt
+
+  @@id([tenantId, workflowKey, nodeId])
+}
+
 // Versioned graph definitions (Slice #5). Postgres owns graph DEFINITIONS; each
 // run snapshots an immutable version (content-hashed) so editing a flow can't
 // corrupt an in-flight execution.

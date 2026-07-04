@@ -45,6 +45,7 @@ import type {
   McpToolNodeConfig,
   MergeNodeConfig,
   NodeDef,
+  PollTriggerNodeConfig,
   RenameKeysNodeConfig,
   RespondToWebhookNodeConfig,
   RssReadNodeConfig,
@@ -117,6 +118,13 @@ const { callSendEmail } = wf.proxyActivities<typeof activities>({
 // Read-only feed fetch — idempotent, so normal retries are fine. Its own block so
 // the start-to-close sits above the fetch timeout (same reasoning as http/sql).
 const { callRssRead } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "60 seconds",
+  retry: { maximumAttempts: 3 },
+});
+
+// pollTrigger fetch + change-detect. Egress fetch (retryable), and the cursor write
+// is idempotent-enough (a retry recomputes the same key). Own block for the timeout.
+const { callPoll } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "60 seconds",
   retry: { maximumAttempts: 3 },
 });
@@ -278,6 +286,19 @@ export async function runGraph(
         // the interpreter passed as this run's input.
         ctx[node.id] = ctx.__input;
         return null;
+      case "pollTrigger": {
+        // Entry node: fetch the URL + detect change vs the persisted cursor (keyed by
+        // workflowKey so it spans the scheduled runs). Output {changed, body}; branch
+        // on `<id>.changed` to no-op when nothing's new.
+        const pollCfg = node.config as unknown as PollTriggerNodeConfig;
+        const r = await callPoll(pollCfg, {
+          tenantId: runCtx.tenantId,
+          workflowKey: runCtx.workflowKey ?? "",
+          nodeId: node.id,
+        });
+        ctx[node.id] = { changed: r.changed, body: r.body };
+        return null;
+      }
       case "agent": {
         // tenantId flows in workflow args (not a secret); the activity fetches
         // the tenant's key by tenantId. executionId is deterministic.

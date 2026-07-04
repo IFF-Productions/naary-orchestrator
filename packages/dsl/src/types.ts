@@ -7,6 +7,7 @@ export type NodeType =
   | "start"
   | "webhookTrigger" // Slice #4: entry node whose output is the inbound event
   | "errorTrigger" // entry node for an error-handler graph; output is the failure context
+  | "pollTrigger" // entry node: polls a URL on an interval; output is {changed, body}
   | "agent"
   | "mcpTool" // Slice #4: calls a remote MCP server tool via a connection
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}
@@ -406,6 +407,24 @@ export interface RssReadNodeConfig {
   urlBinding?: ArgBinding;
   /** Abort the fetch after this many ms (default applied in the activity). */
   timeoutMs?: number;
+}
+
+/**
+ * Poll Trigger — an ENTRY node that fetches a URL and only signals downstream when
+ * the source has CHANGED since the last poll. The change is detected against a
+ * per-(tenant, workflow, node) cursor persisted across runs (side-effecting, so the
+ * compare + fetch happen in an activity). The graph is run on `intervalSeconds` by a
+ * Temporal interval Schedule the control plane syncs when a poll graph is saved.
+ * Output: `{ changed: boolean, body: unknown }` — branch on `<id>.changed`.
+ */
+export interface PollTriggerNodeConfig {
+  /** URL to poll (https). */
+  url: string;
+  /** How often to run the workflow, in seconds (the Schedule interval). */
+  intervalSeconds: number;
+  /** Dotted path into the fetched JSON whose value is the change key (e.g.
+   *  "items.0.id"). Omitted = the whole response body is the key (hashed). */
+  changeKey?: string;
 }
 
 /**

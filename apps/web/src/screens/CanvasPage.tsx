@@ -1220,6 +1220,38 @@ function ConfigPanel({
         </>
       )}
 
+      {kind === "pollTrigger" && (
+        <>
+          <Labeled label="URL to poll">
+            <input
+              value={str("url")}
+              onChange={(e) => onChange({ url: e.target.value })}
+              style={inputStyle}
+              placeholder="https://api.example.com/resource"
+            />
+          </Labeled>
+          <Labeled label="Check every (seconds)">
+            <input
+              type="number"
+              value={num("intervalSeconds") ?? 300}
+              onChange={(e) =>
+                onChange({ intervalSeconds: Number(e.target.value) })
+              }
+              style={inputStyle}
+              placeholder="300"
+            />
+          </Labeled>
+          <Labeled label="Change key (JSON path, optional)">
+            <input
+              value={str("changeKey")}
+              onChange={(e) => onChange({ changeKey: e.target.value })}
+              style={inputStyle}
+              placeholder="items.0.id (blank = whole response)"
+            />
+          </Labeled>
+        </>
+      )}
+
       {kind === "httpRequest" && (
         <>
           <Labeled label="Method">

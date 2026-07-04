@@ -82,6 +82,9 @@ export const NODE_KINDS: NodeKind[] = [
     description: "Starts the workflow when an external service calls its webhook URL." },
   { type: "errorTrigger", label: "Error Trigger", group: "Triggers", accent: "var(--node-error, #d6584f)",
     description: "Entry point for an error-handler workflow; runs when another flow fails." },
+  { type: "pollTrigger", label: "Poll", group: "Triggers", accent: "var(--node-poll, #4f9ad6)",
+    description: "Check a URL on a set interval; only continue when the result changed.",
+    defaultConfig: { url: "https://api.example.com/resource", intervalSeconds: 300 } },
   { type: "agent", label: "Agent", group: "AI & Tools", accent: "var(--node-agent)",
     description: "Ask an AI model to work with the data — summarize, classify, or draft.",
     defaultConfig: { provider: "anthropic", model: "claude-opus-4-8", systemPrompt: "You are a helpful assistant. Summarize the input in one paragraph." } },
@@ -260,6 +263,13 @@ export function nodeSubtitle(
   if (kind === "rssRead") {
     const url = config.url as string | undefined;
     return url ? url.replace(/^https?:\/\//, "").slice(0, 32) : undefined;
+  }
+  if (kind === "pollTrigger") {
+    const secs = config.intervalSeconds as number | undefined;
+    const url = config.url as string | undefined;
+    const host = url ? url.replace(/^https?:\/\//, "").slice(0, 22) : undefined;
+    const every = secs ? `every ${secs}s` : undefined;
+    return [every, host].filter(Boolean).join(" · ") || undefined;
   }
   if (kind === "executeSubWorkflow") {
     const key = config.workflowKey as string | undefined;
