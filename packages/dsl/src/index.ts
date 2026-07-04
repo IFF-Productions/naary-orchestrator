@@ -22,6 +22,7 @@ export {
   type ResolvedJwt,
 } from "./signing";
 export { resolveSendEmail, type ResolvedSendEmail } from "./send-email";
+export { resolveRss, type ResolvedRss } from "./rss";
 export { walk } from "./walk";
 export { canonicalize } from "./canonical";
 export {

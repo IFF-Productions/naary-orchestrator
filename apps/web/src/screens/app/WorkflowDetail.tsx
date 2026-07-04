@@ -40,6 +40,7 @@ const ACCENT: Record<NodeType, string> = {
   jwt: "var(--node-jwt, #7a6fd6)",
   totp: "var(--node-totp, #9a6fc6)",
   sendEmail: "var(--node-email, #4f9ad6)",
+  rssRead: "var(--node-rss, #d98a5a)",
   executeSubWorkflow: "var(--node-subflow, #5b8def)",
   forEach: "var(--node-foreach, #5b6fd6)",
   wait: "var(--node-wait, #8a8f98)",

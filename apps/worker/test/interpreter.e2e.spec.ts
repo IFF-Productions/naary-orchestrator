@@ -122,10 +122,23 @@ const mockActivities = {
     totpCalls.push(cfg);
     return { status: "ok", code: "123456", costUsd: 0 };
   },
+  callRssRead: async (
+    cfg: activities.ResolvedRss,
+    _input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.RssResult> => {
+    rssCalls.push(cfg);
+    const items = [
+      { title: "A", link: "l1", summary: "", published: "", id: "1" },
+      { title: "B", link: "l2", summary: "", published: "", id: "2" },
+    ];
+    return { status: "ok", items, count: items.length, costUsd: 0 };
+  },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
   setExecutionStatus: async (): Promise<void> => undefined, // read-model push; no-op here
 };
 const totpCalls: activities.TotpConfig[] = [];
+const rssCalls: activities.ResolvedRss[] = [];
 const emailCalls: activities.ResolvedSendEmail[] = [];
 const hmacCalls: activities.ResolvedHmac[] = [];
 const jwtCalls: activities.ResolvedJwt[] = [];
@@ -502,6 +515,27 @@ const arrayGraph: GraphDef = {
     { from: "actives", to: "sorted" },
     { from: "sorted", to: "names" },
     { from: "names", to: "end" },
+  ],
+};
+
+// webhook → rssRead → aggregate(count) → end. Proves the feed items land in ctx
+// and downstream array nodes can operate on them.
+const rssGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    { id: "feed", type: "rssRead", config: { url: "https://x.co/feed.xml" } },
+    {
+      id: "n",
+      type: "aggregate",
+      config: { from: "feed", path: "items", operation: "count" },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "feed" },
+    { from: "feed", to: "n" },
+    { from: "n", to: "end" },
   ],
 };
 
@@ -1217,6 +1251,23 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       const result = await handle.result();
       expect(result.status).toBe("circuit_open");
       expect(result.ctx.loop).toBeUndefined();
+    });
+  });
+
+  it("rssRead: exposes {items,count}; downstream array nodes can operate on it", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [rssGraph, {}, { tenantId: "t-rss" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-rss",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(rssCalls[0]).toMatchObject({ url: "https://x.co/feed.xml" });
+      expect(result.ctx.feed).toMatchObject({ count: 2 });
+      // aggregate(count) over feed.items
+      expect(result.ctx.n).toEqual({ result: 2 });
     });
   });
 

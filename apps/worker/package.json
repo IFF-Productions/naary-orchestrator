@@ -29,6 +29,7 @@
     "@temporalio/workflow": "^1.18.1",
     "ai": "6.0.210",
     "dotenv": "^17.4.2",
+    "fast-xml-parser": "^5.9.3",
     "jose": "^5.10.0",
     "nodemailer": "^9.0.3",
     "zod": "^3.25.76"

@@ -95,6 +95,7 @@ const ACCENT: Record<NodeType, string> = {
   jwt: "var(--node-jwt, #7a6fd6)",
   totp: "var(--node-totp, #9a6fc6)",
   sendEmail: "var(--node-email, #4f9ad6)",
+  rssRead: "var(--node-rss, #d98a5a)",
   executeSubWorkflow: "var(--node-subflow, #5b8def)",
   forEach: "var(--node-foreach, #5b6fd6)",
   wait: "var(--node-wait, #8a8f98)",
@@ -232,6 +233,10 @@ function nodeSubtitle(
   if (kind === "sendEmail") {
     const to = config.to as string | undefined;
     return to ? `→ ${to}` : (config.connectionId as string | undefined);
+  }
+  if (kind === "rssRead") {
+    const url = config.url as string | undefined;
+    return url ? url.replace(/^https?:\/\//, "").slice(0, 32) : undefined;
   }
   if (kind === "executeSubWorkflow") {
     const key = config.workflowKey as string | undefined;
@@ -1869,6 +1874,35 @@ function ConfigPanel({
             Bind <code>to</code> / <code>subject</code> / <code>text</code> /{" "}
             <code>html</code> from upstream outputs to override the static
             values.
+          </div>
+        </>
+      )}
+
+      {kind === "rssRead" && (
+        <>
+          <Labeled label="Feed URL (https)">
+            <input
+              value={str("url")}
+              onChange={(e) => onChange({ url: e.target.value })}
+              style={inputStyle}
+              placeholder="https://example.com/feed.xml"
+            />
+          </Labeled>
+          <BindingsEditor
+            bindings={
+              config.urlBinding
+                ? { url: config.urlBinding as BindingRow }
+                : undefined
+            }
+            upstreamIds={upstreamIds}
+            onChange={(v) =>
+              onChange({ urlBinding: v ? Object.values(v)[0] : undefined })
+            }
+          />
+          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+            Fetches + parses the RSS/Atom feed (egress-guarded). Output is{" "}
+            <code>{node.id}.items</code> — an array you can
+            filter/sort/aggregate.
           </div>
         </>
       )}

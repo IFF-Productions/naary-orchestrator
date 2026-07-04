@@ -59,6 +59,7 @@ export const NODE_KINDS: { type: NodeType; label: string }[] = [
   { type: "jwt", label: "JWT" },
   { type: "totp", label: "TOTP" },
   { type: "sendEmail", label: "Send Email" },
+  { type: "rssRead", label: "RSS Read" },
   { type: "executeSubWorkflow", label: "Sub-workflow" },
   { type: "forEach", label: "For Each" },
   { type: "wait", label: "Wait" },

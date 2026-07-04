@@ -213,6 +213,9 @@ importers:
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
+      fast-xml-parser:
+        specifier: ^5.9.3
+        version: 5.9.3
       jose:
         specifier: ^5.10.0
         version: 5.10.0
@@ -5857,8 +5860,7 @@ snapshots:
       '@nestjs/core': 11.1.27(@nestjs/common@11.1.27(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@11.1.27)(reflect-metadata@0.2.2)(rxjs@7.8.2)
       reflect-metadata: 0.2.2
 
-  '@nodable/entities@2.2.0':
-    optional: true
+  '@nodable/entities@2.2.0': {}
 
   '@opentelemetry/api-logs@0.53.0':
     dependencies:
@@ -7168,8 +7170,7 @@ snapshots:
     dependencies:
       color-convert: 2.0.1
 
-  anynum@1.0.1:
-    optional: true
+  anynum@1.0.1: {}
 
   append-field@1.0.0: {}
 
@@ -7630,7 +7631,6 @@ snapshots:
     dependencies:
       path-expression-matcher: 1.6.1
       xml-naming: 0.1.0
-    optional: true
 
   fast-xml-parser@5.9.3:
     dependencies:
@@ -7640,7 +7640,6 @@ snapshots:
       path-expression-matcher: 1.6.1
       strnum: 2.4.1
       xml-naming: 0.1.0
-    optional: true
 
   faye-websocket@0.11.4:
     dependencies:
@@ -8013,8 +8012,7 @@ snapshots:
   is-stream@2.0.1:
     optional: true
 
-  is-unsafe@1.0.1:
-    optional: true
+  is-unsafe@1.0.1: {}
 
   is-wsl@3.1.1:
     dependencies:
@@ -8340,8 +8338,7 @@ snapshots:
 
   parseurl@1.3.3: {}
 
-  path-expression-matcher@1.6.1:
-    optional: true
+  path-expression-matcher@1.6.1: {}
 
   path-key@3.1.1: {}
 
@@ -8838,7 +8835,6 @@ snapshots:
   strnum@2.4.1:
     dependencies:
       anynum: 1.0.1
-    optional: true
 
   strtok3@10.3.5:
     dependencies:
@@ -9199,8 +9195,7 @@ snapshots:
     dependencies:
       is-wsl: 3.1.1
 
-  xml-naming@0.1.0:
-    optional: true
+  xml-naming@0.1.0: {}
 
   xtend@4.0.2: {}
 
