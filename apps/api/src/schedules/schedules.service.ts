@@ -119,6 +119,70 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  /**
+   * Keep a pollTrigger graph's interval Schedule in sync (audit: pollTrigger slice).
+   * If the graph's start node is a pollTrigger, ensure a Temporal INTERVAL schedule
+   * runs it every `intervalSeconds` (≥30s floor). Idempotent: re-created on each save
+   * so it always reflects the latest graph + interval. No-op for non-poll graphs.
+   * Best-effort — the caller should not fail a save if scheduling hiccups.
+   */
+  async syncPollSchedule(
+    tenantId: string,
+    workflowKey: string,
+    graph: GraphDef,
+  ): Promise<void> {
+    const start = graph.nodes.find((n) => n.id === graph.startNodeId);
+    if (!start || start.type !== "pollTrigger") return;
+    const cfg = (start.config ?? {}) as { intervalSeconds?: number };
+    const everySeconds = Math.max(
+      30,
+      Math.floor(Number(cfg.intervalSeconds) || 300),
+    );
+    const snapshot = await this.graphs.getLatest(tenantId, workflowKey);
+    if (!snapshot) return;
+    const budget = await getBudget(tenantId);
+    const id = `poll-${tenantId}-${workflowKey}`;
+
+    // Delete-then-create so the schedule always reflects the latest graph + interval
+    // (simpler + more robust than an in-place update of spec + action).
+    try {
+      await this.client.schedule.getHandle(id).delete();
+    } catch {
+      /* no existing schedule — first activation */
+    }
+    await this.client.schedule.create({
+      scheduleId: id,
+      spec: { intervals: [{ every: everySeconds * 1000 }] },
+      action: {
+        type: "startWorkflow",
+        workflowType: RUN_GRAPH_WORKFLOW,
+        taskQueue: TASK_QUEUE,
+        workflowId: `pollrun-${tenantId}-${workflowKey}`,
+        args: [
+          snapshot.graph,
+          {},
+          {
+            tenantId,
+            workflowKey,
+            perExecutionCapUsd: budget?.perExecutionCapUsd,
+            maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
+            graphContentHash: snapshot.contentHash,
+            graphVersion: snapshot.version,
+          },
+        ],
+        memo: {
+          graphContentHash: snapshot.contentHash,
+          graphVersion: snapshot.version,
+        },
+      },
+    });
+    await getPrisma().schedule.upsert({
+      where: { id },
+      create: { id, tenantId, workflowKey, cron: `every ${everySeconds}s` },
+      update: { cron: `every ${everySeconds}s` },
+    });
+  }
+
   /** Tenant's schedules, enriched with the next fire time from Temporal. */
   async list(tenantId: string): Promise<ScheduleView[]> {
     const rows = await getPrisma().schedule.findMany({

@@ -10,6 +10,7 @@ import {
 } from "@nestjs/common";
 import type { GraphDef } from "@naary/dsl";
 import { TenantId } from "../auth/tenant.decorator";
+import { SchedulesService } from "../schedules/schedules.service";
 import { GenerateGraphDto, SaveGraphDto } from "./graph.dto";
 import { GraphGeneratorService } from "./graph-generator.service";
 import { type GraphSummary, GraphsService } from "./graphs.service";
@@ -24,6 +25,7 @@ export class GraphsController {
   constructor(
     private readonly graphs: GraphsService,
     private readonly generator: GraphGeneratorService,
+    private readonly schedules: SchedulesService,
   ) {}
 
   /** List the tenant's workflows (one row per workflowKey, latest version). */
@@ -107,6 +109,11 @@ export class GraphsController {
       body.name,
       graph,
     );
+    // If this graph is a pollTrigger flow, (re)create its interval schedule so it
+    // "runs on its own timer". Best-effort — a scheduling hiccup must not fail a save.
+    await this.schedules
+      .syncPollSchedule(tenantId, body.workflowKey, graph)
+      .catch(() => undefined);
     return {
       workflowKey: body.workflowKey,
       version: snap.version,

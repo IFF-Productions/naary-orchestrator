@@ -11,10 +11,11 @@ import { SignJWT, importPKCS8 } from "jose";
 import nodemailer from "nodemailer";
 import { XMLBuilder, XMLParser } from "fast-xml-parser";
 import { getQuickJS, shouldInterruptAfterDeadline } from "quickjs-emscripten";
-import { canonicalize } from "@naary/dsl";
+import { canonicalize, getByPath } from "@naary/dsl";
 import type {
   CodeNodeConfig,
   GraphDef,
+  PollTriggerNodeConfig,
   ResolvedHmac,
   ResolvedJwt,
   ResolvedRss,
@@ -653,6 +654,120 @@ export async function callRssRead(
     }
     // Fetch/parse failure — the feed URL is non-secret, so a sanitized retryable is fine.
     throw toSanitizedRetryable(e, "RSS_READ_ERROR");
+  }
+}
+
+/** Change-detection state for a pollTrigger, keyed by (tenant, workflow, node) so it
+ *  persists across the scheduled runs (NOT executionId, which changes each run). */
+export interface PollMeta {
+  tenantId: string;
+  workflowKey: string;
+  nodeId: string;
+}
+export interface PollResult {
+  status: "ok";
+  changed: boolean;
+  body: unknown;
+  costUsd: number;
+}
+
+const DEFAULT_POLL_TIMEOUT_MS = 15_000;
+const MAX_POLL_TIMEOUT_MS = 30_000;
+
+// Test seam: egress fetch + the cursor read/write, swappable in unit tests.
+export const __pollDeps = {
+  fetch: (url: string, init?: RequestInit) =>
+    safeFetch(url, init as never) as unknown as Promise<Response>,
+  assertEgressAllowed,
+  readCursor: (meta: PollMeta): Promise<string | null> =>
+    getPrisma()
+      .pollState.findUnique({
+        where: {
+          tenantId_workflowKey_nodeId: {
+            tenantId: meta.tenantId,
+            workflowKey: meta.workflowKey,
+            nodeId: meta.nodeId,
+          },
+        },
+      })
+      .then((r) => r?.lastKey ?? null),
+  writeCursor: async (meta: PollMeta, lastKey: string): Promise<void> => {
+    await getPrisma().pollState.upsert({
+      where: {
+        tenantId_workflowKey_nodeId: {
+          tenantId: meta.tenantId,
+          workflowKey: meta.workflowKey,
+          nodeId: meta.nodeId,
+        },
+      },
+      create: { ...meta, lastKey },
+      update: { lastKey },
+    });
+  },
+};
+
+/**
+ * pollTrigger node — fetch a URL and report whether the source CHANGED since the last
+ * poll. The change key is the configured JSON path (or the whole body) hashed; it is
+ * compared to a persisted per-(tenant, workflow, node) cursor and the cursor is
+ * advanced. Side-effecting (egress + DB), so it's an activity. The URL is non-secret.
+ * On the FIRST poll (no cursor) `changed` is true so the flow runs once to seed.
+ */
+export async function callPoll(
+  cfg: PollTriggerNodeConfig,
+  meta: PollMeta,
+): Promise<PollResult> {
+  const startedAt = process.hrtime.bigint();
+  try {
+    await __pollDeps.assertEgressAllowed(cfg.url); // https + public host (SSRF guard)
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      Math.min(DEFAULT_POLL_TIMEOUT_MS, MAX_POLL_TIMEOUT_MS),
+    );
+    let text: string;
+    try {
+      const res = await __pollDeps.fetch(cfg.url, {
+        signal: controller.signal,
+      });
+      text = await res.text();
+    } finally {
+      clearTimeout(timer);
+    }
+
+    // Parse JSON when possible so `changeKey` can select a field + the body is usable
+    // downstream; fall back to the raw text.
+    let body: unknown = text;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      /* not JSON — keep the text body */
+    }
+
+    // The change value: a selected path, or the whole body. Hash it to a compact,
+    // storable key (avoids persisting large payloads in PollState).
+    const value = cfg.changeKey
+      ? getByPath(body, cfg.changeKey)
+      : (body ?? text);
+    const key = createHash("sha256")
+      .update(typeof value === "string" ? value : JSON.stringify(value ?? null))
+      .digest("hex");
+
+    const previous = await __pollDeps.readCursor(meta);
+    const changed = previous !== key; // first poll (previous null) ⇒ changed
+    if (changed) await __pollDeps.writeCursor(meta, key);
+
+    activityRuns.inc({ activity: "callPoll", outcome: "ok" });
+    activityDuration.observe({ activity: "callPoll" }, secondsSince(startedAt));
+    return { status: "ok", changed, body, costUsd: 0 };
+  } catch (e) {
+    activityRuns.inc({ activity: "callPoll", outcome: "error" });
+    activityDuration.observe({ activity: "callPoll" }, secondsSince(startedAt));
+    if (e instanceof ApplicationFailure) throw e;
+    if (e instanceof BlockedEgressError) {
+      throw ApplicationFailure.nonRetryable(e.message, "EGRESS_BLOCKED");
+    }
+    throw toSanitizedRetryable(e, "POLL_ERROR");
   }
 }
 

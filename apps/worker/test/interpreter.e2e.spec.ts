@@ -158,8 +158,52 @@ const mockActivities = {
     // Echo back what the interpreter handed the sandbox (proves the snapshot).
     return { status: "ok", result: { got: input }, costUsd: 0 };
   },
+  callPoll: async (
+    _cfg: unknown,
+    meta: activities.PollMeta,
+  ): Promise<activities.PollResult> => {
+    pollCalls.push(meta);
+    return { status: "ok", changed: pollChanged, body: { v: 1 }, costUsd: 0 };
+  },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
   setExecutionStatus: async (): Promise<void> => undefined, // read-model push; no-op here
+};
+const pollCalls: activities.PollMeta[] = [];
+let pollChanged = true;
+
+// pollTrigger(entry) → branch on poll.changed: changed → agent → end; else → end.
+const pollGraph: GraphDef = {
+  startNodeId: "poll",
+  nodes: [
+    {
+      id: "poll",
+      type: "pollTrigger",
+      config: { url: "https://api.example.com/x", intervalSeconds: 60 },
+    },
+    {
+      id: "act",
+      type: "agent",
+      config: {
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        systemPrompt: "handle the change",
+      },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    {
+      from: "poll",
+      to: "act",
+      condition: { path: "poll.changed", op: "eq", value: true },
+    },
+    {
+      from: "poll",
+      to: "end",
+      condition: { path: "poll.changed", op: "neq", value: true },
+    },
+    { from: "act", to: "end" },
+  ],
 };
 const codeCalls: {
   cfg: activities.CodeNodeConfig;
@@ -1474,6 +1518,47 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       const result = await handle.result();
       expect(result.status).toBe("circuit_open");
       expect(result.ctx.loop).toBeUndefined();
+    });
+  });
+
+  it("pollTrigger: CHANGED runs the downstream branch; ctx.poll = {changed,body}", async () => {
+    pollChanged = true;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [pollGraph, {}, { tenantId: "t-poll", workflowKey: "poller" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-poll-changed",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(result.ctx.poll).toEqual({ changed: true, body: { v: 1 } });
+      // the "changed" branch reached the agent
+      expect(agentCalls.some((m) => m.nodeId === "act")).toBe(true);
+      // the activity got the cross-run key (tenant + workflowKey + node)
+      expect(pollCalls[pollCalls.length - 1]).toMatchObject({
+        tenantId: "t-poll",
+        workflowKey: "poller",
+        nodeId: "poll",
+      });
+    });
+  });
+
+  it("pollTrigger: UNCHANGED short-circuits to end (downstream skipped)", async () => {
+    pollChanged = false;
+    const before = agentCalls.length;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [pollGraph, {}, { tenantId: "t-poll", workflowKey: "poller" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-poll-unchanged",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(result.ctx.poll).toMatchObject({ changed: false });
+      // no new agent call — the change branch was NOT taken
+      expect(agentCalls.length).toBe(before);
     });
   });
 

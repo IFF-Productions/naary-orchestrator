@@ -15,6 +15,7 @@ export type DslNodeType =
   | "start"
   | "webhookTrigger"
   | "errorTrigger"
+  | "pollTrigger"
   | "agent"
   | "mcpTool"
   | "httpRequest"
@@ -149,6 +150,15 @@ export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
     mapsTo: ["errorTrigger"],
     coverage: "covered",
     note: "errorTrigger entry node — a failing run auto-starts its bound error-handler graph (detached, ParentClosePolicy.ABANDON) with the failure context; loop-guarded.",
+  },
+  {
+    name: "Poll Trigger",
+    slug: "poll-trigger",
+    n8nNode: "PollTrigger (n8n polling triggers)",
+    group: "Triggers",
+    mapsTo: ["pollTrigger"],
+    coverage: "covered",
+    note: "pollTrigger entry node — a Temporal interval Schedule runs the graph every intervalSeconds; the node fetches the URL and only fires downstream when a change key (or the whole body) differs from a persisted per-(tenant,workflow,node) cursor.",
   },
   {
     name: "SSE Trigger",

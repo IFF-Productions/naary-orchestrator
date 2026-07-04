@@ -1,5 +1,6 @@
 import { Global, Module } from "@nestjs/common";
 import { CredentialsService } from "@naary/secrets";
+import { SchedulesModule } from "../schedules/schedules.module";
 import { GraphGeneratorService } from "./graph-generator.service";
 import { GraphsController } from "./graphs.controller";
 import { GraphsService } from "./graphs.service";
@@ -7,6 +8,7 @@ import { GraphsService } from "./graphs.service";
 /** Global so ExecutionsService and the webhook ingress can resolve graphs from DB. */
 @Global()
 @Module({
+  imports: [SchedulesModule], // to sync a pollTrigger graph's interval schedule on save
   controllers: [GraphsController],
   providers: [
     GraphsService,
