@@ -1,0 +1,116 @@
+import "reflect-metadata";
+import {
+  BadRequestException,
+  UnprocessableEntityException,
+} from "@nestjs/common";
+import { MissingCredentialError } from "@naary/secrets";
+import { APICallError } from "ai";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { GraphGeneratorService } from "../src/graphs/graph-generator.service";
+
+// Mock only the model network — credentials are injected. Keeps the test hermetic
+// (no key, no LLM); like agent.activity.spec, the live model call is deferred.
+const generateText = vi.fn();
+vi.mock("ai", async (orig) => ({
+  ...(await orig<typeof import("ai")>()),
+  generateText: (...args: unknown[]) => generateText(...args),
+}));
+
+const getDecryptedKey = vi.fn();
+function makeService(): GraphGeneratorService {
+  return new GraphGeneratorService({ getDecryptedKey } as never);
+}
+
+// A structurally valid graph the model might emit.
+const validOut = {
+  name: "Feed to email",
+  startNodeId: "start",
+  nodes: [
+    { id: "start", type: "start" },
+    { id: "end", type: "end" },
+  ],
+  edges: [{ from: "start", to: "end" }],
+};
+// Invalid: edge points at a node that doesn't exist → validateGraph rejects.
+const invalidOut = {
+  name: "Broken",
+  startNodeId: "start",
+  nodes: [{ id: "start", type: "start" }],
+  edges: [{ from: "start", to: "ghost" }],
+};
+
+beforeEach(() => {
+  generateText.mockReset();
+  getDecryptedKey.mockReset().mockResolvedValue("sk-ant-test");
+});
+
+describe("GraphGeneratorService", () => {
+  it("returns a validated draft graph on the first attempt", async () => {
+    generateText.mockResolvedValue({ output: validOut });
+
+    const res = await makeService().generate("t-1", "email me a daily digest");
+
+    expect(res.name).toBe("Feed to email");
+    expect(res.graph.startNodeId).toBe("start");
+    expect(res.graph.nodes).toHaveLength(2);
+    expect(getDecryptedKey).toHaveBeenCalledWith("t-1", "anthropic");
+    expect(generateText).toHaveBeenCalledOnce();
+  });
+
+  it("repairs once: invalid graph → feeds the error back → valid on retry", async () => {
+    generateText
+      .mockResolvedValueOnce({ output: invalidOut })
+      .mockResolvedValueOnce({ output: validOut });
+
+    const res = await makeService().generate("t-1", "do a thing");
+
+    expect(res.graph.nodes).toHaveLength(2);
+    expect(generateText).toHaveBeenCalledTimes(2);
+    // the repair prompt carries the validator error + the previous graph
+    const repairArgs = generateText.mock.calls[1][0];
+    expect(String(repairArgs.prompt)).toContain("ghost");
+  });
+
+  it("gives up with 422 when the repair is still invalid (no infinite loop)", async () => {
+    generateText.mockResolvedValue({ output: invalidOut });
+
+    await expect(makeService().generate("t-1", "x")).rejects.toBeInstanceOf(
+      UnprocessableEntityException,
+    );
+    expect(generateText).toHaveBeenCalledTimes(2); // one attempt + one repair, then stop
+  });
+
+  it("maps a missing tenant key to 400 with actionable copy (no model call)", async () => {
+    getDecryptedKey.mockRejectedValue(
+      new MissingCredentialError("t-1", "anthropic"),
+    );
+
+    await expect(makeService().generate("t-1", "x")).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(generateText).not.toHaveBeenCalled();
+  });
+
+  it("maps a provider 401 to a 400 (key rejected)", async () => {
+    generateText.mockRejectedValue(
+      new APICallError({
+        message: "unauthorized",
+        url: "https://api.anthropic.com/v1/messages",
+        requestBodyValues: {},
+        statusCode: 401,
+      }),
+    );
+
+    await expect(makeService().generate("t-1", "x")).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it("rejects an empty prompt with 400 before any key/model work", async () => {
+    await expect(makeService().generate("t-1", "   ")).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(getDecryptedKey).not.toHaveBeenCalled();
+    expect(generateText).not.toHaveBeenCalled();
+  });
+});

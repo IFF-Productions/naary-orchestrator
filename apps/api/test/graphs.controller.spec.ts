@@ -4,6 +4,7 @@ import type { GraphDef } from "@naary/dsl";
 import { describe, expect, it, vi } from "vitest";
 import { SaveGraphDto } from "../src/graphs/graph.dto";
 import { GraphsController } from "../src/graphs/graphs.controller";
+import type { GraphGeneratorService } from "../src/graphs/graph-generator.service";
 import type { GraphsService } from "../src/graphs/graphs.service";
 
 const validGraph: GraphDef = {
@@ -36,7 +37,7 @@ describe("GraphsController", () => {
     });
     const controller = new GraphsController({
       upsert,
-    } as unknown as GraphsService);
+    } as unknown as GraphsService, {} as unknown as GraphGeneratorService);
 
     const res = await controller.save("t-1", dto(validGraph));
 
@@ -58,7 +59,7 @@ describe("GraphsController", () => {
     const upsert = vi.fn();
     const controller = new GraphsController({
       upsert,
-    } as unknown as GraphsService);
+    } as unknown as GraphsService, {} as unknown as GraphGeneratorService);
 
     await expect(
       controller.save("t-1", dto({ not: "a graph" })),
@@ -78,7 +79,7 @@ describe("GraphsController", () => {
     const list = vi.fn().mockResolvedValue(summaries);
     const controller = new GraphsController({
       list,
-    } as unknown as GraphsService);
+    } as unknown as GraphsService, {} as unknown as GraphGeneratorService);
 
     expect(await controller.list("t-1")).toBe(summaries);
     expect(list).toHaveBeenCalledWith("t-1");
@@ -94,7 +95,7 @@ describe("GraphsController", () => {
     const getLatestNamed = vi.fn().mockResolvedValue(named);
     const controller = new GraphsController({
       getLatestNamed,
-    } as unknown as GraphsService);
+    } as unknown as GraphsService, {} as unknown as GraphGeneratorService);
 
     expect(await controller.get("t-1", "canvas")).toBe(named);
     expect(getLatestNamed).toHaveBeenCalledWith("t-1", "canvas");
@@ -104,7 +105,7 @@ describe("GraphsController", () => {
     const getLatestNamed = vi.fn().mockResolvedValue(null);
     const controller = new GraphsController({
       getLatestNamed,
-    } as unknown as GraphsService);
+    } as unknown as GraphsService, {} as unknown as GraphGeneratorService);
 
     await expect(controller.get("t-1", "nope")).rejects.toBeInstanceOf(
       NotFoundException,

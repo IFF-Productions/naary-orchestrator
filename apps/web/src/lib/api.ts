@@ -119,6 +119,13 @@ export const api = {
   getGraph(workflowKey: string): Promise<NamedGraph> {
     return http(`/graphs/${encodeURIComponent(workflowKey)}`);
   },
+  // AI workflow builder: describe a workflow → a validated DRAFT graph (unsaved).
+  generateGraph(prompt: string): Promise<{ name: string; graph: GraphDef }> {
+    return http("/graphs/generate", {
+      method: "POST",
+      body: JSON.stringify({ prompt }),
+    });
+  },
   // The workflowKey of this workflow's error handler (null if none).
   getErrorHandler(
     workflowKey: string,

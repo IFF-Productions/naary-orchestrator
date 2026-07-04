@@ -10,7 +10,8 @@ import {
 } from "@nestjs/common";
 import type { GraphDef } from "@naary/dsl";
 import { TenantId } from "../auth/tenant.decorator";
-import { SaveGraphDto } from "./graph.dto";
+import { GenerateGraphDto, SaveGraphDto } from "./graph.dto";
+import { GraphGeneratorService } from "./graph-generator.service";
 import { type GraphSummary, GraphsService } from "./graphs.service";
 
 /**
@@ -20,12 +21,29 @@ import { type GraphSummary, GraphsService } from "./graphs.service";
  */
 @Controller("graphs")
 export class GraphsController {
-  constructor(private readonly graphs: GraphsService) {}
+  constructor(
+    private readonly graphs: GraphsService,
+    private readonly generator: GraphGeneratorService,
+  ) {}
 
   /** List the tenant's workflows (one row per workflowKey, latest version). */
   @Get()
   list(@TenantId() tenantId: string): Promise<GraphSummary[]> {
     return this.graphs.list(tenantId);
+  }
+
+  /**
+   * AI workflow builder: turn a plain-English description into a DRAFT graph the
+   * canvas loads unsaved. Uses the tenant's own provider key (decrypted in-request,
+   * never persisted) and returns a validateGraph-checked graph — the user edits and
+   * saves via POST /graphs. Not saved here.
+   */
+  @Post("generate")
+  generate(
+    @TenantId() tenantId: string,
+    @Body() body: GenerateGraphDto,
+  ): Promise<{ name: string; graph: GraphDef }> {
+    return this.generator.generate(tenantId, body.prompt);
   }
 
   /** The latest graph for a workflowKey — used to open it in the canvas. */

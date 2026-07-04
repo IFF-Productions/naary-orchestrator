@@ -40,6 +40,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@ai-sdk/anthropic':
+        specifier: ^4.0.8
+        version: 4.0.8(zod@4.4.3)
       '@naary/connections':
         specifier: workspace:*
         version: link:../../packages/connections
@@ -85,6 +88,9 @@ importers:
       '@temporalio/client':
         specifier: ^1.19.0
         version: 1.19.0
+      ai:
+        specifier: 7.0.15
+        version: 7.0.15(zod@4.4.3)
       class-transformer:
         specifier: ^0.5.1
         version: 0.5.1

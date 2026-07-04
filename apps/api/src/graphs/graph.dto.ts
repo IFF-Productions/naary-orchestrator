@@ -1,4 +1,13 @@
-import { IsObject, IsString } from "class-validator";
+import { IsObject, IsString, MaxLength, MinLength } from "class-validator";
+
+/** Generate a draft graph from a plain-English description (AI workflow builder).
+ *  Bounded length keeps the model prompt sane and blocks abuse. */
+export class GenerateGraphDto {
+  @IsString()
+  @MinLength(3)
+  @MaxLength(2000)
+  prompt!: string;
+}
 
 /** Save a graph for a tenant under a stable workflowKey. The `graph` is validated
  *  in depth by `validateGraph` inside GraphsService.upsert (400 on a bad graph);
