@@ -17,8 +17,10 @@ import {
   RUN_GRAPH_WORKFLOW,
   stateQuery,
   TASK_QUEUE,
+  webhookResponseQuery,
   type ExecutionState,
   type ExecutionStatus,
+  type WebhookResponse,
 } from "@naary/contracts";
 import { getPrisma } from "@naary/db";
 import { getBudget } from "@naary/usage";
@@ -266,6 +268,54 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       tenantId,
       workflowKey,
     );
+  }
+
+  /**
+   * Start a webhook run AND wait (bounded) for a `respondToWebhook` node to set a
+   * synchronous response. Polls the response query until it's set, the run closes,
+   * or the timeout elapses — then returns whatever it has. Any query hiccup or a
+   * run that never responds degrades to `{ workflowId }` (no response → the ingress
+   * falls back to 202). Never throws for the response path.
+   */
+  async startWebhookAwaitResponse(
+    tenantId: string,
+    snapshot: GraphSnapshot,
+    event: unknown,
+    workflowKey: string,
+    opts: { timeoutMs?: number; pollMs?: number } = {},
+  ): Promise<{ workflowId: string; response?: WebhookResponse }> {
+    const { workflowId } = await this.startWebhook(
+      tenantId,
+      snapshot,
+      event,
+      workflowKey,
+    );
+    const timeoutMs = opts.timeoutMs ?? 10_000;
+    const pollMs = opts.pollMs ?? 150;
+    const handle = this.client.workflow.getHandle(workflowId);
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      try {
+        const response = await handle.query(webhookResponseQuery);
+        if (response) return { workflowId, response };
+        // Not set yet — stop early if the run has already closed. But re-query ONCE
+        // first: the run may have set the response AND completed between this query
+        // and the describe (the node is often right before `end`). A closed run
+        // still answers queries from its final state.
+        const desc = await handle.describe();
+        if (desc.status.name !== "RUNNING") {
+          const final = await handle
+            .query(webhookResponseQuery)
+            .catch(() => undefined);
+          return final ? { workflowId, response: final } : { workflowId };
+        }
+      } catch {
+        // Transient replay/worker hiccup — keep polling until the deadline.
+      }
+      await new Promise((r) => setTimeout(r, pollMs));
+    }
+    return { workflowId };
   }
 
   private async startGraph(

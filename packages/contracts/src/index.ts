@@ -36,3 +36,17 @@ export const approvalSignal = defineSignal<[ApprovalInput]>("approval");
 
 /** Live execution state, readable without disturbing the run. */
 export const stateQuery = defineQuery<ExecutionState>("state");
+
+/** The HTTP response a `respondToWebhook` node sets for the webhook ingress to
+ *  return synchronously. Undefined until (and unless) such a node runs. */
+export interface WebhookResponse {
+  statusCode: number;
+  body?: unknown;
+  headers?: Record<string, string>;
+}
+
+/** Read the pending webhook response (undefined until a respondToWebhook node
+ *  sets it) — the ingress polls this to reply synchronously. */
+export const webhookResponseQuery = defineQuery<WebhookResponse | undefined>(
+  "webhookResponse",
+);

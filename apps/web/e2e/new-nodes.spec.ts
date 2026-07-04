@@ -20,6 +20,7 @@ const NEW_NODES = [
   { label: "Merge", field: "Combine mode" },
   { label: "Wait", field: "Wait (seconds)" },
   { label: "Stop & Error", field: "Error message" },
+  { label: "Respond", field: "Status code" },
   { label: "Sub-workflow", field: "Sub-workflow key" },
   { label: "For Each", field: "Sub-workflow key (run per item)" },
   { label: "HMAC", field: "Algorithm" },

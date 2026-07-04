@@ -2,7 +2,12 @@ import * as path from "node:path";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { approvalSignal, stateQuery, TASK_QUEUE } from "@naary/contracts";
+import {
+  approvalSignal,
+  stateQuery,
+  TASK_QUEUE,
+  webhookResponseQuery,
+} from "@naary/contracts";
 import { githubReviewGraph, sampleGraph, webhookSampleGraph } from "@naary/dsl";
 import type { GraphDef } from "@naary/dsl";
 import type * as activities from "../src/temporal/activities";
@@ -536,6 +541,29 @@ const rssGraph: GraphDef = {
     { from: "trigger", to: "feed" },
     { from: "feed", to: "n" },
     { from: "n", to: "end" },
+  ],
+};
+
+// webhook → respondToWebhook → end. Sets a 201 response whose body binds from the
+// trigger; the run then continues to end. The response is read via the query.
+const respondGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "respond",
+      type: "respondToWebhook",
+      config: {
+        statusCode: 201,
+        body: { ok: true },
+        bodyBinding: { from: "trigger", path: "echo" },
+      },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "respond" },
+    { from: "respond", to: "end" },
   ],
 };
 
@@ -1268,6 +1296,31 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       expect(result.ctx.feed).toMatchObject({ count: 2 });
       // aggregate(count) over feed.items
       expect(result.ctx.n).toEqual({ result: 2 });
+    });
+  });
+
+  it("respondToWebhook: sets a synchronous response (queryable) then continues to completion", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          respondGraph,
+          { echo: { hello: "world" } },
+          { tenantId: "t-respond" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-respond",
+      });
+      const result = await handle.result();
+      // the run CONTINUED past respond → completed
+      expect(result.status).toBe("completed");
+      expect(result.ctx.respond).toEqual({ statusCode: 201 });
+      // the response the ingress would return, read via the query (closed run)
+      const response = await handle.query(webhookResponseQuery);
+      expect(response).toEqual({
+        statusCode: 201,
+        body: { hello: "world" }, // bound from the trigger, overriding static body
+      });
     });
   });
 

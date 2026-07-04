@@ -7,8 +7,15 @@ import {
   Param,
   Post,
   Req,
+  Res,
   UnauthorizedException,
 } from "@nestjs/common";
+
+/** Minimal Express response surface we use (avoids a direct @types/express dep). */
+interface Res {
+  status(code: number): unknown;
+  set(headers: Record<string, string>): unknown;
+}
 import { Public } from "../auth/public.decorator";
 import { ExecutionsService } from "../executions/executions.service";
 import { GraphsService } from "../graphs/graphs.service";
@@ -39,7 +46,8 @@ export class HooksController {
     @Req() req: RawReq,
     @Body() event: unknown,
     @Headers() headers: Record<string, string>,
-  ): Promise<{ status: string; workflowId?: string }> {
+    @Res({ passthrough: true }) res: Res,
+  ): Promise<unknown> {
     const endpoint = await this.webhooks.getEndpoint(endpointId);
     if (!endpoint) {
       throw new NotFoundException("Unknown webhook endpoint");
@@ -80,6 +88,28 @@ export class HooksController {
       throw new NotFoundException(
         `No graph seeded for workflowKey '${endpoint.workflowId}'`,
       );
+    }
+
+    // If the graph has a respondToWebhook node, wait (bounded) for its response and
+    // return it synchronously; otherwise stay fire-and-forget (202, unchanged).
+    const wantsResponse = snapshot.graph.nodes.some(
+      (n) => n.type === "respondToWebhook",
+    );
+    if (wantsResponse) {
+      const { workflowId, response } =
+        await this.executions.startWebhookAwaitResponse(
+          endpoint.tenantId,
+          snapshot,
+          event,
+          endpoint.workflowId,
+        );
+      if (response) {
+        res.status(response.statusCode);
+        if (response.headers) res.set(response.headers);
+        return response.body ?? null;
+      }
+      // Ran but didn't respond in time (e.g. it paused first) — fall back to 202.
+      return { status: "started", workflowId };
     }
 
     const { workflowId } = await this.executions.startWebhook(

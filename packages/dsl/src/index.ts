@@ -23,6 +23,10 @@ export {
 } from "./signing";
 export { resolveSendEmail, type ResolvedSendEmail } from "./send-email";
 export { resolveRss, type ResolvedRss } from "./rss";
+export {
+  resolveWebhookResponse,
+  type ResolvedWebhookResponse,
+} from "./respond-webhook";
 export { walk } from "./walk";
 export { canonicalize } from "./canonical";
 export {
