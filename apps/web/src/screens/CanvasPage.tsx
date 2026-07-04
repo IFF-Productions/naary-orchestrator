@@ -42,7 +42,9 @@ import {
   type CanvasEdge,
   type CanvasNode,
   CONDITION_OPS,
+  defaultConfigFor,
   type EdgeConditionDraft,
+  NODE_DESCRIPTION,
   NODE_GROUPS,
   NODE_KINDS,
   NODE_LABEL as LABEL,
@@ -327,14 +329,9 @@ export function CanvasPage() {
 
   function addNode(kind: NodeType) {
     const id = `${kind}-${crypto.randomUUID().slice(0, 8)}`;
-    // Seed agent defaults so a node the user never opens still runs (provider/model
-    // are otherwise only written to config when the inspector dropdowns change).
-    const config: Record<string, unknown> | undefined =
-      kind === "agent"
-        ? { provider: "anthropic", model: "claude-opus-4-8" }
-        : kind === "httpRequest"
-          ? { method: "GET" }
-          : undefined;
+    // Drop in with working example config (single source: the node registry), so a
+    // non-technical user sees filled-in fields — and a node they never open still runs.
+    const config = defaultConfigFor(kind);
     setNodes((ns) => [
       ...ns,
       {
@@ -774,6 +771,11 @@ export function CanvasPage() {
                       type="button"
                       key={k.type}
                       onClick={() => addNode(k.type)}
+                      title={NODE_DESCRIPTION[k.type]}
+                      // Keep the accessible name exactly the label (the visible
+                      // description div would otherwise widen it and break exact-name
+                      // lookups, incl. the new-nodes Playwright spec).
+                      aria-label={k.label}
                       style={{
                         textAlign: "left",
                         padding: "8px 10px",
@@ -786,7 +788,17 @@ export function CanvasPage() {
                         fontSize: 13,
                       }}
                     >
-                      {k.label}
+                      <div style={{ fontWeight: 600 }}>{k.label}</div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "var(--ink-3)",
+                          marginTop: 2,
+                          lineHeight: 1.35,
+                        }}
+                      >
+                        {NODE_DESCRIPTION[k.type]}
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -1026,6 +1038,10 @@ function ConfigPanel({
             {kind} · {node.id}
           </div>
         </div>
+      </div>
+
+      <div style={{ fontSize: 12, color: "var(--ink-2)", lineHeight: 1.4 }}>
+        {NODE_DESCRIPTION[kind]}
       </div>
 
       {kind === "agent" && (
