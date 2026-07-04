@@ -90,6 +90,7 @@ const ACCENT: Record<NodeType, string> = {
   merge: "var(--node-merge, #3fae86)",
   hmac: "var(--node-hmac, #a86fd6)",
   jwt: "var(--node-jwt, #7a6fd6)",
+  sendEmail: "var(--node-email, #4f9ad6)",
   executeSubWorkflow: "var(--node-subflow, #5b8def)",
   wait: "var(--node-wait, #8a8f98)",
   stopAndError: "var(--node-error, #d6584f)",
@@ -214,6 +215,10 @@ function nodeSubtitle(
   if (kind === "hmac" || kind === "jwt") {
     const conn = config.connectionId as string | undefined;
     return conn || undefined;
+  }
+  if (kind === "sendEmail") {
+    const to = config.to as string | undefined;
+    return to ? `→ ${to}` : (config.connectionId as string | undefined);
   }
   if (kind === "executeSubWorkflow") {
     const key = config.workflowKey as string | undefined;
@@ -1571,6 +1576,69 @@ function ConfigPanel({
               placeholder="3600"
             />
           </Labeled>
+        </>
+      )}
+
+      {kind === "sendEmail" && (
+        <>
+          <Labeled label="SMTP connection id">
+            <input
+              value={str("connectionId")}
+              onChange={(e) => onChange({ connectionId: e.target.value })}
+              style={inputStyle}
+              placeholder="my-smtp"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            An <code>smtp</code> connection — its URI (with credentials) is read
+            server-side, never stored in the graph. Output is{" "}
+            <code>{node.id}.messageId</code>.
+          </div>
+          <Labeled label="From (blank = SMTP user)">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="noreply@example.com"
+            />
+          </Labeled>
+          <Labeled label="To">
+            <input
+              value={str("to")}
+              onChange={(e) => onChange({ to: e.target.value })}
+              style={inputStyle}
+              placeholder="user@example.com"
+            />
+          </Labeled>
+          <Labeled label="Subject">
+            <input
+              value={str("subject")}
+              onChange={(e) => onChange({ subject: e.target.value })}
+              style={inputStyle}
+              placeholder="Your workflow finished"
+            />
+          </Labeled>
+          <Labeled label="Body (text)">
+            <textarea
+              value={str("text")}
+              onChange={(e) => onChange({ text: e.target.value })}
+              rows={4}
+              style={textareaStyle}
+              placeholder="Plain-text body…"
+            />
+          </Labeled>
+          <BindingsEditor
+            bindings={
+              obj("fieldBindings") as Record<string, BindingRow> | undefined
+            }
+            upstreamIds={upstreamIds}
+            onChange={(v) => onChange({ fieldBindings: v })}
+          />
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            Bind <code>to</code> / <code>subject</code> / <code>text</code> /{" "}
+            <code>html</code> from upstream outputs to override the static
+            values.
+          </div>
         </>
       )}
 

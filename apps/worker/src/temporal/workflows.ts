@@ -13,6 +13,7 @@ import {
   resolveJwt,
   resolveMcpArguments,
   resolveRenameKeys,
+  resolveSendEmail,
   resolveSet,
   resolveSqlQuery,
   resolveSubWorkflowInput,
@@ -28,6 +29,7 @@ import type {
   MergeNodeConfig,
   NodeDef,
   RenameKeysNodeConfig,
+  SendEmailNodeConfig,
   SetNodeConfig,
   SqlQueryNodeConfig,
   StopAndErrorNodeConfig,
@@ -72,6 +74,15 @@ const { callHttpRequest } = wf.proxyActivities<typeof activities>({
 const { callSqlQuery } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "150 seconds",
   retry: { maximumAttempts: 3 },
+});
+
+// Sending email is NOT idempotent — a retry after a first attempt already handed the
+// message to the SMTP server (but lost the ack) would double-send. So this runs
+// AT-MOST-ONCE (no retries): a transient failure fails the node rather than risk
+// spamming the recipient. (A future idempotency-key design could relax this.)
+const { callSendEmail } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "60 seconds",
+  retry: { maximumAttempts: 1 },
 });
 
 export interface RunGraphResult {
@@ -365,6 +376,24 @@ export async function runGraph(
           nodeId: node.id,
         });
         ctx[node.id] = { token: result.token };
+        return null;
+      }
+      case "sendEmail": {
+        // Binding resolution is deterministic (pure ctx read); the SMTP URI fetch +
+        // send happen in the activity (URI/creds never enter workflow history).
+        const emailCfg = node.config as unknown as SendEmailNodeConfig;
+        const result = await callSendEmail(
+          resolveSendEmail(emailCfg, ctx),
+          ctx.__input,
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
+        ctx[node.id] = { messageId: result.messageId };
+        costUsd += result.costUsd;
+        ctx.__costUsd = costUsd;
         return null;
       }
       case "executeSubWorkflow": {

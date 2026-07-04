@@ -102,9 +102,18 @@ const mockActivities = {
     jwtCalls.push(cfg);
     return { status: "ok", token: "jwt.token.sig", costUsd: 0 };
   },
+  callSendEmail: async (
+    cfg: activities.ResolvedSendEmail,
+    _input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.SendEmailResult> => {
+    emailCalls.push(cfg);
+    return { status: "ok", messageId: "<sent@test>", costUsd: 0 };
+  },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
   setExecutionStatus: async (): Promise<void> => undefined, // read-model push; no-op here
 };
+const emailCalls: activities.ResolvedSendEmail[] = [];
 const hmacCalls: activities.ResolvedHmac[] = [];
 const jwtCalls: activities.ResolvedJwt[] = [];
 const subResolveCalls: { tenantId: string; workflowKey: string }[] = [];
@@ -367,6 +376,30 @@ const signingGraph: GraphDef = {
     { from: "trigger", to: "sig" },
     { from: "sig", to: "tok" },
     { from: "tok", to: "end" },
+  ],
+};
+
+// webhook → sendEmail → end. The recipient binds from the trigger; the SMTP URI
+// is resolved in-activity (mocked here).
+const emailGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "notify",
+      type: "sendEmail",
+      config: {
+        connectionId: "smtp-1",
+        subject: "done",
+        text: "your run finished",
+        fieldBindings: { to: { from: "trigger", path: "email" } },
+      },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "notify" },
+    { from: "notify", to: "end" },
   ],
 };
 
@@ -926,6 +959,27 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       // jwt resolved the `sub` claim from the trigger; output is the token
       expect(jwtCalls[0].claims).toMatchObject({ sub: "u-7" });
       expect(result.ctx.tok).toEqual({ token: "jwt.token.sig" });
+    });
+  });
+
+  it("sendEmail: resolves recipient from upstream + exposes messageId (URI in-activity)", async () => {
+    emailCalls.length = 0;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [emailGraph, { email: "user@corp.co" }, { tenantId: "t-email" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-email",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      // the `to` field was resolved from the trigger; only connectionId (no URI)
+      expect(emailCalls[0]).toMatchObject({
+        connectionId: "smtp-1",
+        to: "user@corp.co",
+        subject: "done",
+      });
+      expect(result.ctx.notify).toEqual({ messageId: "<sent@test>" });
     });
   });
 

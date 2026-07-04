@@ -20,6 +20,7 @@ export {
   type ResolvedHmac,
   type ResolvedJwt,
 } from "./signing";
+export { resolveSendEmail, type ResolvedSendEmail } from "./send-email";
 export { walk } from "./walk";
 export { canonicalize } from "./canonical";
 export {
