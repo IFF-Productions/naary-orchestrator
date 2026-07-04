@@ -18,6 +18,9 @@ export type NodeType =
   | "listOps" // pure: sort / limit / dedupe an array → array
   | "compareDatasets" // pure: diff two arrays by a key → {added,removed,changed,same}
   | "xml" // parse XML→object / build object→XML (activity; fast-xml-parser)
+  | "html" // extract values from HTML via a CSS selector (activity)
+  | "markdown" // convert markdown↔HTML (activity)
+  | "csv" // parse CSV text→rows / build rows→CSV (activity)
   | "dateTime" // current time / timestamp math via an activity (clock read is I/O)
   | "merge" // fan-in join: run once after all inbound branches arrive; combine outputs
   | "hmac" // signs a payload with a `signing` connection's key (activity); output is the digest
@@ -264,6 +267,47 @@ export interface XmlNodeConfig {
   from: string;
   /** Optional dotted path into that output. */
   path?: string;
+}
+
+/**
+ * HTML node — extract values from an HTML string via a CSS selector (activity).
+ * Output is `{ items }`: the matched elements' text (default), inner HTML, or a
+ * named attribute.
+ */
+export interface HtmlNodeConfig {
+  from: string;
+  path?: string;
+  /** CSS selector, e.g. "a.link" or "table tr td". */
+  selector: string;
+  /** What to extract per match (default "text"). */
+  return?: "text" | "html" | "attribute";
+  /** Attribute name when `return` is "attribute" (e.g. "href"). */
+  attribute?: string;
+}
+
+/**
+ * Markdown node — convert Markdown↔HTML (activity). `toHtml` renders markdown;
+ * `toMarkdown` converts HTML to markdown. Output is `{ text }`.
+ */
+export interface MarkdownNodeConfig {
+  from: string;
+  path?: string;
+  operation: "toHtml" | "toMarkdown";
+}
+
+/**
+ * CSV node — parse CSV text → rows, or build rows → CSV text (activity). `parse`
+ * output is `{ rows }` (objects when `header`, else arrays); `build` output is
+ * `{ csv }`.
+ */
+export interface CsvNodeConfig {
+  from: string;
+  path?: string;
+  operation: "parse" | "build";
+  /** First row is a header (default true). */
+  header?: boolean;
+  /** Field delimiter (default ","). */
+  delimiter?: string;
 }
 
 /**

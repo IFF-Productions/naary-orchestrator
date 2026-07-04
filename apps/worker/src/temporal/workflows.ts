@@ -33,7 +33,10 @@ import type {
   AggregateNodeConfig,
   CodeNodeConfig,
   CompareDatasetsNodeConfig,
+  CsvNodeConfig,
   DateTimeNodeConfig,
+  HtmlNodeConfig,
+  MarkdownNodeConfig,
   ExecuteSubWorkflowNodeConfig,
   FilterNodeConfig,
   ForEachNodeConfig,
@@ -71,6 +74,9 @@ const {
   callJwt,
   callTotp,
   callXml,
+  callHtml,
+  callMarkdown,
+  callCsv,
 } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },
@@ -412,6 +418,58 @@ export async function runGraph(
         const result = await callXml(
           { operation: xmlCfg.operation },
           inputVal,
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
+        ctx[node.id] = result.result;
+        return null;
+      }
+      case "html": {
+        // Extract via a CSS selector in the activity (parser out of the bundle).
+        const htmlCfg = node.config as unknown as HtmlNodeConfig;
+        const meta = {
+          tenantId: runCtx.tenantId,
+          executionId: wf.workflowInfo().workflowId,
+          nodeId: node.id,
+        };
+        const result = await callHtml(
+          {
+            selector: htmlCfg.selector,
+            return: htmlCfg.return,
+            attribute: htmlCfg.attribute,
+          },
+          getByPath(ctx[htmlCfg.from], htmlCfg.path),
+          meta,
+        );
+        ctx[node.id] = result.result;
+        return null;
+      }
+      case "markdown": {
+        const mdCfg = node.config as unknown as MarkdownNodeConfig;
+        const result = await callMarkdown(
+          { operation: mdCfg.operation },
+          getByPath(ctx[mdCfg.from], mdCfg.path),
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
+        ctx[node.id] = result.result;
+        return null;
+      }
+      case "csv": {
+        const csvCfg = node.config as unknown as CsvNodeConfig;
+        const result = await callCsv(
+          {
+            operation: csvCfg.operation,
+            header: csvCfg.header,
+            delimiter: csvCfg.delimiter,
+          },
+          getByPath(ctx[csvCfg.from], csvCfg.path),
           {
             tenantId: runCtx.tenantId,
             executionId: wf.workflowInfo().workflowId,

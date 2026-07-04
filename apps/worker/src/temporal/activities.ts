@@ -10,6 +10,10 @@ import { ApplicationFailure } from "@temporalio/activity";
 import { SignJWT, importPKCS8 } from "jose";
 import nodemailer from "nodemailer";
 import { XMLBuilder, XMLParser } from "fast-xml-parser";
+import { parse as parseHtml } from "node-html-parser";
+import { marked } from "marked";
+import TurndownService from "turndown";
+import Papa from "papaparse";
 import { getQuickJS, shouldInterruptAfterDeadline } from "quickjs-emscripten";
 import { canonicalize } from "@naary/dsl";
 import type {
@@ -701,6 +705,114 @@ export async function callXml(
       "XML_ERROR",
     );
   }
+}
+
+/** Shared shape for the text-parsing activities (html/markdown/csv). */
+export interface TextResult {
+  status: "ok";
+  result: unknown;
+  costUsd: number;
+}
+
+async function textActivity(
+  activity: string,
+  errType: string,
+  input: unknown,
+  meta: AgentMeta,
+  run: (value: unknown) => unknown,
+): Promise<TextResult> {
+  const startedAt = process.hrtime.bigint();
+  const store = getObjectStore();
+  const value = await resolveClaimChecks(input, store);
+  try {
+    const result = await maybeOffload(run(value), store, {
+      keyPrefix: `${activity}/${meta.tenantId}`,
+    });
+    activityRuns.inc({ activity, outcome: "ok" });
+    activityDuration.observe({ activity }, secondsSince(startedAt));
+    return { status: "ok", result, costUsd: 0 };
+  } catch {
+    activityRuns.inc({ activity, outcome: "error" });
+    activityDuration.observe({ activity }, secondsSince(startedAt));
+    // Parse/convert failures are the user's data problem — non-retryable, no secrets.
+    throw ApplicationFailure.nonRetryable(`${activity} failed`, errType);
+  }
+}
+
+export interface HtmlConfig {
+  selector: string;
+  return?: "text" | "html" | "attribute";
+  attribute?: string;
+}
+/** html node — extract via a CSS selector → { items }. */
+export function callHtml(
+  cfg: HtmlConfig,
+  input: unknown,
+  meta: AgentMeta,
+): Promise<TextResult> {
+  return textActivity("callHtml", "HTML_ERROR", input, meta, (value) => {
+    const nodes = parseHtml(String(value)).querySelectorAll(cfg.selector);
+    const items = nodes.map((n) =>
+      cfg.return === "html"
+        ? n.innerHTML
+        : cfg.return === "attribute"
+          ? (n.getAttribute(cfg.attribute ?? "") ?? "")
+          : n.text,
+    );
+    return { items };
+  });
+}
+
+export interface MarkdownConfig {
+  operation: "toHtml" | "toMarkdown";
+}
+/** markdown node — convert markdown↔HTML → { text }. */
+export function callMarkdown(
+  cfg: MarkdownConfig,
+  input: unknown,
+  meta: AgentMeta,
+): Promise<TextResult> {
+  return textActivity(
+    "callMarkdown",
+    "MARKDOWN_ERROR",
+    input,
+    meta,
+    (value) => {
+      const text =
+        cfg.operation === "toMarkdown"
+          ? new TurndownService({ headingStyle: "atx" }).turndown(String(value))
+          : (marked.parse(String(value), { async: false }) as string);
+      return { text };
+    },
+  );
+}
+
+export interface CsvConfig {
+  operation: "parse" | "build";
+  header?: boolean;
+  delimiter?: string;
+}
+/** csv node — parse CSV text → { rows }, or build rows → { csv }. */
+export function callCsv(
+  cfg: CsvConfig,
+  input: unknown,
+  meta: AgentMeta,
+): Promise<TextResult> {
+  return textActivity("callCsv", "CSV_ERROR", input, meta, (value) => {
+    if (cfg.operation === "build") {
+      return {
+        csv: Papa.unparse(value as object[], {
+          delimiter: cfg.delimiter ?? ",",
+        }),
+      };
+    }
+    const parsed = Papa.parse(String(value), {
+      header: cfg.header ?? true,
+      delimiter: cfg.delimiter,
+      skipEmptyLines: true,
+    });
+    return { rows: parsed.data };
+  });
 }
 
 export interface CodeInput {

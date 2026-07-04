@@ -93,6 +93,9 @@ const ACCENT: Record<NodeType, string> = {
   listOps: "var(--node-listops, #4f9e7f)",
   compareDatasets: "var(--node-compare, #7f8f4f)",
   xml: "var(--node-xml, #8f6f4f)",
+  html: "var(--node-html2, #4f7f8f)",
+  markdown: "var(--node-md, #6f8f5f)",
+  csv: "var(--node-csv, #8f7f4f)",
   dateTime: "var(--node-datetime, #6f8fd6)",
   merge: "var(--node-merge, #3fae86)",
   hmac: "var(--node-hmac, #a86fd6)",
@@ -225,13 +228,23 @@ function nodeSubtitle(
     const c = config.condition as { path?: string; op?: string } | undefined;
     return c?.path ? `${c.path} ${c.op ?? ""}`.trim() : undefined;
   }
-  if (kind === "aggregate" || kind === "listOps" || kind === "xml") {
+  if (
+    kind === "aggregate" ||
+    kind === "listOps" ||
+    kind === "xml" ||
+    kind === "markdown" ||
+    kind === "csv"
+  ) {
     const op = config.operation as string | undefined;
     return op || undefined;
   }
   if (kind === "compareDatasets") {
     const k = config.key as string | undefined;
     return k ? `by ${k}` : undefined;
+  }
+  if (kind === "html") {
+    const s = config.selector as string | undefined;
+    return s || undefined;
   }
   if (kind === "dateTime") {
     const src = config.source;
@@ -1777,6 +1790,136 @@ function ConfigPanel({
           <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
             parse → <code>{node.id}</code> is the object; build →{" "}
             <code>{node.id}.xml</code> is the string.
+          </div>
+        </>
+      )}
+
+      {kind === "html" && (
+        <>
+          <Labeled label="Source node id">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="http-node"
+            />
+          </Labeled>
+          <Labeled label="Path (optional)">
+            <input
+              value={str("path")}
+              onChange={(e) => onChange({ path: e.target.value })}
+              style={inputStyle}
+              placeholder="body"
+            />
+          </Labeled>
+          <Labeled label="CSS selector">
+            <input
+              value={str("selector")}
+              onChange={(e) => onChange({ selector: e.target.value })}
+              style={inputStyle}
+              placeholder="a.link"
+            />
+          </Labeled>
+          <Labeled label="Return">
+            <select
+              value={str("return") || "text"}
+              onChange={(e) => onChange({ return: e.target.value })}
+              style={inputStyle}
+            >
+              <option value="text">text</option>
+              <option value="html">html</option>
+              <option value="attribute">attribute</option>
+            </select>
+          </Labeled>
+          <Labeled label="Attribute (when return = attribute)">
+            <input
+              value={str("attribute")}
+              onChange={(e) => onChange({ attribute: e.target.value })}
+              style={inputStyle}
+              placeholder="href"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            Extracts each match → <code>{node.id}.items</code> (array).
+          </div>
+        </>
+      )}
+
+      {kind === "markdown" && (
+        <>
+          <Labeled label="Operation">
+            <select
+              value={str("operation") || "toHtml"}
+              onChange={(e) => onChange({ operation: e.target.value })}
+              style={inputStyle}
+            >
+              <option value="toHtml">toHtml (markdown → HTML)</option>
+              <option value="toMarkdown">toMarkdown (HTML → markdown)</option>
+            </select>
+          </Labeled>
+          <Labeled label="Source node id">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="upstream-node-id"
+            />
+          </Labeled>
+          <Labeled label="Path (optional)">
+            <input
+              value={str("path")}
+              onChange={(e) => onChange({ path: e.target.value })}
+              style={inputStyle}
+              placeholder="text"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            Output is <code>{node.id}.text</code>.
+          </div>
+        </>
+      )}
+
+      {kind === "csv" && (
+        <>
+          <Labeled label="Operation">
+            <select
+              value={str("operation") || "parse"}
+              onChange={(e) => onChange({ operation: e.target.value })}
+              style={inputStyle}
+            >
+              <option value="parse">parse (CSV → rows)</option>
+              <option value="build">build (rows → CSV)</option>
+            </select>
+          </Labeled>
+          <Labeled label="Source node id">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="upstream-node-id"
+            />
+          </Labeled>
+          <Labeled label="Path (optional)">
+            <input
+              value={str("path")}
+              onChange={(e) => onChange({ path: e.target.value })}
+              style={inputStyle}
+              placeholder="body"
+            />
+          </Labeled>
+          <Labeled label="Delimiter (optional)">
+            <input
+              value={str("delimiter")}
+              onChange={(e) =>
+                onChange({ delimiter: e.target.value || undefined })
+              }
+              style={inputStyle}
+              placeholder=","
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            parse → <code>{node.id}.rows</code>; build →{" "}
+            <code>{node.id}.csv</code>. First row is treated as a header.
           </div>
         </>
       )}

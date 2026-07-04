@@ -31,12 +31,18 @@
     "dotenv": "^17.4.2",
     "fast-xml-parser": "^5.9.3",
     "jose": "^5.10.0",
+    "marked": "^18.0.5",
+    "node-html-parser": "^8.0.4",
     "nodemailer": "^9.0.3",
+    "papaparse": "^5.5.4",
     "quickjs-emscripten": "^0.32.0",
+    "turndown": "^7.2.4",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@temporalio/testing": "^1.18.1",
-    "@types/nodemailer": "^8.0.1"
+    "@types/nodemailer": "^8.0.1",
+    "@types/papaparse": "^5.5.2",
+    "@types/turndown": "^5.0.6"
   }
 }

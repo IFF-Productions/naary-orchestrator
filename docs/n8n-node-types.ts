@@ -28,6 +28,9 @@ export type DslNodeType =
   | "listOps"
   | "compareDatasets"
   | "xml"
+  | "html"
+  | "markdown"
+  | "csv"
   | "hmac"
   | "jwt"
   | "totp"
@@ -375,26 +378,27 @@ export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
     slug: "markdown",
     n8nNode: "Markdown",
     group: "Data transformation",
-    mapsTo: [],
-    coverage: "gap",
-    note: "Markdown<->HTML conversion.",
+    mapsTo: ["markdown"],
+    coverage: "covered",
+    note: "markdown node — markdown<->HTML conversion.",
   },
   {
     name: "HTML",
     slug: "html",
     n8nNode: "Html",
     group: "Data transformation",
-    mapsTo: [],
-    coverage: "gap",
-    note: "HTML template/extract.",
+    mapsTo: ["html"],
+    coverage: "covered",
+    note: "html node — extract values from HTML via a CSS selector.",
   },
   {
     name: "HTML Extract (legacy)",
     slug: "html-extract",
     n8nNode: "HtmlExtract",
     group: "Data transformation",
-    mapsTo: [],
-    coverage: "gap",
+    mapsTo: ["html"],
+    coverage: "covered",
+    note: "html node — CSS-selector extraction.",
   },
   {
     name: "XML",
@@ -498,9 +502,9 @@ export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
     slug: "spreadsheet-file",
     n8nNode: "SpreadsheetFile",
     group: "Files & binary",
-    mapsTo: [],
-    coverage: "gap",
-    note: "CSV/XLSX parse+generate.",
+    mapsTo: ["csv"],
+    coverage: "partial",
+    note: "csv node parses/builds CSV text; XLSX/binary is a follow-up (needs a binary-data model).",
   },
   {
     name: "Read PDF",

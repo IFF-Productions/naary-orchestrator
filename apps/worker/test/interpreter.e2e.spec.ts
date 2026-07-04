@@ -137,6 +137,30 @@ const mockActivities = {
     xmlCalls.push({ cfg, input });
     return { status: "ok", result: { parsed: input }, costUsd: 0 };
   },
+  callHtml: async (
+    cfg: activities.HtmlConfig,
+    input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.TextResult> => {
+    textCalls.push({ activity: "html", cfg, input });
+    return { status: "ok", result: { items: ["x"] }, costUsd: 0 };
+  },
+  callMarkdown: async (
+    cfg: activities.MarkdownConfig,
+    input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.TextResult> => {
+    textCalls.push({ activity: "markdown", cfg, input });
+    return { status: "ok", result: { text: "md" }, costUsd: 0 };
+  },
+  callCsv: async (
+    cfg: activities.CsvConfig,
+    input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.TextResult> => {
+    textCalls.push({ activity: "csv", cfg, input });
+    return { status: "ok", result: { rows: [] }, costUsd: 0 };
+  },
   callRssRead: async (
     cfg: activities.ResolvedRss,
     _input: unknown,
@@ -167,6 +191,7 @@ const codeCalls: {
 }[] = [];
 const totpCalls: activities.TotpConfig[] = [];
 const xmlCalls: { cfg: activities.XmlConfig; input: unknown }[] = [];
+const textCalls: { activity: string; cfg: unknown; input: unknown }[] = [];
 const rssCalls: activities.ResolvedRss[] = [];
 const emailCalls: activities.ResolvedSendEmail[] = [];
 const hmacCalls: activities.ResolvedHmac[] = [];
@@ -677,6 +702,42 @@ const xmlGraph: GraphDef = {
   edges: [
     { from: "trigger", to: "x" },
     { from: "x", to: "end" },
+  ],
+};
+
+// webhook → html → markdown → csv → end. Each wires its (mocked) activity in turn.
+const textGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "h",
+      type: "html",
+      config: {
+        from: "trigger",
+        path: "page",
+        selector: "a",
+        return: "attribute",
+        attribute: "href",
+      },
+    },
+    {
+      id: "m",
+      type: "markdown",
+      config: { from: "trigger", path: "md", operation: "toHtml" },
+    },
+    {
+      id: "c",
+      type: "csv",
+      config: { from: "trigger", path: "text", operation: "parse" },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "h" },
+    { from: "h", to: "m" },
+    { from: "m", to: "c" },
+    { from: "c", to: "end" },
   ],
 };
 
@@ -1657,6 +1718,33 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
         input: "<n>1</n>",
       });
       expect(result.ctx.x).toEqual({ parsed: "<n>1</n>" });
+    });
+  });
+
+  it("html/markdown/csv: the interpreter wires each activity with the resolved input", async () => {
+    textCalls.length = 0;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          textGraph,
+          { page: "<a href='/z'></a>", md: "# Hi", text: "a,b\n1,2" },
+          { tenantId: "t-text" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-text",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(textCalls.map((c) => c.activity)).toEqual([
+        "html",
+        "markdown",
+        "csv",
+      ]);
+      expect(textCalls[0].input).toBe("<a href='/z'></a>");
+      expect(result.ctx.h).toEqual({ items: ["x"] });
+      expect(result.ctx.m).toEqual({ text: "md" });
+      expect(result.ctx.c).toEqual({ rows: [] });
     });
   });
 
