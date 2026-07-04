@@ -49,6 +49,44 @@ describe("recordUsage", () => {
     expect(String(data.costUsd)).toBe("0.017500"); // 0.005 + 0.0125, Decimal(12,6)
   });
 
+  it("persists the cache-read + reasoning buckets and bills cache reads at the reduced rate", async () => {
+    await recordUsage({
+      tenantId: "t1",
+      executionId: "exec-1",
+      nodeId: "agent",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      usage: {
+        inputTokens: 1000,
+        outputTokens: 500,
+        cachedInputTokens: 2000,
+        reasoningTokens: 300,
+      },
+    });
+
+    const data = upsert.mock.calls[0][0].create;
+    // both detail buckets are written to the ledger (privacy: tokens only, no text)
+    expect(data.cachedInputTokens).toBe(2000);
+    expect(data.reasoningTokens).toBe(300);
+    // cache reads price at 0.5/MTok (opus), a separate bucket from full-rate input:
+    //   1000·5 + 2000·0.5 + 500·25 (per MTok) = 0.005 + 0.001 + 0.0125
+    expect(String(data.costUsd)).toBe("0.018500");
+  });
+
+  it("defaults the cache-read + reasoning buckets to zero when the provider omits them", async () => {
+    await recordUsage({
+      tenantId: "t1",
+      executionId: "exec-1",
+      nodeId: "agent",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      usage: { inputTokens: 1000, outputTokens: 500 },
+    });
+    const data = upsert.mock.calls[0][0].create;
+    expect(data.cachedInputTokens).toBe(0);
+    expect(data.reasoningTokens).toBe(0);
+  });
+
   it("never records zero for a real call (fallback estimate is non-zero)", async () => {
     await recordUsage({
       tenantId: "t1",
