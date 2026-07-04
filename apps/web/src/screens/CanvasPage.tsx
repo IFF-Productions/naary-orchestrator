@@ -88,6 +88,7 @@ const ACCENT: Record<NodeType, string> = {
   renameKeys: "var(--node-rename, #c9803e)",
   filter: "var(--node-filter, #3f9e8f)",
   aggregate: "var(--node-aggregate, #b0863e)",
+  listOps: "var(--node-listops, #4f9e7f)",
   dateTime: "var(--node-datetime, #6f8fd6)",
   merge: "var(--node-merge, #3fae86)",
   hmac: "var(--node-hmac, #a86fd6)",
@@ -215,7 +216,7 @@ function nodeSubtitle(
     const c = config.condition as { path?: string; op?: string } | undefined;
     return c?.path ? `${c.path} ${c.op ?? ""}`.trim() : undefined;
   }
-  if (kind === "aggregate") {
+  if (kind === "aggregate" || kind === "listOps") {
     const op = config.operation as string | undefined;
     return op || undefined;
   }
@@ -1502,6 +1503,76 @@ function ConfigPanel({
           <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
             Collapses the array into <code>{node.id}.result</code>. For
             collect/sum, pick a field from each item.
+          </div>
+        </>
+      )}
+
+      {kind === "listOps" && (
+        <>
+          <Labeled label="Array source node id">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="upstream-node-id"
+            />
+          </Labeled>
+          <Labeled label="Array path (optional)">
+            <input
+              value={str("path")}
+              onChange={(e) => onChange({ path: e.target.value })}
+              style={inputStyle}
+              placeholder="rows"
+            />
+          </Labeled>
+          <Labeled label="Operation">
+            <select
+              value={str("operation") || "sort"}
+              onChange={(e) => onChange({ operation: e.target.value })}
+              style={inputStyle}
+            >
+              {["sort", "limit", "dedupe"].map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </Labeled>
+          <Labeled label="Field (item path — sort/dedupe)">
+            <input
+              value={str("field")}
+              onChange={(e) => onChange({ field: e.target.value })}
+              style={inputStyle}
+              placeholder="createdAt"
+            />
+          </Labeled>
+          <Labeled label="Order (sort)">
+            <select
+              value={str("order") || "asc"}
+              onChange={(e) => onChange({ order: e.target.value })}
+              style={inputStyle}
+            >
+              <option value="asc">asc</option>
+              <option value="desc">desc</option>
+            </select>
+          </Labeled>
+          <Labeled label="Count (limit)">
+            <input
+              type="number"
+              min={1}
+              value={num("count") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  count: e.target.value ? Number(e.target.value) : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="10"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            Outputs the resulting array. sort/dedupe use the field (whole item
+            if blank); limit takes the first N.
           </div>
         </>
       )}

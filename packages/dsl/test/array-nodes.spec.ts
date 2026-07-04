@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveAggregate, resolveFilter } from "../src/array-nodes";
+import { resolveAggregate, resolveFilter, resolveListOps } from "../src/array-nodes";
 import type { AggregateNodeConfig, FilterNodeConfig } from "../src/types";
 
 const ctx = {
@@ -93,5 +93,47 @@ describe("resolveAggregate", () => {
         ctx,
       ),
     ).toEqual({ result: undefined });
+  });
+});
+
+describe("resolveListOps", () => {
+  const c = { rows: [{ n: 3 }, { n: 1 }, { n: 2 }, { n: 1 }] };
+
+  it("sort ascending / descending by field", () => {
+    expect(
+      resolveListOps({ from: "c", path: "rows", operation: "sort", field: "n" }, {
+        c,
+      }),
+    ).toEqual([{ n: 1 }, { n: 1 }, { n: 2 }, { n: 3 }]);
+    expect(
+      resolveListOps(
+        { from: "c", path: "rows", operation: "sort", field: "n", order: "desc" },
+        { c },
+      ),
+    ).toEqual([{ n: 3 }, { n: 2 }, { n: 1 }, { n: 1 }]);
+  });
+
+  it("limit takes the first N", () => {
+    expect(
+      resolveListOps(
+        { from: "c", path: "rows", operation: "limit", count: 2 },
+        { c },
+      ),
+    ).toEqual([{ n: 3 }, { n: 1 }]);
+  });
+
+  it("dedupe by field keeps first occurrence", () => {
+    expect(
+      resolveListOps(
+        { from: "c", path: "rows", operation: "dedupe", field: "n" },
+        { c },
+      ),
+    ).toEqual([{ n: 3 }, { n: 1 }, { n: 2 }]);
+  });
+
+  it("non-array source → []", () => {
+    expect(
+      resolveListOps({ from: "x", operation: "sort" }, { x: 5 }),
+    ).toEqual([]);
   });
 });

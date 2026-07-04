@@ -22,6 +22,7 @@ export type DslNodeType =
   | "merge"
   | "filter"
   | "aggregate"
+  | "listOps"
   | "wait"
   | "stopAndError"
   | "executeSubWorkflow"
@@ -325,9 +326,9 @@ export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
     slug: "item-lists",
     n8nNode: "ItemLists",
     group: "Data transformation",
-    mapsTo: ["aggregate"],
-    coverage: "partial",
-    note: "aggregate node covers collect/count/sum/first/last over an array value; splitOut/sort/limit/dedup are follow-ups.",
+    mapsTo: ["aggregate", "listOps"],
+    coverage: "covered",
+    note: "aggregate (collect/count/sum/first/last) + listOps (sort/limit/dedupe) over an array value. splitOut is a follow-up.",
   },
   {
     name: "Rename Keys",

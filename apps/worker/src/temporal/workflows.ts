@@ -10,6 +10,7 @@ import {
   nextNodes,
   resolveAggregate,
   resolveFilter,
+  resolveListOps,
   resolveHmac,
   resolveHttpRequest,
   resolveJwt,
@@ -26,6 +27,7 @@ import type {
   ExecuteSubWorkflowNodeConfig,
   FilterNodeConfig,
   GraphDef,
+  ListOpsNodeConfig,
   HmacNodeConfig,
   HttpRequestNodeConfig,
   JwtNodeConfig,
@@ -339,6 +341,12 @@ export async function runGraph(
         // Pure node: collapse an upstream array → { result }.
         const aggCfg = node.config as unknown as AggregateNodeConfig;
         ctx[node.id] = resolveAggregate(aggCfg, ctx);
+        return null;
+      }
+      case "listOps": {
+        // Pure node: sort / limit / dedupe an upstream array → array.
+        const loCfg = node.config as unknown as ListOpsNodeConfig;
+        ctx[node.id] = resolveListOps(loCfg, ctx);
         return null;
       }
       case "dateTime": {
