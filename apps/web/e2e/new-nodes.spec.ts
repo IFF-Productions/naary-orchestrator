@@ -13,6 +13,8 @@ import { expect, test } from "@playwright/test";
 const NEW_NODES = [
   { label: "Edit Fields", field: "Static fields (JSON)" },
   { label: "Rename Keys", field: "Drop keys (JSON array)" },
+  { label: "Filter", field: "Item path" },
+  { label: "Aggregate", field: "Operation" },
   { label: "Date & Time", field: "Add seconds (may be negative)" },
   { label: "Merge", field: "Combine mode" },
   { label: "Wait", field: "Wait (seconds)" },

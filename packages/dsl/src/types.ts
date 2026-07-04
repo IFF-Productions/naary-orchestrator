@@ -12,6 +12,8 @@ export type NodeType =
   | "sqlQuery" // runs a read-only query against a tenant DB; output is {rows,rowCount}
   | "set" // builds a plain object from static fields + upstream bindings (pure, no I/O)
   | "renameKeys" // pure: remap/drop keys of an upstream object
+  | "filter" // pure: keep array items matching a per-item predicate
+  | "aggregate" // pure: collapse an array (collect/count/sum/first/last)
   | "dateTime" // current time / timestamp math via an activity (clock read is I/O)
   | "merge" // fan-in join: run once after all inbound branches arrive; combine outputs
   | "hmac" // signs a payload with a `signing` connection's key (activity); output is the digest
@@ -188,6 +190,40 @@ export interface RenameKeysNodeConfig {
   rename?: Record<string, string>;
   /** Top-level keys to remove from the output. */
   drop?: string[];
+}
+
+/**
+ * Filter node — keep the items of an upstream ARRAY that match a per-item predicate.
+ * PURE (deterministic ctx read, no I/O). The predicate is the same structured
+ * `EdgeCondition` used on edges, evaluated against each item (so `condition.path` is
+ * relative to the item). Output is the filtered array; a non-array source yields `[]`.
+ */
+export interface FilterNodeConfig {
+  /** Upstream node id whose output holds the array. */
+  from: string;
+  /** Optional dotted path into that output to reach the array. */
+  path?: string;
+  /** Per-item predicate (reuses the edge-condition op set). */
+  condition: EdgeCondition;
+}
+
+/** Aggregate operations over an upstream array. */
+export type AggregateOp = "collect" | "count" | "sum" | "first" | "last";
+
+/**
+ * Aggregate node — collapse an upstream ARRAY into a single value. PURE. `collect`
+ * → the array of `field` values (or whole items when `field` is omitted); `count` →
+ * length; `sum` → numeric sum over `field`; `first`/`last` → an end item. Output is
+ * `{ result }` so a graph can branch on `<nodeId>.result`.
+ */
+export interface AggregateNodeConfig {
+  /** Upstream node id whose output holds the array. */
+  from: string;
+  /** Optional dotted path into that output to reach the array. */
+  path?: string;
+  operation: AggregateOp;
+  /** Field to collect/sum from each item (dotted path, relative to the item). */
+  field?: string;
 }
 
 /**

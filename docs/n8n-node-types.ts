@@ -20,6 +20,8 @@ export type DslNodeType =
   | "sqlQuery"
   | "set"
   | "merge"
+  | "filter"
+  | "aggregate"
   | "wait"
   | "stopAndError"
   | "executeSubWorkflow"
@@ -185,9 +187,9 @@ export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
     slug: "filter",
     n8nNode: "Filter",
     group: "Flow control",
-    mapsTo: [],
-    coverage: "gap",
-    note: "Per-item drop/keep; we have no item-collection model.",
+    mapsTo: ["filter"],
+    coverage: "covered",
+    note: "filter node — keeps array-VALUE items matching a structured predicate (reuses EdgeCondition). We operate on an array value, not n8n's implicit per-item stream.",
   },
   {
     name: "Merge",
@@ -323,9 +325,9 @@ export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
     slug: "item-lists",
     n8nNode: "ItemLists",
     group: "Data transformation",
-    mapsTo: [],
-    coverage: "gap",
-    note: "No item-collection transforms.",
+    mapsTo: ["aggregate"],
+    coverage: "partial",
+    note: "aggregate node covers collect/count/sum/first/last over an array value; splitOut/sort/limit/dedup are follow-ups.",
   },
   {
     name: "Rename Keys",

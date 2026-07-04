@@ -31,6 +31,8 @@ const ACCENT: Record<NodeType, string> = {
   sqlQuery: "var(--node-sql, #b06fd6)",
   set: "var(--node-set, #d98a3d)",
   renameKeys: "var(--node-rename, #c9803e)",
+  filter: "var(--node-filter, #3f9e8f)",
+  aggregate: "var(--node-aggregate, #b0863e)",
   dateTime: "var(--node-datetime, #6f8fd6)",
   merge: "var(--node-merge, #3fae86)",
   hmac: "var(--node-hmac, #a86fd6)",

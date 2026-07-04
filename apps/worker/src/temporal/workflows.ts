@@ -8,6 +8,8 @@ import type {
 import {
   getByPath,
   nextNodes,
+  resolveAggregate,
+  resolveFilter,
   resolveHmac,
   resolveHttpRequest,
   resolveJwt,
@@ -19,8 +21,10 @@ import {
   resolveSubWorkflowInput,
 } from "@naary/dsl";
 import type {
+  AggregateNodeConfig,
   DateTimeNodeConfig,
   ExecuteSubWorkflowNodeConfig,
+  FilterNodeConfig,
   GraphDef,
   HmacNodeConfig,
   HttpRequestNodeConfig,
@@ -322,6 +326,19 @@ export async function runGraph(
         // Pure node: reshape an upstream object's keys, entirely in the interpreter.
         const rkCfg = node.config as unknown as RenameKeysNodeConfig;
         ctx[node.id] = resolveRenameKeys(rkCfg, ctx);
+        return null;
+      }
+      case "filter": {
+        // Pure node: keep the upstream array items matching the per-item predicate.
+        // Output IS the filtered array (downstream reads `<id>.0` or aggregates it).
+        const filterCfg = node.config as unknown as FilterNodeConfig;
+        ctx[node.id] = resolveFilter(filterCfg, ctx);
+        return null;
+      }
+      case "aggregate": {
+        // Pure node: collapse an upstream array → { result }.
+        const aggCfg = node.config as unknown as AggregateNodeConfig;
+        ctx[node.id] = resolveAggregate(aggCfg, ctx);
         return null;
       }
       case "dateTime": {
