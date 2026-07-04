@@ -26,6 +26,8 @@ export type DslNodeType =
   | "filter"
   | "aggregate"
   | "listOps"
+  | "compareDatasets"
+  | "xml"
   | "hmac"
   | "jwt"
   | "totp"
@@ -355,8 +357,9 @@ export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
     slug: "compare-datasets",
     n8nNode: "CompareDatasets",
     group: "Data transformation",
-    mapsTo: [],
-    coverage: "gap",
+    mapsTo: ["compareDatasets"],
+    coverage: "covered",
+    note: "compareDatasets node — diffs two arrays by a key into added/removed/changed/same (pure).",
   },
   {
     name: "Date & Time",
@@ -398,9 +401,9 @@ export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
     slug: "xml",
     n8nNode: "Xml",
     group: "Data transformation",
-    mapsTo: [],
-    coverage: "gap",
-    note: "XML<->JSON conversion.",
+    mapsTo: ["xml"],
+    coverage: "covered",
+    note: "xml node — parse XML->object / build object->XML (fast-xml-parser, in an activity).",
   },
   {
     name: "Transform",

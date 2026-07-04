@@ -14,6 +14,7 @@ import {
   getByPath,
   nextNodes,
   resolveAggregate,
+  resolveCompareDatasets,
   resolveFilter,
   resolveListOps,
   resolveHmac,
@@ -31,6 +32,7 @@ import {
 import type {
   AggregateNodeConfig,
   CodeNodeConfig,
+  CompareDatasetsNodeConfig,
   DateTimeNodeConfig,
   ExecuteSubWorkflowNodeConfig,
   FilterNodeConfig,
@@ -52,6 +54,7 @@ import type {
   StopAndErrorNodeConfig,
   TotpNodeConfig,
   WaitNodeConfig,
+  XmlNodeConfig,
 } from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
 // Do NOT drop `type` — that would pull I/O code into the sandbox.
@@ -67,6 +70,7 @@ const {
   callHmac,
   callJwt,
   callTotp,
+  callXml,
 } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },
@@ -392,6 +396,29 @@ export async function runGraph(
         // Pure node: sort / limit / dedupe an upstream array → array.
         const loCfg = node.config as unknown as ListOpsNodeConfig;
         ctx[node.id] = resolveListOps(loCfg, ctx);
+        return null;
+      }
+      case "compareDatasets": {
+        // Pure node: diff two upstream arrays by key → {added,removed,changed,same}.
+        const cdCfg = node.config as unknown as CompareDatasetsNodeConfig;
+        ctx[node.id] = resolveCompareDatasets(cdCfg, ctx);
+        return null;
+      }
+      case "xml": {
+        // Parse XML→object / build object→XML in the activity (parser stays out of
+        // the deterministic bundle). Input value resolved here (pure ctx read).
+        const xmlCfg = node.config as unknown as XmlNodeConfig;
+        const inputVal = getByPath(ctx[xmlCfg.from], xmlCfg.path);
+        const result = await callXml(
+          { operation: xmlCfg.operation },
+          inputVal,
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
+        ctx[node.id] = result.result;
         return null;
       }
       case "dateTime": {

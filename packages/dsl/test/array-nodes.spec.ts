@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveAggregate, resolveFilter, resolveListOps } from "../src/array-nodes";
+import { resolveAggregate, resolveFilter, resolveListOps, resolveCompareDatasets } from "../src/array-nodes";
 import type { AggregateNodeConfig, FilterNodeConfig } from "../src/types";
 
 const ctx = {
@@ -151,5 +151,49 @@ describe("resolveListOps", () => {
     expect(
       resolveListOps({ from: "x", operation: "sort" }, { x: 5 }),
     ).toEqual([]);
+  });
+});
+
+describe("resolveCompareDatasets", () => {
+  const ctx = {
+    old: {
+      rows: [
+        { id: 1, v: "a" },
+        { id: 2, v: "b" },
+        { id: 3, v: "c" },
+      ],
+    },
+    new: {
+      rows: [
+        { id: 1, v: "a" }, // same
+        { id: 2, v: "B" }, // changed
+        { id: 4, v: "d" }, // added
+      ],
+    },
+  };
+
+  it("diffs two arrays by key into added/removed/changed/same", () => {
+    const r = resolveCompareDatasets(
+      {
+        a: { from: "old", path: "rows" },
+        b: { from: "new", path: "rows" },
+        key: "id",
+      },
+      ctx,
+    );
+    expect(r.added).toEqual([{ id: 4, v: "d" }]);
+    expect(r.removed).toEqual([{ id: 3, v: "c" }]);
+    expect(r.changed).toEqual([
+      { key: 2, a: { id: 2, v: "b" }, b: { id: 2, v: "B" } },
+    ]);
+    expect(r.same).toEqual([{ id: 1, v: "a" }]);
+  });
+
+  it("non-array sources → empty buckets", () => {
+    const r = resolveCompareDatasets(
+      { a: { from: "x" }, b: { from: "y" }, key: "id" },
+      { x: 5, y: null },
+    );
+    expect(r).toEqual({ added: [], removed: [], changed: [], same: [] });
   });
 });

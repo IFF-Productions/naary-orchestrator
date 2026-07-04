@@ -72,6 +72,8 @@ export const NODE_KINDS: {
   { type: "filter", label: "Filter", group: "Transform" },
   { type: "aggregate", label: "Aggregate", group: "Transform" },
   { type: "listOps", label: "List Ops", group: "Transform" },
+  { type: "compareDatasets", label: "Compare Datasets", group: "Transform" },
+  { type: "xml", label: "XML", group: "Transform" },
   { type: "dateTime", label: "Date & Time", group: "Transform" },
   { type: "merge", label: "Merge", group: "Flow" },
   { type: "forEach", label: "For Each", group: "Flow" },

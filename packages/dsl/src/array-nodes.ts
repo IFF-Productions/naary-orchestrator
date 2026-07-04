@@ -2,6 +2,7 @@ import { evaluateCondition } from "./branch";
 import { getByPath } from "./mcp-args";
 import type {
   AggregateNodeConfig,
+  CompareDatasetsNodeConfig,
   FilterNodeConfig,
   ListOpsNodeConfig,
 } from "./types";
@@ -123,4 +124,41 @@ export function resolveListOps(
     default:
       return arr;
   }
+}
+
+/**
+ * Compare Datasets node — diff two arrays by a key field. Pure + total (non-array
+ * sources → empty buckets). Output: `{ added, removed, changed, same }`.
+ */
+export function resolveCompareDatasets(
+  config: CompareDatasetsNodeConfig,
+  ctx: Record<string, unknown>,
+): {
+  added: unknown[];
+  removed: unknown[];
+  changed: { key: unknown; a: unknown; b: unknown }[];
+  same: unknown[];
+} {
+  const aRaw = getByPath(ctx[config.a.from], config.a.path);
+  const bRaw = getByPath(ctx[config.b.from], config.b.path);
+  const a = Array.isArray(aRaw) ? aRaw : [];
+  const b = Array.isArray(bRaw) ? bRaw : [];
+  const keyOf = (item: unknown) => JSON.stringify(getByPath(item, config.key));
+  const aBy = new Map(a.map((item) => [keyOf(item), item]));
+  const bBy = new Map(b.map((item) => [keyOf(item), item]));
+
+  const added: unknown[] = [];
+  const changed: { key: unknown; a: unknown; b: unknown }[] = [];
+  const same: unknown[] = [];
+  for (const [k, bItem] of bBy) {
+    if (!aBy.has(k)) {
+      added.push(bItem);
+    } else {
+      const aItem = aBy.get(k);
+      if (JSON.stringify(aItem) === JSON.stringify(bItem)) same.push(bItem);
+      else changed.push({ key: getByPath(bItem, config.key), a: aItem, b: bItem });
+    }
+  }
+  const removed = a.filter((item) => !bBy.has(keyOf(item)));
+  return { added, removed, changed, same };
 }

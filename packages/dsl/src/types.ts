@@ -16,6 +16,8 @@ export type NodeType =
   | "filter" // pure: keep array items matching a per-item predicate
   | "aggregate" // pure: collapse an array (collect/count/sum/first/last)
   | "listOps" // pure: sort / limit / dedupe an array → array
+  | "compareDatasets" // pure: diff two arrays by a key → {added,removed,changed,same}
+  | "xml" // parse XML→object / build object→XML (activity; fast-xml-parser)
   | "dateTime" // current time / timestamp math via an activity (clock read is I/O)
   | "merge" // fan-in join: run once after all inbound branches arrive; combine outputs
   | "hmac" // signs a payload with a `signing` connection's key (activity); output is the digest
@@ -234,6 +236,34 @@ export interface ListOpsNodeConfig {
   order?: "asc" | "desc";
   /** Max items for limit. */
   count?: number;
+}
+
+/**
+ * Compare Datasets node — diff two upstream ARRAYS by a key field. PURE. Output is
+ * `{ added, removed, changed, same }`: rows only in B (added), only in A (removed),
+ * in both but not deep-equal (changed — `{ key, a, b }`), and identical (same).
+ */
+export interface CompareDatasetsNodeConfig {
+  /** Left array (the baseline). */
+  a: ArgBinding;
+  /** Right array (the comparison). */
+  b: ArgBinding;
+  /** Item field whose value identifies a row in both arrays. */
+  key: string;
+}
+
+/**
+ * XML node — convert between XML text and an object. `parse` turns an XML string
+ * (from `from`/`path`) into an object; `build` serializes an upstream object to an
+ * XML string. Runs in an ACTIVITY (reuses fast-xml-parser). Output: the object
+ * (parse) or `{ xml }` (build).
+ */
+export interface XmlNodeConfig {
+  operation: "parse" | "build";
+  /** Upstream node id whose output holds the XML string (parse) or object (build). */
+  from: string;
+  /** Optional dotted path into that output. */
+  path?: string;
 }
 
 /**
