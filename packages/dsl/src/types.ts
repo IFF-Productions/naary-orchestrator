@@ -26,6 +26,7 @@ export type NodeType =
   | "forEach" // runs a saved graph once per array item (child run per item); output is an array
   | "wait" // durable delay (Temporal timer); no output
   | "stopAndError" // terminal: fail the run with a message
+  | "respondToWebhook" // sets the HTTP response the webhook ingress returns (pure)
   | "humanApproval"
   | "end";
 
@@ -373,6 +374,24 @@ export interface RssReadNodeConfig {
   urlBinding?: ArgBinding;
   /** Abort the fetch after this many ms (default applied in the activity). */
   timeoutMs?: number;
+}
+
+/**
+ * Respond to Webhook node — set the HTTP response the webhook ingress should return
+ * synchronously (for graphs triggered by a webhook). PURE: it records the response
+ * into run state; the run then CONTINUES (respond fast, keep working). `body` is
+ * static; `bodyBinding` overrides it from an upstream output. If the run never
+ * reaches this node in time, the ingress falls back to a 202.
+ */
+export interface RespondToWebhookNodeConfig {
+  /** HTTP status to return (default 200). */
+  statusCode?: number;
+  /** Static response body (JSON). */
+  body?: unknown;
+  /** Upstream binding whose value replaces `body`. */
+  bodyBinding?: ArgBinding;
+  /** Static, non-secret response headers. */
+  headers?: Record<string, string>;
 }
 
 /**

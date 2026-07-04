@@ -28,6 +28,7 @@ export type DslNodeType =
   | "executeSubWorkflow"
   | "forEach"
   | "rssRead"
+  | "respondToWebhook"
   | "humanApproval"
   | "end";
 
@@ -235,9 +236,9 @@ export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
     slug: "respond-to-webhook",
     n8nNode: "RespondToWebhook",
     group: "Flow control",
-    mapsTo: [],
-    coverage: "gap",
-    note: "No synchronous webhook response pairing.",
+    mapsTo: ["respondToWebhook"],
+    coverage: "covered",
+    note: "respondToWebhook node — the ingress waits (bounded) for the node to set a response and returns it synchronously; set-and-continue. Opt-in per graph.",
   },
   {
     name: "Stop and Error",

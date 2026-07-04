@@ -101,6 +101,7 @@ const ACCENT: Record<NodeType, string> = {
   forEach: "var(--node-foreach, #5b6fd6)",
   wait: "var(--node-wait, #8a8f98)",
   stopAndError: "var(--node-error, #d6584f)",
+  respondToWebhook: "var(--node-respond, #3f8fae)",
   humanApproval: "var(--node-approval)",
   end: "var(--node-end)",
 };
@@ -254,6 +255,9 @@ function nodeSubtitle(
   if (kind === "stopAndError") {
     const msg = config.message as string | undefined;
     return msg ? msg.slice(0, 32) : undefined;
+  }
+  if (kind === "respondToWebhook") {
+    return `HTTP ${(config.statusCode as number | undefined) ?? 200}`;
   }
   return undefined;
 }
@@ -2071,6 +2075,50 @@ function ConfigPanel({
           <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
             Ends the run as <strong>failed</strong> with this message. Nothing
             downstream runs.
+          </div>
+        </>
+      )}
+
+      {kind === "respondToWebhook" && (
+        <>
+          <Labeled label="Status code">
+            <input
+              type="number"
+              min={100}
+              max={599}
+              value={num("statusCode") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  statusCode: e.target.value
+                    ? Number(e.target.value)
+                    : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="200"
+            />
+          </Labeled>
+          <JsonField
+            label="Response body (JSON)"
+            value={config.body as Record<string, unknown> | undefined}
+            placeholder={'{\n  "ok": true\n}'}
+            onChange={(v) => onChange({ body: v })}
+          />
+          <BindingsEditor
+            bindings={
+              config.bodyBinding
+                ? { body: config.bodyBinding as BindingRow }
+                : undefined
+            }
+            upstreamIds={upstreamIds}
+            onChange={(v) =>
+              onChange({ bodyBinding: v ? Object.values(v)[0] : undefined })
+            }
+          />
+          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+            For webhook-triggered graphs: returns this response to the caller
+            synchronously, then the run continues. Bind <code>body</code> from
+            an upstream output to override the static JSON.
           </div>
         </>
       )}

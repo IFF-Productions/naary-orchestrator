@@ -1,9 +1,14 @@
 import * as wf from "@temporalio/workflow";
-import { approvalSignal, stateQuery } from "@naary/contracts";
+import {
+  approvalSignal,
+  stateQuery,
+  webhookResponseQuery,
+} from "@naary/contracts";
 import type {
   ApprovalInput,
   ExecutionState,
   ExecutionStatus,
+  WebhookResponse,
 } from "@naary/contracts";
 import {
   getByPath,
@@ -21,6 +26,7 @@ import {
   resolveSet,
   resolveSqlQuery,
   resolveSubWorkflowInput,
+  resolveWebhookResponse,
 } from "@naary/dsl";
 import type {
   AggregateNodeConfig,
@@ -37,6 +43,7 @@ import type {
   MergeNodeConfig,
   NodeDef,
   RenameKeysNodeConfig,
+  RespondToWebhookNodeConfig,
   RssReadNodeConfig,
   SendEmailNodeConfig,
   SetNodeConfig,
@@ -168,6 +175,10 @@ export async function runGraph(
   let approval: ApprovalInput | undefined;
   let status: ExecutionStatus = "running";
   let currentNodeId = resume?.startNodeId ?? graph.startNodeId;
+  // The synchronous response a respondToWebhook node sets, exposed via a query for
+  // the webhook ingress to return. Read shortly after start (before any long-run
+  // continueAsNew), so it is intentionally NOT carried across a CAN boundary.
+  let webhookResponse: WebhookResponse | undefined;
 
   // Deterministic enforcement state: driven ONLY by activity-returned costs and
   // a node counter — never a DB read in workflow code (CLAUDE.md rule 2; §3).
@@ -201,6 +212,7 @@ export async function runGraph(
     currentNodeId,
     ctx,
   }));
+  wf.setHandler(webhookResponseQuery, () => webhookResponse);
 
   // Register run ownership so this run shows in the Runs list + is tenant-authorized
   // — covers SCHEDULED runs (started by Temporal, with no API-side record). Only on
@@ -625,6 +637,15 @@ export async function runGraph(
             : "Workflow stopped by a Stop and Error node",
           "STOP_AND_ERROR",
         );
+      }
+      case "respondToWebhook": {
+        // Pure node: set the response the webhook ingress returns synchronously,
+        // then CONTINUE (respond fast, keep working). The response is exposed via
+        // webhookResponseQuery, which the ingress polls.
+        const rwCfg = node.config as unknown as RespondToWebhookNodeConfig;
+        webhookResponse = resolveWebhookResponse(rwCfg, ctx);
+        ctx[node.id] = { statusCode: webhookResponse.statusCode };
+        return null;
       }
       case "humanApproval": {
         status = "awaiting_approval";

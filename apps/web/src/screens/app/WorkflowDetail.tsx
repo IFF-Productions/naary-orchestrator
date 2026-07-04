@@ -45,6 +45,7 @@ const ACCENT: Record<NodeType, string> = {
   forEach: "var(--node-foreach, #5b6fd6)",
   wait: "var(--node-wait, #8a8f98)",
   stopAndError: "var(--node-error, #d6584f)",
+  respondToWebhook: "var(--node-respond, #3f8fae)",
   humanApproval: "var(--node-approval)",
   end: "var(--node-end)",
 };
