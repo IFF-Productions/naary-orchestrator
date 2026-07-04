@@ -19,43 +19,11 @@ import {
   type WebhookRow,
 } from "../../lib/api";
 import { decompileGraph } from "../../lib/decompile-graph";
-import { NODE_KINDS } from "../../lib/graph-model";
-
-/** DSL node type → accent + label (kept local; the design's palette vars). */
-const ACCENT: Record<NodeType, string> = {
-  start: "var(--node-trigger)",
-  webhookTrigger: "var(--node-trigger)",
-  errorTrigger: "var(--node-error, #d6584f)",
-  agent: "var(--node-agent)",
-  mcpTool: "var(--node-mcp)",
-  httpRequest: "var(--node-http, #2f9e8f)",
-  sqlQuery: "var(--node-sql, #b06fd6)",
-  set: "var(--node-set, #d98a3d)",
-  renameKeys: "var(--node-rename, #c9803e)",
-  filter: "var(--node-filter, #3f9e8f)",
-  aggregate: "var(--node-aggregate, #b0863e)",
-  listOps: "var(--node-listops, #4f9e7f)",
-  compareDatasets: "var(--node-compare, #7f8f4f)",
-  xml: "var(--node-xml, #8f6f4f)",
-  dateTime: "var(--node-datetime, #6f8fd6)",
-  merge: "var(--node-merge, #3fae86)",
-  hmac: "var(--node-hmac, #a86fd6)",
-  jwt: "var(--node-jwt, #7a6fd6)",
-  totp: "var(--node-totp, #9a6fc6)",
-  sendEmail: "var(--node-email, #4f9ad6)",
-  rssRead: "var(--node-rss, #d98a5a)",
-  executeSubWorkflow: "var(--node-subflow, #5b8def)",
-  forEach: "var(--node-foreach, #5b6fd6)",
-  wait: "var(--node-wait, #8a8f98)",
-  stopAndError: "var(--node-error, #d6584f)",
-  respondToWebhook: "var(--node-respond, #3f8fae)",
-  code: "var(--node-code, #6f7a8f)",
-  humanApproval: "var(--node-approval)",
-  end: "var(--node-end)",
-};
-const LABEL = Object.fromEntries(
-  NODE_KINDS.map((k) => [k.type, k.label]),
-) as Record<NodeType, string>;
+import {
+  ACCENT,
+  NODE_LABEL as LABEL,
+  nodeSubtitle,
+} from "../../lib/graph-model";
 
 interface ViewData extends Record<string, unknown> {
   kind: NodeType;
@@ -102,20 +70,6 @@ function ViewNode({ data }: NodeProps<Node<ViewData>>) {
   );
 }
 const nodeTypes = { view: ViewNode };
-
-function subtitleFor(
-  kind: NodeType,
-  config?: Record<string, unknown>,
-): string | undefined {
-  if (!config) return undefined;
-  if (kind === "agent") return (config.model as string)?.replace("claude-", "");
-  if (kind === "mcpTool") {
-    const tool = config.tool as string | undefined;
-    const conn = config.connectionId as string | undefined;
-    return tool && conn ? `${conn} · ${tool}` : tool || conn;
-  }
-  return undefined;
-}
 
 function edgeLabel(c?: {
   path: string;
@@ -443,7 +397,7 @@ function toFlow(graph: GraphDef): {
       id: n.id,
       type: "view",
       position: n.position,
-      data: { kind: n.type, subtitle: subtitleFor(n.type, n.config) },
+      data: { kind: n.type, subtitle: nodeSubtitle(n.type, n.config) },
     })),
     edges: edges.map((e) => ({
       id: e.id,

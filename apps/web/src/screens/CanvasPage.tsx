@@ -38,12 +38,15 @@ import { decompileGraph } from "../lib/decompile-graph";
 import type { JsonSchemaObject } from "../lib/schema-fields";
 import { SchemaEditor } from "./canvas/SchemaFieldEditor";
 import {
+  ACCENT,
   type CanvasEdge,
   type CanvasNode,
   CONDITION_OPS,
   type EdgeConditionDraft,
   NODE_GROUPS,
   NODE_KINDS,
+  NODE_LABEL as LABEL,
+  nodeSubtitle,
 } from "../lib/graph-model";
 
 const DEFAULT_KEY = "canvas";
@@ -76,42 +79,6 @@ function toFlowEdges(cs: CanvasEdge[]): FlowEdge[] {
     label: summarize(c.condition),
   }));
 }
-
-/** DSL node type → theme accent color (the design palette). */
-const ACCENT: Record<NodeType, string> = {
-  start: "var(--node-trigger)",
-  webhookTrigger: "var(--node-trigger)",
-  errorTrigger: "var(--node-error, #d6584f)",
-  agent: "var(--node-agent)",
-  mcpTool: "var(--node-mcp)",
-  httpRequest: "var(--node-http, #2f9e8f)",
-  sqlQuery: "var(--node-sql, #b06fd6)",
-  set: "var(--node-set, #d98a3d)",
-  renameKeys: "var(--node-rename, #c9803e)",
-  filter: "var(--node-filter, #3f9e8f)",
-  aggregate: "var(--node-aggregate, #b0863e)",
-  listOps: "var(--node-listops, #4f9e7f)",
-  compareDatasets: "var(--node-compare, #7f8f4f)",
-  xml: "var(--node-xml, #8f6f4f)",
-  dateTime: "var(--node-datetime, #6f8fd6)",
-  merge: "var(--node-merge, #3fae86)",
-  hmac: "var(--node-hmac, #a86fd6)",
-  jwt: "var(--node-jwt, #7a6fd6)",
-  totp: "var(--node-totp, #9a6fc6)",
-  sendEmail: "var(--node-email, #4f9ad6)",
-  rssRead: "var(--node-rss, #d98a5a)",
-  executeSubWorkflow: "var(--node-subflow, #5b8def)",
-  forEach: "var(--node-foreach, #5b6fd6)",
-  wait: "var(--node-wait, #8a8f98)",
-  stopAndError: "var(--node-error, #d6584f)",
-  respondToWebhook: "var(--node-respond, #3f8fae)",
-  code: "var(--node-code, #6f7a8f)",
-  humanApproval: "var(--node-approval)",
-  end: "var(--node-end)",
-};
-const LABEL = Object.fromEntries(
-  NODE_KINDS.map((k) => [k.type, k.label]),
-) as Record<NodeType, string>;
 
 interface NaaryData extends Record<string, unknown> {
   kind: NodeType;
@@ -170,111 +137,6 @@ function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
       {kind !== "end" && <Handle type="source" position={Position.Right} />}
     </div>
   );
-}
-
-/** A one-line config preview under the node title (model for agents, the tool for
- *  mcpTool) — mirrors the design's nodes showing their key config. */
-function nodeSubtitle(
-  kind: NodeType,
-  config?: Record<string, unknown>,
-): string | undefined {
-  if (!config) return undefined;
-  if (kind === "agent") {
-    const model = config.model as string | undefined;
-    return model ? model.replace("claude-", "") : undefined;
-  }
-  if (kind === "mcpTool") {
-    const tool = config.tool as string | undefined;
-    const conn = config.connectionId as string | undefined;
-    if (tool && conn) return `${conn} · ${tool}`;
-    return tool || conn || undefined;
-  }
-  if (kind === "httpRequest") {
-    const method = (config.method as string | undefined) ?? "GET";
-    const url = config.url as string | undefined;
-    if (!url) return method;
-    const short = url.replace(/^https?:\/\//, "");
-    return `${method} ${short}`;
-  }
-  if (kind === "sqlQuery") {
-    const conn = config.connectionId as string | undefined;
-    const sql = config.sql as string | undefined;
-    const snippet = sql
-      ? sql.replace(/\s+/g, " ").trim().slice(0, 32)
-      : undefined;
-    if (conn && snippet) return `${conn} · ${snippet}`;
-    return conn || snippet || undefined;
-  }
-  if (kind === "set") {
-    const fields = (config.fields as Record<string, unknown> | undefined) ?? {};
-    const binds =
-      (config.fieldBindings as Record<string, unknown> | undefined) ?? {};
-    const keys = new Set([...Object.keys(fields), ...Object.keys(binds)]);
-    const n = keys.size;
-    return n ? `${n} field${n === 1 ? "" : "s"}` : undefined;
-  }
-  if (kind === "merge") {
-    const mode = (config.mode as string | undefined) ?? "array";
-    return `join · ${mode}`;
-  }
-  if (kind === "renameKeys") {
-    const from = config.from as string | undefined;
-    return from ? `from ${from}` : undefined;
-  }
-  if (kind === "filter") {
-    const c = config.condition as { path?: string; op?: string } | undefined;
-    return c?.path ? `${c.path} ${c.op ?? ""}`.trim() : undefined;
-  }
-  if (kind === "aggregate" || kind === "listOps" || kind === "xml") {
-    const op = config.operation as string | undefined;
-    return op || undefined;
-  }
-  if (kind === "compareDatasets") {
-    const k = config.key as string | undefined;
-    return k ? `by ${k}` : undefined;
-  }
-  if (kind === "dateTime") {
-    const src = config.source;
-    return src && src !== "now" ? "from upstream" : "now";
-  }
-  if (kind === "hmac" || kind === "jwt" || kind === "totp") {
-    const conn = config.connectionId as string | undefined;
-    return conn || undefined;
-  }
-  if (kind === "sendEmail") {
-    const to = config.to as string | undefined;
-    return to ? `→ ${to}` : (config.connectionId as string | undefined);
-  }
-  if (kind === "rssRead") {
-    const url = config.url as string | undefined;
-    return url ? url.replace(/^https?:\/\//, "").slice(0, 32) : undefined;
-  }
-  if (kind === "executeSubWorkflow") {
-    const key = config.workflowKey as string | undefined;
-    return key ? `↳ ${key}` : undefined;
-  }
-  if (kind === "forEach") {
-    const key = config.workflowKey as string | undefined;
-    return key ? `⟳ ${key}` : undefined;
-  }
-  if (kind === "wait") {
-    const secs = config.durationSeconds as number | undefined;
-    return secs && secs > 0 ? `${secs}s` : undefined;
-  }
-  if (kind === "stopAndError") {
-    const msg = config.message as string | undefined;
-    return msg ? msg.slice(0, 32) : undefined;
-  }
-  if (kind === "respondToWebhook") {
-    return `HTTP ${(config.statusCode as number | undefined) ?? 200}`;
-  }
-  if (kind === "code") {
-    const c = config.code as string | undefined;
-    if (!c) return "JS";
-    const lines = c.split("\n").length;
-    return `JS · ${lines} line${lines === 1 ? "" : "s"}`;
-  }
-  return undefined;
 }
 
 const nodeTypes = { naary: NaaryNode };
