@@ -70,3 +70,17 @@ test("run-through: a graph using set → merge → wait completes end-to-end", a
     timeout: 20_000,
   });
 });
+
+test("palette groups + search filter the node list", async ({ page }) => {
+  await page.goto("/app/canvas");
+  await expect(page.getByText("ADD NODE")).toBeVisible();
+  // category headers render
+  await expect(page.getByText("Crypto", { exact: true })).toBeVisible();
+  await expect(page.getByText("Transform", { exact: true })).toBeVisible();
+  // search narrows to matching nodes
+  await page.getByLabel("Search nodes").fill("jwt");
+  await expect(page.getByRole("button", { name: "JWT", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Filter", exact: true }),
+  ).toHaveCount(0);
+});
