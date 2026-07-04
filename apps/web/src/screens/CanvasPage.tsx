@@ -1708,9 +1708,20 @@ function ConfigPanel({
               placeholder="my-signing-key"
             />
           </Labeled>
+          <Labeled label="Algorithm">
+            <select
+              value={str("algorithm") || "HS256"}
+              onChange={(e) => onChange({ algorithm: e.target.value })}
+              style={inputStyle}
+            >
+              <option value="HS256">HS256 (shared secret)</option>
+              <option value="RS256">RS256 (RSA private key)</option>
+            </select>
+          </Labeled>
           <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
-            HS256, signed by a <code>signing</code> connection's key (read
-            server-side). Output is <code>{node.id}.token</code>.
+            Signed by a <code>signing</code> connection's key (read server-side)
+            — a shared secret for HS256, or a PEM PKCS#8 RSA private key for
+            RS256. Output is <code>{node.id}.token</code>.
           </div>
           <BindingsEditor
             bindings={

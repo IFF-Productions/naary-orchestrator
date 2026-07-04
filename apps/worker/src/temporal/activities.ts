@@ -7,7 +7,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { ApplicationFailure } from "@temporalio/activity";
-import { SignJWT } from "jose";
+import { SignJWT, importPKCS8 } from "jose";
 import nodemailer from "nodemailer";
 import { canonicalize } from "@naary/dsl";
 import type {
@@ -317,16 +317,21 @@ export async function callJwt(
       string,
       unknown
     >;
-    const secret = new TextEncoder().encode(key);
+    // HS256: the key is the shared secret. RS256: the key is a PEM PKCS#8 RSA
+    // private key, imported into a CryptoKey.
+    const signKey =
+      cfg.algorithm === "RS256"
+        ? await importPKCS8(key, "RS256")
+        : new TextEncoder().encode(key);
     let signer = new SignJWT(claims)
-      .setProtectedHeader({ alg: "HS256" })
+      .setProtectedHeader({ alg: cfg.algorithm })
       .setIssuedAt();
     if (cfg.expiresInSeconds && cfg.expiresInSeconds > 0) {
       signer = signer.setExpirationTime(
         new Date(Date.now() + cfg.expiresInSeconds * 1000),
       );
     }
-    const token = await signer.sign(secret);
+    const token = await signer.sign(signKey);
     activityRuns.inc({ activity: "callJwt", outcome: "ok" });
     activityDuration.observe({ activity: "callJwt" }, secondsSince(startedAt));
     return { status: "ok", token, costUsd: 0 };

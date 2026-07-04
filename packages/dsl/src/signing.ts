@@ -35,6 +35,7 @@ export function resolveHmac(
 /** The concrete jwt request after binding resolution — no secret. */
 export interface ResolvedJwt {
   connectionId: string;
+  algorithm: "HS256" | "RS256";
   claims: Record<string, unknown>;
   expiresInSeconds?: number;
 }
@@ -57,6 +58,7 @@ export function resolveJwt(
   }
   return {
     connectionId: config.connectionId,
+    algorithm: config.algorithm ?? "HS256",
     claims,
     expiresInSeconds: config.expiresInSeconds,
   };

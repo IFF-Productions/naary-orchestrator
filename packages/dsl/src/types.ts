@@ -286,8 +286,11 @@ export interface HmacNodeConfig {
  * an upstream output. `iat`/`exp` are set by the signer.
  */
 export interface JwtNodeConfig {
-  /** A `signing` connection; its stored key is the HS256 secret. */
+  /** A `signing` connection; its stored secret is the HS256 shared key, or (for
+   *  RS256) a PEM PKCS#8 RSA PRIVATE key. */
   connectionId: string;
+  /** Signature algorithm (default "HS256"). */
+  algorithm?: "HS256" | "RS256";
   /** Static claims (the base payload). */
   claims?: Record<string, unknown>;
   /** claim path → upstream output binding; fills/overrides that claim. */

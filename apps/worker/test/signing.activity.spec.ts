@@ -1,5 +1,5 @@
-import { createHmac } from "node:crypto";
-import { jwtVerify } from "jose";
+import { createHmac, generateKeyPairSync } from "node:crypto";
+import { importSPKI, jwtVerify } from "jose";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MissingConnectionTokenError } from "@naary/connections";
 import {
@@ -96,6 +96,7 @@ describe("callJwt", () => {
     const r = await callJwt(
       {
         connectionId: "sign-1",
+        algorithm: "HS256",
         claims: { sub: "u-7" },
         expiresInSeconds: 3600,
       },
@@ -116,12 +117,34 @@ describe("callJwt", () => {
   it("a wrong key fails verification (proves it was actually signed)", async () => {
     resolveSigningKey.mockResolvedValue(KEY);
     const r = await callJwt(
-      { connectionId: "sign-1", claims: { sub: "u-7" } },
+      { connectionId: "sign-1", algorithm: "HS256", claims: { sub: "u-7" } },
       undefined,
       meta,
     );
     await expect(
       jwtVerify(r.token, new TextEncoder().encode("the-wrong-key")),
     ).rejects.toThrow();
+  });
+
+  it("mints an RS256 token signed by a PEM private key; verifies with the public key", async () => {
+    const { privateKey, publicKey } = generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+    });
+    const pkcs8 = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
+    const spki = publicKey.export({ type: "spki", format: "pem" }) as string;
+    resolveSigningKey.mockResolvedValue(pkcs8); // the signing connection holds the PEM
+
+    const r = await callJwt(
+      { connectionId: "sign-1", algorithm: "RS256", claims: { sub: "svc-1" } },
+      undefined,
+      meta,
+    );
+    expect(r.status).toBe("ok");
+    const { payload, protectedHeader } = await jwtVerify(
+      r.token,
+      await importSPKI(spki, "RS256"),
+    );
+    expect(protectedHeader.alg).toBe("RS256");
+    expect(payload.sub).toBe("svc-1");
   });
 });

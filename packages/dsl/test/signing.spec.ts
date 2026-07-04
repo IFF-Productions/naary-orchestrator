@@ -53,6 +53,7 @@ describe("resolveJwt", () => {
     };
     expect(resolveJwt(config, ctx)).toEqual({
       connectionId: "sign-1",
+      algorithm: "HS256",
       claims: { iss: "naary", sub: "u-7" },
       expiresInSeconds: 3600,
     });
