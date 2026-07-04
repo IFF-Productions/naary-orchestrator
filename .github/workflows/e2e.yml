@@ -1,0 +1,110 @@
+name: E2E
+
+# Browser end-to-end tests against the FULL docker-compose stack (postgres +
+# temporal + api + worker + web) driven by Playwright. This is heavy (builds the
+# backend + web images and boots the stack), so it runs on a SELF-HOSTED runner:
+# Docker layer caching between runs makes it fast, and it keeps the load off
+# GitHub-hosted minutes. Separate from the `verify` job in ci.yml — a flake here
+# never blocks the proven typecheck/test/build gate.
+#
+# Runner prerequisites (register a self-hosted runner with these):
+#   - Docker + the `docker compose` v2 plugin
+#   - Node 22 + pnpm (the setup steps install pnpm; Node via setup-node)
+#   - Free ports 5432 / 7233 / 3000 / 8081, ~4 GB RAM
+#   - Google Chrome is fetched by `playwright install chrome` (needs its shared
+#     libs; on a bare Linux runner run `playwright install-deps chrome` once, or
+#     use a runner image that already has them).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    # SECURITY: never run untrusted fork code on the self-hosted runner. Only
+    # same-repo branches (and pushes to main) execute the stack.
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted]
+    timeout-minutes: 30
+    env:
+      # Test-only stack credentials (NOT real secrets). Shared by the compose stack
+      # (via the .env written below) and the host-side token mint.
+      POSTGRES_USER: naary
+      POSTGRES_DB: naary_orchestrator
+      POSTGRES_PASSWORD: ci_only_pw
+      ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      E2E_TENANT: t-demo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.0.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # compose auto-loads repo-root .env; provide the test-only stack values.
+      - name: Write .env for the stack
+        run: |
+          cat > .env <<ENV
+          POSTGRES_USER=${POSTGRES_USER}
+          POSTGRES_DB=${POSTGRES_DB}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          ENCRYPTION_KEY=${ENCRYPTION_KEY}
+          ENV
+
+      # The host-side token mint imports @naary/db, so its client must be generated.
+      - name: Generate Prisma client
+        run: pnpm --filter @naary/db run generate
+
+      - name: Build + start the stack
+        run: docker compose up -d --build
+
+      - name: Wait for api + web to be healthy
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/healthz >/dev/null 2>&1 \
+               && curl -fsS http://localhost:8081 >/dev/null 2>&1; then
+              echo "stack healthy after ${i} tries"; exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::stack did not become healthy in time"
+          docker compose ps
+          exit 1
+
+      # Mint a tenant API token against the running DB (exposed on localhost:5432)
+      # and hand it to Playwright via E2E_API_TOKEN so global-setup skips its own mint.
+      - name: Mint an E2E API token
+        env:
+          DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}?schema=public
+        run: |
+          TOKEN=$(pnpm --filter @naary/api exec ts-node src/auth/mint-token.ts "${E2E_TENANT}" e2e | tail -n1)
+          if [ -z "$TOKEN" ]; then echo "::error::failed to mint token"; exit 1; fi
+          echo "::add-mask::$TOKEN"
+          echo "E2E_API_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Install Playwright Chrome
+        run: pnpm --filter @naary/web exec playwright install chrome
+
+      - name: Run Playwright e2e
+        run: pnpm --filter @naary/web test:e2e
+
+      - name: Stack logs (on failure)
+        if: failure()
+        run: docker compose logs --tail=300 || true
+
+      - name: Tear down the stack
+        if: always()
+        run: docker compose down -v || true
