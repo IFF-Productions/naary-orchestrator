@@ -1412,6 +1412,47 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
     });
   });
 
+  it("forEach: fans out ACROSS concurrency-window chunks, in order, replay-safe (audit A-3)", async () => {
+    // 25 items with a window of 10 ⇒ chunks [10, 10, 5] (incl. a partial last chunk).
+    // Proves the chunked path processes every item in ARRAY ORDER across chunk
+    // boundaries, then replays the recorded history with no nondeterminism — the
+    // authoritative guard that the sequential-await-per-chunk structure is
+    // deterministic (a plain happy-path pass can't prove replay safety).
+    const items = Array.from({ length: 25 }, (_, i) => ({ n: i }));
+    const worker = await makeWorker();
+    const history = await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [forEachGraph(), { items }, { tenantId: "t-fe-chunk" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-foreach-chunk",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      const loop = result.ctx.loop as {
+        status: string;
+        output: Record<string, unknown>;
+      }[];
+      expect(loop).toHaveLength(25);
+      // every item completed, in array order — chunk boundaries don't reorder/drop
+      expect(loop.every((r) => r.status === "completed")).toBe(true);
+      expect(loop.map((r) => (r.output.trigger as { n: number }).n)).toEqual(
+        items.map((it) => it.n),
+      );
+      // each child's mocked 0.01 folds into the parent (25 × 0.01)
+      expect(result.ctx.__costUsd).toBeCloseTo(0.25, 5);
+      return handle.fetchHistory();
+    });
+    // Replay under the ORIGINAL workflowId — the forEach derives child workflowIds
+    // from the parent's id, which runReplayHistory otherwise stubs to "fake".
+    await expect(
+      Worker.runReplayHistory(
+        { workflowsPath: WORKFLOWS_PATH },
+        history,
+        "e2e-foreach-chunk",
+      ),
+    ).resolves.toBeUndefined();
+  });
+
   it("forEach: an array past the item cap trips circuit_open (no silent truncation)", async () => {
     const worker = await makeWorker();
     await worker.runUntil(async () => {

@@ -59,6 +59,8 @@ import type {
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
 // Do NOT drop `type` — that would pull I/O code into the sandbox.
 import type * as activities from "./activities";
+// Pure fan-out policy (no side effects) — safe to import into workflow code.
+import { FOREACH_CONCURRENCY, perChildCap } from "./foreach-cap";
 
 const {
   runAgent,
@@ -611,16 +613,88 @@ export async function runGraph(
           workflowKey: feCfg.workflowKey,
         });
         const parentId = wf.workflowInfo().workflowId;
+
+        // A child that throws (a stopAndError node or a non-retryable activity error)
+        // becomes a failed ENTRY rather than a rejected Promise.all that kills the
+        // whole batch (child failure ≠ parent crash; a RETURNED terminal status
+        // already resolves normally). Catching a deterministic rejection is replay-safe.
+        // A completed child's cost folds into the parent (commutative sum) and its
+        // bounded {status, output} projection is collected in ARRAY ORDER, so the graph
+        // can branch on `<nodeId>.N.status` without the batch dying.
+        if (wf.patched("foreach-chunked-cap-v1")) {
+          // Bounded concurrency window + per-window cap divisor (audit A-3/Q-3): run
+          // items in chunks of FOREACH_CONCURRENCY so at most that many child runs are
+          // in flight at once, and split the remaining cap across each chunk's children
+          // so their concurrent spends can't sum past it. The running `costUsd` carried
+          // between chunks means an expensive early chunk can legitimately starve later
+          // ones (their childCap → 0 ⇒ those children fail on budget) — the aggregate
+          // never exceeds the cap, which is the rule-6 fail-safe, NOT a bug.
+          const collected: {
+            status: string;
+            output: Record<string, unknown>;
+          }[] = [];
+          for (
+            let start = 0;
+            start < items.length;
+            start += FOREACH_CONCURRENCY
+          ) {
+            const chunk = items.slice(start, start + FOREACH_CONCURRENCY);
+            const childCap =
+              runCtx.perExecutionCapUsd !== undefined
+                ? perChildCap(runCtx.perExecutionCapUsd - costUsd, chunk.length)
+                : undefined;
+            const settled = await Promise.all(
+              chunk.map((item, j) =>
+                wf
+                  .executeChild(runGraph, {
+                    // Global index (start + j) — a chunk-local index would collide
+                    // workflowIds across chunks.
+                    workflowId: `${parentId}-foreach-${node.id}-${stepCount}-${start + j}`,
+                    args: [
+                      snapshot.graph,
+                      item,
+                      {
+                        tenantId: runCtx.tenantId,
+                        workflowKey: feCfg.workflowKey,
+                        perExecutionCapUsd: childCap,
+                        maxStepsPerRun: runCtx.maxStepsPerRun,
+                        graphContentHash: snapshot.contentHash,
+                        graphVersion: snapshot.version,
+                        subWorkflowDepth: depth + 1,
+                      } satisfies RunGraphCtx,
+                    ],
+                  })
+                  .then((r) => ({ ok: true as const, r }))
+                  .catch(() => ({ ok: false as const })),
+              ),
+            );
+            for (const s of settled) {
+              if (!s.ok) {
+                collected.push({ status: "failed", output: {} });
+                continue;
+              }
+              const r = s.r;
+              costUsd +=
+                typeof r.ctx.__costUsd === "number" ? r.ctx.__costUsd : 0;
+              const output: Record<string, unknown> = {};
+              for (const [k, v] of Object.entries(r.ctx)) {
+                if (!k.startsWith("__")) output[k] = v;
+              }
+              collected.push({ status: r.status as string, output });
+            }
+          }
+          ctx.__costUsd = costUsd;
+          ctx[node.id] = collected;
+          return null;
+        }
+
+        // LEGACY path (runs started before the patch): single fan-out, one shared cap
+        // snapshot. Kept byte-identical so in-flight runs replay without nondeterminism.
         const childCap =
           runCtx.perExecutionCapUsd !== undefined
             ? Math.max(0, runCtx.perExecutionCapUsd - costUsd)
             : undefined;
 
-        // Each child is wrapped so a THROWN child (a stopAndError node, or a
-        // non-retryable activity error) becomes a failed ENTRY — not a rejected
-        // Promise.all that would kill the whole batch (child failure ≠ parent crash,
-        // same contract as executeSubWorkflow; a RETURNED terminal status already
-        // resolves normally). Catching a deterministic rejection stays replay-safe.
         const settled = await Promise.all(
           items.map((item, i) =>
             wf
@@ -645,10 +719,6 @@ export async function runGraph(
           ),
         );
 
-        // Meter every completed child's cost into the parent (commutative sum) and
-        // collect the bounded {status, output} projection per item, in ARRAY ORDER.
-        // A child that threw surfaces as { status: "failed" } so the graph can branch
-        // on `<nodeId>.N.status` without the batch dying.
         const collected = settled.map((s) => {
           if (!s.ok) return { status: "failed", output: {} };
           const r = s.r;
