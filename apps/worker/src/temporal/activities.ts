@@ -41,6 +41,7 @@ import {
   resolveSigningKey,
   resolveSmtpUri,
   resolveMcpTarget,
+  safeFetch,
 } from "@naary/connections";
 import { getAdapter } from "@naary/sql";
 import { getPrisma } from "@naary/db";
@@ -560,7 +561,10 @@ const MAX_RSS_ITEMS = 100; // feeds are small; bound the inline payload anyway.
 
 // Injectable I/O seam for the rssRead activity (swapped in unit tests).
 export const __rssDeps = {
-  fetch: (url: string, init?: RequestInit) => fetch(url, init),
+  // SSRF-hardened: guarded connector re-checks every redirect hop + pins the
+  // validated IP (closes S-1 redirect-bypass + S-2 DNS-rebind).
+  fetch: (url: string, init?: RequestInit) =>
+    safeFetch(url, init as never) as unknown as Promise<Response>,
   assertEgressAllowed,
 };
 
@@ -1284,7 +1288,10 @@ export interface HttpRequestResult {
 
 /** Test seam: the network call + connection/egress resolution, swappable in tests. */
 export const __httpDeps = {
-  fetch: (...args: Parameters<typeof fetch>) => fetch(...args),
+  // SSRF-hardened (see safeFetch): validates every redirect hop at connect time and
+  // pins the checked IP, so a public URL can't redirect/rebind into internal hosts.
+  fetch: (url: string | URL, init?: RequestInit): Promise<Response> =>
+    safeFetch(String(url), init as never) as unknown as Promise<Response>,
   resolveAuthHeader,
   assertEgressAllowed,
 };
@@ -1483,7 +1490,32 @@ export interface SqlQueryResult {
 export const __sqlDeps = {
   resolveDbConnection,
   getAdapter,
+  assertHostPublic,
 };
+
+/** Best-effort host extraction from a DSN — a URL (postgres:// / mssql://) or an
+ *  mssql key=value connection string (`Server=host,port;…`). null when unparseable
+ *  (the driver will then fail on a malformed DSN anyway). */
+export function dsnHost(dsn: string): string | null {
+  try {
+    const u = new URL(dsn);
+    if (u.hostname) return u.hostname.replace(/^\[|\]$/g, "");
+  } catch {
+    /* not a URL — try the mssql key=value form below */
+  }
+  const m = dsn.match(
+    /(?:^|;)\s*(?:server|data source|address|addr|network address)\s*=\s*([^;]+)/i,
+  );
+  if (!m) return null;
+  // strip a `tcp:` prefix, an instance suffix (host\INSTANCE), and a ,port suffix.
+  const host = m[1]
+    .trim()
+    .replace(/^tcp:/i, "")
+    .split("\\")[0]
+    .split(",")[0]
+    .trim();
+  return host || null;
+}
 
 /** mssql/tedious code for a bad login (wrong user/password in the DSN). */
 const MSSQL_AUTH_CODE = "ELOGIN";
@@ -1528,6 +1560,11 @@ export async function callSqlQuery(
       meta.tenantId,
       cfg.connectionId,
     );
+    // SSRF (audit S-3): the DSN host is tenant-supplied — reject an internal/reserved
+    // target before connecting (mirrors callSendEmail's assertHostPublic). Wire
+    // protocol, not HTTP, so this bounds internal reach/port-scanning.
+    const dbHost = dsnHost(dsn);
+    if (dbHost) await __sqlDeps.assertHostPublic(dbHost);
     // Resolve any claim-checked bound param back to its real value before the call.
     const params = (await resolveClaimChecks(
       cfg.params ?? [],
@@ -1577,6 +1614,12 @@ export async function callSqlQuery(
       secondsSince(startedAt),
     );
     if (e instanceof ApplicationFailure) throw e;
+    // A DSN pointing at an internal/reserved host — the user must fix the connection.
+    if (e instanceof BlockedEgressError) {
+      throw ApplicationFailure.nonRetryable(e.message, "EGRESS_BLOCKED", {
+        connectionId: cfg.connectionId,
+      });
+    }
     // A missing stored DSN, or an mssql bad-login (wrong user/password in the DSN):
     // the user must fix the connection — non-retryable, don't loop (CLAUDE.md).
     if (
