@@ -195,6 +195,10 @@ export function CanvasPage() {
   // next run. Blank ⇒ the server falls back to the sample (api.startExecution).
   const [showInput, setShowInput] = useState(false);
   const [runInput, setRunInput] = useState("");
+  // AI workflow builder: describe a flow → generate a draft onto the canvas.
+  const [showAi, setShowAi] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [generating, setGenerating] = useState(false);
 
   const keyParam = searchParams.get("key");
   const templateParam = searchParams.get("template");
@@ -412,6 +416,33 @@ export function CanvasPage() {
     else newWorkflow();
   }
 
+  // Generate a draft graph from the description and load it onto the canvas as a
+  // NEW unsaved draft (same as forking a template — Save persists it). Reuses the
+  // decompile → flow-nodes path so the result is fully editable.
+  async function generateFromPrompt() {
+    const prompt = aiPrompt.trim();
+    if (!prompt || generating) return;
+    setGenerating(true);
+    setStatus("Generating workflow…");
+    try {
+      const { name: genName, graph: gen } = await api.generateGraph(prompt);
+      const { nodes: cn, edges: ce } = decompileGraph(gen);
+      setNodes(toFlowNodes(cn));
+      setEdges(toFlowEdges(ce));
+      setName(genName);
+      setWorkflowKey("");
+      if (keyParam || templateParam) setSearchParams({}, { replace: true });
+      setStatus("Generated — review, edit, and Save to keep it.");
+      setShowAi(false);
+    } catch (e) {
+      setStatus(
+        e instanceof Error ? e.message : "Couldn't generate a workflow.",
+      );
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   async function save(): Promise<string | null> {
     if (!graph) {
       setStatus(error ?? "Graph is not runnable.");
@@ -562,6 +593,13 @@ export function CanvasPage() {
           <Button
             variant="secondary"
             disabled={busy}
+            onClick={() => setShowAi((s) => !s)}
+          >
+            {showAi ? "Close AI" : "✨ Build with AI"}
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={busy}
             onClick={() => setShowInput((s) => !s)}
           >
             {showInput ? "Hide input" : "Input"}
@@ -582,6 +620,56 @@ export function CanvasPage() {
           </Button>
         </div>
       </header>
+
+      {showAi && (
+        <div
+          style={{
+            padding: "12px 16px",
+            borderBottom: "1px solid var(--line)",
+            background: "var(--surface)",
+          }}
+        >
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 6 }}>
+            Describe the workflow in plain English — an agent drafts it onto the
+            canvas for you to edit. (Uses your Anthropic key from Settings.)
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <textarea
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              placeholder="e.g. When a webhook comes in, have an agent summarize it, wait for my approval, then email the summary to my team."
+              rows={2}
+              disabled={generating}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter")
+                  void generateFromPrompt();
+              }}
+              style={{
+                flex: 1,
+                resize: "vertical",
+                padding: "8px 10px",
+                borderRadius: 8,
+                border: "1px solid var(--line)",
+                background: "var(--card)",
+                color: "var(--ink)",
+                fontSize: 13,
+                fontFamily: "inherit",
+              }}
+            />
+            <Button
+              variant="primary"
+              disabled={generating || aiPrompt.trim().length < 3}
+              onClick={() => void generateFromPrompt()}
+            >
+              {generating ? "Generating…" : "Generate"}
+            </Button>
+          </div>
+          <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 4 }}>
+            Generating replaces the current canvas with a new draft.
+            ⌘/Ctrl+Enter to generate.
+          </div>
+        </div>
+      )}
 
       {showInput && (
         <div

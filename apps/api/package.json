@@ -10,6 +10,8 @@
     "start": "ts-node src/main.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.8",
+    "ai": "7.0.15",
     "@naary/connections": "workspace:*",
     "@naary/contracts": "workspace:*",
     "@naary/db": "workspace:*",
