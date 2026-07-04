@@ -25,6 +25,7 @@ export type DslNodeType =
   | "wait"
   | "stopAndError"
   | "executeSubWorkflow"
+  | "forEach"
   | "humanApproval"
   | "end";
 
@@ -205,9 +206,9 @@ export const N8N_CORE_NODE_TYPES: CoreNodeType[] = [
     slug: "split-in-batches",
     n8nNode: "SplitInBatches",
     group: "Flow control",
-    mapsTo: [],
-    coverage: "gap",
-    note: "No looping/iteration primitive.",
+    mapsTo: ["forEach"],
+    coverage: "partial",
+    note: "forEach runs a saved sub-workflow once per array item (child run per item, capped), not an in-graph batch loop; sequential/batch modes are follow-ups.",
   },
   {
     name: "Wait",

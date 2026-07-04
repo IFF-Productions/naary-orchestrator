@@ -21,6 +21,7 @@ export type NodeType =
   | "totp" // generates the current RFC-6238 TOTP code from a `signing` connection's seed
   | "sendEmail" // sends an email via an `smtp` connection (activity)
   | "executeSubWorkflow" // runs another saved graph as a child run; output is {status,output}
+  | "forEach" // runs a saved graph once per array item (child run per item); output is an array
   | "wait" // durable delay (Temporal timer); no output
   | "stopAndError" // terminal: fail the run with a message
   | "humanApproval"
@@ -314,6 +315,23 @@ export interface SendEmailNodeConfig {
   fieldBindings?: Record<string, ArgBinding>;
   /** Flat per-send cost metered into the run budget (Arch§4.6). */
   costUsd?: number;
+}
+
+/**
+ * For Each node — map an upstream ARRAY by running a saved graph (`workflowKey`) as
+ * a durable child run ONCE PER ITEM (the item is the child's input), concurrently.
+ * Output is an array of `{ status, output }` (the same bounded projection as
+ * `executeSubWorkflow`), in item order — so downstream can filter/aggregate it.
+ * Only `workflowKey`/`tenantId` cross the boundary (no secrets). Bounded by an item
+ * cap and the sub-workflow depth cap.
+ */
+export interface ForEachNodeConfig {
+  /** The saved-graph key to run per item (this tenant's latest version). */
+  workflowKey: string;
+  /** Upstream node id whose output holds the array to iterate. */
+  from: string;
+  /** Optional dotted path into that output to reach the array. */
+  path?: string;
 }
 
 /**

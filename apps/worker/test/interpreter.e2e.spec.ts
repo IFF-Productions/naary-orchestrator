@@ -79,7 +79,11 @@ const mockActivities = {
   }): Promise<activities.SubWorkflowGraph> => {
     subResolveCalls.push(meta);
     const graph =
-      meta.workflowKey === "reject-flow" ? subRejectChildGraph : subChildGraph;
+      meta.workflowKey === "reject-flow"
+        ? subRejectChildGraph
+        : meta.workflowKey === "throw-flow"
+          ? subThrowChildGraph
+          : subChildGraph;
     return { graph, contentHash: "child-hash", version: 1 };
   },
   callHmac: async (
@@ -243,6 +247,21 @@ const subChildGraph: GraphDef = {
 // returns the terminal "invalid_graph" (no timer/signal needed, so it works under
 // the non-time-skipping local test env). The parent should surface this status,
 // not crash on it.
+// A child that THROWS (stopAndError → non-retryable ApplicationFailure), so its
+// executeChild REJECTS — forEach must catch this per item, not kill the batch.
+const subThrowChildGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    { id: "boom", type: "stopAndError", config: { message: "item failed" } },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "boom" },
+    { from: "boom", to: "end" },
+  ],
+};
+
 const subRejectChildGraph: GraphDef = {
   startNodeId: "trigger",
   nodes: [{ id: "trigger", type: "webhookTrigger" }],
@@ -266,6 +285,30 @@ const subParentGraph: GraphDef = {
     { from: "sub", to: "end" },
   ],
 };
+
+// webhook → forEach → end. Runs subChildGraph (webhook → agent → end) once per
+// item of `trigger.items`; the child's `trigger` output echoes the item.
+function forEachGraph(
+  fromPath = "items",
+  workflowKey = "child-flow",
+): GraphDef {
+  return {
+    startNodeId: "trigger",
+    nodes: [
+      { id: "trigger", type: "webhookTrigger" },
+      {
+        id: "loop",
+        type: "forEach",
+        config: { workflowKey, from: "trigger", path: fromPath },
+      },
+      { id: "end", type: "end" },
+    ],
+    edges: [
+      { from: "trigger", to: "loop" },
+      { from: "loop", to: "end" },
+    ],
+  };
+}
 
 // webhook → wait → end. A tiny durable delay, then completes.
 const waitGraph: GraphDef = {
@@ -1079,6 +1122,95 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       ]);
       // aggregate collected their names into { result }
       expect(result.ctx.names).toEqual({ result: ["Ada", "Cy"] });
+    });
+  });
+
+  it("forEach: runs the child once per item (item as input) and collects results in order", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          forEachGraph(),
+          { items: [{ n: 1 }, { n: 2 }, { n: 3 }] },
+          { tenantId: "t-foreach" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-foreach",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      const loop = result.ctx.loop as {
+        status: string;
+        output: Record<string, unknown>;
+      }[];
+      expect(loop).toHaveLength(3);
+      // every item ran to completion, in ARRAY ORDER, with the item as its input
+      expect(loop.map((r) => r.status)).toEqual([
+        "completed",
+        "completed",
+        "completed",
+      ]);
+      expect(loop.map((r) => r.output.trigger)).toEqual([
+        { n: 1 },
+        { n: 2 },
+        { n: 3 },
+      ]);
+      // each child's mocked agent cost (0.01) summed into the parent (3 × 0.01)
+      expect(result.ctx.__costUsd).toBeCloseTo(0.03, 5);
+    });
+  });
+
+  it("forEach: empty/non-array source → [] (no children)", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          forEachGraph("missing"),
+          { items: [] },
+          { tenantId: "t-fe-empty" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-foreach-empty",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(result.ctx.loop).toEqual([]);
+    });
+  });
+
+  it("forEach: a THROWING child (stopAndError) becomes a failed entry, not a batch kill", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          forEachGraph("items", "throw-flow"),
+          { items: [{ n: 1 }, { n: 2 }] },
+          { tenantId: "t-fe-throw" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-foreach-throw",
+      });
+      const result = await handle.result();
+      // the whole forEach still COMPLETES; each thrown child is a failed entry
+      expect(result.status).toBe("completed");
+      const loop = result.ctx.loop as { status: string }[];
+      expect(loop).toHaveLength(2);
+      expect(loop.map((r) => r.status)).toEqual(["failed", "failed"]);
+    });
+  });
+
+  it("forEach: an array past the item cap trips circuit_open (no silent truncation)", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const items = Array.from({ length: 101 }, (_, i) => ({ n: i }));
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [forEachGraph(), { items }, { tenantId: "t-fe-cap" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-foreach-cap",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("circuit_open");
+      expect(result.ctx.loop).toBeUndefined();
     });
   });
 
