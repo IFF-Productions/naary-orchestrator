@@ -1022,15 +1022,16 @@ export async function runAgent(
     // BILLING (CLAUDE.md rule 6): totalUsage sums across tool steps; guard the
     // ai@6 undefined-usage bug so we never silently record a free call.
     // NOTE (QA#2): for Anthropic, `inputTokens` EXCLUDES cache-read tokens (those
-    // arrive separately as cachedInputTokens), so input and cached are independent
+    // arrive separately as cache-read tokens), so input and cached are independent
     // billing buckets — computeCost must not subtract one from the other.
+    // ai@7 moved the cache/reasoning counts into inputTokenDetails/outputTokenDetails.
     const u = result.totalUsage ?? result.usage;
     const real = {
       inputTokens: u?.inputTokens ?? 0,
       outputTokens: u?.outputTokens ?? 0,
       totalTokens: u?.totalTokens,
-      cachedInputTokens: u?.cachedInputTokens,
-      reasoningTokens: u?.reasoningTokens,
+      cachedInputTokens: u?.inputTokenDetails?.cacheReadTokens,
+      reasoningTokens: u?.outputTokenDetails?.reasoningTokens,
     };
     const usage =
       real.inputTokens || real.outputTokens

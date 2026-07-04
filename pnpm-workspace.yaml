@@ -12,11 +12,21 @@ allowBuilds:
   esbuild: true
   '@firebase/util': false
 
+minimumReleaseAgeExclude:
+  - '@ai-sdk/anthropic@4.0.8'
+  - '@ai-sdk/gateway@4.0.12'
+  - ai@7.0.15
+  - undici@8.7.0
+
 # Force patched versions of transitive deps flagged by Dependabot (pnpm 11 reads
 # overrides from here, not package.json). All are minor/patch bumps:
 #   multer (high) via @nestjs/platform-express; protobufjs (high) via @temporalio;
 #   @hono/node-server (moderate). See PRODUCTION-READINESS §3.E.
+# protobufjs is capped below 8: @temporalio/proto@1.19 pins 7.6.2 and protobufjs 8
+# is a breaking major (the Root class identity changed, so @temporalio/common's
+# `instanceof Root` payload-converter check throws). >=7.6.3 keeps the Dependabot
+# patch (7.6.2 was the flagged version); <8 keeps Temporal working.
 overrides:
   multer: '>=2.2.0'
-  protobufjs: '>=7.6.3'
-  '@hono/node-server': '>=1.19.13'
+  protobufjs: '>=7.6.3 <8'
+  '@hono/node-server': '>=2.0.8'

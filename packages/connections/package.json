@@ -12,9 +12,9 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@naary/db": "workspace:*",
     "@naary/secrets": "workspace:*",
-    "undici": "^8.6.0"
+    "undici": "^8.7.0"
   },
   "devDependencies": {
-    "@types/node": "^26.0.0"
+    "@types/node": "^26.1.0"
   }
 }
