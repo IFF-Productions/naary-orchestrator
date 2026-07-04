@@ -680,6 +680,23 @@ const xmlGraph: GraphDef = {
   ],
 };
 
+// start → humanApproval(timeoutHours:1) → end. With no signal, the durable
+// auto-reject timer elapses (the time-skipping env advances it) → rejected.
+const approvalTimeoutGraph: GraphDef = {
+  startNodeId: "s",
+  nodes: [
+    { id: "s", type: "start" },
+    // ~1.8s real (env is createLocal, not time-skipping) so the durable timer
+    // actually fires inside the test; the interpreter math is timeoutHours * 3.6M ms.
+    { id: "appr", type: "humanApproval", config: { timeoutHours: 0.0005 } },
+    { id: "e", type: "end" },
+  ],
+  edges: [
+    { from: "s", to: "appr" },
+    { from: "appr", to: "e" },
+  ],
+};
+
 let env: TestWorkflowEnvironment;
 
 beforeAll(async () => {
@@ -750,6 +767,21 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
 
       const result = await handle.result();
       expect(result.status).toBe("completed");
+    });
+  });
+
+  it("humanApproval: auto-rejects when the timeout elapses with no decision (durable timer)", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [approvalTimeoutGraph, {}, { tenantId: "t-approve-timeout" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-approve-timeout",
+      });
+      // No signal is ever sent — the time-skipping env advances the 1h timer, so
+      // wf.condition times out → the interpreter auto-rejects.
+      const result = await handle.result();
+      expect(result.status).toBe("rejected");
     });
   });
 

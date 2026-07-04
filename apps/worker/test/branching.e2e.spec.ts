@@ -240,4 +240,41 @@ describe("interpreter — branching / parallel / loop (Slice #6)", () => {
       Worker.runReplayHistory({ workflowsPath: WORKFLOWS_PATH }, history),
     ).resolves.toBeUndefined();
   });
+
+  it("replays a DIAMOND (fan-out → two activity branches → merge) without nondeterminism (audit A-2/Q-4)", async () => {
+    // The merge fan-in fires on the LAST branch to arrive under the parallel
+    // Promise.all — its correctness rests on replay-stable concurrent arrival order.
+    // This replays a real diamond so any future change that breaks that ordering is
+    // caught (the linear replay test above can't exercise it).
+    const graph: GraphDef = {
+      startNodeId: "fork",
+      nodes: [
+        { id: "fork", type: "start" },
+        mcp("a", "a-conn"),
+        mcp("b", "b-conn"),
+        { id: "join", type: "merge", config: { mode: "array" } },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "fork", to: "a" },
+        { from: "fork", to: "b" },
+        { from: "a", to: "join" },
+        { from: "b", to: "join" },
+        { from: "join", to: "end" },
+      ],
+    };
+    const worker = await makeWorker();
+    const history = await worker.runUntil(async () => {
+      const h = await env.client.workflow.start(runGraph, {
+        args: [graph, {}, { tenantId: "t1" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-replay-diamond",
+      });
+      expect((await h.result()).status).toBe("completed");
+      return h.fetchHistory();
+    });
+    await expect(
+      Worker.runReplayHistory({ workflowsPath: WORKFLOWS_PATH }, history),
+    ).resolves.toBeUndefined();
+  });
 });
