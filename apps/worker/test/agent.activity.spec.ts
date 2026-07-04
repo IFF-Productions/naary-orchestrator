@@ -79,6 +79,39 @@ describe("runAgent", () => {
     ).toBeCloseTo(0.0175, 9);
   });
 
+  it("maps ai@7 nested usage details to the cache-read + reasoning ledger buckets", async () => {
+    // ai@7 moved cache-read + reasoning counts out of the flat usage object into
+    // inputTokenDetails/outputTokenDetails. runAgent must remap them so the ledger
+    // still records the cache-read bucket AND bills it at the reduced cache rate —
+    // a wrong path would silently record 0 cached tokens and over-bill cache reads
+    // at the full input rate.
+    generateText.mockResolvedValue({
+      output: { category: "billing", urgency: 4 },
+      text: '{"category":"billing","urgency":4}',
+      totalUsage: {
+        inputTokens: 1000,
+        outputTokens: 500,
+        totalTokens: 1500,
+        inputTokenDetails: { cacheReadTokens: 2000 },
+        outputTokenDetails: { reasoningTokens: 300 },
+      },
+    });
+
+    const result = await runAgent(CFG, { msg: "cached prompt" }, META);
+
+    expect(recordUsage).toHaveBeenCalledOnce();
+    const recorded = recordUsage.mock.calls[0][0];
+    // nested ai@7 details land in the flat ledger buckets recordUsage persists
+    expect(recorded.usage.cachedInputTokens).toBe(2000);
+    expect(recorded.usage.reasoningTokens).toBe(300);
+    expect(recorded.usage.inputTokens).toBe(1000);
+    expect(recorded.usage.outputTokens).toBe(500);
+    // cost includes the cache-read bucket at the reduced 0.5/MTok opus rate:
+    //   input 1000·5 + cached 2000·0.5 + output 500·25 (per MTok)
+    //   = 0.005 + 0.001 + 0.0125 = 0.0185  (vs 0.0175 with no cache bucket)
+    expect(result.costUsd).toBeCloseTo(0.0185, 9);
+  });
+
   it("records a non-zero FALLBACK estimate when the provider omits usage", async () => {
     generateText.mockResolvedValue({
       output: { category: "support", urgency: 1 },
