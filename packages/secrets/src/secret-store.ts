@@ -62,6 +62,27 @@ export class SecretStore {
     );
   }
 
+  /**
+   * Delete a tenant's entries whose key starts with `keyPrefix` and whose row is
+   * older than `olderThanMs` (by `createdAt`). Decryption-free storage hygiene —
+   * used to sweep abandoned, TTL-past records (e.g. never-completed OAuth states,
+   * audit S-5). Returns the number deleted. Best-effort; safe to run opportunistically.
+   */
+  async prunePrefixOlderThan(
+    tenantId: string,
+    keyPrefix: string,
+    olderThanMs: number,
+  ): Promise<number> {
+    const res = await getPrisma().tenantCredential.deleteMany({
+      where: {
+        tenantId,
+        provider: { startsWith: keyPrefix },
+        createdAt: { lt: new Date(Date.now() - olderThanMs) },
+      },
+    });
+    return res.count;
+  }
+
   async remove(tenantId: string, key: string): Promise<void> {
     await getPrisma().tenantCredential.deleteMany({
       where: { tenantId, provider: key },

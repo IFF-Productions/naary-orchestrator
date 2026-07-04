@@ -18,13 +18,16 @@ const baseCfg: OAuthConfig = {
 
 function fakeStore(cfg: OAuthConfig) {
   const put = vi.fn(async () => {});
+  const prunePrefixOlderThan = vi.fn(async () => 0);
   return {
     store: {
       get: async () => JSON.stringify(cfg),
       put,
       remove: async () => {},
+      prunePrefixOlderThan,
     } as never,
     put,
+    prunePrefixOlderThan,
   };
 }
 

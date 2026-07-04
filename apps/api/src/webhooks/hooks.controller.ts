@@ -48,6 +48,13 @@ export class HooksController {
     @Headers() headers: Record<string, string>,
     @Res({ passthrough: true }) res: Res,
   ): Promise<unknown> {
+    // Audit S-4: reject unsigned requests BEFORE the DB read + AES-decrypt, so a
+    // caller who only knows an endpoint id can't force per-request DB/crypto work.
+    // The signature header is the same for every provider (X-Hub-Signature-256).
+    if (!headers["x-hub-signature-256"]) {
+      throw new UnauthorizedException("Missing signature");
+    }
+
     const endpoint = await this.webhooks.getEndpoint(endpointId);
     if (!endpoint) {
       throw new NotFoundException("Unknown webhook endpoint");
