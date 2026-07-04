@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MissingConnectionTokenError } from "@naary/connections";
+import {
+  BlockedEgressError,
+  MissingConnectionTokenError,
+  assertHostPublic,
+} from "@naary/connections";
 import {
   __setObjectStore,
   MemoryObjectStore,
@@ -10,6 +14,7 @@ import {
   __sqlDeps,
   type SqlQueryConfig,
   callSqlQuery,
+  dsnHost,
 } from "../src/temporal/activities";
 
 const META = { tenantId: "t1", executionId: "exec-1", nodeId: "sql" };
@@ -32,6 +37,9 @@ beforeEach(() => {
   });
   __sqlDeps.resolveDbConnection = resolveDbConnection as never;
   __sqlDeps.getAdapter = (() => ({ engine: "postgres", runReadOnly })) as never;
+  // Allow the egress host check by default (db.internal doesn't resolve in tests);
+  // the S-3 tests below use the REAL guard with a literal internal IP.
+  __sqlDeps.assertHostPublic = vi.fn().mockResolvedValue(undefined) as never;
   store = new MemoryObjectStore();
   __setObjectStore(store);
 });
@@ -140,5 +148,39 @@ describe("callSqlQuery activity", () => {
       nonRetryable: true,
       type: "CONNECTION_REAUTH",
     });
+  });
+
+  it("S-3: a DSN pointing at an internal IP → EGRESS_BLOCKED, never connects", async () => {
+    // Use the REAL egress guard; 10.0.0.5 is an IP literal → blocked without DNS.
+    __sqlDeps.assertHostPublic = assertHostPublic as never;
+    resolveDbConnection.mockResolvedValue({
+      engine: "postgres",
+      dsn: "postgres://u:p@10.0.0.5:5432/app",
+    });
+    const err = await callSqlQuery(CFG, {}, META).catch((e) => e);
+    expect(err.nonRetryable).toBe(true);
+    expect(err.type).toBe("EGRESS_BLOCKED");
+    expect(runReadOnly).not.toHaveBeenCalled();
+    // the DSN (with password) never leaks into the error
+    expect(JSON.stringify(err)).not.toContain("10.0.0.5");
+  });
+});
+
+describe("dsnHost", () => {
+  it("parses a postgres URL DSN", () => {
+    expect(dsnHost("postgres://u:p@db.example.com:5432/app")).toBe(
+      "db.example.com",
+    );
+  });
+  it("parses an mssql key=value connection string", () => {
+    expect(
+      dsnHost("Server=tcp:sql.example.com,1433;Database=app;User Id=x;"),
+    ).toBe("sql.example.com");
+    expect(dsnHost("Data Source=10.0.0.9\\SQLEXPRESS;Database=app")).toBe(
+      "10.0.0.9",
+    );
+  });
+  it("returns null for an unparseable DSN", () => {
+    expect(dsnHost("not a dsn")).toBeNull();
   });
 });
