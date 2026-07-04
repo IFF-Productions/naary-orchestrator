@@ -110,9 +110,18 @@ const mockActivities = {
     emailCalls.push(cfg);
     return { status: "ok", messageId: "<sent@test>", costUsd: 0 };
   },
+  callTotp: async (
+    cfg: activities.TotpConfig,
+    _input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.TotpResult> => {
+    totpCalls.push(cfg);
+    return { status: "ok", code: "123456", costUsd: 0 };
+  },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
   setExecutionStatus: async (): Promise<void> => undefined, // read-model push; no-op here
 };
+const totpCalls: activities.TotpConfig[] = [];
 const emailCalls: activities.ResolvedSendEmail[] = [];
 const hmacCalls: activities.ResolvedHmac[] = [];
 const jwtCalls: activities.ResolvedJwt[] = [];
@@ -400,6 +409,21 @@ const emailGraph: GraphDef = {
   edges: [
     { from: "trigger", to: "notify" },
     { from: "notify", to: "end" },
+  ],
+};
+
+// webhook → totp → end. Generates the current code from a signing-connection seed
+// (resolved + clock read in-activity; mocked here).
+const totpGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    { id: "code", type: "totp", config: { connectionId: "sign-1", digits: 6 } },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "code" },
+    { from: "code", to: "end" },
   ],
 };
 
@@ -980,6 +1004,22 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
         subject: "done",
       });
       expect(result.ctx.notify).toEqual({ messageId: "<sent@test>" });
+    });
+  });
+
+  it("totp: generates a code from the signing connection (seed + clock in-activity)", async () => {
+    totpCalls.length = 0;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [totpGraph, {}, { tenantId: "t-totp" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-totp",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(totpCalls[0]).toMatchObject({ connectionId: "sign-1", digits: 6 });
+      expect(result.ctx.code).toEqual({ code: "123456" });
     });
   });
 

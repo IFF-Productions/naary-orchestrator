@@ -35,6 +35,7 @@ const ACCENT: Record<NodeType, string> = {
   merge: "var(--node-merge, #3fae86)",
   hmac: "var(--node-hmac, #a86fd6)",
   jwt: "var(--node-jwt, #7a6fd6)",
+  totp: "var(--node-totp, #9a6fc6)",
   sendEmail: "var(--node-email, #4f9ad6)",
   executeSubWorkflow: "var(--node-subflow, #5b8def)",
   wait: "var(--node-wait, #8a8f98)",

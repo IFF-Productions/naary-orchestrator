@@ -33,6 +33,7 @@ import type {
   SetNodeConfig,
   SqlQueryNodeConfig,
   StopAndErrorNodeConfig,
+  TotpNodeConfig,
   WaitNodeConfig,
 } from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
@@ -48,6 +49,7 @@ const {
   resolveSubWorkflowGraph,
   callHmac,
   callJwt,
+  callTotp,
 } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },
@@ -376,6 +378,18 @@ export async function runGraph(
           nodeId: node.id,
         });
         ctx[node.id] = { token: result.token };
+        return null;
+      }
+      case "totp": {
+        // No bindings: the seed comes from the connection, the time from the clock
+        // — both handled in the activity. Output is the current code.
+        const totpCfg = node.config as unknown as TotpNodeConfig;
+        const result = await callTotp(totpCfg, ctx.__input, {
+          tenantId: runCtx.tenantId,
+          executionId: wf.workflowInfo().workflowId,
+          nodeId: node.id,
+        });
+        ctx[node.id] = { code: result.code };
         return null;
       }
       case "sendEmail": {

@@ -16,6 +16,7 @@ export type NodeType =
   | "merge" // fan-in join: run once after all inbound branches arrive; combine outputs
   | "hmac" // signs a payload with a `signing` connection's key (activity); output is the digest
   | "jwt" // mints an HS256 JWT signed by a `signing` connection's key (activity)
+  | "totp" // generates the current RFC-6238 TOTP code from a `signing` connection's seed
   | "sendEmail" // sends an email via an `smtp` connection (activity)
   | "executeSubWorkflow" // runs another saved graph as a child run; output is {status,output}
   | "wait" // durable delay (Temporal timer); no output
@@ -236,6 +237,24 @@ export interface JwtNodeConfig {
   claimsBindings?: Record<string, ArgBinding>;
   /** Token lifetime in seconds (sets `exp`). Omitted = no expiry. */
   expiresInSeconds?: number;
+}
+
+/**
+ * TOTP node — generate the current RFC-6238 time-based one-time code from a base32
+ * seed stored in a `signing` connection (the seed is read + used IN the activity,
+ * never in config/history; the clock read is why this is an activity). Output is
+ * `{ code }`. No bindings — the seed comes from the connection, the time from the
+ * clock.
+ */
+export interface TotpNodeConfig {
+  /** A `signing` connection whose secret is the base32 TOTP seed. */
+  connectionId: string;
+  /** Number of digits (default 6). */
+  digits?: number;
+  /** Time step in seconds (default 30). */
+  period?: number;
+  /** HMAC algorithm (default "sha1", per most authenticator apps). */
+  algorithm?: "sha1" | "sha256" | "sha512";
 }
 
 /**

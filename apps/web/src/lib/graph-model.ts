@@ -54,6 +54,7 @@ export const NODE_KINDS: { type: NodeType; label: string }[] = [
   { type: "merge", label: "Merge" },
   { type: "hmac", label: "HMAC" },
   { type: "jwt", label: "JWT" },
+  { type: "totp", label: "TOTP" },
   { type: "sendEmail", label: "Send Email" },
   { type: "executeSubWorkflow", label: "Sub-workflow" },
   { type: "wait", label: "Wait" },

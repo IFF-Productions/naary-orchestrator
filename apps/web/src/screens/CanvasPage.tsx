@@ -90,6 +90,7 @@ const ACCENT: Record<NodeType, string> = {
   merge: "var(--node-merge, #3fae86)",
   hmac: "var(--node-hmac, #a86fd6)",
   jwt: "var(--node-jwt, #7a6fd6)",
+  totp: "var(--node-totp, #9a6fc6)",
   sendEmail: "var(--node-email, #4f9ad6)",
   executeSubWorkflow: "var(--node-subflow, #5b8def)",
   wait: "var(--node-wait, #8a8f98)",
@@ -212,7 +213,7 @@ function nodeSubtitle(
     const src = config.source;
     return src && src !== "now" ? "from upstream" : "now";
   }
-  if (kind === "hmac" || kind === "jwt") {
+  if (kind === "hmac" || kind === "jwt" || kind === "totp") {
     const conn = config.connectionId as string | undefined;
     return conn || undefined;
   }
@@ -1574,6 +1575,52 @@ function ConfigPanel({
               }
               style={inputStyle}
               placeholder="3600"
+            />
+          </Labeled>
+        </>
+      )}
+
+      {kind === "totp" && (
+        <>
+          <Labeled label="Signing connection id (base32 seed)">
+            <input
+              value={str("connectionId")}
+              onChange={(e) => onChange({ connectionId: e.target.value })}
+              style={inputStyle}
+              placeholder="my-totp-seed"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            A <code>signing</code> connection whose secret is the base32 TOTP
+            seed (read server-side). Output is <code>{node.id}.code</code>.
+          </div>
+          <Labeled label="Digits">
+            <input
+              type="number"
+              min={6}
+              max={8}
+              value={num("digits") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  digits: e.target.value ? Number(e.target.value) : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="6"
+            />
+          </Labeled>
+          <Labeled label="Period (seconds)">
+            <input
+              type="number"
+              min={1}
+              value={num("period") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  period: e.target.value ? Number(e.target.value) : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="30"
             />
           </Labeled>
         </>
