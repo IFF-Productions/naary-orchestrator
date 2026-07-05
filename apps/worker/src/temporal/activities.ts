@@ -11,6 +11,7 @@ import { SignJWT, importPKCS8 } from "jose";
 import nodemailer from "nodemailer";
 import { XMLBuilder, XMLParser } from "fast-xml-parser";
 import { parse as parseHtml } from "node-html-parser";
+import Papa from "papaparse";
 import { getQuickJS, shouldInterruptAfterDeadline } from "quickjs-emscripten";
 import { canonicalize, getByPath } from "@naary/dsl";
 import type {
@@ -938,6 +939,62 @@ export async function callHtmlExtract(
       secondsSince(startedAt),
     );
     throw ApplicationFailure.nonRetryable("HTML extract failed", "HTML_ERROR");
+  }
+}
+
+export interface CsvConfig {
+  operation: "parse" | "build";
+  header?: boolean;
+  delimiter?: string;
+}
+export interface CsvResult {
+  status: "ok";
+  result: unknown;
+  costUsd: number;
+}
+
+/**
+ * csv node — parse CSV text → rows, or build rows → CSV text. Pure transform (no secrets,
+ * no egress), in an activity to keep the parser out of the deterministic workflow bundle
+ * (like callXml). `header` (default true) uses/emits a header row. Claim-checked input is
+ * rehydrated; a large result is offloaded; malformed input is the user's data problem.
+ */
+export async function callCsv(
+  cfg: CsvConfig,
+  input: unknown,
+  meta: AgentMeta,
+): Promise<CsvResult> {
+  const startedAt = process.hrtime.bigint();
+  const store = getObjectStore();
+  const value = await resolveClaimChecks(input, store);
+  const header = cfg.header !== false;
+  const delimiter = cfg.delimiter || ",";
+  try {
+    let result: unknown;
+    if (cfg.operation === "build") {
+      const rows = Array.isArray(value) ? value : [value];
+      result = { csv: Papa.unparse(rows as object[], { header, delimiter }) };
+    } else {
+      const parsed = Papa.parse(String(value), {
+        header,
+        delimiter,
+        skipEmptyLines: true,
+      });
+      result = parsed.data;
+    }
+    const offloaded = await maybeOffload(result, store, {
+      keyPrefix: `csv/${meta.tenantId}`,
+    });
+    activityRuns.inc({ activity: "callCsv", outcome: "ok" });
+    activityDuration.observe({ activity: "callCsv" }, secondsSince(startedAt));
+    return { status: "ok", result: offloaded, costUsd: 0 };
+  } catch {
+    activityRuns.inc({ activity: "callCsv", outcome: "error" });
+    activityDuration.observe({ activity: "callCsv" }, secondsSince(startedAt));
+    throw ApplicationFailure.nonRetryable(
+      `CSV ${cfg.operation} failed`,
+      "CSV_ERROR",
+    );
   }
 }
 

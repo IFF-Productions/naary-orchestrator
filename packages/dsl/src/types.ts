@@ -21,6 +21,7 @@ export type NodeType =
   | "compareDatasets" // pure: diff two arrays by a key → {added,removed,changed,same}
   | "xml" // parse XML→object / build object→XML (activity; fast-xml-parser)
   | "htmlExtract" // pull values out of an HTML string by CSS selector (activity)
+  | "csv" // parse CSV text→rows / build rows→CSV text (activity; papaparse)
   | "dateTime" // current time / timestamp math via an activity (clock read is I/O)
   | "merge" // fan-in join: run once after all inbound branches arrive; combine outputs
   | "switch" // multi-way router: first matching rule → output {matched}; branch edges on it
@@ -297,6 +298,25 @@ export interface XmlNodeConfig {
   from: string;
   /** Optional dotted path into that output. */
   path?: string;
+}
+
+/**
+ * CSV node — convert between CSV text and an array of rows (n8n's Spreadsheet File, CSV).
+ * `parse` turns CSV text (from `from`/`path`) into rows (objects keyed by the header row
+ * when `header`, else arrays); `build` serializes an upstream array of objects to CSV text.
+ * Output: the rows array (parse) or `{ csv }` (build). Runs in an ACTIVITY (parser out of
+ * the deterministic bundle, like `xml`). No secrets, no egress.
+ */
+export interface CsvNodeConfig {
+  operation: "parse" | "build";
+  /** Upstream node id whose output holds the CSV string (parse) or rows array (build). */
+  from: string;
+  /** Optional dotted path into that output. */
+  path?: string;
+  /** parse: treat the first row as the header (default true). build: emit a header row. */
+  header?: boolean;
+  /** Field delimiter (default ","). */
+  delimiter?: string;
 }
 
 /** One field to pull out of an HTML document by CSS selector (HTML Extract node). */

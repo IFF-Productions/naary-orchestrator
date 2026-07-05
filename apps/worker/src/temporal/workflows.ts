@@ -35,6 +35,7 @@ import type {
   AggregateNodeConfig,
   CodeNodeConfig,
   CompareDatasetsNodeConfig,
+  CsvNodeConfig,
   DateTimeNodeConfig,
   ExecuteSubWorkflowNodeConfig,
   FilterNodeConfig,
@@ -80,6 +81,7 @@ const {
   callTotp,
   callXml,
   callHtmlExtract,
+  callCsv,
 } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },
@@ -512,6 +514,27 @@ export async function runGraph(
         const res = await callHtmlExtract(
           { extractions: htmlCfg.extractions ?? [] },
           htmlVal,
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
+        ctx[node.id] = res.result;
+        return null;
+      }
+      case "csv": {
+        // Parse CSV→rows / build rows→CSV. Input resolved here (pure ctx read); the parse
+        // runs in the activity (parser out of the deterministic bundle).
+        const csvCfg = node.config as unknown as CsvNodeConfig;
+        const csvVal = getByPath(ctx[csvCfg.from], csvCfg.path);
+        const res = await callCsv(
+          {
+            operation: csvCfg.operation,
+            header: csvCfg.header,
+            delimiter: csvCfg.delimiter,
+          },
+          csvVal,
           {
             tenantId: runCtx.tenantId,
             executionId: wf.workflowInfo().workflowId,

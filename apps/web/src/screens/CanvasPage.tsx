@@ -1992,6 +1992,69 @@ function ConfigPanel({
           );
         })()}
 
+      {kind === "csv" && (
+        <>
+          <Labeled label="Operation">
+            <select
+              value={str("operation") || "parse"}
+              onChange={(e) => onChange({ operation: e.target.value })}
+              style={inputStyle}
+            >
+              <option value="parse">parse (CSV text → rows)</option>
+              <option value="build">build (rows → CSV text)</option>
+            </select>
+          </Labeled>
+          <Labeled label="Source node id">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="upstream-node-id"
+            />
+          </Labeled>
+          <Labeled label="Path (optional)">
+            <input
+              value={str("path")}
+              onChange={(e) => onChange({ path: e.target.value })}
+              style={inputStyle}
+              placeholder="body"
+            />
+          </Labeled>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Labeled label="Delimiter">
+              <input
+                value={str("delimiter") || ""}
+                onChange={(e) =>
+                  onChange({ delimiter: e.target.value || undefined })
+                }
+                style={inputStyle}
+                placeholder=","
+              />
+            </Labeled>
+          </div>
+          <label
+            style={{
+              display: "flex",
+              gap: 6,
+              alignItems: "center",
+              fontSize: 12,
+              color: "var(--ink-2)",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={config.header !== false}
+              onChange={(e) => onChange({ header: e.target.checked })}
+            />
+            First row is the header
+          </label>
+          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+            parse → <code>{node.id}</code> is the rows array; build →{" "}
+            <code>{node.id}.csv</code> is the string.
+          </div>
+        </>
+      )}
+
       {kind === "dateTime" && (
         <>
           <Labeled label="Source node id (blank = current time)">
