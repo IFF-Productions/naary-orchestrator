@@ -76,6 +76,10 @@ export class McpController {
       tenantId,
       listWorkflows: () => this.graphs.list(tenantId),
       getRun: (runId) => this.executions.getState(runId, tenantId),
+      runWorkflow: (workflowKey, input) =>
+        this.executions
+          .start(tenantId, input, workflowKey)
+          .then((r) => ({ runId: r.workflowId })),
     });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,

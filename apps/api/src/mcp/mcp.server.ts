@@ -29,6 +29,10 @@ export interface McpToolDeps {
   tenantId: string;
   listWorkflows: () => Promise<McpWorkflowSummary[]>;
   getRun: (runId: string) => Promise<McpRunState>;
+  runWorkflow: (
+    workflowKey: string,
+    input?: Record<string, unknown>,
+  ) => Promise<{ runId: string }>;
 }
 
 /** JSON payload → a text tool result (MCP's portable content shape). */
@@ -42,8 +46,9 @@ function jsonResult(payload: unknown): CallToolResult {
  * Build the naary control-plane MCP server for one session (design flavor A). Tools so far:
  *   - list_node_types — discover the building blocks (shared @naary/dsl catalog)
  *   - list_workflows  — the tenant's saved workflows
+ *   - run_workflow    — start a durable run of a saved workflow
  *   - get_run         — a run's status + node outputs
- * (create_workflow / run_workflow / approve land in later slices.)
+ * (create_workflow / approve land in later slices.)
  */
 export function buildMcpServer(deps: McpToolDeps): McpServer {
   const server = new McpServer(
@@ -77,6 +82,25 @@ export function buildMcpServer(deps: McpToolDeps): McpServer {
     "List the saved workflows in this workspace (one entry per workflow, its latest version). " +
       "Use a returned workflowKey with run_workflow (later) or to reference an existing flow.",
     async () => jsonResult({ workflows: await deps.listWorkflows() }),
+  );
+
+  server.tool(
+    "run_workflow",
+    "Start a durable run of a saved workflow by its workflowKey (from list_workflows), with an " +
+      "optional JSON input passed to the trigger node. Returns { runId } immediately — the run " +
+      "keeps executing even after you disconnect (it can take minutes or days, e.g. awaiting a " +
+      "human approval). Poll get_run with the returned runId to await its result.",
+    {
+      workflowKey: z
+        .string()
+        .describe("The workflow to run (a key from list_workflows)."),
+      input: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("Optional JSON input for the trigger node."),
+    },
+    async ({ workflowKey, input }) =>
+      jsonResult(await deps.runWorkflow(workflowKey, input)),
   );
 
   server.tool(
