@@ -150,6 +150,20 @@ describe("compileGraph", () => {
     });
   });
 
+  it.each(["pollTrigger", "errorTrigger", "scheduleTrigger"] as const)(
+    "accepts %s as the single entry node",
+    (type) => {
+      const nodes: CanvasNode[] = [
+        { id: "trig", type, position: at(0) },
+        { id: "end", type: "end", position: at(1) },
+      ];
+      const edges: CanvasEdge[] = [{ id: "e", source: "trig", target: "end" }];
+      const { graph, error } = compileGraph(nodes, edges);
+      expect(error).toBeUndefined();
+      expect(graph?.startNodeId).toBe("trig");
+    },
+  );
+
   it("accepts a scheduleTrigger as the single entry node (→ startNodeId)", () => {
     const nodes: CanvasNode[] = [
       {

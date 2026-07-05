@@ -3,9 +3,9 @@
  * the SAME `validateGraph` the server runs (so the on-canvas status matches the API
  * 400). Pure — no React, unit-tested in test/compile-graph.spec.ts.
  *
- * Entry-node rule: GraphDef needs exactly one `startNodeId`, so the canvas must
- * have exactly one `start`/`webhookTrigger` node — enforced here with a clear
- * message (validateGraph only checks the id resolves, not entry-node count).
+ * Entry-node rule: GraphDef needs exactly one `startNodeId`, so the canvas must have
+ * exactly one entry/trigger node (Start / Webhook / Schedule / Poll / Error) — enforced
+ * here with a clear message (validateGraph only checks the id resolves, not entry-node count).
  */
 import type {
   EdgeCondition,
@@ -25,10 +25,14 @@ export interface CompileResult {
   error?: string;
 }
 
+// Every node type that can START a graph (be its `startNodeId`). All are handled as entry
+// nodes by the interpreter. Keep in sync with the trigger node types.
 const ENTRY_TYPES: ReadonlySet<NodeType> = new Set<NodeType>([
   "start",
   "webhookTrigger",
   "scheduleTrigger",
+  "pollTrigger",
+  "errorTrigger",
 ]);
 
 export function compileGraph(
@@ -41,11 +45,14 @@ export function compileGraph(
 
   const entries = nodes.filter((n) => ENTRY_TYPES.has(n.type));
   if (entries.length === 0) {
-    return { error: "No entry node — add a Start (or Webhook) node." };
+    return {
+      error: "No entry node — add a Start / Webhook / Schedule / Poll trigger.",
+    };
   }
   if (entries.length > 1) {
     return {
-      error: "Multiple entry nodes — keep exactly one Start/Webhook node.",
+      error:
+        "Multiple entry nodes — keep exactly one trigger (Start/Webhook/Schedule/Poll).",
     };
   }
 
