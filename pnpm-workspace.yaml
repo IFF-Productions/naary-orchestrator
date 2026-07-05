@@ -26,7 +26,13 @@ minimumReleaseAgeExclude:
 # is a breaking major (the Root class identity changed, so @temporalio/common's
 # `instanceof Root` payload-converter check throws). >=7.6.3 keeps the Dependabot
 # patch (7.6.2 was the flagged version); <8 keeps Temporal working.
+# uuid (moderate) via firebase-admin → @google-cloud/storage → gaxios/teeny-request:
+# a bounds-check flaw in uuid v3/v5/v6 when a `buf` arg is passed. Not exploitable here
+# (our code uses node:crypto; gaxios calls v4() with no buffer), but the patched line
+# dedupes the tree to one uuid (11.1.1, already present via @temporalio). The v4 named
+# export is API-compatible across the range gaxios uses, so forcing >=11.1.1 is safe.
 overrides:
   multer: '>=2.2.0'
   protobufjs: '>=7.6.3 <8'
   '@hono/node-server': '>=2.0.8'
+  uuid: '>=11.1.1'
