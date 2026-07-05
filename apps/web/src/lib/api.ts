@@ -231,6 +231,10 @@ export const api = {
       body: JSON.stringify(patch),
     });
   },
+  // --- Audit log (activity feed) ---
+  getAuditLog(tenantId: string): Promise<AuditEvent[]> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/audit`);
+  },
   // --- Notifications ---
   getNotifications(tenantId: string): Promise<NotificationSettings> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/notifications`);
@@ -444,6 +448,17 @@ export interface Member {
 export interface TenantSettings {
   displayName: string | null;
   defaultModel: string | null;
+}
+
+/** One entry in the activity feed (who did what, when). */
+export interface AuditEvent {
+  id: string;
+  actor: string;
+  action: string;
+  method: string;
+  path: string;
+  statusCode: number;
+  createdAt: string;
 }
 
 export interface NotificationSettings {

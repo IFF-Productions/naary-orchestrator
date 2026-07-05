@@ -5,6 +5,7 @@ import {
 } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
+import { AuditModule } from "./audit/audit.module";
 import { AuthModule } from "./auth/auth.module";
 import { DbLifecycleService } from "./common/db-lifecycle.service";
 import { MetricsController } from "./common/metrics.controller";
@@ -29,6 +30,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     // protecting credential-save / execution-start / oauth / hooks from abuse.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     AuthModule,
+    AuditModule,
     HealthModule,
     GraphsModule,
     ExecutionsModule,

@@ -226,3 +226,19 @@ model NotificationSettings {
   onRunFailed       Boolean  @default(true)
   updatedAt         DateTime @default(now()) @updatedAt
 }
+
+// Append-only audit log: who did what, when (the activity feed). One row per
+// successful mutating request, written by the AuditInterceptor. `actor` is the OIDC
+// subject (or "api-token"); `action` is a human label derived from method+route.
+model AuditEvent {
+  id         String   @id @default(uuid())
+  tenantId   String
+  actor      String // OIDC subject, or "api-token"
+  action     String // human label, e.g. "Saved a workflow"
+  method     String // HTTP method
+  path       String // request path (no query)
+  statusCode Int
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+}
