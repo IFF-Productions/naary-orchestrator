@@ -25,6 +25,7 @@ export type NodeType =
   | "csv" // parse CSV text→rows / build rows→CSV text (activity; papaparse)
   | "dateTime" // current time / timestamp math via an activity (clock read is I/O)
   | "merge" // fan-in join: run once after all inbound branches arrive; combine outputs
+  | "if" // boolean gate: combine N predicates with AND/OR → output {result}
   | "switch" // multi-way router: first matching rule → output {matched}; branch edges on it
   | "hmac" // signs a payload with a `signing` connection's key (activity); output is the digest
   | "jwt" // mints an HS256 JWT signed by a `signing` connection's key (activity)
@@ -617,6 +618,20 @@ export interface CodeNodeConfig {
  * (a conditional edge into a merge is rejected by `validateGraph`, since a branch
  * that never fires would strand the join); loops back through a merge are undefined.
  */
+/**
+ * IF node — a boolean gate (n8n's IF). Evaluates `conditions` and COMBINES them with AND
+ * (all must hold) or OR (any), producing `{ result: boolean }`. This adds boolean
+ * combination that a single edge condition / Switch rule can't express. The author draws a
+ * true-edge (`<ifId>.result eq true`) and a false-edge (`eq false`). PURE (reuses
+ * `evaluateCondition`, no eval).
+ */
+export interface IfNodeConfig {
+  /** Combine the conditions: "and" (default, all hold) or "or" (any holds). */
+  combine?: "and" | "or";
+  /** The predicates (same op set as edges/filter/switch). Empty ⇒ result is false. */
+  conditions: EdgeCondition[];
+}
+
 /** One named branch of a Switch node — a label plus the predicate that selects it. */
 export interface SwitchRule {
   /** The branch label; also the value written to `{ matched }` when this rule wins. */

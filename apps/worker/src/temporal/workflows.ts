@@ -19,6 +19,7 @@ import {
   resolveListOps,
   resolveHmac,
   resolveHash,
+  resolveIf,
   resolveHttpRequest,
   resolveJwt,
   resolveMcpArguments,
@@ -47,6 +48,7 @@ import type {
   HashNodeConfig,
   HmacNodeConfig,
   HtmlExtractNodeConfig,
+  IfNodeConfig,
   HttpRequestNodeConfig,
   JwtNodeConfig,
   McpToolNodeConfig,
@@ -595,6 +597,13 @@ export async function runGraph(
         // on `<switchId>.matched`. Reuses evaluateCondition (structured, no eval).
         const swCfg = node.config as unknown as SwitchNodeConfig;
         ctx[node.id] = resolveSwitch(swCfg, ctx);
+        return null;
+      }
+      case "if": {
+        // Pure node: combine predicates with AND/OR → { result }. Downstream edges branch
+        // on `<ifId>.result` (eq true / eq false).
+        const ifCfg = node.config as unknown as IfNodeConfig;
+        ctx[node.id] = resolveIf(ifCfg, ctx);
         return null;
       }
       case "hmac": {
