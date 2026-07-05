@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import { ApplicationFailure } from "@temporalio/activity";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -23,6 +24,11 @@ const mockActivities = {
     cfg: activities.McpToolConfig,
   ): Promise<activities.McpToolResult> => {
     mcpConns.push(cfg.connectionId);
+    // "boom-conn" fails (non-retryable → fast) so tests can exercise the per-node error
+    // policy; every other connection succeeds.
+    if (cfg.connectionId === "boom-conn") {
+      throw ApplicationFailure.nonRetryable("mcp tool exploded", "BoomError");
+    }
     // echo the configured per-call cost, like the real activity (Arch§4.6)
     return { status: "ok", content: [], costUsd: cfg.costUsd ?? 0 };
   },
@@ -99,6 +105,140 @@ describe("interpreter — branching / parallel / loop (Slice #6)", () => {
     expect(status).toBe("completed");
     // only the matching branch ran
     expect(mcpConns).toEqual(["billing-conn"]);
+  });
+
+  it("routes via a switch node: first matching rule wins, edges branch on .matched", async () => {
+    // agent → category "billing", urgency 3. Rule 1 (urgent, urgency>=5) misses; rule 2
+    // (billing) matches → matched="billing" → only the billing edge fires.
+    const graph: GraphDef = {
+      startNodeId: "agent",
+      nodes: [
+        { id: "agent", type: "agent" },
+        {
+          id: "sw",
+          type: "switch",
+          config: {
+            rules: [
+              {
+                name: "urgent",
+                condition: {
+                  path: "agent.output.urgency",
+                  op: "gte",
+                  value: 5,
+                },
+              },
+              {
+                name: "billing",
+                condition: {
+                  path: "agent.output.category",
+                  op: "eq",
+                  value: "billing",
+                },
+              },
+            ],
+            fallback: "other",
+          },
+        },
+        mcp("urgentBranch", "urgent-conn"),
+        mcp("billingBranch", "billing-conn"),
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "agent", to: "sw" },
+        {
+          from: "sw",
+          to: "urgentBranch",
+          condition: { path: "sw.matched", op: "eq", value: "urgent" },
+        },
+        {
+          from: "sw",
+          to: "billingBranch",
+          condition: { path: "sw.matched", op: "eq", value: "billing" },
+        },
+        { from: "urgentBranch", to: "end" },
+        { from: "billingBranch", to: "end" },
+      ],
+    };
+    const worker = await makeWorker();
+    const status = await worker.runUntil(async () => {
+      const h = await env.client.workflow.start(runGraph, {
+        args: [graph, {}, { tenantId: "t1" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-switch",
+      });
+      return (await h.result()).status;
+    });
+    expect(status).toBe("completed");
+    expect(mcpConns).toEqual(["billing-conn"]);
+  });
+
+  it("onError:continue turns a node failure into { error } and keeps going", async () => {
+    // boom fails; onError:"continue" records boom.error and the flow branches on it.
+    const graph: GraphDef = {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        {
+          id: "boom",
+          type: "mcpTool",
+          config: { connectionId: "boom-conn", tool: "noop" },
+          onError: "continue",
+        },
+        mcp("after", "after-conn"),
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "s", to: "boom" },
+        {
+          from: "boom",
+          to: "after",
+          condition: { path: "boom.error", op: "exists" },
+        },
+        { from: "after", to: "end" },
+      ],
+    };
+    const worker = await makeWorker();
+    const status = await worker.runUntil(async () => {
+      const h = await env.client.workflow.start(runGraph, {
+        args: [graph, {}, { tenantId: "t1" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-onerror-continue",
+      });
+      return (await h.result()).status;
+    });
+    expect(status).toBe("completed");
+    // boom ran (and failed), then the error-branch node ran
+    expect(mcpConns).toEqual(["boom-conn", "after-conn"]);
+  });
+
+  it("without onError, the same failure fails the run (default stop)", async () => {
+    const graph: GraphDef = {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        {
+          id: "boom",
+          type: "mcpTool",
+          config: { connectionId: "boom-conn", tool: "noop" },
+        },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "s", to: "boom" },
+        { from: "boom", to: "end" },
+      ],
+    };
+    const worker = await makeWorker();
+    await expect(
+      worker.runUntil(async () => {
+        const h = await env.client.workflow.start(runGraph, {
+          args: [graph, {}, { tenantId: "t1" }],
+          taskQueue: TASK_QUEUE,
+          workflowId: "e2e-onerror-stop",
+        });
+        return (await h.result()).status;
+      }),
+    ).rejects.toThrow();
   });
 
   it("runs both branches on a parallel fan-out (two unconditional edges)", async () => {

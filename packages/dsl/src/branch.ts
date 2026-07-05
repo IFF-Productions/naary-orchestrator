@@ -7,7 +7,20 @@ import type { EdgeCondition, GraphDef } from "./types";
  * replay-sensitive (CLAUDE.md Tier-1 rule 2). Predicates are structured DATA.
  */
 
-/** Evaluate one structured edge predicate against the run context. */
+/** Empty = null/undefined, empty string, empty array, or object with no own keys. */
+function isEmptyValue(v: unknown): boolean {
+  if (v === undefined || v === null || v === "") return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === "object") return Object.keys(v as object).length === 0;
+  return false;
+}
+
+/**
+ * Evaluate one structured edge predicate against the run context. PURE + deterministic:
+ * value/string/number/emptiness checks plus a `regex` test (`RegExp` is deterministic; an
+ * invalid pattern → false, never a throw that would fail the workflow task). String ops
+ * coerce non-string actuals to string so a number/boolean still compares sensibly.
+ */
 export function evaluateCondition(
   cond: EdgeCondition,
   ctx: Record<string, unknown>,
@@ -26,6 +39,35 @@ export function evaluateCondition(
       return typeof actual === "number" && actual > (cond.value as number);
     case "lt":
       return typeof actual === "number" && actual < (cond.value as number);
+    case "gte":
+      return typeof actual === "number" && actual >= (cond.value as number);
+    case "lte":
+      return typeof actual === "number" && actual <= (cond.value as number);
+    case "contains":
+      if (typeof actual === "string")
+        return actual.includes(String(cond.value));
+      if (Array.isArray(actual)) return actual.includes(cond.value);
+      return false;
+    case "notContains":
+      if (typeof actual === "string")
+        return !actual.includes(String(cond.value));
+      if (Array.isArray(actual)) return !actual.includes(cond.value);
+      return true; // a missing/non-collection value does not contain the target
+    case "startsWith":
+      return actual != null && String(actual).startsWith(String(cond.value));
+    case "endsWith":
+      return actual != null && String(actual).endsWith(String(cond.value));
+    case "regex":
+      if (actual == null) return false;
+      try {
+        return new RegExp(String(cond.value)).test(String(actual));
+      } catch {
+        return false; // invalid pattern never fails the run
+      }
+    case "isEmpty":
+      return isEmptyValue(actual);
+    case "notEmpty":
+      return !isEmptyValue(actual);
     default:
       return false;
   }

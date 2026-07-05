@@ -23,7 +23,12 @@ export {
   resolveSqlExec,
   type ResolvedSqlExec,
 } from "./sql-query";
+export { resolveIf } from "./if-node";
+export { resolveJson } from "./json-node";
+export { resolveNumber } from "./number-node";
 export { resolveSet } from "./set-node";
+export { resolveSwitch } from "./switch-node";
+export { resolveText } from "./text-node";
 export { resolveRenameKeys } from "./rename-keys";
 export {
   resolveFilter,
@@ -35,8 +40,10 @@ export { resolveSubWorkflowInput } from "./sub-workflow";
 export {
   resolveHmac,
   resolveJwt,
+  resolveHash,
   type ResolvedHmac,
   type ResolvedJwt,
+  type ResolvedHash,
 } from "./signing";
 export { resolveSendEmail, type ResolvedSendEmail } from "./send-email";
 export { resolveRss, type ResolvedRss } from "./rss";

@@ -18,6 +18,10 @@ import {
   resolveFilter,
   resolveListOps,
   resolveHmac,
+  resolveHash,
+  resolveIf,
+  resolveJson,
+  resolveNumber,
   resolveHttpRequest,
   resolveJwt,
   resolveMcpArguments,
@@ -28,19 +32,27 @@ import {
   resolveSqlQuery,
   resolveSqlExec,
   resolveSubWorkflowInput,
+  resolveSwitch,
+  resolveText,
   resolveWebhookResponse,
 } from "@naary/dsl";
 import type {
   AggregateNodeConfig,
   CodeNodeConfig,
   CompareDatasetsNodeConfig,
+  CsvNodeConfig,
   DateTimeNodeConfig,
   ExecuteSubWorkflowNodeConfig,
   FilterNodeConfig,
   ForEachNodeConfig,
   GraphDef,
   ListOpsNodeConfig,
+  HashNodeConfig,
   HmacNodeConfig,
+  HtmlExtractNodeConfig,
+  IfNodeConfig,
+  JsonNodeConfig,
+  NumberNodeConfig,
   HttpRequestNodeConfig,
   JwtNodeConfig,
   McpToolNodeConfig,
@@ -52,6 +64,8 @@ import type {
   RssReadNodeConfig,
   SendEmailNodeConfig,
   SetNodeConfig,
+  SwitchNodeConfig,
+  TextNodeConfig,
   SqlQueryNodeConfig,
   SqlExecNodeConfig,
   StopAndErrorNodeConfig,
@@ -73,9 +87,12 @@ const {
   computeDateTime,
   resolveSubWorkflowGraph,
   callHmac,
+  callHash,
   callJwt,
   callTotp,
   callXml,
+  callHtmlExtract,
+  callCsv,
 } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },
@@ -199,6 +216,25 @@ export interface ResumeState {
   /** Fan-in arrival counts per merge node id (Slice N5). Carried so a run that
    *  continueAsNews mid-join resumes its counts. Plain object (CAN-safe). */
   mergeArrivals?: Record<string, number>;
+}
+
+/**
+ * Sanitized, bounded failure message for a node's error output (onError: "continue").
+ * Temporal wraps an activity failure in ActivityFailure whose `cause` carries the real
+ * message; unwrap to the innermost cause, then cap length so a huge error can't bloat the
+ * ctx/history. Activity errors are already sanitized upstream (toSanitizedRetryable), so
+ * this never surfaces secrets.
+ */
+function nodeErrorMessage(err: unknown): string {
+  let e: unknown = err;
+  // Drill through wrapped failures (ActivityFailure → cause → …) to the root message.
+  for (let i = 0; i < 5 && e && typeof e === "object" && "cause" in e; i++) {
+    const cause = (e as { cause?: unknown }).cause;
+    if (!cause) break;
+    e = cause;
+  }
+  const msg = e instanceof Error ? e.message : String(e);
+  return msg.length > 500 ? `${msg.slice(0, 500)}…` : msg;
 }
 
 /**
@@ -439,6 +475,13 @@ export async function runGraph(
         ctx[node.id] = resolveRenameKeys(rkCfg, ctx);
         return null;
       }
+      case "text": {
+        // Pure node: one string op on an upstream value → { result }. Deterministic
+        // (regex is pure; invalid patterns fail closed to null in resolveText).
+        const txtCfg = node.config as unknown as TextNodeConfig;
+        ctx[node.id] = resolveText(txtCfg, ctx);
+        return null;
+      }
       case "filter": {
         // Pure node: keep the upstream array items matching the per-item predicate.
         // Output IS the filtered array (downstream reads `<id>.0` or aggregates it).
@@ -481,6 +524,44 @@ export async function runGraph(
         ctx[node.id] = result.result;
         return null;
       }
+      case "htmlExtract": {
+        // Pull values from an HTML string by CSS selector. HTML resolved here (pure ctx
+        // read); the parse runs in the activity (parser out of the deterministic bundle).
+        const htmlCfg = node.config as unknown as HtmlExtractNodeConfig;
+        const htmlVal = getByPath(ctx[htmlCfg.from], htmlCfg.path);
+        const res = await callHtmlExtract(
+          { extractions: htmlCfg.extractions ?? [] },
+          htmlVal,
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
+        ctx[node.id] = res.result;
+        return null;
+      }
+      case "csv": {
+        // Parse CSV→rows / build rows→CSV. Input resolved here (pure ctx read); the parse
+        // runs in the activity (parser out of the deterministic bundle).
+        const csvCfg = node.config as unknown as CsvNodeConfig;
+        const csvVal = getByPath(ctx[csvCfg.from], csvCfg.path);
+        const res = await callCsv(
+          {
+            operation: csvCfg.operation,
+            header: csvCfg.header,
+            delimiter: csvCfg.delimiter,
+          },
+          csvVal,
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
+        ctx[node.id] = res.result;
+        return null;
+      }
       case "dateTime": {
         // The base value is resolved deterministically here (pure ctx read); the
         // CLOCK READ (when source is "now") happens in the activity, since time is
@@ -515,11 +596,50 @@ export async function runGraph(
             : inputs;
         return null;
       }
+      case "switch": {
+        // Pure node: pick the first matching rule → { matched }. Downstream edges branch
+        // on `<switchId>.matched`. Reuses evaluateCondition (structured, no eval).
+        const swCfg = node.config as unknown as SwitchNodeConfig;
+        ctx[node.id] = resolveSwitch(swCfg, ctx);
+        return null;
+      }
+      case "if": {
+        // Pure node: combine predicates with AND/OR → { result }. Downstream edges branch
+        // on `<ifId>.result` (eq true / eq false).
+        const ifCfg = node.config as unknown as IfNodeConfig;
+        ctx[node.id] = resolveIf(ifCfg, ctx);
+        return null;
+      }
+      case "json": {
+        // Pure node: JSON parse/stringify (deterministic ES built-ins, no activity).
+        // Malformed JSON on parse throws → a node failure onError:"continue" can catch.
+        const jsonCfg = node.config as unknown as JsonNodeConfig;
+        ctx[node.id] = resolveJson(jsonCfg, ctx);
+        return null;
+      }
+      case "number": {
+        // Pure node: one arithmetic op on resolved operands → { result }.
+        const numCfg = node.config as unknown as NumberNodeConfig;
+        ctx[node.id] = resolveNumber(numCfg, ctx);
+        return null;
+      }
       case "hmac": {
         // Binding resolution is deterministic (pure ctx read); the key fetch +
         // signing happen in the activity (the key never enters workflow history).
         const hmacCfg = node.config as unknown as HmacNodeConfig;
         const result = await callHmac(resolveHmac(hmacCfg, ctx), ctx.__input, {
+          tenantId: runCtx.tenantId,
+          executionId: wf.workflowInfo().workflowId,
+          nodeId: node.id,
+        });
+        ctx[node.id] = { digest: result.digest };
+        return null;
+      }
+      case "hash": {
+        // Keyless digest. Binding resolution is deterministic (pure ctx read); the hash
+        // (node:crypto) runs in the activity, out of the deterministic bundle.
+        const hashCfg = node.config as unknown as HashNodeConfig;
+        const result = await callHash(resolveHash(hashCfg, ctx), ctx.__input, {
           tenantId: runCtx.tenantId,
           executionId: wf.workflowInfo().workflowId,
           nodeId: node.id,
@@ -953,7 +1073,20 @@ export async function runGraph(
         if (arrived < expected) return null;
       }
 
-      const terminal = await execNode(node);
+      // Per-node error policy (n8n's "On Error"). "continue" catches a node failure,
+      // records `{ error }` as its output, and proceeds so the graph can branch on
+      // `<nodeId>.error`; "stop" (default) rethrows to fail the run (the workflow-level
+      // error handler, if bound, then fires). The catch is deterministic — Temporal
+      // records the activity failure in history and replays it identically. costUsd
+      // accumulated before the failure is kept (already metered).
+      let terminal: ExecutionStatus | null;
+      try {
+        terminal = await execNode(node);
+      } catch (err) {
+        if (node.onError !== "continue") throw err;
+        ctx[node.id] = { error: nodeErrorMessage(err) };
+        terminal = null;
+      }
       if (terminal !== null) return terminal;
 
       const nexts = nextNodes(graph, current, ctx);

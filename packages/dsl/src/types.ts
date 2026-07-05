@@ -15,16 +15,24 @@ export type NodeType =
   | "sqlExec" // runs a WRITE (INSERT/UPDATE/DELETE) in a txn; output is {rowsAffected}
   | "set" // builds a plain object from static fields + upstream bindings (pure, no I/O)
   | "renameKeys" // pure: remap/drop keys of an upstream object
+  | "text" // pure: string ops (upper/lower/trim/replace/split/join/substring/regex)
   | "filter" // pure: keep array items matching a per-item predicate
   | "aggregate" // pure: collapse an array (collect/count/sum/first/last)
   | "listOps" // pure: sort / limit / dedupe an array → array
   | "compareDatasets" // pure: diff two arrays by a key → {added,removed,changed,same}
   | "xml" // parse XML→object / build object→XML (activity; fast-xml-parser)
+  | "htmlExtract" // pull values out of an HTML string by CSS selector (activity)
+  | "csv" // parse CSV text→rows / build rows→CSV text (activity; papaparse)
+  | "json" // pure: parse JSON text→value / stringify value→text
+  | "number" // pure: arithmetic on numbers (add/sub/mul/div/mod/pow/round/floor/ceil/abs)
   | "dateTime" // current time / timestamp math via an activity (clock read is I/O)
   | "merge" // fan-in join: run once after all inbound branches arrive; combine outputs
+  | "if" // boolean gate: combine N predicates with AND/OR → output {result}
+  | "switch" // multi-way router: first matching rule → output {matched}; branch edges on it
   | "hmac" // signs a payload with a `signing` connection's key (activity); output is the digest
   | "jwt" // mints an HS256 JWT signed by a `signing` connection's key (activity)
   | "totp" // generates the current RFC-6238 TOTP code from a `signing` connection's seed
+  | "hash" // one-way digest of a value (sha256/512/1/md5) — no key/connection needed
   | "sendEmail" // sends an email via an `smtp` connection (activity)
   | "rssRead" // fetches + parses an RSS/Atom feed (egress-guarded activity); output is {items}
   | "executeSubWorkflow" // runs another saved graph as a child run; output is {status,output}
@@ -41,6 +49,13 @@ export interface NodeDef {
   type: NodeType;
   /** Node-specific configuration, e.g. the agent node's canned output. */
   config?: Record<string, unknown>;
+  /**
+   * What to do when this node throws (n8n's per-node "On Error"). "stop" (default) fails
+   * the run — the workflow-level error handler, if bound, then fires. "continue" catches
+   * the failure, writes `{ error }` as this node's output, and proceeds — so the graph can
+   * branch on `<nodeId>.error` (exists) to handle it inline (n8n's error-output branch).
+   */
+  onError?: "stop" | "continue";
 }
 
 /**
@@ -208,6 +223,46 @@ export interface ExecuteSubWorkflowNodeConfig {
   inputBindings?: Record<string, ArgBinding>;
 }
 
+/** String operations for the Text node (n8n's string expression methods, as a node). */
+export type TextOp =
+  | "upper"
+  | "lower"
+  | "trim"
+  | "replace"
+  | "split"
+  | "join"
+  | "substring"
+  | "length"
+  | "regexExtract";
+
+/**
+ * Text node — one string operation on an upstream value. PURE (deterministic ctx read, no
+ * I/O; regex uses `RegExp`, invalid patterns fail closed to null). Output is `{ result }`.
+ * The input is coerced to a string for most ops; `join` expects an array. Covers the common
+ * string transforms users otherwise reach for the Code node to do.
+ */
+export interface TextNodeConfig {
+  operation: TextOp;
+  /** Upstream node id whose output holds the input value. */
+  from: string;
+  /** Optional dotted path into that output. */
+  path?: string;
+  /** replace: the substring (or regex source when `useRegex`); regexExtract: the pattern. */
+  search?: string;
+  /** replace: the replacement text (supports $1 groups when `useRegex`). */
+  replacement?: string;
+  /** replace: treat `search` as a global regex. */
+  useRegex?: boolean;
+  /** split: the delimiter (default ","); join: the glue (default ","). */
+  separator?: string;
+  /** substring: start index (default 0). */
+  start?: number;
+  /** substring: end index (exclusive; omitted = to the end). */
+  end?: number;
+  /** regexExtract: capture group to return (default 0 = whole match). */
+  group?: number;
+}
+
 /**
  * Rename Keys node — reshape an upstream object by renaming and/or dropping its
  * top-level keys. PURE (deterministic ctx read, no I/O). Output is the reshaped
@@ -291,6 +346,107 @@ export interface XmlNodeConfig {
 }
 
 /**
+ * CSV node — convert between CSV text and an array of rows (n8n's Spreadsheet File, CSV).
+ * `parse` turns CSV text (from `from`/`path`) into rows (objects keyed by the header row
+ * when `header`, else arrays); `build` serializes an upstream array of objects to CSV text.
+ * Output: the rows array (parse) or `{ csv }` (build). Runs in an ACTIVITY (parser out of
+ * the deterministic bundle, like `xml`). No secrets, no egress.
+ */
+export interface CsvNodeConfig {
+  operation: "parse" | "build";
+  /** Upstream node id whose output holds the CSV string (parse) or rows array (build). */
+  from: string;
+  /** Optional dotted path into that output. */
+  path?: string;
+  /** parse: treat the first row as the header (default true). build: emit a header row. */
+  header?: boolean;
+  /** Field delimiter (default ","). */
+  delimiter?: string;
+}
+
+/** Arithmetic operations for the Number node. Binary use `a` and `b`; unary use `a`. */
+export type MathOp =
+  | "add"
+  | "subtract"
+  | "multiply"
+  | "divide"
+  | "modulo"
+  | "power"
+  | "round"
+  | "floor"
+  | "ceil"
+  | "abs";
+
+/**
+ * Number (Math) node — one arithmetic operation. Operands come from a static value or an
+ * upstream binding (coerced with Number()). Binary ops (add/subtract/multiply/divide/
+ * modulo/power) use `a` and `b`; unary ops (round/floor/ceil/abs) use `a` (round honors
+ * `precision`). PURE + deterministic → runs in the interpreter. Output is `{ result }`.
+ */
+export interface NumberNodeConfig {
+  operation: MathOp;
+  /** Left operand (static). */
+  a?: number;
+  /** Left operand from an upstream output (overrides `a`). */
+  aBinding?: ArgBinding;
+  /** Right operand (static; binary ops only). */
+  b?: number;
+  /** Right operand from an upstream output (overrides `b`). */
+  bBinding?: ArgBinding;
+  /** round: decimal places to keep (default 0). */
+  precision?: number;
+}
+
+/**
+ * JSON node — parse a JSON string into a value, or stringify a value into JSON text. PURE
+ * (JSON.parse/stringify are deterministic ES built-ins — no I/O, no activity). `parse` output
+ * IS the parsed value (object/array/…); `stringify` output is `{ json }`. Invalid JSON on
+ * parse throws a node failure (so `onError: continue` can branch on it).
+ */
+export interface JsonNodeConfig {
+  operation: "parse" | "stringify";
+  /** Upstream node id whose output holds the JSON string (parse) or value (stringify). */
+  from: string;
+  /** Optional dotted path into that output. */
+  path?: string;
+  /** stringify: indent width for pretty-printing (0/omitted = compact). */
+  indent?: number;
+}
+
+/** One field to pull out of an HTML document by CSS selector (HTML Extract node). */
+export interface HtmlExtraction {
+  /** Output key on the node's result object. */
+  key: string;
+  /** CSS selector (tag/class/id/attribute/descendant), e.g. "h1", ".price", "a.more". */
+  selector: string;
+  /** What to read from the matched element: its text (default), inner HTML, or an
+   *  attribute's value. */
+  return?: "text" | "html" | "attribute";
+  /** Attribute name when `return` is "attribute" (e.g. "href"). */
+  attribute?: string;
+  /** Return every match as an array (default: just the first match's value). */
+  all?: boolean;
+}
+
+/**
+ * HTML Extract node — pull structured values out of an HTML string with CSS selectors
+ * (n8n's HTML node, Extract operation). The HTML comes from an upstream node (`from`/`path`,
+ * e.g. an `httpRequest` body); each extraction reads text / inner HTML / an attribute of
+ * its selector's match(es). Output is `{ [key]: value }`.
+ *
+ * Runs in an ACTIVITY (like `xml`) to keep the HTML parser out of the deterministic
+ * workflow bundle. No secrets, no egress (the fetch is a separate `httpRequest` node).
+ */
+export interface HtmlExtractNodeConfig {
+  /** Upstream node id whose output holds the HTML string. */
+  from: string;
+  /** Optional dotted path into that output (e.g. "body"). */
+  path?: string;
+  /** The fields to extract. */
+  extractions: HtmlExtraction[];
+}
+
+/**
  * Aggregate node — collapse an upstream ARRAY into a single value. PURE. `collect`
  * → the array of `field` values (or whole items when `field` is omitted); `count` →
  * length; `sum` → numeric sum over `field`; `first`/`last` → an end item. Output is
@@ -335,6 +491,23 @@ export interface HmacNodeConfig {
   /** Upstream binding whose value replaces `payload`. */
   payloadBinding?: ArgBinding;
   /** Output digest encoding. Default "hex". */
+  encoding?: "hex" | "base64";
+}
+
+/**
+ * Hash node — a one-way digest of a value (n8n's String.hash()). Unlike `hmac`/`jwt`/`totp`
+ * there is NO key or connection: it just hashes. `input` is the static value; `inputBinding`
+ * overrides it from an upstream output (objects are JSON-stringified before hashing). Output
+ * is `{ digest }`. Runs in an ACTIVITY (node:crypto isn't in the deterministic bundle).
+ */
+export interface HashNodeConfig {
+  /** Digest algorithm (default "sha256"). */
+  algorithm?: "sha256" | "sha512" | "sha1" | "md5";
+  /** Static value to hash (string, or object → JSON). */
+  input?: unknown;
+  /** Upstream binding whose value replaces `input`. */
+  inputBinding?: ArgBinding;
+  /** Output digest encoding (default "hex"). */
   encoding?: "hex" | "base64";
 }
 
@@ -496,6 +669,42 @@ export interface CodeNodeConfig {
  * (a conditional edge into a merge is rejected by `validateGraph`, since a branch
  * that never fires would strand the join); loops back through a merge are undefined.
  */
+/**
+ * IF node — a boolean gate (n8n's IF). Evaluates `conditions` and COMBINES them with AND
+ * (all must hold) or OR (any), producing `{ result: boolean }`. This adds boolean
+ * combination that a single edge condition / Switch rule can't express. The author draws a
+ * true-edge (`<ifId>.result eq true`) and a false-edge (`eq false`). PURE (reuses
+ * `evaluateCondition`, no eval).
+ */
+export interface IfNodeConfig {
+  /** Combine the conditions: "and" (default, all hold) or "or" (any holds). */
+  combine?: "and" | "or";
+  /** The predicates (same op set as edges/filter/switch). Empty ⇒ result is false. */
+  conditions: EdgeCondition[];
+}
+
+/** One named branch of a Switch node — a label plus the predicate that selects it. */
+export interface SwitchRule {
+  /** The branch label; also the value written to `{ matched }` when this rule wins. */
+  name: string;
+  /** Structured predicate (same op set as edges/filter), evaluated against `ctx`. */
+  condition: EdgeCondition;
+}
+
+/**
+ * Switch node — multi-way router (n8n's Switch, Rules mode). Evaluates `rules` IN ORDER
+ * against the run context and outputs `{ matched }` = the FIRST matching rule's name, or
+ * `fallback` when none match. PURE (reuses `evaluateCondition`, no I/O). The author draws
+ * one outgoing edge per branch with `eq` on `<switchId>.matched` — one node instead of N
+ * hand-wired conditional edges on the source.
+ */
+export interface SwitchNodeConfig {
+  /** Ordered branches; the first whose condition holds wins. */
+  rules: SwitchRule[];
+  /** `matched` value when no rule matches (default "default"). */
+  fallback?: string;
+}
+
 export interface MergeNodeConfig {
   /** How to combine the inbound parents' outputs. "array" (default) →
    *  `[parent1, …, parentN]` in declared inbound-edge order; "object" →
@@ -529,9 +738,29 @@ export interface StopAndErrorNodeConfig {
  * path into ctx (e.g. "agent.output.category"); `op` compares the resolved value
  * to `value`. An edge with no condition is unconditional (linear/parallel).
  */
+/** Comparison operators for a structured predicate. All are PURE + deterministic (no
+ *  eval): value/string/number/emptiness checks, plus `regex` (a deterministic `RegExp`
+ *  test). `isEmpty`/`notEmpty`/`exists` ignore `value`. */
+export type ConditionOp =
+  | "eq"
+  | "neq"
+  | "in"
+  | "exists"
+  | "gt"
+  | "lt"
+  | "gte"
+  | "lte"
+  | "contains"
+  | "notContains"
+  | "startsWith"
+  | "endsWith"
+  | "regex"
+  | "isEmpty"
+  | "notEmpty";
+
 export interface EdgeCondition {
   path: string;
-  op: "eq" | "neq" | "in" | "exists" | "gt" | "lt";
+  op: ConditionOp;
   value?: unknown;
 }
 

@@ -67,6 +67,108 @@ describe("evaluateCondition", () => {
       ),
     ).toBe(false);
   });
+
+  it("gte / lte (inclusive, numbers only)", () => {
+    const c = { path: "agent.output.urgency", op: "gte" as const, value: 3 };
+    expect(evaluateCondition(c, ctx)).toBe(true);
+    expect(evaluateCondition({ ...c, value: 4 }, ctx)).toBe(false);
+    expect(
+      evaluateCondition(
+        { path: "agent.output.urgency", op: "lte", value: 3 },
+        ctx,
+      ),
+    ).toBe(true);
+    expect(
+      evaluateCondition(
+        { path: "agent.output.category", op: "gte", value: 3 },
+        ctx,
+      ),
+    ).toBe(false); // non-number
+  });
+
+  it("contains / notContains (string + array)", () => {
+    const s = { agent: { output: { category: "billing-urgent" } } };
+    expect(
+      evaluateCondition(
+        { path: "agent.output.category", op: "contains", value: "urgent" },
+        s,
+      ),
+    ).toBe(true);
+    expect(
+      evaluateCondition(
+        { path: "agent.output.category", op: "notContains", value: "sales" },
+        s,
+      ),
+    ).toBe(true);
+    const arr = { n: { tags: ["a", "b"] } };
+    expect(
+      evaluateCondition({ path: "n.tags", op: "contains", value: "b" }, arr),
+    ).toBe(true);
+    expect(
+      evaluateCondition({ path: "n.tags", op: "contains", value: "z" }, arr),
+    ).toBe(false);
+    // a missing value does not contain the target → notContains is true
+    expect(
+      evaluateCondition(
+        { path: "n.missing", op: "notContains", value: "x" },
+        arr,
+      ),
+    ).toBe(true);
+  });
+
+  it("startsWith / endsWith (coerce non-strings)", () => {
+    const s = { n: { name: "invoice-42", num: 4200 } };
+    expect(
+      evaluateCondition(
+        { path: "n.name", op: "startsWith", value: "invoice" },
+        s,
+      ),
+    ).toBe(true);
+    expect(
+      evaluateCondition({ path: "n.name", op: "endsWith", value: "42" }, s),
+    ).toBe(true);
+    expect(
+      evaluateCondition({ path: "n.num", op: "startsWith", value: "42" }, s),
+    ).toBe(true);
+    expect(
+      evaluateCondition({ path: "n.missing", op: "startsWith", value: "x" }, s),
+    ).toBe(false);
+  });
+
+  it("regex (invalid pattern is false, never throws)", () => {
+    const s = { n: { email: "a@b.co" } };
+    expect(
+      evaluateCondition(
+        { path: "n.email", op: "regex", value: "^[^@]+@[^@]+$" },
+        s,
+      ),
+    ).toBe(true);
+    expect(
+      evaluateCondition({ path: "n.email", op: "regex", value: "^x" }, s),
+    ).toBe(false);
+    expect(
+      evaluateCondition({ path: "n.email", op: "regex", value: "(" }, s),
+    ).toBe(false); // invalid
+    expect(
+      evaluateCondition({ path: "n.missing", op: "regex", value: ".*" }, s),
+    ).toBe(false);
+  });
+
+  it("isEmpty / notEmpty (null, '', [], {})", () => {
+    const s = { n: { a: "", b: [], c: {}, d: null, e: "x", f: [1], g: 0 } };
+    for (const k of ["a", "b", "c", "d", "missing"]) {
+      expect(evaluateCondition({ path: `n.${k}`, op: "isEmpty" }, s)).toBe(
+        true,
+      );
+    }
+    for (const k of ["e", "f"]) {
+      expect(evaluateCondition({ path: `n.${k}`, op: "notEmpty" }, s)).toBe(
+        true,
+      );
+    }
+    // 0 is NOT empty (only null/undefined/""/[]/{})
+    expect(evaluateCondition({ path: "n.g", op: "isEmpty" }, s)).toBe(false);
+  });
 });
 
 const graph: GraphDef = {

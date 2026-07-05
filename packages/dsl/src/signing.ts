@@ -1,5 +1,28 @@
 import { getByPath } from "./mcp-args";
-import type { HmacNodeConfig, JwtNodeConfig } from "./types";
+import type { HashNodeConfig, HmacNodeConfig, JwtNodeConfig } from "./types";
+
+/** The concrete hash request after binding resolution — no key. `input` is the RAW resolved
+ *  value (possibly a claim-check reference the activity rehydrates before hashing). */
+export interface ResolvedHash {
+  algorithm: "sha256" | "sha512" | "sha1" | "md5";
+  input: unknown;
+  encoding: "hex" | "base64";
+}
+
+/** Resolve a hash node's request from ctx. Pure — `inputBinding` overrides the static
+ *  `input`; the raw value is stringified + hashed in the activity. */
+export function resolveHash(
+  config: HashNodeConfig,
+  ctx: Record<string, unknown>,
+): ResolvedHash {
+  return {
+    algorithm: config.algorithm ?? "sha256",
+    input: config.inputBinding
+      ? getByPath(ctx[config.inputBinding.from], config.inputBinding.path)
+      : config.input,
+    encoding: config.encoding ?? "hex",
+  };
+}
 
 /** The concrete hmac request after binding resolution — no secret (the key is
  *  attached in the activity from `connectionId`). `payload` is the RAW resolved
