@@ -22,6 +22,7 @@ const GROUPS: { heading: string; items: NavItemDef[] }[] = [
       { to: "/app", label: "Overview", icon: "grid" },
       { to: "/app/workflows", label: "Workflows", icon: "workflow" },
       { to: "/app/runs", label: "Runs", icon: "activity" },
+      { to: "/app/activity", label: "Activity", icon: "clock" },
       { to: "/app/approvals", label: "Approvals", icon: "approval" },
       { to: "/app/schedules", label: "Schedules", icon: "clock" },
       { to: "/app/templates", label: "Templates", icon: "template" },
