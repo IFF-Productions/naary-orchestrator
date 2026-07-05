@@ -2146,6 +2146,57 @@ function ConfigPanel({
           );
         })()}
 
+      {kind === "json" && (
+        <>
+          <Labeled label="Operation">
+            <select
+              value={str("operation") || "parse"}
+              onChange={(e) => onChange({ operation: e.target.value })}
+              style={inputStyle}
+            >
+              <option value="parse">parse (JSON text → data)</option>
+              <option value="stringify">stringify (data → JSON text)</option>
+            </select>
+          </Labeled>
+          <Labeled label="Source node id">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="upstream-node-id"
+            />
+          </Labeled>
+          <Labeled label="Path (optional)">
+            <input
+              value={str("path")}
+              onChange={(e) => onChange({ path: e.target.value })}
+              style={inputStyle}
+              placeholder="body"
+            />
+          </Labeled>
+          {str("operation") === "stringify" && (
+            <Labeled label="Indent (0 = compact)">
+              <input
+                type="number"
+                min={0}
+                value={num("indent") ?? ""}
+                onChange={(e) =>
+                  onChange({
+                    indent: e.target.value ? Number(e.target.value) : undefined,
+                  })
+                }
+                style={inputStyle}
+                placeholder="0"
+              />
+            </Labeled>
+          )}
+          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+            parse → <code>{node.id}</code> is the value; stringify →{" "}
+            <code>{node.id}.json</code> is the string.
+          </div>
+        </>
+      )}
+
       {kind === "csv" && (
         <>
           <Labeled label="Operation">

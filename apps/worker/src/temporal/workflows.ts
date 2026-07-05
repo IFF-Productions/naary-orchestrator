@@ -20,6 +20,7 @@ import {
   resolveHmac,
   resolveHash,
   resolveIf,
+  resolveJson,
   resolveHttpRequest,
   resolveJwt,
   resolveMcpArguments,
@@ -49,6 +50,7 @@ import type {
   HmacNodeConfig,
   HtmlExtractNodeConfig,
   IfNodeConfig,
+  JsonNodeConfig,
   HttpRequestNodeConfig,
   JwtNodeConfig,
   McpToolNodeConfig,
@@ -604,6 +606,13 @@ export async function runGraph(
         // on `<ifId>.result` (eq true / eq false).
         const ifCfg = node.config as unknown as IfNodeConfig;
         ctx[node.id] = resolveIf(ifCfg, ctx);
+        return null;
+      }
+      case "json": {
+        // Pure node: JSON parse/stringify (deterministic ES built-ins, no activity).
+        // Malformed JSON on parse throws → a node failure onError:"continue" can catch.
+        const jsonCfg = node.config as unknown as JsonNodeConfig;
+        ctx[node.id] = resolveJson(jsonCfg, ctx);
         return null;
       }
       case "hmac": {
