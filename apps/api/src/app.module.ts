@@ -15,6 +15,7 @@ import { ConnectionsModule } from "./connections/connections.module";
 import { ExecutionsModule } from "./executions/executions.module";
 import { GraphsModule } from "./graphs/graphs.module";
 import { HealthModule } from "./health/health.module";
+import { McpModule } from "./mcp/mcp.module";
 import { MembersModule } from "./members/members.module";
 import { MembershipModule } from "./membership/membership.module";
 import { NotificationsModule } from "./notifications/notifications.module";
@@ -46,6 +47,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     NotificationsModule,
     TemplatesModule,
     SchedulesModule,
+    McpModule,
   ],
   controllers: [MetricsController],
   providers: [
