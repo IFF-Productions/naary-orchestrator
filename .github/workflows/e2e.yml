@@ -84,6 +84,27 @@ jobs:
           echo "Using compose command: $CMD"
           echo "cmd=$CMD" >> "$GITHUB_OUTPUT"
 
+      # Pre-flight: the Docker DAEMON must be reachable by THIS user. On a self-hosted Mac
+      # this is the usual second failure — Docker Desktop's socket is owned by the user who
+      # installed it (e.g. /var/run/docker.sock → ~installer/.docker/run/docker.sock, perms
+      # srwxr-xr-x), so a runner running as a DIFFERENT user gets "permission denied ...
+      # /var/run/docker.sock". Fail here with the fix instead of deep in `compose up`.
+      - name: Verify Docker daemon is reachable
+        run: |
+          if docker info >/dev/null 2>&1; then
+            echo "Docker daemon reachable as user '$(whoami)'."
+            exit 0
+          fi
+          cat >&2 <<'MSG'
+          ::error::Cannot reach the Docker daemon as this runner user. macOS Docker Desktop is PER-USER: its socket is owned by the user who installed it, so another user is denied. Fix one of:
+            1) Run the GitHub Actions runner as the user who owns Docker Desktop; or
+            2) Give the runner user its OWN daemon with Colima (recommended for a headless/secondary user):
+                 brew install colima docker docker-compose
+                 colima start        # creates a docker socket owned by this user
+               then re-run. (Keep Colima running, e.g. `brew services` or a login item.)
+          MSG
+          exit 1
+
       - uses: pnpm/action-setup@v4
         with:
           version: 11.9.0
