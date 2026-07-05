@@ -165,11 +165,17 @@ const mockActivities = {
     pollCalls.push(meta);
     return { status: "ok", changed: pollChanged, body: { v: 1 }, costUsd: 0 };
   },
+  sendNotification: async (
+    input: activities.NotificationInput,
+  ): Promise<void> => {
+    notifyCalls.push(input);
+  },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
   setExecutionStatus: async (): Promise<void> => undefined, // read-model push; no-op here
 };
 const pollCalls: activities.PollMeta[] = [];
 let pollChanged = true;
+const notifyCalls: activities.NotificationInput[] = [];
 
 // pollTrigger(entry) → branch on poll.changed: changed → agent → end; else → end.
 const pollGraph: GraphDef = {
@@ -820,6 +826,12 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
         approved: true,
         comment: "looks good",
       });
+      // pausing for approval fired a best-effort tenant notification
+      expect(
+        notifyCalls.some(
+          (n) => n.kind === "approval_pending" && n.tenantId === "t-123",
+        ),
+      ).toBe(true);
     });
   });
 
@@ -1150,6 +1162,12 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
         (e: unknown) => e as { cause?: { message?: string } },
       );
       expect(err.cause?.message).toMatch(/halt: bad input/);
+      // the failure fired a best-effort run_failed notification for the tenant
+      expect(
+        notifyCalls.some(
+          (n) => n.kind === "run_failed" && n.tenantId === "t-stop",
+        ),
+      ).toBe(true);
     });
   });
 

@@ -215,3 +215,14 @@ model TenantSettings {
   defaultModel String? // e.g. 'claude-opus-4-8'
   updatedAt    DateTime @default(now()) @updatedAt
 }
+
+// Per-tenant notification settings. A run notifies (best-effort) via an outbound
+// webhook POST when an approval is pending or a run fails — so a HITL flow that can
+// pause for days actually reaches a human. One row per tenant; absence = off.
+model NotificationSettings {
+  tenantId          String   @id
+  webhookUrl        String? // POST target (Slack/Teams/generic incoming webhook)
+  onApprovalPending Boolean  @default(true)
+  onRunFailed       Boolean  @default(true)
+  updatedAt         DateTime @default(now()) @updatedAt
+}
