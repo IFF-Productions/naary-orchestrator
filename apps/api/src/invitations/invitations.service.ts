@@ -98,8 +98,10 @@ export class InvitationsService {
   /**
    * Accept an invite: verify the token, gate on the accepter's verified email matching the
    * invite, then create the Membership (busts the cache) and mark the invite consumed.
-   * Returns the joined workspace + role. All failure modes surface as a generic 400 so a
-   * probe can't distinguish "no such token" from "expired/used/wrong-email".
+   * Returns the joined workspace + role. Token problems (unknown / expired / already used)
+   * surface as an opaque 400 so a probe can't distinguish them; email problems (unverified /
+   * wrong recipient) return a 403 with an actionable message — only the token holder can
+   * reach that branch, and a legit invitee who signed in with the wrong account needs to know.
    */
   async accept(
     rawToken: string,

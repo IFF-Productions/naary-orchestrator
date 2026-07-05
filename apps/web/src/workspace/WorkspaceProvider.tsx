@@ -26,6 +26,8 @@ export interface WorkspaceState {
   workspaces: Workspace[];
   /** The active workspace id (sent as X-Workspace-Id), or null before one is chosen. */
   activeId: string | null;
+  /** The caller's role in the active workspace ('owner' | 'admin' | 'member' | undefined). */
+  activeRole: string | undefined;
   /** Authenticated but belongs to no workspace → show the create screen. */
   needsWorkspace: boolean;
   /** Failed to load the workspace list (network/server). */
@@ -100,6 +102,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     loading,
     workspaces,
     activeId,
+    activeRole: workspaces.find((w) => w.tenantId === activeId)?.role,
     needsWorkspace: !loading && !error && workspaces.length === 0,
     error,
     setActive,

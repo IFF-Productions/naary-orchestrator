@@ -236,21 +236,44 @@ export const api = {
   getUsage(tenantId: string): Promise<UsageReport> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/usage`);
   },
-  // --- Team (members) ---
+  // --- Team (members = authoritative Membership rows) ---
   listMembers(tenantId: string): Promise<Member[]> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/members`);
   },
-  addMember(tenantId: string, email: string, role?: string): Promise<Member> {
-    return http(`/tenants/${encodeURIComponent(tenantId)}/members`, {
-      method: "POST",
-      body: JSON.stringify({ email, ...(role ? { role } : {}) }),
-    });
-  },
-  removeMember(tenantId: string, memberId: string): Promise<void> {
+  // Remove a member → deletes the Membership + busts their cache (access revoked at once).
+  removeMember(tenantId: string, membershipId: string): Promise<void> {
     return http(
-      `/tenants/${encodeURIComponent(tenantId)}/members/${encodeURIComponent(memberId)}`,
+      `/tenants/${encodeURIComponent(tenantId)}/members/${encodeURIComponent(membershipId)}`,
       { method: "DELETE" },
     );
+  },
+  // --- Invitations ---
+  listInvitations(tenantId: string): Promise<Invitation[]> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/invitations`);
+  },
+  // Create an invite → the raw token is returned ONCE (share the /invite/<token> link).
+  createInvitation(
+    tenantId: string,
+    email: string,
+    role: string,
+  ): Promise<CreatedInvitation> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/invitations`, {
+      method: "POST",
+      body: JSON.stringify({ email, role }),
+    });
+  },
+  revokeInvitation(tenantId: string, invitationId: string): Promise<void> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/invitations/${encodeURIComponent(invitationId)}`,
+      { method: "DELETE" },
+    );
+  },
+  // Accept an invite by its token (token in the body, never the URL). Joins the workspace.
+  acceptInvitation(token: string): Promise<{ tenantId: string; role: string }> {
+    return http(`/invitations/accept`, {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
   },
   // --- Settings ---
   getSettings(tenantId: string): Promise<TenantSettings> {
@@ -473,12 +496,30 @@ export interface UsageReport {
   }[];
   events: unknown[];
 }
+/** A workspace member (an authoritative Membership row). */
 export interface Member {
   id: string;
-  email: string;
+  userId: string;
+  email: string | null;
   role: string;
   createdAt: string;
 }
+
+/** A pending invitation (never includes the token hash). */
+export interface Invitation {
+  id: string;
+  email: string;
+  role: string;
+  invitedBy: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
+/** Result of creating an invitation — carries the raw token exactly once. */
+export interface CreatedInvitation extends Invitation {
+  token: string;
+}
+
 export interface TenantSettings {
   displayName: string | null;
   defaultModel: string | null;

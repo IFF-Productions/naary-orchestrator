@@ -19,6 +19,12 @@ export const router = createBrowserRouter([
     ...lazy(() => import("./screens/DesignSystemPage"), "DesignSystemPage"),
   },
   { path: "/auth", ...lazy(() => import("./screens/AuthPage"), "AuthPage") },
+  // Accept-invitation link — outside RequireAuth's workspace gate (a brand-new invitee
+  // has no workspace yet; accepting is how they get their first). Handles its own auth.
+  {
+    path: "/invite/:token",
+    ...lazy(() => import("./screens/InviteAccept"), "InviteAccept"),
+  },
   // Everything under here requires a Keycloak session or a pasted nry_ token.
   {
     element: <RequireAuth />,
