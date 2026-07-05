@@ -1817,6 +1817,181 @@ function ConfigPanel({
         </>
       )}
 
+      {kind === "htmlExtract" &&
+        (() => {
+          const extractions =
+            (config.extractions as
+              | Array<{
+                  key?: string;
+                  selector?: string;
+                  return?: string;
+                  attribute?: string;
+                  all?: boolean;
+                }>
+              | undefined) ?? [];
+          const setEx = (next: typeof extractions) =>
+            onChange({ extractions: next });
+          return (
+            <>
+              <Labeled label="HTML source node id">
+                <input
+                  value={str("from")}
+                  onChange={(e) => onChange({ from: e.target.value })}
+                  style={inputStyle}
+                  placeholder="upstream-http-node"
+                />
+              </Labeled>
+              <Labeled label="Path (optional)">
+                <input
+                  value={str("path")}
+                  onChange={(e) => onChange({ path: e.target.value })}
+                  style={inputStyle}
+                  placeholder="body"
+                />
+              </Labeled>
+              <div
+                style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}
+              >
+                Each row reads a CSS selector's match into{" "}
+                <code>{node.id}.&lt;key&gt;</code>.
+              </div>
+              {extractions.map((ex, i) => (
+                <div
+                  // biome-ignore lint/suspicious/noArrayIndexKey: positional rows
+                  key={i}
+                  style={{
+                    border: "1px solid var(--line)",
+                    borderRadius: 8,
+                    padding: 10,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      value={ex.key ?? ""}
+                      onChange={(e) =>
+                        setEx(
+                          extractions.map((x, j) =>
+                            j === i ? { ...x, key: e.target.value } : x,
+                          ),
+                        )
+                      }
+                      style={inputStyle}
+                      placeholder="key (e.g. title)"
+                    />
+                    <button
+                      type="button"
+                      aria-label="Remove extraction"
+                      onClick={() =>
+                        setEx(extractions.filter((_, j) => j !== i))
+                      }
+                      style={{
+                        border: "1px solid var(--line-2)",
+                        background: "var(--card)",
+                        color: "var(--ink-2)",
+                        borderRadius: 7,
+                        cursor: "pointer",
+                        padding: "6px 10px",
+                        flex: "none",
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <input
+                    value={ex.selector ?? ""}
+                    onChange={(e) =>
+                      setEx(
+                        extractions.map((x, j) =>
+                          j === i ? { ...x, selector: e.target.value } : x,
+                        ),
+                      )
+                    }
+                    style={inputStyle}
+                    placeholder="CSS selector (e.g. h1, .price, a.more)"
+                  />
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <select
+                      value={ex.return ?? "text"}
+                      onChange={(e) =>
+                        setEx(
+                          extractions.map((x, j) =>
+                            j === i ? { ...x, return: e.target.value } : x,
+                          ),
+                        )
+                      }
+                      style={inputStyle}
+                    >
+                      <option value="text">text</option>
+                      <option value="html">inner HTML</option>
+                      <option value="attribute">attribute</option>
+                    </select>
+                    {ex.return === "attribute" && (
+                      <input
+                        value={ex.attribute ?? ""}
+                        onChange={(e) =>
+                          setEx(
+                            extractions.map((x, j) =>
+                              j === i ? { ...x, attribute: e.target.value } : x,
+                            ),
+                          )
+                        }
+                        style={inputStyle}
+                        placeholder="attribute (e.g. href)"
+                      />
+                    )}
+                  </div>
+                  <label
+                    style={{
+                      display: "flex",
+                      gap: 6,
+                      alignItems: "center",
+                      fontSize: 12,
+                      color: "var(--ink-2)",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={Boolean(ex.all)}
+                      onChange={(e) =>
+                        setEx(
+                          extractions.map((x, j) =>
+                            j === i ? { ...x, all: e.target.checked } : x,
+                          ),
+                        )
+                      }
+                    />
+                    Return all matches (array)
+                  </label>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() =>
+                  setEx([
+                    ...extractions,
+                    { key: "", selector: "", return: "text" },
+                  ])
+                }
+                style={{
+                  alignSelf: "flex-start",
+                  border: "1px solid var(--line-2)",
+                  background: "var(--card)",
+                  color: "var(--ink-2)",
+                  borderRadius: 7,
+                  cursor: "pointer",
+                  padding: "6px 10px",
+                  fontSize: 12,
+                }}
+              >
+                + Add extraction
+              </button>
+            </>
+          );
+        })()}
+
       {kind === "dateTime" && (
         <>
           <Labeled label="Source node id (blank = current time)">

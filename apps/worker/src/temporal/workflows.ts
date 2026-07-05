@@ -42,6 +42,7 @@ import type {
   GraphDef,
   ListOpsNodeConfig,
   HmacNodeConfig,
+  HtmlExtractNodeConfig,
   HttpRequestNodeConfig,
   JwtNodeConfig,
   McpToolNodeConfig,
@@ -78,6 +79,7 @@ const {
   callJwt,
   callTotp,
   callXml,
+  callHtmlExtract,
 } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },
@@ -500,6 +502,23 @@ export async function runGraph(
           },
         );
         ctx[node.id] = result.result;
+        return null;
+      }
+      case "htmlExtract": {
+        // Pull values from an HTML string by CSS selector. HTML resolved here (pure ctx
+        // read); the parse runs in the activity (parser out of the deterministic bundle).
+        const htmlCfg = node.config as unknown as HtmlExtractNodeConfig;
+        const htmlVal = getByPath(ctx[htmlCfg.from], htmlCfg.path);
+        const res = await callHtmlExtract(
+          { extractions: htmlCfg.extractions ?? [] },
+          htmlVal,
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
+        ctx[node.id] = res.result;
         return null;
       }
       case "dateTime": {

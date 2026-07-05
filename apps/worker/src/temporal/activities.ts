@@ -10,6 +10,7 @@ import { ApplicationFailure } from "@temporalio/activity";
 import { SignJWT, importPKCS8 } from "jose";
 import nodemailer from "nodemailer";
 import { XMLBuilder, XMLParser } from "fast-xml-parser";
+import { parse as parseHtml } from "node-html-parser";
 import { getQuickJS, shouldInterruptAfterDeadline } from "quickjs-emscripten";
 import { canonicalize, getByPath } from "@naary/dsl";
 import type {
@@ -867,6 +868,79 @@ export interface XmlResult {
  * of the deterministic workflow bundle. Claim-checked input is rehydrated first; a
  * large result is offloaded.
  */
+export interface HtmlExtraction {
+  key: string;
+  selector: string;
+  return?: "text" | "html" | "attribute";
+  attribute?: string;
+  all?: boolean;
+}
+export interface HtmlExtractConfig {
+  extractions: HtmlExtraction[];
+}
+export interface HtmlExtractResult {
+  status: "ok";
+  result: Record<string, unknown>;
+  costUsd: number;
+}
+
+/**
+ * htmlExtract node — pull values out of an HTML string with CSS selectors. Pure transform
+ * (no secrets, no egress — the fetch is a separate httpRequest node), but runs in an activity
+ * to keep the HTML parser out of the deterministic workflow bundle (like callXml). Each
+ * extraction reads a matched element's text / inner HTML / attribute; `all` returns every
+ * match. Claim-checked input is rehydrated first; a large result is offloaded.
+ */
+export async function callHtmlExtract(
+  cfg: HtmlExtractConfig,
+  input: unknown,
+  meta: AgentMeta,
+): Promise<HtmlExtractResult> {
+  const startedAt = process.hrtime.bigint();
+  const store = getObjectStore();
+  const value = await resolveClaimChecks(input, store);
+  try {
+    const root = parseHtml(String(value));
+    const readEl = (
+      el: ReturnType<typeof root.querySelector>,
+      ex: HtmlExtraction,
+    ): string | null => {
+      if (!el) return null;
+      if (ex.return === "html") return el.innerHTML;
+      if (ex.return === "attribute")
+        return el.getAttribute(ex.attribute ?? "") ?? null;
+      return el.text.trim();
+    };
+    const out: Record<string, unknown> = {};
+    for (const ex of cfg.extractions ?? []) {
+      if (!ex.key || !ex.selector) continue;
+      out[ex.key] = ex.all
+        ? root.querySelectorAll(ex.selector).map((el) => readEl(el, ex))
+        : readEl(root.querySelector(ex.selector), ex);
+    }
+    const offloaded = await maybeOffload(out, store, {
+      keyPrefix: `html/${meta.tenantId}`,
+    });
+    activityRuns.inc({ activity: "callHtmlExtract", outcome: "ok" });
+    activityDuration.observe(
+      { activity: "callHtmlExtract" },
+      secondsSince(startedAt),
+    );
+    return {
+      status: "ok",
+      result: offloaded as Record<string, unknown>,
+      costUsd: 0,
+    };
+  } catch {
+    activityRuns.inc({ activity: "callHtmlExtract", outcome: "error" });
+    activityDuration.observe(
+      { activity: "callHtmlExtract" },
+      secondsSince(startedAt),
+    );
+    throw ApplicationFailure.nonRetryable("HTML extract failed", "HTML_ERROR");
+  }
+}
+
 export async function callXml(
   cfg: XmlConfig,
   input: unknown,

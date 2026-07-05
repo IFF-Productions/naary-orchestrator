@@ -20,6 +20,7 @@ export type NodeType =
   | "listOps" // pure: sort / limit / dedupe an array → array
   | "compareDatasets" // pure: diff two arrays by a key → {added,removed,changed,same}
   | "xml" // parse XML→object / build object→XML (activity; fast-xml-parser)
+  | "htmlExtract" // pull values out of an HTML string by CSS selector (activity)
   | "dateTime" // current time / timestamp math via an activity (clock read is I/O)
   | "merge" // fan-in join: run once after all inbound branches arrive; combine outputs
   | "switch" // multi-way router: first matching rule → output {matched}; branch edges on it
@@ -296,6 +297,39 @@ export interface XmlNodeConfig {
   from: string;
   /** Optional dotted path into that output. */
   path?: string;
+}
+
+/** One field to pull out of an HTML document by CSS selector (HTML Extract node). */
+export interface HtmlExtraction {
+  /** Output key on the node's result object. */
+  key: string;
+  /** CSS selector (tag/class/id/attribute/descendant), e.g. "h1", ".price", "a.more". */
+  selector: string;
+  /** What to read from the matched element: its text (default), inner HTML, or an
+   *  attribute's value. */
+  return?: "text" | "html" | "attribute";
+  /** Attribute name when `return` is "attribute" (e.g. "href"). */
+  attribute?: string;
+  /** Return every match as an array (default: just the first match's value). */
+  all?: boolean;
+}
+
+/**
+ * HTML Extract node — pull structured values out of an HTML string with CSS selectors
+ * (n8n's HTML node, Extract operation). The HTML comes from an upstream node (`from`/`path`,
+ * e.g. an `httpRequest` body); each extraction reads text / inner HTML / an attribute of
+ * its selector's match(es). Output is `{ [key]: value }`.
+ *
+ * Runs in an ACTIVITY (like `xml`) to keep the HTML parser out of the deterministic
+ * workflow bundle. No secrets, no egress (the fetch is a separate `httpRequest` node).
+ */
+export interface HtmlExtractNodeConfig {
+  /** Upstream node id whose output holds the HTML string. */
+  from: string;
+  /** Optional dotted path into that output (e.g. "body"). */
+  path?: string;
+  /** The fields to extract. */
+  extractions: HtmlExtraction[];
 }
 
 /**
