@@ -42,6 +42,13 @@ export interface NodeDef {
   type: NodeType;
   /** Node-specific configuration, e.g. the agent node's canned output. */
   config?: Record<string, unknown>;
+  /**
+   * What to do when this node throws (n8n's per-node "On Error"). "stop" (default) fails
+   * the run — the workflow-level error handler, if bound, then fires. "continue" catches
+   * the failure, writes `{ error }` as this node's output, and proceeds — so the graph can
+   * branch on `<nodeId>.error` (exists) to handle it inline (n8n's error-output branch).
+   */
+  onError?: "stop" | "continue";
 }
 
 /**

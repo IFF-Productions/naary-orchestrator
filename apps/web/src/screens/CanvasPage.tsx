@@ -1045,6 +1045,33 @@ function ConfigPanel({
         {NODE_DESCRIPTION[kind]}
       </div>
 
+      {/* Per-node error policy (n8n's "On Error"), shown for nodes that can fail. */}
+      {ERRORABLE_KINDS.has(kind) && (
+        <Labeled label="On error">
+          <select
+            value={str("onError") || "stop"}
+            onChange={(e) =>
+              onChange({
+                onError: e.target.value === "continue" ? "continue" : undefined,
+              })
+            }
+            style={inputStyle}
+          >
+            <option value="stop">Stop the run (default)</option>
+            <option value="continue">
+              Continue — output an error and carry on
+            </option>
+          </select>
+          {str("onError") === "continue" && (
+            <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>
+              On failure this node outputs <code>{node.id}.error</code> and the
+              flow continues — branch on it (op <code>exists</code>) to handle
+              it.
+            </div>
+          )}
+        </Labeled>
+      )}
+
       {kind === "agent" && (
         <>
           <Labeled label="Provider">
@@ -2582,6 +2609,26 @@ const STRING_OPS = [
   "endsWith",
   "regex",
 ];
+
+/** Node kinds that call activities / can genuinely fail — the ones "On error" applies to. */
+const ERRORABLE_KINDS = new Set<NodeType>([
+  "agent",
+  "mcpTool",
+  "httpRequest",
+  "sqlQuery",
+  "sqlExec",
+  "sendEmail",
+  "rssRead",
+  "xml",
+  "dateTime",
+  "code",
+  "hmac",
+  "jwt",
+  "totp",
+  "executeSubWorkflow",
+  "forEach",
+  "pollTrigger",
+]);
 
 /** Editor for a structured predicate (path/op/value) stored as a DSL EdgeCondition
  *  on the filter node's config. Coerces the value on change (like the edge editor). */

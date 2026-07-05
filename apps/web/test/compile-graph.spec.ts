@@ -149,4 +149,37 @@ describe("compileGraph", () => {
       });
     });
   });
+
+  describe("onError (per-node error policy)", () => {
+    const base: CanvasNode[] = [
+      { id: "s", type: "start", position: at(0) },
+      { id: "h", type: "httpRequest", position: at(1) },
+    ];
+    const wire: CanvasEdge[] = [{ id: "e", source: "s", target: "h" }];
+
+    it("lifts config.onError:'continue' to the NodeDef field and strips it from config", () => {
+      const nodes = base.map((n) =>
+        n.id === "h"
+          ? { ...n, config: { url: "https://x.test", onError: "continue" } }
+          : n,
+      );
+      const { graph } = compileGraph(nodes, wire);
+      const h = graph?.nodes.find((n) => n.id === "h");
+      expect(h?.onError).toBe("continue");
+      // stripped from config; the type-specific config survives
+      expect(h?.config).toEqual({ url: "https://x.test" });
+      expect((h?.config as Record<string, unknown>)?.onError).toBeUndefined();
+    });
+
+    it("omits onError when 'stop' (the default) and drops an onError-only config", () => {
+      const nodes = base.map((n) =>
+        n.id === "h" ? { ...n, config: { onError: "stop" } } : n,
+      );
+      const h = compileGraph(nodes, wire).graph?.nodes.find(
+        (n) => n.id === "h",
+      );
+      expect(h?.onError).toBeUndefined();
+      expect(h?.config).toBeUndefined(); // config had only the default → omitted
+    });
+  });
 });

@@ -48,13 +48,19 @@ export function compileGraph(
     };
   }
 
-  const graphNodes: NodeDef[] = nodes.map((n) => ({
-    id: n.id,
-    type: n.type,
-    ...(n.config && Object.keys(n.config).length > 0
-      ? { config: n.config }
-      : {}),
-  }));
+  const graphNodes: NodeDef[] = nodes.map((n) => {
+    // `onError` is a first-class NodeDef field but is edited in config-space on the canvas;
+    // lift it out (only when "continue" — "stop" is the default) so it doesn't ride in config.
+    const cfg = n.config ? { ...n.config } : undefined;
+    const onError = cfg?.onError;
+    if (cfg) delete cfg.onError;
+    return {
+      id: n.id,
+      type: n.type,
+      ...(cfg && Object.keys(cfg).length > 0 ? { config: cfg } : {}),
+      ...(onError === "continue" ? { onError: "continue" as const } : {}),
+    };
+  });
   const graphEdges: EdgeDef[] = edges.map((e) => {
     const condition = buildCondition(e.condition);
     return {

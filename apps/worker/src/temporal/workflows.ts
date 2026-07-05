@@ -204,6 +204,25 @@ export interface ResumeState {
 }
 
 /**
+ * Sanitized, bounded failure message for a node's error output (onError: "continue").
+ * Temporal wraps an activity failure in ActivityFailure whose `cause` carries the real
+ * message; unwrap to the innermost cause, then cap length so a huge error can't bloat the
+ * ctx/history. Activity errors are already sanitized upstream (toSanitizedRetryable), so
+ * this never surfaces secrets.
+ */
+function nodeErrorMessage(err: unknown): string {
+  let e: unknown = err;
+  // Drill through wrapped failures (ActivityFailure → cause → …) to the root message.
+  for (let i = 0; i < 5 && e && typeof e === "object" && "cause" in e; i++) {
+    const cause = (e as { cause?: unknown }).cause;
+    if (!cause) break;
+    e = cause;
+  }
+  const msg = e instanceof Error ? e.message : String(e);
+  return msg.length > 500 ? `${msg.slice(0, 500)}…` : msg;
+}
+
+/**
  * The generic interpreter: one workflow walks graph DATA (CLAUDE.md Tier-1
  * rule 1 — interpreter, not codegen). Deterministic — all side effects go
  * through activities; the human-approval pause is a Signal + condition(), never
@@ -962,7 +981,20 @@ export async function runGraph(
         if (arrived < expected) return null;
       }
 
-      const terminal = await execNode(node);
+      // Per-node error policy (n8n's "On Error"). "continue" catches a node failure,
+      // records `{ error }` as its output, and proceeds so the graph can branch on
+      // `<nodeId>.error`; "stop" (default) rethrows to fail the run (the workflow-level
+      // error handler, if bound, then fires). The catch is deterministic — Temporal
+      // records the activity failure in history and replays it identically. costUsd
+      // accumulated before the failure is kept (already metered).
+      let terminal: ExecutionStatus | null;
+      try {
+        terminal = await execNode(node);
+      } catch (err) {
+        if (node.onError !== "continue") throw err;
+        ctx[node.id] = { error: nodeErrorMessage(err) };
+        terminal = null;
+      }
       if (terminal !== null) return terminal;
 
       const nexts = nextNodes(graph, current, ctx);
