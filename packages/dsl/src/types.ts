@@ -24,6 +24,7 @@ export type NodeType =
   | "htmlExtract" // pull values out of an HTML string by CSS selector (activity)
   | "csv" // parse CSV text→rows / build rows→CSV text (activity; papaparse)
   | "json" // pure: parse JSON text→value / stringify value→text
+  | "number" // pure: arithmetic on numbers (add/sub/mul/div/mod/pow/round/floor/ceil/abs)
   | "dateTime" // current time / timestamp math via an activity (clock read is I/O)
   | "merge" // fan-in join: run once after all inbound branches arrive; combine outputs
   | "if" // boolean gate: combine N predicates with AND/OR → output {result}
@@ -361,6 +362,39 @@ export interface CsvNodeConfig {
   header?: boolean;
   /** Field delimiter (default ","). */
   delimiter?: string;
+}
+
+/** Arithmetic operations for the Number node. Binary use `a` and `b`; unary use `a`. */
+export type MathOp =
+  | "add"
+  | "subtract"
+  | "multiply"
+  | "divide"
+  | "modulo"
+  | "power"
+  | "round"
+  | "floor"
+  | "ceil"
+  | "abs";
+
+/**
+ * Number (Math) node — one arithmetic operation. Operands come from a static value or an
+ * upstream binding (coerced with Number()). Binary ops (add/subtract/multiply/divide/
+ * modulo/power) use `a` and `b`; unary ops (round/floor/ceil/abs) use `a` (round honors
+ * `precision`). PURE + deterministic → runs in the interpreter. Output is `{ result }`.
+ */
+export interface NumberNodeConfig {
+  operation: MathOp;
+  /** Left operand (static). */
+  a?: number;
+  /** Left operand from an upstream output (overrides `a`). */
+  aBinding?: ArgBinding;
+  /** Right operand (static; binary ops only). */
+  b?: number;
+  /** Right operand from an upstream output (overrides `b`). */
+  bBinding?: ArgBinding;
+  /** round: decimal places to keep (default 0). */
+  precision?: number;
 }
 
 /**

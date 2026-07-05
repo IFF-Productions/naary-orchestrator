@@ -2197,6 +2197,146 @@ function ConfigPanel({
         </>
       )}
 
+      {kind === "number" &&
+        (() => {
+          const op = str("operation") || "add";
+          const binary = [
+            "add",
+            "subtract",
+            "multiply",
+            "divide",
+            "modulo",
+            "power",
+          ].includes(op);
+          const bind = (k: "aBinding" | "bBinding") =>
+            (config[k] as { from?: string; path?: string } | undefined) ?? {};
+          const setBind = (
+            k: "aBinding" | "bBinding",
+            patch: { from?: string; path?: string },
+          ) => {
+            const next = { ...bind(k), ...patch };
+            onChange({ [k]: next.from ? next : undefined });
+          };
+          return (
+            <>
+              <Labeled label="Operation">
+                <select
+                  value={op}
+                  onChange={(e) => onChange({ operation: e.target.value })}
+                  style={inputStyle}
+                >
+                  <option value="add">Add (a + b)</option>
+                  <option value="subtract">Subtract (a − b)</option>
+                  <option value="multiply">Multiply (a × b)</option>
+                  <option value="divide">Divide (a ÷ b)</option>
+                  <option value="modulo">Modulo (a % b)</option>
+                  <option value="power">Power (a ^ b)</option>
+                  <option value="round">Round (a)</option>
+                  <option value="floor">Floor (a)</option>
+                  <option value="ceil">Ceil (a)</option>
+                  <option value="abs">Absolute (a)</option>
+                </select>
+              </Labeled>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Labeled label="a (value)">
+                  <input
+                    type="number"
+                    value={num("a") ?? ""}
+                    onChange={(e) =>
+                      onChange({
+                        a: e.target.value ? Number(e.target.value) : undefined,
+                      })
+                    }
+                    style={inputStyle}
+                    placeholder="0"
+                  />
+                </Labeled>
+                <Labeled label="a from node">
+                  <input
+                    value={bind("aBinding").from ?? ""}
+                    onChange={(e) =>
+                      setBind("aBinding", { from: e.target.value })
+                    }
+                    style={inputStyle}
+                    placeholder="node id"
+                  />
+                </Labeled>
+                <Labeled label="a path">
+                  <input
+                    value={bind("aBinding").path ?? ""}
+                    onChange={(e) =>
+                      setBind("aBinding", { path: e.target.value })
+                    }
+                    style={inputStyle}
+                    placeholder="x"
+                  />
+                </Labeled>
+              </div>
+              {binary && (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Labeled label="b (value)">
+                    <input
+                      type="number"
+                      value={num("b") ?? ""}
+                      onChange={(e) =>
+                        onChange({
+                          b: e.target.value
+                            ? Number(e.target.value)
+                            : undefined,
+                        })
+                      }
+                      style={inputStyle}
+                      placeholder="0"
+                    />
+                  </Labeled>
+                  <Labeled label="b from node">
+                    <input
+                      value={bind("bBinding").from ?? ""}
+                      onChange={(e) =>
+                        setBind("bBinding", { from: e.target.value })
+                      }
+                      style={inputStyle}
+                      placeholder="node id"
+                    />
+                  </Labeled>
+                  <Labeled label="b path">
+                    <input
+                      value={bind("bBinding").path ?? ""}
+                      onChange={(e) =>
+                        setBind("bBinding", { path: e.target.value })
+                      }
+                      style={inputStyle}
+                      placeholder="y"
+                    />
+                  </Labeled>
+                </div>
+              )}
+              {op === "round" && (
+                <Labeled label="Decimal places">
+                  <input
+                    type="number"
+                    min={0}
+                    value={num("precision") ?? ""}
+                    onChange={(e) =>
+                      onChange({
+                        precision: e.target.value
+                          ? Number(e.target.value)
+                          : undefined,
+                      })
+                    }
+                    style={inputStyle}
+                    placeholder="0"
+                  />
+                </Labeled>
+              )}
+              <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+                Result is <code>{node.id}.result</code>. A binding (from/path)
+                overrides the static value.
+              </div>
+            </>
+          );
+        })()}
+
       {kind === "csv" && (
         <>
           <Labeled label="Operation">
