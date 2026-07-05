@@ -23,8 +23,11 @@ export type NodeType =
   | "xml" // parse XML→object / build object→XML (activity; fast-xml-parser)
   | "htmlExtract" // pull values out of an HTML string by CSS selector (activity)
   | "csv" // parse CSV text→rows / build rows→CSV text (activity; papaparse)
+  | "json" // pure: parse JSON text→value / stringify value→text
+  | "number" // pure: arithmetic on numbers (add/sub/mul/div/mod/pow/round/floor/ceil/abs)
   | "dateTime" // current time / timestamp math via an activity (clock read is I/O)
   | "merge" // fan-in join: run once after all inbound branches arrive; combine outputs
+  | "if" // boolean gate: combine N predicates with AND/OR → output {result}
   | "switch" // multi-way router: first matching rule → output {matched}; branch edges on it
   | "hmac" // signs a payload with a `signing` connection's key (activity); output is the digest
   | "jwt" // mints an HS256 JWT signed by a `signing` connection's key (activity)
@@ -361,6 +364,55 @@ export interface CsvNodeConfig {
   delimiter?: string;
 }
 
+/** Arithmetic operations for the Number node. Binary use `a` and `b`; unary use `a`. */
+export type MathOp =
+  | "add"
+  | "subtract"
+  | "multiply"
+  | "divide"
+  | "modulo"
+  | "power"
+  | "round"
+  | "floor"
+  | "ceil"
+  | "abs";
+
+/**
+ * Number (Math) node — one arithmetic operation. Operands come from a static value or an
+ * upstream binding (coerced with Number()). Binary ops (add/subtract/multiply/divide/
+ * modulo/power) use `a` and `b`; unary ops (round/floor/ceil/abs) use `a` (round honors
+ * `precision`). PURE + deterministic → runs in the interpreter. Output is `{ result }`.
+ */
+export interface NumberNodeConfig {
+  operation: MathOp;
+  /** Left operand (static). */
+  a?: number;
+  /** Left operand from an upstream output (overrides `a`). */
+  aBinding?: ArgBinding;
+  /** Right operand (static; binary ops only). */
+  b?: number;
+  /** Right operand from an upstream output (overrides `b`). */
+  bBinding?: ArgBinding;
+  /** round: decimal places to keep (default 0). */
+  precision?: number;
+}
+
+/**
+ * JSON node — parse a JSON string into a value, or stringify a value into JSON text. PURE
+ * (JSON.parse/stringify are deterministic ES built-ins — no I/O, no activity). `parse` output
+ * IS the parsed value (object/array/…); `stringify` output is `{ json }`. Invalid JSON on
+ * parse throws a node failure (so `onError: continue` can branch on it).
+ */
+export interface JsonNodeConfig {
+  operation: "parse" | "stringify";
+  /** Upstream node id whose output holds the JSON string (parse) or value (stringify). */
+  from: string;
+  /** Optional dotted path into that output. */
+  path?: string;
+  /** stringify: indent width for pretty-printing (0/omitted = compact). */
+  indent?: number;
+}
+
 /** One field to pull out of an HTML document by CSS selector (HTML Extract node). */
 export interface HtmlExtraction {
   /** Output key on the node's result object. */
@@ -617,6 +669,20 @@ export interface CodeNodeConfig {
  * (a conditional edge into a merge is rejected by `validateGraph`, since a branch
  * that never fires would strand the join); loops back through a merge are undefined.
  */
+/**
+ * IF node — a boolean gate (n8n's IF). Evaluates `conditions` and COMBINES them with AND
+ * (all must hold) or OR (any), producing `{ result: boolean }`. This adds boolean
+ * combination that a single edge condition / Switch rule can't express. The author draws a
+ * true-edge (`<ifId>.result eq true`) and a false-edge (`eq false`). PURE (reuses
+ * `evaluateCondition`, no eval).
+ */
+export interface IfNodeConfig {
+  /** Combine the conditions: "and" (default, all hold) or "or" (any holds). */
+  combine?: "and" | "or";
+  /** The predicates (same op set as edges/filter/switch). Empty ⇒ result is false. */
+  conditions: EdgeCondition[];
+}
+
 /** One named branch of a Switch node — a label plus the predicate that selects it. */
 export interface SwitchRule {
   /** The branch label; also the value written to `{ matched }` when this rule wins. */

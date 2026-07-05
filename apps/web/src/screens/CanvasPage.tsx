@@ -2146,6 +2146,197 @@ function ConfigPanel({
           );
         })()}
 
+      {kind === "json" && (
+        <>
+          <Labeled label="Operation">
+            <select
+              value={str("operation") || "parse"}
+              onChange={(e) => onChange({ operation: e.target.value })}
+              style={inputStyle}
+            >
+              <option value="parse">parse (JSON text → data)</option>
+              <option value="stringify">stringify (data → JSON text)</option>
+            </select>
+          </Labeled>
+          <Labeled label="Source node id">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="upstream-node-id"
+            />
+          </Labeled>
+          <Labeled label="Path (optional)">
+            <input
+              value={str("path")}
+              onChange={(e) => onChange({ path: e.target.value })}
+              style={inputStyle}
+              placeholder="body"
+            />
+          </Labeled>
+          {str("operation") === "stringify" && (
+            <Labeled label="Indent (0 = compact)">
+              <input
+                type="number"
+                min={0}
+                value={num("indent") ?? ""}
+                onChange={(e) =>
+                  onChange({
+                    indent: e.target.value ? Number(e.target.value) : undefined,
+                  })
+                }
+                style={inputStyle}
+                placeholder="0"
+              />
+            </Labeled>
+          )}
+          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+            parse → <code>{node.id}</code> is the value; stringify →{" "}
+            <code>{node.id}.json</code> is the string.
+          </div>
+        </>
+      )}
+
+      {kind === "number" &&
+        (() => {
+          const op = str("operation") || "add";
+          const binary = [
+            "add",
+            "subtract",
+            "multiply",
+            "divide",
+            "modulo",
+            "power",
+          ].includes(op);
+          const bind = (k: "aBinding" | "bBinding") =>
+            (config[k] as { from?: string; path?: string } | undefined) ?? {};
+          const setBind = (
+            k: "aBinding" | "bBinding",
+            patch: { from?: string; path?: string },
+          ) => {
+            const next = { ...bind(k), ...patch };
+            onChange({ [k]: next.from ? next : undefined });
+          };
+          return (
+            <>
+              <Labeled label="Operation">
+                <select
+                  value={op}
+                  onChange={(e) => onChange({ operation: e.target.value })}
+                  style={inputStyle}
+                >
+                  <option value="add">Add (a + b)</option>
+                  <option value="subtract">Subtract (a − b)</option>
+                  <option value="multiply">Multiply (a × b)</option>
+                  <option value="divide">Divide (a ÷ b)</option>
+                  <option value="modulo">Modulo (a % b)</option>
+                  <option value="power">Power (a ^ b)</option>
+                  <option value="round">Round (a)</option>
+                  <option value="floor">Floor (a)</option>
+                  <option value="ceil">Ceil (a)</option>
+                  <option value="abs">Absolute (a)</option>
+                </select>
+              </Labeled>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Labeled label="a (value)">
+                  <input
+                    type="number"
+                    value={num("a") ?? ""}
+                    onChange={(e) =>
+                      onChange({
+                        a: e.target.value ? Number(e.target.value) : undefined,
+                      })
+                    }
+                    style={inputStyle}
+                    placeholder="0"
+                  />
+                </Labeled>
+                <Labeled label="a from node">
+                  <input
+                    value={bind("aBinding").from ?? ""}
+                    onChange={(e) =>
+                      setBind("aBinding", { from: e.target.value })
+                    }
+                    style={inputStyle}
+                    placeholder="node id"
+                  />
+                </Labeled>
+                <Labeled label="a path">
+                  <input
+                    value={bind("aBinding").path ?? ""}
+                    onChange={(e) =>
+                      setBind("aBinding", { path: e.target.value })
+                    }
+                    style={inputStyle}
+                    placeholder="x"
+                  />
+                </Labeled>
+              </div>
+              {binary && (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Labeled label="b (value)">
+                    <input
+                      type="number"
+                      value={num("b") ?? ""}
+                      onChange={(e) =>
+                        onChange({
+                          b: e.target.value
+                            ? Number(e.target.value)
+                            : undefined,
+                        })
+                      }
+                      style={inputStyle}
+                      placeholder="0"
+                    />
+                  </Labeled>
+                  <Labeled label="b from node">
+                    <input
+                      value={bind("bBinding").from ?? ""}
+                      onChange={(e) =>
+                        setBind("bBinding", { from: e.target.value })
+                      }
+                      style={inputStyle}
+                      placeholder="node id"
+                    />
+                  </Labeled>
+                  <Labeled label="b path">
+                    <input
+                      value={bind("bBinding").path ?? ""}
+                      onChange={(e) =>
+                        setBind("bBinding", { path: e.target.value })
+                      }
+                      style={inputStyle}
+                      placeholder="y"
+                    />
+                  </Labeled>
+                </div>
+              )}
+              {op === "round" && (
+                <Labeled label="Decimal places">
+                  <input
+                    type="number"
+                    min={0}
+                    value={num("precision") ?? ""}
+                    onChange={(e) =>
+                      onChange({
+                        precision: e.target.value
+                          ? Number(e.target.value)
+                          : undefined,
+                      })
+                    }
+                    style={inputStyle}
+                    placeholder="0"
+                  />
+                </Labeled>
+              )}
+              <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+                Result is <code>{node.id}.result</code>. A binding (from/path)
+                overrides the static value.
+              </div>
+            </>
+          );
+        })()}
+
       {kind === "csv" && (
         <>
           <Labeled label="Operation">
@@ -2270,6 +2461,92 @@ function ConfigPanel({
           </div>
         </>
       )}
+
+      {kind === "if" &&
+        (() => {
+          const conditions =
+            (config.conditions as
+              | Array<{ path?: string; op?: string; value?: unknown }>
+              | undefined) ?? [];
+          const setConds = (next: typeof conditions) =>
+            onChange({ conditions: next });
+          return (
+            <>
+              <Labeled label="Combine">
+                <select
+                  value={str("combine") || "and"}
+                  onChange={(e) => onChange({ combine: e.target.value })}
+                  style={inputStyle}
+                >
+                  <option value="and">AND — all must be true</option>
+                  <option value="or">OR — any can be true</option>
+                </select>
+              </Labeled>
+              <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+                Result is <code>{node.id}.result</code> (boolean). Draw a
+                true-edge (<code>result eq true</code>) and a false-edge.
+              </div>
+              {conditions.map((c, i) => (
+                <div
+                  // biome-ignore lint/suspicious/noArrayIndexKey: positional rows
+                  key={i}
+                  style={{
+                    border: "1px solid var(--line)",
+                    borderRadius: 8,
+                    padding: 10,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  <ConditionEditor
+                    condition={c}
+                    onChange={(next) =>
+                      setConds(conditions.map((x, j) => (j === i ? next : x)))
+                    }
+                  />
+                  <button
+                    type="button"
+                    aria-label="Remove condition"
+                    onClick={() =>
+                      setConds(conditions.filter((_, j) => j !== i))
+                    }
+                    style={{
+                      alignSelf: "flex-end",
+                      border: "1px solid var(--line-2)",
+                      background: "var(--card)",
+                      color: "var(--ink-2)",
+                      borderRadius: 7,
+                      cursor: "pointer",
+                      padding: "4px 10px",
+                      fontSize: 12,
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() =>
+                  setConds([...conditions, { path: "", op: "eq", value: "" }])
+                }
+                style={{
+                  alignSelf: "flex-start",
+                  border: "1px solid var(--line-2)",
+                  background: "var(--card)",
+                  color: "var(--ink-2)",
+                  borderRadius: 7,
+                  cursor: "pointer",
+                  padding: "6px 10px",
+                  fontSize: 12,
+                }}
+              >
+                + Add condition
+              </button>
+            </>
+          );
+        })()}
 
       {kind === "switch" &&
         (() => {

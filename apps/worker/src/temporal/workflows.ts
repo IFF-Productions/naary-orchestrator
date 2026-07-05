@@ -19,6 +19,9 @@ import {
   resolveListOps,
   resolveHmac,
   resolveHash,
+  resolveIf,
+  resolveJson,
+  resolveNumber,
   resolveHttpRequest,
   resolveJwt,
   resolveMcpArguments,
@@ -47,6 +50,9 @@ import type {
   HashNodeConfig,
   HmacNodeConfig,
   HtmlExtractNodeConfig,
+  IfNodeConfig,
+  JsonNodeConfig,
+  NumberNodeConfig,
   HttpRequestNodeConfig,
   JwtNodeConfig,
   McpToolNodeConfig,
@@ -595,6 +601,26 @@ export async function runGraph(
         // on `<switchId>.matched`. Reuses evaluateCondition (structured, no eval).
         const swCfg = node.config as unknown as SwitchNodeConfig;
         ctx[node.id] = resolveSwitch(swCfg, ctx);
+        return null;
+      }
+      case "if": {
+        // Pure node: combine predicates with AND/OR → { result }. Downstream edges branch
+        // on `<ifId>.result` (eq true / eq false).
+        const ifCfg = node.config as unknown as IfNodeConfig;
+        ctx[node.id] = resolveIf(ifCfg, ctx);
+        return null;
+      }
+      case "json": {
+        // Pure node: JSON parse/stringify (deterministic ES built-ins, no activity).
+        // Malformed JSON on parse throws → a node failure onError:"continue" can catch.
+        const jsonCfg = node.config as unknown as JsonNodeConfig;
+        ctx[node.id] = resolveJson(jsonCfg, ctx);
+        return null;
+      }
+      case "number": {
+        // Pure node: one arithmetic op on resolved operands → { result }.
+        const numCfg = node.config as unknown as NumberNodeConfig;
+        ctx[node.id] = resolveNumber(numCfg, ctx);
         return null;
       }
       case "hmac": {

@@ -23,6 +23,9 @@ export {
   resolveSqlExec,
   type ResolvedSqlExec,
 } from "./sql-query";
+export { resolveIf } from "./if-node";
+export { resolveJson } from "./json-node";
+export { resolveNumber } from "./number-node";
 export { resolveSet } from "./set-node";
 export { resolveSwitch } from "./switch-node";
 export { resolveText } from "./text-node";

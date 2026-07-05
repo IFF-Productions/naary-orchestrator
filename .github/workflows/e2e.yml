@@ -67,6 +67,8 @@ jobs:
       # The host-side token mint imports @naary/db, so its client must be generated.
       - name: Generate Prisma client
         run: pnpm --filter @naary/db run generate
+        env:
+          DATABASE_URL: postgresql://naary:ci_only_pw@localhost:5432/naary_orchestrator?schema=public
 
       - name: Build + start the stack
         run: docker compose up -d --build
