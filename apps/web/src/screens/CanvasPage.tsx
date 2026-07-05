@@ -3070,6 +3070,81 @@ function ConfigPanel({
         </>
       )}
 
+      {kind === "random" && (
+        <>
+          <Labeled label="Generate">
+            <select
+              value={str("operation") || "uuid"}
+              onChange={(e) => onChange({ operation: e.target.value })}
+              style={inputStyle}
+            >
+              <option value="uuid">UUID (v4)</option>
+              <option value="hex">Random hex</option>
+              <option value="base64">Random base64url</option>
+              <option value="alphanumeric">Alphanumeric string</option>
+              <option value="int">Integer in a range</option>
+            </select>
+          </Labeled>
+          {(str("operation") === "hex" ||
+            str("operation") === "base64" ||
+            str("operation") === "alphanumeric") && (
+            <Labeled
+              label={
+                str("operation") === "alphanumeric"
+                  ? "Length (characters)"
+                  : "Length (bytes)"
+              }
+            >
+              <input
+                type="number"
+                min={1}
+                value={num("length") ?? ""}
+                onChange={(e) =>
+                  onChange({
+                    length: e.target.value ? Number(e.target.value) : undefined,
+                  })
+                }
+                style={inputStyle}
+                placeholder="16"
+              />
+            </Labeled>
+          )}
+          {str("operation") === "int" && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <Labeled label="Min">
+                <input
+                  type="number"
+                  value={num("min") ?? ""}
+                  onChange={(e) =>
+                    onChange({
+                      min: e.target.value ? Number(e.target.value) : undefined,
+                    })
+                  }
+                  style={inputStyle}
+                  placeholder="0"
+                />
+              </Labeled>
+              <Labeled label="Max">
+                <input
+                  type="number"
+                  value={num("max") ?? ""}
+                  onChange={(e) =>
+                    onChange({
+                      max: e.target.value ? Number(e.target.value) : undefined,
+                    })
+                  }
+                  style={inputStyle}
+                  placeholder="100"
+                />
+              </Labeled>
+            </div>
+          )}
+          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+            Output is <code>{node.id}.value</code>. Generated fresh each run.
+          </div>
+        </>
+      )}
+
       {kind === "sendEmail" && (
         <>
           <Labeled label="SMTP connection id">
