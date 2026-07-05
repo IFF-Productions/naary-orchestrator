@@ -54,6 +54,14 @@ export {
 export { walk } from "./walk";
 export { canonicalize } from "./canonical";
 export {
+  NODE_CATALOG,
+  NODE_TYPES,
+  CONDITION_OPS,
+  nodeCatalogPrompt,
+  type NodeCatalogEntry,
+  type NodeGroup,
+} from "./node-catalog";
+export {
   evaluateCondition,
   nextNodes,
   validateGraph,

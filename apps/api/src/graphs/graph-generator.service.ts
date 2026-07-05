@@ -8,7 +8,12 @@ import {
   UnprocessableEntityException,
 } from "@nestjs/common";
 import type { GraphDef } from "@naary/dsl";
-import { validateGraph } from "@naary/dsl";
+import {
+  CONDITION_OPS,
+  NODE_TYPES,
+  nodeCatalogPrompt,
+  validateGraph,
+} from "@naary/dsl";
 import { CredentialsService, MissingCredentialError } from "@naary/secrets";
 import { APICallError, generateText, jsonSchema, Output } from "ai";
 
@@ -17,40 +22,9 @@ import { APICallError, generateText, jsonSchema, Output } from "ai";
 const GEN_PROVIDER = "anthropic";
 const GEN_MODEL = "claude-opus-4-8";
 
-// The DSL node types the generator may use. Kept in sync with @naary/dsl NodeType;
-// the enum both grounds the model and bounds structured output. (A future slice can
-// derive this from a shared catalog — see audit A-1's registry.)
-const NODE_TYPES = [
-  "start",
-  "webhookTrigger",
-  "errorTrigger",
-  "agent",
-  "mcpTool",
-  "httpRequest",
-  "sqlQuery",
-  "set",
-  "renameKeys",
-  "filter",
-  "aggregate",
-  "listOps",
-  "compareDatasets",
-  "xml",
-  "dateTime",
-  "merge",
-  "hmac",
-  "jwt",
-  "totp",
-  "sendEmail",
-  "rssRead",
-  "executeSubWorkflow",
-  "forEach",
-  "wait",
-  "stopAndError",
-  "respondToWebhook",
-  "code",
-  "humanApproval",
-  "end",
-] as const;
+// The node types + operators the generator may use come from the shared @naary/dsl catalog
+// (NODE_TYPES / CONDITION_OPS), so adding a node/operator automatically teaches the AI builder
+// about it — no more hand-maintained list drifting behind the DSL (the old bug).
 
 // Structured-output schema. Deliberately PERMISSIVE on node `config` (a free object):
 // validateGraph is the real gate, and NodeDef.config is itself untyped in the DSL, so
@@ -94,7 +68,7 @@ const GRAPH_OUTPUT_SCHEMA = {
               path: { type: "string" },
               op: {
                 type: "string",
-                enum: ["eq", "neq", "gt", "lt", "in", "exists"],
+                enum: CONDITION_OPS,
               },
               value: {},
             },
@@ -122,41 +96,20 @@ const graphOutput = jsonSchema<{
   }[];
 }>(GRAPH_OUTPUT_SCHEMA as unknown as Parameters<typeof jsonSchema>[0]);
 
-// Grounding: what each node does + its key config. Compact on purpose (prompt cost);
-// the model rarely needs every field, and validateGraph catches structural mistakes.
-const NODE_CATALOG = `
-Entry nodes (exactly one, as startNodeId): "start" (manual/scheduled run), "webhookTrigger" (started by an inbound HTTP webhook; its output is the event), "errorTrigger" (only for error-handler workflows).
-"agent": calls an LLM. config: { provider:"anthropic", model:"claude-opus-4-8", systemPrompt:string }. Output is at <id>.output.
-"mcpTool": calls a remote tool via a connection. config: { connectionId:string, tool:string, argumentBindings?:{ <arg>:{from:string,path:string} } }.
-"httpRequest": HTTP call. config: { method:"GET"|"POST"|..., url:string, headers?:object, body?:any }. Output has <id>.status (HTTP code).
-"sqlQuery": read-only SQL against a tenant DB. config: { connectionId:string, sql:string, paramBindings?:{ "1":{from,path} } }.
-"set": build an object. config: { fields?:object, fieldBindings?:{ path:{from,path} } }.
-"renameKeys","filter","aggregate","listOps","compareDatasets": array/object transforms (pure).
-"sendEmail": config: { connectionId:string, to?:string, subject?:string }.
-"rssRead": config: { url:string }.
-"httpRequest"/"sqlQuery" outputs can drive edge conditions (e.g. path:"<id>.status", op:"lt", value:400).
-"humanApproval": pauses for a person. config: { title?:string, instructions?:string, timeoutHours?:number }. Continue on approve; the run stops on reject.
-"respondToWebhook": sets the sync HTTP response. config: { statusCode?:number, body?:any }. Use only in webhook flows.
-"wait": durable delay. config: { durationSeconds:number }.
-"stopAndError": fail the run. config: { message?:string }.
-"forEach"/"executeSubWorkflow": run another saved workflow (config.workflowKey) — only reference a key the user already has.
-"code": sandboxed JS. config: { code:string }.
-"end": terminal node.
-`.trim();
-
 const SYSTEM_PROMPT = `You design automation workflows as a JSON graph for a durable workflow engine.
 
 Rules:
 - Output a graph: { name, startNodeId, nodes:[{id,type,config?}], edges:[{from,to,condition?}] }.
-- Exactly ONE entry node (start | webhookTrigger | errorTrigger) and it MUST be startNodeId.
+- Exactly ONE entry node (marked [entry] below) and it MUST be startNodeId.
 - Every edge.from/edge.to MUST reference an existing node id. Node ids are short, unique, lowercase.
 - Prefer the simplest graph that satisfies the request. End flows with an "end" node (or "respondToWebhook" for a webhook that returns a response).
-- Only use connection-based nodes (mcpTool/sqlQuery/sendEmail) when the request implies them; leave connectionId as a short placeholder the user will set.
+- Only use connection-based nodes (mcpTool/sqlQuery/sqlExec/sendEmail/hmac/jwt/totp) when the request implies them; leave connectionId as a short placeholder the user will set.
 - Do NOT invent node types. Use only the catalog below.
 - A conditional edge has condition:{path,op,value}; do NOT put a conditional edge INTO a "merge" node.
+- To branch, prefer an "if" (two-way) or "switch" (multi-way) node and put conditions on the edges leaving it (e.g. path:"<if-id>.result", op:"eq", value:true).
 
 Available nodes:
-${NODE_CATALOG}`;
+${nodeCatalogPrompt()}`;
 
 @Injectable()
 export class GraphGeneratorService {
