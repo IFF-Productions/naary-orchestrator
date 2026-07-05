@@ -1,9 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
-import {
-  type MembershipCache,
-  type UserMembership,
-} from "./membership-cache";
+import { type MembershipCache, type UserMembership } from "./membership-cache";
 
 /** DI token for the swappable cache (in-memory today; Redis behind REDIS_URL later). */
 export const MEMBERSHIP_CACHE = Symbol("MEMBERSHIP_CACHE");
@@ -50,6 +48,24 @@ export class MembershipService {
       update: {}, // keep the existing role if already present
     });
     this.cache.invalidate(userId);
+  }
+
+  /**
+   * Create a brand-new workspace owned by the caller (design Path A). The `tenantId` is
+   * SERVER-GENERATED (never from the request body — attack #2), so a user can neither pick
+   * nor collide with an existing tenant. The caller becomes its owner. Invalidates the
+   * cache so the new workspace appears immediately (e.g. in the switcher).
+   */
+  async createWorkspace(
+    userId: string,
+    email?: string,
+  ): Promise<UserMembership> {
+    const tenantId = `ws-${randomUUID()}`;
+    await getPrisma().membership.create({
+      data: { userId, tenantId, role: "owner", email: email ?? null },
+    });
+    this.cache.invalidate(userId);
+    return { tenantId, role: "owner" };
   }
 
   /** Drop the user's cached memberships (call after any membership/role write). */

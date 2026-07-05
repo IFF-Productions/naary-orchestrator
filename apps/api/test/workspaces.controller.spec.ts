@@ -1,20 +1,27 @@
 import "reflect-metadata";
+import { ForbiddenException } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Principal } from "../src/auth/tenant.decorator";
 import type { MembershipService } from "../src/membership/membership.service";
 import { WorkspacesController } from "../src/membership/workspaces.controller";
 
 const listForUser = vi.fn();
 const ensureMembership = vi.fn();
+const createWorkspace = vi.fn();
 function makeController(): WorkspacesController {
   return new WorkspacesController({
     listForUser,
     ensureMembership,
+    createWorkspace,
   } as unknown as MembershipService);
 }
 
 beforeEach(() => {
   listForUser.mockReset();
   ensureMembership.mockReset().mockResolvedValue(undefined);
+  createWorkspace
+    .mockReset()
+    .mockResolvedValue({ tenantId: "ws-new", role: "owner" });
 });
 
 describe("WorkspacesController", () => {
@@ -51,5 +58,42 @@ describe("WorkspacesController", () => {
     expect(res).toEqual([{ tenantId: "t-token", role: "owner" }]);
     expect(listForUser).not.toHaveBeenCalled();
     expect(ensureMembership).not.toHaveBeenCalled();
+  });
+
+  describe("create (POST /workspaces)", () => {
+    it("creates a workspace for a verified signed-in user", async () => {
+      const principal: Principal = {
+        tenantId: "",
+        userId: "u-1",
+        email: "a@b.co",
+        emailVerified: true,
+      };
+      expect(await makeController().create(principal)).toEqual({
+        tenantId: "ws-new",
+        role: "owner",
+      });
+      expect(createWorkspace).toHaveBeenCalledWith("u-1", "a@b.co");
+    });
+
+    it("403s an API-token principal (no user identity → can't self-serve)", async () => {
+      const principal: Principal = { tenantId: "t-1", role: "owner" };
+      await expect(makeController().create(principal)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(createWorkspace).not.toHaveBeenCalled();
+    });
+
+    it("403s a user whose email is not verified (attack #6)", async () => {
+      const principal: Principal = {
+        tenantId: "",
+        userId: "u-1",
+        email: "a@b.co",
+        emailVerified: false,
+      };
+      await expect(makeController().create(principal)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(createWorkspace).not.toHaveBeenCalled();
+    });
   });
 });

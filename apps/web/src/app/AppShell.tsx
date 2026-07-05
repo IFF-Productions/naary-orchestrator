@@ -6,6 +6,11 @@ import type { IconName } from "../components";
 import { clearToken } from "../lib/auth";
 import { PAGE_META } from "../lib/mock";
 import { useTheme } from "../theme";
+import { useWorkspace } from "../workspace/WorkspaceProvider";
+import {
+  WorkspaceSwitcher,
+  workspaceLabel,
+} from "../workspace/WorkspaceSwitcher";
 
 interface NavItemDef {
   to: string;
@@ -57,7 +62,9 @@ const FOOTER_ITEMS: NavItemDef[] = [
 export function AppShell() {
   const [collapsed, setCollapsed] = useState(false);
   const { theme, toggleTheme } = useTheme();
-  const { tenant, logout } = useAuth();
+  const { logout } = useAuth();
+  const { activeId } = useWorkspace();
+  const wsLabel = activeId ? workspaceLabel(activeId) : undefined;
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const [title, sub] = PAGE_META[pathname] ?? ["Naary", ""];
@@ -107,33 +114,7 @@ export function AppShell() {
           }}
         >
           <BrandTile />
-          <div
-            style={{
-              flex: 1,
-              minWidth: 0,
-              opacity: labelOp,
-              transition: "opacity .12s",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 14,
-                fontWeight: 700,
-                color: "var(--ink)",
-                lineHeight: 1.1,
-              }}
-            >
-              Naary
-            </div>
-            <div style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
-              Northwind workspace
-            </div>
-          </div>
-          <Icon
-            name="chevron-up-down"
-            size={14}
-            style={{ color: "var(--ink-3)", opacity: labelOp }}
-          />
+          <WorkspaceSwitcher labelOp={labelOp} />
         </div>
 
         {/* nav */}
@@ -203,7 +184,7 @@ export function AppShell() {
               color: "var(--ink-2)",
             }}
           >
-            {(tenant ?? "?")
+            {(activeId ?? "?")
               .replace(/[^a-zA-Z0-9]/g, "")
               .slice(0, 2)
               .toUpperCase() || "?"}
@@ -228,10 +209,10 @@ export function AppShell() {
                 textOverflow: "ellipsis",
               }}
             >
-              {tenant ?? "Signed in"}
+              {wsLabel ?? "Signed in"}
             </div>
             <div style={{ fontSize: 10, color: "var(--ink-3)" }}>
-              {tenant ? "Tenant" : "API token"}
+              {wsLabel ? "Workspace" : "API token"}
             </div>
           </div>
           <button

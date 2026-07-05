@@ -9,11 +9,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiTokenService } from "../src/auth/api-token.service";
 import { AuthGuard } from "../src/auth/auth.guard";
 import type { FirebaseVerifier } from "../src/auth/firebase-verifier";
+import type { MembershipService } from "../src/membership/membership.service";
+import { IS_USER_SCOPED_KEY } from "../src/auth/user-scoped.decorator";
 
 const verify = vi.fn();
 const firebaseVerify = vi.fn();
+const listForUser = vi.fn();
+const ensureMembership = vi.fn();
 const getAllAndOverride = vi.fn();
 let firebaseEnabled = false;
+/** Routes flagged user-scoped for a given test (keyed by metadata key). */
+let userScoped = false;
 
 function makeGuard(): AuthGuard {
   const firebase = {
@@ -22,16 +28,23 @@ function makeGuard(): AuthGuard {
     },
     verify: firebaseVerify,
   } as unknown as FirebaseVerifier;
-  return new AuthGuard({ verify } as unknown as ApiTokenService, firebase, {
-    getAllAndOverride,
-  } as unknown as Reflector);
+  const memberships = {
+    listForUser,
+    ensureMembership,
+  } as unknown as MembershipService;
+  return new AuthGuard(
+    { verify } as unknown as ApiTokenService,
+    firebase,
+    { getAllAndOverride } as unknown as Reflector,
+    memberships,
+  );
 }
 
 interface FakeReq {
   headers: Record<string, string | undefined>;
   params?: Record<string, string>;
   path?: string;
-  principal?: { tenantId: string };
+  principal?: unknown;
 }
 
 function ctx(req: FakeReq): ExecutionContext {
@@ -45,8 +58,16 @@ function ctx(req: FakeReq): ExecutionContext {
 beforeEach(() => {
   verify.mockReset();
   firebaseVerify.mockReset();
+  listForUser.mockReset().mockResolvedValue([]);
+  ensureMembership.mockReset().mockResolvedValue(undefined);
   firebaseEnabled = false;
-  getAllAndOverride.mockReset().mockReturnValue(false);
+  userScoped = false;
+  // Reflector: IS_PUBLIC_KEY → false, IS_USER_SCOPED_KEY → the per-test `userScoped`.
+  getAllAndOverride
+    .mockReset()
+    .mockImplementation((key: string) =>
+      key === IS_USER_SCOPED_KEY ? userScoped : false,
+    );
 });
 
 describe("AuthGuard", () => {
@@ -72,15 +93,16 @@ describe("AuthGuard", () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it("attaches the resolved tenant as the principal on a valid API token", async () => {
+  it("attaches the resolved tenant (owner) on a valid API token", async () => {
     verify.mockResolvedValue("t-1");
     const req: FakeReq = {
       headers: { authorization: "Bearer nry_good" },
       path: "/executions",
     };
     await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
-    expect(req.principal).toEqual({ tenantId: "t-1" });
+    expect(req.principal).toEqual({ tenantId: "t-1", role: "owner" });
     expect(firebaseVerify).not.toHaveBeenCalled();
+    expect(listForUser).not.toHaveBeenCalled();
   });
 
   it("401s a non-`nry_` token when Firebase is disabled (no service account)", async () => {
@@ -94,18 +116,6 @@ describe("AuthGuard", () => {
     expect(firebaseVerify).not.toHaveBeenCalled();
   });
 
-  it("attaches tenant + subject from a valid Firebase ID token when enabled", async () => {
-    firebaseEnabled = true;
-    firebaseVerify.mockResolvedValue({ tenantId: "t-9", subject: "user-42" });
-    const req: FakeReq = {
-      headers: { authorization: "Bearer header.payload.sig" },
-      path: "/executions",
-    };
-    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
-    expect(req.principal).toEqual({ tenantId: "t-9", subject: "user-42" });
-    expect(verify).not.toHaveBeenCalled();
-  });
-
   it("401s when an enabled Firebase verifier rejects the token", async () => {
     firebaseEnabled = true;
     firebaseVerify.mockResolvedValue(null);
@@ -116,7 +126,9 @@ describe("AuthGuard", () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it("403s when a /tenants/:id path tenant differs from the token's tenant", async () => {
+  // --- API-token cross-tenant isolation (must stay green through the guard rewrite) ---
+
+  it("403s when a /tenants/:id path tenant differs from the API token's tenant", async () => {
     verify.mockResolvedValue("t-1");
     const req: FakeReq = {
       headers: { authorization: "Bearer nry_good" },
@@ -128,7 +140,7 @@ describe("AuthGuard", () => {
     );
   });
 
-  it("allows a /tenants/:id path that matches the token's tenant", async () => {
+  it("allows a /tenants/:id path that matches the API token's tenant", async () => {
     verify.mockResolvedValue("t-1");
     const req: FakeReq = {
       headers: { authorization: "Bearer nry_good" },
@@ -153,8 +165,6 @@ describe("AuthGuard", () => {
   });
 
   it("does NOT apply the tenant check to a non-tenant route (executions/:id is a workflowId)", async () => {
-    // /executions/<workflowId> self-scopes by the ownership record; the :id is NOT a
-    // tenant, so the /tenants/ pattern must not match it and 403 every run lookup.
     verify.mockResolvedValue("t-1");
     const req: FakeReq = {
       headers: { authorization: "Bearer nry_good" },
@@ -162,5 +172,209 @@ describe("AuthGuard", () => {
       params: { id: "wh-t-1-abc123" },
     };
     await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+  });
+
+  it("403s an API token whose X-Workspace-Id names a different tenant", async () => {
+    verify.mockResolvedValue("t-1");
+    const req: FakeReq = {
+      headers: {
+        authorization: "Bearer nry_good",
+        "x-workspace-id": "t-OTHER",
+      },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  // --- Firebase user → membership resolution ---
+
+  it("resolves the active workspace + role from membership on a /tenants/:id path", async () => {
+    firebaseEnabled = true;
+    firebaseVerify.mockResolvedValue({
+      userId: "u-1",
+      email: "a@b.co",
+      emailVerified: true,
+    });
+    listForUser.mockResolvedValue([{ tenantId: "t-1", role: "admin" }]);
+    const req: FakeReq = {
+      headers: { authorization: "Bearer good.jwt" },
+      path: "/tenants/t-1/credentials",
+      params: { id: "t-1" },
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(req.principal).toEqual({
+      tenantId: "t-1",
+      userId: "u-1",
+      subject: "u-1",
+      email: "a@b.co",
+      emailVerified: true,
+      role: "admin",
+    });
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it("403s a Firebase user targeting a workspace they have NO membership in (attack #1)", async () => {
+    firebaseEnabled = true;
+    firebaseVerify.mockResolvedValue({
+      userId: "u-1",
+      emailVerified: true,
+    });
+    listForUser.mockResolvedValue([{ tenantId: "t-1", role: "owner" }]);
+    const req: FakeReq = {
+      headers: { authorization: "Bearer good.jwt", "x-workspace-id": "t-2" },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it("resolves the sole membership when no workspace is targeted", async () => {
+    firebaseEnabled = true;
+    firebaseVerify.mockResolvedValue({ userId: "u-1", emailVerified: true });
+    listForUser.mockResolvedValue([{ tenantId: "t-1", role: "member" }]);
+    const req: FakeReq = {
+      headers: { authorization: "Bearer good.jwt" },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(req.principal).toMatchObject({ tenantId: "t-1", role: "member" });
+  });
+
+  it("403s a workspace-scoped route when NO workspace resolves (fail closed, not empty scope)", async () => {
+    firebaseEnabled = true;
+    firebaseVerify.mockResolvedValue({ userId: "u-1", emailVerified: true });
+    listForUser.mockResolvedValue([]); // no memberships, no claim
+    const req: FakeReq = {
+      headers: { authorization: "Bearer good.jwt" },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it("allows a @UserScoped route tenant-less when NO workspace resolves", async () => {
+    firebaseEnabled = true;
+    userScoped = true;
+    firebaseVerify.mockResolvedValue({
+      userId: "u-1",
+      email: "a@b.co",
+      emailVerified: true,
+    });
+    listForUser.mockResolvedValue([]);
+    const req: FakeReq = {
+      headers: { authorization: "Bearer good.jwt" },
+      path: "/me/workspaces",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(req.principal).toEqual({
+      tenantId: "",
+      userId: "u-1",
+      subject: "u-1",
+      email: "a@b.co",
+      emailVerified: true,
+    });
+  });
+
+  it("does NOT 403 a @UserScoped route on a stale/foreign X-Workspace-Id (no lockout)", async () => {
+    // A previous user's workspace lingering in the header must not 403 the switcher's own
+    // load — user-scoped routes ignore the header for enforcement.
+    firebaseEnabled = true;
+    userScoped = true;
+    firebaseVerify.mockResolvedValue({ userId: "u-1", emailVerified: true });
+    listForUser.mockResolvedValue([{ tenantId: "t-mine", role: "owner" }]);
+    const req: FakeReq = {
+      headers: {
+        authorization: "Bearer good.jwt",
+        "x-workspace-id": "t-STALE",
+      },
+      path: "/me/workspaces",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    // Falls back to the user's own workspace, ignoring the foreign header.
+    expect(req.principal).toMatchObject({ tenantId: "t-mine" });
+  });
+
+  // --- Legacy claim → Membership migration ---
+
+  it("honors a legacy tenant claim and backfills a Membership on first sight", async () => {
+    firebaseEnabled = true;
+    firebaseVerify.mockResolvedValue({
+      userId: "u-1",
+      email: "a@b.co",
+      emailVerified: true,
+      claimTenant: "t-claim",
+    });
+    listForUser.mockResolvedValue([]); // no membership row yet
+    const req: FakeReq = {
+      headers: { authorization: "Bearer good.jwt" },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(req.principal).toMatchObject({
+      tenantId: "t-claim",
+      role: "owner",
+    });
+    expect(ensureMembership).toHaveBeenCalledWith(
+      "u-1",
+      "t-claim",
+      "owner",
+      "a@b.co",
+    );
+  });
+
+  it("still authorizes a claim user when the backfill write fails (non-authorizing)", async () => {
+    // Access is granted via the claim union, NOT the migration write — a transient DB error
+    // or a P2002 race (parallel first-login requests) must not 500 an authorized user.
+    firebaseEnabled = true;
+    firebaseVerify.mockResolvedValue({
+      userId: "u-1",
+      emailVerified: true,
+      claimTenant: "t-claim",
+    });
+    listForUser.mockResolvedValue([]);
+    ensureMembership.mockRejectedValue(new Error("unique constraint (P2002)"));
+    const req: FakeReq = {
+      headers: { authorization: "Bearer good.jwt" },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(req.principal).toMatchObject({ tenantId: "t-claim", role: "owner" });
+  });
+
+  it("does NOT re-backfill when the claim tenant is already a membership", async () => {
+    firebaseEnabled = true;
+    firebaseVerify.mockResolvedValue({
+      userId: "u-1",
+      emailVerified: true,
+      claimTenant: "t-claim",
+    });
+    listForUser.mockResolvedValue([{ tenantId: "t-claim", role: "owner" }]);
+    const req: FakeReq = {
+      headers: { authorization: "Bearer good.jwt" },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(ensureMembership).not.toHaveBeenCalled();
+  });
+
+  it("403s when the header and path name different workspaces", async () => {
+    firebaseEnabled = true;
+    firebaseVerify.mockResolvedValue({ userId: "u-1", emailVerified: true });
+    listForUser.mockResolvedValue([
+      { tenantId: "t-1", role: "owner" },
+      { tenantId: "t-2", role: "owner" },
+    ]);
+    const req: FakeReq = {
+      headers: { authorization: "Bearer good.jwt", "x-workspace-id": "t-2" },
+      path: "/tenants/t-1/credentials",
+      params: { id: "t-1" },
+    };
+    await expect(makeGuard().canActivate(ctx(req))).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 });

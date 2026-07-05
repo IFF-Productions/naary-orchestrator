@@ -17,9 +17,18 @@ export interface FirebaseConfig {
   tenantClaim: string;
 }
 
-export interface FirebasePrincipal {
-  tenantId: string;
-  subject: string;
+/** The authenticated Firebase user (design §3 — the token authenticates the USER,
+ *  not a tenant). Workspace access is granted by a Membership row, resolved by the
+ *  AuthGuard; this type carries only identity. */
+export interface FirebaseUser {
+  /** Firebase uid — the stable user identity. */
+  userId: string;
+  email?: string;
+  emailVerified: boolean;
+  /** Legacy `tenant` custom claim, if present. A TRANSITIONAL owner grant for existing
+   *  single-tenant users — the AuthGuard migrates it to a Membership on first request.
+   *  Undefined for new (post-provisioning) users. */
+  claimTenant?: string;
 }
 
 /** A verify function over the raw token → decoded claims. Injectable so the
@@ -27,25 +36,36 @@ export interface FirebasePrincipal {
 export type VerifyIdToken = (token: string) => Promise<Record<string, unknown>>;
 
 /**
- * Pure: decoded ID-token claims → principal, or null when the tenant claim is
- * missing/empty (security-relevant — mirrors the old OidcVerifier's check, so a
- * token without a tenant can never authenticate). Unit-tested in isolation.
+ * Pure: decoded ID-token claims → the authenticated user, or null when there is no
+ * user identity at all (no `uid`/`sub` — a token that names no user must never
+ * authenticate). Unlike the old claim model, a MISSING tenant claim no longer rejects:
+ * the token authenticates the user; a Membership (not the claim) authorizes a workspace.
+ * The claim, when present, rides along as a transitional owner grant. Unit-tested in
+ * isolation.
  */
-export function principalFromClaims(
+export function userFromClaims(
   claims: Record<string, unknown>,
   tenantClaim: string,
-): FirebasePrincipal | null {
-  const tenantId = claims[tenantClaim];
-  if (typeof tenantId !== "string" || tenantId.length === 0) return null;
-  return { tenantId, subject: String(claims.uid ?? claims.sub ?? "") };
+): FirebaseUser | null {
+  const userId = String(claims.uid ?? claims.sub ?? "");
+  if (userId.length === 0) return null;
+  const claim = claims[tenantClaim];
+  return {
+    userId,
+    email: typeof claims.email === "string" ? claims.email : undefined,
+    emailVerified: claims.email_verified === true,
+    claimTenant:
+      typeof claim === "string" && claim.length > 0 ? claim : undefined,
+  };
 }
 
 /**
  * Verifies a Firebase ID token (RS256, signed by Google): firebase-admin's
  * `verifyIdToken` checks the signature against Google's public keys plus
- * issuer/audience (= the project) and expiry. tenantId comes from a `tenant`
- * CUSTOM CLAIM on the user (set via setCustomUserClaims — see set-tenant-claim.ts),
- * mirroring the previous Keycloak `tenant` claim. The guard accepts a Firebase JWT
+ * issuer/audience (= the project) and expiry, then yields the authenticated USER
+ * (uid/email). A legacy `tenant` custom claim (set via setCustomUserClaims — see
+ * set-tenant-claim.ts), if present, rides along for migration; workspace access is
+ * decided by Membership in the guard, not the claim. The guard accepts a Firebase JWT
  * alongside `nry_` API tokens (dual auth).
  *
  * Firebase requires a SERVICE ACCOUNT to verify ID tokens, so this is OFF unless
@@ -81,13 +101,14 @@ export class FirebaseVerifier {
     return this.config !== undefined;
   }
 
-  /** Verify a Firebase ID token → principal, or null (disabled / invalid / no tenant). */
-  async verify(token: string): Promise<FirebasePrincipal | null> {
+  /** Verify a Firebase ID token → the authenticated user, or null (disabled / invalid /
+   *  no user identity). */
+  async verify(token: string): Promise<FirebaseUser | null> {
     if (!this.config) return null;
     try {
       const verify = this.resolveVerifyFn();
       const claims = await verify(token);
-      return principalFromClaims(claims, this.config.tenantClaim);
+      return userFromClaims(claims, this.config.tenantClaim);
     } catch {
       return null; // bad signature / issuer / audience / expiry / revoked
     }
