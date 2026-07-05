@@ -42,6 +42,7 @@ import type {
   CompareDatasetsNodeConfig,
   CsvNodeConfig,
   EncodeNodeConfig,
+  RandomNodeConfig,
   DateTimeNodeConfig,
   ExecuteSubWorkflowNodeConfig,
   FilterNodeConfig,
@@ -96,6 +97,7 @@ const {
   callHtmlExtract,
   callCsv,
   callEncode,
+  callRandom,
 } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },
@@ -663,6 +665,26 @@ export async function runGraph(
         // Pure node: one arithmetic op on resolved operands → { result }.
         const numCfg = node.config as unknown as NumberNodeConfig;
         ctx[node.id] = resolveNumber(numCfg, ctx);
+        return null;
+      }
+      case "random": {
+        // Generate a fresh random value. Runs in the activity — randomness must never touch
+        // deterministic workflow code. No inputs. Output { value }.
+        const rndCfg = node.config as unknown as RandomNodeConfig;
+        const res = await callRandom(
+          {
+            operation: rndCfg.operation,
+            length: rndCfg.length,
+            min: rndCfg.min,
+            max: rndCfg.max,
+          },
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
+        ctx[node.id] = { value: res.value };
         return null;
       }
       case "encode": {

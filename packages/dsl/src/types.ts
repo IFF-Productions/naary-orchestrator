@@ -35,6 +35,7 @@ export type NodeType =
   | "jwt" // mints an HS256 JWT signed by a `signing` connection's key (activity)
   | "totp" // generates the current RFC-6238 TOTP code from a `signing` connection's seed
   | "hash" // one-way digest of a value (sha256/512/1/md5) — no key/connection needed
+  | "random" // generate a UUID / random hex / base64 / alphanumeric / int (activity)
   | "sendEmail" // sends an email via an `smtp` connection (activity)
   | "rssRead" // fetches + parses an RSS/Atom feed (egress-guarded activity); output is {items}
   | "executeSubWorkflow" // runs another saved graph as a child run; output is {status,output}
@@ -397,6 +398,25 @@ export interface CsvNodeConfig {
   header?: boolean;
   /** Field delimiter (default ","). */
   delimiter?: string;
+}
+
+/** What the Random node generates. */
+export type RandomOp = "uuid" | "hex" | "base64" | "alphanumeric" | "int";
+
+/**
+ * Random (Generate) node — produce a fresh random value (n8n's Crypto "Generate"): a UUID v4,
+ * random hex/base64url of `length` bytes, an alphanumeric string of `length` chars, or a
+ * uniform integer in `[min, max]`. Runs in an ACTIVITY because randomness is non-deterministic
+ * (must not touch workflow code). No inputs — it generates. Output is `{ value }`.
+ */
+export interface RandomNodeConfig {
+  operation: RandomOp;
+  /** hex/base64: number of random bytes; alphanumeric: number of chars (default 16). */
+  length?: number;
+  /** int: inclusive lower bound (default 0). */
+  min?: number;
+  /** int: inclusive upper bound (default 100). */
+  max?: number;
 }
 
 /** Encode/decode operations for the Encode node. */

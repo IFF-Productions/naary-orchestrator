@@ -4,7 +4,13 @@
  * in the worker PROCESS, never in the deterministic workflow bundle — workflows.ts
  * imports it type-only.
  */
-import { createHash, createHmac } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  randomInt,
+  randomUUID,
+} from "node:crypto";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { ApplicationFailure } from "@temporalio/activity";
 import { SignJWT, importPKCS8 } from "jose";
@@ -972,6 +978,78 @@ export async function callHtmlExtract(
       secondsSince(startedAt),
     );
     throw ApplicationFailure.nonRetryable("HTML extract failed", "HTML_ERROR");
+  }
+}
+
+export interface RandomConfig {
+  operation: "uuid" | "hex" | "base64" | "alphanumeric" | "int";
+  length?: number;
+  min?: number;
+  max?: number;
+}
+export interface RandomResult {
+  status: "ok";
+  value: string | number;
+  costUsd: number;
+}
+
+const ALNUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+/**
+ * random node — generate a fresh random value. In an activity because randomness is
+ * non-deterministic (Math.random/randomBytes must never run in workflow code). No secrets.
+ */
+export async function callRandom(
+  cfg: RandomConfig,
+  meta: AgentMeta,
+): Promise<RandomResult> {
+  const startedAt = process.hrtime.bigint();
+  try {
+    const len = Math.min(1024, Math.max(1, Math.floor(cfg.length ?? 16)));
+    let value: string | number;
+    switch (cfg.operation) {
+      case "uuid":
+        value = randomUUID();
+        break;
+      case "hex":
+        value = randomBytes(len).toString("hex");
+        break;
+      case "base64":
+        value = randomBytes(len).toString("base64url");
+        break;
+      case "alphanumeric": {
+        const bytes = randomBytes(len);
+        let out = "";
+        for (let i = 0; i < len; i++) out += ALNUM[bytes[i] % ALNUM.length];
+        value = out;
+        break;
+      }
+      case "int": {
+        const min = Math.floor(cfg.min ?? 0);
+        const max = Math.floor(cfg.max ?? 100);
+        // randomInt's upper bound is exclusive; make [min, max] inclusive. Guard min<=max.
+        value = max <= min ? min : randomInt(min, max + 1);
+        break;
+      }
+      default:
+        value = "";
+    }
+    activityRuns.inc({ activity: "callRandom", outcome: "ok" });
+    activityDuration.observe(
+      { activity: "callRandom" },
+      secondsSince(startedAt),
+    );
+    return { status: "ok", value, costUsd: 0 };
+  } catch {
+    activityRuns.inc({ activity: "callRandom", outcome: "error" });
+    activityDuration.observe(
+      { activity: "callRandom" },
+      secondsSince(startedAt),
+    );
+    throw ApplicationFailure.nonRetryable(
+      "Random generate failed",
+      "RANDOM_ERROR",
+    );
   }
 }
 
