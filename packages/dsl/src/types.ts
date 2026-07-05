@@ -529,9 +529,29 @@ export interface StopAndErrorNodeConfig {
  * path into ctx (e.g. "agent.output.category"); `op` compares the resolved value
  * to `value`. An edge with no condition is unconditional (linear/parallel).
  */
+/** Comparison operators for a structured predicate. All are PURE + deterministic (no
+ *  eval): value/string/number/emptiness checks, plus `regex` (a deterministic `RegExp`
+ *  test). `isEmpty`/`notEmpty`/`exists` ignore `value`. */
+export type ConditionOp =
+  | "eq"
+  | "neq"
+  | "in"
+  | "exists"
+  | "gt"
+  | "lt"
+  | "gte"
+  | "lte"
+  | "contains"
+  | "notContains"
+  | "startsWith"
+  | "endsWith"
+  | "regex"
+  | "isEmpty"
+  | "notEmpty";
+
 export interface EdgeCondition {
   path: string;
-  op: "eq" | "neq" | "in" | "exists" | "gt" | "lt";
+  op: ConditionOp;
   value?: unknown;
 }
 

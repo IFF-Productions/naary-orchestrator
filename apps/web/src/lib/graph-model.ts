@@ -26,8 +26,24 @@ export const CONDITION_OPS: EdgeCondition["op"][] = [
   "neq",
   "gt",
   "lt",
+  "gte",
+  "lte",
+  "contains",
+  "notContains",
+  "startsWith",
+  "endsWith",
+  "regex",
   "in",
   "exists",
+  "isEmpty",
+  "notEmpty",
+];
+
+/** Operators that take no `value` (the value field is hidden for these). */
+export const VALUELESS_OPS: EdgeCondition["op"][] = [
+  "exists",
+  "isEmpty",
+  "notEmpty",
 ];
 
 export interface CanvasEdge {

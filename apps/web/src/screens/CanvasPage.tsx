@@ -45,6 +45,7 @@ import {
   defaultConfigFor,
   type EdgeConditionDraft,
   NODE_DESCRIPTION,
+  VALUELESS_OPS,
   NODE_GROUPS,
   NODE_KINDS,
   NODE_LABEL as LABEL,
@@ -2465,6 +2466,15 @@ function coerceCond(s: string): string | number | boolean {
   return s;
 }
 
+/** Ops whose value is kept as a verbatim string (never numeric-coerced). */
+const STRING_OPS = [
+  "contains",
+  "notContains",
+  "startsWith",
+  "endsWith",
+  "regex",
+];
+
 /** Editor for a structured predicate (path/op/value) stored as a DSL EdgeCondition
  *  on the filter node's config. Coerces the value on change (like the edge editor). */
 function ConditionEditor({
@@ -2492,7 +2502,11 @@ function ConditionEditor({
         .split(",")
         .map((s) => coerceCond(s.trim()))
         .filter((v) => v !== "");
-    } else if (nextOp !== "exists") {
+    } else if (VALUELESS_OPS.includes(nextOp as EdgeConditionDraft["op"])) {
+      // exists / isEmpty / notEmpty carry no value
+    } else if (STRING_OPS.includes(nextOp)) {
+      c.value = nextVal; // keep verbatim (regex pattern, "42" stays a string)
+    } else {
       c.value = coerceCond(nextVal);
     }
     onChange(c);
@@ -2521,8 +2535,16 @@ function ConditionEditor({
           ))}
         </select>
       </Labeled>
-      {op !== "exists" && (
-        <Labeled label={op === "in" ? "Values (comma-separated)" : "Value"}>
+      {!VALUELESS_OPS.includes(op) && (
+        <Labeled
+          label={
+            op === "in"
+              ? "Values (comma-separated)"
+              : op === "regex"
+                ? "Pattern (JS regex)"
+                : "Value"
+          }
+        >
           <input
             value={valStr}
             onChange={(e) => build(path, op, e.target.value)}
@@ -2835,13 +2857,27 @@ function EdgeConfigPanel({
         </select>
       </Labeled>
 
-      {c.op !== "exists" && (
-        <Labeled label={c.op === "in" ? "Values (comma-separated)" : "Value"}>
+      {!VALUELESS_OPS.includes(c.op) && (
+        <Labeled
+          label={
+            c.op === "in"
+              ? "Values (comma-separated)"
+              : c.op === "regex"
+                ? "Pattern (JS regex)"
+                : "Value"
+          }
+        >
           <input
             value={c.value}
             onChange={(e) => onChange({ value: e.target.value })}
             style={inputStyle}
-            placeholder={c.op === "in" ? "billing, refunds" : "billing"}
+            placeholder={
+              c.op === "in"
+                ? "billing, refunds"
+                : c.op === "regex"
+                  ? "^INV-\\d+$"
+                  : "billing"
+            }
           />
         </Labeled>
       )}

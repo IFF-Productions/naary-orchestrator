@@ -76,14 +76,18 @@ export function compileGraph(
 }
 
 /** Editor draft → DSL EdgeCondition. A blank path means "unconditional" (omit).
- *  `exists` carries no value; `in` becomes an array; numeric-looking values for
- *  gt/lt/eq/neq/in are coerced to numbers/booleans so the interpreter's strict
- *  comparisons (`===`, `>`) work (evaluateCondition in @naary/dsl). */
+ *  Value handling by op: valueless ops (exists/isEmpty/notEmpty) carry none; `in` becomes
+ *  an array; numeric ops (gt/lt/gte/lte) coerce to Number; STRING ops (contains/notContains/
+ *  startsWith/endsWith/regex) keep the raw string verbatim (so "42" stays a string and a
+ *  regex pattern isn't mangled); eq/neq coerce numeric/boolean-looking text. Mirrors
+ *  evaluateCondition in @naary/dsl. */
 function buildCondition(draft?: EdgeConditionDraft): EdgeCondition | undefined {
   if (!draft || !draft.path.trim()) return undefined;
   const base = { path: draft.path.trim(), op: draft.op };
   switch (draft.op) {
     case "exists":
+    case "isEmpty":
+    case "notEmpty":
       return base;
     case "in":
       return {
@@ -95,7 +99,15 @@ function buildCondition(draft?: EdgeConditionDraft): EdgeCondition | undefined {
       };
     case "gt":
     case "lt":
+    case "gte":
+    case "lte":
       return { ...base, value: Number(draft.value) };
+    case "contains":
+    case "notContains":
+    case "startsWith":
+    case "endsWith":
+    case "regex":
+      return { ...base, value: draft.value };
     default:
       return { ...base, value: coerce(draft.value) };
   }
