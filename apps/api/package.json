@@ -18,6 +18,7 @@
     "@naary/db": "workspace:*",
     "@naary/dsl": "workspace:*",
     "@naary/secrets": "workspace:*",
+    "zod": "^4.4.3",
     "@naary/usage": "workspace:*",
     "@nestjs/common": "^11.1.27",
     "@nestjs/core": "^11.1.27",
