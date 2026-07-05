@@ -52,6 +52,30 @@ export interface RunEvent {
 
 const BASE = "/api";
 
+// The active workspace, sent as `X-Workspace-Id` so the server scopes every request to the
+// selected workspace (multi-workspace model). The WorkspaceProvider sets this once it has
+// resolved the caller's workspaces; it's persisted so a reload keeps the selection. When
+// unset (fresh signup, or an nry_ token with a single workspace) the server falls back to
+// the caller's sole/claim workspace.
+const WORKSPACE_KEY = "naary.workspace";
+let activeWorkspaceId: string | null =
+  typeof localStorage !== "undefined"
+    ? localStorage.getItem(WORKSPACE_KEY)
+    : null;
+
+/** Set (or clear) the active workspace id sent on every subsequent request. */
+export function setActiveWorkspace(id: string | null): void {
+  activeWorkspaceId = id;
+  if (typeof localStorage === "undefined") return;
+  if (id) localStorage.setItem(WORKSPACE_KEY, id);
+  else localStorage.removeItem(WORKSPACE_KEY);
+}
+
+/** The active workspace id, or null if none selected yet. */
+export function getActiveWorkspace(): string | null {
+  return activeWorkspaceId;
+}
+
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await getBearerToken();
   const res = await fetch(`${BASE}${path}`, {
@@ -59,6 +83,7 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
     headers: {
       "content-type": "application/json",
       ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(activeWorkspaceId ? { "x-workspace-id": activeWorkspaceId } : {}),
       ...init?.headers,
     },
   });
@@ -197,6 +222,11 @@ export const api = {
   // The caller's workspaces + role (powers the workspace switcher).
   getMyWorkspaces(): Promise<Workspace[]> {
     return http("/me/workspaces");
+  },
+  // Create a new workspace owned by the caller. The tenantId is server-generated (never
+  // sent from the client); requires a verified-email Firebase user (server-enforced).
+  createWorkspace(): Promise<Workspace> {
+    return http("/workspaces", { method: "POST" });
   },
   // Recent runs for the tenant (identity + start time; status is on the detail view).
   listRuns(): Promise<RunSummary[]> {

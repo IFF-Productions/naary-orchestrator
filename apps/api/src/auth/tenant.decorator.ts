@@ -1,11 +1,24 @@
 import { createParamDecorator, type ExecutionContext } from "@nestjs/common";
 
-/** The authenticated caller. `tenantId` is resolved by AuthGuard (from a Keycloak
- *  JWT's `tenant` claim or an API token) — never trusted from the request path/body.
- *  `subject` is the OIDC user id when authenticated via Keycloak. */
+/** The authenticated caller. Resolved by AuthGuard — never trusted from the path/body.
+ *  For Firebase users, `tenantId` is the ACTIVE workspace, membership-checked against the
+ *  `X-Workspace-Id` header or `/tenants/:id` path; for `nry_` API tokens it's the token's
+ *  single tenant. */
 export interface Principal {
+  /** Active workspace id. `""` only on user-scoped routes for a user with no resolved
+   *  workspace — the guard fails workspace-scoped routes closed (403) before a controller
+   *  runs, so `""` never reaches a workspace data query. */
   tenantId: string;
+  /** Firebase uid (absent for `nry_` API-token principals). */
+  userId?: string;
+  /** = `userId` for Firebase users; absent for API tokens. Kept for audit/logging. */
   subject?: string;
+  email?: string;
+  /** Firebase `email_verified` — gates workspace creation (design Path A). Absent for
+   *  API-token principals. */
+  emailVerified?: boolean;
+  /** Role in the active workspace ('owner' | 'admin' | 'member'); 'owner' for API tokens. */
+  role?: string;
 }
 
 export interface RequestWithPrincipal {

@@ -1,5 +1,6 @@
 import { Controller, Get } from "@nestjs/common";
 import { CurrentPrincipal, type Principal } from "./tenant.decorator";
+import { UserScoped } from "./user-scoped.decorator";
 
 /**
  * "Who am I": returns the authenticated principal so the SPA knows its own
@@ -10,6 +11,7 @@ import { CurrentPrincipal, type Principal } from "./tenant.decorator";
 @Controller("me")
 export class MeController {
   @Get()
+  @UserScoped()
   me(@CurrentPrincipal() principal: Principal): {
     tenantId: string;
     subject?: string;
