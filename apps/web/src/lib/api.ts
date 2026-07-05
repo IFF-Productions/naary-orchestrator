@@ -231,6 +231,19 @@ export const api = {
       body: JSON.stringify(patch),
     });
   },
+  // --- Notifications ---
+  getNotifications(tenantId: string): Promise<NotificationSettings> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/notifications`);
+  },
+  saveNotifications(
+    tenantId: string,
+    patch: Partial<NotificationSettings>,
+  ): Promise<NotificationSettings> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/notifications`, {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    });
+  },
   // --- Integrations ---
   // Provider API keys (BYOK). The key is NEVER returned — list yields names + validity.
   listCredentials(tenantId: string): Promise<ProviderCredential[]> {
@@ -431,6 +444,12 @@ export interface Member {
 export interface TenantSettings {
   displayName: string | null;
   defaultModel: string | null;
+}
+
+export interface NotificationSettings {
+  webhookUrl: string | null;
+  onApprovalPending: boolean;
+  onRunFailed: boolean;
 }
 
 /**

@@ -771,6 +771,87 @@ export async function callPoll(
   }
 }
 
+export type NotificationKind = "approval_pending" | "run_failed";
+export interface NotificationInput {
+  tenantId: string;
+  kind: NotificationKind;
+  workflowId: string;
+  workflowKey?: string;
+  /** For approval_pending: the approval node's title (from the graph). */
+  title?: string;
+  /** For run_failed: the terminal status / error type. */
+  detail?: string;
+}
+
+// Test seam: settings read + egress fetch, swappable so tests need no DB/network.
+export const __notifyDeps = {
+  readSettings: (
+    tenantId: string,
+  ): Promise<{
+    webhookUrl: string | null;
+    onApprovalPending: boolean;
+    onRunFailed: boolean;
+  } | null> =>
+    getPrisma().notificationSettings.findUnique({ where: { tenantId } }),
+  fetch: (url: string, init?: RequestInit) =>
+    safeFetch(url, init as never) as unknown as Promise<Response>,
+  assertEgressAllowed,
+};
+
+/** Human-readable line for the notification (what a Slack/Teams webhook shows). */
+function notificationText(input: NotificationInput): string {
+  const wf = input.workflowKey ? `"${input.workflowKey}"` : "a workflow";
+  if (input.kind === "approval_pending") {
+    return `⏳ Approval needed on ${wf}${input.title ? `: ${input.title}` : ""} (run ${input.workflowId}).`;
+  }
+  return `❌ ${wf} run failed${input.detail ? ` (${input.detail})` : ""} — run ${input.workflowId}.`;
+}
+
+/**
+ * Fire a tenant notification for an approval-pending or failed run. BEST-EFFORT: reads
+ * the tenant's NotificationSettings, and — only if a webhook is set and the event is
+ * enabled — POSTs an egress-guarded JSON payload (Slack/Teams/generic compatible). A
+ * no-op when unconfigured or disabled. This activity NEVER throws (a notification
+ * problem must not affect the run); the caller also wraps it defensively.
+ */
+export async function sendNotification(
+  input: NotificationInput,
+): Promise<void> {
+  try {
+    const settings = await __notifyDeps.readSettings(input.tenantId);
+    if (!settings?.webhookUrl) return;
+    if (input.kind === "approval_pending" && !settings.onApprovalPending)
+      return;
+    if (input.kind === "run_failed" && !settings.onRunFailed) return;
+
+    await __notifyDeps.assertEgressAllowed(settings.webhookUrl); // https + public
+    const text = notificationText(input);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      await __notifyDeps.fetch(settings.webhookUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        // `text` is Slack/Teams-friendly; the structured fields serve generic hooks.
+        body: JSON.stringify({
+          text,
+          kind: input.kind,
+          workflowId: input.workflowId,
+          workflowKey: input.workflowKey,
+          title: input.title,
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    activityRuns.inc({ activity: "sendNotification", outcome: "ok" });
+  } catch {
+    // Best-effort: swallow everything (bad URL, blocked egress, timeout, 5xx).
+    activityRuns.inc({ activity: "sendNotification", outcome: "error" });
+  }
+}
+
 export interface XmlConfig {
   operation: "parse" | "build";
 }

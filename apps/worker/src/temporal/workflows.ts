@@ -139,6 +139,13 @@ const { callPoll } = wf.proxyActivities<typeof activities>({
   retry: { maximumAttempts: 3 },
 });
 
+// Best-effort tenant notification (webhook POST). The activity itself never throws;
+// a couple of retries cover a transient webhook blip. Non-critical to the run.
+const { sendNotification } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "30 seconds",
+  retry: { maximumAttempts: 2 },
+});
+
 // Sandboxed user JS. The activity caps wall-clock at ≤5s; the start-to-close sits
 // above that. User-code failures are non-retryable in the activity, so 1 attempt.
 const { callCode } = wf.proxyActivities<typeof activities>({
@@ -838,6 +845,26 @@ export async function runGraph(
       case "humanApproval": {
         status = "awaiting_approval";
         await syncStatus(); // surface the pause in the Runs list / approval queue
+        // Notify the tenant (best-effort) that a decision is needed — a HITL pause can
+        // last days, so don't rely on someone watching the inbox. Gated + swallowed so
+        // it can never affect the run. Patched so in-flight runs don't diverge on replay.
+        const approvalCfg2 = (node.config ?? {}) as {
+          title?: string;
+          timeoutHours?: number;
+        };
+        if (wf.patched("notify-v1") && !runCtx.isErrorHandler) {
+          try {
+            await sendNotification({
+              tenantId: runCtx.tenantId,
+              kind: "approval_pending",
+              workflowId: wf.workflowInfo().workflowId,
+              workflowKey: runCtx.workflowKey,
+              title: approvalCfg2.title,
+            });
+          } catch {
+            /* best-effort — never block the pause on a notification */
+          }
+        }
         // Optional auto-reject timeout (durable Temporal timer; deterministic).
         const approvalCfg = (node.config ?? {}) as { timeoutHours?: number };
         const timeoutMs =
@@ -1018,6 +1045,21 @@ export async function runGraph(
     status === "budget_exceeded" ||
     status === "circuit_open" ||
     status === "invalid_graph";
+  // Notify the tenant (best-effort) that a run failed — same swallow + patch gate as
+  // the approval notification. Skipped for error-handler runs (they ARE the response).
+  if (isFailure && !runCtx.isErrorHandler && wf.patched("notify-v1")) {
+    try {
+      await sendNotification({
+        tenantId: runCtx.tenantId,
+        kind: "run_failed",
+        workflowId: wf.workflowInfo().workflowId,
+        workflowKey: runCtx.workflowKey,
+        detail: threw !== undefined ? "failed" : status,
+      });
+    } catch {
+      /* best-effort — a notification problem must not mask the failure */
+    }
+  }
   if (
     isFailure &&
     runCtx.errorWorkflowKey &&
