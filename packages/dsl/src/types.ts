@@ -8,6 +8,7 @@ export type NodeType =
   | "webhookTrigger" // Slice #4: entry node whose output is the inbound event
   | "errorTrigger" // entry node for an error-handler graph; output is the failure context
   | "pollTrigger" // entry node: polls a URL on an interval; output is {changed, body}
+  | "scheduleTrigger" // entry node: runs the graph on a cron schedule (control-plane synced)
   | "agent"
   | "mcpTool" // Slice #4: calls a remote MCP server tool via a connection
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}
@@ -72,6 +73,18 @@ export interface ArgBinding {
 /** Start node: an optional sample trigger input used for manual/test runs. */
 export interface StartNodeConfig {
   sampleInput?: Record<string, unknown>;
+}
+
+/**
+ * Schedule Trigger — an ENTRY node that makes the graph run on a cron schedule (n8n's
+ * Schedule Trigger). The control plane syncs a Temporal cron Schedule when a graph with this
+ * start node is saved (like pollTrigger's interval sync). In the interpreter it's a passthrough
+ * of the run input (the scheduled run carries no external event). `cron` is a standard 5/6-field
+ * expression, e.g. "0 9 * * 1-5" (weekdays 9am).
+ */
+export interface ScheduleTriggerNodeConfig {
+  /** Cron expression (Temporal/standard). */
+  cron: string;
 }
 
 /** Human-approval node config. The interpreter reads `timeoutHours` to bound the

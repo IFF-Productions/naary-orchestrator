@@ -334,6 +334,11 @@ export async function runGraph(
         // Slice #4: the inbound event (the workflow input) is this node's output.
         ctx[node.id] = ctx.__input;
         return null;
+      case "scheduleTrigger":
+        // Entry node: the run was started by a Temporal cron Schedule (control-plane synced
+        // on save). Passthrough of the run input — the schedule carries no external event.
+        ctx[node.id] = ctx.__input;
+        return null;
       case "errorTrigger":
         // Entry node of an error-handler graph — its output is the failure context
         // the interpreter passed as this run's input.

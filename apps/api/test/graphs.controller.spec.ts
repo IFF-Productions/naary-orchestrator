@@ -8,10 +8,11 @@ import type { GraphGeneratorService } from "../src/graphs/graph-generator.servic
 import type { GraphsService } from "../src/graphs/graphs.service";
 import type { SchedulesService } from "../src/schedules/schedules.service";
 
-// The save path calls schedules.syncPollSchedule(...).catch(...) — a stub that
-// resolves is enough for the non-poll graphs these tests use.
+// The save path calls schedules.syncPollSchedule(...) + syncCronSchedule(...).catch(...) —
+// stubs that resolve are enough for the non-trigger graphs these tests use.
 const schedulesStub = {
   syncPollSchedule: vi.fn().mockResolvedValue(undefined),
+  syncCronSchedule: vi.fn().mockResolvedValue(undefined),
 } as unknown as SchedulesService;
 
 const validGraph: GraphDef = {

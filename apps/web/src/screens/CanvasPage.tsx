@@ -1280,6 +1280,25 @@ function ConfigPanel({
         </>
       )}
 
+      {kind === "scheduleTrigger" && (
+        <>
+          <Labeled label="Cron expression">
+            <input
+              value={str("cron")}
+              onChange={(e) => onChange({ cron: e.target.value })}
+              style={inputStyle}
+              placeholder="0 9 * * 1-5"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            Standard cron (min hour day month weekday). The schedule is created
+            server-side when you save. Examples: <code>*/15 * * * *</code>{" "}
+            (every 15 min), <code>0 9 * * 1-5</code> (weekdays 9am),{" "}
+            <code>0 0 1 * *</code> (1st of the month).
+          </div>
+        </>
+      )}
+
       {kind === "httpRequest" && (
         <>
           <Labeled label="Method">

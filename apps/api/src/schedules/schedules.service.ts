@@ -183,6 +183,65 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /**
+   * Keep a `scheduleTrigger` graph's CRON Schedule in sync (mirror of syncPollSchedule).
+   * If the graph's start node is a scheduleTrigger, ensure a Temporal cron Schedule runs it
+   * on `cron`. Idempotent: delete-then-create on each save so it reflects the latest graph +
+   * cron. No-op for non-schedule graphs. Best-effort — the caller must not fail a save if
+   * scheduling hiccups (e.g. an invalid cron, which Temporal rejects on create).
+   */
+  async syncCronSchedule(
+    tenantId: string,
+    workflowKey: string,
+    graph: GraphDef,
+  ): Promise<void> {
+    const start = graph.nodes.find((n) => n.id === graph.startNodeId);
+    if (!start || start.type !== "scheduleTrigger") return;
+    const cron = String((start.config as { cron?: string })?.cron ?? "").trim();
+    if (!cron) return;
+    const snapshot = await this.graphs.getLatest(tenantId, workflowKey);
+    if (!snapshot) return;
+    const budget = await getBudget(tenantId);
+    const id = `cron-${tenantId}-${workflowKey}`;
+
+    try {
+      await this.client.schedule.getHandle(id).delete();
+    } catch {
+      /* no existing schedule — first activation */
+    }
+    await this.client.schedule.create({
+      scheduleId: id,
+      spec: { cronExpressions: [cron] },
+      action: {
+        type: "startWorkflow",
+        workflowType: RUN_GRAPH_WORKFLOW,
+        taskQueue: TASK_QUEUE,
+        workflowId: `cronrun-${tenantId}-${workflowKey}`,
+        args: [
+          snapshot.graph,
+          {},
+          {
+            tenantId,
+            workflowKey,
+            perExecutionCapUsd: budget?.perExecutionCapUsd,
+            maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
+            graphContentHash: snapshot.contentHash,
+            graphVersion: snapshot.version,
+          },
+        ],
+        memo: {
+          graphContentHash: snapshot.contentHash,
+          graphVersion: snapshot.version,
+        },
+      },
+    });
+    await getPrisma().schedule.upsert({
+      where: { id },
+      create: { id, tenantId, workflowKey, cron },
+      update: { cron },
+    });
+  }
+
   /** Tenant's schedules, enriched with the next fire time from Temporal. */
   async list(tenantId: string): Promise<ScheduleView[]> {
     const rows = await getPrisma().schedule.findMany({
