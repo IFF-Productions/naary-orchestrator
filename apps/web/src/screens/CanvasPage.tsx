@@ -2216,6 +2216,46 @@ function ConfigPanel({
         </>
       )}
 
+      {kind === "encode" && (
+        <>
+          <Labeled label="Operation">
+            <select
+              value={str("operation") || "base64Encode"}
+              onChange={(e) => onChange({ operation: e.target.value })}
+              style={inputStyle}
+            >
+              <option value="base64Encode">Base64 encode</option>
+              <option value="base64Decode">Base64 decode</option>
+              <option value="base64urlEncode">Base64url encode</option>
+              <option value="base64urlDecode">Base64url decode</option>
+              <option value="hexEncode">Hex encode</option>
+              <option value="hexDecode">Hex decode</option>
+              <option value="urlEncode">URL encode</option>
+              <option value="urlDecode">URL decode</option>
+            </select>
+          </Labeled>
+          <Labeled label="Source node id">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="upstream-node-id"
+            />
+          </Labeled>
+          <Labeled label="Path (optional)">
+            <input
+              value={str("path")}
+              onChange={(e) => onChange({ path: e.target.value })}
+              style={inputStyle}
+              placeholder="result"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+            Result is <code>{node.id}.result</code>.
+          </div>
+        </>
+      )}
+
       {kind === "number" &&
         (() => {
           const op = str("operation") || "add";
