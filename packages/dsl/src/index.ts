@@ -24,6 +24,7 @@ export {
   type ResolvedSqlExec,
 } from "./sql-query";
 export { resolveSet } from "./set-node";
+export { resolveSwitch } from "./switch-node";
 export { resolveRenameKeys } from "./rename-keys";
 export {
   resolveFilter,

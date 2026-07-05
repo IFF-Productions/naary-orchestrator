@@ -22,6 +22,7 @@ export type NodeType =
   | "xml" // parse XML→object / build object→XML (activity; fast-xml-parser)
   | "dateTime" // current time / timestamp math via an activity (clock read is I/O)
   | "merge" // fan-in join: run once after all inbound branches arrive; combine outputs
+  | "switch" // multi-way router: first matching rule → output {matched}; branch edges on it
   | "hmac" // signs a payload with a `signing` connection's key (activity); output is the digest
   | "jwt" // mints an HS256 JWT signed by a `signing` connection's key (activity)
   | "totp" // generates the current RFC-6238 TOTP code from a `signing` connection's seed
@@ -496,6 +497,28 @@ export interface CodeNodeConfig {
  * (a conditional edge into a merge is rejected by `validateGraph`, since a branch
  * that never fires would strand the join); loops back through a merge are undefined.
  */
+/** One named branch of a Switch node — a label plus the predicate that selects it. */
+export interface SwitchRule {
+  /** The branch label; also the value written to `{ matched }` when this rule wins. */
+  name: string;
+  /** Structured predicate (same op set as edges/filter), evaluated against `ctx`. */
+  condition: EdgeCondition;
+}
+
+/**
+ * Switch node — multi-way router (n8n's Switch, Rules mode). Evaluates `rules` IN ORDER
+ * against the run context and outputs `{ matched }` = the FIRST matching rule's name, or
+ * `fallback` when none match. PURE (reuses `evaluateCondition`, no I/O). The author draws
+ * one outgoing edge per branch with `eq` on `<switchId>.matched` — one node instead of N
+ * hand-wired conditional edges on the source.
+ */
+export interface SwitchNodeConfig {
+  /** Ordered branches; the first whose condition holds wins. */
+  rules: SwitchRule[];
+  /** `matched` value when no rule matches (default "default"). */
+  fallback?: string;
+}
+
 export interface MergeNodeConfig {
   /** How to combine the inbound parents' outputs. "array" (default) →
    *  `[parent1, …, parentN]` in declared inbound-edge order; "object" →

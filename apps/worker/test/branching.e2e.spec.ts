@@ -101,6 +101,71 @@ describe("interpreter — branching / parallel / loop (Slice #6)", () => {
     expect(mcpConns).toEqual(["billing-conn"]);
   });
 
+  it("routes via a switch node: first matching rule wins, edges branch on .matched", async () => {
+    // agent → category "billing", urgency 3. Rule 1 (urgent, urgency>=5) misses; rule 2
+    // (billing) matches → matched="billing" → only the billing edge fires.
+    const graph: GraphDef = {
+      startNodeId: "agent",
+      nodes: [
+        { id: "agent", type: "agent" },
+        {
+          id: "sw",
+          type: "switch",
+          config: {
+            rules: [
+              {
+                name: "urgent",
+                condition: {
+                  path: "agent.output.urgency",
+                  op: "gte",
+                  value: 5,
+                },
+              },
+              {
+                name: "billing",
+                condition: {
+                  path: "agent.output.category",
+                  op: "eq",
+                  value: "billing",
+                },
+              },
+            ],
+            fallback: "other",
+          },
+        },
+        mcp("urgentBranch", "urgent-conn"),
+        mcp("billingBranch", "billing-conn"),
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "agent", to: "sw" },
+        {
+          from: "sw",
+          to: "urgentBranch",
+          condition: { path: "sw.matched", op: "eq", value: "urgent" },
+        },
+        {
+          from: "sw",
+          to: "billingBranch",
+          condition: { path: "sw.matched", op: "eq", value: "billing" },
+        },
+        { from: "urgentBranch", to: "end" },
+        { from: "billingBranch", to: "end" },
+      ],
+    };
+    const worker = await makeWorker();
+    const status = await worker.runUntil(async () => {
+      const h = await env.client.workflow.start(runGraph, {
+        args: [graph, {}, { tenantId: "t1" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-switch",
+      });
+      return (await h.result()).status;
+    });
+    expect(status).toBe("completed");
+    expect(mcpConns).toEqual(["billing-conn"]);
+  });
+
   it("runs both branches on a parallel fan-out (two unconditional edges)", async () => {
     const graph: GraphDef = {
       startNodeId: "fork",

@@ -28,6 +28,7 @@ import {
   resolveSqlQuery,
   resolveSqlExec,
   resolveSubWorkflowInput,
+  resolveSwitch,
   resolveWebhookResponse,
 } from "@naary/dsl";
 import type {
@@ -52,6 +53,7 @@ import type {
   RssReadNodeConfig,
   SendEmailNodeConfig,
   SetNodeConfig,
+  SwitchNodeConfig,
   SqlQueryNodeConfig,
   SqlExecNodeConfig,
   StopAndErrorNodeConfig,
@@ -513,6 +515,13 @@ export async function runGraph(
                 ...inputs.filter((i) => i !== null && typeof i === "object"),
               )
             : inputs;
+        return null;
+      }
+      case "switch": {
+        // Pure node: pick the first matching rule → { matched }. Downstream edges branch
+        // on `<switchId>.matched`. Reuses evaluateCondition (structured, no eval).
+        const swCfg = node.config as unknown as SwitchNodeConfig;
+        ctx[node.id] = resolveSwitch(swCfg, ctx);
         return null;
       }
       case "hmac": {

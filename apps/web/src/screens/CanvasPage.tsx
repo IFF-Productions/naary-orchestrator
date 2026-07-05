@@ -1852,6 +1852,114 @@ function ConfigPanel({
         </>
       )}
 
+      {kind === "switch" &&
+        (() => {
+          const rules =
+            (config.rules as
+              | Array<{
+                  name?: string;
+                  condition?: { path?: string; op?: string; value?: unknown };
+                }>
+              | undefined) ?? [];
+          const setRules = (next: typeof rules) => onChange({ rules: next });
+          return (
+            <>
+              <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+                Rules run top-to-bottom; the first match sets{" "}
+                <code>{node.id}.matched</code> to that rule's name (else the
+                fallback). Draw one outgoing edge per branch with{" "}
+                <code>matched eq &lt;name&gt;</code>.
+              </div>
+              {rules.map((rule, i) => (
+                <div
+                  // biome-ignore lint/suspicious/noArrayIndexKey: rules are positional
+                  key={i}
+                  style={{
+                    border: "1px solid var(--line)",
+                    borderRadius: 8,
+                    padding: 10,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  <div
+                    style={{ display: "flex", gap: 8, alignItems: "center" }}
+                  >
+                    <input
+                      value={rule.name ?? ""}
+                      onChange={(e) =>
+                        setRules(
+                          rules.map((r, j) =>
+                            j === i ? { ...r, name: e.target.value } : r,
+                          ),
+                        )
+                      }
+                      style={inputStyle}
+                      placeholder="branch name (e.g. urgent)"
+                    />
+                    <button
+                      type="button"
+                      aria-label="Remove rule"
+                      onClick={() => setRules(rules.filter((_, j) => j !== i))}
+                      style={{
+                        border: "1px solid var(--line-2)",
+                        background: "var(--card)",
+                        color: "var(--ink-2)",
+                        borderRadius: 7,
+                        cursor: "pointer",
+                        padding: "6px 10px",
+                        flex: "none",
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <ConditionEditor
+                    condition={rule.condition}
+                    onChange={(c) =>
+                      setRules(
+                        rules.map((r, j) =>
+                          j === i ? { ...r, condition: c } : r,
+                        ),
+                      )
+                    }
+                  />
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() =>
+                  setRules([
+                    ...rules,
+                    { name: "", condition: { path: "", op: "eq", value: "" } },
+                  ])
+                }
+                style={{
+                  alignSelf: "flex-start",
+                  border: "1px solid var(--line-2)",
+                  background: "var(--card)",
+                  color: "var(--ink-2)",
+                  borderRadius: 7,
+                  cursor: "pointer",
+                  padding: "6px 10px",
+                  fontSize: 12,
+                }}
+              >
+                + Add rule
+              </button>
+              <Labeled label="Fallback (matched when no rule fits)">
+                <input
+                  value={str("fallback")}
+                  onChange={(e) => onChange({ fallback: e.target.value })}
+                  style={inputStyle}
+                  placeholder="default"
+                />
+              </Labeled>
+            </>
+          );
+        })()}
+
       {kind === "hmac" && (
         <>
           <Labeled label="Signing connection id">
