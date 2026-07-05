@@ -2536,6 +2536,94 @@ function ConfigPanel({
         </>
       )}
 
+      {kind === "hash" && (
+        <>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Labeled label="Algorithm">
+              <select
+                value={str("algorithm") || "sha256"}
+                onChange={(e) => onChange({ algorithm: e.target.value })}
+                style={inputStyle}
+              >
+                <option value="sha256">SHA-256</option>
+                <option value="sha512">SHA-512</option>
+                <option value="sha1">SHA-1</option>
+                <option value="md5">MD5</option>
+              </select>
+            </Labeled>
+            <Labeled label="Encoding">
+              <select
+                value={str("encoding") || "hex"}
+                onChange={(e) => onChange({ encoding: e.target.value })}
+                style={inputStyle}
+              >
+                <option value="hex">hex</option>
+                <option value="base64">base64</option>
+              </select>
+            </Labeled>
+          </div>
+          <Labeled label="Value to hash (static)">
+            <input
+              value={str("input")}
+              onChange={(e) => onChange({ input: e.target.value })}
+              style={inputStyle}
+              placeholder="text, or bind from a node below"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            Or bind the value from an upstream node (overrides the static
+            value).
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Labeled label="From node id">
+              <input
+                value={
+                  (config.inputBinding as { from?: string } | undefined)
+                    ?.from ?? ""
+                }
+                onChange={(e) =>
+                  onChange({
+                    inputBinding: e.target.value
+                      ? {
+                          from: e.target.value,
+                          path: (
+                            config.inputBinding as { path?: string } | undefined
+                          )?.path,
+                        }
+                      : undefined,
+                  })
+                }
+                style={inputStyle}
+                placeholder="upstream-node-id"
+              />
+            </Labeled>
+            <Labeled label="Path (optional)">
+              <input
+                value={
+                  (config.inputBinding as { path?: string } | undefined)
+                    ?.path ?? ""
+                }
+                onChange={(e) =>
+                  onChange({
+                    inputBinding: {
+                      from:
+                        (config.inputBinding as { from?: string } | undefined)
+                          ?.from ?? "",
+                      path: e.target.value || undefined,
+                    },
+                  })
+                }
+                style={inputStyle}
+                placeholder="body"
+              />
+            </Labeled>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+            Output is <code>{node.id}.digest</code>.
+          </div>
+        </>
+      )}
+
       {kind === "sendEmail" && (
         <>
           <Labeled label="SMTP connection id">

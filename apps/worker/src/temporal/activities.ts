@@ -18,6 +18,7 @@ import type {
   CodeNodeConfig,
   GraphDef,
   PollTriggerNodeConfig,
+  ResolvedHash,
   ResolvedHmac,
   ResolvedJwt,
   ResolvedRss,
@@ -27,6 +28,7 @@ import type {
 // jwt/sendEmail/rss activity args are the DSL's Resolved* types).
 export type {
   CodeNodeConfig,
+  ResolvedHash,
   ResolvedHmac,
   ResolvedJwt,
   ResolvedRss,
@@ -300,6 +302,37 @@ export async function callHmac(
     activityRuns.inc({ activity: "callHmac", outcome: "error" });
     activityDuration.observe({ activity: "callHmac" }, secondsSince(startedAt));
     throw toSigningFailure(e, "HMAC_ERROR");
+  }
+}
+
+export interface HashResult {
+  status: "ok";
+  digest: string;
+  costUsd: number;
+}
+
+/**
+ * hash node — a keyless one-way digest of the resolved input (n8n's String.hash()). Runs in
+ * an activity (node:crypto isn't in the deterministic bundle). A claim-checked bound input is
+ * rehydrated FIRST so we hash the real data, not the `{__claimCheck}` reference. No secrets.
+ */
+export async function callHash(
+  cfg: ResolvedHash,
+  _input: unknown,
+  meta: AgentMeta,
+): Promise<HashResult> {
+  const startedAt = process.hrtime.bigint();
+  try {
+    const store = getObjectStore();
+    const value = toSignedString(await resolveClaimChecks(cfg.input, store));
+    const digest = createHash(cfg.algorithm).update(value).digest(cfg.encoding);
+    activityRuns.inc({ activity: "callHash", outcome: "ok" });
+    activityDuration.observe({ activity: "callHash" }, secondsSince(startedAt));
+    return { status: "ok", digest, costUsd: 0 };
+  } catch {
+    activityRuns.inc({ activity: "callHash", outcome: "error" });
+    activityDuration.observe({ activity: "callHash" }, secondsSince(startedAt));
+    throw ApplicationFailure.nonRetryable("Hash failed", "HASH_ERROR");
   }
 }
 

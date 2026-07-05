@@ -37,8 +37,10 @@ export { resolveSubWorkflowInput } from "./sub-workflow";
 export {
   resolveHmac,
   resolveJwt,
+  resolveHash,
   type ResolvedHmac,
   type ResolvedJwt,
+  type ResolvedHash,
 } from "./signing";
 export { resolveSendEmail, type ResolvedSendEmail } from "./send-email";
 export { resolveRss, type ResolvedRss } from "./rss";

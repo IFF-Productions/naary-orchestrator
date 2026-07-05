@@ -29,6 +29,7 @@ export type NodeType =
   | "hmac" // signs a payload with a `signing` connection's key (activity); output is the digest
   | "jwt" // mints an HS256 JWT signed by a `signing` connection's key (activity)
   | "totp" // generates the current RFC-6238 TOTP code from a `signing` connection's seed
+  | "hash" // one-way digest of a value (sha256/512/1/md5) — no key/connection needed
   | "sendEmail" // sends an email via an `smtp` connection (activity)
   | "rssRead" // fetches + parses an RSS/Atom feed (egress-guarded activity); output is {items}
   | "executeSubWorkflow" // runs another saved graph as a child run; output is {status,output}
@@ -438,6 +439,23 @@ export interface HmacNodeConfig {
   /** Upstream binding whose value replaces `payload`. */
   payloadBinding?: ArgBinding;
   /** Output digest encoding. Default "hex". */
+  encoding?: "hex" | "base64";
+}
+
+/**
+ * Hash node — a one-way digest of a value (n8n's String.hash()). Unlike `hmac`/`jwt`/`totp`
+ * there is NO key or connection: it just hashes. `input` is the static value; `inputBinding`
+ * overrides it from an upstream output (objects are JSON-stringified before hashing). Output
+ * is `{ digest }`. Runs in an ACTIVITY (node:crypto isn't in the deterministic bundle).
+ */
+export interface HashNodeConfig {
+  /** Digest algorithm (default "sha256"). */
+  algorithm?: "sha256" | "sha512" | "sha1" | "md5";
+  /** Static value to hash (string, or object → JSON). */
+  input?: unknown;
+  /** Upstream binding whose value replaces `input`. */
+  inputBinding?: ArgBinding;
+  /** Output digest encoding (default "hex"). */
   encoding?: "hex" | "base64";
 }
 

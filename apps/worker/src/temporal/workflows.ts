@@ -18,6 +18,7 @@ import {
   resolveFilter,
   resolveListOps,
   resolveHmac,
+  resolveHash,
   resolveHttpRequest,
   resolveJwt,
   resolveMcpArguments,
@@ -43,6 +44,7 @@ import type {
   ForEachNodeConfig,
   GraphDef,
   ListOpsNodeConfig,
+  HashNodeConfig,
   HmacNodeConfig,
   HtmlExtractNodeConfig,
   HttpRequestNodeConfig,
@@ -79,6 +81,7 @@ const {
   computeDateTime,
   resolveSubWorkflowGraph,
   callHmac,
+  callHash,
   callJwt,
   callTotp,
   callXml,
@@ -599,6 +602,18 @@ export async function runGraph(
         // signing happen in the activity (the key never enters workflow history).
         const hmacCfg = node.config as unknown as HmacNodeConfig;
         const result = await callHmac(resolveHmac(hmacCfg, ctx), ctx.__input, {
+          tenantId: runCtx.tenantId,
+          executionId: wf.workflowInfo().workflowId,
+          nodeId: node.id,
+        });
+        ctx[node.id] = { digest: result.digest };
+        return null;
+      }
+      case "hash": {
+        // Keyless digest. Binding resolution is deterministic (pure ctx read); the hash
+        // (node:crypto) runs in the activity, out of the deterministic bundle.
+        const hashCfg = node.config as unknown as HashNodeConfig;
+        const result = await callHash(resolveHash(hashCfg, ctx), ctx.__input, {
           tenantId: runCtx.tenantId,
           executionId: wf.workflowInfo().workflowId,
           nodeId: node.id,
