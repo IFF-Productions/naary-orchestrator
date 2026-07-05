@@ -28,6 +28,7 @@ export interface CompileResult {
 const ENTRY_TYPES: ReadonlySet<NodeType> = new Set<NodeType>([
   "start",
   "webhookTrigger",
+  "scheduleTrigger",
 ]);
 
 export function compileGraph(

@@ -109,10 +109,14 @@ export class GraphsController {
       body.name,
       graph,
     );
-    // If this graph is a pollTrigger flow, (re)create its interval schedule so it
-    // "runs on its own timer". Best-effort — a scheduling hiccup must not fail a save.
+    // If this graph is a pollTrigger / scheduleTrigger flow, (re)create its Temporal
+    // schedule so it "runs on its own timer". Best-effort — a scheduling hiccup (e.g. an
+    // invalid cron) must not fail a save.
     await this.schedules
       .syncPollSchedule(tenantId, body.workflowKey, graph)
+      .catch(() => undefined);
+    await this.schedules
+      .syncCronSchedule(tenantId, body.workflowKey, graph)
       .catch(() => undefined);
     return {
       workflowKey: body.workflowKey,

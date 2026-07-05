@@ -1280,6 +1280,25 @@ function ConfigPanel({
         </>
       )}
 
+      {kind === "scheduleTrigger" && (
+        <>
+          <Labeled label="Cron expression">
+            <input
+              value={str("cron")}
+              onChange={(e) => onChange({ cron: e.target.value })}
+              style={inputStyle}
+              placeholder="0 9 * * 1-5"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+            Standard cron (min hour day month weekday). The schedule is created
+            server-side when you save. Examples: <code>*/15 * * * *</code>{" "}
+            (every 15 min), <code>0 9 * * 1-5</code> (weekdays 9am),{" "}
+            <code>0 0 1 * *</code> (1st of the month).
+          </div>
+        </>
+      )}
+
       {kind === "httpRequest" && (
         <>
           <Labeled label="Method">
@@ -2193,6 +2212,46 @@ function ConfigPanel({
           <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
             parse → <code>{node.id}</code> is the value; stringify →{" "}
             <code>{node.id}.json</code> is the string.
+          </div>
+        </>
+      )}
+
+      {kind === "encode" && (
+        <>
+          <Labeled label="Operation">
+            <select
+              value={str("operation") || "base64Encode"}
+              onChange={(e) => onChange({ operation: e.target.value })}
+              style={inputStyle}
+            >
+              <option value="base64Encode">Base64 encode</option>
+              <option value="base64Decode">Base64 decode</option>
+              <option value="base64urlEncode">Base64url encode</option>
+              <option value="base64urlDecode">Base64url decode</option>
+              <option value="hexEncode">Hex encode</option>
+              <option value="hexDecode">Hex decode</option>
+              <option value="urlEncode">URL encode</option>
+              <option value="urlDecode">URL decode</option>
+            </select>
+          </Labeled>
+          <Labeled label="Source node id">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="upstream-node-id"
+            />
+          </Labeled>
+          <Labeled label="Path (optional)">
+            <input
+              value={str("path")}
+              onChange={(e) => onChange({ path: e.target.value })}
+              style={inputStyle}
+              placeholder="result"
+            />
+          </Labeled>
+          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+            Result is <code>{node.id}.result</code>.
           </div>
         </>
       )}

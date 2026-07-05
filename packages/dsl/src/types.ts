@@ -8,6 +8,7 @@ export type NodeType =
   | "webhookTrigger" // Slice #4: entry node whose output is the inbound event
   | "errorTrigger" // entry node for an error-handler graph; output is the failure context
   | "pollTrigger" // entry node: polls a URL on an interval; output is {changed, body}
+  | "scheduleTrigger" // entry node: runs the graph on a cron schedule (control-plane synced)
   | "agent"
   | "mcpTool" // Slice #4: calls a remote MCP server tool via a connection
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}
@@ -25,6 +26,7 @@ export type NodeType =
   | "csv" // parse CSV text→rows / build rows→CSV text (activity; papaparse)
   | "json" // pure: parse JSON text→value / stringify value→text
   | "number" // pure: arithmetic on numbers (add/sub/mul/div/mod/pow/round/floor/ceil/abs)
+  | "encode" // encode/decode a string: base64 / base64url / hex / url (activity)
   | "dateTime" // current time / timestamp math via an activity (clock read is I/O)
   | "merge" // fan-in join: run once after all inbound branches arrive; combine outputs
   | "if" // boolean gate: combine N predicates with AND/OR → output {result}
@@ -72,6 +74,18 @@ export interface ArgBinding {
 /** Start node: an optional sample trigger input used for manual/test runs. */
 export interface StartNodeConfig {
   sampleInput?: Record<string, unknown>;
+}
+
+/**
+ * Schedule Trigger — an ENTRY node that makes the graph run on a cron schedule (n8n's
+ * Schedule Trigger). The control plane syncs a Temporal cron Schedule when a graph with this
+ * start node is saved (like pollTrigger's interval sync). In the interpreter it's a passthrough
+ * of the run input (the scheduled run carries no external event). `cron` is a standard 5/6-field
+ * expression, e.g. "0 9 * * 1-5" (weekdays 9am).
+ */
+export interface ScheduleTriggerNodeConfig {
+  /** Cron expression (Temporal/standard). */
+  cron: string;
 }
 
 /** Human-approval node config. The interpreter reads `timeoutHours` to bound the
@@ -362,6 +376,30 @@ export interface CsvNodeConfig {
   header?: boolean;
   /** Field delimiter (default ","). */
   delimiter?: string;
+}
+
+/** Encode/decode operations for the Encode node. */
+export type EncodeOp =
+  | "base64Encode"
+  | "base64Decode"
+  | "base64urlEncode"
+  | "base64urlDecode"
+  | "hexEncode"
+  | "hexDecode"
+  | "urlEncode"
+  | "urlDecode";
+
+/**
+ * Encode node — convert a string to/from base64, base64url, hex, or URL-encoding (n8n's
+ * base64Encode/urlEncode string methods). Output is `{ result }`. Runs in an ACTIVITY (uses
+ * Node's Buffer, which isn't in the deterministic workflow bundle). No secrets, no egress.
+ */
+export interface EncodeNodeConfig {
+  operation: EncodeOp;
+  /** Upstream node id whose output holds the input string. */
+  from: string;
+  /** Optional dotted path into that output. */
+  path?: string;
 }
 
 /** Arithmetic operations for the Number node. Binary use `a` and `b`; unary use `a`. */

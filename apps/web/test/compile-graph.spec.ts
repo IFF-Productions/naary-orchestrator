@@ -150,6 +150,25 @@ describe("compileGraph", () => {
     });
   });
 
+  it("accepts a scheduleTrigger as the single entry node (→ startNodeId)", () => {
+    const nodes: CanvasNode[] = [
+      {
+        id: "cron",
+        type: "scheduleTrigger",
+        position: at(0),
+        config: { cron: "0 9 * * 1-5" },
+      },
+      { id: "end", type: "end", position: at(1) },
+    ];
+    const edges: CanvasEdge[] = [{ id: "e", source: "cron", target: "end" }];
+    const { graph, error } = compileGraph(nodes, edges);
+    expect(error).toBeUndefined();
+    expect(graph?.startNodeId).toBe("cron");
+    expect(graph?.nodes.find((n) => n.id === "cron")?.config).toEqual({
+      cron: "0 9 * * 1-5",
+    });
+  });
+
   describe("onError (per-node error policy)", () => {
     const base: CanvasNode[] = [
       { id: "s", type: "start", position: at(0) },

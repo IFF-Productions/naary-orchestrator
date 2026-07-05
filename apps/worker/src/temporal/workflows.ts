@@ -41,6 +41,7 @@ import type {
   CodeNodeConfig,
   CompareDatasetsNodeConfig,
   CsvNodeConfig,
+  EncodeNodeConfig,
   DateTimeNodeConfig,
   ExecuteSubWorkflowNodeConfig,
   FilterNodeConfig,
@@ -93,6 +94,7 @@ const {
   callXml,
   callHtmlExtract,
   callCsv,
+  callEncode,
 } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },
@@ -332,6 +334,11 @@ export async function runGraph(
         return null;
       case "webhookTrigger":
         // Slice #4: the inbound event (the workflow input) is this node's output.
+        ctx[node.id] = ctx.__input;
+        return null;
+      case "scheduleTrigger":
+        // Entry node: the run was started by a Temporal cron Schedule (control-plane synced
+        // on save). Passthrough of the run input — the schedule carries no external event.
         ctx[node.id] = ctx.__input;
         return null;
       case "errorTrigger":
@@ -621,6 +628,19 @@ export async function runGraph(
         // Pure node: one arithmetic op on resolved operands → { result }.
         const numCfg = node.config as unknown as NumberNodeConfig;
         ctx[node.id] = resolveNumber(numCfg, ctx);
+        return null;
+      }
+      case "encode": {
+        // Input resolved here (pure ctx read); the encode runs in the activity (Buffer for
+        // base64/hex isn't in the deterministic bundle). Output { result }.
+        const encCfg = node.config as unknown as EncodeNodeConfig;
+        const encVal = getByPath(ctx[encCfg.from], encCfg.path);
+        const res = await callEncode({ operation: encCfg.operation }, encVal, {
+          tenantId: runCtx.tenantId,
+          executionId: wf.workflowInfo().workflowId,
+          nodeId: node.id,
+        });
+        ctx[node.id] = { result: res.result };
         return null;
       }
       case "hmac": {
