@@ -194,6 +194,10 @@ export const api = {
   getMe(): Promise<{ tenantId: string; subject?: string }> {
     return http("/me");
   },
+  // The caller's workspaces + role (powers the workspace switcher).
+  getMyWorkspaces(): Promise<Workspace[]> {
+    return http("/me/workspaces");
+  },
   // Recent runs for the tenant (identity + start time; status is on the detail view).
   listRuns(): Promise<RunSummary[]> {
     return http("/executions");
@@ -448,6 +452,12 @@ export interface Member {
 export interface TenantSettings {
   displayName: string | null;
   defaultModel: string | null;
+}
+
+/** A workspace the current user belongs to, with their role (workspace switcher). */
+export interface Workspace {
+  tenantId: string;
+  role: string;
 }
 
 /** One entry in the activity feed (who did what, when). */
