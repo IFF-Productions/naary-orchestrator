@@ -108,6 +108,8 @@ jobs:
       # The host-side token mint imports @naary/db, so its client must be generated.
       - name: Generate Prisma client
         run: pnpm --filter @naary/db run generate
+        env:
+          DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}?schema=public
 
       - name: Build + start the stack
         run: ${{ steps.compose.outputs.cmd }} up -d --build
