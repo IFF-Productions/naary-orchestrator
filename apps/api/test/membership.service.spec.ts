@@ -3,10 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const findMany = vi.fn();
 const upsert = vi.fn();
 const create = vi.fn();
+const findFirst = vi.fn();
+const deleteFn = vi.fn();
 vi.mock("@naary/db", () => ({
-  getPrisma: () => ({ membership: { findMany, upsert, create } }),
+  getPrisma: () => ({
+    membership: { findMany, upsert, create, findFirst, delete: deleteFn },
+  }),
 }));
 
+import { ForbiddenException } from "@nestjs/common";
 import { MembershipService } from "../src/membership/membership.service";
 import { InMemoryMembershipCache } from "../src/membership/membership-cache";
 
@@ -20,6 +25,8 @@ beforeEach(() => {
   findMany.mockReset();
   upsert.mockReset().mockResolvedValue({});
   create.mockReset().mockResolvedValue({});
+  findFirst.mockReset();
+  deleteFn.mockReset().mockResolvedValue({});
 });
 
 describe("MembershipService", () => {
@@ -87,5 +94,38 @@ describe("MembershipService", () => {
     const a = await svc.createWorkspace("u1");
     const b = await svc.createWorkspace("u1");
     expect(a.tenantId).not.toBe(b.tenantId);
+  });
+
+  it("removeMembership deletes the row and BUSTS that user's cache (attack #5)", async () => {
+    findMany.mockResolvedValue([{ tenantId: "t1", role: "member" }]);
+    const svc = makeService();
+    await svc.listForUser("u-victim"); // cache populated
+    findFirst.mockResolvedValue({
+      id: "m-1",
+      userId: "u-victim",
+      role: "member",
+    });
+
+    await svc.removeMembership("t1", "m-1");
+
+    expect(deleteFn).toHaveBeenCalledWith({ where: { id: "m-1" } });
+    // The removed user's cache was invalidated → next read hits the DB.
+    findMany.mockResolvedValue([]);
+    expect(await svc.listForUser("u-victim")).toEqual([]);
+    expect(findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it("removeMembership refuses to remove an owner", async () => {
+    findFirst.mockResolvedValue({ id: "m-1", userId: "u", role: "owner" });
+    await expect(
+      makeService().removeMembership("t1", "m-1"),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(deleteFn).not.toHaveBeenCalled();
+  });
+
+  it("removeMembership is a no-op for an unknown/cross-tenant id (no delete)", async () => {
+    findFirst.mockResolvedValue(null);
+    await makeService().removeMembership("t1", "nope");
+    expect(deleteFn).not.toHaveBeenCalled();
   });
 });

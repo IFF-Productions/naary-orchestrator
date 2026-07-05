@@ -1,9 +1,11 @@
 import { Module } from "@nestjs/common";
 import { MembersController } from "./members.controller";
-import { MembersService } from "./members.service";
 
+/**
+ * Team member management. Operates on the authoritative Membership table via the @Global
+ * MembershipModule (which provides MembershipService), so no local providers are needed.
+ */
 @Module({
   controllers: [MembersController],
-  providers: [MembersService],
 })
 export class MembersModule {}

@@ -210,9 +210,8 @@ model Member {
 
 // Multi-workspace membership (design: PROVISIONING-MULTIUSER.md). The AUTHORITY for
 // which workspaces a user belongs to + their role — a user has one row per workspace.
-// `userId` is the Firebase uid. Resolved per-request through MembershipCache; this
-// table is the source of truth. (The guard does NOT enforce against this yet — added
-// in a later slice; today it's populated + read by /me/workspaces only.)
+// `userId` is the Firebase uid. The AuthGuard resolves (userId, activeTenant) → role
+// per-request through MembershipCache and enforces access against this table.
 model Membership {
   id        String   @id @default(uuid())
   userId    String // Firebase uid
@@ -223,6 +222,25 @@ model Membership {
 
   @@unique([userId, tenantId])
   @@index([userId])
+  @@index([tenantId])
+}
+
+// Pending invitation to join a workspace with a role (design Path B). The invite carries
+// a high-entropy token handed to the invitee out-of-band; only its sha256 hash is stored
+// (`tokenHash`), so a DB read can't recover a usable token. Accepting is single-use
+// (`acceptedAt`), expiring (`expiresAt`), and gated on the accepter's verified email
+// MATCHING `email` — the token alone is not enough. `invitedBy` is the inviter's uid.
+model Invitation {
+  id         String    @id @default(uuid())
+  tenantId   String
+  email      String // normalized (lowercased) intended recipient
+  role       String    @default("member") // 'admin' | 'member' (never 'owner' via invite)
+  tokenHash  String    @unique // sha256 of the raw token; the raw token is never stored
+  invitedBy  String // inviter Firebase uid
+  expiresAt  DateTime
+  acceptedAt DateTime? // set once, on accept → single-use
+  createdAt  DateTime  @default(now())
+
   @@index([tenantId])
 }
 

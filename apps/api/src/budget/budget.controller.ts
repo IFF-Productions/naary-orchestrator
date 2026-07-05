@@ -1,9 +1,12 @@
-import { Body, Controller, Get, Param, Put } from "@nestjs/common";
+import { Body, Controller, Get, Param, Put, UseGuards } from "@nestjs/common";
 import type { TenantBudgetConfig } from "@naary/usage";
+import { Roles } from "../auth/roles.decorator";
+import { RolesGuard } from "../auth/roles.guard";
 import { SetBudgetDto } from "./set-budget.dto";
 import { BudgetService, type BudgetView } from "./budget.service";
 
 @Controller("tenants/:id/budget")
+@UseGuards(RolesGuard)
 export class BudgetController {
   constructor(private readonly budget: BudgetService) {}
 
@@ -12,7 +15,9 @@ export class BudgetController {
     return this.budget.view(id);
   }
 
+  /** Change the budget/caps. Admin+ (design §5). */
   @Put()
+  @Roles("admin")
   set(
     @Param("id") id: string,
     @Body() body: SetBudgetDto,
