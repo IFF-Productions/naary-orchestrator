@@ -8,7 +8,10 @@ name: E2E
 # never blocks the proven typecheck/test/build gate.
 #
 # Runner prerequisites (register a self-hosted runner with these):
-#   - Docker + the `docker compose` v2 plugin
+#   - Docker with a working `docker compose` (v2 plugin) OR `docker-compose` (v1). The
+#     "Resolve Docker Compose command" step below picks whichever exists and, on a macOS
+#     runner whose user lacks the plugin (e.g. Docker Desktop installed under a DIFFERENT
+#     user), auto-links Docker Desktop's bundled plugin into this user's ~/.docker/cli-plugins.
 #   - Node 22 + pnpm (the setup steps install pnpm; Node via setup-node)
 #   - Free ports 5432 / 7233 / 3000 / 8081, ~4 GB RAM
 #   - Google Chrome is fetched by `playwright install chrome` (needs its shared
@@ -43,6 +46,65 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Resolve the Compose command once, and self-heal the common self-hosted-Mac case.
+      #
+      # Symptom: `docker compose up -d --build` fails with "unknown shorthand flag: 'd' in -d"
+      # — i.e. `docker compose` is NOT a plugin here, so `-d` falls through to the top-level
+      # docker CLI. On macOS, Docker Desktop bundles the v2 plugin but only wires it into the
+      # PRIMARY user's ~/.docker/cli-plugins; a runner running as a DIFFERENT macOS user has
+      # the global `docker` binary but not that plugin. So: try v2, then legacy v1, then link
+      # Docker Desktop's bundled plugin into this user's plugin dir and retry.
+      - name: Resolve Docker Compose command
+        id: compose
+        run: |
+          set -e
+          pick() {
+            if docker compose version >/dev/null 2>&1; then echo "docker compose"; return 0; fi
+            if command -v docker-compose >/dev/null 2>&1 && docker-compose version >/dev/null 2>&1; then
+              echo "docker-compose"; return 0
+            fi
+            return 1
+          }
+          if ! CMD=$(pick); then
+            # Link Docker Desktop's bundled v2 plugin into this user's cli-plugins, then retry.
+            for p in \
+              /Applications/Docker.app/Contents/Resources/cli-plugins/docker-compose \
+              "$HOME/.docker/cli-plugins/docker-compose"; do
+              if [ -x "$p" ]; then
+                mkdir -p "$HOME/.docker/cli-plugins"
+                ln -sfn "$p" "$HOME/.docker/cli-plugins/docker-compose"
+                break
+              fi
+            done
+            CMD=$(pick) || {
+              echo "::error::No usable Docker Compose. This runner (as user '$(whoami)') has neither the 'docker compose' v2 plugin nor 'docker-compose' v1. On a self-hosted Mac, link Docker Desktop's plugin for this user: mkdir -p ~/.docker/cli-plugins && ln -sfn /Applications/Docker.app/Contents/Resources/cli-plugins/docker-compose ~/.docker/cli-plugins/docker-compose"
+              exit 1
+            }
+          fi
+          echo "Using compose command: $CMD"
+          echo "cmd=$CMD" >> "$GITHUB_OUTPUT"
+
+      # Pre-flight: the Docker DAEMON must be reachable by THIS user. On a self-hosted Mac
+      # this is the usual second failure — Docker Desktop's socket is owned by the user who
+      # installed it (e.g. /var/run/docker.sock → ~installer/.docker/run/docker.sock, perms
+      # srwxr-xr-x), so a runner running as a DIFFERENT user gets "permission denied ...
+      # /var/run/docker.sock". Fail here with the fix instead of deep in `compose up`.
+      - name: Verify Docker daemon is reachable
+        run: |
+          if docker info >/dev/null 2>&1; then
+            echo "Docker daemon reachable as user '$(whoami)'."
+            exit 0
+          fi
+          cat >&2 <<'MSG'
+          ::error::Cannot reach the Docker daemon as this runner user. macOS Docker Desktop is PER-USER: its socket is owned by the user who installed it, so another user is denied. Fix one of:
+            1) Run the GitHub Actions runner as the user who owns Docker Desktop; or
+            2) Give the runner user its OWN daemon with Colima (recommended for a headless/secondary user):
+                 brew install colima docker docker-compose
+                 colima start        # creates a docker socket owned by this user
+               then re-run. (Keep Colima running, e.g. `brew services` or a login item.)
+          MSG
+          exit 1
+
       - uses: pnpm/action-setup@v4
         with:
           version: 11.9.0
@@ -67,9 +129,11 @@ jobs:
       # The host-side token mint imports @naary/db, so its client must be generated.
       - name: Generate Prisma client
         run: pnpm --filter @naary/db run generate
+        env:
+          DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}?schema=public
 
       - name: Build + start the stack
-        run: docker compose up -d --build
+        run: ${{ steps.compose.outputs.cmd }} up -d --build
 
       - name: Wait for api + web to be healthy
         run: |
@@ -81,7 +145,7 @@ jobs:
             sleep 5
           done
           echo "::error::stack did not become healthy in time"
-          docker compose ps
+          ${{ steps.compose.outputs.cmd }} ps
           exit 1
 
       # Mint a tenant API token against the running DB (exposed on localhost:5432)
@@ -103,8 +167,8 @@ jobs:
 
       - name: Stack logs (on failure)
         if: failure()
-        run: docker compose logs --tail=300 || true
+        run: ${{ steps.compose.outputs.cmd }} logs --tail=300 || true
 
       - name: Tear down the stack
         if: always()
-        run: docker compose down -v || true
+        run: ${{ steps.compose.outputs.cmd }} down -v || true
