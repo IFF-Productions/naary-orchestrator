@@ -21,11 +21,15 @@ export function decompileGraph(graph: GraphDef): {
     const d = depth.get(n.id) ?? 0;
     const row = rowByDepth.get(d) ?? 0;
     rowByDepth.set(d, row + 1);
-    // `onError` is a first-class NodeDef field; surface it back into config-space so the
-    // canvas editor (which works in config) shows/edits it.
+    // `onError` + `retry` are first-class NodeDef fields; surface them back into config-space
+    // so the canvas editor (which works in config) shows/edits them.
     const config =
-      n.onError || n.config
-        ? { ...n.config, ...(n.onError ? { onError: n.onError } : {}) }
+      n.onError || n.retry || n.config
+        ? {
+            ...n.config,
+            ...(n.onError ? { onError: n.onError } : {}),
+            ...(n.retry ? { retry: n.retry } : {}),
+          }
         : undefined;
     return {
       id: n.id,

@@ -181,5 +181,38 @@ describe("compileGraph", () => {
       expect(h?.onError).toBeUndefined();
       expect(h?.config).toBeUndefined(); // config had only the default → omitted
     });
+
+    it("lifts config.retry to the NodeDef field and strips it from config", () => {
+      const nodes = base.map((n) =>
+        n.id === "h"
+          ? {
+              ...n,
+              config: {
+                url: "https://x.test",
+                retry: { maxAttempts: 5, initialIntervalSeconds: 2 },
+              },
+            }
+          : n,
+      );
+      const h = compileGraph(nodes, wire).graph?.nodes.find(
+        (n) => n.id === "h",
+      );
+      expect(h?.retry).toEqual({ maxAttempts: 5, initialIntervalSeconds: 2 });
+      expect(h?.config).toEqual({ url: "https://x.test" });
+      expect((h?.config as Record<string, unknown>)?.retry).toBeUndefined();
+    });
+
+    it("drops an empty/all-undefined retry object", () => {
+      const nodes = base.map((n) =>
+        n.id === "h"
+          ? { ...n, config: { url: "https://x.test", retry: {} } }
+          : n,
+      );
+      const h = compileGraph(nodes, wire).graph?.nodes.find(
+        (n) => n.id === "h",
+      );
+      expect(h?.retry).toBeUndefined();
+      expect(h?.config).toEqual({ url: "https://x.test" });
+    });
   });
 });

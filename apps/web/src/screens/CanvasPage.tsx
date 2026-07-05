@@ -1072,6 +1072,116 @@ function ConfigPanel({
         </Labeled>
       )}
 
+      {/* Per-node retry (n8n's "Retry On Fail"), backed by Temporal — unbounded + exponential. */}
+      {RETRYABLE_KINDS.has(kind) &&
+        (() => {
+          const retry = config.retry as
+            | {
+                maxAttempts?: number;
+                initialIntervalSeconds?: number;
+                backoffCoefficient?: number;
+              }
+            | undefined;
+          const on = Boolean(retry);
+          const setRetry = (patch: Record<string, unknown> | undefined) =>
+            onChange({ retry: patch });
+          return (
+            <div
+              style={{
+                border: "1px solid var(--line)",
+                borderRadius: 8,
+                padding: 10,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              <label
+                style={{
+                  display: "flex",
+                  gap: 6,
+                  alignItems: "center",
+                  fontSize: 12,
+                  color: "var(--ink-2)",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={(e) =>
+                    setRetry(
+                      e.target.checked
+                        ? {
+                            maxAttempts: 3,
+                            initialIntervalSeconds: 1,
+                            backoffCoefficient: 2,
+                          }
+                        : undefined,
+                    )
+                  }
+                />
+                Retry on failure (Temporal — exponential, no 5-try cap)
+              </label>
+              {on && (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Labeled label="Max attempts">
+                    <input
+                      type="number"
+                      min={1}
+                      value={retry?.maxAttempts ?? ""}
+                      onChange={(e) =>
+                        setRetry({
+                          ...retry,
+                          maxAttempts: e.target.value
+                            ? Number(e.target.value)
+                            : undefined,
+                        })
+                      }
+                      style={inputStyle}
+                      placeholder="3"
+                    />
+                  </Labeled>
+                  <Labeled label="Initial wait (s)">
+                    <input
+                      type="number"
+                      min={0}
+                      value={retry?.initialIntervalSeconds ?? ""}
+                      onChange={(e) =>
+                        setRetry({
+                          ...retry,
+                          initialIntervalSeconds: e.target.value
+                            ? Number(e.target.value)
+                            : undefined,
+                        })
+                      }
+                      style={inputStyle}
+                      placeholder="1"
+                    />
+                  </Labeled>
+                  <Labeled label="Backoff ×">
+                    <input
+                      type="number"
+                      min={1}
+                      step={0.5}
+                      value={retry?.backoffCoefficient ?? ""}
+                      onChange={(e) =>
+                        setRetry({
+                          ...retry,
+                          backoffCoefficient: e.target.value
+                            ? Number(e.target.value)
+                            : undefined,
+                        })
+                      }
+                      style={inputStyle}
+                      placeholder="2"
+                    />
+                  </Labeled>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
       {kind === "agent" && (
         <>
           <Labeled label="Provider">
@@ -3385,6 +3495,16 @@ const ERRORABLE_KINDS = new Set<NodeType>([
   "executeSubWorkflow",
   "forEach",
   "pollTrigger",
+]);
+
+/** Node kinds whose activity is idempotent-ish enough to safely retry (per-node retry).
+ *  Excludes the at-most-once nodes (sqlExec/sendEmail/code) where a retry could double-act. */
+const RETRYABLE_KINDS = new Set<NodeType>([
+  "agent",
+  "mcpTool",
+  "httpRequest",
+  "sqlQuery",
+  "rssRead",
 ]);
 
 /** Editor for a structured predicate (path/op/value) stored as a DSL EdgeCondition

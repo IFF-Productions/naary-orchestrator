@@ -56,6 +56,27 @@ export interface NodeDef {
    * branch on `<nodeId>.error` (exists) to handle it inline (n8n's error-output branch).
    */
   onError?: "stop" | "continue";
+  /**
+   * Per-node retry policy for the activity nodes that support it (n8n's "Retry On Fail",
+   * but backed by Temporal — so UNBOUNDED, exponential, and crash-surviving, vs n8n's hard
+   * 5-tries / 5s cap). Overrides the node's default Temporal RetryPolicy. Only honored for
+   * idempotent-ish activity nodes (agent/mcpTool/httpRequest/sqlQuery/rssRead); ignored for
+   * pure nodes and the at-most-once nodes (sqlExec/sendEmail/code), whose retry would risk
+   * a double-effect. A non-retryable provider error (e.g. 401/429) still won't retry.
+   */
+  retry?: NodeRetryPolicy;
+}
+
+/** Author-facing retry knobs mapped onto the activity's Temporal RetryPolicy. */
+export interface NodeRetryPolicy {
+  /** Total attempts (default 3). Temporal allows far more than n8n's cap of 5. */
+  maxAttempts?: number;
+  /** Wait before the 2nd attempt, in seconds (default 1). */
+  initialIntervalSeconds?: number;
+  /** Multiplier applied to the wait each attempt (default 2 = exponential backoff). */
+  backoffCoefficient?: number;
+  /** Cap on the per-attempt wait, in seconds (optional). */
+  maxIntervalSeconds?: number;
 }
 
 /**
