@@ -25,6 +25,7 @@ export {
 } from "./sql-query";
 export { resolveSet } from "./set-node";
 export { resolveSwitch } from "./switch-node";
+export { resolveText } from "./text-node";
 export { resolveRenameKeys } from "./rename-keys";
 export {
   resolveFilter,

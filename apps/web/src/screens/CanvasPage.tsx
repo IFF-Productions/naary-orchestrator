@@ -1548,6 +1548,160 @@ function ConfigPanel({
         </>
       )}
 
+      {kind === "text" &&
+        (() => {
+          const op = str("operation") || "trim";
+          return (
+            <>
+              <Labeled label="Operation">
+                <select
+                  value={op}
+                  onChange={(e) => onChange({ operation: e.target.value })}
+                  style={inputStyle}
+                >
+                  <option value="upper">Uppercase</option>
+                  <option value="lower">Lowercase</option>
+                  <option value="trim">Trim whitespace</option>
+                  <option value="replace">Replace</option>
+                  <option value="split">Split → array</option>
+                  <option value="join">Join array → string</option>
+                  <option value="substring">Substring</option>
+                  <option value="length">Length</option>
+                  <option value="regexExtract">Regex extract</option>
+                </select>
+              </Labeled>
+              <Labeled label="Source node id">
+                <input
+                  value={str("from")}
+                  onChange={(e) => onChange({ from: e.target.value })}
+                  style={inputStyle}
+                  placeholder="upstream-node-id"
+                />
+              </Labeled>
+              <Labeled label="Path (optional)">
+                <input
+                  value={str("path")}
+                  onChange={(e) => onChange({ path: e.target.value })}
+                  style={inputStyle}
+                  placeholder="output"
+                />
+              </Labeled>
+              {op === "replace" && (
+                <>
+                  <Labeled label="Find">
+                    <input
+                      value={str("search")}
+                      onChange={(e) => onChange({ search: e.target.value })}
+                      style={inputStyle}
+                      placeholder="text or regex source"
+                    />
+                  </Labeled>
+                  <Labeled label="Replace with">
+                    <input
+                      value={str("replacement")}
+                      onChange={(e) =>
+                        onChange({ replacement: e.target.value })
+                      }
+                      style={inputStyle}
+                      placeholder="replacement"
+                    />
+                  </Labeled>
+                  <label
+                    style={{
+                      display: "flex",
+                      gap: 6,
+                      alignItems: "center",
+                      fontSize: 12,
+                      color: "var(--ink-2)",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={Boolean(config.useRegex)}
+                      onChange={(e) => onChange({ useRegex: e.target.checked })}
+                    />
+                    Treat "find" as a regular expression (global)
+                  </label>
+                </>
+              )}
+              {(op === "split" || op === "join") && (
+                <Labeled label="Separator">
+                  <input
+                    value={str("separator")}
+                    onChange={(e) => onChange({ separator: e.target.value })}
+                    style={inputStyle}
+                    placeholder=","
+                  />
+                </Labeled>
+              )}
+              {op === "substring" && (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Labeled label="Start">
+                    <input
+                      type="number"
+                      value={num("start") ?? ""}
+                      onChange={(e) =>
+                        onChange({
+                          start: e.target.value
+                            ? Number(e.target.value)
+                            : undefined,
+                        })
+                      }
+                      style={inputStyle}
+                      placeholder="0"
+                    />
+                  </Labeled>
+                  <Labeled label="End (optional)">
+                    <input
+                      type="number"
+                      value={num("end") ?? ""}
+                      onChange={(e) =>
+                        onChange({
+                          end: e.target.value
+                            ? Number(e.target.value)
+                            : undefined,
+                        })
+                      }
+                      style={inputStyle}
+                      placeholder="end"
+                    />
+                  </Labeled>
+                </div>
+              )}
+              {op === "regexExtract" && (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Labeled label="Pattern">
+                    <input
+                      value={str("search")}
+                      onChange={(e) => onChange({ search: e.target.value })}
+                      style={inputStyle}
+                      placeholder="(\\d+)"
+                    />
+                  </Labeled>
+                  <Labeled label="Group">
+                    <input
+                      type="number"
+                      value={num("group") ?? ""}
+                      onChange={(e) =>
+                        onChange({
+                          group: e.target.value
+                            ? Number(e.target.value)
+                            : undefined,
+                        })
+                      }
+                      style={inputStyle}
+                      placeholder="0"
+                    />
+                  </Labeled>
+                </div>
+              )}
+              <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+                Result is <code>{node.id}.result</code>.
+              </div>
+            </>
+          );
+        })()}
+
       {kind === "filter" && (
         <>
           <Labeled label="Array source node id">

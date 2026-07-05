@@ -29,6 +29,7 @@ import {
   resolveSqlExec,
   resolveSubWorkflowInput,
   resolveSwitch,
+  resolveText,
   resolveWebhookResponse,
 } from "@naary/dsl";
 import type {
@@ -56,6 +57,7 @@ import type {
   SendEmailNodeConfig,
   SetNodeConfig,
   SwitchNodeConfig,
+  TextNodeConfig,
   SqlQueryNodeConfig,
   SqlExecNodeConfig,
   StopAndErrorNodeConfig,
@@ -462,6 +464,13 @@ export async function runGraph(
         // Pure node: reshape an upstream object's keys, entirely in the interpreter.
         const rkCfg = node.config as unknown as RenameKeysNodeConfig;
         ctx[node.id] = resolveRenameKeys(rkCfg, ctx);
+        return null;
+      }
+      case "text": {
+        // Pure node: one string op on an upstream value → { result }. Deterministic
+        // (regex is pure; invalid patterns fail closed to null in resolveText).
+        const txtCfg = node.config as unknown as TextNodeConfig;
+        ctx[node.id] = resolveText(txtCfg, ctx);
         return null;
       }
       case "filter": {

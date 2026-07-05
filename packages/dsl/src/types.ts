@@ -15,6 +15,7 @@ export type NodeType =
   | "sqlExec" // runs a WRITE (INSERT/UPDATE/DELETE) in a txn; output is {rowsAffected}
   | "set" // builds a plain object from static fields + upstream bindings (pure, no I/O)
   | "renameKeys" // pure: remap/drop keys of an upstream object
+  | "text" // pure: string ops (upper/lower/trim/replace/split/join/substring/regex)
   | "filter" // pure: keep array items matching a per-item predicate
   | "aggregate" // pure: collapse an array (collect/count/sum/first/last)
   | "listOps" // pure: sort / limit / dedupe an array → array
@@ -216,6 +217,46 @@ export interface ExecuteSubWorkflowNodeConfig {
   input?: Record<string, unknown>;
   /** dotted input path → upstream output binding; fills/overrides that path. */
   inputBindings?: Record<string, ArgBinding>;
+}
+
+/** String operations for the Text node (n8n's string expression methods, as a node). */
+export type TextOp =
+  | "upper"
+  | "lower"
+  | "trim"
+  | "replace"
+  | "split"
+  | "join"
+  | "substring"
+  | "length"
+  | "regexExtract";
+
+/**
+ * Text node — one string operation on an upstream value. PURE (deterministic ctx read, no
+ * I/O; regex uses `RegExp`, invalid patterns fail closed to null). Output is `{ result }`.
+ * The input is coerced to a string for most ops; `join` expects an array. Covers the common
+ * string transforms users otherwise reach for the Code node to do.
+ */
+export interface TextNodeConfig {
+  operation: TextOp;
+  /** Upstream node id whose output holds the input value. */
+  from: string;
+  /** Optional dotted path into that output. */
+  path?: string;
+  /** replace: the substring (or regex source when `useRegex`); regexExtract: the pattern. */
+  search?: string;
+  /** replace: the replacement text (supports $1 groups when `useRegex`). */
+  replacement?: string;
+  /** replace: treat `search` as a global regex. */
+  useRegex?: boolean;
+  /** split: the delimiter (default ","); join: the glue (default ","). */
+  separator?: string;
+  /** substring: start index (default 0). */
+  start?: number;
+  /** substring: end index (exclusive; omitted = to the end). */
+  end?: number;
+  /** regexExtract: capture group to return (default 0 = whole match). */
+  group?: number;
 }
 
 /**
