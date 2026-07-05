@@ -16,6 +16,7 @@ import { ExecutionsModule } from "./executions/executions.module";
 import { GraphsModule } from "./graphs/graphs.module";
 import { HealthModule } from "./health/health.module";
 import { MembersModule } from "./members/members.module";
+import { MembershipModule } from "./membership/membership.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { SchedulesModule } from "./schedules/schedules.module";
 import { SecretsModule } from "./secrets/secrets.module";
@@ -40,6 +41,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     WebhooksModule,
     ConnectionsModule,
     MembersModule,
+    MembershipModule,
     SettingsModule,
     NotificationsModule,
     TemplatesModule,

@@ -208,6 +208,24 @@ model Member {
   @@index([tenantId])
 }
 
+// Multi-workspace membership (design: PROVISIONING-MULTIUSER.md). The AUTHORITY for
+// which workspaces a user belongs to + their role — a user has one row per workspace.
+// `userId` is the Firebase uid. Resolved per-request through MembershipCache; this
+// table is the source of truth. (The guard does NOT enforce against this yet — added
+// in a later slice; today it's populated + read by /me/workspaces only.)
+model Membership {
+  id        String   @id @default(uuid())
+  userId    String // Firebase uid
+  tenantId  String
+  role      String   @default("member") // 'owner' | 'admin' | 'member'
+  email     String? // the user's email at join time (directory convenience)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, tenantId])
+  @@index([userId])
+  @@index([tenantId])
+}
+
 // Per-tenant settings (Settings screen). One row per tenant.
 model TenantSettings {
   tenantId     String   @id
