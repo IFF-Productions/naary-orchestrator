@@ -59,6 +59,7 @@ import type {
   McpToolNodeConfig,
   MergeNodeConfig,
   NodeDef,
+  NodeRetryPolicy,
   PollTriggerNodeConfig,
   RenameKeysNodeConfig,
   RespondToWebhookNodeConfig,
@@ -171,6 +172,36 @@ const { callCode } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "30 seconds",
   retry: { maximumAttempts: 1 },
 });
+
+/**
+ * Per-node retry override (NodeDef.retry, n8n's "Retry On Fail"). Returns a proxy whose
+ * activities carry the node's retry policy, or undefined to use the module default. Building a
+ * proxy in the workflow body is deterministic (pure config → replays identically). Temporal's
+ * retries are unbounded + exponential + crash-surviving — naary beats n8n's 5-try/5s cap.
+ * Only used by the idempotent-ish activity nodes; a non-retryable ApplicationFailure (401/429)
+ * still won't retry regardless.
+ */
+function retryOverride(
+  retry: NodeRetryPolicy | undefined,
+  startToCloseTimeoutMs: number,
+): ReturnType<typeof wf.proxyActivities<typeof activities>> | undefined {
+  if (!retry) return undefined;
+  // Durations as milliseconds (numbers) — Temporal accepts them and they sidestep the
+  // template-literal Duration string type.
+  return wf.proxyActivities<typeof activities>({
+    startToCloseTimeout: startToCloseTimeoutMs,
+    retry: {
+      maximumAttempts: retry.maxAttempts ?? 3,
+      // Temporal requires initialInterval > 0 — floor to 1ms so a configured 0 = "as fast
+      // as possible" doesn't produce an invalid RetryPolicy (which would fail the run).
+      initialInterval: Math.max(1, (retry.initialIntervalSeconds ?? 1) * 1000),
+      backoffCoefficient: retry.backoffCoefficient ?? 2,
+      ...(retry.maxIntervalSeconds
+        ? { maximumInterval: retry.maxIntervalSeconds * 1000 }
+        : {}),
+    },
+  });
+}
 
 export interface RunGraphResult {
   status: ExecutionStatus;
@@ -362,7 +393,8 @@ export async function runGraph(
       case "agent": {
         // tenantId flows in workflow args (not a secret); the activity fetches
         // the tenant's key by tenantId. executionId is deterministic.
-        const result = await runAgent(
+        const over = retryOverride(node.retry, 60_000);
+        const result = await (over?.runAgent ?? runAgent)(
           node.config as unknown as activities.AgentConfig,
           ctx.__input,
           {
@@ -383,7 +415,8 @@ export async function runGraph(
         // Resolving tool args from upstream outputs is deterministic graph work,
         // so it happens HERE; the I/O (token fetch + HTTP) is inside the activity.
         const mcpCfg = node.config as unknown as McpToolNodeConfig;
-        const toolResult = await callMcpTool(
+        const over = retryOverride(node.retry, 60_000);
+        const toolResult = await (over?.callMcpTool ?? callMcpTool)(
           {
             connectionId: mcpCfg.connectionId,
             tool: mcpCfg.tool,
@@ -408,7 +441,8 @@ export async function runGraph(
         // Binding resolution is deterministic graph work (pure ctx path-reads), so
         // it runs HERE; the I/O (auth fetch, egress check, fetch) is in the activity.
         const httpCfg = node.config as unknown as HttpRequestNodeConfig;
-        const result = await callHttpRequest(
+        const over = retryOverride(node.retry, 150_000);
+        const result = await (over?.callHttpRequest ?? callHttpRequest)(
           resolveHttpRequest(httpCfg, ctx),
           ctx.__input,
           {
@@ -433,7 +467,8 @@ export async function runGraph(
         // read + DB query (read-only) are in the activity. The sql text is never
         // built from bindings — only the params array (no SQL injection).
         const sqlCfg = node.config as unknown as SqlQueryNodeConfig;
-        const result = await callSqlQuery(
+        const over = retryOverride(node.retry, 150_000);
+        const result = await (over?.callSqlQuery ?? callSqlQuery)(
           resolveSqlQuery(sqlCfg, ctx),
           ctx.__input,
           {
@@ -712,11 +747,16 @@ export async function runGraph(
         // (I/O, egress-guarded) run in the activity. Output {items, count} so
         // downstream filter/listOps/aggregate can operate on `<nodeId>.items`.
         const rssCfg = node.config as unknown as RssReadNodeConfig;
-        const result = await callRssRead(resolveRss(rssCfg, ctx), ctx.__input, {
-          tenantId: runCtx.tenantId,
-          executionId: wf.workflowInfo().workflowId,
-          nodeId: node.id,
-        });
+        const over = retryOverride(node.retry, 60_000);
+        const result = await (over?.callRssRead ?? callRssRead)(
+          resolveRss(rssCfg, ctx),
+          ctx.__input,
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
         ctx[node.id] = { items: result.items, count: result.count };
         return null;
       }

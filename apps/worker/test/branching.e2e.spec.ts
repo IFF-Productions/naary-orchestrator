@@ -13,6 +13,9 @@ const WORKFLOWS_PATH = path.join(__dirname, "../src/temporal/workflows.ts");
 // Hermetic mocks. callMcpTool records the connectionId so we can see which branch
 // actually ran; runAgent returns a fixed classification to drive conditions.
 let mcpConns: string[] = [];
+// "flaky-conn" fails the first 3 attempts then succeeds — to prove per-node retry lets a node
+// exceed the default 3-attempt cap (the 4th attempt only runs if maxAttempts > 3).
+let flakyAttempts = 0;
 const mockActivities = {
   runAgent: async (): Promise<activities.AgentResult> => ({
     status: "ok",
@@ -29,6 +32,12 @@ const mockActivities = {
     if (cfg.connectionId === "boom-conn") {
       throw ApplicationFailure.nonRetryable("mcp tool exploded", "BoomError");
     }
+    if (cfg.connectionId === "flaky-conn") {
+      flakyAttempts++;
+      // RETRYABLE plain error for the first 3 tries; succeeds on the 4th.
+      if (flakyAttempts < 4) throw new Error("transient flake");
+      return { status: "ok", content: [], costUsd: 0 };
+    }
     // echo the configured per-call cost, like the real activity (Arch§4.6)
     return { status: "ok", content: [], costUsd: cfg.costUsd ?? 0 };
   },
@@ -43,6 +52,7 @@ beforeAll(async () => {
 afterAll(async () => env?.teardown());
 beforeEach(() => {
   mcpConns = [];
+  flakyAttempts = 0;
 });
 
 function makeWorker(): Promise<Worker> {
@@ -239,6 +249,69 @@ describe("interpreter — branching / parallel / loop (Slice #6)", () => {
         return (await h.result()).status;
       }),
     ).rejects.toThrow();
+  });
+
+  it("per-node retry lets a node exceed the default 3-attempt cap (fails 3×, succeeds on the 4th)", async () => {
+    const graph: GraphDef = {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        {
+          id: "flaky",
+          type: "mcpTool",
+          config: { connectionId: "flaky-conn", tool: "noop" },
+          // maxAttempts 6 > the default 3 → the 4th (successful) attempt runs.
+          retry: { maxAttempts: 6, initialIntervalSeconds: 0 },
+        },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "s", to: "flaky" },
+        { from: "flaky", to: "end" },
+      ],
+    };
+    const worker = await makeWorker();
+    const status = await worker.runUntil(async () => {
+      const h = await env.client.workflow.start(runGraph, {
+        args: [graph, {}, { tenantId: "t1" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-retry-override",
+      });
+      return (await h.result()).status;
+    });
+    expect(status).toBe("completed");
+    expect(flakyAttempts).toBe(4); // 3 fails + 1 success
+  });
+
+  it("without the override, the default cap (3) fails the same flaky node", async () => {
+    const graph: GraphDef = {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        {
+          id: "flaky",
+          type: "mcpTool",
+          config: { connectionId: "flaky-conn", tool: "noop" },
+        },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "s", to: "flaky" },
+        { from: "flaky", to: "end" },
+      ],
+    };
+    const worker = await makeWorker();
+    await expect(
+      worker.runUntil(async () => {
+        const h = await env.client.workflow.start(runGraph, {
+          args: [graph, {}, { tenantId: "t1" }],
+          taskQueue: TASK_QUEUE,
+          workflowId: "e2e-retry-default",
+        });
+        return (await h.result()).status;
+      }),
+    ).rejects.toThrow();
+    expect(flakyAttempts).toBe(3); // stopped at the default cap
   });
 
   it("runs both branches on a parallel fan-out (two unconditional edges)", async () => {

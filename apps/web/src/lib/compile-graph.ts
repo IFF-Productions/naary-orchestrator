@@ -50,16 +50,26 @@ export function compileGraph(
   }
 
   const graphNodes: NodeDef[] = nodes.map((n) => {
-    // `onError` is a first-class NodeDef field but is edited in config-space on the canvas;
-    // lift it out (only when "continue" — "stop" is the default) so it doesn't ride in config.
+    // `onError` + `retry` are first-class NodeDef fields but are edited in config-space on
+    // the canvas; lift them out so they don't ride in config (onError only when "continue" —
+    // "stop" is the default; retry only when it has real content).
     const cfg = n.config ? { ...n.config } : undefined;
     const onError = cfg?.onError;
-    if (cfg) delete cfg.onError;
+    const retry = cfg?.retry as NodeDef["retry"] | undefined;
+    if (cfg) {
+      delete cfg.onError;
+      delete cfg.retry;
+    }
+    const retryOut =
+      retry && Object.values(retry).some((v) => v !== undefined && v !== "")
+        ? retry
+        : undefined;
     return {
       id: n.id,
       type: n.type,
       ...(cfg && Object.keys(cfg).length > 0 ? { config: cfg } : {}),
       ...(onError === "continue" ? { onError: "continue" as const } : {}),
+      ...(retryOut ? { retry: retryOut } : {}),
     };
   });
   const graphEdges: EdgeDef[] = edges.map((e) => {
