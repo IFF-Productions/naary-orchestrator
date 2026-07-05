@@ -39,9 +39,9 @@ const providers: {
     key: "openai",
     initial: "O",
     name: "OpenAI",
-    models: "GPT-4o, GPT-4.1, o3",
+    models: "GPT-4o, GPT-4o mini, GPT-4.1",
     color: "var(--state-done)",
-    supported: false,
+    supported: true,
   },
   {
     key: "google",

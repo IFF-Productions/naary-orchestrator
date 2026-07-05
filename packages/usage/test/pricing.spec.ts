@@ -57,6 +57,32 @@ describe("computeCost", () => {
     expect(haiku).toBeLessThan(opus);
   });
 
+  it("prices OpenAI models (multi-provider)", () => {
+    // gpt-4o: $2.5/MTok in, $10/MTok out → 1000*2.5e-6 + 500*10e-6 = 0.0075
+    expect(
+      computeCost({
+        provider: "openai",
+        model: "gpt-4o",
+        inputTokens: 1000,
+        outputTokens: 500,
+      }),
+    ).toBeCloseTo(0.0075, 9);
+    // gpt-4o-mini is far cheaper than gpt-4o for identical tokens
+    const mini = computeCost({
+      provider: "openai",
+      model: "gpt-4o-mini",
+      inputTokens: 1000,
+      outputTokens: 1000,
+    });
+    const full = computeCost({
+      provider: "openai",
+      model: "gpt-4o",
+      inputTokens: 1000,
+      outputTokens: 1000,
+    });
+    expect(mini).toBeLessThan(full);
+  });
+
   it("throws on an unknown model rather than silently pricing it at zero", () => {
     expect(() =>
       computeCost({

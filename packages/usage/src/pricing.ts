@@ -50,6 +50,30 @@ export const MODEL_PRICING: Record<string, Record<string, ModelPrice>> = {
       cachedInputPerMTok: 1,
     },
   },
+  // OpenAI list prices, USD per million tokens (cached-input = the discounted
+  // prompt-cache read rate). As of 2026-06-25. Source: OpenAI API pricing.
+  openai: {
+    "gpt-4o": {
+      inputPerMTok: 2.5,
+      outputPerMTok: 10,
+      cachedInputPerMTok: 1.25,
+    },
+    "gpt-4o-mini": {
+      inputPerMTok: 0.15,
+      outputPerMTok: 0.6,
+      cachedInputPerMTok: 0.075,
+    },
+    "gpt-4.1": {
+      inputPerMTok: 2,
+      outputPerMTok: 8,
+      cachedInputPerMTok: 0.5,
+    },
+    "gpt-4.1-mini": {
+      inputPerMTok: 0.4,
+      outputPerMTok: 1.6,
+      cachedInputPerMTok: 0.1,
+    },
+  },
 };
 
 export class UnknownModelPricingError extends Error {
