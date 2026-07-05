@@ -975,6 +975,82 @@ export async function callHtmlExtract(
   }
 }
 
+export interface EncodeConfig {
+  operation:
+    | "base64Encode"
+    | "base64Decode"
+    | "base64urlEncode"
+    | "base64urlDecode"
+    | "hexEncode"
+    | "hexDecode"
+    | "urlEncode"
+    | "urlDecode";
+}
+export interface EncodeResult {
+  status: "ok";
+  result: string;
+  costUsd: number;
+}
+
+/**
+ * encode node — string ↔ base64 / base64url / hex / URL. In an activity because base64/hex
+ * use Node's Buffer (not in the deterministic workflow bundle). Claim-checked input is
+ * rehydrated first; malformed input (e.g. bad hex) is the user's data problem → non-retryable.
+ */
+export async function callEncode(
+  cfg: EncodeConfig,
+  input: unknown,
+  meta: AgentMeta,
+): Promise<EncodeResult> {
+  const startedAt = process.hrtime.bigint();
+  const store = getObjectStore();
+  const s = String((await resolveClaimChecks(input, store)) ?? "");
+  try {
+    let result: string;
+    switch (cfg.operation) {
+      case "base64Encode":
+        result = Buffer.from(s, "utf8").toString("base64");
+        break;
+      case "base64Decode":
+        result = Buffer.from(s, "base64").toString("utf8");
+        break;
+      case "base64urlEncode":
+        result = Buffer.from(s, "utf8").toString("base64url");
+        break;
+      case "base64urlDecode":
+        result = Buffer.from(s, "base64url").toString("utf8");
+        break;
+      case "hexEncode":
+        result = Buffer.from(s, "utf8").toString("hex");
+        break;
+      case "hexDecode":
+        result = Buffer.from(s, "hex").toString("utf8");
+        break;
+      case "urlEncode":
+        result = encodeURIComponent(s);
+        break;
+      case "urlDecode":
+        result = decodeURIComponent(s);
+        break;
+      default:
+        result = s;
+    }
+    activityRuns.inc({ activity: "callEncode", outcome: "ok" });
+    activityDuration.observe(
+      { activity: "callEncode" },
+      secondsSince(startedAt),
+    );
+    return { status: "ok", result, costUsd: 0 };
+  } catch {
+    activityRuns.inc({ activity: "callEncode", outcome: "error" });
+    activityDuration.observe(
+      { activity: "callEncode" },
+      secondsSince(startedAt),
+    );
+    throw ApplicationFailure.nonRetryable("Encode failed", "ENCODE_ERROR");
+  }
+}
+
 export interface CsvConfig {
   operation: "parse" | "build";
   header?: boolean;

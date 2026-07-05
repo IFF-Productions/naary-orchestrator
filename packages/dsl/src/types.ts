@@ -26,6 +26,7 @@ export type NodeType =
   | "csv" // parse CSV text→rows / build rows→CSV text (activity; papaparse)
   | "json" // pure: parse JSON text→value / stringify value→text
   | "number" // pure: arithmetic on numbers (add/sub/mul/div/mod/pow/round/floor/ceil/abs)
+  | "encode" // encode/decode a string: base64 / base64url / hex / url (activity)
   | "dateTime" // current time / timestamp math via an activity (clock read is I/O)
   | "merge" // fan-in join: run once after all inbound branches arrive; combine outputs
   | "if" // boolean gate: combine N predicates with AND/OR → output {result}
@@ -375,6 +376,30 @@ export interface CsvNodeConfig {
   header?: boolean;
   /** Field delimiter (default ","). */
   delimiter?: string;
+}
+
+/** Encode/decode operations for the Encode node. */
+export type EncodeOp =
+  | "base64Encode"
+  | "base64Decode"
+  | "base64urlEncode"
+  | "base64urlDecode"
+  | "hexEncode"
+  | "hexDecode"
+  | "urlEncode"
+  | "urlDecode";
+
+/**
+ * Encode node — convert a string to/from base64, base64url, hex, or URL-encoding (n8n's
+ * base64Encode/urlEncode string methods). Output is `{ result }`. Runs in an ACTIVITY (uses
+ * Node's Buffer, which isn't in the deterministic workflow bundle). No secrets, no egress.
+ */
+export interface EncodeNodeConfig {
+  operation: EncodeOp;
+  /** Upstream node id whose output holds the input string. */
+  from: string;
+  /** Optional dotted path into that output. */
+  path?: string;
 }
 
 /** Arithmetic operations for the Number node. Binary use `a` and `b`; unary use `a`. */
