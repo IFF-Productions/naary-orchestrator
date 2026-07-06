@@ -195,7 +195,7 @@ export function Overview() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4,1fr)",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
           gap: 14,
           marginBottom: 16,
         }}
@@ -616,7 +616,7 @@ function LiveStrip() {
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "repeat(4,1fr)",
+        gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
         gap: 14,
         marginBottom: 16,
       }}
