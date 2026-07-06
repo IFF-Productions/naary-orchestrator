@@ -17,6 +17,6 @@ import { GraphsService } from "./graphs.service";
     // generator decrypts the tenant's provider key in-request for the model call.
     { provide: CredentialsService, useFactory: () => new CredentialsService() },
   ],
-  exports: [GraphsService],
+  exports: [GraphsService, GraphGeneratorService],
 })
 export class GraphsModule {}

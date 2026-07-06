@@ -25,6 +25,24 @@ export interface McpRunState {
  * isolation identical to the REST API (design §3 / CLAUDE.md Tier-1 rule 4). The controller
  * wires these to GraphsService/ExecutionsService (both pre-scoped to the token's tenantId).
  */
+/** Result of create_workflow — the draft, plus save fields when persisted. */
+export interface McpCreateWorkflowResult {
+  name: string;
+  graph: unknown;
+  saved: boolean;
+  workflowKey?: string;
+  version?: number;
+  contentHash?: string;
+}
+
+export interface McpCreateWorkflowArgs {
+  prompt?: string;
+  name?: string;
+  graph?: Record<string, unknown>;
+  save?: boolean;
+  workflowKey?: string;
+}
+
 export interface McpToolDeps {
   tenantId: string;
   listWorkflows: () => Promise<McpWorkflowSummary[]>;
@@ -33,6 +51,9 @@ export interface McpToolDeps {
     workflowKey: string,
     input?: Record<string, unknown>,
   ) => Promise<{ runId: string }>;
+  createWorkflow: (
+    args: McpCreateWorkflowArgs,
+  ) => Promise<McpCreateWorkflowResult>;
 }
 
 /** JSON payload → a text tool result (MCP's portable content shape). */
@@ -46,9 +67,10 @@ function jsonResult(payload: unknown): CallToolResult {
  * Build the naary control-plane MCP server for one session (design flavor A). Tools so far:
  *   - list_node_types — discover the building blocks (shared @naary/dsl catalog)
  *   - list_workflows  — the tenant's saved workflows
+ *   - create_workflow — draft a graph from a prompt (or accept one) and optionally save it
  *   - run_workflow    — start a durable run of a saved workflow
  *   - get_run         — a run's status + node outputs
- * (create_workflow / approve land in later slices.)
+ * (approve lands in a later slice.)
  */
 export function buildMcpServer(deps: McpToolDeps): McpServer {
   const server = new McpServer(
@@ -82,6 +104,43 @@ export function buildMcpServer(deps: McpToolDeps): McpServer {
     "List the saved workflows in this workspace (one entry per workflow, its latest version). " +
       "Use a returned workflowKey with run_workflow (later) or to reference an existing flow.",
     async () => jsonResult({ workflows: await deps.listWorkflows() }),
+  );
+
+  server.tool(
+    "create_workflow",
+    "Create a workflow — two ways: pass `prompt` (plain English → the AI builder drafts a " +
+      "graph) OR pass a `graph` you authored (with `name`). By default returns the DRAFT " +
+      "WITHOUT saving (saved:false) so you can inspect it; pass save:true to persist it and get " +
+      "a workflowKey you can run_workflow. Call list_node_types first to know the node vocabulary.",
+    {
+      prompt: z
+        .string()
+        .optional()
+        .describe(
+          "Plain-English description; the AI builder drafts the graph.",
+        ),
+      name: z
+        .string()
+        .optional()
+        .describe(
+          "Workflow name (used with a supplied graph, or to name a saved one).",
+        ),
+      graph: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("A graph you authored: { nodes, edges, startNodeId }."),
+      save: z
+        .boolean()
+        .optional()
+        .describe(
+          "Persist the workflow (default false = return a draft only).",
+        ),
+      workflowKey: z
+        .string()
+        .optional()
+        .describe("Key to save under (default: derived from the name)."),
+    },
+    async (args) => jsonResult(await deps.createWorkflow(args)),
   );
 
   server.tool(
