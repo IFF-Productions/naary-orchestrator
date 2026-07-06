@@ -6,10 +6,12 @@ import {
   type TenantSettings,
   UnauthorizedError,
 } from "../../lib/api";
+import { useWorkspace } from "../../workspace/WorkspaceProvider";
 
 const MODELS = ["", "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"];
 
 export function Settings() {
+  const { refresh: refreshWorkspaces } = useWorkspace();
   const [tenant, setTenant] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
@@ -68,6 +70,9 @@ export function Settings() {
       const saved = await api.saveSettings(tenant, patch);
       setDisplayName(saved.displayName ?? "");
       setDefaultModel(saved.defaultModel ?? "");
+      // The display name IS the workspace name — refresh the switcher so a rename shows
+      // immediately (no page reload).
+      await refreshWorkspaces().catch(() => undefined);
       setStatus("Saved.");
     } catch (e) {
       setError(

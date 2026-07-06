@@ -27,6 +27,13 @@ export function Workflows() {
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
   const [err, setErr] = useState<string | null>(null);
 
+  // Re-sync when ?q changes while we're ALREADY on this route — a same-route navigation
+  // (searching from the topbar while on Workflows) doesn't remount, so the mount seed alone
+  // would leave the list unfiltered.
+  useEffect(() => {
+    setQuery(searchParams.get("q") ?? "");
+  }, [searchParams]);
+
   useEffect(() => {
     let live = true;
     Promise.all([api.listGraphs(), api.listRuns().catch(() => [])])
