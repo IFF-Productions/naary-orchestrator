@@ -54,6 +54,7 @@ export interface McpToolDeps {
   createWorkflow: (
     args: McpCreateWorkflowArgs,
   ) => Promise<McpCreateWorkflowResult>;
+  approve: (runId: string, approved: boolean, note?: string) => Promise<void>;
 }
 
 /** JSON payload → a text tool result (MCP's portable content shape). */
@@ -70,7 +71,7 @@ function jsonResult(payload: unknown): CallToolResult {
  *   - create_workflow — draft a graph from a prompt (or accept one) and optionally save it
  *   - run_workflow    — start a durable run of a saved workflow
  *   - get_run         — a run's status + node outputs
- * (approve lands in a later slice.)
+ *   - approve         — resolve a run paused on a human-approval step
  */
 export function buildMcpServer(deps: McpToolDeps): McpServer {
   const server = new McpServer(
@@ -169,6 +170,27 @@ export function buildMcpServer(deps: McpToolDeps): McpServer {
       "await completion. `ctx` maps each node id to its output.",
     { runId: z.string().describe("The run id returned by run_workflow.") },
     async ({ runId }) => jsonResult(await deps.getRun(runId)),
+  );
+
+  server.tool(
+    "approve",
+    "Resolve a run that is paused on a human-approval step (status awaiting_approval): approve " +
+      "it to continue, or reject it to stop the run. Find such runs via get_run — this is how an " +
+      "agent satisfies (or a human in the UI satisfies) a durable approval gate.",
+    {
+      runId: z.string().describe("The paused run's id."),
+      decision: z
+        .enum(["approve", "reject"])
+        .describe("approve → continue the run; reject → stop it."),
+      note: z
+        .string()
+        .optional()
+        .describe("Optional note recorded with the decision."),
+    },
+    async ({ runId, decision, note }) => {
+      await deps.approve(runId, decision === "approve", note);
+      return jsonResult({ runId, decision, ok: true });
+    },
   );
 
   return server;

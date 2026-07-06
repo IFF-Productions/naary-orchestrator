@@ -32,6 +32,7 @@ async function connect(overrides: Partial<McpToolDeps> = {}) {
       graph: { nodes: [], edges: [], startNodeId: "s" },
       saved: false,
     }),
+    approve: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
   const server = buildMcpServer(deps);
@@ -59,12 +60,38 @@ describe("MCP server", () => {
   it("advertises the slice-1..4 tools", async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
+      "approve",
       "create_workflow",
       "get_run",
       "list_node_types",
       "list_workflows",
       "run_workflow",
     ]);
+  });
+
+  it("approve maps the decision to approved boolean + note", async () => {
+    const ok = parse(
+      await client.callTool({
+        name: "approve",
+        arguments: { runId: "exec-9", decision: "approve", note: "lgtm" },
+      }),
+    );
+    expect(ok).toEqual({ runId: "exec-9", decision: "approve", ok: true });
+    expect(deps.approve).toHaveBeenCalledWith("exec-9", true, "lgtm");
+
+    await client.callTool({
+      name: "approve",
+      arguments: { runId: "exec-9", decision: "reject" },
+    });
+    expect(deps.approve).toHaveBeenCalledWith("exec-9", false, undefined);
+  });
+
+  it("approve rejects an invalid decision (schema-enforced enum)", async () => {
+    const res = await client.callTool({
+      name: "approve",
+      arguments: { runId: "exec-9", decision: "maybe" },
+    });
+    expect(res.isError).toBe(true);
   });
 
   it("create_workflow forwards its args and returns the draft", async () => {

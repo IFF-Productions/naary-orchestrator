@@ -113,6 +113,8 @@ export class McpController {
           .start(tenantId, input, workflowKey)
           .then((r) => ({ runId: r.workflowId })),
       createWorkflow: (args) => this.createWorkflow(tenantId, args),
+      approve: (runId, approved, note) =>
+        this.executions.approve(runId, approved, tenantId, note),
     });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
