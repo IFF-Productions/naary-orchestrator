@@ -35,7 +35,9 @@
     "@naary/observability": "workspace:*",
     "@naary/logging": "workspace:*",
     "@naary/temporal-config": "workspace:*",
-    "@naary/metrics": "workspace:*"
+    "@naary/metrics": "workspace:*",
+    "@ai-sdk/openai": "^4.0.8",
+    "@ai-sdk/google": "^4.0.8"
   },
   "devDependencies": {
     "@nestjs/testing": "^11.1.27"
