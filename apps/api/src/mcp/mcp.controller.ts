@@ -103,6 +103,10 @@ export class McpController {
       return;
     }
 
+    // Fetch the tenant's workflows up front so each can be exposed as its own tool (flavor B).
+    // Best-effort — a listing hiccup just means no per-workflow tools this session.
+    const exposedWorkflows = await this.graphs.list(tenantId).catch(() => []);
+
     // Deps are pre-scoped to the token's tenantId — a tool can't reach another tenant.
     const server = buildMcpServer({
       tenantId,
@@ -115,6 +119,7 @@ export class McpController {
       createWorkflow: (args) => this.createWorkflow(tenantId, args),
       approve: (runId, approved, note) =>
         this.executions.approve(runId, approved, tenantId, note),
+      exposedWorkflows,
     });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,

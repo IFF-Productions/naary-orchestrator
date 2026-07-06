@@ -33,6 +33,7 @@ async function connect(overrides: Partial<McpToolDeps> = {}) {
       saved: false,
     }),
     approve: vi.fn().mockResolvedValue(undefined),
+    exposedWorkflows: [],
     ...overrides,
   };
   const server = buildMcpServer(deps);
@@ -166,5 +167,29 @@ describe("MCP server", () => {
   it("get_run requires a runId (schema-enforced)", async () => {
     const res = await client.callTool({ name: "get_run", arguments: {} });
     expect(res.isError).toBe(true);
+  });
+
+  it("exposes each saved workflow as its own run_<key> tool (flavor B)", async () => {
+    const ctx = await connect({
+      exposedWorkflows: [
+        { workflowKey: "support-reply", name: "Support Reply", version: 1 },
+        { workflowKey: "daily digest!", name: "Daily Digest", version: 1 },
+      ],
+    });
+    const names = (await ctx.client.listTools()).tools.map((t) => t.name);
+    // hyphens are allowed; other chars sanitize to "_"
+    expect(names).toContain("run_support-reply");
+    expect(names).toContain("run_daily_digest_");
+
+    const res = parse(
+      await ctx.client.callTool({
+        name: "run_support-reply",
+        arguments: { input: { issue: 7 } },
+      }),
+    );
+    expect(res).toEqual({ runId: "exec-new-1" });
+    expect(ctx.deps.runWorkflow).toHaveBeenCalledWith("support-reply", {
+      issue: 7,
+    });
   });
 });
