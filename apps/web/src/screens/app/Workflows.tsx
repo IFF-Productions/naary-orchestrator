@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Card, Icon, SearchInput, StatusPill } from "../../components";
 import { api, type GraphSummary, type RunSummary } from "../../lib/api";
 import { runStatusUi, successRate } from "../../lib/run-status";
@@ -22,7 +22,9 @@ export function Workflows() {
   const navigate = useNavigate();
   const [graphs, setGraphs] = useState<GraphSummary[] | null>(null);
   const [runs, setRuns] = useState<RunSummary[]>([]);
-  const [query, setQuery] = useState("");
+  // Seed the filter from ?q= so the global topbar search lands here pre-filtered.
+  const [searchParams] = useSearchParams();
+  const [query, setQuery] = useState(searchParams.get("q") ?? "");
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {

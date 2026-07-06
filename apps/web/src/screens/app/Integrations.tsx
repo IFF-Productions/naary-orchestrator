@@ -153,7 +153,9 @@ export function Integrations() {
       )}
 
       {/* ===== Add (real create actions) ===== */}
-      {tenant && <AddIntegrations tenant={tenant} onChanged={load} />}
+      <div id="add-integrations">
+        {tenant && <AddIntegrations tenant={tenant} onChanged={load} />}
+      </div>
 
       {/* ===== Model providers ===== */}
       <div style={{ ...monoLabel, marginBottom: 11 }}>Model providers</div>
@@ -176,42 +178,6 @@ export function Integrations() {
             onSaved={load}
           />
         ))}
-
-        {/* add local model */}
-        <button
-          type="button"
-          style={{
-            background: "var(--card)",
-            border: "1px dashed var(--line-2)",
-            borderRadius: 11,
-            padding: 15,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 6,
-            cursor: "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          <span
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 8,
-              background: "var(--card-2)",
-              color: "var(--ink-2)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <Icon name="plus" size={16} strokeWidth={2} />
-          </span>
-          <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
-            Add local model
-          </span>
-        </button>
       </div>
 
       {/* ===== MCP servers (connections) ===== */}
@@ -226,6 +192,11 @@ export function Integrations() {
         <span style={monoLabel}>MCP servers</span>
         <button
           type="button"
+          onClick={() =>
+            document
+              .getElementById("add-integrations")
+              ?.scrollIntoView({ behavior: "smooth", block: "start" })
+          }
           style={{
             height: 30,
             padding: "0 12px",

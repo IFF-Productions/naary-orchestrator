@@ -32,8 +32,8 @@ export interface WorkspaceState {
   error?: string;
   /** Switch the active workspace (persists + re-scopes subsequent requests). */
   setActive: (id: string) => void;
-  /** Create a new workspace and switch to it. Throws on failure (caller surfaces it). */
-  create: () => Promise<Workspace>;
+  /** Create a new workspace (optionally named) and switch to it. Throws on failure. */
+  create: (name?: string) => Promise<Workspace>;
   /** Re-fetch the workspace list. */
   refresh: () => Promise<void>;
 }
@@ -85,12 +85,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setActiveId(id);
   }, []);
 
-  const create = useCallback(async (): Promise<Workspace> => {
-    const ws = await api.createWorkspace();
-    await load();
-    setActive(ws.tenantId);
-    return ws;
-  }, [load, setActive]);
+  const create = useCallback(
+    async (name?: string): Promise<Workspace> => {
+      const ws = await api.createWorkspace(name);
+      await load();
+      setActive(ws.tenantId);
+      return ws;
+    },
+    [load, setActive],
+  );
 
   const refresh = useCallback(async () => {
     await load();

@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   ForbiddenException,
   Get,
@@ -12,6 +13,8 @@ import { MembershipService } from "./membership.service";
 export interface WorkspaceView {
   tenantId: string;
   role: string;
+  /** The workspace's display name (TenantSettings.displayName), if set. */
+  name?: string;
 }
 
 /**
@@ -37,7 +40,14 @@ export class WorkspacesController {
     // API-token principals have no user identity (no subject) — return the token's
     // single workspace synthesized, without persisting a Membership.
     if (!userId) {
-      return [{ tenantId: principal.tenantId, role: "owner" }];
+      const names = await this.memberships.workspaceNames([principal.tenantId]);
+      return [
+        {
+          tenantId: principal.tenantId,
+          role: "owner",
+          name: names.get(principal.tenantId),
+        },
+      ];
     }
     let memberships = await this.memberships.listForUser(userId);
     if (memberships.length === 0 && principal.tenantId) {
@@ -49,7 +59,16 @@ export class WorkspacesController {
       );
       memberships = await this.memberships.listForUser(userId);
     }
-    return memberships.map((m) => ({ tenantId: m.tenantId, role: m.role }));
+    // Enrich with the display name (TenantSettings.displayName) so the switcher shows the
+    // real name the user set in Settings — not an id-derived stub.
+    const names = await this.memberships.workspaceNames(
+      memberships.map((m) => m.tenantId),
+    );
+    return memberships.map((m) => ({
+      tenantId: m.tenantId,
+      role: m.role,
+      name: names.get(m.tenantId),
+    }));
   }
 
   /**
@@ -64,6 +83,7 @@ export class WorkspacesController {
   @UserScoped()
   async create(
     @CurrentPrincipal() principal: Principal,
+    @Body() body: { name?: string },
   ): Promise<WorkspaceView> {
     if (!principal.userId) {
       throw new ForbiddenException(
@@ -75,6 +95,10 @@ export class WorkspacesController {
         "Verify your email address before creating a workspace.",
       );
     }
-    return this.memberships.createWorkspace(principal.userId, principal.email);
+    return this.memberships.createWorkspace(
+      principal.userId,
+      principal.email,
+      body?.name,
+    );
   }
 }

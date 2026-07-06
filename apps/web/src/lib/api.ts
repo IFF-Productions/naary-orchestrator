@@ -230,8 +230,12 @@ export const api = {
   },
   // Create a new workspace owned by the caller. The tenantId is server-generated (never
   // sent from the client); requires a verified-email Firebase user (server-enforced).
-  createWorkspace(): Promise<Workspace> {
-    return http("/workspaces", { method: "POST" });
+  // `name` (optional) seeds the workspace display name.
+  createWorkspace(name?: string): Promise<Workspace> {
+    return http("/workspaces", {
+      method: "POST",
+      body: JSON.stringify(name?.trim() ? { name: name.trim() } : {}),
+    });
   },
   // Recent runs for the tenant (identity + start time; status is on the detail view).
   listRuns(): Promise<RunSummary[]> {
@@ -493,6 +497,8 @@ export interface TenantSettings {
 export interface Workspace {
   tenantId: string;
   role: string;
+  /** Display name (TenantSettings.displayName); may be unset for un-named workspaces. */
+  name?: string;
 }
 
 /** One entry in the activity feed (who did what, when). */
