@@ -27,6 +27,11 @@ async function connect(overrides: Partial<McpToolDeps> = {}) {
       ctx: { agent: { output: "hi" } },
     } satisfies McpRunState),
     runWorkflow: vi.fn().mockResolvedValue({ runId: "exec-new-1" }),
+    createWorkflow: vi.fn().mockResolvedValue({
+      name: "Drafted",
+      graph: { nodes: [], edges: [], startNodeId: "s" },
+      saved: false,
+    }),
     ...overrides,
   };
   const server = buildMcpServer(deps);
@@ -51,14 +56,30 @@ describe("MCP server", () => {
     ({ client, deps } = await connect());
   });
 
-  it("advertises the slice-1+2+3 tools", async () => {
+  it("advertises the slice-1..4 tools", async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
+      "create_workflow",
       "get_run",
       "list_node_types",
       "list_workflows",
       "run_workflow",
     ]);
+  });
+
+  it("create_workflow forwards its args and returns the draft", async () => {
+    const res = parse(
+      await client.callTool({
+        name: "create_workflow",
+        arguments: { prompt: "email me a digest", save: false },
+      }),
+    );
+    expect(res.saved).toBe(false);
+    expect(res.name).toBe("Drafted");
+    expect(deps.createWorkflow).toHaveBeenCalledWith({
+      prompt: "email me a digest",
+      save: false,
+    });
   });
 
   it("list_node_types returns the full node catalog", async () => {
