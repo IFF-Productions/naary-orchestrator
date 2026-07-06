@@ -3,6 +3,8 @@ import { All, Controller, Req, Res } from "@nestjs/common";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { ApiTokenService } from "../auth/api-token.service";
 import { Public } from "../auth/public.decorator";
+import { ExecutionsService } from "../executions/executions.service";
+import { GraphsService } from "../graphs/graphs.service";
 import { buildMcpServer } from "./mcp.server";
 
 /** Nest/Express parses the JSON body onto the request; the transport wants that parsed value. */
@@ -36,7 +38,11 @@ function rpcError(
  */
 @Controller("mcp")
 export class McpController {
-  constructor(private readonly tokens: ApiTokenService) {}
+  constructor(
+    private readonly tokens: ApiTokenService,
+    private readonly graphs: GraphsService,
+    private readonly executions: ExecutionsService,
+  ) {}
 
   @Public()
   @All()
@@ -65,7 +71,12 @@ export class McpController {
       return;
     }
 
-    const server = buildMcpServer({ tenantId });
+    // Deps are pre-scoped to the token's tenantId — a tool can't reach another tenant.
+    const server = buildMcpServer({
+      tenantId,
+      listWorkflows: () => this.graphs.list(tenantId),
+      getRun: (runId) => this.executions.getState(runId, tenantId),
+    });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });

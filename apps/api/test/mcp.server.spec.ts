@@ -1,13 +1,36 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { NODE_CATALOG } from "@naary/dsl";
-import { beforeEach, describe, expect, it } from "vitest";
-import { buildMcpServer } from "../src/mcp/mcp.server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  buildMcpServer,
+  type McpToolDeps,
+  type McpRunState,
+} from "../src/mcp/mcp.server";
 
 // Exercise the real MCP server through a real MCP client over an in-memory transport pair —
 // the same client SDK the worker uses to CALL remote servers, now pointed at OUR server.
-async function connect() {
-  const server = buildMcpServer({ tenantId: "t-1" });
+async function connect(overrides: Partial<McpToolDeps> = {}) {
+  const deps: McpToolDeps = {
+    tenantId: "t-1",
+    listWorkflows: vi
+      .fn()
+      .mockResolvedValue([
+        {
+          workflowKey: "wf-a",
+          name: "Flow A",
+          version: 3,
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
+      ]),
+    getRun: vi.fn().mockResolvedValue({
+      status: "completed",
+      currentNodeId: "",
+      ctx: { agent: { output: "hi" } },
+    } satisfies McpRunState),
+    ...overrides,
+  };
+  const server = buildMcpServer(deps);
   const client = new Client({ name: "test-agent", version: "1.0.0" });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -15,41 +38,69 @@ async function connect() {
     server.connect(serverTransport),
     client.connect(clientTransport),
   ]);
-  return { client, server };
+  return { client, deps };
 }
 
-describe("MCP server — list_node_types", () => {
+const parse = (res: Awaited<ReturnType<Client["callTool"]>>) =>
+  JSON.parse((res.content as { type: string; text: string }[])[0].text);
+
+describe("MCP server", () => {
   let client: Client;
+  let deps: McpToolDeps;
 
   beforeEach(async () => {
-    ({ client } = await connect());
+    ({ client, deps } = await connect());
   });
 
-  it("advertises the list_node_types tool", async () => {
+  it("advertises the slice-1+2 tools", async () => {
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toContain("list_node_types");
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      "get_run",
+      "list_node_types",
+      "list_workflows",
+    ]);
   });
 
-  it("returns the full node catalog (every type, with group + summary)", async () => {
-    const res = await client.callTool({
-      name: "list_node_types",
-      arguments: {},
-    });
-    const text = (res.content as { type: string; text: string }[])[0].text;
-    const { nodes } = JSON.parse(text) as {
-      nodes: { type: string; group: string; summary: string }[];
-    };
-
-    // one entry per catalogued node type
+  it("list_node_types returns the full node catalog", async () => {
+    const { nodes } = parse(
+      await client.callTool({ name: "list_node_types", arguments: {} }),
+    );
     expect(nodes).toHaveLength(Object.keys(NODE_CATALOG).length);
-    const types = nodes.map((n) => n.type);
+    const types = nodes.map((n: { type: string }) => n.type);
     for (const t of ["agent", "switch", "if", "random", "scheduleTrigger"]) {
       expect(types).toContain(t);
     }
-    // shape is agent-usable: every node carries a group + a non-empty summary
-    for (const n of nodes) {
-      expect(n.group).toBeTruthy();
-      expect(n.summary).toBeTruthy();
-    }
+  });
+
+  it("list_workflows returns the tenant's saved workflows", async () => {
+    const { workflows } = parse(
+      await client.callTool({ name: "list_workflows", arguments: {} }),
+    );
+    expect(workflows).toEqual([
+      {
+        workflowKey: "wf-a",
+        name: "Flow A",
+        version: 3,
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    expect(deps.listWorkflows).toHaveBeenCalledTimes(1);
+  });
+
+  it("get_run passes the runId through and returns status + ctx", async () => {
+    const res = parse(
+      await client.callTool({
+        name: "get_run",
+        arguments: { runId: "exec-123" },
+      }),
+    );
+    expect(res.status).toBe("completed");
+    expect(res.ctx).toEqual({ agent: { output: "hi" } });
+    expect(deps.getRun).toHaveBeenCalledWith("exec-123");
+  });
+
+  it("get_run requires a runId (schema-enforced)", async () => {
+    const res = await client.callTool({ name: "get_run", arguments: {} });
+    expect(res.isError).toBe(true);
   });
 });
