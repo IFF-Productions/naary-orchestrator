@@ -13,21 +13,26 @@ import {
 async function connect(overrides: Partial<McpToolDeps> = {}) {
   const deps: McpToolDeps = {
     tenantId: "t-1",
-    listWorkflows: vi
-      .fn()
-      .mockResolvedValue([
-        {
-          workflowKey: "wf-a",
-          name: "Flow A",
-          version: 3,
-          updatedAt: "2026-01-01T00:00:00Z",
-        },
-      ]),
+    listWorkflows: vi.fn().mockResolvedValue([
+      {
+        workflowKey: "wf-a",
+        name: "Flow A",
+        version: 3,
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    ]),
     getRun: vi.fn().mockResolvedValue({
       status: "completed",
       currentNodeId: "",
       ctx: { agent: { output: "hi" } },
     } satisfies McpRunState),
+    runWorkflow: vi.fn().mockResolvedValue({ runId: "exec-new-1" }),
+    createWorkflow: vi.fn().mockResolvedValue({
+      name: "Drafted",
+      graph: { nodes: [], edges: [], startNodeId: "s" },
+      saved: false,
+    }),
+    approve: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
   const server = buildMcpServer(deps);
@@ -52,13 +57,56 @@ describe("MCP server", () => {
     ({ client, deps } = await connect());
   });
 
-  it("advertises the slice-1+2 tools", async () => {
+  it("advertises the slice-1..4 tools", async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
+      "approve",
+      "create_workflow",
       "get_run",
       "list_node_types",
       "list_workflows",
+      "run_workflow",
     ]);
+  });
+
+  it("approve maps the decision to approved boolean + note", async () => {
+    const ok = parse(
+      await client.callTool({
+        name: "approve",
+        arguments: { runId: "exec-9", decision: "approve", note: "lgtm" },
+      }),
+    );
+    expect(ok).toEqual({ runId: "exec-9", decision: "approve", ok: true });
+    expect(deps.approve).toHaveBeenCalledWith("exec-9", true, "lgtm");
+
+    await client.callTool({
+      name: "approve",
+      arguments: { runId: "exec-9", decision: "reject" },
+    });
+    expect(deps.approve).toHaveBeenCalledWith("exec-9", false, undefined);
+  });
+
+  it("approve rejects an invalid decision (schema-enforced enum)", async () => {
+    const res = await client.callTool({
+      name: "approve",
+      arguments: { runId: "exec-9", decision: "maybe" },
+    });
+    expect(res.isError).toBe(true);
+  });
+
+  it("create_workflow forwards its args and returns the draft", async () => {
+    const res = parse(
+      await client.callTool({
+        name: "create_workflow",
+        arguments: { prompt: "email me a digest", save: false },
+      }),
+    );
+    expect(res.saved).toBe(false);
+    expect(res.name).toBe("Drafted");
+    expect(deps.createWorkflow).toHaveBeenCalledWith({
+      prompt: "email me a digest",
+      save: false,
+    });
   });
 
   it("list_node_types returns the full node catalog", async () => {
@@ -85,6 +133,22 @@ describe("MCP server", () => {
       },
     ]);
     expect(deps.listWorkflows).toHaveBeenCalledTimes(1);
+  });
+
+  it("run_workflow starts a run with the key + input and returns the runId", async () => {
+    const res = parse(
+      await client.callTool({
+        name: "run_workflow",
+        arguments: { workflowKey: "wf-a", input: { issue: 42 } },
+      }),
+    );
+    expect(res).toEqual({ runId: "exec-new-1" });
+    expect(deps.runWorkflow).toHaveBeenCalledWith("wf-a", { issue: 42 });
+  });
+
+  it("run_workflow requires a workflowKey (schema-enforced)", async () => {
+    const res = await client.callTool({ name: "run_workflow", arguments: {} });
+    expect(res.isError).toBe(true);
   });
 
   it("get_run passes the runId through and returns status + ctx", async () => {

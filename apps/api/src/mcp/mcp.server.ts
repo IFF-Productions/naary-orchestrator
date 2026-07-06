@@ -25,10 +25,36 @@ export interface McpRunState {
  * isolation identical to the REST API (design §3 / CLAUDE.md Tier-1 rule 4). The controller
  * wires these to GraphsService/ExecutionsService (both pre-scoped to the token's tenantId).
  */
+/** Result of create_workflow — the draft, plus save fields when persisted. */
+export interface McpCreateWorkflowResult {
+  name: string;
+  graph: unknown;
+  saved: boolean;
+  workflowKey?: string;
+  version?: number;
+  contentHash?: string;
+}
+
+export interface McpCreateWorkflowArgs {
+  prompt?: string;
+  name?: string;
+  graph?: Record<string, unknown>;
+  save?: boolean;
+  workflowKey?: string;
+}
+
 export interface McpToolDeps {
   tenantId: string;
   listWorkflows: () => Promise<McpWorkflowSummary[]>;
   getRun: (runId: string) => Promise<McpRunState>;
+  runWorkflow: (
+    workflowKey: string,
+    input?: Record<string, unknown>,
+  ) => Promise<{ runId: string }>;
+  createWorkflow: (
+    args: McpCreateWorkflowArgs,
+  ) => Promise<McpCreateWorkflowResult>;
+  approve: (runId: string, approved: boolean, note?: string) => Promise<void>;
 }
 
 /** JSON payload → a text tool result (MCP's portable content shape). */
@@ -42,8 +68,10 @@ function jsonResult(payload: unknown): CallToolResult {
  * Build the naary control-plane MCP server for one session (design flavor A). Tools so far:
  *   - list_node_types — discover the building blocks (shared @naary/dsl catalog)
  *   - list_workflows  — the tenant's saved workflows
+ *   - create_workflow — draft a graph from a prompt (or accept one) and optionally save it
+ *   - run_workflow    — start a durable run of a saved workflow
  *   - get_run         — a run's status + node outputs
- * (create_workflow / run_workflow / approve land in later slices.)
+ *   - approve         — resolve a run paused on a human-approval step
  */
 export function buildMcpServer(deps: McpToolDeps): McpServer {
   const server = new McpServer(
@@ -80,12 +108,89 @@ export function buildMcpServer(deps: McpToolDeps): McpServer {
   );
 
   server.tool(
+    "create_workflow",
+    "Create a workflow — two ways: pass `prompt` (plain English → the AI builder drafts a " +
+      "graph) OR pass a `graph` you authored (with `name`). By default returns the DRAFT " +
+      "WITHOUT saving (saved:false) so you can inspect it; pass save:true to persist it and get " +
+      "a workflowKey you can run_workflow. Call list_node_types first to know the node vocabulary.",
+    {
+      prompt: z
+        .string()
+        .optional()
+        .describe(
+          "Plain-English description; the AI builder drafts the graph.",
+        ),
+      name: z
+        .string()
+        .optional()
+        .describe(
+          "Workflow name (used with a supplied graph, or to name a saved one).",
+        ),
+      graph: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("A graph you authored: { nodes, edges, startNodeId }."),
+      save: z
+        .boolean()
+        .optional()
+        .describe(
+          "Persist the workflow (default false = return a draft only).",
+        ),
+      workflowKey: z
+        .string()
+        .optional()
+        .describe("Key to save under (default: derived from the name)."),
+    },
+    async (args) => jsonResult(await deps.createWorkflow(args)),
+  );
+
+  server.tool(
+    "run_workflow",
+    "Start a durable run of a saved workflow by its workflowKey (from list_workflows), with an " +
+      "optional JSON input passed to the trigger node. Returns { runId } immediately — the run " +
+      "keeps executing even after you disconnect (it can take minutes or days, e.g. awaiting a " +
+      "human approval). Poll get_run with the returned runId to await its result.",
+    {
+      workflowKey: z
+        .string()
+        .describe("The workflow to run (a key from list_workflows)."),
+      input: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("Optional JSON input for the trigger node."),
+    },
+    async ({ workflowKey, input }) =>
+      jsonResult(await deps.runWorkflow(workflowKey, input)),
+  );
+
+  server.tool(
     "get_run",
     "Get the current status and node outputs of a workflow run by its runId. Runs are durable " +
       "and may be pending for minutes or days (e.g. awaiting a human approval) — poll this to " +
       "await completion. `ctx` maps each node id to its output.",
     { runId: z.string().describe("The run id returned by run_workflow.") },
     async ({ runId }) => jsonResult(await deps.getRun(runId)),
+  );
+
+  server.tool(
+    "approve",
+    "Resolve a run that is paused on a human-approval step (status awaiting_approval): approve " +
+      "it to continue, or reject it to stop the run. Find such runs via get_run — this is how an " +
+      "agent satisfies (or a human in the UI satisfies) a durable approval gate.",
+    {
+      runId: z.string().describe("The paused run's id."),
+      decision: z
+        .enum(["approve", "reject"])
+        .describe("approve → continue the run; reject → stop it."),
+      note: z
+        .string()
+        .optional()
+        .describe("Optional note recorded with the decision."),
+    },
+    async ({ runId, decision, note }) => {
+      await deps.approve(runId, decision === "approve", note);
+      return jsonResult({ runId, decision, ok: true });
+    },
   );
 
   return server;

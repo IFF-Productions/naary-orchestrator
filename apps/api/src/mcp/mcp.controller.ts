@@ -1,11 +1,42 @@
+import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { All, Controller, Req, Res } from "@nestjs/common";
+import { All, BadRequestException, Controller, Req, Res } from "@nestjs/common";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { GraphDef } from "@naary/dsl";
 import { ApiTokenService } from "../auth/api-token.service";
 import { Public } from "../auth/public.decorator";
 import { ExecutionsService } from "../executions/executions.service";
+import { GraphGeneratorService } from "../graphs/graph-generator.service";
 import { GraphsService } from "../graphs/graphs.service";
+import type { McpCreateWorkflowArgs } from "./mcp.server";
 import { buildMcpServer } from "./mcp.server";
+
+/** Light top-level shape guard (upsert's validateGraph does the deep checks) so a non-graph
+ *  arg is a clean 400, not a 500. */
+function asGraphDef(g: Record<string, unknown>): GraphDef {
+  if (
+    !Array.isArray(g.nodes) ||
+    !Array.isArray(g.edges) ||
+    typeof g.startNodeId !== "string"
+  ) {
+    throw new BadRequestException(
+      "graph must have { nodes: [], edges: [], startNodeId: string }",
+    );
+  }
+  return g as unknown as GraphDef;
+}
+
+/** A stable-ish workflowKey from a name + short random suffix (avoids collisions across
+ *  separate creates of the same name). */
+function deriveWorkflowKey(name: string): string {
+  const slug =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "")
+      .slice(0, 40) || "workflow";
+  return `${slug}-${randomBytes(3).toString("hex")}`;
+}
 
 /** Nest/Express parses the JSON body onto the request; the transport wants that parsed value. */
 type McpRequest = IncomingMessage & { body?: unknown };
@@ -42,6 +73,7 @@ export class McpController {
     private readonly tokens: ApiTokenService,
     private readonly graphs: GraphsService,
     private readonly executions: ExecutionsService,
+    private readonly generator: GraphGeneratorService,
   ) {}
 
   @Public()
@@ -76,6 +108,13 @@ export class McpController {
       tenantId,
       listWorkflows: () => this.graphs.list(tenantId),
       getRun: (runId) => this.executions.getState(runId, tenantId),
+      runWorkflow: (workflowKey, input) =>
+        this.executions
+          .start(tenantId, input, workflowKey)
+          .then((r) => ({ runId: r.workflowId })),
+      createWorkflow: (args) => this.createWorkflow(tenantId, args),
+      approve: (runId, approved, note) =>
+        this.executions.approve(runId, approved, tenantId, note),
     });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
@@ -87,6 +126,42 @@ export class McpController {
     });
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
+  }
+
+  /**
+   * create_workflow: draft a graph from a `prompt` (AI builder) or accept an agent-authored
+   * `graph`, and optionally persist it. Same generate + upsert paths as the REST/canvas flow, so
+   * validation, versioning, and (for a prompt) BYOK provider use are identical.
+   */
+  private async createWorkflow(
+    tenantId: string,
+    { prompt, name, graph, save, workflowKey }: McpCreateWorkflowArgs,
+  ) {
+    let draftName: string;
+    let draftGraph: GraphDef;
+    if (prompt?.trim()) {
+      const gen = await this.generator.generate(tenantId, prompt);
+      draftName = name?.trim() || gen.name;
+      draftGraph = gen.graph;
+    } else if (graph) {
+      draftName = name?.trim() || "Workflow";
+      draftGraph = asGraphDef(graph);
+    } else {
+      throw new BadRequestException("Provide either `prompt` or `graph`.");
+    }
+
+    if (!save) return { name: draftName, graph: draftGraph, saved: false };
+
+    const key = workflowKey?.trim() || deriveWorkflowKey(draftName);
+    const snap = await this.graphs.upsert(tenantId, key, draftName, draftGraph);
+    return {
+      name: draftName,
+      graph: draftGraph,
+      saved: true,
+      workflowKey: key,
+      version: snap.version,
+      contentHash: snap.contentHash,
+    };
   }
 
   /** Resolve a `nry_` bearer token to its tenantId, or null if absent/invalid. */
