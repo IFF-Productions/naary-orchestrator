@@ -1,4 +1,6 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createOpenAI } from "@ai-sdk/openai";
 import {
   BadRequestException,
   HttpException,
@@ -17,10 +19,24 @@ import {
 import { CredentialsService, MissingCredentialError } from "@naary/secrets";
 import { APICallError, generateText, jsonSchema, Output } from "ai";
 
-// The model this feature generates with. Anthropic is the only supported provider
-// today (matches the agent activity); the tenant brings their own key.
-const GEN_PROVIDER = "anthropic";
-const GEN_MODEL = "claude-opus-4-8";
+// Providers the generator can use, in preference order — when the caller doesn't pick one,
+// the first provider the tenant has a valid key for wins. Kept in sync with the worker's
+// buildModel() + MODEL_PRICING. The tenant brings their own key (BYOK).
+const GEN_PROVIDERS = ["anthropic", "openai", "google"] as const;
+type GenProvider = (typeof GEN_PROVIDERS)[number];
+const GEN_DEFAULT_MODEL: Record<GenProvider, string> = {
+  anthropic: "claude-opus-4-8",
+  openai: "gpt-4.1",
+  google: "gemini-2.5-pro",
+};
+
+/** Build the AI SDK model handle for a provider (mirrors the worker's buildModel). */
+function buildGenModel(provider: GenProvider, apiKey: string) {
+  const model = GEN_DEFAULT_MODEL[provider];
+  if (provider === "openai") return createOpenAI({ apiKey })(model);
+  if (provider === "google") return createGoogleGenerativeAI({ apiKey })(model);
+  return createAnthropic({ apiKey })(model);
+}
 
 // The node types + operators the generator may use come from the shared @naary/dsl catalog
 // (NODE_TYPES / CONDITION_OPS), so adding a node/operator automatically teaches the AI builder
@@ -124,21 +140,25 @@ export class GraphGeneratorService {
   async generate(
     tenantId: string,
     prompt: string,
+    provider?: string,
   ): Promise<{ name: string; graph: GraphDef }> {
     const description = prompt?.trim();
     if (!description)
       throw new BadRequestException("A description is required");
 
-    const apiKey = await this.getKey(tenantId);
+    const { provider: chosen, apiKey } = await this.resolveProvider(
+      tenantId,
+      provider,
+    );
 
     // First attempt.
-    let out = await this.callModel(apiKey, description);
+    let out = await this.callModel(chosen, apiKey, description);
     let graph = toGraphDef(out);
     let check = validateGraph(graph);
 
     // One repair retry: feed the validator error back so the model fixes it.
     if (!check.valid) {
-      out = await this.callModel(apiKey, description, {
+      out = await this.callModel(chosen, apiKey, description, {
         previous: JSON.stringify(out),
         error: check.error ?? "invalid graph",
       });
@@ -154,13 +174,38 @@ export class GraphGeneratorService {
     return { name: out.name?.trim() || "Generated workflow", graph };
   }
 
-  private async getKey(tenantId: string): Promise<string> {
+  /**
+   * Pick the provider to generate with + decrypt its key. If the caller named one, use it;
+   * otherwise use the tenant's first configured+valid provider (by preference order). Throws a
+   * helpful 400 when the chosen (or any) provider has no usable key.
+   */
+  private async resolveProvider(
+    tenantId: string,
+    requested?: string,
+  ): Promise<{ provider: GenProvider; apiKey: string }> {
+    let provider = requested?.trim() as GenProvider | undefined;
+    if (provider && !GEN_PROVIDERS.includes(provider)) {
+      throw new BadRequestException(`Unsupported provider: ${requested}`);
+    }
+    if (!provider) {
+      const configured = await this.credentials.listProviders(tenantId);
+      const valid = new Set(
+        configured.filter((c) => c.isValid).map((c) => c.provider),
+      );
+      provider = GEN_PROVIDERS.find((p) => valid.has(p));
+      if (!provider) {
+        throw new BadRequestException(
+          "Add a model provider key (Anthropic, OpenAI, or Google) in Integrations before generating a workflow.",
+        );
+      }
+    }
     try {
-      return await this.credentials.getDecryptedKey(tenantId, GEN_PROVIDER);
+      const apiKey = await this.credentials.getDecryptedKey(tenantId, provider);
+      return { provider, apiKey };
     } catch (e) {
       if (e instanceof MissingCredentialError) {
         throw new BadRequestException(
-          "Add a valid Anthropic API key in Settings before generating a workflow.",
+          `No valid ${provider} key. Add one in Integrations, or choose a provider you've configured.`,
         );
       }
       throw e;
@@ -168,6 +213,7 @@ export class GraphGeneratorService {
   }
 
   private async callModel(
+    provider: GenProvider,
     apiKey: string,
     description: string,
     repair?: { previous: string; error: string },
@@ -186,7 +232,7 @@ export class GraphGeneratorService {
       : description;
     try {
       const result = await generateText({
-        model: createAnthropic({ apiKey })(GEN_MODEL),
+        model: buildGenModel(provider, apiKey),
         system: SYSTEM_PROMPT,
         prompt: userPrompt,
         output: Output.object({ schema: graphOutput }),
@@ -194,7 +240,7 @@ export class GraphGeneratorService {
       });
       return result.output;
     } catch (e) {
-      throw mapProviderError(e);
+      throw mapProviderError(e, provider);
     }
   }
 }
@@ -217,16 +263,16 @@ function toGraphDef(out: {
 }
 
 /** Map provider failures to HTTP responses (mirrors the worker's AUTH/QUOTA split). */
-function mapProviderError(e: unknown): HttpException {
+function mapProviderError(e: unknown, provider: string): HttpException {
   if (APICallError.isInstance(e)) {
     if (e.statusCode === 401 || e.statusCode === 403) {
       return new BadRequestException(
-        "Your Anthropic API key was rejected. Update it in Settings.",
+        `Your ${provider} API key was rejected. Update it in Integrations.`,
       );
     }
     if (e.statusCode === 429) {
       return new HttpException(
-        "Anthropic rate limit or quota exceeded. Try again shortly.",
+        `${provider} rate limit or quota exceeded. Try again shortly.`,
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
