@@ -945,18 +945,23 @@ export function CanvasPage() {
 const clampW = (v: number, min: number, max: number) =>
   Math.max(min, Math.min(max, v));
 
-/** A thin vertical drag bar for resizing an adjacent side panel. `onResize` gets the pointer's
- *  clientX during the drag; the caller derives the new width from the panels-row rect. */
+/** A vertical drag bar for resizing an adjacent side panel. Shows a grip pill so it's
+ *  discoverable; `onResize` gets the pointer's clientX during the drag and the caller derives
+ *  the new width from the panels-row rect. */
 function ResizeHandle({ onResize }: { onResize: (clientX: number) => void }) {
+  const [active, setActive] = useState(false);
   return (
     <div
       role="separator"
       aria-orientation="vertical"
       aria-label="Resize panel"
+      title="Drag to resize"
       onPointerDown={(e) => {
         e.preventDefault();
+        setActive(true);
         const move = (ev: PointerEvent) => onResize(ev.clientX);
         const up = () => {
+          setActive(false);
           window.removeEventListener("pointermove", move);
           window.removeEventListener("pointerup", up);
           document.body.style.cursor = "";
@@ -967,20 +972,29 @@ function ResizeHandle({ onResize }: { onResize: (clientX: number) => void }) {
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", up);
       }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = "var(--brand)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "var(--line)";
-      }}
+      onMouseEnter={() => setActive(true)}
+      onMouseLeave={() => setActive(false)}
       style={{
         flex: "none",
-        width: 5,
+        width: 9,
         cursor: "col-resize",
-        background: "var(--line)",
-        transition: "background 120ms",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "var(--surface)",
+        borderLeft: "1px solid var(--line)",
       }}
-    />
+    >
+      <span
+        style={{
+          width: 3,
+          height: 30,
+          borderRadius: 2,
+          background: active ? "var(--brand)" : "var(--line-2)",
+          transition: "background 120ms",
+        }}
+      />
+    </div>
   );
 }
 
@@ -1111,7 +1125,14 @@ function ConfigPanel({
     (config[k] as Record<string, unknown> | undefined) ?? undefined;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 14,
+        maxWidth: 640,
+      }}
+    >
       {/* header */}
       <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
         <span
