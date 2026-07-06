@@ -976,10 +976,11 @@ function InspectorModal({
 /** Provider/model options the runtime actually supports today. Must stay in sync with the
  *  worker's buildModel() (the providers it can construct) + MODEL_PRICING (so runs are billed) —
  *  offering a provider/model outside those would author nodes that fail or misbill at run time. */
-const PROVIDERS = ["anthropic", "openai"] as const;
+const PROVIDERS = ["anthropic", "openai", "google"] as const;
 const MODELS: Record<string, string[]> = {
   anthropic: ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"],
   openai: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"],
+  google: ["gemini-2.5-pro", "gemini-2.5-flash"],
 };
 
 /** One upstream→argument binding row in the mcpTool editor. */

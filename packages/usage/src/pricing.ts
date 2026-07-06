@@ -74,6 +74,20 @@ export const MODEL_PRICING: Record<string, Record<string, ModelPrice>> = {
       cachedInputPerMTok: 0.1,
     },
   },
+  // Google Gemini list prices, USD per million tokens (representative base-tier rates;
+  // Gemini tiers by context length). As of 2026-06-25. Source: Google AI pricing.
+  google: {
+    "gemini-2.5-pro": {
+      inputPerMTok: 1.25,
+      outputPerMTok: 10,
+      cachedInputPerMTok: 0.31,
+    },
+    "gemini-2.5-flash": {
+      inputPerMTok: 0.3,
+      outputPerMTok: 2.5,
+      cachedInputPerMTok: 0.075,
+    },
+  },
 };
 
 export class UnknownModelPricingError extends Error {
