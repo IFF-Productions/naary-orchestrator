@@ -18,13 +18,12 @@ test.describe("integrations — model provider keys", () => {
       page.getByText("Model providers", { exact: true }),
     ).toBeVisible();
 
-    // Anthropic is the only supported provider → it owns the sole key button
-    // ("Add key", or "Update key" if a row already exists).
-    const keyButton = page.getByRole("button", { name: /Add key|Update key/ });
+    // All three providers are supported (BYOK) → each exposes a key affordance.
+    // The first card is Anthropic; open its inline form.
+    const keyButton = page
+      .getByRole("button", { name: /Add key|Update key/ })
+      .first();
     await expect(keyButton).toBeVisible();
-
-    // Unsupported providers (OpenAI/Google) are honestly gated.
-    await expect(page.getByText("Coming soon").first()).toBeVisible();
 
     // Clicking the affordance opens an inline (password) key form.
     await keyButton.click();
@@ -51,6 +50,9 @@ test.describe("integrations — database connections", () => {
     await expect(
       page.getByText("Connect a database", { exact: true }),
     ).toBeVisible();
+
+    // The form is a collapsible now — expand it to reveal the fields.
+    await page.getByRole("button", { name: /Connect a database/ }).click();
 
     // Non-secret host + the secret DSN field (its placeholder is the postgres DSN).
     await expect(page.getByPlaceholder("localhost:5432")).toBeVisible();
