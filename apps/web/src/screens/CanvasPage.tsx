@@ -23,7 +23,7 @@ import {
   Position,
   ReactFlow,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { NodeType } from "@naary/dsl";
 import { Button } from "../components";
@@ -190,6 +190,20 @@ export function CanvasPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [name, setName] = useState("Canvas draft");
   const [paletteQuery, setPaletteQuery] = useState("");
+  // Drag-resizable side panels (palette + node inspector). Widths persist per browser.
+  const panelsRowRef = useRef<HTMLDivElement>(null);
+  const [paletteWidth, setPaletteWidth] = useState(
+    () => Number(localStorage.getItem("naary.paletteW")) || 180,
+  );
+  const [inspectorWidth, setInspectorWidth] = useState(
+    () => Number(localStorage.getItem("naary.inspectorW")) || 440,
+  );
+  useEffect(() => {
+    localStorage.setItem("naary.paletteW", String(paletteWidth));
+  }, [paletteWidth]);
+  useEffect(() => {
+    localStorage.setItem("naary.inspectorW", String(inspectorWidth));
+  }, [inspectorWidth]);
   // The saved workflowKey (empty until first save of a NEW workflow → slug(name)).
   const [workflowKey, setWorkflowKey] = useState("");
   const [workflows, setWorkflows] = useState<GraphSummary[]>([]);
@@ -733,17 +747,21 @@ export function CanvasPage() {
         </div>
       )}
 
-      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-        {/* palette */}
+      <div
+        ref={panelsRowRef}
+        style={{ display: "flex", flex: 1, minHeight: 0 }}
+      >
+        {/* palette (drag its right edge to resize) */}
         <aside
           style={{
-            width: 168,
+            width: paletteWidth,
+            flex: "none",
             padding: 14,
-            borderRight: "1px solid var(--line)",
             background: "var(--surface)",
             display: "flex",
             flexDirection: "column",
             gap: 8,
+            minHeight: 0,
           }}
         >
           <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 2 }}>
@@ -849,6 +867,14 @@ export function CanvasPage() {
           </div>
         </aside>
 
+        {/* drag to resize the palette */}
+        <ResizeHandle
+          onResize={(clientX) => {
+            const r = panelsRowRef.current?.getBoundingClientRect();
+            if (r) setPaletteWidth(clampW(clientX - r.left, 150, 420));
+          }}
+        />
+
         {/* canvas */}
         <div style={{ flex: 1, minWidth: 0 }}>
           <ReactFlow
@@ -864,55 +890,129 @@ export function CanvasPage() {
             <Controls />
           </ReactFlow>
         </div>
-      </div>
 
-      {/* node / edge editor — a modal so it has room for the richer config */}
-      {(selected || selectedEdge) && (
-        <InspectorModal
-          title={selected ? "Edit node" : "Edit branch condition"}
-          onClose={closeInspector}
-          onDelete={
-            selected
-              ? () => deleteNode(selected.id)
-              : selectedEdge
-                ? () => deleteEdge(selectedEdge.id)
-                : undefined
-          }
-          deleteLabel={selected ? "Delete node" : "Delete edge"}
-        >
-          {selected ? (
-            <ConfigPanel
-              key={selected.id}
-              node={selected}
-              upstreamIds={nodes
-                .filter((n) => n.id !== selected.id)
-                .map((n) => n.id)}
-              hookUrls={hookUrls}
-              onChange={(patch) => updateConfig(selected.id, patch)}
+        {/* node / edge editor — a docked, drag-resizable side panel (right) */}
+        {(selected || selectedEdge) && (
+          <>
+            <ResizeHandle
+              onResize={(clientX) => {
+                const r = panelsRowRef.current?.getBoundingClientRect();
+                if (r) setInspectorWidth(clampW(r.right - clientX, 320, 760));
+              }}
             />
-          ) : selectedEdge ? (
-            <EdgeConfigPanel
-              key={selectedEdge.id}
-              condition={selectedEdge.data?.condition}
-              onChange={(patch) => updateEdgeCondition(selectedEdge.id, patch)}
-              onClear={() => clearEdgeCondition(selectedEdge.id)}
-            />
-          ) : null}
-        </InspectorModal>
-      )}
+            <InspectorPanel
+              title={selected ? "Edit node" : "Edit branch condition"}
+              width={inspectorWidth}
+              onClose={closeInspector}
+              onDelete={
+                selected
+                  ? () => deleteNode(selected.id)
+                  : selectedEdge
+                    ? () => deleteEdge(selectedEdge.id)
+                    : undefined
+              }
+              deleteLabel={selected ? "Delete node" : "Delete edge"}
+            >
+              {selected ? (
+                <ConfigPanel
+                  key={selected.id}
+                  node={selected}
+                  upstreamIds={nodes
+                    .filter((n) => n.id !== selected.id)
+                    .map((n) => n.id)}
+                  hookUrls={hookUrls}
+                  onChange={(patch) => updateConfig(selected.id, patch)}
+                />
+              ) : selectedEdge ? (
+                <EdgeConfigPanel
+                  key={selectedEdge.id}
+                  condition={selectedEdge.data?.condition}
+                  onChange={(patch) =>
+                    updateEdgeCondition(selectedEdge.id, patch)
+                  }
+                  onClear={() => clearEdgeCondition(selectedEdge.id)}
+                />
+              ) : null}
+            </InspectorPanel>
+          </>
+        )}
+      </div>
     </div>
   );
 }
 
 /** Centered modal overlay for the node/edge editor; backdrop + Esc close it. */
-function InspectorModal({
+const clampW = (v: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, v));
+
+/** A vertical drag bar for resizing an adjacent side panel. Shows a grip pill so it's
+ *  discoverable; `onResize` gets the pointer's clientX during the drag and the caller derives
+ *  the new width from the panels-row rect. */
+function ResizeHandle({ onResize }: { onResize: (clientX: number) => void }) {
+  const [active, setActive] = useState(false);
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize panel"
+      title="Drag to resize"
+      onPointerDown={(e) => {
+        e.preventDefault();
+        setActive(true);
+        const move = (ev: PointerEvent) => onResize(ev.clientX);
+        const up = () => {
+          setActive(false);
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", up);
+          document.body.style.cursor = "";
+          document.body.style.userSelect = "";
+        };
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", up);
+      }}
+      onMouseEnter={() => setActive(true)}
+      onMouseLeave={() => setActive(false)}
+      style={{
+        flex: "none",
+        width: 9,
+        cursor: "col-resize",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "var(--surface)",
+        borderLeft: "1px solid var(--line)",
+      }}
+    >
+      <span
+        style={{
+          width: 3,
+          height: 30,
+          borderRadius: 2,
+          background: active ? "var(--brand)" : "var(--line-2)",
+          transition: "background 120ms",
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * Docked, drag-resizable node/edge inspector (replaces the old centered modal). Lives inside the
+ * canvas flex row as a right-hand column; a ResizeHandle on its left edge changes its width. Esc
+ * still closes it.
+ */
+function InspectorPanel({
   title,
+  width,
   onClose,
   onDelete,
   deleteLabel,
   children,
 }: {
   title: string;
+  width: number;
   onClose: () => void;
   onDelete?: () => void;
   deleteLabel?: string;
@@ -928,77 +1028,61 @@ function InspectorModal({
 
   return (
     <div
-      // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop click-to-close; Esc handled below
-      onClick={onClose}
       style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,.45)",
+        width,
+        flex: "none",
         display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 50,
-        padding: 24,
+        flexDirection: "column",
+        minHeight: 0,
+        background: "var(--surface)",
       }}
     >
       <div
-        // biome-ignore lint/a11y/useKeyWithClickEvents: stop backdrop close when clicking inside
-        onClick={(e) => e.stopPropagation()}
         style={{
-          width: 520,
-          maxWidth: "100%",
-          maxHeight: "85vh",
           display: "flex",
-          flexDirection: "column",
-          background: "var(--surface)",
-          border: "1px solid var(--line)",
-          borderRadius: 12,
-          boxShadow: "0 12px 40px rgba(0,0,0,.4)",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "12px 16px",
+          borderBottom: "1px solid var(--line)",
+          flex: "none",
         }}
       >
-        <div
+        <strong style={{ fontSize: 14 }}>{title}</strong>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
           style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "12px 16px",
-            borderBottom: "1px solid var(--line)",
+            border: "1px solid var(--line-2)",
+            background: "var(--card)",
+            color: "var(--ink-2)",
+            borderRadius: 6,
+            cursor: "pointer",
+            padding: "2px 9px",
+            fontSize: 14,
           }}
         >
-          <strong style={{ fontSize: 14 }}>{title}</strong>
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            style={{
-              border: "1px solid var(--line-2)",
-              background: "var(--card)",
-              color: "var(--ink-2)",
-              borderRadius: 6,
-              cursor: "pointer",
-              padding: "2px 9px",
-              fontSize: 14,
-            }}
-          >
-            ✕
-          </button>
-        </div>
-        <div style={{ padding: 16, overflowY: "auto" }}>{children}</div>
-        {onDelete && (
-          <div
-            style={{
-              padding: "10px 16px",
-              borderTop: "1px solid var(--line)",
-              display: "flex",
-              justifyContent: "flex-end",
-            }}
-          >
-            <Button variant="danger" icon="trash" onClick={onDelete}>
-              {deleteLabel ?? "Delete"}
-            </Button>
-          </div>
-        )}
+          ✕
+        </button>
       </div>
+      <div style={{ padding: 16, overflowY: "auto", flex: 1, minHeight: 0 }}>
+        {children}
+      </div>
+      {onDelete && (
+        <div
+          style={{
+            padding: "10px 16px",
+            borderTop: "1px solid var(--line)",
+            display: "flex",
+            justifyContent: "flex-end",
+            flex: "none",
+          }}
+        >
+          <Button variant="danger" icon="trash" onClick={onDelete}>
+            {deleteLabel ?? "Delete"}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1041,7 +1125,14 @@ function ConfigPanel({
     (config[k] as Record<string, unknown> | undefined) ?? undefined;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 14,
+        maxWidth: 640,
+      }}
+    >
       {/* header */}
       <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
         <span
