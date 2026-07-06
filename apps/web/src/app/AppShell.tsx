@@ -7,6 +7,7 @@ import { clearToken } from "../lib/auth";
 import { PAGE_META } from "../lib/mock";
 import { useTheme } from "../theme";
 import { useWorkspace } from "../workspace/WorkspaceProvider";
+import { NotificationsBell } from "./NotificationsBell";
 import {
   WorkspaceSwitcher,
   workspaceLabel,
@@ -328,26 +329,7 @@ export function AppShell() {
               onClick={toggleTheme}
               title="Toggle theme"
             />
-            <button
-              className="btn btn-secondary btn-icon"
-              style={{ position: "relative" }}
-              title="Notifications"
-              onClick={() => navigate("/app/activity")}
-            >
-              <Icon name="bell" size={16} />
-              <span
-                style={{
-                  position: "absolute",
-                  top: 6,
-                  right: 7,
-                  width: 7,
-                  height: 7,
-                  borderRadius: "50%",
-                  background: "var(--brand)",
-                  border: "1.5px solid var(--bg-2)",
-                }}
-              />
-            </button>
+            <NotificationsBell />
             <Button
               variant="primary"
               icon="plus"
