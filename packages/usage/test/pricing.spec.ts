@@ -83,6 +83,32 @@ describe("computeCost", () => {
     expect(mini).toBeLessThan(full);
   });
 
+  it("prices Google Gemini models (multi-provider)", () => {
+    // gemini-2.5-pro: $1.25/MTok in, $10/MTok out → 1000*1.25e-6 + 500*10e-6 = 0.00625
+    expect(
+      computeCost({
+        provider: "google",
+        model: "gemini-2.5-pro",
+        inputTokens: 1000,
+        outputTokens: 500,
+      }),
+    ).toBeCloseTo(0.00625, 9);
+    // flash is cheaper than pro for identical tokens
+    const flash = computeCost({
+      provider: "google",
+      model: "gemini-2.5-flash",
+      inputTokens: 1000,
+      outputTokens: 1000,
+    });
+    const pro = computeCost({
+      provider: "google",
+      model: "gemini-2.5-pro",
+      inputTokens: 1000,
+      outputTokens: 1000,
+    });
+    expect(flash).toBeLessThan(pro);
+  });
+
   it("throws on an unknown model rather than silently pricing it at zero", () => {
     expect(() =>
       computeCost({

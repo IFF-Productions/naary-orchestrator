@@ -36,7 +36,8 @@
     "papaparse": "^5.5.3",
     "quickjs-emscripten": "^0.32.0",
     "zod": "^4.4.3",
-    "@ai-sdk/openai": "^4.0.8"
+    "@ai-sdk/openai": "^4.0.8",
+    "@ai-sdk/google": "^4.0.8"
   },
   "devDependencies": {
     "@temporalio/testing": "^1.19.0",
