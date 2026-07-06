@@ -49,7 +49,7 @@ const providers: {
     name: "Google",
     models: "Gemini 2.5 Pro / Flash",
     color: "var(--node-trigger)",
-    supported: false,
+    supported: true,
   },
 ];
 

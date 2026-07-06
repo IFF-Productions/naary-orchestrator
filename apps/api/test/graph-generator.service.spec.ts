@@ -17,8 +17,9 @@ vi.mock("ai", async (orig) => ({
 }));
 
 const getDecryptedKey = vi.fn();
+const listProviders = vi.fn();
 function makeService(): GraphGeneratorService {
-  return new GraphGeneratorService({ getDecryptedKey } as never);
+  return new GraphGeneratorService({ getDecryptedKey, listProviders } as never);
 }
 
 // A structurally valid graph the model might emit.
@@ -42,6 +43,11 @@ const invalidOut = {
 beforeEach(() => {
   generateText.mockReset();
   getDecryptedKey.mockReset().mockResolvedValue("sk-ant-test");
+  // Default: the tenant has a valid Anthropic key, so auto-select resolves to anthropic
+  // (preserving the historical default when the caller names no provider).
+  listProviders
+    .mockReset()
+    .mockResolvedValue([{ provider: "anthropic", isValid: true }]);
 });
 
 describe("GraphGeneratorService", () => {
@@ -104,6 +110,45 @@ describe("GraphGeneratorService", () => {
     await expect(makeService().generate("t-1", "x")).rejects.toBeInstanceOf(
       BadRequestException,
     );
+  });
+
+  it("uses an explicitly requested provider (openai) and its key", async () => {
+    generateText.mockResolvedValue({ output: validOut });
+
+    await makeService().generate("t-1", "make a flow", "openai");
+
+    expect(getDecryptedKey).toHaveBeenCalledWith("t-1", "openai");
+    // no auto-select needed when the caller names a provider
+    expect(listProviders).not.toHaveBeenCalled();
+  });
+
+  it("auto-selects the tenant's configured provider when none is requested", async () => {
+    // only OpenAI is valid → generator should pick it (anthropic absent)
+    listProviders.mockResolvedValue([
+      { provider: "anthropic", isValid: false },
+      { provider: "openai", isValid: true },
+    ]);
+    generateText.mockResolvedValue({ output: validOut });
+
+    await makeService().generate("t-1", "make a flow");
+
+    expect(getDecryptedKey).toHaveBeenCalledWith("t-1", "openai");
+  });
+
+  it("400s when the tenant has no valid provider key at all", async () => {
+    listProviders.mockResolvedValue([]);
+
+    await expect(makeService().generate("t-1", "x")).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(generateText).not.toHaveBeenCalled();
+  });
+
+  it("400s on an unsupported provider name", async () => {
+    await expect(
+      makeService().generate("t-1", "x", "cohere"),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(generateText).not.toHaveBeenCalled();
   });
 
   it("rejects an empty prompt with 400 before any key/model work", async () => {

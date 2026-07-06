@@ -45,7 +45,7 @@ export class GraphsController {
     @TenantId() tenantId: string,
     @Body() body: GenerateGraphDto,
   ): Promise<{ name: string; graph: GraphDef }> {
-    return this.generator.generate(tenantId, body.prompt);
+    return this.generator.generate(tenantId, body.prompt, body.provider);
   }
 
   /** The latest graph for a workflowKey — used to open it in the canvas. */

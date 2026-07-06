@@ -1,4 +1,5 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { APICallError, generateText } from "ai";
 
@@ -60,6 +61,25 @@ export async function validateOpenAiKey(apiKey: string): Promise<boolean> {
   try {
     await generateText({
       model: openai("gpt-4o-mini"),
+      prompt: "ping",
+      maxOutputTokens: 1,
+    });
+    return true;
+  } catch (e) {
+    return classifyKeyError(e);
+  }
+}
+
+/**
+ * Validate a tenant's Google (Gemini) key with a cheap 1-token call — mirrors the others
+ * (4xx bad/exhausted key ⇒ invalid; 5xx/network ⇒ sanitized transient). gemini-2.5-flash is
+ * the cheapest model to probe with.
+ */
+export async function validateGoogleKey(apiKey: string): Promise<boolean> {
+  const google = createGoogleGenerativeAI({ apiKey });
+  try {
+    await generateText({
+      model: google("gemini-2.5-flash"),
       prompt: "ping",
       maxOutputTokens: 1,
     });

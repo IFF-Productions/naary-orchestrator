@@ -201,6 +201,8 @@ export function CanvasPage() {
   // AI workflow builder: describe a flow → generate a draft onto the canvas.
   const [showAi, setShowAi] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
+  // "" = let the server auto-pick the tenant's configured provider.
+  const [genProvider, setGenProvider] = useState("");
   const [generating, setGenerating] = useState(false);
 
   const keyParam = searchParams.get("key");
@@ -423,7 +425,10 @@ export function CanvasPage() {
     setGenerating(true);
     setStatus("Generating workflow…");
     try {
-      const { name: genName, graph: gen } = await api.generateGraph(prompt);
+      const { name: genName, graph: gen } = await api.generateGraph(
+        prompt,
+        genProvider || undefined,
+      );
       const { nodes: cn, edges: ce } = decompileGraph(gen);
       setNodes(toFlowNodes(cn));
       setEdges(toFlowEdges(ce));
@@ -629,7 +634,8 @@ export function CanvasPage() {
         >
           <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 6 }}>
             Describe the workflow in plain English — an agent drafts it onto the
-            canvas for you to edit. (Uses your Anthropic key from Settings.)
+            canvas for you to edit. (Uses your model provider key from
+            Integrations.)
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
             <textarea
@@ -654,13 +660,37 @@ export function CanvasPage() {
                 fontFamily: "inherit",
               }}
             />
-            <Button
-              variant="primary"
-              disabled={generating || aiPrompt.trim().length < 3}
-              onClick={() => void generateFromPrompt()}
-            >
-              {generating ? "Generating…" : "Generate"}
-            </Button>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <select
+                value={genProvider}
+                onChange={(e) => setGenProvider(e.target.value)}
+                disabled={generating}
+                title="Model provider for generation"
+                style={{
+                  padding: "7px 8px",
+                  borderRadius: 8,
+                  border: "1px solid var(--line)",
+                  background: "var(--card)",
+                  color: "var(--ink)",
+                  fontSize: 12,
+                  fontFamily: "inherit",
+                }}
+              >
+                <option value="">Auto</option>
+                {PROVIDERS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+              <Button
+                variant="primary"
+                disabled={generating || aiPrompt.trim().length < 3}
+                onClick={() => void generateFromPrompt()}
+              >
+                {generating ? "Generating…" : "Generate"}
+              </Button>
+            </div>
           </div>
           <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 4 }}>
             Generating replaces the current canvas with a new draft.
@@ -976,10 +1006,11 @@ function InspectorModal({
 /** Provider/model options the runtime actually supports today. Must stay in sync with the
  *  worker's buildModel() (the providers it can construct) + MODEL_PRICING (so runs are billed) —
  *  offering a provider/model outside those would author nodes that fail or misbill at run time. */
-const PROVIDERS = ["anthropic", "openai"] as const;
+const PROVIDERS = ["anthropic", "openai", "google"] as const;
 const MODELS: Record<string, string[]> = {
   anthropic: ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"],
   openai: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"],
+  google: ["gemini-2.5-pro", "gemini-2.5-flash"],
 };
 
 /** One upstream→argument binding row in the mcpTool editor. */
