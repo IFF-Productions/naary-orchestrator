@@ -69,12 +69,15 @@ export function SearchInput({
   kbd = "⌘K",
   value,
   onChange,
+  onSubmit,
   style,
 }: {
   placeholder?: string;
   kbd?: string;
   value?: string;
   onChange?: (v: string) => void;
+  /** Fired when the user presses Enter (with the current value). */
+  onSubmit?: (v: string) => void;
   style?: React.CSSProperties;
 }) {
   return (
@@ -85,6 +88,10 @@ export function SearchInput({
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange?.(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter")
+            onSubmit?.((e.target as HTMLInputElement).value);
+        }}
       />
       {kbd && <span className="kbd">{kbd}</span>}
     </div>

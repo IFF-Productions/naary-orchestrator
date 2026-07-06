@@ -63,11 +63,26 @@ export function AppShell() {
   const [collapsed, setCollapsed] = useState(false);
   const { theme, toggleTheme } = useTheme();
   const { logout } = useAuth();
-  const { activeId } = useWorkspace();
-  const wsLabel = activeId ? workspaceLabel(activeId) : undefined;
+  const { activeId, workspaces } = useWorkspace();
+  const activeWs = workspaces.find((w) => w.tenantId === activeId);
+  const wsLabel = activeId
+    ? workspaceLabel(activeId, activeWs?.name)
+    : undefined;
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const [search, setSearch] = useState("");
   const [title, sub] = PAGE_META[pathname] ?? ["Naary", ""];
+
+  // Global search: jump to Workflows filtered by the query (Workflows reads ?q).
+  const runSearch = (q: string) => {
+    const query = q.trim();
+    navigate(
+      query
+        ? `/app/workflows?q=${encodeURIComponent(query)}`
+        : "/app/workflows",
+    );
+    setSearch("");
+  };
   const labelOp = collapsed ? 0 : 1;
 
   // Sign out of BOTH session kinds: Firebase (if signed in) and the pasted
@@ -184,7 +199,7 @@ export function AppShell() {
               color: "var(--ink-2)",
             }}
           >
-            {(activeId ?? "?")
+            {(wsLabel ?? activeId ?? "?")
               .replace(/[^a-zA-Z0-9]/g, "")
               .slice(0, 2)
               .toUpperCase() || "?"}
@@ -291,7 +306,12 @@ export function AppShell() {
           </span>
 
           <div style={{ marginLeft: 18, width: 300 }}>
-            <SearchInput placeholder="Search workflows, runs…" />
+            <SearchInput
+              placeholder="Search workflows…"
+              value={search}
+              onChange={setSearch}
+              onSubmit={runSearch}
+            />
           </div>
 
           <div
@@ -311,6 +331,8 @@ export function AppShell() {
             <button
               className="btn btn-secondary btn-icon"
               style={{ position: "relative" }}
+              title="Notifications"
+              onClick={() => navigate("/app/activity")}
             >
               <Icon name="bell" size={16} />
               <span
@@ -326,7 +348,11 @@ export function AppShell() {
                 }}
               />
             </button>
-            <Button variant="primary" icon="plus">
+            <Button
+              variant="primary"
+              icon="plus"
+              onClick={() => navigate("/app/canvas")}
+            >
               New workflow
             </Button>
           </div>

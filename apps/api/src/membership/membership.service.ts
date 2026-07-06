@@ -59,13 +59,40 @@ export class MembershipService {
   async createWorkspace(
     userId: string,
     email?: string,
-  ): Promise<UserMembership> {
+    name?: string,
+  ): Promise<UserMembership & { name?: string }> {
     const tenantId = `ws-${randomUUID()}`;
     await getPrisma().membership.create({
       data: { userId, tenantId, role: "owner", email: email ?? null },
     });
+    // The workspace name is TenantSettings.displayName (same field the Settings screen
+    // edits) — seed it so the switcher shows the chosen name from the first render.
+    const displayName = name?.trim();
+    if (displayName) {
+      await getPrisma().tenantSettings.upsert({
+        where: { tenantId },
+        create: { tenantId, displayName },
+        update: { displayName },
+      });
+    }
     this.cache.invalidate(userId);
-    return { tenantId, role: "owner" };
+    return { tenantId, role: "owner", name: displayName || undefined };
+  }
+
+  /**
+   * Map tenantId → workspace display name (TenantSettings.displayName) for the given ids.
+   * Only ids with a non-empty name appear in the result. Used to enrich /me/workspaces so the
+   * switcher shows the real name instead of an id-derived stub.
+   */
+  async workspaceNames(tenantIds: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (tenantIds.length === 0) return out;
+    const rows = await getPrisma().tenantSettings.findMany({
+      where: { tenantId: { in: tenantIds } },
+      select: { tenantId: true, displayName: true },
+    });
+    for (const r of rows) if (r.displayName) out.set(r.tenantId, r.displayName);
+    return out;
   }
 
   /** Drop the user's cached memberships (call after any membership/role write). */

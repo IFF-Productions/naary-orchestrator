@@ -13,6 +13,7 @@ export function CreateWorkspace() {
   const { create } = useWorkspace();
   const { authenticated, emailVerified } = useAuth();
   const [busy, setBusy] = useState(false);
+  const [name, setName] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
 
   // A Firebase user whose email isn't verified can't provision — tell them before the try.
@@ -22,7 +23,7 @@ export function CreateWorkspace() {
     setBusy(true);
     setError(undefined);
     try {
-      await create();
+      await create(name);
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "Could not create the workspace.",
@@ -61,6 +62,27 @@ export function CreateWorkspace() {
                 alignItems: "center",
               }}
             >
+              {!blockedUnverified && (
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Workspace name (e.g. Acme Inc)"
+                  disabled={busy}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !busy) void onCreate();
+                  }}
+                  style={{
+                    width: 260,
+                    padding: "9px 11px",
+                    borderRadius: 8,
+                    border: "1px solid var(--line)",
+                    background: "var(--card)",
+                    color: "var(--ink)",
+                    fontSize: 13,
+                    fontFamily: "inherit",
+                  }}
+                />
+              )}
               <Button
                 variant="primary"
                 icon="plus"

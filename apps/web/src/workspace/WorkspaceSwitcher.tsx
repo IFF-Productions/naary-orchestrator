@@ -7,8 +7,10 @@ import { useState } from "react";
 import { Icon } from "../components";
 import { useWorkspace } from "./WorkspaceProvider";
 
-/** A readable label for a workspace id (server ids are `ws-<uuid>`; legacy are `t-*`). */
-export function workspaceLabel(id: string): string {
+/** A readable label for a workspace: its display name if set, else a stub from the id
+ *  (server ids are `ws-<uuid>`; legacy are `t-*`). */
+export function workspaceLabel(id: string, name?: string): string {
+  if (name?.trim()) return name.trim();
   if (id.startsWith("ws-")) return `Workspace ${id.slice(3, 9)}`;
   return id;
 }
@@ -70,7 +72,7 @@ export function WorkspaceSwitcher({ labelOp = 1 }: { labelOp?: number }) {
               textOverflow: "ellipsis",
             }}
           >
-            Naary
+            {active ? workspaceLabel(active.tenantId, active.name) : "Naary"}
           </span>
           <span
             style={{
@@ -82,7 +84,7 @@ export function WorkspaceSwitcher({ labelOp = 1 }: { labelOp?: number }) {
               textOverflow: "ellipsis",
             }}
           >
-            {active ? workspaceLabel(active.tenantId) : "No workspace"}
+            {active ? active.role : "No workspace"}
           </span>
         </span>
         <Icon
@@ -152,7 +154,7 @@ export function WorkspaceSwitcher({ labelOp = 1 }: { labelOp?: number }) {
                       textOverflow: "ellipsis",
                     }}
                   >
-                    {workspaceLabel(w.tenantId)}
+                    {workspaceLabel(w.tenantId, w.name)}
                   </span>
                   <span style={{ fontSize: 10, color: "var(--ink-3)" }}>
                     {w.role}
