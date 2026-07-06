@@ -973,11 +973,13 @@ function InspectorModal({
   );
 }
 
-/** Provider/model options the runtime actually supports today (buildModel is
- *  anthropic-only — offering others would author nodes that fail at run time). */
-const PROVIDERS = ["anthropic"] as const;
+/** Provider/model options the runtime actually supports today. Must stay in sync with the
+ *  worker's buildModel() (the providers it can construct) + MODEL_PRICING (so runs are billed) —
+ *  offering a provider/model outside those would author nodes that fail or misbill at run time. */
+const PROVIDERS = ["anthropic", "openai"] as const;
 const MODELS: Record<string, string[]> = {
   anthropic: ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"],
+  openai: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"],
 };
 
 /** One upstream→argument binding row in the mcpTool editor. */
@@ -1187,7 +1189,14 @@ function ConfigPanel({
           <Labeled label="Provider">
             <select
               value={str("provider") || "anthropic"}
-              onChange={(e) => onChange({ provider: e.target.value })}
+              onChange={(e) =>
+                // Switching provider resets the model to that provider's default —
+                // otherwise a Claude model could linger on an OpenAI node (a run-time mismatch).
+                onChange({
+                  provider: e.target.value,
+                  model: MODELS[e.target.value]?.[0],
+                })
+              }
               style={inputStyle}
             >
               {PROVIDERS.map((p) => (

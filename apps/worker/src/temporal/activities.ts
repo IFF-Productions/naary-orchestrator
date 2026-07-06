@@ -12,6 +12,7 @@ import {
   randomUUID,
 } from "node:crypto";
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createOpenAI } from "@ai-sdk/openai";
 import { ApplicationFailure } from "@temporalio/activity";
 import { SignJWT, importPKCS8 } from "jose";
 import nodemailer from "nodemailer";
@@ -1391,6 +1392,9 @@ function getCredentials(): CredentialsService {
 function buildModel(provider: string, model: string, apiKey: string) {
   if (provider === "anthropic") {
     return createAnthropic({ apiKey })(model);
+  }
+  if (provider === "openai") {
+    return createOpenAI({ apiKey })(model);
   }
   throw ApplicationFailure.nonRetryable(
     `Unsupported provider: ${provider}`,

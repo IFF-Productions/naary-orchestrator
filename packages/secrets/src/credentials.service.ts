@@ -1,6 +1,6 @@
 import { getPrisma } from "@naary/db";
 import { type KeyEncryptor, createKeyEncryptor } from "./crypto";
-import { validateAnthropicKey } from "./provider-validate";
+import { validateAnthropicKey, validateOpenAiKey } from "./provider-validate";
 
 /** Thrown when a tenant has no usable (present + valid) credential for a provider. */
 export class MissingCredentialError extends Error {
@@ -21,6 +21,7 @@ export type ProviderValidator = (
 
 const defaultValidator: ProviderValidator = (provider, apiKey) => {
   if (provider === "anthropic") return validateAnthropicKey(apiKey);
+  if (provider === "openai") return validateOpenAiKey(apiKey);
   throw new Error(`Unsupported provider: ${provider}`);
 };
 

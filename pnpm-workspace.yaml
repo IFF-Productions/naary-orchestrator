@@ -17,6 +17,7 @@ minimumReleaseAgeExclude:
   - '@ai-sdk/gateway@4.0.12'
   - ai@7.0.15
   - undici@8.7.0
+  - '@ai-sdk/openai@4.0.8'
 
 # Force patched versions of transitive deps flagged by Dependabot (pnpm 11 reads
 # overrides from here, not package.json). All are minor/patch bumps:

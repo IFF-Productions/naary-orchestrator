@@ -13,9 +13,15 @@ vi.mock("ai", async (importActual) => {
 vi.mock("@ai-sdk/anthropic", () => ({
   createAnthropic: () => () => ({}) as never, // model factory → dummy handle
 }));
+vi.mock("@ai-sdk/openai", () => ({
+  createOpenAI: () => () => ({}) as never, // model factory → dummy handle
+}));
 
 import { APICallError } from "ai";
-import { validateAnthropicKey } from "../src/provider-validate";
+import {
+  validateAnthropicKey,
+  validateOpenAiKey,
+} from "../src/provider-validate";
 
 function apiError(statusCode: number): APICallError {
   return new APICallError({
@@ -62,5 +68,30 @@ describe("validateAnthropicKey", () => {
     await expect(validateAnthropicKey("sk-ant-good")).rejects.toThrow(
       "Provider key validation failed transiently",
     );
+  });
+});
+
+describe("validateOpenAiKey", () => {
+  it("returns true when the ping succeeds", async () => {
+    generateTextMock.mockResolvedValue({ text: "ok" });
+    expect(await validateOpenAiKey("sk-openai-good")).toBe(true);
+  });
+
+  it.each([400, 401, 403, 429])(
+    "returns false (invalid, surfaced — not a 500) on a %i client error",
+    async (status) => {
+      generateTextMock.mockRejectedValue(apiError(status));
+      expect(await validateOpenAiKey("sk-openai-bad")).toBe(false);
+    },
+  );
+
+  it("rethrows a SANITIZED error on a 5xx transient (no raw APICallError)", async () => {
+    generateTextMock.mockRejectedValue(apiError(503));
+    await expect(validateOpenAiKey("sk-openai-good")).rejects.toMatchObject({
+      message: "Provider key validation failed transiently (status 503)",
+    });
+    await expect(
+      validateOpenAiKey("sk-openai-good"),
+    ).rejects.not.toBeInstanceOf(APICallError);
   });
 });
