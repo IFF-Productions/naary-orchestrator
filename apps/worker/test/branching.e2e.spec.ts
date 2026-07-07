@@ -117,6 +117,39 @@ describe("interpreter — branching / parallel / loop (Slice #6)", () => {
     expect(mcpConns).toEqual(["billing-conn"]);
   });
 
+  it("resolves {{ nodeId.path }} templates in config from an upstream output", async () => {
+    // The mcpTool's connectionId is a template referencing the agent's output; the interpreter
+    // must resolve it to "billing" (agent mock → output.category) BEFORE the activity runs.
+    const graph: GraphDef = {
+      startNodeId: "agent",
+      nodes: [
+        { id: "agent", type: "agent" },
+        {
+          id: "call",
+          type: "mcpTool",
+          config: { connectionId: "{{ agent.output.category }}", tool: "noop" },
+        },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "agent", to: "call" },
+        { from: "call", to: "end" },
+      ],
+    };
+    const worker = await makeWorker();
+    const status = await worker.runUntil(async () => {
+      const h = await env.client.workflow.start(runGraph, {
+        args: [graph, {}, { tenantId: "t1" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-template",
+      });
+      return (await h.result()).status;
+    });
+    expect(status).toBe("completed");
+    // connectionId was resolved from agent.output.category, not passed literally
+    expect(mcpConns).toEqual(["billing"]);
+  });
+
   it("routes via a switch node: first matching rule wins, edges branch on .matched", async () => {
     // agent → category "billing", urgency 3. Rule 1 (urgent, urgency>=5) misses; rule 2
     // (billing) matches → matched="billing" → only the billing edge fires.
