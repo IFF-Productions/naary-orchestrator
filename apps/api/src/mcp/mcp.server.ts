@@ -55,6 +55,38 @@ export interface McpToolDeps {
     args: McpCreateWorkflowArgs,
   ) => Promise<McpCreateWorkflowResult>;
   approve: (runId: string, approved: boolean, note?: string) => Promise<void>;
+  /**
+   * Saved workflows to expose as their OWN callable tools (design flavor B — the "Server-Trigger"
+   * model). Each becomes `run_<workflowKey>` so an agent can call a specific flow by name, not
+   * just via the generic run_workflow. Same capability + tenant scope as run_workflow — no new
+   * access is granted.
+   */
+  exposedWorkflows: McpWorkflowSummary[];
+}
+
+/** MCP tool names must be [A-Za-z0-9_-]. Slugify a workflowKey and de-collide within the set. */
+function toolNamesFor(workflows: McpWorkflowSummary[]): Map<string, string> {
+  const used = new Set<string>([
+    "list_node_types",
+    "list_workflows",
+    "create_workflow",
+    "run_workflow",
+    "get_run",
+    "approve",
+  ]);
+  const out = new Map<string, string>();
+  for (const wf of workflows) {
+    const base = `run_${wf.workflowKey.replace(/[^A-Za-z0-9_-]/g, "_")}`.slice(
+      0,
+      60,
+    );
+    let name = base;
+    let n = 2;
+    while (used.has(name)) name = `${base}_${n++}`;
+    used.add(name);
+    out.set(wf.workflowKey, name);
+  }
+  return out;
 }
 
 /** JSON payload → a text tool result (MCP's portable content shape). */
@@ -192,6 +224,32 @@ export function buildMcpServer(deps: McpToolDeps): McpServer {
       return jsonResult({ runId, decision, ok: true });
     },
   );
+
+  // Flavor B — expose each saved workflow as its own `run_<key>` tool (capped to keep the tool
+  // list sane). A call starts a durable run; poll get_run for the result.
+  const CAP = 40;
+  const exposed = deps.exposedWorkflows.slice(0, CAP);
+  const names = toolNamesFor(exposed);
+  for (const wf of exposed) {
+    const name = names.get(wf.workflowKey);
+    if (!name) continue;
+    server.tool(
+      name,
+      `Run the "${wf.name}" workflow (key: ${wf.workflowKey}) as a durable run. Returns ` +
+        `{ runId } immediately — poll get_run to await it (it may pause for approval or run for ` +
+        `a while). Equivalent to run_workflow with this workflowKey.`,
+      {
+        input: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe(
+            "Optional JSON input passed to the workflow's trigger node.",
+          ),
+      },
+      async ({ input }) =>
+        jsonResult(await deps.runWorkflow(wf.workflowKey, input)),
+    );
+  }
 
   return server;
 }
