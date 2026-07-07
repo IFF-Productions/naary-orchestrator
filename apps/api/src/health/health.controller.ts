@@ -1,4 +1,5 @@
 import { Controller, Get } from "@nestjs/common";
+import { ApiOkResponse, ApiOperation } from "@nestjs/swagger";
 import { Public } from "../auth/public.decorator";
 
 /**
@@ -9,6 +10,13 @@ import { Public } from "../auth/public.decorator";
  */
 @Controller("healthz")
 export class HealthController {
+  @ApiOperation({
+    summary: "Liveness probe",
+    description: "Public — reports the process is up and serving HTTP.",
+  })
+  @ApiOkResponse({
+    schema: { properties: { status: { type: "string", example: "ok" } } },
+  })
   @Public()
   @Get()
   check(): { status: "ok" } {

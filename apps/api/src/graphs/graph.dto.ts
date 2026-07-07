@@ -1,3 +1,4 @@
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import {
   IsObject,
   IsOptional,
@@ -9,13 +10,23 @@ import {
 /** Generate a draft graph from a plain-English description (AI workflow builder).
  *  Bounded length keeps the model prompt sane and blocks abuse. */
 export class GenerateGraphDto {
+  @ApiProperty({
+    minLength: 3,
+    maxLength: 2000,
+    example:
+      "When a webhook arrives, have an agent summarize it, wait for my approval, then email the summary.",
+    description: "Plain-English description of the workflow to build.",
+  })
   @IsString()
   @MinLength(3)
   @MaxLength(2000)
   prompt!: string;
 
-  /** Optional model provider to generate with (anthropic | openai | google). Omitted ⇒
-   *  the generator picks the tenant's first configured+valid provider. */
+  @ApiPropertyOptional({
+    enum: ["anthropic", "openai", "google"],
+    description:
+      "Provider to generate with. Omitted ⇒ the tenant's first configured+valid provider.",
+  })
   @IsOptional()
   @IsString()
   provider?: string;
@@ -25,12 +36,22 @@ export class GenerateGraphDto {
  *  in depth by `validateGraph` inside GraphsService.upsert (400 on a bad graph);
  *  here we only assert it's an object — the controller checks the top-level shape. */
 export class SaveGraphDto {
+  @ApiProperty({
+    example: "support-triage",
+    description: "Stable key the workflow is stored + run under.",
+  })
   @IsString()
   workflowKey!: string;
 
+  @ApiProperty({ example: "Support triage" })
   @IsString()
   name!: string;
 
+  @ApiProperty({
+    type: "object",
+    additionalProperties: true,
+    description: "The graph: { nodes, edges, startNodeId }.",
+  })
   @IsObject()
   graph!: Record<string, unknown>;
 }

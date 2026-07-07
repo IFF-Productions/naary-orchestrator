@@ -6,12 +6,18 @@ import {
   Post,
   Query,
 } from "@nestjs/common";
+import { ApiBearerAuth, ApiOkResponse, ApiOperation } from "@nestjs/swagger";
 import {
   ConnectionService,
   completeConsent,
   startConsent,
 } from "@naary/connections";
 import { Public } from "../auth/public.decorator";
+import { ApiEndpoint } from "../swagger/api-decorators";
+import {
+  OAuthCallbackResponse,
+  OAuthStartResponse,
+} from "./connection.response";
 
 /**
  * Interactive OAuth consent (B3) — runs once in the web app. `start` returns the
@@ -23,6 +29,14 @@ import { Public } from "../auth/public.decorator";
 export class OAuthController {
   constructor(private readonly connections: ConnectionService) {}
 
+  @ApiBearerAuth("bearer")
+  @ApiEndpoint({
+    summary: "Start OAuth consent",
+    description:
+      "Returns the provider authorize URL for the browser to begin interactive consent.",
+    ok: OAuthStartResponse,
+    notFound: true,
+  })
   @Post("tenants/:id/connections/:connectionId/oauth/start")
   async start(
     @Param("id") tenantId: string,
@@ -41,6 +55,12 @@ export class OAuthController {
     });
   }
 
+  @ApiOperation({
+    summary: "OAuth callback (provider redirect target)",
+    description:
+      "Public: the provider redirects here with a single-use `state` (its credential) and `code`; exchanges the code and persists the encrypted refresh token.",
+  })
+  @ApiOkResponse({ type: OAuthCallbackResponse })
   @Public() // provider redirect target; the single-use `state` is its credential
   @Get("oauth/callback")
   callback(

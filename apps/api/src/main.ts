@@ -11,6 +11,7 @@ initMetrics({ component: "api" });
 
 import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
+import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/all-exceptions.filter";
@@ -61,6 +62,37 @@ async function bootstrap(): Promise<void> {
 
   // Sanitize errors so internals/secrets never reach the client (Sec#11).
   app.useGlobalFilters(new AllExceptionsFilter());
+
+  // OpenAPI / Swagger docs. Served at /docs (interactive UI) with the machine-readable
+  // schema at /docs-json. Every endpoint authenticates with a Bearer token (an `nry_` API
+  // token or a Firebase ID token), so we register one bearer scheme and mark it required for
+  // all operations. Set SWAGGER_DISABLED=1 to omit it in a hardened deployment.
+  if (process.env.SWAGGER_DISABLED !== "1") {
+    const config = new DocumentBuilder()
+      .setTitle("naary API")
+      .setDescription(
+        "Control plane for durable, human-in-the-loop AI-agent + webhook workflows. " +
+          "Authenticate every request with `Authorization: Bearer <token>` — an `nry_` API " +
+          "token (mint one in the app, or `POST /tokens`) or a Firebase ID token.",
+      )
+      .setVersion("0.1.0")
+      .addBearerAuth(
+        {
+          type: "http",
+          scheme: "bearer",
+          description: "An `nry_…` API token or a Firebase ID token.",
+        },
+        "bearer",
+      )
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    // Apply the bearer requirement to every operation (avoids decorating each controller).
+    document.security = [{ bearer: [] }];
+    SwaggerModule.setup("docs", app, document, {
+      jsonDocumentUrl: "docs-json",
+      swaggerOptions: { persistAuthorization: true },
+    });
+  }
 
   // Lets onModuleDestroy run (closes the Temporal connection + pg pool) on SIGINT/SIGTERM.
   app.enableShutdownHooks();

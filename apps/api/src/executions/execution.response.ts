@@ -1,0 +1,83 @@
+import { ApiProperty } from "@nestjs/swagger";
+
+/** Result of starting a run — the Temporal workflowId to poll/approve against. */
+export class StartExecutionResponse {
+  @ApiProperty({
+    example: "run-8f3a1c2e",
+    description: "Temporal workflowId of the started run.",
+  })
+  workflowId!: string;
+}
+
+/** One row in the recent-runs list (newest first). */
+export class RunListItemResponse {
+  @ApiProperty({ example: "run-8f3a1c2e" }) workflowId!: string;
+  @ApiProperty({ format: "date-time", example: "2026-07-04T12:00:00.000Z" })
+  createdAt!: string;
+}
+
+/** A run paused for approval, enriched with the humanApproval node's prompt. */
+export class AwaitingApprovalResponse {
+  @ApiProperty({ example: "run-8f3a1c2e" }) workflowId!: string;
+  @ApiProperty({ nullable: true, example: "support-triage" })
+  workflowKey!: string | null;
+  @ApiProperty({ example: "approve-summary" }) nodeId!: string;
+  @ApiProperty({ example: "Approve the drafted summary" }) title!: string;
+  @ApiProperty({
+    nullable: true,
+    example: "Review the summary before it is emailed.",
+  })
+  instructions!: string | null;
+  @ApiProperty({ format: "date-time", example: "2026-07-04T12:00:00.000Z" })
+  createdAt!: string;
+}
+
+/** Acknowledgement that an approval decision was accepted (async, 202). */
+export class AcceptedResponse {
+  @ApiProperty({ example: true }) accepted!: boolean;
+}
+
+/** Live run detail — status, current node, and the accumulated context. */
+export class RunStateResponse {
+  @ApiProperty({
+    example: "running",
+    description:
+      "App status or a Temporal close reason (failed | timed_out | terminated | canceled | unknown).",
+  })
+  status!: string;
+  @ApiProperty({ example: "agent-1" }) currentNodeId!: string;
+  @ApiProperty({
+    type: "object",
+    additionalProperties: true,
+    description: "Accumulated workflow context.",
+  })
+  ctx!: Record<string, unknown>;
+}
+
+/** One entry in a run's execution log (derived from Temporal history). */
+export class RunEventResponse {
+  @ApiProperty({ example: 12 }) id!: number;
+  @ApiProperty({
+    enum: [
+      "started",
+      "activity",
+      "signal",
+      "timer",
+      "completed",
+      "error",
+      "continued",
+    ],
+    example: "activity",
+    description: "Coarse kind for the UI icon/colour.",
+  })
+  kind!: string;
+  @ApiProperty({ example: "Activity: callAgent" }) label!: string;
+  @ApiProperty({
+    nullable: true,
+    format: "date-time",
+    example: "2026-07-04T12:00:00.000Z",
+  })
+  at!: string | null;
+  @ApiProperty({ required: false, example: "Provider returned 429" })
+  detail?: string;
+}

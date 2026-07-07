@@ -11,6 +11,7 @@ allowBuilds:
   '@prisma/engines': true
   esbuild: true
   '@firebase/util': false
+  '@scarf/scarf': false
 
 minimumReleaseAgeExclude:
   - '@ai-sdk/anthropic@4.0.8'

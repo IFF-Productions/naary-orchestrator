@@ -6,9 +6,12 @@ import {
   HttpCode,
   Post,
 } from "@nestjs/common";
+import { ApiBearerAuth } from "@nestjs/swagger";
 import { CurrentPrincipal, type Principal } from "../auth/tenant.decorator";
 import { UserScoped } from "../auth/user-scoped.decorator";
+import { ApiEndpoint } from "../swagger/api-decorators";
 import { MembershipService } from "./membership.service";
+import { WorkspaceViewResponse } from "./workspace.response";
 
 export interface WorkspaceView {
   tenantId: string;
@@ -22,6 +25,7 @@ export interface WorkspaceView {
  * a brand-new user with no workspace yet must be able to list (empty) and create one.
  * `GET /me/workspaces` powers the switcher; `POST /workspaces` is Path A.
  */
+@ApiBearerAuth("bearer")
 @Controller()
 export class WorkspacesController {
   constructor(private readonly memberships: MembershipService) {}
@@ -31,6 +35,11 @@ export class WorkspacesController {
    * the `tenant` claim / API token and may have no Membership row yet — on read we lazily
    * backfill an OWNER membership for their current tenant so the switcher shows it.
    */
+  @ApiEndpoint({
+    summary: "List the caller's workspaces",
+    description: "Powers the workspace switcher (one entry per membership).",
+    ok: [WorkspaceViewResponse],
+  })
   @Get("me/workspaces")
   @UserScoped()
   async list(
@@ -78,6 +87,12 @@ export class WorkspacesController {
    *  - `email_verified === true` (attack #6) — an unverified email can't provision.
    * A user MAY own several workspaces (multi-workspace model) — no "must be tenant-less".
    */
+  @ApiEndpoint({
+    summary: "Create a workspace",
+    description:
+      "Self-serve workspace creation owned by the caller. Requires a signed-in, email-verified user.",
+    created: WorkspaceViewResponse,
+  })
   @Post("workspaces")
   @HttpCode(201)
   @UserScoped()
