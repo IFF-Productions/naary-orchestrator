@@ -237,6 +237,20 @@ export const api = {
       body: JSON.stringify(name?.trim() ? { name: name.trim() } : {}),
     });
   },
+  // --- API tokens (for the MCP server + CLI/CI). Workspace-scoped via X-Workspace-Id. ---
+  listApiTokens(): Promise<ApiTokenRow[]> {
+    return http("/tokens");
+  },
+  // Returns the plaintext token ONCE — it can't be shown again.
+  mintApiToken(label?: string): Promise<MintedToken> {
+    return http("/tokens", {
+      method: "POST",
+      body: JSON.stringify(label?.trim() ? { label: label.trim() } : {}),
+    });
+  },
+  revokeApiToken(id: string): Promise<void> {
+    return http(`/tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
   // Recent runs for the tenant (identity + start time; status is on the detail view).
   listRuns(): Promise<RunSummary[]> {
     return http("/executions");
@@ -497,6 +511,22 @@ export interface Member {
 export interface TenantSettings {
   displayName: string | null;
   defaultModel: string | null;
+}
+
+/** An API token's metadata (never the token value). */
+export interface ApiTokenRow {
+  id: string;
+  label: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+/** A freshly minted token — `token` is the plaintext, shown once. */
+export interface MintedToken {
+  id: string;
+  token: string;
+  label: string;
+  createdAt: string;
 }
 
 /** A workspace the current user belongs to, with their role (workspace switcher). */
