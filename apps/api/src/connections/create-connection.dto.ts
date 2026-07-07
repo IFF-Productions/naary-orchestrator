@@ -1,3 +1,4 @@
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import {
   IsIn,
   IsNotEmpty,
@@ -39,6 +40,19 @@ class ConnectionServerUrlConstraint implements ValidatorConstraintInterface {
 }
 
 export class CreateConnectionDto implements CreateConnectionInput {
+  @ApiProperty({
+    enum: [
+      "atlassian",
+      "github",
+      "custom",
+      "postgres",
+      "mssql",
+      "signing",
+      "smtp",
+    ],
+    example: "github",
+    description: "Connection kind.",
+  })
   @IsIn([
     "atlassian",
     "github",
@@ -50,20 +64,44 @@ export class CreateConnectionDto implements CreateConnectionInput {
   ])
   type!: CreateConnectionInput["type"];
 
+  @ApiProperty({
+    example: "Prod GitHub",
+    description: "Display label for the connection.",
+  })
   @IsString()
   @IsNotEmpty()
   label!: string;
 
+  @ApiProperty({
+    example: "https://api.github.com",
+    description:
+      "https URL for MCP/HTTP connections, or a non-secret display host for DB connections (the DSN rides in `token`).",
+  })
   @Validate(ConnectionServerUrlConstraint)
   serverUrl!: string;
 
+  @ApiProperty({
+    enum: ["api_token", "pat", "oauth", "connection_string"],
+    example: "pat",
+    description: "How the connection authenticates.",
+  })
   @IsIn(["api_token", "pat", "oauth", "connection_string"])
   authMode!: CreateConnectionInput["authMode"];
 
+  @ApiPropertyOptional({
+    type: [String],
+    example: ["repo", "read:org"],
+    description: "Requested OAuth/token scopes.",
+  })
   @IsOptional()
   @IsString({ each: true })
   scopes?: string[];
 
+  @ApiPropertyOptional({
+    example: "ghp_xxx",
+    description:
+      "Secret credential (PAT / api_token / connection string). Stored encrypted, never returned.",
+  })
   @IsOptional()
   @IsString()
   token?: string;

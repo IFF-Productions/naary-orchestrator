@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { All, BadRequestException, Controller, Req, Res } from "@nestjs/common";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { ApiExcludeController } from "@nestjs/swagger";
 import type { GraphDef } from "@naary/dsl";
 import { ApiTokenService } from "../auth/api-token.service";
 import { Public } from "../auth/public.decorator";
@@ -67,6 +68,10 @@ function rpcError(
  * Params are typed as Node's IncomingMessage/ServerResponse (what the SDK transport expects);
  * the Express objects Nest passes at runtime extend them.
  */
+// Not a REST endpoint — an MCP Streamable-HTTP (JSON-RPC) transport documented in
+// docs/design/MCP-SERVER.md. Excluded from the OpenAPI schema so it doesn't render as a
+// bogus @All route; consumers connect with an MCP client, not curl.
+@ApiExcludeController()
 @Controller("mcp")
 export class McpController {
   constructor(

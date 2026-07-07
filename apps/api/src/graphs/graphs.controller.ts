@@ -8,11 +8,20 @@ import {
   Post,
   Put,
 } from "@nestjs/common";
+import { ApiBearerAuth } from "@nestjs/swagger";
 import type { GraphDef } from "@naary/dsl";
 import { TenantId } from "../auth/tenant.decorator";
 import { SchedulesService } from "../schedules/schedules.service";
+import { ApiEndpoint } from "../swagger/api-decorators";
 import { GenerateGraphDto, SaveGraphDto } from "./graph.dto";
 import { GraphGeneratorService } from "./graph-generator.service";
+import {
+  ErrorHandlerResponse,
+  GenerateGraphResponse,
+  GraphDetailResponse,
+  GraphSummaryResponse,
+  SaveGraphResponse,
+} from "./graph.response";
 import { type GraphSummary, GraphsService } from "./graphs.service";
 
 /**
@@ -20,6 +29,7 @@ import { type GraphSummary, GraphsService } from "./graphs.service";
  * body). GraphsService.upsert content-hashes + versions it and runs validateGraph
  * (400 on a malformed graph) before it can be persisted or run.
  */
+@ApiBearerAuth("bearer")
 @Controller("graphs")
 export class GraphsController {
   constructor(
@@ -29,6 +39,11 @@ export class GraphsController {
   ) {}
 
   /** List the tenant's workflows (one row per workflowKey, latest version). */
+  @ApiEndpoint({
+    summary: "List workflows",
+    description: "One row per workflowKey (its latest version).",
+    ok: [GraphSummaryResponse],
+  })
   @Get()
   list(@TenantId() tenantId: string): Promise<GraphSummary[]> {
     return this.graphs.list(tenantId);
@@ -40,6 +55,12 @@ export class GraphsController {
    * never persisted) and returns a validateGraph-checked graph — the user edits and
    * saves via POST /graphs. Not saved here.
    */
+  @ApiEndpoint({
+    summary: "Generate a draft workflow from a description",
+    description:
+      "AI workflow builder — returns an unsaved draft graph; save it via POST /graphs.",
+    ok: GenerateGraphResponse,
+  })
   @Post("generate")
   generate(
     @TenantId() tenantId: string,
@@ -49,6 +70,11 @@ export class GraphsController {
   }
 
   /** The latest graph for a workflowKey — used to open it in the canvas. */
+  @ApiEndpoint({
+    summary: "Get a workflow's latest graph",
+    ok: GraphDetailResponse,
+    notFound: true,
+  })
   @Get(":workflowKey")
   async get(
     @TenantId() tenantId: string,
@@ -67,6 +93,10 @@ export class GraphsController {
   }
 
   /** The workflowKey of this workflow's error handler (null if none). */
+  @ApiEndpoint({
+    summary: "Get a workflow's error handler",
+    ok: ErrorHandlerResponse,
+  })
   @Get(":workflowKey/error-handler")
   async getErrorHandler(
     @TenantId() tenantId: string,
@@ -81,6 +111,10 @@ export class GraphsController {
   }
 
   /** Bind (or clear, with null/empty) this workflow's error handler. */
+  @ApiEndpoint({
+    summary: "Bind or clear a workflow's error handler",
+    ok: ErrorHandlerResponse,
+  })
   @Put(":workflowKey/error-handler")
   async setErrorHandler(
     @TenantId() tenantId: string,
@@ -97,6 +131,12 @@ export class GraphsController {
     return { errorWorkflowKey: value };
   }
 
+  @ApiEndpoint({
+    summary: "Save (version) a workflow graph",
+    description:
+      "Content-hashes + versions the graph; re-syncs poll/cron schedules for trigger graphs.",
+    created: SaveGraphResponse,
+  })
   @Post()
   async save(
     @TenantId() tenantId: string,

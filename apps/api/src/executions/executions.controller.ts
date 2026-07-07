@@ -1,6 +1,16 @@
 import { Body, Controller, Get, HttpCode, Param, Post } from "@nestjs/common";
+import { ApiBearerAuth } from "@nestjs/swagger";
 import { TenantId } from "../auth/tenant.decorator";
+import { ApiEndpoint } from "../swagger/api-decorators";
 import { ApproveDto, StartExecutionDto } from "./execution.dto";
+import {
+  AcceptedResponse,
+  AwaitingApprovalResponse,
+  RunEventResponse,
+  RunListItemResponse,
+  RunStateResponse,
+  StartExecutionResponse,
+} from "./execution.response";
 import {
   type AwaitingApproval,
   ExecutionsService,
@@ -8,10 +18,16 @@ import {
   type RunStateView,
 } from "./executions.service";
 
+@ApiBearerAuth("bearer")
 @Controller("executions")
 export class ExecutionsController {
   constructor(private readonly executions: ExecutionsService) {}
 
+  @ApiEndpoint({
+    summary: "Start a run",
+    description: "Starts a run of the given workflow (defaults to 'default').",
+    created: StartExecutionResponse,
+  })
   @Post()
   start(
     @TenantId() tenantId: string,
@@ -21,6 +37,11 @@ export class ExecutionsController {
   }
 
   /** Recent runs for the authenticated tenant (newest first). */
+  @ApiEndpoint({
+    summary: "List recent runs",
+    description: "Recent runs for the tenant (newest first).",
+    ok: [RunListItemResponse],
+  })
   @Get()
   listRuns(
     @TenantId() tenantId: string,
@@ -30,11 +51,22 @@ export class ExecutionsController {
 
   /** The tenant's runs paused for approval, each with its prompt (the inbox). Must
    *  be declared BEFORE `@Get(":id")` so "awaiting" isn't captured as an :id. */
+  @ApiEndpoint({
+    summary: "List runs awaiting approval",
+    description: "The tenant's runs paused for approval (the inbox).",
+    ok: [AwaitingApprovalResponse],
+  })
   @Get("awaiting")
   awaiting(@TenantId() tenantId: string): Promise<AwaitingApproval[]> {
     return this.executions.listAwaiting(tenantId);
   }
 
+  @ApiEndpoint({
+    summary: "Approve or reject a paused run",
+    description: "Signals the run's humanApproval decision (accepted async).",
+    ok: AcceptedResponse,
+    notFound: true,
+  })
   @Post(":id/approve")
   @HttpCode(202) // explicit: NestJS would otherwise return 201 for a POST
   async approve(
@@ -46,6 +78,11 @@ export class ExecutionsController {
     return { accepted: true };
   }
 
+  @ApiEndpoint({
+    summary: "Get a run's live state",
+    ok: RunStateResponse,
+    notFound: true,
+  })
   @Get(":id")
   getState(
     @TenantId() tenantId: string,
@@ -55,6 +92,12 @@ export class ExecutionsController {
   }
 
   /** The run's execution log (curated Temporal history). */
+  @ApiEndpoint({
+    summary: "Get a run's execution log",
+    description: "Curated Temporal history for the run.",
+    ok: [RunEventResponse],
+    notFound: true,
+  })
   @Get(":id/history")
   history(
     @TenantId() tenantId: string,
