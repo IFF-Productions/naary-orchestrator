@@ -4,6 +4,7 @@ import { ApiTokenService } from "./api-token.service";
 import { AuthGuard } from "./auth.guard";
 import { FirebaseVerifier } from "./firebase-verifier";
 import { MeController } from "./me.controller";
+import { TokensController } from "./tokens.controller";
 
 /** Registers the dual-auth (Firebase ID token + API token) guard globally and
  *  exposes ApiTokenService for minting. FirebaseVerifier is built from env —
@@ -11,7 +12,7 @@ import { MeController } from "./me.controller";
  *  deployments are unchanged. */
 @Global()
 @Module({
-  controllers: [MeController],
+  controllers: [MeController, TokensController],
   providers: [
     ApiTokenService,
     { provide: FirebaseVerifier, useFactory: () => new FirebaseVerifier() },

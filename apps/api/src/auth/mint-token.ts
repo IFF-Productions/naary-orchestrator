@@ -11,7 +11,7 @@ async function main(): Promise<void> {
     console.error("usage: ts-node src/auth/mint-token.ts <tenantId> [label]");
     process.exit(1);
   }
-  const token = await new ApiTokenService().mint(tenantId, label);
+  const { token } = await new ApiTokenService().mint(tenantId, label);
   // eslint-disable-next-line no-console
   console.log(token);
   process.exit(0);

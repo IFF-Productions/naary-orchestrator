@@ -12,13 +12,39 @@ const hashToken = (token: string): string =>
  */
 @Injectable()
 export class ApiTokenService {
-  /** Mint a token for a tenant. Returns the PLAINTEXT once — it is never stored. */
-  async mint(tenantId: string, label: string): Promise<string> {
+  /** Mint a token for a tenant. Returns the id + PLAINTEXT once — only the sha256 is stored,
+   *  so the plaintext can never be shown again. */
+  async mint(
+    tenantId: string,
+    label: string,
+  ): Promise<{ id: string; token: string; label: string; createdAt: Date }> {
     const token = `nry_${randomBytes(24).toString("base64url")}`;
-    await getPrisma().apiToken.create({
+    const row = await getPrisma().apiToken.create({
       data: { tenantId, label, tokenHash: hashToken(token) },
+      select: { id: true, label: true, createdAt: true },
     });
-    return token;
+    return { id: row.id, token, label: row.label, createdAt: row.createdAt };
+  }
+
+  /** A tenant's tokens — metadata only, never the token/hash (write-once). */
+  async list(
+    tenantId: string,
+  ): Promise<
+    { id: string; label: string; createdAt: Date; lastUsedAt: Date | null }[]
+  > {
+    return getPrisma().apiToken.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, label: true, createdAt: true, lastUsedAt: true },
+    });
+  }
+
+  /** Revoke a tenant's token by id (tenant-scoped). Returns true if a row was removed. */
+  async revoke(tenantId: string, id: string): Promise<boolean> {
+    const res = await getPrisma().apiToken.deleteMany({
+      where: { id, tenantId },
+    });
+    return res.count > 0;
   }
 
   /** Resolve a bearer token to its tenantId, or null if unknown. */
