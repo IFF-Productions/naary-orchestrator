@@ -344,6 +344,12 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
+  deleteWebhook(tenantId: string, endpointId: string): Promise<void> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/webhooks/${encodeURIComponent(endpointId)}`,
+      { method: "DELETE" },
+    );
+  },
   // --- Billing ---
   // Budget config + live month-to-date spend. Tenant-scoped. The server returns 404
   // (→ generic Error, not UnauthorizedError) when no budget is configured.
