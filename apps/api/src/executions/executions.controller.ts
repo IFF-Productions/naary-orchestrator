@@ -79,6 +79,23 @@ export class ExecutionsController {
   }
 
   @ApiEndpoint({
+    summary: "Cancel a running run",
+    description:
+      "Terminates the workflow (status → terminated). 409 if already finished.",
+    ok: AcceptedResponse,
+    notFound: true,
+  })
+  @Post(":id/cancel")
+  @HttpCode(200)
+  async cancel(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+  ): Promise<{ accepted: true }> {
+    await this.executions.cancel(id, tenantId);
+    return { accepted: true };
+  }
+
+  @ApiEndpoint({
     summary: "Get a run's live state",
     ok: RunStateResponse,
     notFound: true,
