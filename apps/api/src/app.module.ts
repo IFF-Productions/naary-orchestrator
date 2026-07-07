@@ -19,6 +19,7 @@ import { McpModule } from "./mcp/mcp.module";
 import { MembersModule } from "./members/members.module";
 import { MembershipModule } from "./membership/membership.module";
 import { NotificationsModule } from "./notifications/notifications.module";
+import { PinsModule } from "./pins/pins.module";
 import { SchedulesModule } from "./schedules/schedules.module";
 import { SecretsModule } from "./secrets/secrets.module";
 import { SettingsModule } from "./settings/settings.module";
@@ -35,6 +36,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     AuditModule,
     HealthModule,
     GraphsModule,
+    PinsModule,
     ExecutionsModule,
     SecretsModule,
     UsageModule,

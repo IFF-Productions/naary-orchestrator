@@ -127,6 +127,10 @@ export interface ProviderCredential {
   isValid: boolean;
 }
 
+/** Result of a single-node test run. */
+export type TestNodeResult =
+  { pure: true; output: unknown } | { pure: false; message: string };
+
 export const api = {
   // Built-in workflow templates (global, not tenant-scoped).
   listTemplates(): Promise<TemplateSummary[]> {
@@ -143,6 +147,41 @@ export const api = {
   // Fetch one workflow's latest graph (to open in the canvas).
   getGraph(workflowKey: string): Promise<NamedGraph> {
     return http(`/graphs/${encodeURIComponent(workflowKey)}`);
+  },
+  // --- Pinned node outputs (authoring-only samples; the interpreter never reads them) ---
+  listPins(workflowKey: string): Promise<Record<string, unknown>> {
+    return http(`/graphs/${encodeURIComponent(workflowKey)}/pins`);
+  },
+  pinNode(
+    workflowKey: string,
+    nodeId: string,
+    output: unknown,
+  ): Promise<{ pinned: true }> {
+    return http(
+      `/graphs/${encodeURIComponent(workflowKey)}/nodes/${encodeURIComponent(nodeId)}/pin`,
+      { method: "PUT", body: JSON.stringify({ output }) },
+    );
+  },
+  unpinNode(
+    workflowKey: string,
+    nodeId: string,
+  ): Promise<{ cleared: boolean }> {
+    return http(
+      `/graphs/${encodeURIComponent(workflowKey)}/nodes/${encodeURIComponent(nodeId)}/pin`,
+      { method: "DELETE" },
+    );
+  },
+  // Single-node "Test": run one node against the workflow's pins (+ optional inputs override).
+  // Pure nodes return { pure:true, output }; activity/control nodes return { pure:false, message }.
+  testNode(
+    workflowKey: string,
+    nodeId: string,
+    inputs?: Record<string, unknown>,
+  ): Promise<TestNodeResult> {
+    return http(
+      `/graphs/${encodeURIComponent(workflowKey)}/nodes/${encodeURIComponent(nodeId)}/test`,
+      { method: "POST", body: JSON.stringify(inputs ? { inputs } : {}) },
+    );
   },
   // AI workflow builder: describe a workflow → a validated DRAFT graph (unsaved).
   // `provider` (optional) picks the model provider; omitted ⇒ the server auto-selects
