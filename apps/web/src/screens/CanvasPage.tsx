@@ -320,9 +320,11 @@ export function CanvasPage() {
   const selectedEdge = edges.find((e) => e.selected);
 
   // Webhook endpoint URLs registered for THIS workflow (shown in the webhook node).
+  // The full, invokable URL: the hooks ingress lives at /hooks/:id on the API, reachable
+  // through the same /api proxy the app uses (nginx rewrites /api/hooks/… → /hooks/…).
   const hookUrls = webhooks
     .filter((w) => workflowKey && w.workflowId === workflowKey)
-    .map((w) => `/hooks/${w.id}`);
+    .map((w) => `${window.location.origin}/api/hooks/${w.id}`);
 
   // Close the inspector modal by clearing the react-flow selection.
   function closeInspector(): void {
@@ -3660,6 +3662,45 @@ function ConfigPanel({
   );
 }
 
+/** A small copy-to-clipboard button with brief "Copied ✓" feedback. */
+function CopyButton({
+  text,
+  label = "Copy",
+}: {
+  text: string;
+  label?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {
+          /* clipboard unavailable — the value is still visible to copy manually */
+        }
+      }}
+      style={{
+        flex: "none",
+        padding: "0 10px",
+        borderRadius: 6,
+        border: "1px solid var(--line-2)",
+        background: "var(--card)",
+        color: "var(--ink-2)",
+        fontSize: 11,
+        fontWeight: 600,
+        cursor: "pointer",
+        fontFamily: "inherit",
+      }}
+    >
+      {copied ? "Copied ✓" : label}
+    </button>
+  );
+}
+
 /** Read-only webhook binding: the registered endpoint URL(s) for this workflow
  *  (config lives in the registry, not the node). Empty → guidance to register. */
 function WebhookInfo({ hookUrls }: { hookUrls: string[] }) {
@@ -3671,23 +3712,34 @@ function WebhookInfo({ hookUrls }: { hookUrls: string[] }) {
       </div>
       {hookUrls.length > 0 ? (
         <div>
-          <RowHead label="Endpoint(s)" value={`${hookUrls.length}`} />
+          <RowHead label="Invoke with (POST)" value={`${hookUrls.length}`} />
           {hookUrls.map((u) => (
             <div
               key={u}
-              className="mono"
               style={{
-                fontSize: 11,
-                color: "var(--ink)",
-                background: "var(--card-2)",
-                border: "1px solid var(--line-2)",
-                borderRadius: 6,
-                padding: "6px 8px",
+                display: "flex",
+                alignItems: "stretch",
+                gap: 6,
                 marginBottom: 4,
-                wordBreak: "break-all",
               }}
             >
-              POST {u}
+              <span
+                className="mono"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontSize: 11,
+                  color: "var(--ink)",
+                  background: "var(--card-2)",
+                  border: "1px solid var(--line-2)",
+                  borderRadius: 6,
+                  padding: "6px 8px",
+                  wordBreak: "break-all",
+                }}
+              >
+                {u}
+              </span>
+              <CopyButton text={u} />
             </div>
           ))}
         </div>

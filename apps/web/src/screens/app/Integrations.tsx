@@ -74,6 +74,46 @@ const monoLabel: React.CSSProperties = {
   textTransform: "uppercase",
 };
 
+/** The full, invokable webhook URL. The /hooks/:id ingress is reached through the same /api
+ *  proxy the app uses (nginx rewrites /api/hooks/… → /hooks/…), so this URL is callable as-is. */
+const webhookUrl = (id: string): string =>
+  `${window.location.origin}/api/hooks/${id}`;
+
+/** Small copy-to-clipboard button with brief "Copied ✓" feedback. */
+function UrlCopy({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      title="Copy URL"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(url);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {
+          /* clipboard unavailable — the URL is still visible to copy manually */
+        }
+      }}
+      style={{
+        flex: "none",
+        height: 26,
+        padding: "0 10px",
+        borderRadius: 6,
+        border: "1px solid var(--line-2)",
+        background: "var(--surface)",
+        color: "var(--ink-2)",
+        fontSize: 11,
+        fontWeight: 600,
+        cursor: "pointer",
+        fontFamily: "inherit",
+      }}
+    >
+      {copied ? "Copied ✓" : "Copy"}
+    </button>
+  );
+}
+
 export function Integrations() {
   const [tenant, setTenant] = useState<string | null>(null);
   const [connections, setConnections] = useState<ConnectionRow[] | null>(null);
@@ -81,6 +121,7 @@ export function Integrations() {
   const [credentials, setCredentials] = useState<ProviderCredential[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
+  const [deletingHook, setDeletingHook] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -184,7 +225,9 @@ export function Integrations() {
           marginBottom: 11,
         }}
       >
-        <span style={monoLabel}>MCP servers</span>
+        <span style={monoLabel}>
+          Connections (MCP · database · SMTP · signing)
+        </span>
         <button
           type="button"
           onClick={() =>
@@ -231,7 +274,7 @@ export function Integrations() {
         )}
         {!loading && connections?.length === 0 && (
           <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-2)" }}>
-            No connected servers yet — connect one to get started.
+            No connections yet — add one from "Add integration" above.
           </div>
         )}
         {(connections ?? []).map((c, i) => (
@@ -373,17 +416,61 @@ export function Integrations() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 className="mono"
-                style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "var(--ink)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+                title={webhookUrl(w.id)}
               >
-                /hooks/{w.id}
+                {webhookUrl(w.id)}
               </div>
               <div
                 style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 1 }}
               >
-                {w.provider} · {w.workflowId}
+                POST · {w.provider} · {w.workflowId}
               </div>
             </div>
+            <UrlCopy url={webhookUrl(w.id)} />
             <StatusPill state="done" label="Active" />
+            <button
+              type="button"
+              disabled={deletingHook === w.id}
+              title="Delete endpoint"
+              onClick={() => {
+                if (!tenant || deletingHook) return;
+                if (
+                  !window.confirm(
+                    "Delete this webhook endpoint? Calls to its URL will stop working.",
+                  )
+                ) {
+                  return;
+                }
+                setDeletingHook(w.id);
+                void api
+                  .deleteWebhook(tenant, w.id)
+                  .then(() => load())
+                  .catch(() => setError("Could not delete the webhook."))
+                  .finally(() => setDeletingHook(null));
+              }}
+              style={{
+                height: 28,
+                padding: "0 12px",
+                borderRadius: 6,
+                border: "1px solid var(--line-2)",
+                background: "var(--surface)",
+                color: "var(--ink-2)",
+                fontSize: 11.5,
+                cursor: deletingHook === w.id ? "default" : "pointer",
+                opacity: deletingHook === w.id ? 0.6 : 1,
+                fontFamily: "inherit",
+              }}
+            >
+              {deletingHook === w.id ? "Deleting…" : "Delete"}
+            </button>
           </div>
         ))}
       </div>

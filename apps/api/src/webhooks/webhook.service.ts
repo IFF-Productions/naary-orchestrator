@@ -83,6 +83,15 @@ export class WebhookService {
     });
   }
 
+  /** Delete a tenant's webhook endpoint by id (tenant-scoped so it can't touch another's).
+   *  Returns true if a row was removed. Any inbound call to that ingress then 404s. */
+  async deleteEndpoint(tenantId: string, endpointId: string): Promise<boolean> {
+    const res = await getPrisma().webhookEndpoint.deleteMany({
+      where: { id: endpointId, tenantId },
+    });
+    return res.count > 0;
+  }
+
   /** Decrypt an endpoint's stored signing secret (in memory only; never logged). */
   decryptSigningSecret(endpoint: WebhookEndpoint): string {
     return this.encryptor.decrypt(

@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  NotFoundException,
+  Param,
+  Post,
+} from "@nestjs/common";
 import {
   type RegisteredWebhook,
   type WebhookEndpointView,
@@ -27,5 +35,16 @@ export class WebhooksController {
   @Get()
   list(@Param("id") tenantId: string): Promise<WebhookEndpointView[]> {
     return this.webhooks.list(tenantId);
+  }
+
+  /** Delete a webhook endpoint. Tenant-scoped; 404 if it isn't this tenant's. */
+  @Delete(":endpointId")
+  async remove(
+    @Param("id") tenantId: string,
+    @Param("endpointId") endpointId: string,
+  ): Promise<{ deleted: true }> {
+    const ok = await this.webhooks.deleteEndpoint(tenantId, endpointId);
+    if (!ok) throw new NotFoundException("Webhook endpoint not found");
+    return { deleted: true };
   }
 }
