@@ -22,6 +22,7 @@ import {
   type ExecutionStatus,
   type WebhookResponse,
 } from "@naary/contracts";
+import type { GraphDef, NodeDef } from "@naary/dsl";
 import { getPrisma } from "@naary/db";
 import { getBudget } from "@naary/usage";
 import { executionsStarted } from "../common/metrics";
@@ -376,6 +377,44 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     });
     executionsStarted.inc({ workflowKey });
     return { workflowId };
+  }
+
+  /**
+   * Single-node TEST (design SINGLE-NODE-EXECUTION.md slice 3): run ONE activity node against a
+   * seeded ctx (its upstream outputs, from pins) and return its output. Runs the REAL interpreter
+   * in test mode over a synthetic one-node graph — same activity + in-activity secret fetch +
+   * billing as a real run — but records no Execution/read-model row (it's not a "run"). Awaits
+   * completion (a single activity). Throws WorkflowFailedError if the node errors.
+   */
+  async testNode(
+    tenantId: string,
+    workflowKey: string,
+    node: NodeDef,
+    seededCtx: Record<string, unknown>,
+  ): Promise<unknown> {
+    const graph: GraphDef = {
+      startNodeId: node.id,
+      nodes: [node, { id: "__snx_end", type: "end" }],
+      edges: [{ from: node.id, to: "__snx_end" }],
+    };
+    const budget = await getBudget(tenantId);
+    const result = (await this.client.workflow.execute(RUN_GRAPH_WORKFLOW, {
+      args: [
+        graph,
+        (seededCtx.__input as unknown) ?? {},
+        {
+          tenantId,
+          workflowKey,
+          test: true,
+          seededCtx,
+          perExecutionCapUsd: budget?.perExecutionCapUsd,
+          maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
+        },
+      ],
+      taskQueue: TASK_QUEUE,
+      workflowId: `test-${tenantId}-${randomUUID()}`,
+    })) as { ctx: Record<string, unknown> };
+    return result.ctx[node.id];
   }
 
   async approve(
