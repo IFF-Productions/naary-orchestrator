@@ -31,6 +31,7 @@ import {
   api,
   type ConnectionRow,
   type GraphSummary,
+  type TestNodeResult,
   UnauthorizedError,
   type WebhookRow,
 } from "../lib/api";
@@ -1006,6 +1007,7 @@ export function CanvasPage() {
                   isPinned={Object.hasOwn(pins, selected.id)}
                   onPin={(output) => pinNode(selected.id, output)}
                   onUnpin={() => unpinNode(selected.id)}
+                  onTest={() => api.testNode(workflowKey, selected.id)}
                   onChange={(patch) => updateConfig(selected.id, patch)}
                 />
               ) : selectedEdge ? (
@@ -1258,6 +1260,7 @@ function ConfigPanel({
   isPinned,
   onPin,
   onUnpin,
+  onTest,
   onChange,
 }: {
   node: Node<NaaryData>;
@@ -1269,6 +1272,7 @@ function ConfigPanel({
   isPinned: boolean;
   onPin: (output: unknown) => Promise<void>;
   onUnpin: () => Promise<void>;
+  onTest: () => Promise<TestNodeResult>;
   onChange: (patch: Record<string, unknown>) => void;
 }) {
   const kind = node.data.kind;
@@ -1356,6 +1360,7 @@ function ConfigPanel({
         pinnedOutput={pinnedOutput}
         onPin={onPin}
         onUnpin={onUnpin}
+        onTest={onTest}
       />
 
       {/* Per-node error policy (n8n's "On Error"), shown for nodes that can fail. */}
@@ -3862,16 +3867,33 @@ function PinSection({
   pinnedOutput,
   onPin,
   onUnpin,
+  onTest,
 }: {
   canPin: boolean;
   isPinned: boolean;
   pinnedOutput: unknown;
   onPin: (output: unknown) => Promise<void>;
   onUnpin: () => Promise<void>;
+  onTest: () => Promise<TestNodeResult>;
 }) {
   const [draft, setDraft] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [tested, setTested] = useState<TestNodeResult | null>(null);
+
+  async function runTest() {
+    setTesting(true);
+    setErr(null);
+    setTested(null);
+    try {
+      setTested(await onTest());
+    } catch {
+      setErr("Test failed — save the workflow, then try again.");
+    } finally {
+      setTesting(false);
+    }
+  }
 
   const label = (
     <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 6 }}>
@@ -3928,6 +3950,60 @@ function PinSection({
       }}
     >
       {label}
+
+      {/* Single-node Test (slice 2): run this node against pins → output you can pin. */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon="bolt"
+          disabled={testing}
+          onClick={runTest}
+        >
+          {testing ? "Testing…" : "Test node"}
+        </Button>
+      </div>
+      {tested && tested.pure && (
+        <div style={{ marginBottom: 10 }}>
+          <pre
+            className="mono"
+            style={{
+              margin: 0,
+              maxHeight: 160,
+              overflow: "auto",
+              fontSize: 11,
+              color: "var(--ink)",
+              background: "var(--card)",
+              border: "1px solid var(--line-2)",
+              borderRadius: 6,
+              padding: "6px 8px",
+            }}
+          >
+            {JSON.stringify(tested.output, null, 2)}
+          </pre>
+          <div style={{ marginTop: 6 }}>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                onPin(tested.output).finally(() => setBusy(false));
+              }}
+            >
+              Pin this output
+            </Button>
+          </div>
+        </div>
+      )}
+      {tested && !tested.pure && (
+        <div
+          style={{ fontSize: 11.5, color: "var(--ink-3)", marginBottom: 10 }}
+        >
+          {tested.message}
+        </div>
+      )}
+
       {isPinned ? (
         <>
           <pre

@@ -127,6 +127,10 @@ export interface ProviderCredential {
   isValid: boolean;
 }
 
+/** Result of a single-node test run. */
+export type TestNodeResult =
+  { pure: true; output: unknown } | { pure: false; message: string };
+
 export const api = {
   // Built-in workflow templates (global, not tenant-scoped).
   listTemplates(): Promise<TemplateSummary[]> {
@@ -165,6 +169,18 @@ export const api = {
     return http(
       `/graphs/${encodeURIComponent(workflowKey)}/nodes/${encodeURIComponent(nodeId)}/pin`,
       { method: "DELETE" },
+    );
+  },
+  // Single-node "Test": run one node against the workflow's pins (+ optional inputs override).
+  // Pure nodes return { pure:true, output }; activity/control nodes return { pure:false, message }.
+  testNode(
+    workflowKey: string,
+    nodeId: string,
+    inputs?: Record<string, unknown>,
+  ): Promise<TestNodeResult> {
+    return http(
+      `/graphs/${encodeURIComponent(workflowKey)}/nodes/${encodeURIComponent(nodeId)}/test`,
+      { method: "POST", body: JSON.stringify(inputs ? { inputs } : {}) },
     );
   },
   // AI workflow builder: describe a workflow → a validated DRAFT graph (unsaved).

@@ -22,6 +22,7 @@ export {
   lintTemplates,
   type TemplateWarning,
 } from "./template";
+export { isPureNode, runPureNode } from "./pure-node";
 export { resolveHttpRequest, type ResolvedHttpRequest } from "./http-request";
 export {
   resolveSqlQuery,
