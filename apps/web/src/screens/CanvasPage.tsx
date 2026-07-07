@@ -29,6 +29,7 @@ import type { NodeType } from "@naary/dsl";
 import { Button } from "../components";
 import {
   api,
+  type ConnectionRow,
   type GraphSummary,
   UnauthorizedError,
   type WebhookRow,
@@ -208,6 +209,9 @@ export function CanvasPage() {
   const [workflowKey, setWorkflowKey] = useState("");
   const [workflows, setWorkflows] = useState<GraphSummary[]>([]);
   const [webhooks, setWebhooks] = useState<WebhookRow[]>([]);
+  // Tenant connections (DBs, MCP servers, SMTP, signing) so a node's config can PICK one
+  // by label instead of pasting a raw connectionId.
+  const [connections, setConnections] = useState<ConnectionRow[]>([]);
   // Optional per-run input (JSON) — overrides the Start node's sampleInput for the
   // next run. Blank ⇒ the server falls back to the sample (api.startExecution).
   const [showInput, setShowInput] = useState(false);
@@ -222,15 +226,25 @@ export function CanvasPage() {
   const keyParam = searchParams.get("key");
   const templateParam = searchParams.get("template");
 
-  // Registered webhook endpoints (so a webhookTrigger node can show its hook URL).
+  // Registered webhook endpoints + tenant connections (so a webhookTrigger node can show its
+  // hook URL, and connection-based nodes can pick a connection by label).
   useEffect(() => {
     let live = true;
     api
       .getMe()
-      .then((me) => api.listWebhooks(me.tenantId))
-      .then((ws) => live && setWebhooks(ws))
+      .then((me) =>
+        Promise.all([
+          api.listWebhooks(me.tenantId).catch(() => []),
+          api.listConnections(me.tenantId).catch(() => []),
+        ]),
+      )
+      .then(([ws, conns]) => {
+        if (!live) return;
+        setWebhooks(ws);
+        setConnections(conns);
+      })
       .catch(() => {
-        /* unauthenticated / none — webhook node shows the register hint */
+        /* unauthenticated / none — nodes show their register/add hints */
       });
     return () => {
       live = false;
@@ -923,6 +937,7 @@ export function CanvasPage() {
                     .filter((n) => n.id !== selected.id)
                     .map((n) => n.id)}
                   hookUrls={hookUrls}
+                  connections={connections}
                   onChange={(patch) => updateConfig(selected.id, patch)}
                 />
               ) : selectedEdge ? (
@@ -1105,6 +1120,63 @@ interface BindingRow {
   path?: string;
 }
 
+/** Which connection types each connection-based node can use — mirrors the Integrations
+ *  forms (MCP servers = github/atlassian/custom; DB engines; smtp; signing). */
+const CONNECTION_TYPES: Record<string, ConnectionRow["type"][]> = {
+  mcpTool: ["github", "atlassian", "custom"],
+  httpRequest: ["github", "atlassian", "custom"],
+  sqlQuery: ["postgres", "mssql", "mysql"],
+  sqlExec: ["postgres", "mssql", "mysql"],
+  sendEmail: ["smtp"],
+  hmac: ["signing"],
+  jwt: ["signing"],
+  totp: ["signing"],
+};
+
+/** Pick a connection by LABEL instead of pasting a raw connectionId. Filtered to the node's
+ *  connection types; keeps an unknown current value visible so older configs don't break. */
+function ConnectionSelect({
+  connections,
+  types,
+  value,
+  onChange,
+}: {
+  connections: ConnectionRow[];
+  types: readonly ConnectionRow["type"][];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const matches = connections.filter((c) => types.includes(c.type));
+  const hasCurrent = !!value && matches.some((c) => c.id === value);
+  return (
+    <>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={inputStyle}
+      >
+        <option value="">
+          {matches.length ? "Select a connection…" : "No matching connections"}
+        </option>
+        {matches.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.label} ({c.type})
+          </option>
+        ))}
+        {value && !hasCurrent && (
+          <option value={value}>{value} (current)</option>
+        )}
+      </select>
+      {matches.length === 0 && (
+        <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>
+          No matching connection yet — add one on the Integrations screen, then
+          reopen this node.
+        </div>
+      )}
+    </>
+  );
+}
+
 /** Per-type config editor for the selected node — matches the design's inspector.
  *  Only the types with meaningful config (agent, mcpTool) expose fields; others
  *  are structural. Every field maps to a real DSL/runtime config key. */
@@ -1112,11 +1184,13 @@ function ConfigPanel({
   node,
   upstreamIds,
   hookUrls,
+  connections,
   onChange,
 }: {
   node: Node<NaaryData>;
   upstreamIds: string[];
   hookUrls: string[];
+  connections: ConnectionRow[];
   onChange: (patch: Record<string, unknown>) => void;
 }) {
   const kind = node.data.kind;
@@ -1441,12 +1515,12 @@ function ConfigPanel({
 
       {kind === "mcpTool" && (
         <>
-          <Labeled label="Connection id">
-            <input
+          <Labeled label="Connection">
+            <ConnectionSelect
+              connections={connections}
+              types={CONNECTION_TYPES[kind] ?? []}
               value={str("connectionId")}
-              onChange={(e) => onChange({ connectionId: e.target.value })}
-              style={inputStyle}
-              placeholder="github"
+              onChange={(id) => onChange({ connectionId: id })}
             />
           </Labeled>
           <Labeled label="Tool">
@@ -1594,11 +1668,11 @@ function ConfigPanel({
           />
 
           <Labeled label="Auth connection id (optional)">
-            <input
+            <ConnectionSelect
+              connections={connections}
+              types={CONNECTION_TYPES[kind] ?? []}
               value={str("connectionId")}
-              onChange={(e) => onChange({ connectionId: e.target.value })}
-              style={inputStyle}
-              placeholder="my-api"
+              onChange={(id) => onChange({ connectionId: id })}
             />
           </Labeled>
           <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
@@ -1664,11 +1738,11 @@ function ConfigPanel({
       {(kind === "sqlQuery" || kind === "sqlExec") && (
         <>
           <Labeled label="Database connection id">
-            <input
+            <ConnectionSelect
+              connections={connections}
+              types={CONNECTION_TYPES[kind] ?? []}
               value={str("connectionId")}
-              onChange={(e) => onChange({ connectionId: e.target.value })}
-              style={inputStyle}
-              placeholder="my-postgres"
+              onChange={(id) => onChange({ connectionId: id })}
             />
           </Labeled>
           <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
@@ -2961,11 +3035,11 @@ function ConfigPanel({
       {kind === "hmac" && (
         <>
           <Labeled label="Signing connection id">
-            <input
+            <ConnectionSelect
+              connections={connections}
+              types={CONNECTION_TYPES[kind] ?? []}
               value={str("connectionId")}
-              onChange={(e) => onChange({ connectionId: e.target.value })}
-              style={inputStyle}
-              placeholder="my-signing-key"
+              onChange={(id) => onChange({ connectionId: id })}
             />
           </Labeled>
           <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
@@ -3015,11 +3089,11 @@ function ConfigPanel({
       {kind === "jwt" && (
         <>
           <Labeled label="Signing connection id">
-            <input
+            <ConnectionSelect
+              connections={connections}
+              types={CONNECTION_TYPES[kind] ?? []}
               value={str("connectionId")}
-              onChange={(e) => onChange({ connectionId: e.target.value })}
-              style={inputStyle}
-              placeholder="my-signing-key"
+              onChange={(id) => onChange({ connectionId: id })}
             />
           </Labeled>
           <Labeled label="Algorithm">
@@ -3072,11 +3146,11 @@ function ConfigPanel({
       {kind === "totp" && (
         <>
           <Labeled label="Signing connection id (base32 seed)">
-            <input
+            <ConnectionSelect
+              connections={connections}
+              types={CONNECTION_TYPES[kind] ?? []}
               value={str("connectionId")}
-              onChange={(e) => onChange({ connectionId: e.target.value })}
-              style={inputStyle}
-              placeholder="my-totp-seed"
+              onChange={(id) => onChange({ connectionId: id })}
             />
           </Labeled>
           <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
@@ -3281,11 +3355,11 @@ function ConfigPanel({
       {kind === "sendEmail" && (
         <>
           <Labeled label="SMTP connection id">
-            <input
+            <ConnectionSelect
+              connections={connections}
+              types={CONNECTION_TYPES[kind] ?? []}
               value={str("connectionId")}
-              onChange={(e) => onChange({ connectionId: e.target.value })}
-              style={inputStyle}
-              placeholder="my-smtp"
+              onChange={(id) => onChange({ connectionId: id })}
             />
           </Labeled>
           <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
