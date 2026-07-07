@@ -16,7 +16,12 @@ export {
   apiEnrichGraph,
 } from "./templates";
 export { getByPath, resolveMcpArguments } from "./mcp-args";
-export { resolveTemplates, resolveTemplateString } from "./template";
+export {
+  resolveTemplates,
+  resolveTemplateString,
+  lintTemplates,
+  type TemplateWarning,
+} from "./template";
 export { resolveHttpRequest, type ResolvedHttpRequest } from "./http-request";
 export {
   resolveSqlQuery,

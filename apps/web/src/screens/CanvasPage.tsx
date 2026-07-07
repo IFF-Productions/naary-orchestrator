@@ -25,7 +25,7 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import type { NodeType } from "@naary/dsl";
+import { lintTemplates, type NodeType } from "@naary/dsl";
 import { Button } from "../components";
 import {
   api,
@@ -330,6 +330,12 @@ export function CanvasPage() {
     return compileGraph(canvasNodes, canvasEdges);
   }, [nodes, edges]);
 
+  // Non-blocking lint: {{ nodeId.path }} tokens that reference a node not in the graph (typos).
+  const templateWarnings = useMemo(
+    () => (graph ? lintTemplates(graph) : []),
+    [graph],
+  );
+
   const selected = nodes.find((n) => n.selected);
   const selectedEdge = edges.find((e) => e.selected);
 
@@ -610,6 +616,24 @@ export function CanvasPage() {
         >
           {graph ? "valid" : (error ?? "invalid")}
         </span>
+        {templateWarnings.length > 0 && (
+          <span
+            title={templateWarnings
+              .map((w) => `${w.nodeId}.${w.field}: {{ ${w.ref} }} ${w.message}`)
+              .join("\n")}
+            style={{
+              fontSize: 12,
+              padding: "3px 10px",
+              borderRadius: 999,
+              background: "var(--state-warn, #b0863e)",
+              color: "#fff",
+              cursor: "help",
+            }}
+          >
+            ⚠ {templateWarnings.length} reference
+            {templateWarnings.length > 1 ? "s" : ""}
+          </span>
+        )}
         <div style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
           {status && (
             <span
@@ -1244,6 +1268,33 @@ function ConfigPanel({
       <div style={{ fontSize: 12, color: "var(--ink-2)", lineHeight: 1.4 }}>
         {NODE_DESCRIPTION[kind]}
       </div>
+
+      {/* Insert-reference helper (design EXPRESSIONS.md §5): use {{ nodeId.path }} in any string
+          field to splice an upstream output. Chips copy a starter token to paste at the cursor. */}
+      {upstreamIds.length > 0 && (
+        <div
+          style={{
+            padding: "8px 10px",
+            borderRadius: 8,
+            border: "1px dashed var(--line-2)",
+            background: "var(--card-2)",
+          }}
+        >
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 6 }}>
+            References — put <code>{"{{ node.path }}"}</code> in any field.
+            Click to copy a starter:
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {upstreamIds.map((uid) => (
+              <CopyButton
+                key={uid}
+                text={`{{ ${uid}. }}`}
+                label={`{{ ${uid} }}`}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Per-node error policy (n8n's "On Error"), shown for nodes that can fail. */}
       {ERRORABLE_KINDS.has(kind) && (

@@ -1,4 +1,5 @@
 import { getByPath } from "./mcp-args";
+import type { GraphDef } from "./types";
 
 /**
  * Template-lite expressions (design docs/design/EXPRESSIONS.md). String config fields may embed
@@ -59,4 +60,67 @@ function walk(v: unknown, ctx: Record<string, unknown>): unknown {
     return out;
   }
   return v;
+}
+
+/** A `{{ }}` token that references a node id not present in the graph (a likely typo). */
+export interface TemplateWarning {
+  /** The node whose config contains the token. */
+  nodeId: string;
+  /** Dotted path to the offending config field, e.g. "headers.X-Cat". */
+  field: string;
+  /** The referenced path inside the token, e.g. "aget.output.id". */
+  ref: string;
+  message: string;
+}
+
+// A `{{ path }}` token, not escaped. Mirrors resolveTemplateString.
+const LINT_RE = /\\\{\{|\{\{\s*([^{}]+?)\s*\}\}/g;
+
+/**
+ * Lint `{{ nodeId.path }}` tokens across a graph's string config. Flags tokens whose referenced
+ * node id isn't a node in the graph — an always-empty reference (a typo). A WARNING, not an error:
+ * the run tolerates it (resolves to empty), so this is author-time guidance only.
+ */
+export function lintTemplates(graph: GraphDef): TemplateWarning[] {
+  const nodeIds = new Set(graph.nodes.map((n) => n.id));
+  const warnings: TemplateWarning[] = [];
+  for (const node of graph.nodes) {
+    walkForTokens(node.config, "", (field, ref) => {
+      const refNode = ref.split(".")[0]?.trim();
+      if (refNode && !nodeIds.has(refNode)) {
+        warnings.push({
+          nodeId: node.id,
+          field,
+          ref,
+          message: `references unknown node "${refNode}" — will always be empty`,
+        });
+      }
+    });
+  }
+  return warnings;
+}
+
+function walkForTokens(
+  v: unknown,
+  field: string,
+  cb: (field: string, ref: string) => void,
+): void {
+  if (typeof v === "string") {
+    let m: RegExpExecArray | null;
+    LINT_RE.lastIndex = 0;
+    // biome-ignore lint/suspicious/noAssignInExpressions: standard regex exec loop
+    while ((m = LINT_RE.exec(v)) !== null) {
+      if (m[0] !== "\\{{" && m[1]) cb(field, m[1].trim());
+    }
+    return;
+  }
+  if (Array.isArray(v)) {
+    v.forEach((x, i) => walkForTokens(x, `${field}[${i}]`, cb));
+    return;
+  }
+  if (v && typeof v === "object") {
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      walkForTokens(val, field ? `${field}.${k}` : k, cb);
+    }
+  }
 }
