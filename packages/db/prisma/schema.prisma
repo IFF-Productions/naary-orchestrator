@@ -86,6 +86,20 @@ model GraphDefinition {
   @@index([tenantId, workflowKey])
 }
 
+/** Pinned node output — AUTHORING-ONLY sample data (design SINGLE-NODE-EXECUTION.md §4). Lets you
+ *  build downstream nodes against a saved output without re-running upstream. The interpreter NEVER
+ *  reads this (a real run always executes upstream) — it's a dev aid, invisible to production. */
+model PinnedData {
+  tenantId    String
+  workflowKey String
+  nodeId      String
+  output      Json // the pinned sample (keep small; large blobs use the claim-check store)
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  @@id([tenantId, workflowKey, nodeId])
+  @@index([tenantId, workflowKey])
+}
+
 /** Per-workflow error-handler binding: when the run for `workflowKey` fails, the
  *  interpreter starts the graph saved under `errorWorkflowKey` (detached) with the
  *  failure context. One row per (tenant, workflowKey); absence = no handler. */

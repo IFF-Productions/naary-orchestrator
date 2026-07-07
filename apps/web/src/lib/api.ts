@@ -144,6 +144,29 @@ export const api = {
   getGraph(workflowKey: string): Promise<NamedGraph> {
     return http(`/graphs/${encodeURIComponent(workflowKey)}`);
   },
+  // --- Pinned node outputs (authoring-only samples; the interpreter never reads them) ---
+  listPins(workflowKey: string): Promise<Record<string, unknown>> {
+    return http(`/graphs/${encodeURIComponent(workflowKey)}/pins`);
+  },
+  pinNode(
+    workflowKey: string,
+    nodeId: string,
+    output: unknown,
+  ): Promise<{ pinned: true }> {
+    return http(
+      `/graphs/${encodeURIComponent(workflowKey)}/nodes/${encodeURIComponent(nodeId)}/pin`,
+      { method: "PUT", body: JSON.stringify({ output }) },
+    );
+  },
+  unpinNode(
+    workflowKey: string,
+    nodeId: string,
+  ): Promise<{ cleared: boolean }> {
+    return http(
+      `/graphs/${encodeURIComponent(workflowKey)}/nodes/${encodeURIComponent(nodeId)}/pin`,
+      { method: "DELETE" },
+    );
+  },
   // AI workflow builder: describe a workflow → a validated DRAFT graph (unsaved).
   // `provider` (optional) picks the model provider; omitted ⇒ the server auto-selects
   // the tenant's first configured+valid one.

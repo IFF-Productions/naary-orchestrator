@@ -212,6 +212,8 @@ export function CanvasPage() {
   // Tenant connections (DBs, MCP servers, SMTP, signing) so a node's config can PICK one
   // by label instead of pasting a raw connectionId.
   const [connections, setConnections] = useState<ConnectionRow[]>([]);
+  // Pinned node outputs (authoring samples) for the saved workflow, keyed by nodeId.
+  const [pins, setPins] = useState<Record<string, unknown>>({});
   // Optional per-run input (JSON) — overrides the Start node's sampleInput for the
   // next run. Blank ⇒ the server falls back to the sample (api.startExecution).
   const [showInput, setShowInput] = useState(false);
@@ -250,6 +252,43 @@ export function CanvasPage() {
       live = false;
     };
   }, []);
+
+  // Pinned outputs for the saved workflow (authoring samples). Cleared for an unsaved flow.
+  useEffect(() => {
+    if (!workflowKey) {
+      setPins({});
+      return;
+    }
+    let live = true;
+    api
+      .listPins(workflowKey)
+      .then((p) => live && setPins(p))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [workflowKey]);
+
+  const pinNode = useCallback(
+    async (nodeId: string, output: unknown) => {
+      if (!workflowKey) return;
+      await api.pinNode(workflowKey, nodeId, output);
+      setPins((p) => ({ ...p, [nodeId]: output }));
+    },
+    [workflowKey],
+  );
+  const unpinNode = useCallback(
+    async (nodeId: string) => {
+      if (!workflowKey) return;
+      await api.unpinNode(workflowKey, nodeId);
+      setPins((p) => {
+        const next = { ...p };
+        delete next[nodeId];
+        return next;
+      });
+    },
+    [workflowKey],
+  );
 
   // Load the workflow list (for the selector) + open ?key= if present.
   useEffect(() => {
@@ -962,6 +1001,11 @@ export function CanvasPage() {
                     .map((n) => n.id)}
                   hookUrls={hookUrls}
                   connections={connections}
+                  canPin={!!workflowKey}
+                  pinnedOutput={pins[selected.id]}
+                  isPinned={Object.hasOwn(pins, selected.id)}
+                  onPin={(output) => pinNode(selected.id, output)}
+                  onUnpin={() => unpinNode(selected.id)}
                   onChange={(patch) => updateConfig(selected.id, patch)}
                 />
               ) : selectedEdge ? (
@@ -1209,12 +1253,22 @@ function ConfigPanel({
   upstreamIds,
   hookUrls,
   connections,
+  canPin,
+  pinnedOutput,
+  isPinned,
+  onPin,
+  onUnpin,
   onChange,
 }: {
   node: Node<NaaryData>;
   upstreamIds: string[];
   hookUrls: string[];
   connections: ConnectionRow[];
+  canPin: boolean;
+  pinnedOutput: unknown;
+  isPinned: boolean;
+  onPin: (output: unknown) => Promise<void>;
+  onUnpin: () => Promise<void>;
   onChange: (patch: Record<string, unknown>) => void;
 }) {
   const kind = node.data.kind;
@@ -1295,6 +1349,14 @@ function ConfigPanel({
           </div>
         </div>
       )}
+
+      <PinSection
+        canPin={canPin}
+        isPinned={isPinned}
+        pinnedOutput={pinnedOutput}
+        onPin={onPin}
+        onUnpin={onUnpin}
+      />
 
       {/* Per-node error policy (n8n's "On Error"), shown for nodes that can fail. */}
       {ERRORABLE_KINDS.has(kind) && (
@@ -3788,6 +3850,163 @@ function ConfigPanel({
 }
 
 /** A small copy-to-clipboard button with brief "Copied ✓" feedback. */
+/**
+ * Data pinning (design SINGLE-NODE-EXECUTION.md slice 1): pin a sample output for this node so you
+ * can build downstream nodes against it without re-running upstream. Authoring-only — the
+ * interpreter never reads pins. Source in slice 1 is a manual JSON paste (single-node "Test" that
+ * fills it is slice 2).
+ */
+function PinSection({
+  canPin,
+  isPinned,
+  pinnedOutput,
+  onPin,
+  onUnpin,
+}: {
+  canPin: boolean;
+  isPinned: boolean;
+  pinnedOutput: unknown;
+  onPin: (output: unknown) => Promise<void>;
+  onUnpin: () => Promise<void>;
+}) {
+  const [draft, setDraft] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const label = (
+    <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 6 }}>
+      📌 Pinned sample — authoring only; the interpreter never uses it (a real
+      run always executes upstream).
+    </div>
+  );
+
+  if (!canPin) {
+    return (
+      <div
+        style={{
+          padding: "8px 10px",
+          borderRadius: 8,
+          border: "1px dashed var(--line-2)",
+          background: "var(--card-2)",
+        }}
+      >
+        {label}
+        <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
+          Save the workflow first to pin a sample output.
+        </div>
+      </div>
+    );
+  }
+
+  async function pin() {
+    setErr(null);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(draft);
+    } catch {
+      setErr("Enter valid JSON.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await onPin(parsed);
+      setDraft("");
+    } catch {
+      setErr("Could not save the pin.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        padding: "8px 10px",
+        borderRadius: 8,
+        border: "1px solid var(--line-2)",
+        background: "var(--card-2)",
+      }}
+    >
+      {label}
+      {isPinned ? (
+        <>
+          <pre
+            className="mono"
+            style={{
+              margin: 0,
+              maxHeight: 160,
+              overflow: "auto",
+              fontSize: 11,
+              color: "var(--ink)",
+              background: "var(--card)",
+              border: "1px solid var(--line-2)",
+              borderRadius: 6,
+              padding: "6px 8px",
+            }}
+          >
+            {JSON.stringify(pinnedOutput, null, 2)}
+          </pre>
+          <div style={{ marginTop: 8 }}>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                onUnpin().finally(() => setBusy(false));
+              }}
+            >
+              Unpin
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={'{\n  "example": "output"\n}'}
+            spellCheck={false}
+            className="mono"
+            style={{
+              width: "100%",
+              minHeight: 64,
+              resize: "vertical",
+              fontSize: 11,
+              padding: "6px 8px",
+              borderRadius: 6,
+              border: "1px solid var(--line-2)",
+              background: "var(--card)",
+              color: "var(--ink)",
+            }}
+          />
+          {err && (
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--state-error)",
+                marginTop: 4,
+              }}
+            >
+              {err}
+            </div>
+          )}
+          <div style={{ marginTop: 8 }}>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy || !draft.trim()}
+              onClick={pin}
+            >
+              Pin sample
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function CopyButton({
   text,
   label = "Copy",
