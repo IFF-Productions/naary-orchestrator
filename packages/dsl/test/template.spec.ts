@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { resolveTemplateString, resolveTemplates } from "../src/template";
+import type { GraphDef } from "../src/types";
+import {
+  lintTemplates,
+  resolveTemplateString,
+  resolveTemplates,
+} from "../src/template";
 
 const ctx = {
   start: { subject: "Invoice #42", amount: 100 },
@@ -96,5 +101,52 @@ describe("resolveTemplates (deep config walk)", () => {
   it("is a no-op (structurally) for a config with no tokens", () => {
     const config = { a: "x", b: 1, c: { d: ["e"] } };
     expect(resolveTemplates(config, ctx)).toEqual(config);
+  });
+});
+
+describe("lintTemplates", () => {
+  const g = (nodes: GraphDef["nodes"]): GraphDef => ({
+    startNodeId: "start",
+    nodes,
+    edges: [],
+  });
+
+  it("flags a token referencing an unknown node id", () => {
+    const graph = g([
+      { id: "start", type: "start" },
+      { id: "agent", type: "agent" },
+      {
+        id: "http",
+        type: "httpRequest",
+        config: {
+          url: "https://x/{{ aget.output.id }}", // typo: "aget"
+          headers: { A: "{{ agent.output.category }}" }, // valid
+        },
+      },
+    ]);
+    const w = lintTemplates(graph);
+    expect(w).toHaveLength(1);
+    expect(w[0]).toMatchObject({ nodeId: "http", field: "url", ref: "aget.output.id" });
+    expect(w[0].message).toContain("aget");
+  });
+
+  it("no warnings when all referenced nodes exist (or no tokens)", () => {
+    const graph = g([
+      { id: "start", type: "start" },
+      { id: "agent", type: "agent" },
+      {
+        id: "http",
+        type: "httpRequest",
+        config: { url: "https://x/{{ agent.output.id }}", method: "GET" },
+      },
+    ]);
+    expect(lintTemplates(graph)).toEqual([]);
+  });
+
+  it("ignores escaped \\{{ literals", () => {
+    const graph = g([
+      { id: "n", type: "set", config: { fields: { t: "\\{{ nope }}" } } },
+    ]);
+    expect(lintTemplates(graph)).toEqual([]);
   });
 });
