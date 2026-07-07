@@ -405,6 +405,26 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Cancel a running (or paused) run — terminates the workflow immediately (status → terminated).
+   * Terminate rather than a graceful cancel: the generic interpreter doesn't handle a
+   * CancelledFailure, so terminate gives a definitive stop. Tenant-scoped via assertOwner. A run
+   * that's already closed returns NOT_FOUND → 409 (nothing to cancel).
+   */
+  async cancel(id: string, tenantId: string): Promise<void> {
+    await this.assertOwner(id, tenantId);
+    try {
+      await this.client.workflow.getHandle(id).terminate("Canceled by user");
+    } catch (e) {
+      if (e instanceof WorkflowNotFoundError) {
+        throw new ConflictException(
+          "Execution is already finished — nothing to cancel.",
+        );
+      }
+      throw e;
+    }
+  }
+
+  /**
    * The tenant's runs currently paused for human approval, each enriched with the
    * approval node's prompt (title/instructions) resolved from the stored graph — so
    * the inbox shows WHAT is being approved, not just that something is waiting.

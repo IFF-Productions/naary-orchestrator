@@ -209,6 +209,12 @@ export const api = {
       body: JSON.stringify({ approved, ...(comment ? { comment } : {}) }),
     });
   },
+  // Cancel a running run (terminates the workflow). 409 if already finished.
+  cancelRun(id: string): Promise<{ accepted: true }> {
+    return http(`/executions/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+    });
+  },
   // The tenant's runs paused for approval, each with its prompt (approvals inbox).
   listAwaitingApprovals(): Promise<AwaitingApproval[]> {
     return http("/executions/awaiting");

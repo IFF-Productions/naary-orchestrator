@@ -112,6 +112,24 @@ function RunView({ id }: { id: string }) {
     }
   }
 
+  async function cancelRun() {
+    if (
+      !window.confirm(
+        "Cancel this run? It will be terminated and can't resume.",
+      )
+    )
+      return;
+    setActing(true);
+    try {
+      await api.cancelRun(id);
+      await poll();
+    } catch {
+      setError("Could not cancel the run (it may have already finished).");
+    } finally {
+      setActing(false);
+    }
+  }
+
   const status = state?.status;
   const awaiting = status === "awaiting_approval";
   const running = status === "running";
@@ -174,22 +192,34 @@ function RunView({ id }: { id: string }) {
             </div>
           </div>
         </div>
-        {awaiting && (
+        {(awaiting || running) && (
           <div style={{ display: "flex", gap: 9 }}>
+            {awaiting && (
+              <>
+                <Button
+                  variant="positive"
+                  icon="check"
+                  disabled={acting}
+                  onClick={() => decide(true)}
+                >
+                  Approve
+                </Button>
+                <Button
+                  variant="danger"
+                  disabled={acting}
+                  onClick={() => decide(false)}
+                >
+                  Reject
+                </Button>
+              </>
+            )}
             <Button
-              variant="positive"
-              icon="check"
+              variant="secondary"
+              icon="x"
               disabled={acting}
-              onClick={() => decide(true)}
+              onClick={cancelRun}
             >
-              Approve
-            </Button>
-            <Button
-              variant="danger"
-              disabled={acting}
-              onClick={() => decide(false)}
-            >
-              Reject
+              Cancel run
             </Button>
           </div>
         )}
