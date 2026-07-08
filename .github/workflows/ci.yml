@@ -4,6 +4,10 @@ name: CI
 # suite mocks @naary/db, so no Postgres is needed; the Temporal e2e tests spin up
 # @temporalio/testing's in-process server. No secrets required — a dummy .env only
 # satisfies the prisma-generate dotenv wrapper (generate never connects).
+#
+# Runs on a SELF-HOSTED runner (like e2e.yml). Fork PRs are skipped (see the `if:` guard)
+# so untrusted code never executes on the runner. Runner needs Node 22 + pnpm reachable
+# (setup-node/pnpm-action-setup install them) and outbound network for the tool downloads.
 on:
   pull_request:
   push:
@@ -16,7 +20,12 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # SECURITY: on a self-hosted runner, never execute untrusted fork code. Only same-repo
+    # branches (and pushes to main) run — a fork PR's `verify` is skipped. (Mirrors e2e.yml.)
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
