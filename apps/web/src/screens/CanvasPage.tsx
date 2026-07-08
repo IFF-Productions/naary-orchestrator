@@ -88,6 +88,8 @@ function toFlowEdges(cs: CanvasEdge[]): FlowEdge[] {
 interface NaaryData extends Record<string, unknown> {
   kind: NodeType;
   config?: Record<string, unknown>;
+  /** Injected for rendering: this node has a pinned authoring sample (📌 badge). */
+  pinned?: boolean;
 }
 
 /** A node on the canvas: accent bar, label, and connection handles. Entry nodes
@@ -119,9 +121,18 @@ function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
         style={{
           padding: subtitle ? "9px 12px 4px" : "9px 12px",
           fontWeight: 600,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 6,
         }}
       >
-        {LABEL[kind]}
+        <span>{LABEL[kind]}</span>
+        {data.pinned && (
+          <span title="Has a pinned sample output" style={{ fontSize: 11 }}>
+            📌
+          </span>
+        )}
       </div>
       {subtitle && (
         <div
@@ -374,6 +385,20 @@ export function CanvasPage() {
   const templateWarnings = useMemo(
     () => (graph ? lintTemplates(graph) : []),
     [graph],
+  );
+
+  // Overlay a 📌 badge on nodes with a pinned sample. Derived (not stored on the node) so pinning
+  // doesn't churn the editable `nodes` state; onNodesChange still applies to `nodes`.
+  const flowNodes = useMemo(
+    () =>
+      nodes.map((n) =>
+        Object.hasOwn(pins, n.id)
+          ? { ...n, data: { ...n.data, pinned: true } }
+          : n.data.pinned
+            ? { ...n, data: { ...n.data, pinned: false } }
+            : n,
+      ),
+    [nodes, pins],
   );
 
   const selected = nodes.find((n) => n.selected);
@@ -958,7 +983,7 @@ export function CanvasPage() {
         {/* canvas */}
         <div style={{ flex: 1, minWidth: 0 }}>
           <ReactFlow
-            nodes={nodes}
+            nodes={flowNodes}
             edges={edges}
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
