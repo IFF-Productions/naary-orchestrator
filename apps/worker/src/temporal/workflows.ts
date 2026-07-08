@@ -240,6 +240,14 @@ export interface RunGraphCtx {
   /** True when this run IS an error-handler (started by another run's failure).
    *  Suppresses re-firing a handler so a failing handler can't loop. */
   isErrorHandler?: boolean;
+  /** Single-node TEST mode (design SINGLE-NODE-EXECUTION.md slice 3): seed ctx from `seededCtx`
+   *  (upstream outputs, from pins) and run just the target node's activity. Suppresses the
+   *  Execution/read-model recording so a test never shows up as a "run" — but the activity is
+   *  real (secrets in-activity) and any LLM/tool spend is still metered (its own UsageEvent). */
+  test?: boolean;
+  /** Node outputs to pre-populate ctx with (test mode) — the target node reads these as its
+   *  upstream inputs, so no upstream nodes execute. */
+  seededCtx?: Record<string, unknown>;
 }
 
 /** Carried across continueAsNew so a long/looping run resumes with state intact
@@ -285,10 +293,11 @@ export async function runGraph(
   runCtx: RunGraphCtx,
   resume?: ResumeState,
 ): Promise<RunGraphResult> {
-  // On a continueAsNew restart, seed state from the carried snapshot.
+  // On a continueAsNew restart, seed state from the carried snapshot. In single-node test mode,
+  // seed ctx with the target's upstream outputs (from pins) so only the target executes.
   const ctx: Record<string, unknown> = resume
     ? { ...resume.ctx }
-    : { __input: input };
+    : { __input: input, ...(runCtx.seededCtx ?? {}) };
   let approval: ApprovalInput | undefined;
   let status: ExecutionStatus = "running";
   let currentNodeId = resume?.startNodeId ?? graph.startNodeId;
@@ -336,7 +345,7 @@ export async function runGraph(
   // first start (not continueAsNew). Behind a patched() gate so in-flight runs that
   // predate this change don't hit a nondeterminism error on replay (CLAUDE.md:
   // version interpreter changes with workflow.patched()).
-  if (!resume && wf.patched("record-execution-v1")) {
+  if (!resume && !runCtx.test && wf.patched("record-execution-v1")) {
     await recordExecution({
       workflowId: wf.workflowInfo().workflowId,
       tenantId: runCtx.tenantId,
@@ -348,6 +357,7 @@ export async function runGraph(
   // a single PG read (no per-run Temporal calls). Gated by patched() so in-flight
   // runs that predate this change stay replay-safe.
   async function syncStatus(): Promise<void> {
+    if (runCtx.test) return; // test mode: never touch the Runs read-model
     if (wf.patched("exec-status-v1")) {
       await setExecutionStatus({
         workflowId: wf.workflowInfo().workflowId,

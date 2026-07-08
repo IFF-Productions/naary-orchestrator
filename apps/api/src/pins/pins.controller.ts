@@ -12,9 +12,28 @@ import {
 import { ApiBearerAuth } from "@nestjs/swagger";
 import { isPureNode, runPureNode } from "@naary/dsl";
 import { TenantId } from "../auth/tenant.decorator";
+import { ExecutionsService } from "../executions/executions.service";
 import { GraphsService } from "../graphs/graphs.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { PinsService } from "./pins.service";
+
+/** Node types with no output-producing behavior to test in isolation — control/wait/trigger
+ *  nodes. (Pure + activity nodes are testable; these need the full flow.) */
+const UNTESTABLE_NODE_TYPES = new Set<string>([
+  "start",
+  "end",
+  "wait",
+  "humanApproval",
+  "forEach",
+  "executeSubWorkflow",
+  "webhookTrigger",
+  "scheduleTrigger",
+  "pollTrigger",
+  "errorTrigger",
+  "respondToWebhook",
+  "merge",
+  "stopAndError",
+]);
 
 /**
  * Pinned node outputs for the canvas authoring loop (design SINGLE-NODE-EXECUTION.md §5).
@@ -27,13 +46,15 @@ export class PinsController {
   constructor(
     private readonly pins: PinsService,
     private readonly graphs: GraphsService,
+    private readonly executions: ExecutionsService,
   ) {}
 
   /**
-   * Single-node "Test" (design SINGLE-NODE-EXECUTION.md slice 2): run ONE node against a mini-ctx
-   * built from the workflow's pins (+ optional `inputs` override), returning its output — without
-   * a full run. Only PURE nodes (set/text/if/…) run here (instant, no Temporal, no secrets);
-   * activity/control nodes report `pure:false` (the Temporal path is slice 3).
+   * Single-node "Test" (design SINGLE-NODE-EXECUTION.md slices 2–3): run ONE node against a
+   * mini-ctx built from the workflow's pins (+ optional `inputs` override), returning its output —
+   * without a full run. PURE nodes run instantly in-process; ACTIVITY nodes run the real activity
+   * via a short-lived test-mode Temporal exec (secrets in-activity, billing counts); control/wait
+   * nodes report `pure:false` (not testable in isolation).
    */
   @ApiEndpoint({
     summary: "Test-run a single node against pinned/sample inputs",
@@ -56,10 +77,10 @@ export class PinsController {
     if (!node) {
       throw new NotFoundException(`No node '${nodeId}' in this graph`);
     }
-    if (!isPureNode(node.type)) {
+    if (UNTESTABLE_NODE_TYPES.has(node.type)) {
       return {
         pure: false,
-        message: `"${node.type}" runs an activity or control step — not testable inline yet. Run the full flow, or pin an upstream sample.`,
+        message: `"${node.type}" can't be tested in isolation — run the full flow.`,
       };
     }
     // mini-ctx: the workflow's pinned outputs, overridden by any manual inputs.
@@ -67,12 +88,30 @@ export class PinsController {
       ...(await this.pins.list(tenantId, workflowKey)),
       ...(body?.inputs ?? {}),
     };
+    // Pure node: run in-process, instant, no Temporal.
+    if (isPureNode(node.type)) {
+      try {
+        return { pure: true, output: runPureNode(node, ctx) };
+      } catch (e) {
+        throw new BadRequestException(
+          e instanceof Error ? e.message : "Node failed to run",
+        );
+      }
+    }
+    // Activity node: run the REAL activity via a short-lived test-mode Temporal exec.
     try {
-      return { pure: true, output: runPureNode(node, ctx) };
-    } catch (e) {
-      throw new BadRequestException(
-        e instanceof Error ? e.message : "Node failed to run",
+      const output = await this.executions.testNode(
+        tenantId,
+        workflowKey,
+        node,
+        ctx,
       );
+      return { pure: true, output };
+    } catch (e) {
+      return {
+        pure: false,
+        message: `Test run failed: ${e instanceof Error ? e.message : "the node errored"}`,
+      };
     }
   }
 
