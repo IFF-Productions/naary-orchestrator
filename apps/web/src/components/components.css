@@ -80,7 +80,7 @@
 .btn-danger {
   background: transparent;
   border-color: color-mix(in srgb, var(--state-error) 50%, transparent);
-  color: #e5736f;
+  color: var(--state-error);
 }
 .btn-danger:hover:not(:disabled) {
   background: var(--error-soft);
@@ -358,7 +358,7 @@
 .avatar {
   border-radius: 50%;
   flex: none;
-  background: linear-gradient(140deg, #3a4252, #252b36);
+  background: var(--avatar-bg);
   border: 1px solid var(--line-2);
   display: inline-flex;
   align-items: center;

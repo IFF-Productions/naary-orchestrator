@@ -163,7 +163,7 @@ export function WorkspaceSwitcher({ labelOp = 1 }: { labelOp?: number }) {
                     <Icon
                       name="check"
                       size={13}
-                      style={{ color: "var(--accent, #6ea8fe)", flex: "none" }}
+                      style={{ color: "var(--state-info)", flex: "none" }}
                     />
                   )}
                 </button>
@@ -203,7 +203,7 @@ export function WorkspaceSwitcher({ labelOp = 1 }: { labelOp?: number }) {
                 style={{
                   padding: "4px 9px 2px",
                   fontSize: 11,
-                  color: "var(--danger, #e5484d)",
+                  color: "var(--state-error)",
                 }}
               >
                 {error}

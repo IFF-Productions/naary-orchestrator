@@ -190,7 +190,7 @@ export function AppShell() {
               height: 30,
               borderRadius: "50%",
               flex: "none",
-              background: "linear-gradient(140deg,#3a4252,#252b36)",
+              background: "var(--avatar-bg)",
               border: "1px solid var(--line-2)",
               display: "flex",
               alignItems: "center",

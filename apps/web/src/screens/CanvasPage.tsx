@@ -693,7 +693,7 @@ export function CanvasPage() {
               fontSize: "var(--text-sm)",
               padding: "3px 10px",
               borderRadius: "var(--radius-full)",
-              background: "var(--state-warn, #b0863e)",
+              background: "var(--state-paused)",
               color: "#fff",
               cursor: "help",
             }}

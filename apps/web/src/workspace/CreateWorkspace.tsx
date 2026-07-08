@@ -92,7 +92,7 @@ export function CreateWorkspace() {
                 {busy ? "Creating…" : "Create workspace"}
               </Button>
               {error && (
-                <div style={{ fontSize: 12, color: "var(--danger, #e5484d)" }}>
+                <div style={{ fontSize: 12, color: "var(--state-error)" }}>
                   {error}
                 </div>
               )}
