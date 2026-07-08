@@ -17,6 +17,7 @@ export type ExecutionStatus =
   | "awaiting_approval"
   | "completed"
   | "rejected"
+  | "awaiting_webhook" // paused on a wait(webhook) node until an external resume call
   | "budget_exceeded" // per-execution cost cap hit (Slice #3)
   | "circuit_open" // max-step circuit breaker tripped (Slice #3)
   | "invalid_graph"; // malformed graph (dangling edge / unknown node) — terminal, not retried (Slice #6)
@@ -35,6 +36,17 @@ export interface ApprovalInput {
 
 /** Human approval: delivered as a Signal, awaited via condition() in the workflow. */
 export const approvalSignal = defineSignal<[ApprovalInput]>("approval");
+
+/** Payload delivered when an external system resumes a run paused on a wait(webhook)
+ *  node. `payload` (the resume request body) becomes the wait node's output so
+ *  downstream nodes can branch on / read it. */
+export interface ResumeInput {
+  payload?: unknown;
+}
+
+/** Webhook resume: delivered as a Signal to a run paused on a wait(webhook) node,
+ *  awaited via condition() in the workflow (mirrors approvalSignal). */
+export const resumeSignal = defineSignal<[ResumeInput]>("resume");
 
 /** Live execution state, readable without disturbing the run. */
 export const stateQuery = defineQuery<ExecutionState>("state");
