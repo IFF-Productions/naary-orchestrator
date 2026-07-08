@@ -18,7 +18,7 @@ import {
   validateGraph,
 } from "@naary/dsl";
 import { CredentialsService, MissingCredentialError } from "@naary/secrets";
-import { APICallError, generateText, jsonSchema, Output } from "ai";
+import { APICallError, generateText } from "ai";
 
 // Providers the generator can use, in preference order — when the caller doesn't pick one,
 // the first provider the tenant has a valid key for wins. Kept in sync with the worker's
@@ -43,87 +43,11 @@ function buildGenModel(provider: GenProvider, apiKey: string) {
 // (NODE_TYPES / CONDITION_OPS), so adding a node/operator automatically teaches the AI builder
 // about it — no more hand-maintained list drifting behind the DSL (the old bug).
 
-// Structured-output schema. Deliberately PERMISSIVE on node `config` (a free object):
-// validateGraph is the real gate, and NodeDef.config is itself untyped in the DSL, so
-// a strict per-config schema would be stricter than the platform. Uses the AI SDK's
-// jsonSchema<T> (not Zod) to avoid the TS2589 generics blow-up in generateText.
-const GRAPH_OUTPUT_SCHEMA = {
-  type: "object",
-  properties: {
-    name: {
-      type: "string",
-      description: "A short, human title for the workflow.",
-    },
-    startNodeId: { type: "string" },
-    nodes: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          type: { type: "string", enum: NODE_TYPES },
-          config: {
-            type: "object",
-            additionalProperties: true,
-            description:
-              "Node settings — FILL with concrete values per the node's config: shape in the catalog (e.g. agent systemPrompt/model, httpRequest url/method). Only omit for nodes that take none (start/end/merge).",
-          },
-        },
-        required: ["id", "type"],
-        additionalProperties: false,
-      },
-    },
-    edges: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          from: { type: "string" },
-          to: { type: "string" },
-          condition: {
-            type: "object",
-            properties: {
-              path: { type: "string" },
-              op: {
-                type: "string",
-                enum: CONDITION_OPS,
-              },
-              // Concrete permissive type — Anthropic's structured-output validator rejects
-              // an empty `{}` schema ("any JSON value"). Covers the real condition values:
-              // primitives + a string array for the `in` operator.
-              value: {
-                anyOf: [
-                  { type: "string" },
-                  { type: "number" },
-                  { type: "boolean" },
-                  { type: "null" },
-                  { type: "array", items: { type: "string" } },
-                ],
-              },
-            },
-            required: ["path", "op"],
-            additionalProperties: false,
-          },
-        },
-        required: ["from", "to"],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ["name", "startNodeId", "nodes", "edges"],
-  additionalProperties: false,
-} as const;
-
-const graphOutput = jsonSchema<{
-  name: string;
-  startNodeId: string;
-  nodes: { id: string; type: string; config?: Record<string, unknown> }[];
-  edges: {
-    from: string;
-    to: string;
-    condition?: { path: string; op: string; value?: unknown };
-  }[];
-}>(GRAPH_OUTPUT_SCHEMA as unknown as Parameters<typeof jsonSchema>[0]);
+// NOTE: we generate as plain-text JSON (parsed + validated below), NOT AI-SDK structured
+// output. Structured output (`Output.object`) returned a skeleton here — nodes with id+type
+// but empty edges and empty config, even on repair — so free-form generation driven by the
+// prompt (few-shot + fill rules) produces materially better graphs. validateGraph + the
+// node-type/connectivity checks + one repair retry are the real gate.
 
 const SYSTEM_PROMPT = `You design automation workflows as a JSON graph for a durable workflow engine.
 
@@ -136,7 +60,7 @@ Rules:
 - Do NOT invent node types. Use only the catalog below.
 - FILL IN each node's config with concrete, ready-to-run values inferred from the request, following the "config:" shape shown for that node type below. Write real agent systemPrompts (specific to the task), real url+method for httpRequest, real title+instructions for humanApproval, real subject+body for sendEmail, etc. Reference upstream outputs with {{ nodeId.path }} where a value comes from an earlier node.
 - Do NOT emit an empty config {} for a node whose catalog entry shows config keys. Only nodes with no "config:" shape (e.g. start, end, merge) may omit config. For connection-based nodes leave ONLY connectionId as a "<...>" placeholder; still fill the rest.
-- A conditional edge has condition:{path,op,value}; do NOT put a conditional edge INTO a "merge" node.
+- A conditional edge has condition:{path,op,value}; op MUST be one of: ${CONDITION_OPS.join(", ")}. Do NOT put a conditional edge INTO a "merge" node.
 - To branch, prefer an "if" (two-way) or "switch" (multi-way) node and put conditions on the edges leaving it (e.g. path:"<if-id>.result", op:"eq", value:true).
 
 Example of the expected quality — note filled configs AND complete edges (a trigger/end takes no config; every other node is ready to run):
@@ -188,7 +112,7 @@ export class GraphGeneratorService {
     let out = await this.callModel(chosen, apiKey, description);
     this.logDraftShape("first", out);
     let graph = toGraphDef(out);
-    let check = validateGraph(graph);
+    let check = this.validate(graph);
 
     // One repair retry: feed the validator error back so the model fixes it.
     if (!check.valid) {
@@ -198,7 +122,7 @@ export class GraphGeneratorService {
       });
       this.logDraftShape(`repair(${check.error})`, out);
       graph = toGraphDef(out);
-      check = validateGraph(graph);
+      check = this.validate(graph);
       if (!check.valid) {
         throw new UnprocessableEntityException(
           `Couldn't generate a valid workflow (${check.error}). Try rephrasing the description.`,
@@ -207,6 +131,28 @@ export class GraphGeneratorService {
     }
 
     return { name: out.name?.trim() || "Generated workflow", graph };
+  }
+
+  /** Structural validation + node-type check. Plain-text generation lost the schema's
+   *  `type` enum, so guard here that every node type is a real catalog type (feeds the
+   *  repair loop when the model invents one). */
+  private validate(graph: GraphDef): { valid: boolean; error?: string } {
+    const structural = validateGraph(graph);
+    if (!structural.valid) return structural;
+    const unknown = [
+      ...new Set(
+        graph.nodes
+          .map((n) => n.type)
+          .filter((t) => !(NODE_TYPES as readonly string[]).includes(t)),
+      ),
+    ];
+    if (unknown.length > 0) {
+      return {
+        valid: false,
+        error: `unknown node type(s): ${unknown.join(", ")} — use only catalog node types`,
+      };
+    }
+    return { valid: true };
   }
 
   /** Log the RAW model draft's structure (counts only — node types + per-node config-key
@@ -273,30 +219,23 @@ export class GraphGeneratorService {
     apiKey: string,
     description: string,
     repair?: { previous: string; error: string },
-  ): Promise<{
-    name: string;
-    startNodeId: string;
-    nodes: { id: string; type: string; config?: Record<string, unknown> }[];
-    edges: {
-      from: string;
-      to: string;
-      condition?: { path: string; op: string; value?: unknown };
-    }[];
-  }> {
+  ): Promise<GraphDraft> {
     const userPrompt = repair
       ? `The previous graph was invalid: ${repair.error}\n\nPrevious graph:\n${repair.previous}\n\nFix it. Original request:\n${description}`
       : description;
+    // Plain-text generation (NOT Output.object): the structured-output path returned a
+    // skeleton — nodes with id+type but empty edges and empty config, even on repair.
+    // Free-form generation follows the prompt (few-shot + fill rules), so the model
+    // actually writes edges + config; the JSON is parsed + validated (+ repair) below.
+    let text: string;
     try {
       const result = await generateText({
         model: buildGenModel(provider, apiKey),
         system: SYSTEM_PROMPT,
-        prompt: userPrompt,
-        // Higher cap: filled-in configs (systemPrompts, bodies) are much larger than a
-        // bare-topology graph, and a truncated response fails JSON parse → repair loop.
-        output: Output.object({ schema: graphOutput }),
+        prompt: `${userPrompt}\n\nRespond with ONLY the JSON graph object — start at { and end at }. No prose, no markdown code fences.`,
         maxOutputTokens: 8000,
       });
-      return result.output;
+      text = result.text;
     } catch (e) {
       // Surface the REAL upstream cause (previously swallowed by the catch-all 503):
       // status/url/message/body — never the API key. This is how we tell a stale model id
@@ -306,6 +245,55 @@ export class GraphGeneratorService {
       );
       throw mapProviderError(e, provider);
     }
+    const parsed = parseGraphJson(text);
+    if (!parsed) {
+      this.logger.warn(
+        `graph generate: model returned unparseable JSON (head: ${text.slice(0, 120).replace(/\s+/g, " ")})`,
+      );
+      throw new UnprocessableEntityException(
+        "The model didn't return a valid workflow. Try rephrasing the description.",
+      );
+    }
+    return parsed;
+  }
+}
+
+/** Draft shape the model returns (loose; validateGraph + toGraphDef do the real checks). */
+interface GraphDraft {
+  name?: string;
+  startNodeId: string;
+  nodes: { id: string; type: string; config?: Record<string, unknown> }[];
+  edges: {
+    from: string;
+    to: string;
+    condition?: { path: string; op: string; value?: unknown };
+  }[];
+}
+
+/** Extract a graph object from the model's text: tolerate markdown fences / surrounding
+ *  prose by taking the outermost {...}. Returns null if it isn't parseable graph-shaped JSON. */
+function parseGraphJson(text: string): GraphDraft | null {
+  if (!text) return null;
+  let s = text.trim();
+  const fenced = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced) s = fenced[1].trim();
+  const start = s.indexOf("{");
+  const end = s.lastIndexOf("}");
+  if (start === -1 || end === -1 || end < start) return null;
+  try {
+    const obj = JSON.parse(s.slice(start, end + 1)) as unknown;
+    if (
+      !obj ||
+      typeof obj !== "object" ||
+      typeof (obj as GraphDraft).startNodeId !== "string" ||
+      !Array.isArray((obj as GraphDraft).nodes) ||
+      !Array.isArray((obj as GraphDraft).edges)
+    ) {
+      return null;
+    }
+    return obj as GraphDraft;
+  } catch {
+    return null;
   }
 }
 
