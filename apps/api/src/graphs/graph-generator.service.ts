@@ -6,6 +6,7 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from "@nestjs/common";
@@ -86,7 +87,18 @@ const GRAPH_OUTPUT_SCHEMA = {
                 type: "string",
                 enum: CONDITION_OPS,
               },
-              value: {},
+              // Concrete permissive type — Anthropic's structured-output validator rejects
+              // an empty `{}` schema ("any JSON value"). Covers the real condition values:
+              // primitives + a string array for the `in` operator.
+              value: {
+                anyOf: [
+                  { type: "string" },
+                  { type: "number" },
+                  { type: "boolean" },
+                  { type: "null" },
+                  { type: "array", items: { type: "string" } },
+                ],
+              },
             },
             required: ["path", "op"],
             additionalProperties: false,
@@ -129,6 +141,7 @@ ${nodeCatalogPrompt()}`;
 
 @Injectable()
 export class GraphGeneratorService {
+  private readonly logger = new Logger(GraphGeneratorService.name);
   constructor(private readonly credentials: CredentialsService) {}
 
   /**
@@ -240,9 +253,26 @@ export class GraphGeneratorService {
       });
       return result.output;
     } catch (e) {
+      // Surface the REAL upstream cause (previously swallowed by the catch-all 503):
+      // status/url/message/body — never the API key. This is how we tell a stale model id
+      // (404) apart from an overloaded provider (429/529) apart from a network failure.
+      this.logger.warn(
+        `graph generate failed (provider=${provider}): ${describeProviderError(e)}`,
+      );
       throw mapProviderError(e, provider);
     }
   }
+}
+
+/** Safe, key-free one-line summary of a provider error for logs. */
+function describeProviderError(e: unknown): string {
+  if (APICallError.isInstance(e)) {
+    const body =
+      typeof e.responseBody === "string" ? e.responseBody.slice(0, 300) : "";
+    return `APICallError status=${e.statusCode ?? "?"} url=${e.url ?? "?"} retryable=${e.isRetryable} msg=${e.message} body=${body}`;
+  }
+  if (e instanceof Error) return `${e.name}: ${e.message}`;
+  return String(e);
 }
 
 /** Narrow the loose model output to a GraphDef (validateGraph does deep checks). */
@@ -265,15 +295,32 @@ function toGraphDef(out: {
 /** Map provider failures to HTTP responses (mirrors the worker's AUTH/QUOTA split). */
 function mapProviderError(e: unknown, provider: string): HttpException {
   if (APICallError.isInstance(e)) {
-    if (e.statusCode === 401 || e.statusCode === 403) {
+    const status = e.statusCode;
+    if (status === 401 || status === 403) {
       return new BadRequestException(
         `Your ${provider} API key was rejected. Update it in Integrations.`,
       );
     }
-    if (e.statusCode === 429) {
+    // Model renamed/removed → a 404 (or a 400 "model not found"). Actionable, not a
+    // generic 503: the fix is to update the generator's model id, not "try again".
+    if (
+      status === 404 ||
+      (status === 400 && /model/i.test(e.responseBody ?? ""))
+    ) {
+      return new UnprocessableEntityException(
+        `The ${provider} model "${GEN_DEFAULT_MODEL[provider as GenProvider] ?? "?"}" is unavailable (it may have been renamed). Update the generator model id.`,
+      );
+    }
+    // 429 = rate/quota; 529 = Anthropic "overloaded"; other 5xx = provider down.
+    if (status === 429 || status === 529) {
       return new HttpException(
-        `${provider} rate limit or quota exceeded. Try again shortly.`,
+        `${provider} is rate-limited or overloaded. Try again shortly.`,
         HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    if (typeof status === "number" && status >= 500) {
+      return new ServiceUnavailableException(
+        `${provider} is temporarily unavailable (upstream ${status}). Try again shortly.`,
       );
     }
   }
