@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button, Icon, StatusPill } from "../../components";
 import { api, type RunSummary, UnauthorizedError } from "../../lib/api";
 import { isFailure, runStatusUi } from "../../lib/run-status";
+import { useMode } from "../../mode";
 
 const COLS = "1.5fr 1fr 0.9fr 0.7fr 0.7fr 0.4fr";
 
@@ -29,6 +30,8 @@ const FILTERS: { label: string; match: (s: string) => boolean }[] = [
 
 export function Runs() {
   const navigate = useNavigate();
+  const { mode } = useMode();
+  const simple = mode === "simple";
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
@@ -106,13 +109,17 @@ export function Runs() {
               marginTop: 2,
             }}
           >
-            Durable execution log{runs ? ` · ${runs.length} recent` : ""}
+            {simple
+              ? `Every time your automations ran${runs ? ` · ${runs.length} recent` : ""}`
+              : `Durable execution log${runs ? ` · ${runs.length} recent` : ""}`}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <Button icon="play" onClick={startRun} disabled={starting}>
-            {starting ? "Starting…" : "Start test run"}
-          </Button>
+          {!simple && (
+            <Button icon="play" onClick={startRun} disabled={starting}>
+              {starting ? "Starting…" : "Start test run"}
+            </Button>
+          )}
           <Button icon="refresh" onClick={() => void load()}>
             Refresh
           </Button>
@@ -190,7 +197,9 @@ export function Runs() {
           <input
             className="bare mono"
             style={{ height: 32, fontSize: "var(--text-xs)" }}
-            placeholder="run id or workflow…"
+            placeholder={
+              simple ? "run id or automation…" : "run id or workflow…"
+            }
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -214,7 +223,7 @@ export function Runs() {
           }}
         >
           <span>Run</span>
-          <span>Workflow</span>
+          <span>{simple ? "Automation" : "Workflow"}</span>
           <span>Status</span>
           <span>Cost</span>
           <span>Started</span>
@@ -240,7 +249,9 @@ export function Runs() {
               color: "var(--ink-3)",
             }}
           >
-            No runs yet — start one from the canvas or “Start test run”.
+            {simple
+              ? "No runs yet — open an automation and press “Run now”."
+              : "No runs yet — start one from the canvas or “Start test run”."}
           </div>
         )}
 

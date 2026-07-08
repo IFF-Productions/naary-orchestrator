@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Card, Icon } from "../../components";
 import { api, type AwaitingApproval, UnauthorizedError } from "../../lib/api";
+import { useMode } from "../../mode";
 
 /** Compact relative time from an ISO timestamp (no date lib). */
 function ago(iso: string): string {
@@ -24,6 +25,8 @@ function ago(iso: string): string {
  */
 export function Approvals() {
   const navigate = useNavigate();
+  const { mode } = useMode();
+  const simple = mode === "simple";
   const [items, setItems] = useState<AwaitingApproval[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [comments, setComments] = useState<Record<string, string>>({});
@@ -99,8 +102,8 @@ export function Approvals() {
           marginTop: 0,
         }}
       >
-        Runs waiting on your decision. Approving continues the workflow;
-        rejecting stops it.
+        Runs waiting on your decision. Approving continues the{" "}
+        {simple ? "automation" : "workflow"}; rejecting stops it.
       </p>
 
       {error && (
@@ -163,7 +166,8 @@ export function Approvals() {
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {it.workflowKey ?? "workflow"} · {ago(it.createdAt)}
+                  {it.workflowKey ?? (simple ? "automation" : "workflow")} ·{" "}
+                  {ago(it.createdAt)}
                 </button>
               </div>
               {it.instructions && (
