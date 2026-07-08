@@ -210,8 +210,10 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
   },
   wait: {
     group: "flow",
-    summary: "Durable delay (survives restarts). No output.",
-    config: "{ durationSeconds }",
+    summary:
+      "Durable pause (survives restarts): a fixed delay, or until an external system calls the run's resume URL.",
+    config:
+      "{ mode?: 'duration' | 'webhook', durationSeconds?, timeoutSeconds? }",
   },
   humanApproval: {
     group: "flow",

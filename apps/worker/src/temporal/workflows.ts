@@ -1,6 +1,7 @@
 import * as wf from "@temporalio/workflow";
 import {
   approvalSignal,
+  resumeSignal,
   stateQuery,
   webhookResponseQuery,
 } from "@naary/contracts";
@@ -8,6 +9,7 @@ import type {
   ApprovalInput,
   ExecutionState,
   ExecutionStatus,
+  ResumeInput,
   WebhookResponse,
 } from "@naary/contracts";
 import {
@@ -299,6 +301,8 @@ export async function runGraph(
     ? { ...resume.ctx }
     : { __input: input, ...(runCtx.seededCtx ?? {}) };
   let approval: ApprovalInput | undefined;
+  // Set by resumeSignal when an external system calls the run's resume URL (wait/webhook mode).
+  let webhookResume: ResumeInput | undefined;
   let status: ExecutionStatus = "running";
   let currentNodeId = resume?.startNodeId ?? graph.startNodeId;
   // The synchronous response a respondToWebhook node sets, exposed via a query for
@@ -332,6 +336,9 @@ export async function runGraph(
 
   wf.setHandler(approvalSignal, (s) => {
     approval = s;
+  });
+  wf.setHandler(resumeSignal, (s) => {
+    webhookResume = s;
   });
   wf.setHandler(stateQuery, (): ExecutionState => ({
     status,
@@ -1011,10 +1018,40 @@ export async function runGraph(
         return null;
       }
       case "wait": {
+        const waitCfg = cfg as unknown as WaitNodeConfig;
+        if (waitCfg.mode === "webhook") {
+          // Durable pause until an external system resumes the run (Signal + condition(),
+          // exactly like humanApproval — no polling, survives crashes/days). An optional
+          // durable timer auto-continues after timeoutSeconds so a stuck run isn't wedged.
+          status = "awaiting_webhook";
+          await syncStatus(); // surface the pause in the Runs list
+          const timeoutMs =
+            typeof waitCfg.timeoutSeconds === "number" &&
+            waitCfg.timeoutSeconds > 0
+              ? waitCfg.timeoutSeconds * 1000
+              : undefined;
+          let resumed = true;
+          if (timeoutMs !== undefined) {
+            resumed = await wf.condition(
+              () => webhookResume !== undefined,
+              timeoutMs,
+            );
+          } else {
+            await wf.condition(() => webhookResume !== undefined);
+          }
+          status = "running";
+          // Durable, branchable output: <nodeId>.resumed / .timedOut / .payload.
+          ctx[node.id] = {
+            resumed,
+            timedOut: !resumed,
+            payload: resumed ? (webhookResume?.payload ?? null) : null,
+          };
+          webhookResume = undefined; // consume so a later loop iteration can pause again
+          return null;
+        }
         // Durable delay via a Temporal timer — survives crashes, costs nothing
         // while waiting, and replays deterministically (no wall-clock, no
         // sleep-loop). Skip a non-positive duration so the node just passes through.
-        const waitCfg = cfg as unknown as WaitNodeConfig;
         const secs = waitCfg.durationSeconds ?? 0;
         if (secs > 0) await wf.sleep(secs * 1000);
         return null;

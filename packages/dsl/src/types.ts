@@ -797,8 +797,19 @@ export interface MergeNodeConfig {
  * costs nothing while waiting — never a busy-loop (CLAUDE.md rule 5). No output.
  */
 export interface WaitNodeConfig {
-  /** How long to pause, in seconds. <= 0 / omitted = no wait (pass through). */
+  /**
+   * "duration" (default) = pause for a fixed time; "webhook" = pause DURABLY until an
+   * external system POSTs the run's resume URL (survives crashes / days, like approval).
+   */
+  mode?: "duration" | "webhook";
+  /** duration mode: how long to pause, in seconds. <= 0 / omitted = no wait (pass through). */
   durationSeconds?: number;
+  /**
+   * webhook mode: optional max seconds to wait before auto-continuing (a durable timer,
+   * so it survives a crash). <= 0 / omitted = wait forever until resumed. On timeout the
+   * node's output is `{ resumed: false, timedOut: true }` so a graph can branch on it.
+   */
+  timeoutSeconds?: number;
 }
 
 /**
