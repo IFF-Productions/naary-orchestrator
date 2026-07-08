@@ -1002,12 +1002,28 @@ export function CanvasPage() {
                     .map((n) => n.id)}
                   hookUrls={hookUrls}
                   connections={connections}
+                  pins={pins}
                   canPin={!!workflowKey}
                   pinnedOutput={pins[selected.id]}
                   isPinned={Object.hasOwn(pins, selected.id)}
                   onPin={(output) => pinNode(selected.id, output)}
                   onUnpin={() => unpinNode(selected.id)}
-                  onTest={() => api.testNode(workflowKey, selected.id)}
+                  onTest={async (autofill) => {
+                    const r = await api.testNode(
+                      workflowKey,
+                      selected.id,
+                      undefined,
+                      autofill,
+                    );
+                    // auto-fill pins upstream nodes server-side — refresh so they show.
+                    if (autofill && workflowKey) {
+                      api
+                        .listPins(workflowKey)
+                        .then(setPins)
+                        .catch(() => undefined);
+                    }
+                    return r;
+                  }}
                   onChange={(patch) => updateConfig(selected.id, patch)}
                 />
               ) : selectedEdge ? (
@@ -1255,6 +1271,7 @@ function ConfigPanel({
   upstreamIds,
   hookUrls,
   connections,
+  pins,
   canPin,
   pinnedOutput,
   isPinned,
@@ -1267,12 +1284,13 @@ function ConfigPanel({
   upstreamIds: string[];
   hookUrls: string[];
   connections: ConnectionRow[];
+  pins: Record<string, unknown>;
   canPin: boolean;
   pinnedOutput: unknown;
   isPinned: boolean;
   onPin: (output: unknown) => Promise<void>;
   onUnpin: () => Promise<void>;
-  onTest: () => Promise<TestNodeResult>;
+  onTest: (autofillUpstream?: boolean) => Promise<TestNodeResult>;
   onChange: (patch: Record<string, unknown>) => void;
 }) {
   const kind = node.data.kind;
@@ -1340,16 +1358,30 @@ function ConfigPanel({
         >
           <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 6 }}>
             References — put <code>{"{{ node.path }}"}</code> in any field.
-            Click to copy a starter:
+            Pinned/tested nodes suggest real paths; click to copy:
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {upstreamIds.map((uid) => (
-              <CopyButton
-                key={uid}
-                text={`{{ ${uid}. }}`}
-                label={`{{ ${uid} }}`}
-              />
-            ))}
+            {upstreamIds.flatMap((uid) => {
+              const pin = pins[uid];
+              const paths =
+                pin && typeof pin === "object" ? leafPaths(pin) : [];
+              if (paths.length === 0) {
+                return [
+                  <CopyButton
+                    key={uid}
+                    text={`{{ ${uid}. }}`}
+                    label={`{{ ${uid} }}`}
+                  />,
+                ];
+              }
+              return paths.map((p) => (
+                <CopyButton
+                  key={`${uid}.${p}`}
+                  text={`{{ ${uid}.${p} }}`}
+                  label={`{{ ${uid}.${p} }}`}
+                />
+              ));
+            })}
           </div>
         </div>
       )}
@@ -3861,6 +3893,30 @@ function ConfigPanel({
  * interpreter never reads pins. Source in slice 1 is a manual JSON paste (single-node "Test" that
  * fills it is slice 2).
  */
+/** Dotted paths to the leaves of a pinned output — powers the reference picker's suggestions.
+ *  Capped in depth + count so a big object doesn't explode the chip list. Arrays are leaves
+ *  (the user indexes them). */
+function leafPaths(
+  value: unknown,
+  prefix = "",
+  depth = 0,
+  out: string[] = [],
+): string[] {
+  if (out.length >= 24 || depth > 3) return out;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (out.length >= 24) break;
+      const path = prefix ? `${prefix}.${k}` : k;
+      if (v && typeof v === "object" && !Array.isArray(v) && depth < 3) {
+        leafPaths(v, path, depth + 1, out);
+      } else {
+        out.push(path);
+      }
+    }
+  }
+  return out;
+}
+
 function PinSection({
   canPin,
   isPinned,
@@ -3874,20 +3930,21 @@ function PinSection({
   pinnedOutput: unknown;
   onPin: (output: unknown) => Promise<void>;
   onUnpin: () => Promise<void>;
-  onTest: () => Promise<TestNodeResult>;
+  onTest: (autofillUpstream?: boolean) => Promise<TestNodeResult>;
 }) {
   const [draft, setDraft] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [tested, setTested] = useState<TestNodeResult | null>(null);
+  const [autofill, setAutofill] = useState(false);
 
   async function runTest() {
     setTesting(true);
     setErr(null);
     setTested(null);
     try {
-      setTested(await onTest());
+      setTested(await onTest(autofill));
     } catch {
       setErr("Test failed — save the workflow, then try again.");
     } finally {
@@ -3951,8 +4008,16 @@ function PinSection({
     >
       {label}
 
-      {/* Single-node Test (slice 2): run this node against pins → output you can pin. */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+      {/* Single-node Test: run this node against pins → output you can pin. Optionally auto-run
+          + pin un-pinned upstream first (slice 4). */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 10,
+        }}
+      >
         <Button
           variant="secondary"
           size="sm"
@@ -3962,6 +4027,24 @@ function PinSection({
         >
           {testing ? "Testing…" : "Test node"}
         </Button>
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+            fontSize: 11,
+            color: "var(--ink-3)",
+            cursor: "pointer",
+          }}
+          title="Run + pin any un-pinned upstream nodes first (can call real activities)"
+        >
+          <input
+            type="checkbox"
+            checked={autofill}
+            onChange={(e) => setAutofill(e.target.checked)}
+          />
+          auto-fill upstream
+        </label>
       </div>
       {tested && tested.pure && (
         <div style={{ marginBottom: 10 }}>
