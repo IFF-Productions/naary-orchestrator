@@ -69,9 +69,9 @@ const CONNECTION_LABEL: Record<ConnectionRow["status"], string> = {
 
 const monoLabel: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
-  fontSize: 10,
-  fontWeight: 600,
-  letterSpacing: "0.1em",
+  fontSize: "var(--text-2xs)",
+  fontWeight: "var(--weight-semibold)",
+  letterSpacing: "var(--tracking-label)",
   color: "var(--ink-3)",
   textTransform: "uppercase",
 };
@@ -88,6 +88,7 @@ function UrlCopy({ url }: { url: string }) {
     <button
       type="button"
       title="Copy URL"
+      className="btn btn-sm btn-secondary"
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(url);
@@ -97,19 +98,7 @@ function UrlCopy({ url }: { url: string }) {
           /* clipboard unavailable — the URL is still visible to copy manually */
         }
       }}
-      style={{
-        flex: "none",
-        height: 26,
-        padding: "0 10px",
-        borderRadius: 6,
-        border: "1px solid var(--line-2)",
-        background: "var(--surface)",
-        color: "var(--ink-2)",
-        fontSize: 11,
-        fontWeight: 600,
-        cursor: "pointer",
-        fontFamily: "inherit",
-      }}
+      style={{ flex: "none" }}
     >
       {copied ? "Copied ✓" : "Copy"}
     </button>
@@ -161,19 +150,24 @@ function McpAccess() {
   }
 
   return (
-    <div style={{ marginBottom: 26 }}>
-      <div style={{ ...monoLabel, marginBottom: 11 }}>MCP access</div>
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ ...monoLabel, marginBottom: 12 }}>MCP access</div>
       <div
         style={{
           background: "var(--card)",
           border: "1px solid var(--line)",
-          borderRadius: 12,
+          borderRadius: "var(--radius-lg)",
           boxShadow: "var(--shadow-card)",
           padding: 16,
         }}
       >
         <div
-          style={{ fontSize: 12.5, color: "var(--ink-2)", marginBottom: 10 }}
+          style={{
+            fontSize: "var(--text-body)",
+            lineHeight: "var(--leading-snug)",
+            color: "var(--ink-2)",
+            marginBottom: 12,
+          }}
         >
           Point an MCP client (Claude Desktop, Cursor, an SDK agent) at this
           endpoint with a token below to build &amp; run your workflows as
@@ -181,20 +175,18 @@ function McpAccess() {
         </div>
 
         {/* endpoint URL */}
-        <div style={{ fontSize: 11, ...monoLabel, marginBottom: 5 }}>
-          Endpoint
-        </div>
-        <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+        <div style={{ ...monoLabel, marginBottom: 6 }}>Endpoint</div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
           <span
             className="mono"
             style={{
               flex: 1,
               minWidth: 0,
-              fontSize: 12,
+              fontSize: "var(--text-sm)",
               color: "var(--ink)",
               background: "var(--card-2)",
               border: "1px solid var(--line-2)",
-              borderRadius: 6,
+              borderRadius: "var(--radius-sm)",
               padding: "7px 9px",
               wordBreak: "break-all",
             }}
@@ -210,7 +202,7 @@ function McpAccess() {
             style={{
               marginBottom: 16,
               padding: 12,
-              borderRadius: 8,
+              borderRadius: "var(--radius-md)",
               background: "var(--brand-soft)",
               border:
                 "1px solid color-mix(in srgb, var(--brand) 45%, transparent)",
@@ -218,25 +210,25 @@ function McpAccess() {
           >
             <div
               style={{
-                fontSize: 11.5,
-                fontWeight: 600,
+                fontSize: "var(--text-sm)",
+                fontWeight: "var(--weight-semibold)",
                 color: "var(--brand)",
-                marginBottom: 6,
+                marginBottom: 8,
               }}
             >
               Copy this token now — it won't be shown again.
             </div>
-            <div style={{ display: "flex", gap: 6 }}>
+            <div style={{ display: "flex", gap: 8 }}>
               <span
                 className="mono"
                 style={{
                   flex: 1,
                   minWidth: 0,
-                  fontSize: 12,
+                  fontSize: "var(--text-sm)",
                   color: "var(--ink)",
                   background: "var(--card)",
                   border: "1px solid var(--line-2)",
-                  borderRadius: 6,
+                  borderRadius: "var(--radius-sm)",
                   padding: "7px 9px",
                   wordBreak: "break-all",
                 }}
@@ -261,11 +253,11 @@ function McpAccess() {
             style={{
               flex: 1,
               padding: "7px 9px",
-              borderRadius: 7,
+              borderRadius: "var(--radius-sm)",
               border: "1px solid var(--line-2)",
               background: "var(--card)",
               color: "var(--ink)",
-              fontSize: 13,
+              fontSize: "var(--text-body)",
             }}
           />
           <Button variant="primary" icon="plus" disabled={busy} onClick={mint}>
@@ -275,9 +267,9 @@ function McpAccess() {
         {err && (
           <div
             style={{
-              fontSize: 12,
+              fontSize: "var(--text-sm)",
               color: "var(--state-error)",
-              marginBottom: 10,
+              marginBottom: 12,
             }}
           >
             {err}
@@ -286,7 +278,7 @@ function McpAccess() {
 
         {/* list */}
         {tokens && tokens.length > 0 && (
-          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 6 }}>
+          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 4 }}>
             {tokens.map((t) => (
               <div
                 key={t.id}
@@ -294,20 +286,26 @@ function McpAccess() {
                   display: "flex",
                   alignItems: "center",
                   gap: 12,
-                  padding: "9px 0",
+                  padding: "10px 0",
                 }}
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     style={{
-                      fontSize: 12.5,
-                      fontWeight: 600,
+                      fontSize: "var(--text-body)",
+                      fontWeight: "var(--weight-semibold)",
                       color: "var(--ink)",
                     }}
                   >
                     {t.label}
                   </div>
-                  <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+                  <div
+                    style={{
+                      fontSize: "var(--text-xs)",
+                      color: "var(--ink-3)",
+                      marginTop: 2,
+                    }}
+                  >
                     created {new Date(t.createdAt).toLocaleDateString()} ·{" "}
                     {t.lastUsedAt
                       ? `last used ${new Date(t.lastUsedAt).toLocaleDateString()}`
@@ -316,6 +314,7 @@ function McpAccess() {
                 </div>
                 <button
                   type="button"
+                  className="btn btn-sm btn-secondary"
                   onClick={() => {
                     if (
                       !window.confirm(
@@ -327,17 +326,6 @@ function McpAccess() {
                       .revokeApiToken(t.id)
                       .then(() => load())
                       .catch(() => setErr("Could not revoke the token."));
-                  }}
-                  style={{
-                    height: 28,
-                    padding: "0 12px",
-                    borderRadius: 6,
-                    border: "1px solid var(--line-2)",
-                    background: "var(--surface)",
-                    color: "var(--ink-2)",
-                    fontSize: 11.5,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
                   }}
                 >
                   Revoke
@@ -394,15 +382,21 @@ export function Integrations() {
       <div style={{ marginBottom: 20 }}>
         <div
           style={{
-            fontSize: 21,
-            fontWeight: 700,
+            fontSize: "var(--text-title)",
+            fontWeight: "var(--weight-bold)",
             color: "var(--ink)",
-            letterSpacing: "-0.01em",
+            letterSpacing: "var(--tracking-tight)",
           }}
         >
           Integrations
         </div>
-        <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
+        <div
+          style={{
+            fontSize: "var(--text-body)",
+            color: "var(--ink-2)",
+            marginTop: 4,
+          }}
+        >
           MCP servers, model providers and connected apps.
         </div>
       </div>
@@ -410,14 +404,14 @@ export function Integrations() {
       {error && (
         <div
           style={{
-            marginBottom: 18,
-            padding: "9px 12px",
-            borderRadius: 8,
+            marginBottom: 20,
+            padding: "10px 12px",
+            borderRadius: "var(--radius-md)",
             background: "var(--error-soft)",
             border:
               "1px solid color-mix(in srgb, var(--state-error) 40%, transparent)",
             color: "var(--state-error)",
-            fontSize: 12,
+            fontSize: "var(--text-sm)",
           }}
         >
           {error}
@@ -428,19 +422,19 @@ export function Integrations() {
       <McpAccess />
 
       {/* ===== Add integration (collapsed create forms) ===== */}
-      <div id="add-integrations" style={{ marginBottom: 26 }}>
-        <div style={{ ...monoLabel, marginBottom: 11 }}>Add integration</div>
+      <div id="add-integrations" style={{ marginBottom: 24 }}>
+        <div style={{ ...monoLabel, marginBottom: 12 }}>Add integration</div>
         {tenant && <AddIntegrations tenant={tenant} onChanged={load} />}
       </div>
 
       {/* ===== Model providers ===== */}
-      <div style={{ ...monoLabel, marginBottom: 11 }}>Model providers</div>
+      <div style={{ ...monoLabel, marginBottom: 12 }}>Model providers</div>
       <div
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
           gap: 12,
-          marginBottom: 26,
+          marginBottom: 24,
         }}
       >
         {providers.map((p) => (
@@ -462,7 +456,7 @@ export function Integrations() {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          marginBottom: 11,
+          marginBottom: 12,
         }}
       >
         <span style={monoLabel}>
@@ -478,18 +472,19 @@ export function Integrations() {
           style={{
             height: 30,
             padding: "0 12px",
-            borderRadius: 7,
+            borderRadius: "var(--radius-sm)",
             border:
               "1px solid color-mix(in srgb, var(--brand) 50%, transparent)",
             background: "var(--brand-soft)",
             color: "var(--brand)",
-            fontSize: 11.5,
-            fontWeight: 600,
+            fontSize: "var(--text-sm)",
+            fontWeight: "var(--weight-semibold)",
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
             gap: 6,
             fontFamily: "inherit",
+            transition: "background 0.14s ease, border-color 0.14s ease",
           }}
         >
           <Icon name="plus" size={13} strokeWidth={2} />
@@ -501,19 +496,31 @@ export function Integrations() {
         style={{
           background: "var(--card)",
           border: "1px solid var(--line)",
-          borderRadius: 12,
+          borderRadius: "var(--radius-lg)",
           boxShadow: "var(--shadow-card)",
           overflow: "hidden",
-          marginBottom: 26,
+          marginBottom: 24,
         }}
       >
         {loading && (
-          <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-3)" }}>
+          <div
+            style={{
+              padding: 16,
+              fontSize: "var(--text-body)",
+              color: "var(--ink-3)",
+            }}
+          >
             Loading…
           </div>
         )}
         {!loading && connections?.length === 0 && (
-          <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-2)" }}>
+          <div
+            style={{
+              padding: 16,
+              fontSize: "var(--text-body)",
+              color: "var(--ink-3)",
+            }}
+          >
             No connections yet — add one from "Add integration" above.
           </div>
         )}
@@ -523,8 +530,8 @@ export function Integrations() {
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 13,
-              padding: "13px 18px",
+              gap: 12,
+              padding: "14px 16px",
               borderBottom:
                 i < (connections?.length ?? 0) - 1
                   ? "1px solid var(--line)"
@@ -535,7 +542,7 @@ export function Integrations() {
               style={{
                 width: 34,
                 height: 34,
-                borderRadius: 8,
+                borderRadius: "var(--radius-md)",
                 background:
                   "color-mix(in srgb, var(--node-mcp) 15%, transparent)",
                 color: "var(--node-mcp)",
@@ -550,12 +557,20 @@ export function Integrations() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 className="mono"
-                style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}
+                style={{
+                  fontSize: "var(--text-body)",
+                  fontWeight: "var(--weight-semibold)",
+                  color: "var(--ink)",
+                }}
               >
                 {c.label}
               </div>
               <div
-                style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 1 }}
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--ink-3)",
+                  marginTop: 2,
+                }}
               >
                 {c.type} · {c.serverUrl}
               </div>
@@ -566,6 +581,7 @@ export function Integrations() {
             />
             <button
               type="button"
+              className="btn btn-sm btn-secondary"
               disabled={disconnecting === c.id}
               onClick={() => {
                 if (!tenant || disconnecting) return;
@@ -583,18 +599,6 @@ export function Integrations() {
                   .catch(() => setError("Could not disconnect the connection."))
                   .finally(() => setDisconnecting(null));
               }}
-              style={{
-                height: 28,
-                padding: "0 12px",
-                borderRadius: 6,
-                border: "1px solid var(--line-2)",
-                background: "var(--surface)",
-                color: "var(--ink-2)",
-                fontSize: 11.5,
-                cursor: disconnecting === c.id ? "default" : "pointer",
-                opacity: disconnecting === c.id ? 0.6 : 1,
-                fontFamily: "inherit",
-              }}
             >
               {disconnecting === c.id ? "Disconnecting…" : "Disconnect"}
             </button>
@@ -603,23 +607,35 @@ export function Integrations() {
       </div>
 
       {/* ===== Webhook endpoints ===== */}
-      <div style={{ ...monoLabel, marginBottom: 11 }}>Webhook endpoints</div>
+      <div style={{ ...monoLabel, marginBottom: 12 }}>Webhook endpoints</div>
       <div
         style={{
           background: "var(--card)",
           border: "1px solid var(--line)",
-          borderRadius: 12,
+          borderRadius: "var(--radius-lg)",
           boxShadow: "var(--shadow-card)",
           overflow: "hidden",
         }}
       >
         {loading && (
-          <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-3)" }}>
+          <div
+            style={{
+              padding: 16,
+              fontSize: "var(--text-body)",
+              color: "var(--ink-3)",
+            }}
+          >
             Loading…
           </div>
         )}
         {!loading && webhooks?.length === 0 && (
-          <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-2)" }}>
+          <div
+            style={{
+              padding: 16,
+              fontSize: "var(--text-body)",
+              color: "var(--ink-3)",
+            }}
+          >
             No webhook endpoints yet — register one to trigger a workflow.
           </div>
         )}
@@ -629,8 +645,8 @@ export function Integrations() {
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 13,
-              padding: "13px 18px",
+              gap: 12,
+              padding: "14px 16px",
               borderBottom:
                 i < (webhooks?.length ?? 0) - 1
                   ? "1px solid var(--line)"
@@ -641,7 +657,7 @@ export function Integrations() {
               style={{
                 width: 34,
                 height: 34,
-                borderRadius: 8,
+                borderRadius: "var(--radius-md)",
                 background:
                   "color-mix(in srgb, var(--node-trigger) 15%, transparent)",
                 color: "var(--node-trigger)",
@@ -657,8 +673,8 @@ export function Integrations() {
               <div
                 className="mono"
                 style={{
-                  fontSize: 12,
-                  fontWeight: 600,
+                  fontSize: "var(--text-sm)",
+                  fontWeight: "var(--weight-semibold)",
                   color: "var(--ink)",
                   whiteSpace: "nowrap",
                   overflow: "hidden",
@@ -669,7 +685,11 @@ export function Integrations() {
                 {webhookUrl(w.id)}
               </div>
               <div
-                style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 1 }}
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--ink-3)",
+                  marginTop: 2,
+                }}
               >
                 POST · {w.provider} · {w.workflowId}
               </div>
@@ -678,6 +698,7 @@ export function Integrations() {
             <StatusPill state="done" label="Active" />
             <button
               type="button"
+              className="btn btn-sm btn-secondary"
               disabled={deletingHook === w.id}
               title="Delete endpoint"
               onClick={() => {
@@ -696,18 +717,6 @@ export function Integrations() {
                   .catch(() => setError("Could not delete the webhook."))
                   .finally(() => setDeletingHook(null));
               }}
-              style={{
-                height: 28,
-                padding: "0 12px",
-                borderRadius: 6,
-                border: "1px solid var(--line-2)",
-                background: "var(--surface)",
-                color: "var(--ink-2)",
-                fontSize: 11.5,
-                cursor: deletingHook === w.id ? "default" : "pointer",
-                opacity: deletingHook === w.id ? 0.6 : 1,
-                fontFamily: "inherit",
-              }}
             >
               {deletingHook === w.id ? "Deleting…" : "Delete"}
             </button>
@@ -723,17 +732,17 @@ export function Integrations() {
 const fieldStyle: React.CSSProperties = {
   width: "100%",
   padding: "7px 9px",
-  borderRadius: 7,
+  borderRadius: "var(--radius-sm)",
   border: "1px solid var(--line-2)",
   background: "var(--card)",
   color: "var(--ink)",
-  fontSize: 13,
+  fontSize: "var(--text-body)",
 };
 const fieldLabel: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--text-xs)",
   color: "var(--ink-2)",
   display: "block",
-  marginBottom: 4,
+  marginBottom: 6,
 };
 
 /** A card that collapses to a single clickable header row (title + subtitle + accent bar) and
@@ -757,7 +766,7 @@ function Collapsible({
       style={{
         background: "var(--card)",
         border: "1px solid var(--line)",
-        borderRadius: 11,
+        borderRadius: "var(--radius-lg)",
         boxShadow: "var(--shadow-card)",
         overflow: "hidden",
       }}
@@ -771,7 +780,7 @@ function Collapsible({
           display: "flex",
           alignItems: "center",
           gap: 12,
-          padding: "12px 15px",
+          padding: "12px 16px",
           background: "transparent",
           border: "none",
           cursor: "pointer",
@@ -783,7 +792,7 @@ function Collapsible({
           style={{
             width: 4,
             height: 26,
-            borderRadius: 2,
+            borderRadius: "var(--radius-full)",
             background: accent,
             flex: "none",
           }}
@@ -792,8 +801,8 @@ function Collapsible({
           <span
             style={{
               display: "block",
-              fontSize: 13,
-              fontWeight: 600,
+              fontSize: "var(--text-body)",
+              fontWeight: "var(--weight-semibold)",
               color: "var(--ink)",
             }}
           >
@@ -803,9 +812,9 @@ function Collapsible({
             <span
               style={{
                 display: "block",
-                fontSize: 11,
+                fontSize: "var(--text-xs)",
                 color: "var(--ink-3)",
-                marginTop: 1,
+                marginTop: 2,
               }}
             >
               {subtitle}
@@ -845,7 +854,7 @@ function AddIntegrations({
         display: "flex",
         flexDirection: "column",
         gap: 10,
-        marginBottom: 26,
+        marginBottom: 24,
       }}
     >
       <Collapsible
@@ -987,7 +996,14 @@ function DatabaseForm({
           placeholder={dsnPlaceholder}
         />
       </div>
-      <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 12 }}>
+      <div
+        style={{
+          fontSize: "var(--text-xs)",
+          lineHeight: "var(--leading-snug)",
+          color: "var(--ink-3)",
+          marginBottom: 12,
+        }}
+      >
         Used by the SQL Query node (read-only). The connection string is stored
         encrypted and never shown again.
       </div>
@@ -1000,7 +1016,9 @@ function DatabaseForm({
           {busy ? "Connecting…" : "Connect"}
         </Button>
         {msg && (
-          <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{msg}</span>
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
+            {msg}
+          </span>
         )}
       </div>
     </>
@@ -1079,7 +1097,14 @@ function SmtpForm({
           placeholder="smtps://user:pass@smtp.example.com:465"
         />
       </div>
-      <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 12 }}>
+      <div
+        style={{
+          fontSize: "var(--text-xs)",
+          lineHeight: "var(--leading-snug)",
+          color: "var(--ink-3)",
+          marginBottom: 12,
+        }}
+      >
         Used by the Send Email node. The URI (with credentials) is stored
         encrypted and never shown again.
       </div>
@@ -1092,7 +1117,9 @@ function SmtpForm({
           {busy ? "Connecting…" : "Connect"}
         </Button>
         {msg && (
-          <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{msg}</span>
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
+            {msg}
+          </span>
         )}
       </div>
     </>
@@ -1160,7 +1187,14 @@ function SigningForm({
           placeholder="a long random secret"
         />
       </div>
-      <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 12 }}>
+      <div
+        style={{
+          fontSize: "var(--text-xs)",
+          lineHeight: "var(--leading-snug)",
+          color: "var(--ink-3)",
+          marginBottom: 12,
+        }}
+      >
         Used by the HMAC and JWT nodes to sign payloads. The key is stored
         encrypted and never shown again.
       </div>
@@ -1173,7 +1207,9 @@ function SigningForm({
           {busy ? "Saving…" : "Save"}
         </Button>
         {msg && (
-          <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{msg}</span>
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
+            {msg}
+          </span>
         )}
       </div>
     </>
@@ -1297,7 +1333,9 @@ function ConnectForm({
           {busy ? "Connecting…" : "Connect"}
         </Button>
         {msg && (
-          <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{msg}</span>
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
+            {msg}
+          </span>
         )}
       </div>
     </>
@@ -1368,7 +1406,9 @@ function WebhookForm({
           {busy ? "Registering…" : "Register"}
         </Button>
         {msg && (
-          <span style={{ fontSize: 12, color: "var(--state-error)" }}>
+          <span
+            style={{ fontSize: "var(--text-sm)", color: "var(--state-error)" }}
+          >
             {msg}
           </span>
         )}
@@ -1426,24 +1466,43 @@ function WebhookHowTo({
     <div
       style={{
         marginTop: 12,
-        padding: 10,
-        borderRadius: 8,
-        background: "var(--card-2, var(--surface))",
-        border: "1px solid var(--line)",
+        padding: 12,
+        borderRadius: "var(--radius-md)",
+        background: "var(--brand-soft)",
+        border: "1px solid color-mix(in srgb, var(--brand) 45%, transparent)",
       }}
     >
-      <div style={{ fontSize: 11, color: "var(--ink-2)", marginBottom: 6 }}>
+      <div
+        style={{
+          fontSize: "var(--text-xs)",
+          lineHeight: "var(--leading-snug)",
+          color: "var(--ink-2)",
+          marginBottom: 8,
+        }}
+      >
         Save this signing secret now — it is shown <strong>only once</strong>.
         The webhook is authenticated by an{" "}
         <strong>HMAC-SHA256 signature over the raw body</strong> (no bearer
         token).
       </div>
-      <div className="mono" style={{ fontSize: 11, marginBottom: 4 }}>
+      <div
+        className="mono"
+        style={{
+          fontSize: "var(--text-xs)",
+          color: "var(--ink-3)",
+          marginBottom: 4,
+        }}
+      >
         POST {registered.ingressPath}
       </div>
       <div
         className="mono"
-        style={{ fontSize: 11, wordBreak: "break-all", color: "var(--brand)" }}
+        style={{
+          fontSize: "var(--text-xs)",
+          fontWeight: "var(--weight-semibold)",
+          wordBreak: "break-all",
+          color: "var(--brand)",
+        }}
       >
         {registered.signingSecret}
       </div>
@@ -1453,10 +1512,16 @@ function WebhookHowTo({
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          margin: "12px 0 4px",
+          margin: "12px 0 6px",
         }}
       >
-        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)" }}>
+        <div
+          style={{
+            fontSize: "var(--text-xs)",
+            fontWeight: "var(--weight-semibold)",
+            color: "var(--ink-2)",
+          }}
+        >
           Trigger it (copy &amp; run)
         </div>
         <Button variant="secondary" onClick={() => void copy()}>
@@ -1468,10 +1533,10 @@ function WebhookHowTo({
         style={{
           margin: 0,
           padding: 10,
-          borderRadius: 6,
+          borderRadius: "var(--radius-sm)",
           background: "var(--surface)",
           border: "1px solid var(--line)",
-          fontSize: 10.5,
+          fontSize: "var(--text-2xs)",
           lineHeight: 1.5,
           overflowX: "auto",
           whiteSpace: "pre",
@@ -1480,7 +1545,13 @@ function WebhookHowTo({
       >
         {curl}
       </pre>
-      <div style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 6 }}>
+      <div
+        style={{
+          fontSize: "var(--text-2xs)",
+          color: "var(--ink-3)",
+          marginTop: 6,
+        }}
+      >
         Replace <code>&lt;YOUR_API_URL&gt;</code> with your API host. Sign the
         exact bytes you send. A repeat with the same <code>x-delivery-id</code>{" "}
         is ignored.
@@ -1534,8 +1605,8 @@ function ProviderCard({
       style={{
         background: "var(--card)",
         border: "1px solid var(--line)",
-        borderRadius: 11,
-        padding: 15,
+        borderRadius: "var(--radius-lg)",
+        padding: 16,
         boxShadow: "var(--shadow-card)",
       }}
     >
@@ -1550,14 +1621,14 @@ function ProviderCard({
           style={{
             width: 32,
             height: 32,
-            borderRadius: 8,
+            borderRadius: "var(--radius-md)",
             background: `color-mix(in srgb, ${p.color} 16%, transparent)`,
             color: p.color,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontWeight: 700,
-            fontSize: 14,
+            fontWeight: "var(--weight-bold)",
+            fontSize: "var(--text-md)",
           }}
         >
           {p.initial}
@@ -1567,38 +1638,44 @@ function ProviderCard({
           style={{
             width: 8,
             height: 8,
-            borderRadius: "50%",
+            borderRadius: "var(--radius-full)",
             background: connected ? "var(--state-done)" : "var(--line-2)",
           }}
         />
       </div>
       <div
         style={{
-          fontSize: 13,
-          fontWeight: 600,
+          fontSize: "var(--text-body)",
+          fontWeight: "var(--weight-semibold)",
           color: "var(--ink)",
-          marginTop: 11,
+          marginTop: 12,
         }}
       >
         {p.name}
       </div>
-      <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>
+      <div
+        style={{
+          fontSize: "var(--text-xs)",
+          color: "var(--ink-3)",
+          marginTop: 2,
+        }}
+      >
         {p.models}
       </div>
 
       {!p.supported ? (
         <div
           style={{
-            marginTop: 11,
-            fontSize: 11.5,
-            fontWeight: 600,
+            marginTop: 12,
+            fontSize: "var(--text-sm)",
+            fontWeight: "var(--weight-semibold)",
             color: "var(--ink-3)",
           }}
         >
           Coming soon
         </div>
       ) : open ? (
-        <div style={{ marginTop: 10 }}>
+        <div style={{ marginTop: 12 }}>
           <input
             type="password"
             value={apiKey}
@@ -1608,19 +1685,19 @@ function ProviderCard({
             style={{
               width: "100%",
               padding: "6px 8px",
-              borderRadius: 7,
+              borderRadius: "var(--radius-sm)",
               border: "1px solid var(--line-2)",
               background: "var(--bg)",
               color: "var(--ink)",
-              fontSize: 12,
+              fontSize: "var(--text-sm)",
             }}
           />
           {err && (
             <div
               style={{
-                fontSize: 11,
+                fontSize: "var(--text-xs)",
                 color: "var(--state-error)",
-                marginTop: 5,
+                marginTop: 6,
               }}
             >
               {err}
@@ -1644,14 +1721,16 @@ function ProviderCard({
           type="button"
           onClick={() => setOpen(true)}
           style={{
-            marginTop: 11,
+            marginTop: 12,
             background: "transparent",
             border: "none",
             padding: 0,
             cursor: "pointer",
-            fontSize: 11.5,
-            fontWeight: 600,
+            fontSize: "var(--text-sm)",
+            fontWeight: "var(--weight-semibold)",
             color: "var(--brand)",
+            fontFamily: "inherit",
+            transition: "color 0.14s ease",
           }}
         >
           {connected ? "Update key" : "Add key"}

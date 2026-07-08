@@ -20,7 +20,7 @@ import { RunVolumeChart, SpendChart } from "./charts";
 const cardStyle: React.CSSProperties = {
   background: "var(--card)",
   border: "1px solid var(--line)",
-  borderRadius: 12,
+  borderRadius: "var(--radius-lg)",
   boxShadow: "var(--shadow-card)",
 };
 
@@ -37,7 +37,10 @@ function ago(iso: string): string {
 }
 
 function fmtUsd(n: number): string {
-  return `$${n.toFixed(2)}`;
+  return `$${n.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: n > 0 && n < 1 ? 4 : 2,
+  })}`;
 }
 
 function fmtTokens(n: number): string {
@@ -85,14 +88,16 @@ export function Observability() {
   }, []);
 
   const stats = [
-    { label: "Recent runs", value: runs ? `${runs.length}` : "—" },
+    { label: "Recent runs", value: runs ? `${runs.length}` : "—", mono: false },
     {
       label: "Tokens used",
       value: usage ? fmtTokens(usage.totalTokens) : "—",
+      mono: true,
     },
     {
       label: "Total cost",
       value: usage ? fmtUsd(usage.totalCostUsd) : "—",
+      mono: true,
     },
   ];
 
@@ -108,15 +113,21 @@ export function Observability() {
       <div style={{ marginBottom: 18 }}>
         <div
           style={{
-            fontSize: 21,
-            fontWeight: 700,
+            fontSize: "var(--text-title)",
+            fontWeight: "var(--weight-bold)",
             color: "var(--ink)",
-            letterSpacing: "-0.01em",
+            letterSpacing: "var(--tracking-tight)",
           }}
         >
           Observability
         </div>
-        <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
+        <div
+          style={{
+            fontSize: "var(--text-body)",
+            color: "var(--ink-2)",
+            marginTop: 4,
+          }}
+        >
           Runs and token/cost usage for your tenant.
         </div>
       </div>
@@ -125,13 +136,13 @@ export function Observability() {
         <div
           style={{
             marginBottom: 16,
-            padding: "9px 12px",
-            borderRadius: 8,
+            padding: "10px 12px",
+            borderRadius: "var(--radius-sm)",
             background: "var(--error-soft)",
             border:
               "1px solid color-mix(in srgb, var(--state-error) 40%, transparent)",
             color: "var(--state-error)",
-            fontSize: 12,
+            fontSize: "var(--text-sm)",
           }}
         >
           {error}
@@ -162,13 +173,26 @@ export function Observability() {
       >
         {stats.map((s) => (
           <div key={s.label} style={{ ...cardStyle, padding: 16 }}>
-            <div style={{ fontSize: 12, color: "var(--ink-2)" }}>{s.label}</div>
             <div
+              className="mono"
               style={{
-                fontSize: 26,
-                fontWeight: 700,
+                fontSize: "var(--text-2xs)",
+                fontWeight: "var(--weight-semibold)",
+                letterSpacing: "var(--tracking-label)",
+                textTransform: "uppercase",
+                color: "var(--ink-3)",
+              }}
+            >
+              {s.label}
+            </div>
+            <div
+              className={s.mono ? "mono" : undefined}
+              style={{
+                fontSize: "var(--text-xl)",
+                fontWeight: "var(--weight-bold)",
                 color: "var(--ink)",
-                marginTop: 6,
+                marginTop: 8,
+                letterSpacing: "var(--tracking-tight)",
               }}
             >
               {loading ? "…" : s.value}
@@ -189,28 +213,23 @@ export function Observability() {
         <div style={{ ...cardStyle, overflow: "hidden" }}>
           <div
             style={{
-              padding: "15px 18px 11px",
-              fontSize: 13,
-              fontWeight: 600,
+              padding: "16px 18px 12px",
+              fontSize: "var(--text-body)",
+              fontWeight: "var(--weight-semibold)",
               color: "var(--ink)",
             }}
           >
             Recent runs
           </div>
           <div
-            className="mono"
+            className="mono-label"
             style={{
               display: "grid",
               gridTemplateColumns: "1.6fr 1fr 0.4fr",
               gap: 10,
-              padding: "9px 18px",
+              padding: "8px 18px",
               borderTop: "1px solid var(--line)",
               borderBottom: "1px solid var(--line)",
-              fontSize: 9.5,
-              fontWeight: 600,
-              letterSpacing: "0.08em",
-              color: "var(--ink-3)",
-              textTransform: "uppercase",
             }}
           >
             <span>Run</span>
@@ -219,12 +238,24 @@ export function Observability() {
           </div>
 
           {loading && (
-            <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-3)" }}>
+            <div
+              style={{
+                padding: 18,
+                fontSize: "var(--text-body)",
+                color: "var(--ink-3)",
+              }}
+            >
               Loading…
             </div>
           )}
           {!loading && !error && runs?.length === 0 && (
-            <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-2)" }}>
+            <div
+              style={{
+                padding: 18,
+                fontSize: "var(--text-body)",
+                color: "var(--ink-3)",
+              }}
+            >
               No runs yet — start one from the Runs screen.
             </div>
           )}
@@ -249,13 +280,13 @@ export function Observability() {
               >
                 <span
                   className="mono"
-                  style={{ fontSize: 11.5, color: "var(--brand)" }}
+                  style={{ fontSize: "var(--text-xs)", color: "var(--brand)" }}
                 >
                   {r.workflowId}
                 </span>
                 <span
                   className="mono"
-                  style={{ fontSize: 11, color: "var(--ink-3)" }}
+                  style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
                 >
                   {ago(r.createdAt)}
                 </span>
@@ -274,28 +305,23 @@ export function Observability() {
         <div style={{ ...cardStyle, overflow: "hidden" }}>
           <div
             style={{
-              padding: "15px 18px 11px",
-              fontSize: 13,
-              fontWeight: 600,
+              padding: "16px 18px 12px",
+              fontSize: "var(--text-body)",
+              fontWeight: "var(--weight-semibold)",
               color: "var(--ink)",
             }}
           >
             Usage by model
           </div>
           <div
-            className="mono"
+            className="mono-label"
             style={{
               display: "grid",
               gridTemplateColumns: "2fr 1fr 1fr",
               gap: 10,
-              padding: "9px 18px",
+              padding: "8px 18px",
               borderTop: "1px solid var(--line)",
               borderBottom: "1px solid var(--line)",
-              fontSize: 9.5,
-              fontWeight: 600,
-              letterSpacing: "0.08em",
-              color: "var(--ink-3)",
-              textTransform: "uppercase",
             }}
           >
             <span>Model</span>
@@ -304,12 +330,24 @@ export function Observability() {
           </div>
 
           {loading && (
-            <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-3)" }}>
+            <div
+              style={{
+                padding: 18,
+                fontSize: "var(--text-body)",
+                color: "var(--ink-3)",
+              }}
+            >
               Loading…
             </div>
           )}
           {!loading && !error && byModel.length === 0 && (
-            <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-2)" }}>
+            <div
+              style={{
+                padding: 18,
+                fontSize: "var(--text-body)",
+                color: "var(--ink-3)",
+              }}
+            >
               No usage recorded yet.
             </div>
           )}
@@ -332,9 +370,9 @@ export function Observability() {
                 <span style={{ minWidth: 0 }}>
                   <span
                     style={{
-                      fontSize: 12.5,
+                      fontSize: "var(--text-body)",
                       color: "var(--ink)",
-                      fontWeight: 500,
+                      fontWeight: "var(--weight-medium)",
                       display: "block",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
@@ -355,13 +393,13 @@ export function Observability() {
                 </span>
                 <span
                   className="mono"
-                  style={{ fontSize: 11.5, color: "var(--ink-2)" }}
+                  style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
                 >
                   {fmtTokens(m.totalTokens)}
                 </span>
                 <span
                   className="mono"
-                  style={{ fontSize: 11.5, color: "var(--ink)" }}
+                  style={{ fontSize: "var(--text-xs)", color: "var(--ink)" }}
                 >
                   {fmtUsd(m.costUsd)}
                 </span>

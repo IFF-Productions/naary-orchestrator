@@ -80,7 +80,7 @@ export function Runs() {
   }
 
   return (
-    <div style={{ padding: "22px 28px 40px" }}>
+    <div style={{ padding: "24px 28px 40px" }}>
       <div
         style={{
           display: "flex",
@@ -91,15 +91,25 @@ export function Runs() {
       >
         <div>
           <div
-            style={{ fontSize: 21, fontWeight: 700, letterSpacing: "-0.01em" }}
+            style={{
+              fontSize: "var(--text-title)",
+              fontWeight: "var(--weight-bold)",
+              letterSpacing: "-0.01em",
+            }}
           >
             Runs
           </div>
-          <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
+          <div
+            style={{
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-2)",
+              marginTop: 2,
+            }}
+          >
             Durable execution log{runs ? ` · ${runs.length} recent` : ""}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 9 }}>
+        <div style={{ display: "flex", gap: 8 }}>
           <Button icon="play" onClick={startRun} disabled={starting}>
             {starting ? "Starting…" : "Start test run"}
           </Button>
@@ -113,13 +123,13 @@ export function Runs() {
         <div
           style={{
             marginBottom: 14,
-            padding: "9px 12px",
-            borderRadius: 8,
+            padding: "8px 12px",
+            borderRadius: "var(--radius-sm)",
             background: "var(--error-soft)",
             border:
               "1px solid color-mix(in srgb, var(--state-error) 40%, transparent)",
             color: "var(--state-error)",
-            fontSize: 12,
+            fontSize: "var(--text-sm)",
           }}
         >
           {error}
@@ -139,7 +149,7 @@ export function Runs() {
             display: "flex",
             background: "var(--surface)",
             border: "1px solid var(--line)",
-            borderRadius: 8,
+            borderRadius: "var(--radius-sm)",
             padding: 3,
             gap: 2,
           }}
@@ -155,12 +165,15 @@ export function Runs() {
                 style={{
                   border: "none",
                   cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: active ? 600 : 400,
+                  fontSize: "var(--text-sm)",
+                  fontWeight: active
+                    ? "var(--weight-semibold)"
+                    : "var(--weight-regular)",
                   color: active ? "var(--ink)" : "var(--ink-2)",
                   background: active ? "var(--card-2)" : "transparent",
                   padding: "5px 12px",
-                  borderRadius: 6,
+                  borderRadius: "var(--radius-xs)",
+                  transition: "background 140ms ease, color 140ms ease",
                 }}
               >
                 {f.label}
@@ -176,7 +189,7 @@ export function Runs() {
           <Icon name="search" size={14} style={{ color: "var(--ink-3)" }} />
           <input
             className="bare mono"
-            style={{ height: 32, fontSize: 11.5 }}
+            style={{ height: 32, fontSize: "var(--text-xs)" }}
             placeholder="run id or workflow…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -193,8 +206,8 @@ export function Runs() {
             gap: 10,
             padding: "10px 18px",
             borderBottom: "1px solid var(--line)",
-            fontSize: 9.5,
-            fontWeight: 600,
+            fontSize: "var(--text-2xs)",
+            fontWeight: "var(--weight-semibold)",
             letterSpacing: "0.08em",
             color: "var(--ink-3)",
             textTransform: "uppercase",
@@ -210,14 +223,22 @@ export function Runs() {
 
         {runs === null && !error && (
           <div
-            style={{ padding: "18px", fontSize: 12.5, color: "var(--ink-3)" }}
+            style={{
+              padding: 18,
+              fontSize: "var(--text-body)",
+              color: "var(--ink-3)",
+            }}
           >
             Loading…
           </div>
         )}
         {runs?.length === 0 && (
           <div
-            style={{ padding: "18px", fontSize: 12.5, color: "var(--ink-2)" }}
+            style={{
+              padding: 18,
+              fontSize: "var(--text-body)",
+              color: "var(--ink-3)",
+            }}
           >
             No runs yet — start one from the canvas or “Start test run”.
           </div>
@@ -243,7 +264,7 @@ export function Runs() {
             <span
               className="mono"
               style={{
-                fontSize: 11.5,
+                fontSize: "var(--text-xs)",
                 color: "var(--brand)",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -254,7 +275,7 @@ export function Runs() {
             </span>
             <span
               className="mono"
-              style={{ fontSize: 11, color: "var(--ink-2)" }}
+              style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
             >
               {r.workflowKey ?? "—"}
             </span>
@@ -263,13 +284,13 @@ export function Runs() {
             </span>
             <span
               className="mono"
-              style={{ fontSize: 11, color: "var(--ink-2)" }}
+              style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
             >
               {r.costUsd === null ? "—" : `$${r.costUsd.toFixed(4)}`}
             </span>
             <span
               className="mono"
-              style={{ fontSize: 11, color: "var(--ink-3)" }}
+              style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
             >
               {ago(r.startedAt)}
             </span>

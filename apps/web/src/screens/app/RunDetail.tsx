@@ -31,7 +31,7 @@ function BackLink() {
         background: "transparent",
         border: "none",
         color: "var(--ink-2)",
-        fontSize: 12,
+        fontSize: "var(--text-sm)",
         cursor: "pointer",
         marginBottom: 14,
         padding: 0,
@@ -154,7 +154,7 @@ function RunView({ id }: { id: string }) {
             style={{
               width: 42,
               height: 42,
-              borderRadius: 11,
+              borderRadius: "var(--radius-lg)",
               background: "var(--brand-soft)",
               border:
                 "1px solid color-mix(in srgb, var(--brand) 40%, transparent)",
@@ -169,23 +169,36 @@ function RunView({ id }: { id: string }) {
           </span>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 19, fontWeight: 700 }}>Execution</span>
+              <span
+                style={{
+                  fontSize: "var(--text-title)",
+                  fontWeight: "var(--weight-bold)",
+                }}
+              >
+                Execution
+              </span>
               <span
                 className="mono"
                 style={{
-                  fontSize: 11,
+                  fontSize: "var(--text-xs)",
                   color: "var(--ink-2)",
                   background: "var(--surface)",
                   border: "1px solid var(--line)",
                   padding: "2px 8px",
-                  borderRadius: 6,
+                  borderRadius: "var(--radius-xs)",
                 }}
               >
                 {id}
               </span>
               {ui && <StatusPill state={ui.state} label={ui.label} />}
             </div>
-            <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 4 }}>
+            <div
+              style={{
+                fontSize: "var(--text-sm)",
+                color: "var(--ink-2)",
+                marginTop: 4,
+              }}
+            >
               {running || awaiting
                 ? "Polling GET /executions/:id every 1.5s"
                 : "Final state · GET /executions/:id"}
@@ -193,7 +206,7 @@ function RunView({ id }: { id: string }) {
           </div>
         </div>
         {(awaiting || running) && (
-          <div style={{ display: "flex", gap: 9 }}>
+          <div style={{ display: "flex", gap: 8 }}>
             {awaiting && (
               <>
                 <Button
@@ -232,7 +245,12 @@ function RunView({ id }: { id: string }) {
               "color-mix(in srgb, var(--state-error) 40%, transparent)",
           }}
         >
-          <span style={{ color: "var(--state-error)", fontSize: 12.5 }}>
+          <span
+            style={{
+              color: "var(--state-error)",
+              fontSize: "var(--text-body)",
+            }}
+          >
             {error}
           </span>
         </Card>
@@ -240,7 +258,9 @@ function RunView({ id }: { id: string }) {
 
       {!error && loading && !state && (
         <Card>
-          <div style={{ color: "var(--ink-3)", fontSize: 12.5 }}>Loading…</div>
+          <div style={{ color: "var(--ink-3)", fontSize: "var(--text-body)" }}>
+            Loading…
+          </div>
         </Card>
       )}
 
@@ -252,7 +272,9 @@ function RunView({ id }: { id: string }) {
           <Card style={{ padding: "18px 20px" }}>
             <SectionTitle>Node outputs</SectionTitle>
             {nodeOutputs.length === 0 ? (
-              <div style={{ color: "var(--ink-3)", fontSize: 12.5 }}>
+              <div
+                style={{ color: "var(--ink-3)", fontSize: "var(--text-body)" }}
+              >
                 No node outputs yet — this run hasn't produced any node results.
               </div>
             ) : (
@@ -271,7 +293,10 @@ function RunView({ id }: { id: string }) {
                     >
                       <span
                         className="mono"
-                        style={{ fontSize: 12, fontWeight: 600 }}
+                        style={{
+                          fontSize: "var(--text-sm)",
+                          fontWeight: "var(--weight-semibold)",
+                        }}
                       >
                         {nodeId}
                       </span>
@@ -281,7 +306,7 @@ function RunView({ id }: { id: string }) {
                     </div>
                     <CodeBlock
                       style={{
-                        fontSize: 10.5,
+                        fontSize: "var(--text-2xs)",
                         background: "var(--bg)",
                         maxHeight: 320,
                         overflow: "auto",
@@ -299,7 +324,7 @@ function RunView({ id }: { id: string }) {
                 marginTop: 14,
                 paddingTop: 12,
                 borderTop: "1px solid var(--line)",
-                fontSize: 10.5,
+                fontSize: "var(--text-2xs)",
                 color: "var(--ink-3)",
               }}
             >
@@ -315,7 +340,7 @@ function RunView({ id }: { id: string }) {
             </SummaryRow>
             {running && (
               <SummaryRow label="Current node">
-                <span className="mono" style={{ fontSize: 12.5 }}>
+                <span className="mono" style={{ fontSize: "var(--text-body)" }}>
                   {state.currentNodeId || "—"}
                 </span>
               </SummaryRow>
@@ -323,7 +348,10 @@ function RunView({ id }: { id: string }) {
             <SummaryRow label="Accumulated cost">
               <span
                 className="mono"
-                style={{ fontSize: 12.5, color: "#7fc99a" }}
+                style={{
+                  fontSize: "var(--text-body)",
+                  color: "var(--state-done)",
+                }}
               >
                 {formatCost(state.ctx)}
               </span>
@@ -348,7 +376,7 @@ function RunView({ id }: { id: string }) {
               />
               <span
                 className="mono"
-                style={{ fontSize: 10.5, color: "var(--ink-3)" }}
+                style={{ fontSize: "var(--text-2xs)", color: "var(--ink-3)" }}
               >
                 durable · state checkpointed · resumable for 30d
               </span>
@@ -406,9 +434,11 @@ function RunLog({ id }: { id: string }) {
     <Card style={{ padding: "18px 20px", marginTop: 16 }}>
       <SectionTitle>Execution log</SectionTitle>
       {!events ? (
-        <div style={{ color: "var(--ink-3)", fontSize: 12.5 }}>Loading…</div>
+        <div style={{ color: "var(--ink-3)", fontSize: "var(--text-body)" }}>
+          Loading…
+        </div>
       ) : events.length === 0 ? (
-        <div style={{ color: "var(--ink-3)", fontSize: 12.5 }}>
+        <div style={{ color: "var(--ink-3)", fontSize: "var(--text-body)" }}>
           No events yet.
         </div>
       ) : (
@@ -434,7 +464,13 @@ function RunLog({ id }: { id: string }) {
                   background: LOG_KIND_COLOR[ev.kind] ?? "var(--ink-3)",
                 }}
               />
-              <span style={{ flex: 1, fontSize: 12.5, color: "var(--ink)" }}>
+              <span
+                style={{
+                  flex: 1,
+                  fontSize: "var(--text-body)",
+                  color: "var(--ink)",
+                }}
+              >
                 {ev.label}
                 {ev.detail && (
                   <span
@@ -442,7 +478,7 @@ function RunLog({ id }: { id: string }) {
                     style={{
                       color: "var(--ink-3)",
                       marginLeft: 8,
-                      fontSize: 11,
+                      fontSize: "var(--text-xs)",
                     }}
                   >
                     {ev.detail}
@@ -451,7 +487,11 @@ function RunLog({ id }: { id: string }) {
               </span>
               <span
                 className="mono"
-                style={{ fontSize: 10.5, color: "var(--ink-3)", flex: "none" }}
+                style={{
+                  fontSize: "var(--text-2xs)",
+                  color: "var(--ink-3)",
+                  flex: "none",
+                }}
               >
                 {ev.at ? new Date(ev.at).toLocaleTimeString() : ""}
               </span>
@@ -465,7 +505,13 @@ function RunLog({ id }: { id: string }) {
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>
+    <div
+      style={{
+        fontSize: "var(--text-md)",
+        fontWeight: "var(--weight-semibold)",
+        marginBottom: 16,
+      }}
+    >
       {children}
     </div>
   );
@@ -487,7 +533,9 @@ function SummaryRow({
         marginBottom: 11,
       }}
     >
-      <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{label}</span>
+      <span style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
+        {label}
+      </span>
       {children}
     </div>
   );
