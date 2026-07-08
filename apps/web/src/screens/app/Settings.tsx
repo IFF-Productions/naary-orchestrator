@@ -111,13 +111,24 @@ export function Settings() {
 
   return (
     <div style={{ padding: "22px 28px 40px", maxWidth: 720 }}>
-      <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 20 }}>
         <div
-          style={{ fontSize: 21, fontWeight: 700, letterSpacing: "-0.01em" }}
+          style={{
+            fontSize: "var(--text-title)",
+            fontWeight: "var(--weight-bold)",
+            color: "var(--ink)",
+            letterSpacing: "var(--tracking-tight)",
+          }}
         >
           Settings
         </div>
-        <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
+        <div
+          style={{
+            fontSize: "var(--text-body)",
+            color: "var(--ink-2)",
+            marginTop: 4,
+          }}
+        >
           Workspace settings{tenant ? ` · tenant ${tenant}` : ""}.
         </div>
       </div>
@@ -126,11 +137,13 @@ export function Settings() {
         <div
           style={{
             marginBottom: 14,
-            padding: "9px 12px",
-            borderRadius: 8,
+            padding: "10px 12px",
+            borderRadius: "var(--radius-md)",
             background: "var(--error-soft)",
+            border:
+              "1px solid color-mix(in srgb, var(--state-error) 40%, transparent)",
             color: "var(--state-error)",
-            fontSize: 12,
+            fontSize: "var(--text-sm)",
           }}
         >
           {error}
@@ -179,7 +192,9 @@ export function Settings() {
             {busy ? "Saving…" : "Save settings"}
           </Button>
           {status && (
-            <span style={{ fontSize: 12, color: "var(--state-done)" }}>
+            <span
+              style={{ fontSize: "var(--text-sm)", color: "var(--state-done)" }}
+            >
               {status}
             </span>
           )}
@@ -187,17 +202,26 @@ export function Settings() {
       </Card>
 
       <div
+        className="mono"
         style={{
-          fontSize: 15,
-          fontWeight: 600,
-          margin: "22px 0 10px",
+          fontSize: "var(--text-2xs)",
+          fontWeight: "var(--weight-semibold)",
+          letterSpacing: "var(--tracking-label)",
+          textTransform: "uppercase",
+          color: "var(--ink-3)",
+          margin: "24px 0 12px",
         }}
       >
         Notifications
       </div>
       <Card style={{ padding: 18 }}>
         <div
-          style={{ fontSize: 12.5, color: "var(--ink-2)", marginBottom: 12 }}
+          style={{
+            fontSize: "var(--text-body)",
+            lineHeight: "var(--leading-snug)",
+            color: "var(--ink-2)",
+            marginBottom: 12,
+          }}
         >
           Get pinged when a run needs a human — an approval can wait for days,
           so it shouldn't rely on someone watching the inbox. Paste a Slack,
@@ -231,7 +255,9 @@ export function Settings() {
             }
             disabled={!loaded}
           />
-          <span style={{ fontSize: 13 }}>When an approval is waiting</span>
+          <span style={{ fontSize: "var(--text-body)", color: "var(--ink)" }}>
+            When an approval is waiting
+          </span>
         </label>
         <label
           style={{
@@ -249,7 +275,9 @@ export function Settings() {
             }
             disabled={!loaded}
           />
-          <span style={{ fontSize: 13 }}>When a run fails</span>
+          <span style={{ fontSize: "var(--text-body)", color: "var(--ink)" }}>
+            When a run fails
+          </span>
         </label>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <Button
@@ -260,7 +288,9 @@ export function Settings() {
             {notifBusy ? "Saving…" : "Save notifications"}
           </Button>
           {notifStatus && (
-            <span style={{ fontSize: 12, color: "var(--state-done)" }}>
+            <span
+              style={{ fontSize: "var(--text-sm)", color: "var(--state-done)" }}
+            >
               {notifStatus}
             </span>
           )}
@@ -279,7 +309,9 @@ function Field({
 }) {
   return (
     <label style={{ display: "block", marginBottom: 16 }}>
-      <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{label}</span>
+      <span style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
+        {label}
+      </span>
       <div style={{ marginTop: 6 }}>{children}</div>
     </label>
   );
@@ -288,9 +320,9 @@ function Field({
 const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "8px 10px",
-  borderRadius: 7,
+  borderRadius: "var(--radius-sm)",
   border: "1px solid var(--line-2)",
   background: "var(--card)",
   color: "var(--ink)",
-  fontSize: 13,
+  fontSize: "var(--text-body)",
 };

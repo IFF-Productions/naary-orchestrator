@@ -53,19 +53,40 @@ export function Activity() {
           display: "flex",
           alignItems: "center",
           gap: 10,
-          marginBottom: 6,
+          marginBottom: 4,
         }}
       >
         <Icon name="activity" />
-        <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Activity</h1>
+        <h1
+          style={{
+            fontSize: "var(--text-title)",
+            fontWeight: "var(--weight-bold)",
+            color: "var(--ink)",
+            letterSpacing: "var(--tracking-tight)",
+            margin: 0,
+          }}
+        >
+          Activity
+        </h1>
       </div>
-      <p style={{ color: "var(--ink-2)", fontSize: 13, marginTop: 0 }}>
+      <p
+        style={{
+          color: "var(--ink-2)",
+          fontSize: "var(--text-body)",
+          marginTop: 0,
+        }}
+      >
         A record of changes in this workspace — who did what, and when.
       </p>
 
       {error && (
         <Card>
-          <div style={{ color: "var(--state-error)", fontSize: 13 }}>
+          <div
+            style={{
+              color: "var(--state-error)",
+              fontSize: "var(--text-body)",
+            }}
+          >
             {error}
           </div>
         </Card>
@@ -74,7 +95,11 @@ export function Activity() {
       {!error && events?.length === 0 && (
         <Card>
           <div
-            style={{ color: "var(--ink-2)", fontSize: 14, padding: "8px 2px" }}
+            style={{
+              color: "var(--ink-3)",
+              fontSize: "var(--text-body)",
+              padding: "8px 2px",
+            }}
           >
             No activity yet.
           </div>
@@ -90,22 +115,30 @@ export function Activity() {
                 display: "flex",
                 alignItems: "baseline",
                 gap: 12,
-                padding: "11px 16px",
+                padding: "12px 16px",
                 borderTop: i === 0 ? "none" : "1px solid var(--line)",
               }}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14 }}>{e.action}</div>
+                <div
+                  style={{ fontSize: "var(--text-body)", color: "var(--ink)" }}
+                >
+                  {e.action}
+                </div>
                 <div
                   className="mono"
-                  style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}
+                  style={{
+                    fontSize: "var(--text-xs)",
+                    color: "var(--ink-3)",
+                    marginTop: 2,
+                  }}
                 >
                   {e.actor}
                 </div>
               </div>
               <div
                 style={{
-                  fontSize: 11,
+                  fontSize: "var(--text-xs)",
                   color: "var(--ink-3)",
                   whiteSpace: "nowrap",
                 }}

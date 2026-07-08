@@ -71,11 +71,22 @@ export function Team() {
     <div style={{ padding: "22px 28px 40px", maxWidth: 920 }}>
       <div style={{ marginBottom: 16 }}>
         <div
-          style={{ fontSize: 21, fontWeight: 700, letterSpacing: "-0.01em" }}
+          style={{
+            fontSize: "var(--text-title)",
+            fontWeight: "var(--weight-bold)",
+            letterSpacing: "var(--tracking-tight)",
+            color: "var(--ink)",
+          }}
         >
           Team
         </div>
-        <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
+        <div
+          style={{
+            fontSize: "var(--text-sm)",
+            color: "var(--ink-2)",
+            marginTop: 2,
+          }}
+        >
           {members ? `${members.length} members · ` : ""}roles are advisory
           metadata (auth itself is Firebase / API tokens).
         </div>
@@ -86,10 +97,10 @@ export function Team() {
           style={{
             marginBottom: 14,
             padding: "9px 12px",
-            borderRadius: 8,
+            borderRadius: "var(--radius-sm)",
             background: "var(--error-soft)",
             color: "var(--state-error)",
-            fontSize: 12,
+            fontSize: "var(--text-sm)",
           }}
         >
           {error}
@@ -131,12 +142,24 @@ export function Team() {
       {/* members list */}
       <Card style={{ padding: 0, overflow: "hidden" }}>
         {members === null && !error && (
-          <div style={{ padding: 16, fontSize: 12.5, color: "var(--ink-3)" }}>
+          <div
+            style={{
+              padding: 16,
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-3)",
+            }}
+          >
             Loading…
           </div>
         )}
         {members?.length === 0 && (
-          <div style={{ padding: 16, fontSize: 12.5, color: "var(--ink-2)" }}>
+          <div
+            style={{
+              padding: 16,
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-3)",
+            }}
+          >
             No members yet — invite your first teammate above.
           </div>
         )}
@@ -152,12 +175,20 @@ export function Team() {
             }}
           >
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{m.email}</div>
+              <div
+                style={{
+                  fontSize: "var(--text-body)",
+                  fontWeight: "var(--weight-medium)",
+                  color: "var(--ink)",
+                }}
+              >
+                {m.email}
+              </div>
             </div>
             <span
               style={{
-                fontSize: 11,
-                fontWeight: 600,
+                fontSize: "var(--text-xs)",
+                fontWeight: "var(--weight-semibold)",
                 color: ROLE_COLOR[m.role] ?? "var(--ink-2)",
               }}
             >
@@ -192,9 +223,9 @@ export function Team() {
 const inputStyle: React.CSSProperties = {
   flex: 1,
   padding: "8px 10px",
-  borderRadius: 7,
+  borderRadius: "var(--radius-sm)",
   border: "1px solid var(--line-2)",
   background: "var(--card)",
   color: "var(--ink)",
-  fontSize: 13,
+  fontSize: "var(--text-body)",
 };
