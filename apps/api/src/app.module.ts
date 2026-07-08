@@ -22,6 +22,7 @@ import { NotificationsModule } from "./notifications/notifications.module";
 import { PinsModule } from "./pins/pins.module";
 import { SchedulesModule } from "./schedules/schedules.module";
 import { SecretsModule } from "./secrets/secrets.module";
+import { PreferencesModule } from "./preferences/preferences.module";
 import { SettingsModule } from "./settings/settings.module";
 import { TemplatesModule } from "./templates/templates.module";
 import { UsageModule } from "./usage/usage.module";
@@ -46,6 +47,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     MembersModule,
     MembershipModule,
     SettingsModule,
+    PreferencesModule,
     NotificationsModule,
     TemplatesModule,
     SchedulesModule,

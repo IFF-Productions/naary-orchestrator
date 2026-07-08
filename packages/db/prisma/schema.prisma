@@ -259,6 +259,16 @@ model NotificationSettings {
   updatedAt         DateTime @default(now()) @updatedAt
 }
 
+// Per-USER preferences — personal + cross-workspace, so they follow a user across
+// devices (unlike TenantSettings, which is per-workspace). Keyed by Firebase uid.
+// Today: `mode` (Builder vs Simple experience, design PRODUCT-VARIANTS.md). Absent
+// row = client default. API-token principals have no uid, so they stay client-only.
+model UserPreference {
+  userId    String   @id // Firebase uid
+  mode      String? // 'builder' | 'simple' — the experience variant
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
 // Append-only audit log: who did what, when (the activity feed). One row per
 // successful mutating request, written by the AuditInterceptor. `actor` is the OIDC
 // subject (or "api-token"); `action` is a human label derived from method+route.
