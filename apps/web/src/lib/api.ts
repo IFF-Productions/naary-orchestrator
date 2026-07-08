@@ -280,6 +280,17 @@ export const api = {
   getMyWorkspaces(): Promise<Workspace[]> {
     return http("/me/workspaces");
   },
+  // Per-user preferences (experience mode) — cross-device, keyed to the user server-side.
+  // `mode` is null when the user hasn't chosen (or for API-token principals with no uid).
+  getPreferences(): Promise<{ mode: string | null }> {
+    return http("/me/preferences");
+  },
+  savePreferences(mode: string | null): Promise<{ mode: string | null }> {
+    return http("/me/preferences", {
+      method: "PUT",
+      body: JSON.stringify({ mode }),
+    });
+  },
   // Create a new workspace owned by the caller. The tenantId is server-generated (never
   // sent from the client); requires a verified-email Firebase user (server-enforced).
   // `name` (optional) seeds the workspace display name.
