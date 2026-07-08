@@ -104,15 +104,15 @@ function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
     <div
       style={{
         minWidth: 132,
-        borderRadius: 10,
+        borderRadius: "var(--radius-md)",
         border: `1px solid ${accent}`,
         outline: selected ? `2px solid ${accent}` : "none",
         background: "var(--card)",
         color: "var(--ink)",
         fontFamily: "var(--font-sans)",
-        fontSize: 13,
+        fontSize: "var(--text-body)",
         overflow: "hidden",
-        boxShadow: "0 1px 2px rgba(0,0,0,.18)",
+        boxShadow: "var(--shadow-node)",
       }}
     >
       {!isEntry && <Handle type="target" position={Position.Left} />}
@@ -120,7 +120,7 @@ function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
       <div
         style={{
           padding: subtitle ? "9px 12px 4px" : "9px 12px",
-          fontWeight: 600,
+          fontWeight: "var(--weight-semibold)",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -129,7 +129,10 @@ function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
       >
         <span>{LABEL[kind]}</span>
         {data.pinned && (
-          <span title="Has a pinned sample output" style={{ fontSize: 11 }}>
+          <span
+            title="Has a pinned sample output"
+            style={{ fontSize: "var(--text-xs)" }}
+          >
             📌
           </span>
         )}
@@ -139,7 +142,7 @@ function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
           className="mono"
           style={{
             padding: "0 12px 9px",
-            fontSize: 10,
+            fontSize: "var(--text-2xs)",
             color: "var(--ink-3)",
             maxWidth: 180,
             overflow: "hidden",
@@ -666,15 +669,15 @@ export function CanvasPage() {
           style={{ ...headerInputStyle, width: 170 }}
           aria-label="Workflow name"
         />
-        <span style={{ fontSize: 11, color: "var(--ink-3)" }}>
+        <span style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
           key: {activeKey}
         </span>
 
         <span
           style={{
-            fontSize: 12,
+            fontSize: "var(--text-sm)",
             padding: "3px 10px",
-            borderRadius: 999,
+            borderRadius: "var(--radius-full)",
             background: graph ? "var(--state-done)" : "var(--state-error)",
             color: "#fff",
           }}
@@ -687,9 +690,9 @@ export function CanvasPage() {
               .map((w) => `${w.nodeId}.${w.field}: {{ ${w.ref} }} ${w.message}`)
               .join("\n")}
             style={{
-              fontSize: 12,
+              fontSize: "var(--text-sm)",
               padding: "3px 10px",
-              borderRadius: 999,
+              borderRadius: "var(--radius-full)",
               background: "var(--state-warn, #b0863e)",
               color: "#fff",
               cursor: "help",
@@ -703,7 +706,7 @@ export function CanvasPage() {
           {status && (
             <span
               style={{
-                fontSize: 12,
+                fontSize: "var(--text-sm)",
                 color: "var(--ink-2)",
                 alignSelf: "center",
                 maxWidth: 280,
@@ -751,7 +754,13 @@ export function CanvasPage() {
             background: "var(--surface)",
           }}
         >
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginBottom: 6,
+            }}
+          >
             Describe the workflow in plain English — an agent drafts it onto the
             canvas for you to edit. (Uses your model provider key from
             Integrations.)
@@ -771,11 +780,11 @@ export function CanvasPage() {
                 flex: 1,
                 resize: "vertical",
                 padding: "8px 10px",
-                borderRadius: 8,
+                borderRadius: "var(--radius-md)",
                 border: "1px solid var(--line)",
                 background: "var(--card)",
                 color: "var(--ink)",
-                fontSize: 13,
+                fontSize: "var(--text-body)",
                 fontFamily: "inherit",
               }}
             />
@@ -787,11 +796,11 @@ export function CanvasPage() {
                 title="Model provider for generation"
                 style={{
                   padding: "7px 8px",
-                  borderRadius: 8,
+                  borderRadius: "var(--radius-md)",
                   border: "1px solid var(--line)",
                   background: "var(--card)",
                   color: "var(--ink)",
-                  fontSize: 12,
+                  fontSize: "var(--text-sm)",
                   fontFamily: "inherit",
                 }}
               >
@@ -811,7 +820,13 @@ export function CanvasPage() {
               </Button>
             </div>
           </div>
-          <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 4 }}>
+          <div
+            style={{
+              fontSize: "var(--text-2xs)",
+              color: "var(--ink-3)",
+              marginTop: 4,
+            }}
+          >
             Generating replaces the current canvas with a new draft.
             ⌘/Ctrl+Enter to generate.
           </div>
@@ -826,7 +841,13 @@ export function CanvasPage() {
             background: "var(--surface)",
           }}
         >
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 4 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginBottom: 4,
+            }}
+          >
             Run input (JSON) — overrides the Start node's sample input for this
             run; leave blank to use the sample.
           </div>
@@ -840,9 +861,9 @@ export function CanvasPage() {
             style={{
               width: "100%",
               fontFamily: "var(--font-mono)",
-              fontSize: 11.5,
+              fontSize: "var(--text-xs)",
               padding: "7px 9px",
-              borderRadius: 7,
+              borderRadius: "var(--radius-sm)",
               border: "1px solid var(--line-2)",
               background: "var(--card)",
               color: "var(--ink)",
@@ -869,7 +890,13 @@ export function CanvasPage() {
             minHeight: 0,
           }}
         >
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 2 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginBottom: 2,
+            }}
+          >
             ADD NODE
           </div>
           <input
@@ -879,11 +906,11 @@ export function CanvasPage() {
             aria-label="Search nodes"
             style={{
               padding: "6px 9px",
-              borderRadius: 8,
+              borderRadius: "var(--radius-md)",
               border: "1px solid var(--line-2)",
               background: "var(--card)",
               color: "var(--ink)",
-              fontSize: 12.5,
+              fontSize: "var(--text-sm)",
             }}
           />
           <div
@@ -911,9 +938,9 @@ export function CanvasPage() {
                 >
                   <div
                     style={{
-                      fontSize: 10,
-                      fontWeight: 600,
-                      letterSpacing: 0.4,
+                      fontSize: "var(--text-2xs)",
+                      fontWeight: "var(--weight-semibold)",
+                      letterSpacing: "var(--tracking-label)",
                       textTransform: "uppercase",
                       color: "var(--ink-3)",
                     }}
@@ -933,19 +960,21 @@ export function CanvasPage() {
                       style={{
                         textAlign: "left",
                         padding: "8px 10px",
-                        borderRadius: 8,
+                        borderRadius: "var(--radius-md)",
                         border: "1px solid var(--line-2)",
                         borderLeft: `3px solid ${ACCENT[k.type]}`,
                         background: "var(--card)",
                         color: "var(--ink)",
                         cursor: "pointer",
-                        fontSize: 13,
+                        fontSize: "var(--text-body)",
                       }}
                     >
-                      <div style={{ fontWeight: 600 }}>{k.label}</div>
+                      <div style={{ fontWeight: "var(--weight-semibold)" }}>
+                        {k.label}
+                      </div>
                       <div
                         style={{
-                          fontSize: 11,
+                          fontSize: "var(--text-xs)",
                           color: "var(--ink-3)",
                           marginTop: 2,
                           lineHeight: 1.35,
@@ -962,7 +991,7 @@ export function CanvasPage() {
           <div
             style={{
               marginTop: "auto",
-              fontSize: 11,
+              fontSize: "var(--text-xs)",
               color: "var(--ink-3)",
               lineHeight: 1.5,
             }}
@@ -1175,7 +1204,7 @@ function InspectorPanel({
           flex: "none",
         }}
       >
-        <strong style={{ fontSize: 14 }}>{title}</strong>
+        <strong style={{ fontSize: "var(--text-md)" }}>{title}</strong>
         <button
           type="button"
           aria-label="Close"
@@ -1184,10 +1213,10 @@ function InspectorPanel({
             border: "1px solid var(--line-2)",
             background: "var(--card)",
             color: "var(--ink-2)",
-            borderRadius: 6,
+            borderRadius: "var(--radius-sm)",
             cursor: "pointer",
             padding: "2px 9px",
-            fontSize: 14,
+            fontSize: "var(--text-md)",
           }}
         >
           ✕
@@ -1279,7 +1308,13 @@ function ConnectionSelect({
         )}
       </select>
       {matches.length === 0 && (
-        <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>
+        <div
+          style={{
+            fontSize: "var(--text-xs)",
+            color: "var(--ink-3)",
+            marginTop: 4,
+          }}
+        >
           No matching connection yet — add one on the Integrations screen, then
           reopen this node.
         </div>
@@ -1340,7 +1375,7 @@ function ConfigPanel({
           style={{
             width: 28,
             height: 28,
-            borderRadius: 8,
+            borderRadius: "var(--radius-md)",
             flex: "none",
             background: `color-mix(in srgb, ${ACCENT[kind]} 18%, transparent)`,
             color: ACCENT[kind],
@@ -1359,14 +1394,30 @@ function ConfigPanel({
           />
         </span>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>{LABEL[kind]}</div>
-          <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
+          <div
+            style={{
+              fontSize: "var(--text-md)",
+              fontWeight: "var(--weight-semibold)",
+            }}
+          >
+            {LABEL[kind]}
+          </div>
+          <div
+            className="mono"
+            style={{ fontSize: "var(--text-2xs)", color: "var(--ink-3)" }}
+          >
             {kind} · {node.id}
           </div>
         </div>
       </div>
 
-      <div style={{ fontSize: 12, color: "var(--ink-2)", lineHeight: 1.4 }}>
+      <div
+        style={{
+          fontSize: "var(--text-sm)",
+          color: "var(--ink-2)",
+          lineHeight: 1.4,
+        }}
+      >
         {NODE_DESCRIPTION[kind]}
       </div>
 
@@ -1376,12 +1427,18 @@ function ConfigPanel({
         <div
           style={{
             padding: "8px 10px",
-            borderRadius: 8,
+            borderRadius: "var(--radius-md)",
             border: "1px dashed var(--line-2)",
             background: "var(--card-2)",
           }}
         >
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginBottom: 6,
+            }}
+          >
             References — put <code>{"{{ node.path }}"}</code> in any field.
             Pinned/tested nodes suggest real paths; click to copy:
           </div>
@@ -1438,7 +1495,13 @@ function ConfigPanel({
             </option>
           </select>
           {str("onError") === "continue" && (
-            <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>
+            <div
+              style={{
+                fontSize: "var(--text-xs)",
+                color: "var(--ink-3)",
+                marginTop: 4,
+              }}
+            >
               On failure this node outputs <code>{node.id}.error</code> and the
               flow continues — branch on it (op <code>exists</code>) to handle
               it.
@@ -1464,7 +1527,7 @@ function ConfigPanel({
             <div
               style={{
                 border: "1px solid var(--line)",
-                borderRadius: 8,
+                borderRadius: "var(--radius-md)",
                 padding: 10,
                 display: "flex",
                 flexDirection: "column",
@@ -1476,7 +1539,7 @@ function ConfigPanel({
                   display: "flex",
                   gap: 6,
                   alignItems: "center",
-                  fontSize: 12,
+                  fontSize: "var(--text-sm)",
                   color: "var(--ink-2)",
                 }}
               >
@@ -1609,13 +1672,13 @@ function ConfigPanel({
                     onClick={() => onChange({ model: m })}
                     className="mono"
                     style={{
-                      fontSize: 10.5,
+                      fontSize: "var(--text-2xs)",
                       cursor: "pointer",
                       border: `1px solid ${active ? ACCENT.agent : "var(--line-2)"}`,
                       color: active ? ACCENT.agent : "var(--ink-2)",
                       background: "var(--card)",
                       padding: "3px 9px",
-                      borderRadius: 6,
+                      borderRadius: "var(--radius-sm)",
                     }}
                   >
                     {m.replace("claude-", "")}
@@ -1782,7 +1845,13 @@ function ConfigPanel({
               placeholder="0 9 * * 1-5"
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             Standard cron (min hour day month weekday). The schedule is created
             server-side when you save. Examples: <code>*/15 * * * *</code>{" "}
             (every 15 min), <code>0 9 * * 1-5</code> (weekdays 9am),{" "}
@@ -1850,7 +1919,13 @@ function ConfigPanel({
               onChange={(id) => onChange({ connectionId: id })}
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             Auth is attached server-side from the connection — never put tokens
             in the headers above (they'd be stored in the run history).
           </div>
@@ -1877,7 +1952,7 @@ function ConfigPanel({
               display: "flex",
               alignItems: "center",
               gap: 8,
-              fontSize: 12,
+              fontSize: "var(--text-sm)",
               color: "var(--ink-2)",
             }}
           >
@@ -1920,7 +1995,13 @@ function ConfigPanel({
               onChange={(id) => onChange({ connectionId: id })}
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             A <code>postgres</code>, <code>mssql</code>, or <code>mysql</code>{" "}
             connection.{" "}
             {kind === "sqlExec"
@@ -1945,7 +2026,13 @@ function ConfigPanel({
               }
             />
           </div>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             Placeholders are engine-specific: <code>$1, $2…</code> (Postgres),{" "}
             <code>@p1, @p2…</code> (MSSQL), or <code>?</code> (MySQL). Bindings
             fill the values — never build SQL from upstream output.
@@ -2003,7 +2090,7 @@ function ConfigPanel({
 
       {kind === "set" && (
         <>
-          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
             Builds a plain object passed downstream. The output <em>is</em> this
             object — bindings fill/override fields from upstream outputs. Read a
             field later as <code>{node.id}.fieldName</code>.
@@ -2122,7 +2209,7 @@ function ConfigPanel({
                       display: "flex",
                       gap: 6,
                       alignItems: "center",
-                      fontSize: 12,
+                      fontSize: "var(--text-sm)",
                       color: "var(--ink-2)",
                     }}
                   >
@@ -2206,7 +2293,9 @@ function ConfigPanel({
                   </Labeled>
                 </div>
               )}
-              <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+              <div
+                style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
+              >
                 Result is <code>{node.id}.result</code>.
               </div>
             </>
@@ -2231,7 +2320,13 @@ function ConfigPanel({
               placeholder="rows"
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             Keeps array items matching the predicate below (paths are relative
             to each item). Output is the filtered array.
           </div>
@@ -2293,7 +2388,13 @@ function ConfigPanel({
               placeholder="email"
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             Collapses the array into <code>{node.id}.result</code>. For
             collect/sum, pick a field from each item.
           </div>
@@ -2363,7 +2464,13 @@ function ConfigPanel({
               placeholder="10"
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             Outputs the resulting array. sort/dedupe use the field (whole item
             if blank); limit takes the first N.
           </div>
@@ -2440,7 +2547,13 @@ function ConfigPanel({
               placeholder="id"
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             Diffs A vs B by the key → <code>{node.id}.added</code> /{" "}
             <code>.removed</code> / <code>.changed</code> / <code>.same</code>.
           </div>
@@ -2475,7 +2588,13 @@ function ConfigPanel({
               placeholder="body"
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             parse → <code>{node.id}</code> is the object; build →{" "}
             <code>{node.id}.xml</code> is the string.
           </div>
@@ -2515,7 +2634,11 @@ function ConfigPanel({
                 />
               </Labeled>
               <div
-                style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--ink-3)",
+                  marginTop: -6,
+                }}
               >
                 Each row reads a CSS selector's match into{" "}
                 <code>{node.id}.&lt;key&gt;</code>.
@@ -2526,7 +2649,7 @@ function ConfigPanel({
                   key={i}
                   style={{
                     border: "1px solid var(--line)",
-                    borderRadius: 8,
+                    borderRadius: "var(--radius-md)",
                     padding: 10,
                     display: "flex",
                     flexDirection: "column",
@@ -2556,7 +2679,7 @@ function ConfigPanel({
                         border: "1px solid var(--line-2)",
                         background: "var(--card)",
                         color: "var(--ink-2)",
-                        borderRadius: 7,
+                        borderRadius: "var(--radius-sm)",
                         cursor: "pointer",
                         padding: "6px 10px",
                         flex: "none",
@@ -2613,7 +2736,7 @@ function ConfigPanel({
                       display: "flex",
                       gap: 6,
                       alignItems: "center",
-                      fontSize: 12,
+                      fontSize: "var(--text-sm)",
                       color: "var(--ink-2)",
                     }}
                   >
@@ -2645,10 +2768,10 @@ function ConfigPanel({
                   border: "1px solid var(--line-2)",
                   background: "var(--card)",
                   color: "var(--ink-2)",
-                  borderRadius: 7,
+                  borderRadius: "var(--radius-sm)",
                   cursor: "pointer",
                   padding: "6px 10px",
-                  fontSize: 12,
+                  fontSize: "var(--text-sm)",
                 }}
               >
                 + Add extraction
@@ -2701,7 +2824,7 @@ function ConfigPanel({
               />
             </Labeled>
           )}
-          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
             parse → <code>{node.id}</code> is the value; stringify →{" "}
             <code>{node.id}.json</code> is the string.
           </div>
@@ -2742,7 +2865,7 @@ function ConfigPanel({
               placeholder="result"
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
             Result is <code>{node.id}.result</code>.
           </div>
         </>
@@ -2880,7 +3003,9 @@ function ConfigPanel({
                   />
                 </Labeled>
               )}
-              <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+              <div
+                style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
+              >
                 Result is <code>{node.id}.result</code>. A binding (from/path)
                 overrides the static value.
               </div>
@@ -2933,7 +3058,7 @@ function ConfigPanel({
               display: "flex",
               gap: 6,
               alignItems: "center",
-              fontSize: 12,
+              fontSize: "var(--text-sm)",
               color: "var(--ink-2)",
             }}
           >
@@ -2944,7 +3069,7 @@ function ConfigPanel({
             />
             First row is the header
           </label>
-          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
             parse → <code>{node.id}</code> is the rows array; build →{" "}
             <code>{node.id}.csv</code> is the string.
           </div>
@@ -2969,7 +3094,7 @@ function ConfigPanel({
               placeholder="(now)"
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
             Blank = the current time (read server-side). Otherwise bind an
             upstream epoch-ms or ISO value to do timestamp math on. Output is{" "}
             <code>{node.id}.iso</code> / <code>{node.id}.epochMs</code>.
@@ -3004,7 +3129,7 @@ function ConfigPanel({
               <option value="object">Object — merge fields together</option>
             </select>
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
             Joins parallel branches: runs once, after <em>all</em> inbound
             branches arrive, and combines their outputs into{" "}
             <code>{node.id}</code>. Inbound edges must be unconditional (no
@@ -3033,7 +3158,9 @@ function ConfigPanel({
                   <option value="or">OR — any can be true</option>
                 </select>
               </Labeled>
-              <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+              <div
+                style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
+              >
                 Result is <code>{node.id}.result</code> (boolean). Draw a
                 true-edge (<code>result eq true</code>) and a false-edge.
               </div>
@@ -3043,7 +3170,7 @@ function ConfigPanel({
                   key={i}
                   style={{
                     border: "1px solid var(--line)",
-                    borderRadius: 8,
+                    borderRadius: "var(--radius-md)",
                     padding: 10,
                     display: "flex",
                     flexDirection: "column",
@@ -3067,10 +3194,10 @@ function ConfigPanel({
                       border: "1px solid var(--line-2)",
                       background: "var(--card)",
                       color: "var(--ink-2)",
-                      borderRadius: 7,
+                      borderRadius: "var(--radius-sm)",
                       cursor: "pointer",
                       padding: "4px 10px",
-                      fontSize: 12,
+                      fontSize: "var(--text-sm)",
                     }}
                   >
                     Remove
@@ -3087,10 +3214,10 @@ function ConfigPanel({
                   border: "1px solid var(--line-2)",
                   background: "var(--card)",
                   color: "var(--ink-2)",
-                  borderRadius: 7,
+                  borderRadius: "var(--radius-sm)",
                   cursor: "pointer",
                   padding: "6px 10px",
-                  fontSize: 12,
+                  fontSize: "var(--text-sm)",
                 }}
               >
                 + Add condition
@@ -3111,7 +3238,9 @@ function ConfigPanel({
           const setRules = (next: typeof rules) => onChange({ rules: next });
           return (
             <>
-              <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+              <div
+                style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
+              >
                 Rules run top-to-bottom; the first match sets{" "}
                 <code>{node.id}.matched</code> to that rule's name (else the
                 fallback). Draw one outgoing edge per branch with{" "}
@@ -3123,7 +3252,7 @@ function ConfigPanel({
                   key={i}
                   style={{
                     border: "1px solid var(--line)",
-                    borderRadius: 8,
+                    borderRadius: "var(--radius-md)",
                     padding: 10,
                     display: "flex",
                     flexDirection: "column",
@@ -3153,7 +3282,7 @@ function ConfigPanel({
                         border: "1px solid var(--line-2)",
                         background: "var(--card)",
                         color: "var(--ink-2)",
-                        borderRadius: 7,
+                        borderRadius: "var(--radius-sm)",
                         cursor: "pointer",
                         padding: "6px 10px",
                         flex: "none",
@@ -3187,10 +3316,10 @@ function ConfigPanel({
                   border: "1px solid var(--line-2)",
                   background: "var(--card)",
                   color: "var(--ink-2)",
-                  borderRadius: 7,
+                  borderRadius: "var(--radius-sm)",
                   cursor: "pointer",
                   padding: "6px 10px",
-                  fontSize: 12,
+                  fontSize: "var(--text-sm)",
                 }}
               >
                 + Add rule
@@ -3217,7 +3346,13 @@ function ConfigPanel({
               onChange={(id) => onChange({ connectionId: id })}
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             A <code>signing</code> connection — its key is read server-side,
             never stored in the graph. Output is <code>{node.id}.digest</code>.
           </div>
@@ -3281,7 +3416,13 @@ function ConfigPanel({
               <option value="RS256">RS256 (RSA private key)</option>
             </select>
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             Signed by a <code>signing</code> connection's key (read server-side)
             — a shared secret for HS256, or a PEM PKCS#8 RSA private key for
             RS256. Output is <code>{node.id}.token</code>.
@@ -3328,7 +3469,13 @@ function ConfigPanel({
               onChange={(id) => onChange({ connectionId: id })}
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             A <code>signing</code> connection whose secret is the base32 TOTP
             seed (read server-side). Output is <code>{node.id}.code</code>.
           </div>
@@ -3398,7 +3545,13 @@ function ConfigPanel({
               placeholder="text, or bind from a node below"
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             Or bind the value from an upstream node (overrides the static
             value).
           </div>
@@ -3446,7 +3599,7 @@ function ConfigPanel({
               />
             </Labeled>
           </div>
-          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
             Output is <code>{node.id}.digest</code>.
           </div>
         </>
@@ -3521,7 +3674,7 @@ function ConfigPanel({
               </Labeled>
             </div>
           )}
-          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
             Output is <code>{node.id}.value</code>. Generated fresh each run.
           </div>
         </>
@@ -3537,7 +3690,13 @@ function ConfigPanel({
               onChange={(id) => onChange({ connectionId: id })}
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             An <code>smtp</code> connection — its URI (with credentials) is read
             server-side, never stored in the graph. Output is{" "}
             <code>{node.id}.messageId</code>.
@@ -3582,7 +3741,13 @@ function ConfigPanel({
             upstreamIds={upstreamIds}
             onChange={(v) => onChange({ fieldBindings: v })}
           />
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             Bind <code>to</code> / <code>subject</code> / <code>text</code> /{" "}
             <code>html</code> from upstream outputs to override the static
             values.
@@ -3611,7 +3776,7 @@ function ConfigPanel({
               onChange({ urlBinding: v ? Object.values(v)[0] : undefined })
             }
           />
-          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
             Fetches + parses the RSS/Atom feed (egress-guarded). Output is{" "}
             <code>{node.id}.items</code> — an array you can
             filter/sort/aggregate.
@@ -3629,7 +3794,7 @@ function ConfigPanel({
               placeholder="my-saved-workflow"
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
             Runs that saved graph's latest version as a child run (its own row
             in Runs). Read the result later as <code>{node.id}.status</code> /{" "}
             <code>{node.id}.output.*</code>. Nesting is capped to prevent
@@ -3650,7 +3815,13 @@ function ConfigPanel({
             placeholder={'{\n  "message": "hello"\n}'}
             onChange={(v) => onChange({ input: v })}
           />
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             Leave input empty to forward this run's trigger input to the child.
           </div>
         </>
@@ -3682,7 +3853,13 @@ function ConfigPanel({
               placeholder="rows"
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             Runs that saved workflow once per array item (item = the child's
             input), concurrently. Output is an array of{" "}
             <code>{node.id}.N.status</code> / <code>.output</code>, one per
@@ -3709,7 +3886,7 @@ function ConfigPanel({
               placeholder="0"
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
             Pauses the run with a durable timer — it survives restarts and costs
             nothing while waiting.
           </div>
@@ -3726,7 +3903,7 @@ function ConfigPanel({
               placeholder="Stopped: unexpected input"
             />
           </Labeled>
-          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
             Ends the run as <strong>failed</strong> with this message. Nothing
             downstream runs.
           </div>
@@ -3769,7 +3946,7 @@ function ConfigPanel({
               onChange({ bodyBinding: v ? Object.values(v)[0] : undefined })
             }
           />
-          <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
             For webhook-triggered graphs: returns this response to the caller
             synchronously, then the run continues. Bind <code>body</code> from
             an upstream output to override the static JSON.
@@ -3829,7 +4006,13 @@ function ConfigPanel({
               />
             </Labeled>
           </div>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: -6 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
             Runs in a QuickJS/WASM sandbox — no network, no filesystem, capped
             time + memory. <code>return</code> a value; it becomes{" "}
             <code>{node.id}</code>'s output.
@@ -3888,9 +4071,19 @@ function ConfigPanel({
       {kind === "webhookTrigger" && <WebhookInfo hookUrls={hookUrls} />}
 
       {kind === "errorTrigger" && (
-        <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.6 }}>
+        <div
+          style={{
+            fontSize: "var(--text-sm)",
+            color: "var(--ink-3)",
+            lineHeight: 1.6,
+          }}
+        >
           <div
-            style={{ fontWeight: 600, color: "var(--ink-2)", marginBottom: 4 }}
+            style={{
+              fontWeight: "var(--weight-semibold)",
+              color: "var(--ink-2)",
+              marginBottom: 4,
+            }}
           >
             Error handler entry
           </div>
@@ -3903,7 +4096,7 @@ function ConfigPanel({
       )}
 
       {kind === "end" && (
-        <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+        <div style={{ fontSize: "var(--text-sm)", color: "var(--ink-3)" }}>
           The terminal node — no configuration.
         </div>
       )}
@@ -3978,7 +4171,13 @@ function PinSection({
   }
 
   const label = (
-    <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 6 }}>
+    <div
+      style={{
+        fontSize: "var(--text-xs)",
+        color: "var(--ink-3)",
+        marginBottom: 6,
+      }}
+    >
       📌 Pinned sample — authoring only; the interpreter never uses it (a real
       run always executes upstream).
     </div>
@@ -3989,13 +4188,13 @@ function PinSection({
       <div
         style={{
           padding: "8px 10px",
-          borderRadius: 8,
+          borderRadius: "var(--radius-md)",
           border: "1px dashed var(--line-2)",
           background: "var(--card-2)",
         }}
       >
         {label}
-        <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
+        <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
           Save the workflow first to pin a sample output.
         </div>
       </div>
@@ -4026,7 +4225,7 @@ function PinSection({
     <div
       style={{
         padding: "8px 10px",
-        borderRadius: 8,
+        borderRadius: "var(--radius-md)",
         border: "1px solid var(--line-2)",
         background: "var(--card-2)",
       }}
@@ -4057,7 +4256,7 @@ function PinSection({
             display: "flex",
             alignItems: "center",
             gap: 5,
-            fontSize: 11,
+            fontSize: "var(--text-xs)",
             color: "var(--ink-3)",
             cursor: "pointer",
           }}
@@ -4079,11 +4278,11 @@ function PinSection({
               margin: 0,
               maxHeight: 160,
               overflow: "auto",
-              fontSize: 11,
+              fontSize: "var(--text-xs)",
               color: "var(--ink)",
               background: "var(--card)",
               border: "1px solid var(--line-2)",
-              borderRadius: 6,
+              borderRadius: "var(--radius-sm)",
               padding: "6px 8px",
             }}
           >
@@ -4106,7 +4305,11 @@ function PinSection({
       )}
       {tested && !tested.pure && (
         <div
-          style={{ fontSize: 11.5, color: "var(--ink-3)", marginBottom: 10 }}
+          style={{
+            fontSize: "var(--text-xs)",
+            color: "var(--ink-3)",
+            marginBottom: 10,
+          }}
         >
           {tested.message}
         </div>
@@ -4120,11 +4323,11 @@ function PinSection({
               margin: 0,
               maxHeight: 160,
               overflow: "auto",
-              fontSize: 11,
+              fontSize: "var(--text-xs)",
               color: "var(--ink)",
               background: "var(--card)",
               border: "1px solid var(--line-2)",
-              borderRadius: 6,
+              borderRadius: "var(--radius-sm)",
               padding: "6px 8px",
             }}
           >
@@ -4156,9 +4359,9 @@ function PinSection({
               width: "100%",
               minHeight: 64,
               resize: "vertical",
-              fontSize: 11,
+              fontSize: "var(--text-xs)",
               padding: "6px 8px",
-              borderRadius: 6,
+              borderRadius: "var(--radius-sm)",
               border: "1px solid var(--line-2)",
               background: "var(--card)",
               color: "var(--ink)",
@@ -4167,7 +4370,7 @@ function PinSection({
           {err && (
             <div
               style={{
-                fontSize: 11,
+                fontSize: "var(--text-xs)",
                 color: "var(--state-error)",
                 marginTop: 4,
               }}
@@ -4214,12 +4417,12 @@ function CopyButton({
       style={{
         flex: "none",
         padding: "0 10px",
-        borderRadius: 6,
+        borderRadius: "var(--radius-sm)",
         border: "1px solid var(--line-2)",
         background: "var(--card)",
         color: "var(--ink-2)",
-        fontSize: 11,
-        fontWeight: 600,
+        fontSize: "var(--text-xs)",
+        fontWeight: "var(--weight-semibold)",
         cursor: "pointer",
         fontFamily: "inherit",
       }}
@@ -4234,7 +4437,7 @@ function CopyButton({
 function WebhookInfo({ hookUrls }: { hookUrls: string[] }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
+      <div style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
         This workflow is webhook-triggered. The inbound event becomes the
         trigger output.
       </div>
@@ -4256,11 +4459,11 @@ function WebhookInfo({ hookUrls }: { hookUrls: string[] }) {
                 style={{
                   flex: 1,
                   minWidth: 0,
-                  fontSize: 11,
+                  fontSize: "var(--text-xs)",
                   color: "var(--ink)",
                   background: "var(--card-2)",
                   border: "1px solid var(--line-2)",
-                  borderRadius: 6,
+                  borderRadius: "var(--radius-sm)",
                   padding: "6px 8px",
                   wordBreak: "break-all",
                 }}
@@ -4272,7 +4475,7 @@ function WebhookInfo({ hookUrls }: { hookUrls: string[] }) {
           ))}
         </div>
       ) : (
-        <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
+        <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
           No endpoint registered yet — add one on the Integrations screen (it'll
           be bound to this workflow's key). Save the workflow first.
         </div>
@@ -4292,8 +4495,13 @@ function RowHead({ label, value }: { label: string; value: string }) {
         marginBottom: 6,
       }}
     >
-      <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{label}</span>
-      <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
+      <span style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
+        {label}
+      </span>
+      <span
+        className="mono"
+        style={{ fontSize: "var(--text-2xs)", color: "var(--ink-3)" }}
+      >
         {value}
       </span>
     </div>
@@ -4485,14 +4693,18 @@ function JsonField({
         style={{
           ...textareaStyle,
           fontFamily: "var(--font-mono)",
-          fontSize: 11.5,
+          fontSize: "var(--text-xs)",
           borderColor: error ? "var(--state-error)" : "var(--line-2)",
         }}
         placeholder={placeholder}
       />
       {error && (
         <div
-          style={{ fontSize: 11, color: "var(--state-error)", marginTop: 4 }}
+          style={{
+            fontSize: "var(--text-xs)",
+            color: "var(--state-error)",
+            marginTop: 4,
+          }}
         >
           {error}
         </div>
@@ -4549,14 +4761,18 @@ function JsonArrayField({
         style={{
           ...textareaStyle,
           fontFamily: "var(--font-mono)",
-          fontSize: 11.5,
+          fontSize: "var(--text-xs)",
           borderColor: error ? "var(--state-error)" : "var(--line-2)",
         }}
         placeholder={placeholder}
       />
       {error && (
         <div
-          style={{ fontSize: 11, color: "var(--state-error)", marginTop: 4 }}
+          style={{
+            fontSize: "var(--text-xs)",
+            color: "var(--state-error)",
+            marginTop: 4,
+          }}
         >
           {error}
         </div>
@@ -4606,7 +4822,7 @@ function BindingsEditor({
             key={i}
             style={{
               border: "1px solid var(--line)",
-              borderRadius: 8,
+              borderRadius: "var(--radius-md)",
               padding: 8,
               display: "flex",
               flexDirection: "column",
@@ -4628,7 +4844,7 @@ function BindingsEditor({
                   border: "1px solid var(--line-2)",
                   background: "var(--card)",
                   color: "var(--ink-3)",
-                  borderRadius: 6,
+                  borderRadius: "var(--radius-sm)",
                   cursor: "pointer",
                   padding: "0 9px",
                 }}
@@ -4674,9 +4890,9 @@ function BindingsEditor({
             border: "1px dashed var(--line-2)",
             background: "transparent",
             color: "var(--ink-2)",
-            borderRadius: 8,
+            borderRadius: "var(--radius-md)",
             padding: 8,
-            fontSize: 11.5,
+            fontSize: "var(--text-xs)",
             cursor: "pointer",
           }}
         >
@@ -4702,9 +4918,19 @@ function EdgeConfigPanel({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div>
-        <div style={{ fontSize: 11, color: "var(--ink-3)" }}>EDGE</div>
-        <div style={{ fontWeight: 600 }}>Branch condition</div>
-        <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>
+        <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
+          EDGE
+        </div>
+        <div style={{ fontWeight: "var(--weight-semibold)" }}>
+          Branch condition
+        </div>
+        <div
+          style={{
+            fontSize: "var(--text-xs)",
+            color: "var(--ink-3)",
+            marginTop: 2,
+          }}
+        >
           Blank path = always fires. The edge is taken when the predicate holds.
         </div>
       </div>
@@ -4766,12 +4992,12 @@ function EdgeConfigPanel({
           style={{
             alignSelf: "flex-start",
             padding: "6px 10px",
-            borderRadius: 7,
+            borderRadius: "var(--radius-sm)",
             border: "1px solid var(--line-2)",
             background: "var(--card)",
             color: "var(--ink-2)",
             cursor: "pointer",
-            fontSize: 12,
+            fontSize: "var(--text-sm)",
           }}
         >
           Clear condition (make unconditional)
@@ -4789,7 +5015,7 @@ function Labeled({
   children: React.ReactNode;
 }) {
   return (
-    <label style={{ display: "block", fontSize: 12 }}>
+    <label style={{ display: "block", fontSize: "var(--text-sm)" }}>
       <span style={{ color: "var(--ink-2)" }}>{label}</span>
       <div style={{ marginTop: 4 }}>{children}</div>
     </label>
@@ -4799,11 +5025,11 @@ function Labeled({
 const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "7px 9px",
-  borderRadius: 7,
+  borderRadius: "var(--radius-sm)",
   border: "1px solid var(--line-2)",
   background: "var(--card)",
   color: "var(--ink)",
-  fontSize: 13,
+  fontSize: "var(--text-body)",
 };
 const textareaStyle: React.CSSProperties = {
   ...inputStyle,
@@ -4812,9 +5038,9 @@ const textareaStyle: React.CSSProperties = {
 };
 const headerInputStyle: React.CSSProperties = {
   padding: "6px 9px",
-  borderRadius: 7,
+  borderRadius: "var(--radius-sm)",
   border: "1px solid var(--line-2)",
   background: "var(--card)",
   color: "var(--ink)",
-  fontSize: 13,
+  fontSize: "var(--text-body)",
 };
