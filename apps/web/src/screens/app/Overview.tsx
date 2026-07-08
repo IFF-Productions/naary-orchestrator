@@ -31,7 +31,7 @@ import {
 const cardStyle: CSSProperties = {
   background: "var(--card)",
   border: "1px solid var(--line)",
-  borderRadius: 12,
+  borderRadius: "var(--radius-lg)",
   boxShadow: "var(--shadow-card)",
 };
 
@@ -57,7 +57,11 @@ function ago(iso: string): string {
   return `${Math.round(h / 24)}d ago`;
 }
 
-const usd = (n: number) => `$${n.toFixed(4)}`;
+const usd = (n: number) =>
+  `$${n.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: n > 0 && n < 1 ? 4 : 2,
+  })}`;
 
 export function Overview() {
   const navigate = useNavigate();
@@ -104,7 +108,13 @@ export function Overview() {
       key: "wf",
       header: "Workflow",
       render: (r) => (
-        <span style={{ fontSize: 12.5, fontWeight: 500, color: "var(--ink)" }}>
+        <span
+          style={{
+            fontSize: "var(--text-body)",
+            fontWeight: "var(--weight-medium)",
+            color: "var(--ink)",
+          }}
+        >
           {r.workflowKey ?? r.workflowId}
         </span>
       ),
@@ -120,7 +130,7 @@ export function Overview() {
       render: (r) => (
         <span
           className="mono"
-          style={{ fontSize: 11.5, color: "var(--ink-2)" }}
+          style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
         >
           {r.costUsd === null ? "—" : usd(r.costUsd)}
         </span>
@@ -130,7 +140,10 @@ export function Overview() {
       key: "started",
       header: "Started",
       render: (r) => (
-        <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>
+        <span
+          className="mono"
+          style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
+        >
           {ago(r.startedAt)}
         </span>
       ),
@@ -161,15 +174,21 @@ export function Overview() {
         <div>
           <div
             style={{
-              fontSize: 22,
-              fontWeight: 700,
+              fontSize: "var(--text-title)",
+              fontWeight: "var(--weight-bold)",
               color: "var(--ink)",
-              letterSpacing: "-0.01em",
+              letterSpacing: "var(--tracking-tight)",
             }}
           >
             Overview
           </div>
-          <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 3 }}>
+          <div
+            style={{
+              fontSize: "var(--text-body)",
+              color: "var(--ink-2)",
+              marginTop: 4,
+            }}
+          >
             {subline}
           </div>
         </div>
@@ -217,7 +236,11 @@ export function Overview() {
             ) : (
               <>
                 {rate.toFixed(1)}
-                <span style={{ fontSize: 16, color: "var(--ink-2)" }}>%</span>
+                <span
+                  style={{ fontSize: "var(--text-lg)", color: "var(--ink-2)" }}
+                >
+                  %
+                </span>
               </>
             )}
           </StatValue>
@@ -235,11 +258,11 @@ export function Overview() {
               <span
                 className="mono"
                 style={{
-                  fontSize: 10,
+                  fontSize: "var(--text-2xs)",
                   color: "var(--ink-2)",
                   background: "var(--card-2)",
                   padding: "2px 6px",
-                  borderRadius: 5,
+                  borderRadius: "var(--radius-xs)",
                 }}
               >
                 ${Math.round(budget.monthlyCapUsd).toLocaleString()} cap
@@ -287,7 +310,16 @@ export function Overview() {
                 justifyContent: "space-between",
               }}
             >
-              <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
+              <span
+                className="mono"
+                style={{
+                  fontSize: "var(--text-2xs)",
+                  fontWeight: "var(--weight-semibold)",
+                  letterSpacing: "var(--tracking-label)",
+                  textTransform: "uppercase",
+                  color: "var(--ink-3)",
+                }}
+              >
                 Awaiting approval
               </span>
               {awaiting.length > 0 && (
@@ -307,9 +339,9 @@ export function Overview() {
               <Link
                 to="/app/runs"
                 style={{
-                  marginTop: 11,
-                  fontSize: 11.5,
-                  fontWeight: 600,
+                  marginTop: 12,
+                  fontSize: "var(--text-xs)",
+                  fontWeight: "var(--weight-semibold)",
                   color: "var(--state-paused)",
                   display: "flex",
                   alignItems: "center",
@@ -344,13 +376,19 @@ export function Overview() {
               padding: "16px 18px 12px",
             }}
           >
-            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>
+            <div
+              style={{
+                fontSize: "var(--text-md)",
+                fontWeight: "var(--weight-semibold)",
+                color: "var(--ink)",
+              }}
+            >
               Recent runs
             </div>
             <Link
               to="/app/runs"
               style={{
-                fontSize: 11.5,
+                fontSize: "var(--text-xs)",
                 color: "var(--ink-2)",
                 textDecoration: "none",
               }}
@@ -391,8 +429,8 @@ export function Overview() {
           >
             <div
               style={{
-                fontSize: 14,
-                fontWeight: 600,
+                fontSize: "var(--text-md)",
+                fontWeight: "var(--weight-semibold)",
                 color: "var(--ink)",
                 display: "flex",
                 alignItems: "center",
@@ -404,12 +442,12 @@ export function Overview() {
                 <span
                   className="mono"
                   style={{
-                    fontSize: 10,
-                    fontWeight: 600,
+                    fontSize: "var(--text-2xs)",
+                    fontWeight: "var(--weight-semibold)",
                     color: "var(--state-paused)",
                     background: "var(--paused-soft)",
                     padding: "2px 7px",
-                    borderRadius: 5,
+                    borderRadius: "var(--radius-xs)",
                   }}
                 >
                   {awaiting.length}
@@ -419,7 +457,7 @@ export function Overview() {
             <Link
               to="/app/runs"
               style={{
-                fontSize: 11.5,
+                fontSize: "var(--text-xs)",
                 color: "var(--ink-2)",
                 textDecoration: "none",
               }}
@@ -430,7 +468,7 @@ export function Overview() {
           {awaiting.length === 0 ? (
             <div
               style={{
-                fontSize: 12.5,
+                fontSize: "var(--text-body)",
                 color: "var(--ink-3)",
                 padding: "20px 0",
                 textAlign: "center",
@@ -444,10 +482,11 @@ export function Overview() {
                 <Link
                   key={item.workflowId}
                   to={`/app/runs/${item.workflowId}`}
+                  className="run-row"
                   style={{
                     border: "1px solid var(--line)",
-                    borderRadius: 9,
-                    padding: 11,
+                    borderRadius: "var(--radius-md)",
+                    padding: 12,
                     display: "flex",
                     alignItems: "center",
                     gap: 8,
@@ -458,8 +497,8 @@ export function Overview() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div
                       style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
+                        fontSize: "var(--text-body)",
+                        fontWeight: "var(--weight-semibold)",
                         color: "var(--ink)",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
@@ -470,7 +509,10 @@ export function Overview() {
                     </div>
                     <div
                       className="mono"
-                      style={{ fontSize: 10, color: "var(--ink-3)" }}
+                      style={{
+                        fontSize: "var(--text-2xs)",
+                        color: "var(--ink-3)",
+                      }}
                     >
                       waiting {ago(item.startedAt)}
                     </div>
@@ -492,8 +534,8 @@ export function Overview() {
       <div style={{ ...cardStyle, padding: 18 }}>
         <div
           style={{
-            fontSize: 14,
-            fontWeight: 600,
+            fontSize: "var(--text-md)",
+            fontWeight: "var(--weight-semibold)",
             color: "var(--ink)",
             marginBottom: 4,
           }}
@@ -501,14 +543,18 @@ export function Overview() {
           Spend by model
         </div>
         <div
-          style={{ fontSize: 11.5, color: "var(--ink-3)", marginBottom: 16 }}
+          style={{
+            fontSize: "var(--text-xs)",
+            color: "var(--ink-3)",
+            marginBottom: 16,
+          }}
         >
           {usage ? `This month · ${usd(usage.totalCostUsd)} total` : "—"}
         </div>
         {!usage || usage.byModel.length === 0 ? (
           <div
             style={{
-              fontSize: 12.5,
+              fontSize: "var(--text-body)",
               color: "var(--ink-3)",
               padding: "12px 0",
             }}
@@ -528,11 +574,16 @@ export function Overview() {
                     style={{
                       display: "flex",
                       justifyContent: "space-between",
-                      fontSize: 12,
-                      marginBottom: 5,
+                      fontSize: "var(--text-sm)",
+                      marginBottom: 6,
                     }}
                   >
-                    <span style={{ color: "var(--ink)", fontWeight: 500 }}>
+                    <span
+                      style={{
+                        color: "var(--ink)",
+                        fontWeight: "var(--weight-medium)",
+                      }}
+                    >
                       {m.model}
                     </span>
                     <span className="mono" style={{ color: "var(--ink-2)" }}>
@@ -551,20 +602,24 @@ export function Overview() {
         {budget && (
           <div
             style={{
-              marginTop: 18,
-              paddingTop: 15,
+              marginTop: 20,
+              paddingTop: 16,
               borderTop: "1px solid var(--line)",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
             }}
           >
-            <span style={{ fontSize: 12, color: "var(--ink-2)" }}>
+            <span style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
               Remaining this month
             </span>
             <span
               className="mono"
-              style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}
+              style={{
+                fontSize: "var(--text-body)",
+                fontWeight: "var(--weight-semibold)",
+                color: "var(--ink)",
+              }}
             >
               {usd(budget.remainingUsd)}
             </span>
@@ -645,9 +700,9 @@ function LiveCard({
     <div style={{ ...cardStyle, padding: "15px 16px" }}>
       <div
         style={{
-          fontSize: 10,
-          fontWeight: 600,
-          letterSpacing: "0.08em",
+          fontSize: "var(--text-2xs)",
+          fontWeight: "var(--weight-semibold)",
+          letterSpacing: "var(--tracking-label)",
           textTransform: "uppercase",
           color: "var(--ink-3)",
         }}
@@ -657,8 +712,8 @@ function LiveCard({
       <div
         className={mono ? "mono" : undefined}
         style={{
-          fontSize: mono ? 15 : 24,
-          fontWeight: 700,
+          fontSize: mono ? "var(--text-lg)" : "var(--text-xl)",
+          fontWeight: "var(--weight-bold)",
           color: "var(--ink)",
           marginTop: 8,
           overflow: "hidden",
@@ -688,7 +743,18 @@ function StatHead({
         minHeight: 18,
       }}
     >
-      <span style={{ fontSize: 12, color: "var(--ink-2)" }}>{label}</span>
+      <span
+        className="mono"
+        style={{
+          fontSize: "var(--text-2xs)",
+          fontWeight: "var(--weight-semibold)",
+          letterSpacing: "var(--tracking-label)",
+          textTransform: "uppercase",
+          color: "var(--ink-3)",
+        }}
+      >
+        {label}
+      </span>
       {children}
     </div>
   );
@@ -698,11 +764,11 @@ function StatValue({ children }: { children: ReactNode }) {
   return (
     <div
       style={{
-        fontSize: 27,
-        fontWeight: 700,
+        fontSize: "var(--text-xl)",
+        fontWeight: "var(--weight-bold)",
         color: "var(--ink)",
         marginTop: 8,
-        letterSpacing: "-0.02em",
+        letterSpacing: "var(--tracking-tight)",
       }}
     >
       {children}
@@ -715,7 +781,7 @@ function EmptyRow({ children }: { children: ReactNode }) {
     <div
       style={{
         padding: "20px 18px 24px",
-        fontSize: 12.5,
+        fontSize: "var(--text-body)",
         color: "var(--ink-3)",
       }}
     >
@@ -730,7 +796,7 @@ function ApprovalIcon() {
       style={{
         width: 22,
         height: 22,
-        borderRadius: 6,
+        borderRadius: "var(--radius-xs)",
         background: "color-mix(in srgb, var(--node-approval) 18%, transparent)",
         color: "var(--node-approval)",
         display: "flex",

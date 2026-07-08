@@ -22,7 +22,7 @@ import {
 const cardStyle: CSSProperties = {
   background: "var(--card)",
   border: "1px solid var(--line)",
-  borderRadius: 12,
+  borderRadius: "var(--radius-lg)",
   boxShadow: "var(--shadow-card)",
 };
 
@@ -107,15 +107,21 @@ export function Billing() {
       <div style={{ marginBottom: 18 }}>
         <div
           style={{
-            fontSize: 21,
-            fontWeight: 700,
+            fontSize: "var(--text-title)",
+            fontWeight: "var(--weight-bold)",
             color: "var(--ink)",
-            letterSpacing: "-0.01em",
+            letterSpacing: "var(--tracking-tight)",
           }}
         >
           Billing &amp; usage
         </div>
-        <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
+        <div
+          style={{
+            fontSize: "var(--text-body)",
+            color: "var(--ink-2)",
+            marginTop: 4,
+          }}
+        >
           Spend, tokens, budget caps and usage by model — from the usage ledger.
         </div>
       </div>
@@ -199,8 +205,8 @@ function BudgetCard({ budget }: { budget: BudgetView | null }) {
         <div
           style={{
             marginTop: 16,
-            fontSize: 12.5,
-            color: "var(--ink-2)",
+            fontSize: "var(--text-body)",
+            color: "var(--ink-3)",
           }}
         >
           No budget configured for this tenant yet.
@@ -231,9 +237,9 @@ function BudgetCard({ budget }: { budget: BudgetView | null }) {
         style={{
           display: "flex",
           justifyContent: "space-between",
-          fontSize: 12,
+          fontSize: "var(--text-sm)",
           marginTop: 16,
-          marginBottom: 7,
+          marginBottom: 8,
         }}
       >
         <span style={{ color: "var(--ink-2)" }}>Spent this month</span>
@@ -246,7 +252,7 @@ function BudgetCard({ budget }: { budget: BudgetView | null }) {
         className="mono"
         style={{
           marginTop: 8,
-          fontSize: 10.5,
+          fontSize: "var(--text-2xs)",
           color: over ? "var(--state-error)" : "var(--ink-3)",
         }}
       >
@@ -298,7 +304,13 @@ function SpendByModelCard({
       <CardSub>{`This tenant · ${usd(totalCostUsd)} total`}</CardSub>
 
       {!hasUsage || rows.length === 0 ? (
-        <div style={{ marginTop: 16, fontSize: 12.5, color: "var(--ink-2)" }}>
+        <div
+          style={{
+            marginTop: 16,
+            fontSize: "var(--text-body)",
+            color: "var(--ink-3)",
+          }}
+        >
           No usage recorded yet.
         </div>
       ) : (
@@ -319,11 +331,16 @@ function SpendByModelCard({
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
-                    fontSize: 12,
-                    marginBottom: 5,
+                    fontSize: "var(--text-sm)",
+                    marginBottom: 6,
                   }}
                 >
-                  <span style={{ color: "var(--ink)", fontWeight: 500 }}>
+                  <span
+                    style={{
+                      color: "var(--ink)",
+                      fontWeight: "var(--weight-medium)",
+                    }}
+                  >
                     {m.model}
                   </span>
                   <span className="mono" style={{ color: "var(--ink-2)" }}>
@@ -349,10 +366,11 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ ...cardStyle, padding: "15px 16px" }}>
       <div
+        className="mono"
         style={{
-          fontSize: 10,
-          fontWeight: 600,
-          letterSpacing: "0.08em",
+          fontSize: "var(--text-2xs)",
+          fontWeight: "var(--weight-semibold)",
+          letterSpacing: "var(--tracking-label)",
           textTransform: "uppercase",
           color: "var(--ink-3)",
         }}
@@ -362,8 +380,8 @@ function Stat({ label, value }: { label: string; value: string }) {
       <div
         className="mono"
         style={{
-          fontSize: 24,
-          fontWeight: 700,
+          fontSize: "var(--text-xl)",
+          fontWeight: "var(--weight-bold)",
           color: "var(--ink)",
           marginTop: 8,
           overflow: "hidden",
@@ -380,12 +398,14 @@ function Stat({ label, value }: { label: string; value: string }) {
 function KeyVal({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{label}</div>
+      <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
+        {label}
+      </div>
       <div
         className="mono"
         style={{
-          fontSize: 13,
-          fontWeight: 600,
+          fontSize: "var(--text-body)",
+          fontWeight: "var(--weight-semibold)",
           color: "var(--ink)",
           marginTop: 2,
           overflow: "hidden",
@@ -403,8 +423,8 @@ function CardTitle({ children }: { children: ReactNode }) {
   return (
     <div
       style={{
-        fontSize: 13,
-        fontWeight: 600,
+        fontSize: "var(--text-body)",
+        fontWeight: "var(--weight-semibold)",
         color: "var(--ink)",
         marginBottom: 4,
       }}
@@ -416,7 +436,9 @@ function CardTitle({ children }: { children: ReactNode }) {
 
 function CardSub({ children }: { children: ReactNode }) {
   return (
-    <div style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{children}</div>
+    <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
+      {children}
+    </div>
   );
 }
 
@@ -427,7 +449,7 @@ function Notice({ children, tone }: { children: ReactNode; tone?: "error" }) {
         ...cardStyle,
         padding: "28px 20px",
         textAlign: "center",
-        fontSize: 13,
+        fontSize: "var(--text-body)",
         color: tone === "error" ? "var(--state-error)" : "var(--ink-2)",
       }}
     >

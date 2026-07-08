@@ -428,6 +428,14 @@
   border-bottom: none;
 }
 
+/* ---------- Clickable custom row (dashboard lists) ---------- */
+.run-row {
+  transition: background 0.14s ease;
+}
+.run-row:hover {
+  background: var(--card-2);
+}
+
 /* ---------- CodeBlock ---------- */
 .code {
   font-family: var(--font-mono);
