@@ -65,7 +65,8 @@ const GRAPH_OUTPUT_SCHEMA = {
           config: {
             type: "object",
             additionalProperties: true,
-            description: "Node-specific config; omit or {} when not needed.",
+            description:
+              "Node settings — FILL with concrete values per the node's config: shape in the catalog (e.g. agent systemPrompt/model, httpRequest url/method). Only omit for nodes that take none (start/end/merge).",
           },
         },
         required: ["id", "type"],
@@ -133,10 +134,12 @@ Rules:
 - Prefer the simplest graph that satisfies the request. End flows with an "end" node (or "respondToWebhook" for a webhook that returns a response).
 - Only use connection-based nodes (mcpTool/sqlQuery/sqlExec/sendEmail/hmac/jwt/totp) when the request implies them; leave connectionId as a short placeholder the user will set.
 - Do NOT invent node types. Use only the catalog below.
+- FILL IN each node's config with concrete, ready-to-run values inferred from the request, following the "config:" shape shown for that node type below. Write real agent systemPrompts (specific to the task), real url+method for httpRequest, real title+instructions for humanApproval, real subject+body for sendEmail, etc. Reference upstream outputs with {{ nodeId.path }} where a value comes from an earlier node.
+- Do NOT emit an empty config {} for a node whose catalog entry shows config keys. Only nodes with no "config:" shape (e.g. start, end, merge) may omit config. For connection-based nodes leave ONLY connectionId as a "<...>" placeholder; still fill the rest.
 - A conditional edge has condition:{path,op,value}; do NOT put a conditional edge INTO a "merge" node.
 - To branch, prefer an "if" (two-way) or "switch" (multi-way) node and put conditions on the edges leaving it (e.g. path:"<if-id>.result", op:"eq", value:true).
 
-Available nodes:
+Available nodes (each line shows the node's config: shape to fill in):
 ${nodeCatalogPrompt()}`;
 
 @Injectable()
@@ -248,8 +251,10 @@ export class GraphGeneratorService {
         model: buildGenModel(provider, apiKey),
         system: SYSTEM_PROMPT,
         prompt: userPrompt,
+        // Higher cap: filled-in configs (systemPrompts, bodies) are much larger than a
+        // bare-topology graph, and a truncated response fails JSON parse → repair loop.
         output: Output.object({ schema: graphOutput }),
-        maxOutputTokens: 4000,
+        maxOutputTokens: 8000,
       });
       return result.output;
     } catch (e) {
