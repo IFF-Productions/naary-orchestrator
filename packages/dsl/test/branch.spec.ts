@@ -248,6 +248,22 @@ describe("validateGraph", () => {
     expect(validateGraph(diamond).valid).toBe(true);
   });
 
+  it("rejects a multi-node graph whose start has no outgoing edge (disconnected)", () => {
+    // The AI generator emitting nodes with an empty edges array — the run would do nothing.
+    const orphaned: GraphDef = {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        { id: "a", type: "agent" },
+        { id: "e", type: "end" },
+      ],
+      edges: [],
+    };
+    const res = validateGraph(orphaned);
+    expect(res.valid).toBe(false);
+    expect(res.error).toMatch(/no outgoing edge|disconnected/);
+  });
+
   it("rejects a conditional edge into a merge node (v1 fan-in must be unconditional)", () => {
     const bad: GraphDef = {
       startNodeId: "s",

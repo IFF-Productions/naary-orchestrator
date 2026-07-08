@@ -134,5 +134,18 @@ export function validateGraph(graph: GraphDef): GraphValidation {
       };
     }
   }
+  // Connectivity: a multi-node graph whose entry node has no outgoing edge is
+  // disconnected — the run would do nothing. Catches the AI generator emitting
+  // nodes with an empty edges array. Deliberately NARROW (only the start node), not
+  // full reachability, so a secondary entry like an errorTrigger isn't flagged.
+  if (
+    graph.nodes.length > 1 &&
+    !graph.edges.some((e) => e.from === graph.startNodeId)
+  ) {
+    return {
+      valid: false,
+      error: `startNodeId '${graph.startNodeId}' has no outgoing edge — the graph is disconnected`,
+    };
+  }
   return { valid: true };
 }

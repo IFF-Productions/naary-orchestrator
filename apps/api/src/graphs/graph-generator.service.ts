@@ -139,6 +139,23 @@ Rules:
 - A conditional edge has condition:{path,op,value}; do NOT put a conditional edge INTO a "merge" node.
 - To branch, prefer an "if" (two-way) or "switch" (multi-way) node and put conditions on the edges leaving it (e.g. path:"<if-id>.result", op:"eq", value:true).
 
+Example of the expected quality — note filled configs AND complete edges (a trigger/end takes no config; every other node is ready to run):
+{
+  "name": "New-lead Slack alert",
+  "startNodeId": "hook",
+  "nodes": [
+    { "id": "hook", "type": "webhookTrigger", "config": {} },
+    { "id": "classify", "type": "agent", "config": { "provider": "anthropic", "model": "claude-opus-4-8", "systemPrompt": "You are a sales assistant. Read the incoming lead in {{ hook.body }} and reply with a one-line summary and a priority of 'high' or 'low'." } },
+    { "id": "notify", "type": "httpRequest", "config": { "method": "POST", "url": "https://hooks.slack.com/services/<your-webhook>", "body": { "text": "New lead: {{ classify.output }}" } } },
+    { "id": "done", "type": "end" }
+  ],
+  "edges": [
+    { "from": "hook", "to": "classify" },
+    { "from": "classify", "to": "notify" },
+    { "from": "notify", "to": "done" }
+  ]
+}
+
 Available nodes (each line shows the node's config: shape to fill in):
 ${nodeCatalogPrompt()}`;
 
@@ -169,6 +186,7 @@ export class GraphGeneratorService {
 
     // First attempt.
     let out = await this.callModel(chosen, apiKey, description);
+    this.logDraftShape("first", out);
     let graph = toGraphDef(out);
     let check = validateGraph(graph);
 
@@ -178,6 +196,7 @@ export class GraphGeneratorService {
         previous: JSON.stringify(out),
         error: check.error ?? "invalid graph",
       });
+      this.logDraftShape(`repair(${check.error})`, out);
       graph = toGraphDef(out);
       check = validateGraph(graph);
       if (!check.valid) {
@@ -188,6 +207,27 @@ export class GraphGeneratorService {
     }
 
     return { name: out.name?.trim() || "Generated workflow", graph };
+  }
+
+  /** Log the RAW model draft's structure (counts only — node types + per-node config-key
+   *  counts + edge count) so we can see what the model actually emitted vs the final graph.
+   *  No prompt/completion text, no config values — just shape, safe for our own tenant. */
+  private logDraftShape(
+    stage: string,
+    out: {
+      nodes: { type: string; config?: Record<string, unknown> }[];
+      edges: unknown[];
+    },
+  ): void {
+    const nodes = out.nodes
+      .map((n) => `${n.type}(${n.config ? Object.keys(n.config).length : 0})`)
+      .join(",");
+    const filled = out.nodes.filter(
+      (n) => n.config && Object.keys(n.config).length > 0,
+    ).length;
+    this.logger.log(
+      `draft[${stage}]: nodes=${out.nodes.length} edges=${out.edges.length} filledConfigs=${filled}/${out.nodes.length} [${nodes}]`,
+    );
   }
 
   /**
