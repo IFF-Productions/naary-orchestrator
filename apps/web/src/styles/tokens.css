@@ -15,6 +15,8 @@
   --card-2: #1a1f29;
   --line: #222834;
   --line-2: #2c3542;
+  /* Avatar / initials chip — theme-aware (was a hardcoded dark gradient). */
+  --avatar-bg: linear-gradient(140deg, #3a4252, #252b36);
 
   /* --- Content --- */
   --ink: #e8ebf1;
@@ -131,6 +133,8 @@
   --ink: #15191f;
   --ink-2: #5a6472;
   --ink-3: #9099a8;
+
+  --avatar-bg: linear-gradient(140deg, #dfe4ec, #eef1f6);
 
   --brand-soft: rgba(242, 98, 46, 0.1);
   --idle-soft: rgba(123, 132, 147, 0.12);
