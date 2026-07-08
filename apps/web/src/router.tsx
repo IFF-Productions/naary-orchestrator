@@ -1,5 +1,6 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppShell } from "./app/AppShell";
+import { RequireBuilder } from "./app/RequireBuilder";
 import { RequireAuth } from "./auth/RequireAuth";
 
 const lazy = (
@@ -24,8 +25,16 @@ export const router = createBrowserRouter([
     element: <RequireAuth />,
     children: [
       {
+        // Full canvas — Builder-only. Sibling of /app, so AppShell's mode gating
+        // doesn't cover it; RequireBuilder redirects Simple users to their automations.
         path: "/app/canvas",
-        ...lazy(() => import("./screens/CanvasPage"), "CanvasPage"),
+        element: <RequireBuilder />,
+        children: [
+          {
+            index: true,
+            ...lazy(() => import("./screens/CanvasPage"), "CanvasPage"),
+          },
+        ],
       },
       {
         path: "/app",
@@ -34,6 +43,32 @@ export const router = createBrowserRouter([
           {
             index: true,
             ...lazy(() => import("./screens/app/Overview"), "Overview"),
+          },
+          // Simple mode (design PRODUCT-VARIANTS.md): automations = graphs, presented friendly.
+          {
+            path: "automations",
+            ...lazy(
+              () => import("./screens/simple/Automations"),
+              "Automations",
+            ),
+          },
+          {
+            path: "automations/new",
+            ...lazy(
+              () => import("./screens/simple/NewAutomation"),
+              "NewAutomation",
+            ),
+          },
+          {
+            path: "automations/:key",
+            ...lazy(
+              () => import("./screens/simple/AutomationDetail"),
+              "AutomationDetail",
+            ),
+          },
+          {
+            path: "connect-ai",
+            ...lazy(() => import("./screens/simple/ConnectAi"), "ConnectAi"),
           },
           {
             path: "workflows",
