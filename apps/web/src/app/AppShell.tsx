@@ -1,10 +1,17 @@
 import { useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import {
+  Navigate,
+  NavLink,
+  Outlet,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Button, Icon, SearchInput } from "../components";
 import type { IconName } from "../components";
 import { clearToken } from "../lib/auth";
 import { PAGE_META } from "../lib/mock";
+import { useMode } from "../mode";
 import { useTheme } from "../theme";
 import { useWorkspace } from "../workspace/WorkspaceProvider";
 import { NotificationsBell } from "./NotificationsBell";
@@ -60,9 +67,35 @@ const FOOTER_ITEMS: NavItemDef[] = [
   { to: "/app/settings", label: "Settings", icon: "settings" },
 ];
 
+// Simple-mode nav (design PRODUCT-VARIANTS.md §6) — no canvas / integrations / observability.
+const SIMPLE_GROUPS: { heading: string; items: NavItemDef[] }[] = [
+  {
+    heading: "Automate",
+    items: [
+      { to: "/app/automations", label: "Automations", icon: "workflow" },
+      { to: "/app/runs", label: "Runs", icon: "activity" },
+      { to: "/app/approvals", label: "Approvals", icon: "approval" },
+    ],
+  },
+];
+const SIMPLE_FOOTER: NavItemDef[] = [
+  { to: "/app/connect-ai", label: "Connect AI", icon: "plug" },
+  { to: "/app/settings", label: "Settings", icon: "settings" },
+];
+
+// Paths a Simple-mode user may reach; anything else under /app redirects to /app/automations.
+const SIMPLE_ALLOWED = [
+  "/app/automations",
+  "/app/runs",
+  "/app/approvals",
+  "/app/settings",
+  "/app/connect-ai",
+];
+
 export function AppShell() {
   const [collapsed, setCollapsed] = useState(false);
   const { theme, toggleTheme } = useTheme();
+  const { mode } = useMode();
   const { logout } = useAuth();
   const { activeId, workspaces } = useWorkspace();
   const activeWs = workspaces.find((w) => w.tenantId === activeId);
@@ -74,17 +107,28 @@ export function AppShell() {
   const [search, setSearch] = useState("");
   const [title, sub] = PAGE_META[pathname] ?? ["Naary", ""];
 
-  // Global search: jump to Workflows filtered by the query (Workflows reads ?q).
+  // Global search: jump to Workflows filtered by the query (Workflows reads ?q). In Simple mode
+  // that route is hidden, so land on the automations list instead.
   const runSearch = (q: string) => {
     const query = q.trim();
     navigate(
-      query
-        ? `/app/workflows?q=${encodeURIComponent(query)}`
-        : "/app/workflows",
+      mode === "simple"
+        ? "/app/automations"
+        : query
+          ? `/app/workflows?q=${encodeURIComponent(query)}`
+          : "/app/workflows",
     );
     setSearch("");
   };
   const labelOp = collapsed ? 0 : 1;
+
+  // Mode gating: Simple users get the friendly nav + are redirected away from Builder-only routes.
+  const simple = mode === "simple";
+  const groups = simple ? SIMPLE_GROUPS : GROUPS;
+  const footerItems = simple ? SIMPLE_FOOTER : FOOTER_ITEMS;
+  const simpleBlocked =
+    simple &&
+    !SIMPLE_ALLOWED.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
   // Sign out of BOTH session kinds: Firebase (if signed in) and the pasted
   // `nry_` token, then return to the sign-in screen.
@@ -93,6 +137,8 @@ export function AppShell() {
     clearToken();
     navigate("/auth");
   }
+
+  if (simpleBlocked) return <Navigate to="/app/automations" replace />;
 
   return (
     <div
@@ -145,7 +191,7 @@ export function AppShell() {
             gap: 2,
           }}
         >
-          {GROUPS.map((g) => (
+          {groups.map((g) => (
             <div key={g.heading}>
               <GroupHeading op={labelOp}>{g.heading}</GroupHeading>
               {g.items.map((it) => (
@@ -159,7 +205,7 @@ export function AppShell() {
             </div>
           ))}
           <div style={{ flex: 1 }} />
-          {FOOTER_ITEMS.map((it) => (
+          {footerItems.map((it) => (
             <NavRow
               key={it.to}
               item={it}

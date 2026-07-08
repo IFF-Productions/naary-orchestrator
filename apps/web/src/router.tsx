@@ -35,6 +35,32 @@ export const router = createBrowserRouter([
             index: true,
             ...lazy(() => import("./screens/app/Overview"), "Overview"),
           },
+          // Simple mode (design PRODUCT-VARIANTS.md): automations = graphs, presented friendly.
+          {
+            path: "automations",
+            ...lazy(
+              () => import("./screens/simple/Automations"),
+              "Automations",
+            ),
+          },
+          {
+            path: "automations/new",
+            ...lazy(
+              () => import("./screens/simple/NewAutomation"),
+              "NewAutomation",
+            ),
+          },
+          {
+            path: "automations/:key",
+            ...lazy(
+              () => import("./screens/simple/AutomationDetail"),
+              "AutomationDetail",
+            ),
+          },
+          {
+            path: "connect-ai",
+            ...lazy(() => import("./screens/simple/ConnectAi"), "ConnectAi"),
+          },
           {
             path: "workflows",
             ...lazy(() => import("./screens/app/Workflows"), "Workflows"),
