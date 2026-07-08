@@ -87,11 +87,22 @@ export function Workflows() {
       >
         <div>
           <div
-            style={{ fontSize: 21, fontWeight: 700, letterSpacing: "-0.01em" }}
+            style={{
+              fontSize: "var(--text-title)",
+              fontWeight: "var(--weight-bold)",
+              color: "var(--ink)",
+              letterSpacing: "var(--tracking-tight)",
+            }}
           >
             Workflows
           </div>
-          <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
+          <div
+            style={{
+              fontSize: "var(--text-body)",
+              color: "var(--ink-2)",
+              marginTop: 4,
+            }}
+          >
             {graphs ? `${graphs.length} saved` : "…"}
             {runs.length ? ` · ${runs.length} recent runs` : ""}
           </div>
@@ -117,18 +128,13 @@ export function Workflows() {
 
       <Card pad={false} style={{ overflow: "hidden" }}>
         <div
-          className="mono"
+          className="mono-label"
           style={{
             display: "grid",
             gridTemplateColumns: GRID,
             gap: 10,
             padding: "10px 18px",
             borderBottom: "1px solid var(--line)",
-            fontSize: 9.5,
-            fontWeight: 600,
-            letterSpacing: "0.08em",
-            color: "var(--ink-3)",
-            textTransform: "uppercase",
           }}
         >
           <span>Workflow</span>
@@ -139,17 +145,35 @@ export function Workflows() {
         </div>
 
         {err && (
-          <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-2)" }}>
+          <div
+            style={{
+              padding: 18,
+              fontSize: "var(--text-body)",
+              color: "var(--ink-2)",
+            }}
+          >
             Sign in to see your saved workflows.
           </div>
         )}
         {!err && graphs === null && (
-          <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-3)" }}>
+          <div
+            style={{
+              padding: 18,
+              fontSize: "var(--text-body)",
+              color: "var(--ink-3)",
+            }}
+          >
             Loading…
           </div>
         )}
         {!err && graphs?.length === 0 && (
-          <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-2)" }}>
+          <div
+            style={{
+              padding: 18,
+              fontSize: "var(--text-body)",
+              color: "var(--ink-3)",
+            }}
+          >
             No saved workflows yet — create one on the canvas.
           </div>
         )}
@@ -175,13 +199,17 @@ export function Workflows() {
           >
             <div style={{ minWidth: 0 }}>
               <div
-                style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}
+                style={{
+                  fontSize: "var(--text-body)",
+                  fontWeight: "var(--weight-semibold)",
+                  color: "var(--ink)",
+                }}
               >
                 {r.graph.name}
               </div>
               <div
                 className="mono"
-                style={{ fontSize: 11, color: "var(--ink-3)" }}
+                style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
               >
                 {r.graph.workflowKey} · v{r.graph.version}
               </div>
@@ -190,20 +218,22 @@ export function Workflows() {
               {r.lastStatus ? (
                 <StatusPill {...runStatusUi(r.lastStatus)} />
               ) : (
-                <span style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
+                <span
+                  style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
+                >
                   No runs
                 </span>
               )}
             </span>
             <span
               className="mono"
-              style={{ fontSize: 12, color: "var(--ink)" }}
+              style={{ fontSize: "var(--text-sm)", color: "var(--ink)" }}
             >
               {r.runs}
             </span>
             <span
               className="mono"
-              style={{ fontSize: 11.5, color: "var(--ink-2)" }}
+              style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
             >
               {r.success === null ? "—" : `${Math.round(r.success)}%`}
             </span>
@@ -224,7 +254,13 @@ export function Workflows() {
         ))}
       </Card>
 
-      <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 10 }}>
+      <div
+        style={{
+          fontSize: "var(--text-xs)",
+          color: "var(--ink-3)",
+          marginTop: 12,
+        }}
+      >
         <Icon
           name="info"
           size={12}

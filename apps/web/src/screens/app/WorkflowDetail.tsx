@@ -41,24 +41,30 @@ function ViewNode({ data }: NodeProps<Node<ViewData>>) {
     <div
       style={{
         minWidth: 132,
-        borderRadius: 10,
+        borderRadius: "var(--radius-md)",
         border: `1px solid ${accent}`,
         background: "var(--card)",
         color: "var(--ink)",
-        fontSize: 13,
+        fontSize: "var(--text-body)",
         overflow: "hidden",
         boxShadow: "0 1px 2px rgba(0,0,0,.18)",
       }}
     >
       {!isEntry && <Handle type="target" position={Position.Left} />}
       <div style={{ height: 4, background: accent }} />
-      <div style={{ padding: "9px 12px", fontWeight: 600 }}>
+      <div
+        style={{ padding: "9px 12px", fontWeight: "var(--weight-semibold)" }}
+      >
         {LABEL[data.kind]}
       </div>
       {data.subtitle && (
         <div
           className="mono"
-          style={{ padding: "0 12px 9px", fontSize: 10, color: "var(--ink-3)" }}
+          style={{
+            padding: "0 12px 9px",
+            fontSize: "var(--text-2xs)",
+            color: "var(--ink-3)",
+          }}
         >
           {data.subtitle}
         </div>
@@ -154,7 +160,7 @@ export function WorkflowDetail() {
           border: "none",
           cursor: "pointer",
           color: "var(--ink-2)",
-          fontSize: 12.5,
+          fontSize: "var(--text-body)",
           padding: 0,
           marginBottom: 12,
         }}
@@ -171,10 +177,23 @@ export function WorkflowDetail() {
         }}
       >
         <div>
-          <div style={{ fontSize: 21, fontWeight: 700 }}>{g?.name ?? key}</div>
+          <div
+            style={{
+              fontSize: "var(--text-title)",
+              fontWeight: "var(--weight-bold)",
+              color: "var(--ink)",
+              letterSpacing: "var(--tracking-tight)",
+            }}
+          >
+            {g?.name ?? key}
+          </div>
           <div
             className="mono"
-            style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: 4,
+            }}
           >
             {key}
             {g ? ` · v${g.version}` : ""}
@@ -200,7 +219,7 @@ export function WorkflowDetail() {
         <div
           style={{
             marginBottom: 14,
-            fontSize: 12.5,
+            fontSize: "var(--text-body)",
             color: "var(--state-error)",
           }}
         >
@@ -231,12 +250,19 @@ export function WorkflowDetail() {
 
         {/* how it runs */}
         <Card style={{ padding: 18 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>
+          <div
+            style={{
+              fontSize: "var(--text-md)",
+              fontWeight: "var(--weight-semibold)",
+              color: "var(--ink)",
+              marginBottom: 10,
+            }}
+          >
             How it runs
           </div>
           <p
             style={{
-              fontSize: 12.5,
+              fontSize: "var(--text-body)",
               color: "var(--ink-2)",
               lineHeight: 1.6,
               marginTop: 0,
@@ -249,8 +275,8 @@ export function WorkflowDetail() {
           </p>
           <div
             style={{
-              fontSize: 12,
-              fontWeight: 600,
+              fontSize: "var(--text-sm)",
+              fontWeight: "var(--weight-semibold)",
               color: "var(--ink)",
               marginTop: 14,
             }}
@@ -259,7 +285,7 @@ export function WorkflowDetail() {
           </div>
           <ul
             style={{
-              fontSize: 12.5,
+              fontSize: "var(--text-body)",
               color: "var(--ink-2)",
               lineHeight: 1.7,
               paddingLeft: 18,
@@ -279,13 +305,13 @@ export function WorkflowDetail() {
                 {hookUrls.length > 0 ? (
                   <>
                     {hookUrls.map((u) => (
-                      <code key={u} style={{ fontSize: 11 }}>
+                      <code key={u} style={{ fontSize: "var(--text-xs)" }}>
                         POST {u}
                       </code>
                     ))}
                     <div
                       style={{
-                        fontSize: 11.5,
+                        fontSize: "var(--text-xs)",
                         color: "var(--ink-3)",
                         marginTop: 4,
                       }}
@@ -311,8 +337,8 @@ export function WorkflowDetail() {
           </ul>
           <div
             style={{
-              fontSize: 12,
-              fontWeight: 600,
+              fontSize: "var(--text-sm)",
+              fontWeight: "var(--weight-semibold)",
               color: "var(--ink)",
               marginTop: 14,
             }}
@@ -321,7 +347,7 @@ export function WorkflowDetail() {
           </div>
           <p
             style={{
-              fontSize: 12,
+              fontSize: "var(--text-sm)",
               color: "var(--ink-2)",
               lineHeight: 1.6,
               margin: "6px 0 8px",
@@ -337,11 +363,11 @@ export function WorkflowDetail() {
             style={{
               width: "100%",
               padding: "7px 9px",
-              borderRadius: 8,
+              borderRadius: "var(--radius-sm)",
               border: "1px solid var(--line-2)",
               background: "var(--card)",
               color: "var(--ink)",
-              fontSize: 12.5,
+              fontSize: "var(--text-body)",
             }}
           >
             <option value="">— none —</option>
@@ -355,8 +381,8 @@ export function WorkflowDetail() {
           </select>
           <div
             style={{
-              fontSize: 12,
-              fontWeight: 600,
+              fontSize: "var(--text-sm)",
+              fontWeight: "var(--weight-semibold)",
               color: "var(--ink)",
               marginTop: 14,
             }}
@@ -370,10 +396,10 @@ export function WorkflowDetail() {
               <span
                 key={n.id}
                 style={{
-                  fontSize: 10.5,
+                  fontSize: "var(--text-2xs)",
                   border: `1px solid ${ACCENT[n.type]}`,
                   color: ACCENT[n.type],
-                  borderRadius: 6,
+                  borderRadius: "var(--radius-sm)",
                   padding: "2px 8px",
                 }}
               >

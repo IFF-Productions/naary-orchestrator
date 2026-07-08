@@ -47,15 +47,21 @@ export function Templates() {
       <div style={{ marginBottom: 18 }}>
         <div
           style={{
-            fontSize: 21,
-            fontWeight: 700,
+            fontSize: "var(--text-title)",
+            fontWeight: "var(--weight-bold)",
             color: "var(--ink)",
-            letterSpacing: "-0.01em",
+            letterSpacing: "var(--tracking-tight)",
           }}
         >
           Templates
         </div>
-        <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
+        <div
+          style={{
+            fontSize: "var(--text-body)",
+            color: "var(--ink-2)",
+            marginTop: 4,
+          }}
+        >
           Production-ready agent workflows — fork in one click.
         </div>
       </div>
@@ -65,12 +71,12 @@ export function Templates() {
           style={{
             marginBottom: 14,
             padding: "9px 12px",
-            borderRadius: 8,
+            borderRadius: "var(--radius-sm)",
             background: "var(--error-soft)",
             border:
               "1px solid color-mix(in srgb, var(--state-error) 40%, transparent)",
             color: "var(--state-error)",
-            fontSize: 12,
+            fontSize: "var(--text-sm)",
           }}
         >
           {error}
@@ -78,11 +84,13 @@ export function Templates() {
       )}
 
       {templates === null && !error && (
-        <div style={{ fontSize: 12.5, color: "var(--ink-3)" }}>Loading…</div>
+        <div style={{ fontSize: "var(--text-body)", color: "var(--ink-3)" }}>
+          Loading…
+        </div>
       )}
 
       {templates?.length === 0 && (
-        <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>
+        <div style={{ fontSize: "var(--text-body)", color: "var(--ink-3)" }}>
           No templates available.
         </div>
       )}
@@ -145,7 +153,7 @@ function TemplateCard({
           style={{
             width: 38,
             height: 38,
-            borderRadius: 10,
+            borderRadius: "var(--radius-md)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -159,24 +167,30 @@ function TemplateCard({
         <span
           className="mono"
           style={{
-            fontSize: 10,
+            fontSize: "var(--text-2xs)",
             color: "var(--ink-3)",
             background: "var(--surface)",
             border: "1px solid var(--line)",
             padding: "2px 7px",
-            borderRadius: 5,
+            borderRadius: "var(--radius-xs)",
           }}
         >
           {t.nodeCount} nodes
         </span>
       </div>
 
-      <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>
+      <div
+        style={{
+          fontSize: "var(--text-md)",
+          fontWeight: "var(--weight-semibold)",
+          color: "var(--ink)",
+        }}
+      >
         {t.name}
       </div>
       <div
         style={{
-          fontSize: 12,
+          fontSize: "var(--text-sm)",
           color: "var(--ink-2)",
           marginTop: 5,
           lineHeight: 1.5,
@@ -197,7 +211,7 @@ function TemplateCard({
       >
         <span
           className="mono"
-          style={{ fontSize: 10.5, color: "var(--ink-3)" }}
+          style={{ fontSize: "var(--text-2xs)", color: "var(--ink-3)" }}
         >
           {t.key}
         </span>
@@ -215,8 +229,8 @@ function TemplateCard({
             background: "transparent",
             cursor: "pointer",
             padding: 0,
-            fontSize: 11.5,
-            fontWeight: 600,
+            fontSize: "var(--text-xs)",
+            fontWeight: "var(--weight-semibold)",
             color: "var(--brand)",
           }}
         >

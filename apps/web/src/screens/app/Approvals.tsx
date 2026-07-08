@@ -80,16 +80,37 @@ export function Approvals() {
         }}
       >
         <Icon name="approval" />
-        <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Approvals</h1>
+        <h1
+          style={{
+            fontSize: "var(--text-title)",
+            fontWeight: "var(--weight-bold)",
+            letterSpacing: "var(--tracking-tight)",
+            color: "var(--ink)",
+            margin: 0,
+          }}
+        >
+          Approvals
+        </h1>
       </div>
-      <p style={{ color: "var(--ink-2)", fontSize: 13, marginTop: 0 }}>
+      <p
+        style={{
+          color: "var(--ink-2)",
+          fontSize: "var(--text-body)",
+          marginTop: 0,
+        }}
+      >
         Runs waiting on your decision. Approving continues the workflow;
         rejecting stops it.
       </p>
 
       {error && (
         <Card>
-          <div style={{ color: "var(--state-error)", fontSize: 13 }}>
+          <div
+            style={{
+              color: "var(--state-error)",
+              fontSize: "var(--text-body)",
+            }}
+          >
             {error}
           </div>
         </Card>
@@ -98,7 +119,11 @@ export function Approvals() {
       {!error && items?.length === 0 && (
         <Card>
           <div
-            style={{ color: "var(--ink-2)", fontSize: 14, padding: "8px 2px" }}
+            style={{
+              color: "var(--ink-3)",
+              fontSize: "var(--text-md)",
+              padding: "8px 2px",
+            }}
           >
             Nothing waiting for approval right now. 🎉
           </div>
@@ -116,7 +141,15 @@ export function Approvals() {
                   gap: 12,
                 }}
               >
-                <div style={{ fontSize: 15, fontWeight: 600 }}>{it.title}</div>
+                <div
+                  style={{
+                    fontSize: "var(--text-lg)",
+                    fontWeight: "var(--weight-semibold)",
+                    color: "var(--ink)",
+                  }}
+                >
+                  {it.title}
+                </div>
                 <button
                   type="button"
                   onClick={() => navigate(`/app/runs/${it.workflowId}`)}
@@ -125,7 +158,7 @@ export function Approvals() {
                     background: "none",
                     border: "none",
                     color: "var(--ink-3)",
-                    fontSize: 11,
+                    fontSize: "var(--text-xs)",
                     cursor: "pointer",
                     whiteSpace: "nowrap",
                   }}
@@ -136,9 +169,9 @@ export function Approvals() {
               {it.instructions && (
                 <div
                   style={{
-                    fontSize: 13,
+                    fontSize: "var(--text-body)",
                     color: "var(--ink-2)",
-                    lineHeight: 1.45,
+                    lineHeight: "var(--leading-snug)",
                   }}
                 >
                   {it.instructions}
@@ -156,11 +189,11 @@ export function Approvals() {
                 disabled={busy === it.workflowId}
                 style={{
                   padding: "7px 10px",
-                  borderRadius: 8,
+                  borderRadius: "var(--radius-sm)",
                   border: "1px solid var(--line)",
                   background: "var(--card)",
                   color: "var(--ink)",
-                  fontSize: 13,
+                  fontSize: "var(--text-body)",
                 }}
               />
               <div style={{ display: "flex", gap: 8 }}>

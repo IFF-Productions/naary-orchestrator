@@ -276,7 +276,13 @@ export function AppShell() {
             zIndex: 10,
           }}
         >
-          <div style={{ fontSize: 16, fontWeight: 600, color: "var(--ink)" }}>
+          <div
+            style={{
+              fontSize: "var(--text-lg)",
+              fontWeight: "var(--weight-semibold)",
+              color: "var(--ink)",
+            }}
+          >
             {title}
           </div>
           <span
@@ -285,14 +291,14 @@ export function AppShell() {
               display: "flex",
               alignItems: "center",
               gap: 6,
-              fontSize: 10.5,
-              fontWeight: 500,
+              fontSize: "var(--text-2xs)",
+              fontWeight: "var(--weight-medium)",
               color: "var(--brand)",
               background: "var(--brand-soft)",
               border:
                 "1px solid color-mix(in srgb, var(--brand) 30%, transparent)",
               padding: "3px 9px",
-              borderRadius: 6,
+              borderRadius: "var(--radius-sm)",
             }}
           >
             <span
@@ -362,16 +368,16 @@ function BrandTile() {
       style={{
         width: 30,
         height: 30,
-        borderRadius: 8,
+        borderRadius: "var(--radius-sm)",
         flex: "none",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         background: "var(--brand-radial)",
-        boxShadow: "0 0 16px -2px rgba(242,98,46,.6)",
+        boxShadow: "var(--glow-brand)",
       }}
     >
-      <Icon name="flame" size={17} style={{ color: "#fff3ec" }} />
+      <Icon name="flame" size={17} style={{ color: "var(--brand-ink)" }} />
     </div>
   );
 }
@@ -387,9 +393,9 @@ function GroupHeading({
     <div
       className="mono"
       style={{
-        fontSize: 9.5,
-        fontWeight: 600,
-        letterSpacing: "0.13em",
+        fontSize: "var(--text-2xs)",
+        fontWeight: "var(--weight-semibold)",
+        letterSpacing: "var(--tracking-label)",
         color: "var(--ink-3)",
         textTransform: "uppercase",
         padding: "12px 8px 6px",
@@ -418,11 +424,12 @@ function NavRow({
     justifyContent: collapsed ? "center" : "flex-start",
     gap: collapsed ? 0 : 11,
     padding: "9px 9px",
-    borderRadius: 9,
-    fontSize: 13,
-    fontWeight: 500,
+    borderRadius: "var(--radius-md)",
+    fontSize: "var(--text-body)",
+    fontWeight: "var(--weight-medium)",
     textAlign: "left",
     cursor: "pointer",
+    transition: "background .14s ease, color .14s ease",
   };
   const content = (_active: boolean) => (
     <>
@@ -437,12 +444,12 @@ function NavRow({
         <span
           className="mono"
           style={{
-            fontSize: 10,
-            fontWeight: 600,
+            fontSize: "var(--text-2xs)",
+            fontWeight: "var(--weight-semibold)",
             color: "var(--brand)",
             background: "var(--brand-soft)",
             padding: "1px 7px",
-            borderRadius: 20,
+            borderRadius: "var(--radius-pill)",
           }}
         >
           {item.badge}

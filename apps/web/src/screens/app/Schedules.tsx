@@ -93,13 +93,24 @@ export function Schedules() {
 
   return (
     <div style={{ padding: "22px 28px 40px", maxWidth: 1100 }}>
-      <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 20 }}>
         <div
-          style={{ fontSize: 21, fontWeight: 700, letterSpacing: "-0.01em" }}
+          style={{
+            fontSize: "var(--text-title)",
+            fontWeight: "var(--weight-bold)",
+            color: "var(--ink)",
+            letterSpacing: "var(--tracking-tight)",
+          }}
         >
           Schedules
         </div>
-        <div style={{ fontSize: 12.5, color: "var(--ink-2)", marginTop: 2 }}>
+        <div
+          style={{
+            fontSize: "var(--text-body)",
+            color: "var(--ink-2)",
+            marginTop: 4,
+          }}
+        >
           Run a saved workflow on a recurring cron (durable Temporal Schedules).
         </div>
       </div>
@@ -108,13 +119,13 @@ export function Schedules() {
         <div
           style={{
             marginBottom: 14,
-            padding: "9px 12px",
-            borderRadius: 8,
+            padding: "10px 12px",
+            borderRadius: "var(--radius-md)",
             background: "var(--error-soft)",
             border:
               "1px solid color-mix(in srgb, var(--state-error) 40%, transparent)",
             color: "var(--state-error)",
-            fontSize: 12,
+            fontSize: "var(--text-sm)",
           }}
         >
           {error}
@@ -123,7 +134,15 @@ export function Schedules() {
 
       {/* create */}
       <Card style={{ padding: 16, marginBottom: 18 }}>
-        <strong style={{ fontSize: 14 }}>New schedule</strong>
+        <strong
+          style={{
+            fontSize: "var(--text-md)",
+            fontWeight: "var(--weight-semibold)",
+            color: "var(--ink)",
+          }}
+        >
+          New schedule
+        </strong>
         <div
           style={{
             display: "flex",
@@ -133,7 +152,7 @@ export function Schedules() {
             flexWrap: "wrap",
           }}
         >
-          <label style={{ fontSize: 12, color: "var(--ink-2)" }}>
+          <label style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
             Workflow
             <select
               value={workflowKey}
@@ -155,7 +174,7 @@ export function Schedules() {
               ))}
             </select>
           </label>
-          <label style={{ fontSize: 12, color: "var(--ink-2)" }}>
+          <label style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
             Cron
             <input
               value={cron}
@@ -184,13 +203,14 @@ export function Schedules() {
               onClick={() => setCron(p.cron)}
               className="mono"
               style={{
-                fontSize: 10.5,
+                fontSize: "var(--text-2xs)",
                 cursor: "pointer",
                 border: `1px solid ${cron === p.cron ? "var(--brand)" : "var(--line-2)"}`,
                 color: cron === p.cron ? "var(--brand)" : "var(--ink-2)",
                 background: "var(--card)",
                 padding: "3px 9px",
-                borderRadius: 6,
+                borderRadius: "var(--radius-sm)",
+                transition: "border-color 140ms ease, color 140ms ease",
               }}
             >
               {p.label}
@@ -209,9 +229,9 @@ export function Schedules() {
             gap: 10,
             padding: "10px 18px",
             borderBottom: "1px solid var(--line)",
-            fontSize: 9.5,
-            fontWeight: 600,
-            letterSpacing: "0.08em",
+            fontSize: "var(--text-2xs)",
+            fontWeight: "var(--weight-semibold)",
+            letterSpacing: "var(--tracking-label)",
             color: "var(--ink-3)",
             textTransform: "uppercase",
           }}
@@ -224,12 +244,24 @@ export function Schedules() {
         </div>
 
         {rows === null && !error && (
-          <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-3)" }}>
+          <div
+            style={{
+              padding: 16,
+              fontSize: "var(--text-body)",
+              color: "var(--ink-3)",
+            }}
+          >
             Loading…
           </div>
         )}
         {rows?.length === 0 && (
-          <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-2)" }}>
+          <div
+            style={{
+              padding: 16,
+              fontSize: "var(--text-body)",
+              color: "var(--ink-3)",
+            }}
+          >
             No schedules yet — create one above.
           </div>
         )}
@@ -246,18 +278,24 @@ export function Schedules() {
               alignItems: "center",
             }}
           >
-            <span style={{ fontSize: 12.5, fontWeight: 500 }}>
+            <span
+              style={{
+                fontSize: "var(--text-body)",
+                fontWeight: "var(--weight-medium)",
+                color: "var(--ink)",
+              }}
+            >
               {r.workflowKey}
             </span>
             <span
               className="mono"
-              style={{ fontSize: 11.5, color: "var(--ink-2)" }}
+              style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
             >
               {r.cron}
             </span>
             <span
               className="mono"
-              style={{ fontSize: 11, color: "var(--ink-3)" }}
+              style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
             >
               {r.paused ? "paused" : when(r.nextRunAt)}
             </span>
@@ -302,9 +340,9 @@ export function Schedules() {
 
 const field: React.CSSProperties = {
   padding: "7px 9px",
-  borderRadius: 7,
+  borderRadius: "var(--radius-sm)",
   border: "1px solid var(--line-2)",
   background: "var(--card)",
   color: "var(--ink)",
-  fontSize: 13,
+  fontSize: "var(--text-body)",
 };
