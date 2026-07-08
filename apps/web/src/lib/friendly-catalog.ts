@@ -38,7 +38,7 @@ const MODEL_OPTIONS = [
 ];
 
 export const FRIENDLY_CATALOG: Record<string, FriendlyStep> = {
-  manualTrigger: {
+  start: {
     title: "Manual start",
     blurb: "This automation runs when you start it (or via the API).",
     accent: "var(--node-trigger)",
@@ -154,6 +154,52 @@ export const FRIENDLY_CATALOG: Record<string, FriendlyStep> = {
     blurb: "Sends a response back to whoever called the webhook.",
     accent: "var(--node-http)",
     fields: [],
+  },
+  sqlQuery: {
+    title: "Query a database",
+    blurb: "Reads rows from a connected database.",
+    accent: "var(--node-mcp)",
+    fields: [
+      {
+        key: "connectionId",
+        label: "Database",
+        kind: "connection",
+        connectionTypes: ["postgres", "mssql", "mysql"],
+      },
+      {
+        key: "query",
+        label: "SQL query",
+        kind: "textarea",
+        placeholder: "SELECT ... FROM ...",
+      },
+    ],
+  },
+  mcpTool: {
+    title: "Use a tool",
+    blurb: "Calls a tool on a connected MCP server.",
+    accent: "var(--node-mcp)",
+    fields: [
+      {
+        key: "connectionId",
+        label: "Server",
+        kind: "connection",
+        connectionTypes: ["github", "atlassian", "custom"],
+      },
+      { key: "tool", label: "Tool name", kind: "text" },
+    ],
+  },
+  rssRead: {
+    title: "Read an RSS feed",
+    blurb: "Fetches the latest items from a feed URL.",
+    accent: "var(--node-http)",
+    fields: [
+      {
+        key: "url",
+        label: "Feed URL",
+        kind: "text",
+        placeholder: "https://…/feed.xml",
+      },
+    ],
   },
   end: {
     title: "Done",
