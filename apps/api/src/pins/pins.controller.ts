@@ -10,6 +10,7 @@ import {
   Put,
 } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
+import type { GraphDef, NodeDef } from "@naary/dsl";
 import { isPureNode, runPureNode } from "@naary/dsl";
 import { TenantId } from "../auth/tenant.decorator";
 import { ExecutionsService } from "../executions/executions.service";
@@ -65,7 +66,13 @@ export class PinsController {
     @TenantId() tenantId: string,
     @Param("workflowKey") workflowKey: string,
     @Param("nodeId") nodeId: string,
-    @Body() body: { inputs?: Record<string, unknown> },
+    @Body()
+    body: {
+      inputs?: Record<string, unknown>;
+      /** Slice 4: before running the target, recursively run + pin any un-pinned upstream
+       *  (ancestor) nodes so a deep node is testable without pinning each one by hand. */
+      autofillUpstream?: boolean;
+    },
   ): Promise<
     { pure: true; output: unknown } | { pure: false; message: string }
   > {
@@ -88,6 +95,17 @@ export class PinsController {
       ...(await this.pins.list(tenantId, workflowKey)),
       ...(body?.inputs ?? {}),
     };
+    // Optionally run + pin un-pinned ancestors first (opt-in — can fan out into a partial run).
+    if (body?.autofillUpstream) {
+      await this.fillUpstream(
+        tenantId,
+        workflowKey,
+        found.graph,
+        node.id,
+        ctx,
+        new Set(),
+      );
+    }
     // Pure node: run in-process, instant, no Temporal.
     if (isPureNode(node.type)) {
       try {
@@ -112,6 +130,56 @@ export class PinsController {
         pure: false,
         message: `Test run failed: ${e instanceof Error ? e.message : "the node errored"}`,
       };
+    }
+  }
+
+  /** Run one node against ctx (pure → in-process; activity → test-mode Temporal). */
+  private runNode(
+    tenantId: string,
+    workflowKey: string,
+    node: NodeDef,
+    ctx: Record<string, unknown>,
+  ): Promise<unknown> | unknown {
+    return isPureNode(node.type)
+      ? runPureNode(node, ctx)
+      : this.executions.testNode(tenantId, workflowKey, node, ctx);
+  }
+
+  /**
+   * Recursively ensure a node's testable ancestors are in `ctx` — walking edge predecessors, filling
+   * each un-pinned one depth-first (its own ancestors first), running it, and persisting the result
+   * as a pin. Cycle-guarded via `visiting`. Un-testable predecessors (triggers/wait/…) are left
+   * empty; a predecessor that errors is skipped (the target then sees empty for it).
+   */
+  private async fillUpstream(
+    tenantId: string,
+    workflowKey: string,
+    graph: GraphDef,
+    nodeId: string,
+    ctx: Record<string, unknown>,
+    visiting: Set<string>,
+  ): Promise<void> {
+    const preds = graph.edges.filter((e) => e.to === nodeId).map((e) => e.from);
+    for (const predId of preds) {
+      if (predId in ctx || visiting.has(predId)) continue;
+      const pred = graph.nodes.find((n) => n.id === predId);
+      if (!pred || UNTESTABLE_NODE_TYPES.has(pred.type)) continue;
+      visiting.add(predId);
+      await this.fillUpstream(
+        tenantId,
+        workflowKey,
+        graph,
+        predId,
+        ctx,
+        visiting,
+      );
+      try {
+        const out = await this.runNode(tenantId, workflowKey, pred, ctx);
+        ctx[predId] = out;
+        await this.pins.set(tenantId, workflowKey, predId, out);
+      } catch {
+        /* a failing ancestor stays absent — don't abort the whole fill */
+      }
     }
   }
 

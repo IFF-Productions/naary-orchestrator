@@ -177,10 +177,17 @@ export const api = {
     workflowKey: string,
     nodeId: string,
     inputs?: Record<string, unknown>,
+    autofillUpstream?: boolean,
   ): Promise<TestNodeResult> {
     return http(
       `/graphs/${encodeURIComponent(workflowKey)}/nodes/${encodeURIComponent(nodeId)}/test`,
-      { method: "POST", body: JSON.stringify(inputs ? { inputs } : {}) },
+      {
+        method: "POST",
+        body: JSON.stringify({
+          ...(inputs ? { inputs } : {}),
+          ...(autofillUpstream ? { autofillUpstream: true } : {}),
+        }),
+      },
     );
   },
   // AI workflow builder: describe a workflow → a validated DRAFT graph (unsaved).
