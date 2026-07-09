@@ -131,6 +131,10 @@ The node slices in §3 stand on their own value **without** these, but items+exp
 the prerequisite for per-item AI enrichment and the visual authoring the market expects; they
 warrant their own design doc before any code.
 
+> **Now specced (design docs written):** the items model → `ITEMS-MODEL.md`; the chat trigger +
+> RAG AI on-ramp → `CHAT-TRIGGER-RAG.md`. Both sequence into stacked, green-shippable slices and
+> reuse existing machinery (payload offload; the Form Trigger public-surface + budget-cap pattern).
+
 ## 7. Sourced gap ranking (n8n docs → naary)
 
 Build-now (self-contained, high value, in this roadmap) vs. Defer (architectural / web-heavy):
