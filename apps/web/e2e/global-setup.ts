@@ -136,6 +136,61 @@ async function globalSetup(_config: FullConfig): Promise<void> {
     }),
   }).catch(() => undefined);
 
+  // A monthly budget cap for the tenant — REQUIRED before a public form can be registered (the
+  // anonymous endpoint's spend backstop). Seed it on the TOKEN's real tenant (via /me), not the
+  // env TENANT: when E2E_API_TOKEN is supplied in CI its tenant may differ, and the form-page test
+  // registers against the token's tenant (resolved server-side), so the budget must match. Falls
+  // back to the env TENANT if /me is unavailable. Idempotent PUT.
+  const budgetTenant = await fetch(`${API_BASE}/me`, {
+    headers: { authorization: `Bearer ${token}` },
+  })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((j: { tenantId?: string } | null) => j?.tenantId ?? TENANT)
+    .catch(() => TENANT);
+  await fetch(`${API_BASE}/tenants/${budgetTenant}/budget`, {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ monthlyCapUsd: 100, perExecutionCapUsd: 5 }),
+  }).catch(() => undefined);
+
+  // Seed a form-trigger graph: formTrigger → end. Its config carries the field schema the hosted
+  // public form renders. The form-page e2e registers a form against this key and submits it.
+  // workflowKey "e2e-form".
+  await fetch(`${API_BASE}/graphs`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      workflowKey: "e2e-form",
+      name: "E2E hosted form",
+      graph: {
+        startNodeId: "form",
+        nodes: [
+          {
+            id: "form",
+            type: "formTrigger",
+            config: {
+              title: "E2E Contact",
+              description: "Say hello.",
+              submitLabel: "Send it",
+              fields: [
+                { key: "email", label: "Email", type: "email", required: true },
+                { key: "message", label: "Message", type: "textarea" },
+              ],
+            },
+          },
+          { id: "end", type: "end" },
+        ],
+        edges: [{ from: "form", to: "end" }],
+      },
+    }),
+  }).catch(() => undefined);
+
   const authDir = path.resolve(cwd, "e2e/.auth");
   mkdirSync(authDir, { recursive: true });
   writeFileSync(

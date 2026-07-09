@@ -20,6 +20,11 @@ export const router = createBrowserRouter([
     ...lazy(() => import("./screens/DesignSystemPage"), "DesignSystemPage"),
   },
   { path: "/auth", ...lazy(() => import("./screens/AuthPage"), "AuthPage") },
+  // Public hosted form (formTrigger) — anonymous, OUTSIDE RequireAuth (like /auth, /design).
+  {
+    path: "/f/:formId",
+    ...lazy(() => import("./screens/FormPage"), "FormPage"),
+  },
   // Everything under here requires a Keycloak session or a pasted nry_ token.
   {
     element: <RequireAuth />,
