@@ -124,10 +124,10 @@ worker package," it's "zod evaluated inside `workflows.ts`."
 A permissive fallback for not-yet-migrated nodes means every phase ships on its own and no phase
 requires touching all 42 nodes at once.
 
-**Phase 1a — DSL schema foundation (done; §6).** `zod` in `@naary/dsl`, concrete schemas for the 8
-high-value nodes (`agent`, `httpRequest`, `humanApproval`, `sendEmail`, `wait`, `set`, `if`,
-`switch`) + permissive fallback, derived types with bidirectional parity guards, and a sanitized
-`nodeConfigJsonSchema`.
+**Phase 1a — DSL schema foundation (done; §6).** `zod` in `@naary/dsl`, concrete schemas that began
+with 8 high-value nodes and, in Phase 2·1, now cover **every config-bearing node type** (permissive
+fallback only for the 3 config-less entry/exit nodes), derived types with bidirectional parity
+guards, and a sanitized `nodeConfigJsonSchema`.
 
 **Phase 1b — the discriminating experiment (RUN 2026-07-08; result below).** The question was
 whether concrete config schema revives structured-output generation, or whether the failure is the
@@ -155,11 +155,13 @@ prompt in place of / alongside the prose `config:` hints from `nodeCatalogPrompt
 *durable* wins (worker casts, save-time validation, forms) are unaffected and remain the main
 payoff.
 
-**Phase 2 — replace the interfaces + delete the casts (mechanical).**
-Convert the remaining `*NodeConfig` interfaces to `z.infer` of their registry schema. Make
-`NodeDef` a discriminated union (`{ id, type: "httpRequest", config: HttpRequestConfig } | …`).
-Delete the 35 `as unknown as` casts in `workflows.ts` — the compiler now narrows `node.config` per
-`case`. This is where the type safety becomes *enforced* rather than *asserted*.
+**Phase 2 — replace the interfaces + delete the casts.**
+*2·1 (done):* the registry now defines a parity-guarded schema + `z.infer` type for every
+config-bearing node. *2·2 (next):* delete the 35 `as unknown as` casts in `workflows.ts` via a
+runtime-free typed accessor `configOf<T extends NodeType>(node)` mapped from the registry types —
+chosen over a `NodeDef` discriminated union, which would ripple through every generic consumer
+(`walk`/`canonicalize`/web/API) for little gain. The accessor is type-only, so it can live in
+`index.ts` for the worker to use without pulling zod into the workflow bundle.
 
 **Phase 3 — validate on the write path.**
 `validateGraph` (or a new `validateGraphConfig`) runs `graphSchema.safeParse` in the API DTO /
@@ -175,8 +177,8 @@ Each phase is independently shippable and independently reversible.
 
 ## 5. Trade-offs & open questions (called out honestly)
 
-- **~38 schemas to write.** Mostly transcription — the interfaces already spell out every field.
-  The permissive fallback means it's a gradual sweep, not a wall.
+- **~38 schemas to write (now written).** Mostly transcription — the interfaces already spelled out
+  every field; the permissive fallback kept it a gradual sweep rather than a wall. Done in Phase 2·1.
 - **Graph versioning.** Schemas will evolve; an in-flight run's snapshot was validated against an
   older shape. Mitigation: **validate strictly on write, leniently on read** — never re-validate a
   historical graph snapshot against the current schema, and gate interpreter-visible shape changes
@@ -193,29 +195,32 @@ Each phase is independently shippable and independently reversible.
 - **Bundle discipline is load-bearing.** If zod ever leaks into the workflow entrypoint, Tier-1
   rule 2 is silently violated. This needs a guard (lint/bundle assertion), not just a convention.
 
-## 6. Prototype status (this slice)
+## 6. Status (shipped so far)
 
-Phase 1a is built and green — `packages/dsl/src/registry.ts` + `test/registry.spec.ts` (5 tests),
-`tsc -b` clean, full dsl suite 133/133:
+Phases 1a + 1b + 2·1 are built and green — `packages/dsl/src/registry.ts` + `test/registry.spec.ts`
++ `test/registry-corpus.spec.ts`, `tsc -b` clean, full dsl suite **144/144** (PR #184):
 
-- `zod` in `@naary/dsl`; concrete `config` schemas for the 8 Phase-1 nodes + permissive fallback
-  (`nodeConfigSchema(type)`).
+- `zod` in `@naary/dsl`; concrete `config` schemas for **all 38 config-bearing node types** +
+  permissive fallback for the 3 config-less ones (`nodeConfigSchema(type)`, own-property lookup so a
+  hostile deserialized `type` can't reach the prototype chain).
 - Derived TS types (`z.infer`) with **bidirectional type-equivalence guards** (`Exact<A,B>`,
-  enforced by `tsc -b`) against all 7 interface-backed nodes — not a single-literal `satisfies`
-  check. This caught a **real divergence**: the naïve `z.enum(CONDITION_OPS)` widened `op` to
-  `string`, so the inferred `if`/`switch` config was *not* a faithful port; fixed with a
-  literal-preserving op tuple (itself completeness-guarded against `ConditionOp`). Phase 2 can now
-  swap interfaces for inferred types with build-enforced safety, not hope.
+  enforced by `tsc -b`) against every interface-backed node — not a single-literal `satisfies`
+  check. These caught two **real divergences**: the naïve `z.enum(CONDITION_OPS)` widened `op` to
+  `string` (fixed with a literal-preserving, completeness-guarded op tuple), and the interface-less
+  `agent` schema requiring `provider/model/systemPrompt` that the runtime actually **defaults**
+  (would have rejected valid graphs on save). So Phase 2·2 can swap interfaces for inferred types
+  with build-enforced safety, not hope.
+- **Runtime acceptance proven, not just type parity** — a corpus round-trip `safeParse`s every node
+  config across all 10 in-repo sample/template graphs (plus an explicit number-keyed `paramBindings`
+  case), so wiring a save-gate can't reject a known-good workflow.
 - `nodeConfigJsonSchema(type)` → concrete, **Anthropic-safe** JSON Schema (the sanitize pass
   above), verified by a deep "no empty `{}` anywhere" assertion — which itself surfaced the
   `z.unknown()` → `{}` gotcha and proved the sanitize pass necessary.
-- Runtime enforcement demonstrated (`{ methdo, url: 42 }` rejected — a typo the untyped
-  `Record<string, unknown>` waved through).
 - `index.ts` deliberately does **not** re-export `registry.ts`, so the worker's `@naary/dsl`
   surface stays zod-free (Tier-1 rule 2 honored by construction).
 
-**Not yet done / not yet proven:** Phase 1b — the generator experiment above — is unrun, so the
-"structured output fills config" claim is still a hypothesis and #183's fate is undecided.
+Phase 1b (the generator experiment) **ran** and settled #183 — see §4. Remaining: Phase 2·2 (kill
+the worker casts), Phase 3 (validate on save), Phase 4 (auto-derive forms).
 
 ## 7. Recommendation
 

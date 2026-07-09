@@ -6,7 +6,7 @@ import {
   type HttpRequestConfig,
 } from "../src/registry";
 import { NODE_TYPES } from "../src/node-catalog";
-import type { HttpRequestNodeConfig } from "../src/types";
+import type { HttpRequestNodeConfig, NodeType } from "../src/types";
 
 describe("node config registry (TYPED-DSL Phase 1)", () => {
   it("resolves a schema for EVERY node type (concrete or permissive fallback)", () => {
@@ -21,6 +21,16 @@ describe("node config registry (TYPED-DSL Phase 1)", () => {
       const configLess =
         t === "webhookTrigger" || t === "errorTrigger" || t === "end";
       expect(hasConcreteConfig(t), t).toBe(!configLess);
+    }
+  });
+
+  it("is not fooled by prototype-chain keys in a hostile deserialized type", () => {
+    // A graph parsed from untrusted JSON could carry type:"__proto__"/"constructor". These live
+    // on Object.prototype, so `in`/`[type]` would report/return them — the own-property check must not.
+    for (const evil of ["__proto__", "constructor", "toString"] as NodeType[]) {
+      expect(hasConcreteConfig(evil), evil).toBe(false);
+      // still returns a usable zod schema (the permissive fallback), never a prototype method
+      expect(nodeConfigSchema(evil).safeParse({}).success, evil).toBe(true);
     }
   });
 

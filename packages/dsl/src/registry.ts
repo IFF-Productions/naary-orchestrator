@@ -414,16 +414,19 @@ const CONFIG_SCHEMAS = {
  */
 const PERMISSIVE_CONFIG = z.record(z.string(), z.unknown());
 
-/** The config schema for a node type — concrete when defined, else permissive. */
+/** The config schema for a node type — concrete when defined, else permissive. Uses an
+ *  OWN-property check (not `[type]`/`in`) so a hostile deserialized `type` like `"__proto__"` or
+ *  `"constructor"` can't reach up the prototype chain and return a non-schema value. */
 export function nodeConfigSchema(type: NodeType): z.ZodTypeAny {
-  return (
-    (CONFIG_SCHEMAS as Record<string, z.ZodTypeAny>)[type] ?? PERMISSIVE_CONFIG
-  );
+  return hasConcreteConfig(type)
+    ? (CONFIG_SCHEMAS as Record<string, z.ZodTypeAny>)[type]
+    : PERMISSIVE_CONFIG;
 }
 
-/** True when `type` has a concrete (non-fallback) schema. */
+/** True when `type` has a concrete (non-fallback) schema. Own-property check (see above);
+ *  `hasOwnProperty.call` rather than `Object.hasOwn` so it works under the es2021 lib. */
 export function hasConcreteConfig(type: NodeType): boolean {
-  return type in CONFIG_SCHEMAS;
+  return Object.prototype.hasOwnProperty.call(CONFIG_SCHEMAS, type);
 }
 
 /**
