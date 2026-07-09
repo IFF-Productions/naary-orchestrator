@@ -14,9 +14,9 @@ name: E2E
 #     user), auto-links Docker Desktop's bundled plugin into this user's ~/.docker/cli-plugins.
 #   - Node 22 + pnpm (the setup steps install pnpm; Node via setup-node)
 #   - Free ports 5432 / 7233 / 3000 / 8081, ~4 GB RAM
-#   - Google Chrome is fetched by `playwright install chrome` (needs its shared
-#     libs; on a bare Linux runner run `playwright install-deps chrome` once, or
-#     use a runner image that already has them).
+#   - Playwright's bundled Chromium is fetched per-user by `playwright install chromium`
+#     (no sudo, no system browser needed). We deliberately do NOT use the branded
+#     `channel: chrome`, whose install needs root and dies on a non-interactive runner.
 on:
   pull_request:
   push:
@@ -126,12 +126,6 @@ jobs:
           ENCRYPTION_KEY=${ENCRYPTION_KEY}
           ENV
 
-      # The host-side token mint imports @naary/db, so its client must be generated.
-      - name: Generate Prisma client
-        run: pnpm --filter @naary/db run generate
-        env:
-          DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}?schema=public
-
       - name: Build + start the stack
         run: ${{ steps.compose.outputs.cmd }} up -d --build
 
@@ -148,19 +142,48 @@ jobs:
           ${{ steps.compose.outputs.cmd }} ps
           exit 1
 
-      # Mint a tenant API token against the running DB (exposed on localhost:5432)
-      # and hand it to Playwright via E2E_API_TOKEN so global-setup skips its own mint.
+      # Mint a tenant API token by inserting DIRECTLY into the running DB (localhost:5432), then
+      # hand it to Playwright via E2E_API_TOKEN so global-setup skips its own mint.
+      #
+      # We do NOT use `pnpm exec ts-node` here: pnpm 11's pre-run deps-status-check spawns a
+      # `pnpm install` that fails on this runner, and — because the mint pipes through `| tail`
+      # — that ERROR TEXT gets captured AS the token (`[ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL] …`),
+      # so every request 401s and all authenticated tests land on the workspace-error gate. A
+      # tiny node+pg insert (pg is @naary/db's dep) reproduces ApiTokenService.mint's format
+      # (`nry_` + base64url(24) bytes, stored as its sha256 hex) with no pnpm/ts-node in the path.
       - name: Mint an E2E API token
-        env:
-          DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}?schema=public
+        working-directory: packages/db
         run: |
-          TOKEN=$(pnpm --filter @naary/api exec ts-node src/auth/mint-token.ts "${E2E_TENANT}" e2e | tail -n1)
+          # Build DATABASE_URL HERE, in the shell — a step-level `env:` block is NOT
+          # shell-expanded by Actions, so `${POSTGRES_USER}` there would reach Postgres
+          # verbatim (→ "password authentication failed for user ${POSTGRES_USER}"). The
+          # job-level env vars ARE real shell variables inside `run:`.
+          export DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}?schema=public"
+          TOKEN=$(node -e '
+            const { createHash, randomBytes } = require("node:crypto");
+            const { Client } = require("pg");
+            (async () => {
+              const token = "nry_" + randomBytes(24).toString("base64url");
+              const hash = createHash("sha256").update(token).digest("hex");
+              const c = new Client({ connectionString: process.env.DATABASE_URL });
+              await c.connect();
+              await c.query(
+                `insert into "ApiToken"(id,"tenantId","tokenHash",label) values (gen_random_uuid(),$1,$2,$3)`,
+                [process.env.E2E_TENANT, hash, "e2e"],
+              );
+              await c.end();
+              process.stdout.write(token);
+            })().catch((e) => { console.error(e); process.exit(1); });
+          ')
           if [ -z "$TOKEN" ]; then echo "::error::failed to mint token"; exit 1; fi
           echo "::add-mask::$TOKEN"
           echo "E2E_API_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
-      - name: Install Playwright Chrome
-        run: pnpm --filter @naary/web exec playwright install chrome
+      # Bundled Chromium (per-user download, no sudo). NOT `install chrome` — the branded
+      # channel does a system-wide install that needs root, which fails on this non-interactive
+      # runner ("sudo: a terminal is required"). See apps/web/playwright.config.ts.
+      - name: Install Playwright Chromium
+        run: pnpm --filter @naary/web exec playwright install chromium
 
       - name: Run Playwright e2e
         run: pnpm --filter @naary/web test:e2e
