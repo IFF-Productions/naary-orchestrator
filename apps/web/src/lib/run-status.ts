@@ -11,6 +11,7 @@ export const RUN_STATUS_UI: Record<string, { state: RunState; label: string }> =
   {
     running: { state: "running", label: "Running" },
     awaiting_approval: { state: "paused", label: "Awaiting approval" },
+    awaiting_webhook: { state: "paused", label: "Awaiting webhook" },
     completed: { state: "done", label: "Completed" },
     rejected: { state: "error", label: "Rejected" },
     budget_exceeded: { state: "error", label: "Budget exceeded" },

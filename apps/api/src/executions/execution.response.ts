@@ -37,6 +37,16 @@ export class AcceptedResponse {
   @ApiProperty({ example: true }) accepted!: boolean;
 }
 
+/** The resume-URL path for a run paused on a wait(webhook) node (host prepended client-side). */
+export class ResumeUrlResponse {
+  @ApiProperty({
+    example: "/hooks/resume/run-8f3a1c2e?token=ab12…",
+    description:
+      "Relative path an external system POSTs to resume the run. The token is the credential.",
+  })
+  path!: string;
+}
+
 /** Live run detail — status, current node, and the accumulated context. */
 export class RunStateResponse {
   @ApiProperty({

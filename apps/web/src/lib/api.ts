@@ -268,6 +268,10 @@ export const api = {
   getState(id: string): Promise<ExecutionState> {
     return http(`/executions/${encodeURIComponent(id)}`);
   },
+  // The signed resume-URL path for a run paused on a wait(webhook) node.
+  getResumeUrl(id: string): Promise<{ path: string }> {
+    return http(`/executions/${encodeURIComponent(id)}/resume-url`);
+  },
   // The run's execution log (curated Temporal history).
   getRunHistory(id: string): Promise<RunEvent[]> {
     return http(`/executions/${encodeURIComponent(id)}/history`);
