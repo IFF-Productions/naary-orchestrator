@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
 import { canonicalize, type GraphDef, validateGraph } from "@naary/dsl";
+// Runtime config validation is imported from the registry module DIRECTLY (not via the package
+// index) so it never rides the worker's `@naary/dsl` import surface — that's what keeps zod out of
+// the deterministic workflow bundle (Tier-1 rule 2). Deep `dist/` path because the repo uses
+// classic `moduleResolution: node`, which doesn't honor package `exports` subpaths for types.
+import { validateGraphConfigs } from "@naary/dsl/dist/registry";
 
 /** sha256 of the canonical (key-sorted) graph. Server-side — keeps `node:crypto`
  *  out of the DSL (which is bundled into the deterministic workflow). */
@@ -43,6 +48,21 @@ export class GraphsService {
     const check = validateGraph(graph);
     if (!check.valid) {
       throw new BadRequestException(`Invalid graph: ${check.error}`);
+    }
+    // Per-node config validation (Phase 3). Lenient on missing fields (drafts still save), strict
+    // on present values — so a `method:"FETCH"` or `url:42` is caught here, not at run time. The
+    // graph is persisted verbatim below; we validate but never store a parsed/stripped result.
+    const configErrors = validateGraphConfigs(graph);
+    if (configErrors.length > 0) {
+      const summary = configErrors
+        .map(
+          (e) =>
+            `${e.nodeId} (${e.nodeType}): ${e.issues
+              .map((i) => `${i.path || "config"} ${i.message}`)
+              .join("; ")}`,
+        )
+        .join(" | ");
+      throw new BadRequestException(`Invalid node config — ${summary}`);
     }
     const contentHash = hashGraph(graph);
     const latest = await this.latestRow(tenantId, workflowKey);

@@ -429,6 +429,48 @@ export function hasConcreteConfig(type: NodeType): boolean {
   return Object.prototype.hasOwnProperty.call(CONFIG_SCHEMAS, type);
 }
 
+/** One node's config-validation failure: the offending node + its per-field zod issues. */
+export interface NodeConfigError {
+  nodeId: string;
+  nodeType: NodeType;
+  issues: { path: string; message: string }[];
+}
+
+/**
+ * Validate every node's config against its schema — the save-path GATE (Phase 3). Deliberately
+ * LENIENT on MISSING fields (each concrete schema is `.partial()`d) so an in-progress draft — e.g.
+ * an httpRequest whose `url` isn't filled yet — still saves; it's STRICT on PRESENT values, so a
+ * genuinely wrong `method:"FETCH"` or `url:42` is rejected. This never rejects a known-good graph
+ * for incompleteness (the risk of a naïve full-parse gate). Config-less/fallback nodes are skipped.
+ *
+ * GATE ONLY: returns errors; the caller must persist the ORIGINAL graph bytes unchanged — do NOT
+ * store a parsed result (zod strips unmodeled keys → silent data loss).
+ */
+export function validateGraphConfigs(graph: {
+  nodes: { id: string; type: NodeType; config?: Record<string, unknown> }[];
+}): NodeConfigError[] {
+  const errors: NodeConfigError[] = [];
+  for (const node of graph.nodes) {
+    if (!hasConcreteConfig(node.type)) continue; // permissive/config-less → nothing to check
+    const schema = nodeConfigSchema(node.type);
+    // All concrete schemas are ZodObjects; `.partial()` keeps present-value checks, drops
+    // required-ness so a draft with unfilled fields isn't rejected on save.
+    const lenient = schema instanceof z.ZodObject ? schema.partial() : schema;
+    const res = lenient.safeParse(node.config ?? {});
+    if (!res.success) {
+      errors.push({
+        nodeId: node.id,
+        nodeType: node.type,
+        issues: res.error.issues.map((i) => ({
+          path: i.path.join("."),
+          message: i.message,
+        })),
+      });
+    }
+  }
+  return errors;
+}
+
 /**
  * A concrete stand-in for "any JSON value". Anthropic's structured-output validator REJECTS an
  * empty `{}` sub-schema ("Empty schema that accepts any JSON value is not supported") — the exact

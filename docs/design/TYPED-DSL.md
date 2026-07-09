@@ -163,10 +163,15 @@ chosen over a `NodeDef` discriminated union, which would ripple through every ge
 (`walk`/`canonicalize`/web/API) for little gain. The accessor is type-only, so it can live in
 `index.ts` for the worker to use without pulling zod into the workflow bundle.
 
-**Phase 3 — validate on the write path.**
-`validateGraph` (or a new `validateGraphConfig`) runs `graphSchema.safeParse` in the API DTO /
-save handler, returning per-node, per-field errors instead of a generic reject. Structural checks
-in `branch.ts` stay pure and unchanged; config validation is the additive layer.
+**Phase 3 — validate on the write path (done).** `validateGraphConfigs(graph)` runs in
+`GraphsService.upsert` after `validateGraph`, returning per-node/per-field errors. It's a **lenient
+gate**: each concrete schema is `.partial()`d, so an in-progress draft (a `httpRequest` whose `url`
+isn't filled yet) still SAVES, but a present wrong value (`method:"FETCH"`, `url:42`) is rejected —
+never a false rejection of a known-good graph. Gate only: the original graph bytes are persisted
+verbatim (no parsed/stripped result stored). Structural checks in `branch.ts` stay pure. The API
+imports the validator from `@naary/dsl/dist/registry` (directly, not via the package index) so the
+worker's `@naary/dsl` surface stays zod-free; the deep path is because the repo uses classic
+`moduleResolution: node`, which doesn't honor `exports` subpaths for types.
 
 **Phase 4 — auto-derive the web forms.**
 Config panels and the Simple-mode `friendly-catalog` read the schema's `shape` (plus a thin `ui`

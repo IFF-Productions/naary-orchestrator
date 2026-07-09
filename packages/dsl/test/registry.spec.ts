@@ -3,6 +3,7 @@ import {
   hasConcreteConfig,
   nodeConfigJsonSchema,
   nodeConfigSchema,
+  validateGraphConfigs,
   type HttpRequestConfig,
 } from "../src/registry";
 import { NODE_TYPES } from "../src/node-catalog";
@@ -84,5 +85,54 @@ describe("node config registry (TYPED-DSL Phase 1)", () => {
       body: { hello: "world" },
     } satisfies HttpRequestConfig satisfies HttpRequestNodeConfig;
     expect(nodeConfigSchema("httpRequest").safeParse(cfg).success).toBe(true);
+  });
+});
+
+describe("validateGraphConfigs (save gate — lenient on missing, strict on present)", () => {
+  const graph = (
+    nodes: { id: string; type: NodeType; config?: Record<string, unknown> }[],
+  ) => ({ nodes });
+
+  it("passes an in-progress DRAFT with required fields still unfilled", () => {
+    // httpRequest requires method+url at runtime, but a half-built node must still SAVE.
+    const errs = validateGraphConfigs(
+      graph([{ id: "h", type: "httpRequest", config: { method: "GET" } }]),
+    );
+    expect(errs).toEqual([]);
+  });
+
+  it("rejects a PRESENT value of the wrong type / bad enum", () => {
+    const errs = validateGraphConfigs(
+      graph([
+        { id: "h", type: "httpRequest", config: { method: "FETCH", url: 42 } },
+      ]),
+    );
+    expect(errs).toHaveLength(1);
+    expect(errs[0].nodeId).toBe("h");
+    expect(errs[0].issues.map((i) => i.path).sort()).toEqual(["method", "url"]);
+  });
+
+  it("does NOT reject unmodeled extra keys (strip-mode, no false positive)", () => {
+    const errs = validateGraphConfigs(
+      graph([
+        {
+          id: "h",
+          type: "httpRequest",
+          config: { method: "GET", url: "https://x", _uiNote: "draft" },
+        },
+      ]),
+    );
+    expect(errs).toEqual([]);
+  });
+
+  it("skips config-less nodes and reports nodeId/type on failure", () => {
+    const errs = validateGraphConfigs(
+      graph([
+        { id: "e", type: "end" },
+        { id: "w", type: "wait", config: { durationSeconds: "soon" } },
+      ]),
+    );
+    expect(errs).toHaveLength(1);
+    expect(errs[0]).toMatchObject({ nodeId: "w", nodeType: "wait" });
   });
 });
