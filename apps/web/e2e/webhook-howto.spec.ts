@@ -4,7 +4,10 @@ import { expect, test } from "@playwright/test";
 // AND a ready-to-run signed curl (Slice: in-UI "how to trigger" docs).
 test("registering a webhook shows a copy-run signed curl", async ({ page }) => {
   await page.goto("/app/integrations");
-  await expect(page.getByText("Register a webhook")).toBeVisible();
+
+  // The webhook form lives in a Collapsible that's closed by default (its body is
+  // not mounted until opened) — click the header to reveal the register form.
+  await page.getByRole("button", { name: /Register a webhook/ }).click();
 
   // register against the seeded "default" workflow (generic provider)
   await page.getByPlaceholder("wf-default").fill("default");

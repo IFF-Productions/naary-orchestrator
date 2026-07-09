@@ -51,7 +51,9 @@ for (const n of NEW_NODES) {
     // Selecting it opens the inspector with this node type's own config field.
     await node.click();
     await expect(page.getByText("Edit node")).toBeVisible();
-    await expect(page.getByText(n.field)).toBeVisible();
+    // .first(): some field labels (e.g. "JavaScript") also appear in a select's
+    // options, so the label text matches more than one node — presence is enough.
+    await expect(page.getByText(n.field).first()).toBeVisible();
 
     // Delete via the modal; it closes.
     await page.getByRole("button", { name: "Delete node" }).click();
