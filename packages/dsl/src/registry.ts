@@ -429,6 +429,14 @@ export function hasConcreteConfig(type: NodeType): boolean {
   return Object.prototype.hasOwnProperty.call(CONFIG_SCHEMAS, type);
 }
 
+/** The config field names for a node type (top-level keys of its object schema). Empty for the
+ *  permissive fallback / config-less nodes. Lets other packages (e.g. the web's Simple-mode
+ *  catalog) assert their hand-curated field lists only reference keys that actually exist. */
+export function nodeConfigKeys(type: NodeType): string[] {
+  const schema = nodeConfigSchema(type);
+  return schema instanceof z.ZodObject ? Object.keys(schema.shape) : [];
+}
+
 /** One node's config-validation failure: the offending node + its per-field zod issues. */
 export interface NodeConfigError {
   nodeId: string;
