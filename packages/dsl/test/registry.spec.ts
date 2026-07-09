@@ -15,17 +15,13 @@ describe("node config registry (TYPED-DSL Phase 1)", () => {
     }
   });
 
-  it("marks the Phase-1 set as concrete and others as fallback", () => {
-    for (const t of [
-      "agent",
-      "httpRequest",
-      "humanApproval",
-      "wait",
-    ] as const) {
-      expect(hasConcreteConfig(t), t).toBe(true);
+  it("marks config-bearing nodes concrete and config-less nodes as fallback", () => {
+    // every config-bearing node type now has a concrete, parity-guarded schema
+    for (const t of NODE_TYPES) {
+      const configLess =
+        t === "webhookTrigger" || t === "errorTrigger" || t === "end";
+      expect(hasConcreteConfig(t), t).toBe(!configLess);
     }
-    // not-yet-migrated node → permissive fallback
-    expect(hasConcreteConfig("xml")).toBe(false);
   });
 
   it("emits CONCRETE JSON Schema for a migrated node (the empty-{} bug, fixed at the source)", () => {
