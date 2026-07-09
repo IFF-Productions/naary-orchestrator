@@ -12,7 +12,7 @@ import {
   webhookSampleGraph,
 } from "../src";
 import type { GraphDef } from "../src/types";
-import { nodeConfigSchema } from "../src/registry";
+import { nodeConfigSchema, validateGraphConfigs } from "../src/registry";
 
 /**
  * RUNTIME-acceptance oracle (not just type parity): every node config in the in-repo graph corpus
@@ -47,6 +47,12 @@ describe("registry — corpus round-trip (runtime acceptance)", () => {
       }
     });
   }
+
+  it("the save gate (validateGraphConfigs) passes every corpus graph — no false rejections", () => {
+    for (const [name, graph] of Object.entries(CORPUS)) {
+      expect(validateGraphConfigs(graph), name).toEqual([]);
+    }
+  });
 
   it("specifically accepts number-keyed sqlExec/sqlQuery paramBindings", () => {
     // JSON object keys are strings ({"1": …}); prove zod v4's z.record(z.number(), …) accepts it.
