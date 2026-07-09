@@ -59,6 +59,7 @@ function formatCost(ctx: Record<string, unknown>): string {
 
 /* ------------- Real run: polls the control plane for live + closed runs ------------- */
 function RunView({ id }: { id: string }) {
+  const navigate = useNavigate();
   const [state, setState] = useState<ExecutionState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -148,6 +149,19 @@ function RunView({ id }: { id: string }) {
       await poll();
     } catch {
       setError("Could not cancel the run (it may have already finished).");
+    } finally {
+      setActing(false);
+    }
+  }
+
+  async function rerun() {
+    setActing(true);
+    try {
+      // Starts a fresh run with the original trigger input; jump to it.
+      const { workflowId } = await api.rerun(id);
+      navigate(`/app/runs/${workflowId}`);
+    } catch {
+      setError("Could not re-run (this run may predate re-run support).");
     } finally {
       setActing(false);
     }
@@ -259,6 +273,16 @@ function RunView({ id }: { id: string }) {
               Cancel run
             </Button>
           </div>
+        )}
+        {status && isTerminal(status) && (
+          <Button
+            variant="secondary"
+            icon="refresh"
+            disabled={acting}
+            onClick={rerun}
+          >
+            Re-run
+          </Button>
         )}
       </div>
 
