@@ -173,10 +173,17 @@ imports the validator from `@naary/dsl/dist/registry` (directly, not via the pac
 worker's `@naary/dsl` surface stays zod-free; the deep path is because the repo uses classic
 `moduleResolution: node`, which doesn't honor `exports` subpaths for types.
 
-**Phase 4 — auto-derive the web forms.**
-Config panels and the Simple-mode `friendly-catalog` read the schema's `shape` (plus a thin `ui`
-hint map for labels/widget kind) instead of being hand-maintained in parallel. Retire the
-duplicated field lists.
+**Phase 4 — connect the registry to the web (drift guard, NOT full auto-derivation).**
+Originally scoped as "generate the config panels + Simple-mode `friendly-catalog` from the schema."
+On inspection that's **inadvisable**: both surfaces are deliberately bespoke UX — plain-language
+titles/blurbs, curated field subsets, hand-tuned widget kinds and help text — that a schema can't
+express, so auto-deriving would *regress* the UX. Instead the registry earns its keep in the web as
+the **source of truth for validation**: `nodeConfigKeys(type)` backs a build-time drift guard
+(`apps/web/test/registry-drift.spec.ts`) asserting every hand-curated field/default key references a
+config key that actually exists in the schema. This caught two real silent-no-op bugs on
+introduction — `sendEmail` used key `body` (schema: `text`) and `sqlQuery` used `query` (schema:
+`sql`), so Simple-mode edits wrote config the interpreter never read. Keeps the bespoke UX, kills
+the drift.
 
 Each phase is independently shippable and independently reversible.
 

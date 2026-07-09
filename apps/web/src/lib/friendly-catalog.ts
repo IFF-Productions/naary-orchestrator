@@ -109,7 +109,7 @@ export const FRIENDLY_CATALOG: Record<string, FriendlyStep> = {
       },
       { key: "to", label: "To", kind: "text", placeholder: "you@example.com" },
       { key: "subject", label: "Subject", kind: "text" },
-      { key: "body", label: "Body", kind: "textarea" },
+      { key: "text", label: "Body", kind: "textarea" },
     ],
   },
   httpRequest: {
@@ -167,7 +167,7 @@ export const FRIENDLY_CATALOG: Record<string, FriendlyStep> = {
         connectionTypes: ["postgres", "mssql", "mysql"],
       },
       {
-        key: "query",
+        key: "sql",
         label: "SQL query",
         kind: "textarea",
         placeholder: "SELECT ... FROM ...",
