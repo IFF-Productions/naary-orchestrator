@@ -131,9 +131,18 @@ const CONFIG_SCHEMAS = {
 
   // --- AI ---
   agent: z.object({
-    provider: z.string(),
-    model: z.string(),
-    systemPrompt: z.string(),
+    // provider/model/systemPrompt are OPTIONAL on purpose: runAgent defaults provider→anthropic
+    // and model→claude-opus-4-8 and tolerates a missing systemPrompt (activities.ts), so a
+    // save-gate must accept whatever the runtime does — requiring them would reject valid graphs
+    // whose author never touched the dropdown. (agent has no *NodeConfig interface, so no parity
+    // guard; this shape is verified by the corpus round-trip test instead.)
+    provider: z.string().optional(),
+    model: z.string().optional(),
+    systemPrompt: z.string().optional(),
+    /** Sampling temperature (0–2); omitted ⇒ provider default. */
+    temperature: z.number().optional(),
+    /** Per-node output cap; omitted ⇒ MAX_OUTPUT_TOKENS. */
+    maxOutputTokens: z.number().optional(),
     /** JSON-schema-ish object describing the agent's structured output, if any. */
     outputSchema: z.record(z.string(), z.unknown()).optional(),
   }),
