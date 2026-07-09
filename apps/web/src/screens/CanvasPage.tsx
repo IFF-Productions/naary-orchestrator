@@ -98,7 +98,10 @@ function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
   const kind = data.kind;
   const accent = ACCENT[kind];
   const isEntry =
-    kind === "start" || kind === "webhookTrigger" || kind === "errorTrigger";
+    kind === "start" ||
+    kind === "webhookTrigger" ||
+    kind === "errorTrigger" ||
+    kind === "formTrigger";
   const subtitle = nodeSubtitle(kind, data.config);
   return (
     <div
@@ -1859,6 +1862,190 @@ function ConfigPanel({
           </div>
         </>
       )}
+
+      {kind === "formTrigger" &&
+        (() => {
+          const fields = (
+            Array.isArray(config.fields) ? config.fields : []
+          ) as Array<{
+            key?: string;
+            label?: string;
+            type?: string;
+            required?: boolean;
+            options?: string[];
+          }>;
+          const setFields = (next: unknown[]) => onChange({ fields: next });
+          const patchField = (i: number, patch: Record<string, unknown>) =>
+            setFields(fields.map((f, j) => (j === i ? { ...f, ...patch } : f)));
+          return (
+            <>
+              <Labeled label="Form title (optional)">
+                <input
+                  value={str("title")}
+                  onChange={(e) => onChange({ title: e.target.value })}
+                  style={inputStyle}
+                  placeholder="Contact us"
+                />
+              </Labeled>
+              <Labeled label="Description (optional)">
+                <input
+                  value={str("description")}
+                  onChange={(e) => onChange({ description: e.target.value })}
+                  style={inputStyle}
+                  placeholder="We'll get back to you shortly."
+                />
+              </Labeled>
+              <Labeled label="Submit button label (optional)">
+                <input
+                  value={str("submitLabel")}
+                  onChange={(e) => onChange({ submitLabel: e.target.value })}
+                  style={inputStyle}
+                  placeholder="Submit"
+                />
+              </Labeled>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "var(--text-sm)",
+                      color: "var(--ink-2)",
+                      fontWeight: "var(--weight-semibold)",
+                    }}
+                  >
+                    Fields
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon="plus"
+                    onClick={() =>
+                      setFields([
+                        ...fields,
+                        { key: "", label: "", type: "text" },
+                      ])
+                    }
+                  >
+                    Add field
+                  </Button>
+                </div>
+                {fields.length === 0 && (
+                  <div
+                    style={{
+                      fontSize: "var(--text-xs)",
+                      color: "var(--ink-3)",
+                    }}
+                  >
+                    No fields yet. Each submitted value becomes the trigger
+                    output, keyed by the field's key.
+                  </div>
+                )}
+                {fields.map((f, i) => (
+                  <div
+                    // biome-ignore lint/suspicious/noArrayIndexKey: fields are positional
+                    key={i}
+                    style={{
+                      border: "1px solid var(--line)",
+                      borderRadius: "var(--radius-md)",
+                      padding: 10,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                    }}
+                  >
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <input
+                        value={f.key ?? ""}
+                        onChange={(e) => patchField(i, { key: e.target.value })}
+                        style={inputStyle}
+                        placeholder="key (e.g. email)"
+                      />
+                      <input
+                        value={f.label ?? ""}
+                        onChange={(e) =>
+                          patchField(i, { label: e.target.value })
+                        }
+                        style={inputStyle}
+                        placeholder="Label"
+                      />
+                    </div>
+                    <div
+                      style={{ display: "flex", gap: 6, alignItems: "center" }}
+                    >
+                      <select
+                        value={f.type ?? "text"}
+                        onChange={(e) =>
+                          patchField(i, { type: e.target.value })
+                        }
+                        style={inputStyle}
+                      >
+                        {["text", "textarea", "number", "email", "select"].map(
+                          (t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                      <label
+                        style={{
+                          display: "flex",
+                          gap: 6,
+                          alignItems: "center",
+                          fontSize: "var(--text-sm)",
+                          color: "var(--ink-2)",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={Boolean(f.required)}
+                          onChange={(e) =>
+                            patchField(i, {
+                              required: e.target.checked || undefined,
+                            })
+                          }
+                        />
+                        Required
+                      </label>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        icon="trash"
+                        iconOnly
+                        title="Remove field"
+                        onClick={() =>
+                          setFields(fields.filter((_, j) => j !== i))
+                        }
+                      />
+                    </div>
+                    {f.type === "select" && (
+                      <input
+                        value={(f.options ?? []).join(", ")}
+                        onChange={(e) =>
+                          patchField(i, {
+                            options: e.target.value
+                              .split(",")
+                              .map((s) => s.trim())
+                              .filter(Boolean),
+                          })
+                        }
+                        style={inputStyle}
+                        placeholder="option1, option2, option3"
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          );
+        })()}
 
       {kind === "httpRequest" && (
         <>

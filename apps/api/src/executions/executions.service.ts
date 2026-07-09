@@ -287,6 +287,23 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  /** Start a form-submission run; the validated+sanitized submission becomes the trigger output.
+   *  The caller resolved + snapshotted the graph (and confirmed its entry is a formTrigger). */
+  async startForm(
+    tenantId: string,
+    snapshot: GraphSnapshot,
+    submission: Record<string, unknown>,
+    workflowKey: string,
+  ): Promise<{ workflowId: string }> {
+    return this.startGraph(
+      `form-${tenantId}`,
+      snapshot,
+      submission,
+      tenantId,
+      workflowKey,
+    );
+  }
+
   /**
    * Start a webhook run AND wait (bounded) for a `respondToWebhook` node to set a
    * synchronous response. Polls the response query until it's set, the run closes,

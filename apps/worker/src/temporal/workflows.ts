@@ -360,6 +360,11 @@ export async function runGraph(
         // on save). Passthrough of the run input — the schedule carries no external event.
         ctx[node.id] = ctx.__input;
         return null;
+      case "formTrigger":
+        // Entry node: the run was started by a hosted form submission (a later slice adds the
+        // public endpoint). The submitted fields ARE the run input → this node's output.
+        ctx[node.id] = ctx.__input;
+        return null;
       case "errorTrigger":
         // Entry node of an error-handler graph — its output is the failure context
         // the interpreter passed as this run's input.

@@ -50,6 +50,29 @@ describe("compileGraph", () => {
     expect(graph?.nodes.find((n) => n.id === "e")?.config).toBeUndefined();
   });
 
+  it("treats formTrigger as an entry node (its config carries through)", () => {
+    const nodes: CanvasNode[] = [
+      {
+        id: "form",
+        type: "formTrigger",
+        position: at(0),
+        config: {
+          title: "Contact",
+          fields: [{ key: "email", label: "Email", type: "email" }],
+        },
+      },
+      { id: "end", type: "end", position: at(1) },
+    ];
+    const edges: CanvasEdge[] = [{ id: "e1", source: "form", target: "end" }];
+    const { graph, error } = compileGraph(nodes, edges);
+    expect(error).toBeUndefined();
+    expect(graph?.startNodeId).toBe("form");
+    expect(graph?.nodes.find((n) => n.id === "form")?.config).toEqual({
+      title: "Contact",
+      fields: [{ key: "email", label: "Email", type: "email" }],
+    });
+  });
+
   it("errors on an empty canvas", () => {
     expect(compileGraph([], []).error).toMatch(/empty canvas/i);
   });

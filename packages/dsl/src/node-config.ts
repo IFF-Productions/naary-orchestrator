@@ -37,6 +37,7 @@ import type {
   ListOpsConfig,
   McpToolConfig,
   MergeConfig,
+  FormTriggerConfig,
   NumberConfig,
   PollTriggerConfig,
   RandomConfig,
@@ -65,6 +66,7 @@ export interface NodeConfigMap {
   errorTrigger: Record<string, unknown>;
   pollTrigger: PollTriggerConfig;
   scheduleTrigger: ScheduleTriggerConfig;
+  formTrigger: FormTriggerConfig;
   agent: AgentConfig;
   mcpTool: McpToolConfig;
   httpRequest: HttpRequestConfig;

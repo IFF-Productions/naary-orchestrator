@@ -123,6 +123,20 @@ model WebhookEndpoint {
   createdAt     DateTime @default(now())
 }
 
+// A hosted public form that starts a workflow (formTrigger). Unlike a webhook there is
+// NO signing secret — a form is intentionally anonymous, so the opaque `id` is the only
+// capability (don't leak tenantId/workflowId in the public URL). The form's field schema
+// is NOT stored here; it's read live from the current graph's formTrigger node so the
+// hosted form always reflects the latest definition.
+model FormEndpoint {
+  id         String   @id @default(uuid())
+  workflowId String // which graph (workflowKey) this form starts
+  tenantId   String
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId])
+}
+
 // Delivery-id dedupe so provider retries don't start duplicate executions.
 model WebhookDelivery {
   id         String   @id @default(uuid())
