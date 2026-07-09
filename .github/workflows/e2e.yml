@@ -153,9 +153,12 @@ jobs:
       # (`nry_` + base64url(24) bytes, stored as its sha256 hex) with no pnpm/ts-node in the path.
       - name: Mint an E2E API token
         working-directory: packages/db
-        env:
-          DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}?schema=public
         run: |
+          # Build DATABASE_URL HERE, in the shell — a step-level `env:` block is NOT
+          # shell-expanded by Actions, so `${POSTGRES_USER}` there would reach Postgres
+          # verbatim (→ "password authentication failed for user ${POSTGRES_USER}"). The
+          # job-level env vars ARE real shell variables inside `run:`.
+          export DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}?schema=public"
           TOKEN=$(node -e '
             const { createHash, randomBytes } = require("node:crypto");
             const { Client } = require("pg");
