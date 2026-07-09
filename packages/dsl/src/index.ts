@@ -74,3 +74,11 @@ export {
   validateGraph,
   type GraphValidation,
 } from "./branch";
+// Runtime-free typed config accessor (Phase 2·2). Registry config TYPES are re-exported here for
+// the worker; the runtime schemas/validation stay behind ./registry so zod never enters the
+// worker's import surface (Tier-1 rule 2). node-config.ts uses `import type` only → no zod.
+export {
+  asNodeConfig,
+  type NodeConfigMap,
+  type ConfigForType,
+} from "./node-config";

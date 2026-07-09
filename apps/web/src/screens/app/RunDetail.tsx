@@ -63,6 +63,8 @@ function RunView({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
+  const [resumeUrl, setResumeUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const poll = useCallback(async () => {
@@ -100,6 +102,27 @@ function RunView({ id }: { id: string }) {
     };
   }, [poll]);
 
+  // Fetch the signed resume URL while the run is paused on a wait(webhook) node. Built like the
+  // webhook ingress URLs elsewhere: `${origin}/api` + the relative path the API returns.
+  useEffect(() => {
+    if (state?.status !== "awaiting_webhook") {
+      setResumeUrl(null);
+      return;
+    }
+    let cancelled = false;
+    api.getResumeUrl(id).then(
+      (r) => {
+        if (!cancelled) setResumeUrl(`${window.location.origin}/api${r.path}`);
+      },
+      () => {
+        /* transient — the poll will retry via a re-render */
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [state?.status, id]);
+
   async function decide(approved: boolean) {
     setActing(true);
     try {
@@ -132,6 +155,7 @@ function RunView({ id }: { id: string }) {
 
   const status = state?.status;
   const awaiting = status === "awaiting_approval";
+  const awaitingWebhook = status === "awaiting_webhook";
   const running = status === "running";
   const ui = status ? runStatusUi(status) : null;
 
@@ -199,13 +223,13 @@ function RunView({ id }: { id: string }) {
                 marginTop: 4,
               }}
             >
-              {running || awaiting
+              {running || awaiting || awaitingWebhook
                 ? "Polling GET /executions/:id every 1.5s"
                 : "Final state · GET /executions/:id"}
             </div>
           </div>
         </div>
-        {(awaiting || running) && (
+        {(awaiting || running || awaitingWebhook) && (
           <div style={{ display: "flex", gap: 8 }}>
             {awaiting && (
               <>
@@ -253,6 +277,69 @@ function RunView({ id }: { id: string }) {
           >
             {error}
           </span>
+        </Card>
+      )}
+
+      {awaitingWebhook && (
+        <Card
+          style={{
+            borderColor: "color-mix(in srgb, var(--brand) 40%, transparent)",
+            marginBottom: 16,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Icon name="bolt" size={16} />
+            <span
+              style={{
+                fontSize: "var(--text-body)",
+                fontWeight: "var(--weight-bold)",
+              }}
+            >
+              Waiting for a webhook
+            </span>
+          </div>
+          <p
+            style={{
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-2)",
+              margin: "8px 0 12px",
+            }}
+          >
+            This run is paused until an external system POSTs to its resume URL.
+            The URL contains a signed token — anyone with it can resume the run,
+            so treat it like a secret.
+          </p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <code
+              className="mono"
+              style={{
+                flex: 1,
+                overflowX: "auto",
+                whiteSpace: "nowrap",
+                fontSize: "var(--text-xs)",
+                background: "var(--surface)",
+                border: "1px solid var(--line)",
+                borderRadius: "var(--radius-xs)",
+                padding: "8px 10px",
+                color: "var(--ink-1)",
+              }}
+            >
+              {resumeUrl ?? "Loading resume URL…"}
+            </code>
+            <Button
+              variant="secondary"
+              icon={copied ? "check" : "copy"}
+              disabled={!resumeUrl}
+              onClick={() => {
+                if (!resumeUrl) return;
+                void navigator.clipboard?.writeText(resumeUrl);
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1500);
+              }}
+            >
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          </div>
         </Card>
       )}
 

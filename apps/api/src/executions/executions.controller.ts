@@ -6,6 +6,7 @@ import { ApproveDto, StartExecutionDto } from "./execution.dto";
 import {
   AcceptedResponse,
   AwaitingApprovalResponse,
+  ResumeUrlResponse,
   RunEventResponse,
   RunListItemResponse,
   RunStateResponse,
@@ -93,6 +94,21 @@ export class ExecutionsController {
   ): Promise<{ accepted: true }> {
     await this.executions.cancel(id, tenantId);
     return { accepted: true };
+  }
+
+  /** The signed resume URL for a run paused on a wait(webhook) node (owner-scoped). Declared
+   *  before `:id` so the literal `resume-url` segment is matched specifically. */
+  @ApiEndpoint({
+    summary: "Get a run's webhook resume URL",
+    ok: ResumeUrlResponse,
+    notFound: true,
+  })
+  @Get(":id/resume-url")
+  async resumeUrl(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+  ): Promise<ResumeUrlResponse> {
+    return { path: await this.executions.getResumePath(id, tenantId) };
   }
 
   @ApiEndpoint({

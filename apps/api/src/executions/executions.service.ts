@@ -14,12 +14,14 @@ import {
 } from "@temporalio/client";
 import {
   approvalSignal,
+  resumeSignal,
   RUN_GRAPH_WORKFLOW,
   stateQuery,
   TASK_QUEUE,
   webhookResponseQuery,
   type ExecutionState,
   type ExecutionStatus,
+  type ResumeInput,
   type WebhookResponse,
 } from "@naary/contracts";
 import type { GraphDef, NodeDef } from "@naary/dsl";
@@ -28,6 +30,7 @@ import { getBudget } from "@naary/usage";
 import { executionsStarted } from "../common/metrics";
 import { type GraphSnapshot, GraphsService } from "../graphs/graphs.service";
 import { connectTemporal } from "../temporal/client";
+import { resumePath } from "./resume-token";
 
 /** Circuit breaker default when a tenant has no budget configured (safety net). */
 const DEFAULT_MAX_STEPS_PER_RUN = 50;
@@ -441,6 +444,34 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       }
       throw e;
     }
+  }
+
+  /**
+   * Resume a run paused on a wait(webhook) node by signalling `resumeSignal` with the caller's
+   * payload. PUBLIC path: authorization is the HMAC resume token (verified in the controller), so
+   * there is NO tenant/owner check here — the token is the credential. A run that isn't paused
+   * (already resumed, completed, or timed out) is a closed workflow → NOT_FOUND → 409, mirroring
+   * `approve`.
+   */
+  async resumeByToken(workflowId: string, payload: unknown): Promise<void> {
+    try {
+      await this.client.workflow
+        .getHandle(workflowId)
+        .signal(resumeSignal, { payload } satisfies ResumeInput);
+    } catch (e) {
+      if (e instanceof WorkflowNotFoundError) {
+        throw new ConflictException(
+          "Run is not awaiting a webhook resume (already resumed, completed, or timed out).",
+        );
+      }
+      throw e;
+    }
+  }
+
+  /** The relative resume-URL path for a run, for the owner's UI to display/copy. Tenant-scoped. */
+  async getResumePath(workflowId: string, tenantId: string): Promise<string> {
+    await this.assertOwner(workflowId, tenantId);
+    return resumePath(workflowId);
   }
 
   /**
