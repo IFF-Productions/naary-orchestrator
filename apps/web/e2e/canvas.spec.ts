@@ -17,8 +17,9 @@ test("add an agent node, edit it in the modal, delete it", async ({ page }) => {
   // Selecting it opens the inspector modal with the agent config fields.
   await agentNode.click();
   await expect(page.getByText("Edit node")).toBeVisible();
-  await expect(page.getByText("Provider")).toBeVisible();
-  await expect(page.getByText("Model")).toBeVisible();
+  await expect(page.getByText("Provider").first()).toBeVisible();
+  // "Model" appears in the field label + the select's options → match the first.
+  await expect(page.getByText("Model").first()).toBeVisible();
 
   // Delete it via the modal; the modal closes and the node is gone.
   await page.getByRole("button", { name: "Delete node" }).click();
