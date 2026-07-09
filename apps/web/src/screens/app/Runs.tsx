@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { type MouseEvent as ReactMouseEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Icon, StatusPill } from "../../components";
 import { api, type RunSummary, UnauthorizedError } from "../../lib/api";
-import { isFailure, runStatusUi } from "../../lib/run-status";
+import { isFailure, isTerminal, runStatusUi } from "../../lib/run-status";
 import { useMode } from "../../mode";
 
 const COLS = "1.5fr 1fr 0.9fr 0.7fr 0.7fr 0.4fr";
@@ -22,7 +22,11 @@ function ago(iso: string): string {
 /** Filter tabs → which statuses they include (All = everything). */
 const FILTERS: { label: string; match: (s: string) => boolean }[] = [
   { label: "All", match: () => true },
-  { label: "Awaiting", match: (s) => s === "awaiting_approval" },
+  {
+    label: "Waiting",
+    // Both human-in-the-loop pauses: approval AND wait(webhook) (PR #192).
+    match: (s) => s === "awaiting_approval" || s === "awaiting_webhook",
+  },
   { label: "Running", match: (s) => s === "running" },
   { label: "Completed", match: (s) => s === "completed" },
   { label: "Failed", match: isFailure },
@@ -36,6 +40,7 @@ export function Runs() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
   const [starting, setStarting] = useState(false);
+  const [rerunning, setRerunning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
@@ -64,6 +69,20 @@ export function Runs() {
         r.workflowId.includes(query) ||
         (r.workflowKey ?? "").includes(query),
     );
+
+  async function rerun(id: string, e: ReactMouseEvent) {
+    e.stopPropagation(); // don't also navigate into the (old) run
+    setRerunning(id);
+    setError(null);
+    try {
+      const { workflowId } = await api.rerun(id);
+      navigate(`/app/runs/${encodeURIComponent(workflowId)}`);
+    } catch {
+      setError("Could not re-run (the run may predate re-run support).");
+    } finally {
+      setRerunning(null);
+    }
+  }
 
   async function startRun() {
     setStarting(true);
@@ -305,12 +324,30 @@ export function Runs() {
             >
               {ago(r.startedAt)}
             </span>
-            <span style={{ textAlign: "right" }}>
-              <Icon
-                name="chevron-right"
-                size={14}
-                style={{ color: "var(--ink-3)" }}
-              />
+            <span
+              style={{
+                textAlign: "right",
+                display: "flex",
+                justifyContent: "flex-end",
+              }}
+            >
+              {isTerminal(r.status) ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon="refresh"
+                  iconOnly
+                  title="Re-run with the same input"
+                  disabled={rerunning === r.workflowId}
+                  onClick={(e) => void rerun(r.workflowId, e)}
+                />
+              ) : (
+                <Icon
+                  name="chevron-right"
+                  size={14}
+                  style={{ color: "var(--ink-3)" }}
+                />
+              )}
             </span>
           </div>
         ))}
