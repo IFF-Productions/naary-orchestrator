@@ -437,6 +437,42 @@ export const api = {
       { method: "DELETE" },
     );
   },
+  // --- Hosted forms (public formTrigger endpoints) ---
+  // Registered form endpoints for this tenant (no secret — forms are anonymous). Tenant-scoped.
+  listForms(tenantId: string): Promise<FormRow[]> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/forms`);
+  },
+  // Register a form endpoint for a workflow. 400 if the tenant has no monthly budget cap
+  // (the anonymous endpoint's required spend backstop). Returns the public path.
+  createForm(
+    tenantId: string,
+    input: { workflowId: string },
+  ): Promise<RegisteredForm> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/forms`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  deleteForm(tenantId: string, formId: string): Promise<void> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/forms/${encodeURIComponent(formId)}`,
+      { method: "DELETE" },
+    );
+  },
+  // PUBLIC (anonymous — no auth needed): the hosted form's definition + submit. Reached through
+  // the same /api proxy; the endpoints are @Public() so no token is required.
+  getFormDefinition(formId: string): Promise<FormDefinition> {
+    return http(`/forms/${encodeURIComponent(formId)}`);
+  },
+  submitForm(
+    formId: string,
+    data: Record<string, unknown>,
+  ): Promise<{ status: string }> {
+    return http(`/forms/${encodeURIComponent(formId)}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
   // --- Billing ---
   // Budget config + live month-to-date spend. Tenant-scoped. The server returns 404
   // (→ generic Error, not UnauthorizedError) when no budget is configured.
@@ -540,6 +576,38 @@ export interface RegisteredWebhook {
   endpointId: string;
   ingressPath: string;
   signingSecret: string;
+}
+
+/** A registered hosted-form endpoint (no secret — the opaque id is the only capability). */
+export interface FormRow {
+  id: string;
+  workflowId: string;
+  createdAt: string;
+}
+
+/** Returned when registering a form — the public path to host/share. */
+export interface RegisteredForm {
+  formId: string;
+  formPath: string;
+}
+
+/** One field of a public form definition (mirrors the API's FormFieldResponse). */
+export interface FormFieldView {
+  key: string;
+  label: string;
+  type: "text" | "textarea" | "number" | "email" | "select";
+  required?: boolean;
+  placeholder?: string;
+  options?: string[];
+}
+
+/** Public form definition served to an anonymous browser — carries NO tenant/workflow ids. */
+export interface FormDefinition {
+  formId: string;
+  title?: string;
+  description?: string;
+  submitLabel?: string;
+  fields: FormFieldView[];
 }
 
 /** A run paused at an approval, enriched with the node's prompt (approvals inbox). */

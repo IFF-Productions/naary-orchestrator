@@ -4,8 +4,10 @@ import {
   api,
   type ApiTokenRow,
   type ConnectionRow,
+  type FormRow,
   type MintedToken,
   type ProviderCredential,
+  type RegisteredForm,
   type RegisteredWebhook,
   type WebhookRow,
   UnauthorizedError,
@@ -80,6 +82,9 @@ const monoLabel: React.CSSProperties = {
  *  proxy the app uses (nginx rewrites /api/hooks/… → /hooks/…), so this URL is callable as-is. */
 const webhookUrl = (id: string): string =>
   `${window.location.origin}/api/hooks/${id}`;
+
+/** The public, shareable URL of a hosted form — the `/f/:formId` page served outside auth. */
+const formUrl = (id: string): string => `${window.location.origin}/f/${id}`;
 
 /** Small copy-to-clipboard button with brief "Copied ✓" feedback. */
 function UrlCopy({ url }: { url: string }) {
@@ -343,22 +348,26 @@ export function Integrations() {
   const [tenant, setTenant] = useState<string | null>(null);
   const [connections, setConnections] = useState<ConnectionRow[] | null>(null);
   const [webhooks, setWebhooks] = useState<WebhookRow[] | null>(null);
+  const [forms, setForms] = useState<FormRow[] | null>(null);
   const [credentials, setCredentials] = useState<ProviderCredential[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
   const [deletingHook, setDeletingHook] = useState<string | null>(null);
+  const [deletingForm, setDeletingForm] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const { tenantId } = await api.getMe();
       setTenant(tenantId);
-      const [conns, hooks, creds] = await Promise.all([
+      const [conns, hooks, formList, creds] = await Promise.all([
         api.listConnections(tenantId),
         api.listWebhooks(tenantId),
+        api.listForms(tenantId).catch(() => []),
         api.listCredentials(tenantId).catch(() => []),
       ]);
       setConnections(conns);
       setWebhooks(hooks);
+      setForms(formList);
       setCredentials(creds);
       setError(null);
     } catch (e) {
@@ -723,6 +732,130 @@ export function Integrations() {
           </div>
         ))}
       </div>
+
+      {/* ===== Form endpoints ===== */}
+      <div style={{ ...monoLabel, margin: "24px 0 12px" }}>Form endpoints</div>
+      <div
+        style={{
+          background: "var(--card)",
+          border: "1px solid var(--line)",
+          borderRadius: "var(--radius-lg)",
+          boxShadow: "var(--shadow-card)",
+          overflow: "hidden",
+        }}
+      >
+        {loading && (
+          <div
+            style={{
+              padding: 16,
+              fontSize: "var(--text-body)",
+              color: "var(--ink-3)",
+            }}
+          >
+            Loading…
+          </div>
+        )}
+        {!loading && forms?.length === 0 && (
+          <div
+            style={{
+              padding: 16,
+              fontSize: "var(--text-body)",
+              color: "var(--ink-3)",
+            }}
+          >
+            No hosted forms yet — register one to collect submissions that start
+            a workflow.
+          </div>
+        )}
+        {(forms ?? []).map((f, i) => (
+          <div
+            key={f.id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "14px 16px",
+              borderBottom:
+                i < (forms?.length ?? 0) - 1
+                  ? "1px solid var(--line)"
+                  : undefined,
+            }}
+          >
+            <span
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: "var(--radius-md)",
+                background:
+                  "color-mix(in srgb, var(--node-trigger) 15%, transparent)",
+                color: "var(--node-trigger)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flex: "none",
+              }}
+            >
+              <Icon name="edit" size={17} />
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <a
+                href={formUrl(f.id)}
+                target="_blank"
+                rel="noreferrer"
+                className="mono"
+                style={{
+                  display: "block",
+                  fontSize: "var(--text-sm)",
+                  fontWeight: "var(--weight-semibold)",
+                  color: "var(--ink)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  textDecoration: "none",
+                }}
+                title={formUrl(f.id)}
+              >
+                {formUrl(f.id)}
+              </a>
+              <div
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--ink-3)",
+                  marginTop: 2,
+                }}
+              >
+                public form · {f.workflowId}
+              </div>
+            </div>
+            <UrlCopy url={formUrl(f.id)} />
+            <StatusPill state="done" label="Active" />
+            <button
+              type="button"
+              className="btn btn-sm btn-secondary"
+              disabled={deletingForm === f.id}
+              title="Delete form"
+              onClick={() => {
+                if (!tenant || deletingForm) return;
+                if (
+                  !window.confirm(
+                    "Delete this form? Its public URL will stop working.",
+                  )
+                ) {
+                  return;
+                }
+                setDeletingForm(f.id);
+                void api
+                  .deleteForm(tenant, f.id)
+                  .then(() => load())
+                  .catch(() => setError("Could not delete the form."))
+                  .finally(() => setDeletingForm(null));
+              }}
+            >
+              {deletingForm === f.id ? "Deleting…" : "Delete"}
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -892,7 +1025,126 @@ function AddIntegrations({
       >
         <WebhookForm tenant={tenant} onChanged={onChanged} />
       </Collapsible>
+      <Collapsible
+        title="Register a form"
+        subtitle="Collect submissions on a public page that start a workflow"
+        accent="var(--node-trigger)"
+      >
+        <FormForm tenant={tenant} onChanged={onChanged} />
+      </Collapsible>
     </div>
+  );
+}
+
+/** Register a hosted form for a workflow whose entry node is a formTrigger. On success it surfaces
+ *  the shareable public URL. Registration 400s if the tenant has no monthly budget cap — surfaced
+ *  as a clear hint (the anonymous endpoint requires a spend backstop). */
+function FormForm({
+  tenant,
+  onChanged,
+}: {
+  tenant: string;
+  onChanged: () => Promise<void> | void;
+}) {
+  const [workflowId, setWorkflowId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [registered, setRegistered] = useState<RegisteredForm | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function submit() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await api.createForm(tenant, {
+        workflowId: workflowId.trim(),
+      });
+      setRegistered(res);
+      setWorkflowId("");
+      await onChanged();
+    } catch (e) {
+      setMsg(
+        e instanceof Error && /400/.test(e.message)
+          ? "Set a monthly budget for this tenant first — a public form needs a spend cap (Billing)."
+          : "Could not register the form.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <div style={{ marginBottom: 12 }}>
+        <span style={fieldLabel}>
+          Workflow key (its entry node must be a Form)
+        </span>
+        <input
+          style={fieldStyle}
+          value={workflowId}
+          onChange={(e) => setWorkflowId(e.target.value)}
+          placeholder="contact-form"
+        />
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <Button
+          variant="primary"
+          disabled={busy || !workflowId.trim()}
+          onClick={() => void submit()}
+        >
+          {busy ? "Registering…" : "Register"}
+        </Button>
+        {msg && (
+          <span
+            style={{ fontSize: "var(--text-sm)", color: "var(--state-error)" }}
+          >
+            {msg}
+          </span>
+        )}
+      </div>
+
+      {registered && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: 12,
+            borderRadius: "var(--radius-md)",
+            background: "var(--brand-soft)",
+            border:
+              "1px solid color-mix(in srgb, var(--brand) 45%, transparent)",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-2)",
+              marginBottom: 8,
+            }}
+          >
+            Your form is live. Share this public URL — anyone with it can submit
+            (no sign-in):
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <span
+              className="mono"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                fontSize: "var(--text-sm)",
+                color: "var(--ink)",
+                background: "var(--card)",
+                border: "1px solid var(--line-2)",
+                borderRadius: "var(--radius-sm)",
+                padding: "7px 9px",
+                wordBreak: "break-all",
+              }}
+            >
+              {formUrl(registered.formId)}
+            </span>
+            <UrlCopy url={formUrl(registered.formId)} />
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
