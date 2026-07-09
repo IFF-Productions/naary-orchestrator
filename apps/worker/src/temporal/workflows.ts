@@ -60,6 +60,7 @@ const {
   callTotp,
   callXml,
   callHtmlExtract,
+  callMarkdown,
   callCsv,
   callEncode,
   callRandom,
@@ -574,6 +575,25 @@ export async function runGraph(
           },
         );
         ctx[node.id] = res.result;
+        return null;
+      }
+      case "markdown": {
+        // Convert an HTML string → Markdown. HTML resolved here (pure ctx read); the parse runs
+        // in the activity (parser out of the deterministic bundle, like htmlExtract).
+        const mdCfg = asNodeConfig(cfg, "markdown");
+        const mdVal = getByPath(ctx[mdCfg.from], mdCfg.path);
+        const res = await callMarkdown(mdVal, {
+          tenantId: runCtx.tenantId,
+          executionId: wf.workflowInfo().workflowId,
+          nodeId: node.id,
+        });
+        ctx[node.id] = res.result;
+        return null;
+      }
+      case "noOp": {
+        // Does nothing — a structural/placeholder node. Emits {} (downstream nodes bind to real
+        // upstream node ids, so routing an edge through here doesn't break any binding).
+        ctx[node.id] = {};
         return null;
       }
       case "csv": {

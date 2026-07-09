@@ -159,6 +159,16 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
     config:
       "{ from, path?, extractions:[{key,selector,return?,attribute?,all?}] }",
   },
+  markdown: {
+    group: "transform",
+    summary: "Convert an HTML string to Markdown → { markdown }.",
+    config: "{ from, path? }",
+  },
+  noOp: {
+    group: "flow",
+    summary: "Does nothing; a structural/placeholder node. Output is {}.",
+    config: "{}",
+  },
   csv: {
     group: "transform",
     summary: "Parse CSV text→rows / build rows→{csv}.",

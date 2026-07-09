@@ -24,6 +24,8 @@ export type NodeType =
   | "compareDatasets" // pure: diff two arrays by a key → {added,removed,changed,same}
   | "xml" // parse XML→object / build object→XML (activity; fast-xml-parser)
   | "htmlExtract" // pull values out of an HTML string by CSS selector (activity)
+  | "markdown" // convert an HTML string → Markdown (activity; node-html-parser)
+  | "noOp" // does nothing; a structural/placeholder node — output {}
   | "csv" // parse CSV text→rows / build rows→CSV text (activity; papaparse)
   | "json" // pure: parse JSON text→value / stringify value→text
   | "number" // pure: arithmetic on numbers (add/sub/mul/div/mod/pow/round/floor/ceil/abs)
@@ -584,6 +586,14 @@ export interface HtmlExtractNodeConfig {
   path?: string;
   /** The fields to extract. */
   extractions: HtmlExtraction[];
+}
+
+/** Markdown node — convert an upstream HTML string to Markdown. Output is `{ markdown }`. */
+export interface MarkdownNodeConfig {
+  /** Upstream node id whose output holds the HTML string. */
+  from: string;
+  /** Optional dotted path into that output (e.g. "body"). */
+  path?: string;
 }
 
 /**

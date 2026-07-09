@@ -36,6 +36,7 @@ import type {
   HashNodeConfig,
   HmacNodeConfig,
   HtmlExtractNodeConfig,
+  MarkdownNodeConfig,
   HttpRequestNodeConfig,
   IfNodeConfig,
   JsonNodeConfig,
@@ -293,6 +294,10 @@ const CONFIG_SCHEMAS = {
     from: z.string(),
     path: z.string().optional(),
     extractions: z.array(htmlExtraction),
+  }),
+  markdown: z.object({
+    from: z.string(),
+    path: z.string().optional(),
   }),
   csv: z.object({
     operation: z.enum(["parse", "build"]),
@@ -574,6 +579,7 @@ export type CompareDatasetsConfig = z.infer<
 >;
 export type XmlConfig = z.infer<typeof CONFIG_SCHEMAS.xml>;
 export type HtmlExtractConfig = z.infer<typeof CONFIG_SCHEMAS.htmlExtract>;
+export type MarkdownConfig = z.infer<typeof CONFIG_SCHEMAS.markdown>;
 export type CsvConfig = z.infer<typeof CONFIG_SCHEMAS.csv>;
 export type JsonConfig = z.infer<typeof CONFIG_SCHEMAS.json>;
 export type NumberConfig = z.infer<typeof CONFIG_SCHEMAS.number>;
@@ -626,6 +632,7 @@ const _configParity: {
   compareDatasets: Exact<CompareDatasetsConfig, CompareDatasetsNodeConfig>;
   xml: Exact<XmlConfig, XmlNodeConfig>;
   htmlExtract: Exact<HtmlExtractConfig, HtmlExtractNodeConfig>;
+  markdown: Exact<MarkdownConfig, MarkdownNodeConfig>;
   csv: Exact<CsvConfig, CsvNodeConfig>;
   json: Exact<JsonConfig, JsonNodeConfig>;
   number: Exact<NumberConfig, NumberNodeConfig>;
@@ -669,6 +676,7 @@ const _configParity: {
   compareDatasets: true,
   xml: true,
   htmlExtract: true,
+  markdown: true,
   csv: true,
   json: true,
   number: true,

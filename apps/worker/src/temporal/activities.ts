@@ -983,6 +983,145 @@ export async function callHtmlExtract(
   }
 }
 
+export interface MarkdownResult {
+  status: "ok";
+  result: Record<string, unknown>;
+  costUsd: number;
+}
+
+/**
+ * markdown node — convert an HTML string to Markdown. Pure transform (no secrets, no egress), but
+ * runs in an activity to keep the HTML parser out of the deterministic workflow bundle (like
+ * callHtmlExtract). Covers the common tags (headings, p, br, strong/em, a, ul/ol/li, code/pre,
+ * blockquote, hr); unknown tags fall through to their children's text. Not a full CommonMark
+ * round-trip — a pragmatic converter for feeding scraped HTML to an agent as clean Markdown.
+ */
+export async function callMarkdown(
+  input: unknown,
+  meta: AgentMeta,
+): Promise<MarkdownResult> {
+  const startedAt = process.hrtime.bigint();
+  const store = getObjectStore();
+  const value = await resolveClaimChecks(input, store);
+  try {
+    const markdown = htmlToMarkdown(String(value ?? ""));
+    const offloaded = await maybeOffload({ markdown }, store, {
+      keyPrefix: `md/${meta.tenantId}`,
+    });
+    activityRuns.inc({ activity: "callMarkdown", outcome: "ok" });
+    activityDuration.observe(
+      { activity: "callMarkdown" },
+      secondsSince(startedAt),
+    );
+    return {
+      status: "ok",
+      result: offloaded as Record<string, unknown>,
+      costUsd: 0,
+    };
+  } catch {
+    activityRuns.inc({ activity: "callMarkdown", outcome: "error" });
+    activityDuration.observe(
+      { activity: "callMarkdown" },
+      secondsSince(startedAt),
+    );
+    throw ApplicationFailure.nonRetryable(
+      "Markdown conversion failed",
+      "MARKDOWN_ERROR",
+    );
+  }
+}
+
+/** Pure HTML→Markdown conversion (exported for unit tests; the activity wraps it with the store).
+ *  Common-tag subset — not a full CommonMark round-trip. */
+export function htmlToMarkdown(html: string): string {
+  return normalizeMarkdown(htmlNodeToMarkdown(parseHtml(html) as HtmlNodeLike));
+}
+
+/** Minimal node shape from node-html-parser we rely on (avoids importing its classes). */
+interface HtmlNodeLike {
+  nodeType: number; // 1 = element, 3 = text
+  rawTagName?: string;
+  rawText?: string;
+  text?: string;
+  childNodes?: HtmlNodeLike[];
+  getAttribute?: (name: string) => string | null | undefined;
+}
+
+/** Recursively render a parsed HTML node to Markdown (common-tag subset). */
+function htmlNodeToMarkdown(node: HtmlNodeLike): string {
+  if (node.nodeType === 3) {
+    // Text node — collapse internal whitespace (block structure adds the newlines).
+    return String(node.rawText ?? node.text ?? "").replace(/\s+/g, " ");
+  }
+  const kids = () => (node.childNodes ?? []).map(htmlNodeToMarkdown).join("");
+  const tag = (node.rawTagName ?? "").toLowerCase();
+  switch (tag) {
+    case "h1":
+    case "h2":
+    case "h3":
+    case "h4":
+    case "h5":
+    case "h6":
+      return `\n\n${"#".repeat(Number(tag[1]))} ${kids().trim()}\n\n`;
+    case "p":
+    case "div":
+    case "section":
+    case "article":
+      return `\n\n${kids().trim()}\n\n`;
+    case "br":
+      return "  \n";
+    case "hr":
+      return "\n\n---\n\n";
+    case "strong":
+    case "b":
+      return `**${kids().trim()}**`;
+    case "em":
+    case "i":
+      return `_${kids().trim()}_`;
+    case "code":
+      return `\`${(node.text ?? "").trim()}\``;
+    case "pre":
+      return `\n\n\`\`\`\n${(node.text ?? "").replace(/\s+$/, "")}\n\`\`\`\n\n`;
+    case "a": {
+      const href = node.getAttribute?.("href");
+      const label = kids().trim();
+      return href ? `[${label}](${href})` : label;
+    }
+    case "blockquote":
+      return `\n\n> ${kids().trim().replace(/\n+/g, "\n> ")}\n\n`;
+    case "ul":
+      return `\n\n${renderList(node, false)}\n\n`;
+    case "ol":
+      return `\n\n${renderList(node, true)}\n\n`;
+    case "li":
+      return kids().trim(); // list markers are added by renderList
+    default:
+      return kids();
+  }
+}
+
+/** Render <ul>/<ol> children <li> as a bulleted/numbered Markdown list. */
+function renderList(node: HtmlNodeLike, ordered: boolean): string {
+  const items = (node.childNodes ?? []).filter(
+    (c) => (c.rawTagName ?? "").toLowerCase() === "li",
+  );
+  return items
+    .map((li, i) => {
+      const marker = ordered ? `${i + 1}. ` : "- ";
+      return `${marker}${htmlNodeToMarkdown(li).trim()}`;
+    })
+    .join("\n");
+}
+
+/** Collapse the extra whitespace the block rules emit into tidy Markdown. */
+function normalizeMarkdown(s: string): string {
+  return s
+    .replace(/[ \t]+\n/g, "\n") // strip trailing spaces (a <br> becomes a plain newline)
+    .replace(/\n{3,}/g, "\n\n") // at most one blank line between blocks
+    .replace(/[ \t]{2,}(?=\S)/g, " ") // collapse runs of spaces before text
+    .trim();
+}
+
 export interface RandomConfig {
   operation: "uuid" | "hex" | "base64" | "alphanumeric" | "int";
   length?: number;
