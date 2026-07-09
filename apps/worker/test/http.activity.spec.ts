@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  BlockedEgressError,
   MissingConnectionTokenError,
   assertEgressAllowed,
 } from "@naary/connections";
@@ -157,5 +158,240 @@ describe("callHttpRequest activity", () => {
       nonRetryable: false,
       type: "HTTP_TRANSIENT",
     });
+  });
+});
+
+describe("callHttpRequest pagination", () => {
+  it("cursor mode: follows the cursor, accumulates items, stops when it's absent", async () => {
+    fetchMock
+      .mockResolvedValueOnce(res(200, { data: [1, 2], next_cursor: "c1" }))
+      .mockResolvedValueOnce(res(200, { data: [3, 4], next_cursor: "c2" }))
+      .mockResolvedValueOnce(res(200, { data: [5], next_cursor: null }));
+
+    const result = await callHttpRequest(
+      {
+        ...CFG,
+        pagination: {
+          mode: "cursor",
+          itemsPath: "data",
+          cursorPath: "next_cursor",
+          cursorParam: "cursor",
+        },
+      },
+      {},
+      META,
+    );
+
+    expect(result.body).toEqual([1, 2, 3, 4, 5]);
+    expect(result.pages).toBe(3);
+    // page 1 carries no cursor; pages 2 & 3 carry the prior response's cursor.
+    expect(fetchMock.mock.calls[0][0].toString()).not.toContain("cursor=");
+    expect(fetchMock.mock.calls[1][0].toString()).toContain("cursor=c1");
+    expect(fetchMock.mock.calls[2][0].toString()).toContain("cursor=c2");
+  });
+
+  it("page mode: increments the page param and stops on the first empty page", async () => {
+    fetchMock
+      .mockResolvedValueOnce(res(200, { rows: [1] }))
+      .mockResolvedValueOnce(res(200, { rows: [2] }))
+      .mockResolvedValueOnce(res(200, { rows: [] }));
+
+    const result = await callHttpRequest(
+      {
+        ...CFG,
+        pagination: { mode: "page", itemsPath: "rows", pageParam: "page" },
+      },
+      {},
+      META,
+    );
+
+    expect(result.body).toEqual([1, 2]);
+    expect(result.pages).toBe(3);
+    expect(fetchMock.mock.calls[0][0].toString()).toContain("page=1");
+    expect(fetchMock.mock.calls[1][0].toString()).toContain("page=2");
+    expect(fetchMock.mock.calls[2][0].toString()).toContain("page=3");
+  });
+
+  it("url mode: follows an absolute next URL and re-runs egress on every page", async () => {
+    const guard = vi.fn(async (u: string) => new URL(u));
+    __httpDeps.assertEgressAllowed = guard as never;
+    fetchMock
+      .mockResolvedValueOnce(
+        res(200, {
+          items: [1],
+          links: { next: "https://api.example.com/v1/things?page=2" },
+        }),
+      )
+      .mockResolvedValueOnce(res(200, { items: [2], links: { next: null } }));
+
+    const result = await callHttpRequest(
+      {
+        ...CFG,
+        pagination: {
+          mode: "url",
+          itemsPath: "items",
+          nextUrlPath: "links.next",
+        },
+      },
+      {},
+      META,
+    );
+
+    expect(result.body).toEqual([1, 2]);
+    expect(result.pages).toBe(2);
+    // second request goes to the response-supplied next URL, egress-checked again.
+    expect(fetchMock.mock.calls[1][0].toString()).toContain("page=2");
+    expect(guard).toHaveBeenCalledTimes(2);
+  });
+
+  it("url mode: keeps the auth header on a SAME-origin next page", async () => {
+    authMock.mockResolvedValue({ Authorization: "Bearer tok" });
+    fetchMock
+      .mockResolvedValueOnce(
+        res(200, {
+          items: [1],
+          links: { next: "https://api.example.com/v1/things?page=2" },
+        }),
+      )
+      .mockResolvedValueOnce(res(200, { items: [2], links: { next: null } }));
+
+    await callHttpRequest(
+      {
+        ...CFG,
+        connectionId: "conn-1",
+        pagination: {
+          mode: "url",
+          itemsPath: "items",
+          nextUrlPath: "links.next",
+        },
+      },
+      {},
+      META,
+    );
+
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer tok");
+    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe("Bearer tok");
+  });
+
+  it("url mode: STRIPS the auth header on a CROSS-origin next page (no token leak)", async () => {
+    authMock.mockResolvedValue({ Authorization: "Bearer tok" });
+    fetchMock
+      .mockResolvedValueOnce(
+        res(200, {
+          items: [1],
+          links: { next: "https://evil.example.net/steal" },
+        }),
+      )
+      .mockResolvedValueOnce(res(200, { items: [2], links: { next: null } }));
+
+    await callHttpRequest(
+      {
+        ...CFG,
+        connectionId: "conn-1",
+        pagination: {
+          mode: "url",
+          itemsPath: "items",
+          nextUrlPath: "links.next",
+        },
+      },
+      {},
+      META,
+    );
+
+    // Page 1 (same host) carries the token; page 2 (evil.example.net) must NOT.
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer tok");
+    expect(fetchMock.mock.calls[1][0].toString()).toContain("evil.example.net");
+    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBeUndefined();
+  });
+
+  it("fails the whole paginated flow on a bad status when failOnErrorStatus", async () => {
+    fetchMock
+      .mockResolvedValueOnce(res(200, { data: [1], next_cursor: "c1" }))
+      .mockResolvedValueOnce(res(500, "boom", "text/plain"));
+
+    await expect(
+      callHttpRequest(
+        {
+          ...CFG,
+          failOnErrorStatus: true,
+          pagination: {
+            mode: "cursor",
+            itemsPath: "data",
+            cursorPath: "next_cursor",
+          },
+        },
+        {},
+        META,
+      ),
+    ).rejects.toMatchObject({ nonRetryable: true, type: "HTTP_ERROR_STATUS" });
+  });
+
+  it("url mode: a next URL to a blocked host is rejected by the egress guard", async () => {
+    // Guard allows the first host but blocks the metadata IP — proving EVERY page URL
+    // (including a response-supplied `next`) is re-checked, hermetically (no DNS).
+    __httpDeps.assertEgressAllowed = (async (u: string) => {
+      const url = new URL(u);
+      if (url.hostname === "169.254.169.254")
+        throw new BlockedEgressError(`link-local ${url.hostname}`);
+      return url;
+    }) as never;
+    fetchMock.mockResolvedValueOnce(
+      res(200, { items: [1], links: { next: "http://169.254.169.254/" } }),
+    );
+
+    await expect(
+      callHttpRequest(
+        {
+          ...CFG,
+          pagination: {
+            mode: "url",
+            itemsPath: "items",
+            nextUrlPath: "links.next",
+            stopOnEmpty: false,
+          },
+        },
+        {},
+        META,
+      ),
+    ).rejects.toMatchObject({ nonRetryable: true, type: "BLOCKED_EGRESS" });
+  });
+
+  it("caps at maxPages when the stream never ends, and meters cost per page", async () => {
+    fetchMock.mockResolvedValue(res(200, { data: [1], next_cursor: "more" }));
+
+    const result = await callHttpRequest(
+      {
+        ...CFG,
+        costUsd: 0.01,
+        pagination: {
+          mode: "cursor",
+          itemsPath: "data",
+          cursorPath: "next_cursor",
+          maxPages: 3,
+        },
+      },
+      {},
+      META,
+    );
+
+    expect(result.pages).toBe(3);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result.costUsd).toBeCloseTo(0.03);
+    expect(result.body).toEqual([1, 1, 1]);
+  });
+
+  it("treats the whole body as the items array when itemsPath is omitted", async () => {
+    fetchMock
+      .mockResolvedValueOnce(res(200, [1, 2]))
+      .mockResolvedValueOnce(res(200, []));
+
+    const result = await callHttpRequest(
+      { ...CFG, pagination: { mode: "page", pageParam: "page" } },
+      {},
+      META,
+    );
+
+    expect(result.body).toEqual([1, 2]);
+    expect(result.pages).toBe(2);
   });
 });

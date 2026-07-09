@@ -1,5 +1,9 @@
 import { getByPath } from "./mcp-args";
-import type { HttpMethod, HttpRequestNodeConfig } from "./types";
+import type {
+  HttpMethod,
+  HttpPaginationConfig,
+  HttpRequestNodeConfig,
+} from "./types";
 
 /**
  * An httpRequest node's concrete request after binding resolution — the plain
@@ -16,6 +20,8 @@ export interface ResolvedHttpRequest {
   failOnErrorStatus?: boolean;
   timeoutMs?: number;
   costUsd?: number;
+  /** Static (no bindings) — copied through for the activity's page loop. */
+  pagination?: HttpPaginationConfig;
 }
 
 /**
@@ -65,6 +71,9 @@ export function resolveHttpRequest(
     failOnErrorStatus: config.failOnErrorStatus,
     timeoutMs: config.timeoutMs,
     costUsd: config.costUsd,
+    // Pagination is static config (paths, param names, caps) — no bindings resolve
+    // into it, so it copies straight through to the activity that runs the loop.
+    pagination: config.pagination,
   };
   for (const [path, binding] of Object.entries(config.argumentBindings ?? {})) {
     setByPath(resolved, path, getByPath(ctx[binding.from], binding.path));

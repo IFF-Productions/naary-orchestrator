@@ -1982,6 +1982,207 @@ function ConfigPanel({
               placeholder="0.00"
             />
           </Labeled>
+
+          {/* Pagination — auto-follow pages; the loop runs in the activity, so the
+              node returns the combined items. Every page URL is egress-guarded. */}
+          {(() => {
+            const pg = config.pagination as
+              | {
+                  mode?: "cursor" | "page" | "url";
+                  itemsPath?: string;
+                  cursorPath?: string;
+                  cursorParam?: string;
+                  pageParam?: string;
+                  startPage?: number;
+                  nextUrlPath?: string;
+                  stopOnEmpty?: boolean;
+                  maxPages?: number;
+                }
+              | undefined;
+            const on = Boolean(pg);
+            const mode = pg?.mode ?? "cursor";
+            const setPg = (patch: Record<string, unknown> | undefined) =>
+              onChange({ pagination: patch });
+            return (
+              <div
+                style={{
+                  border: "1px solid var(--line)",
+                  borderRadius: "var(--radius-md)",
+                  padding: 10,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                <label
+                  style={{
+                    display: "flex",
+                    gap: 6,
+                    alignItems: "center",
+                    fontSize: "var(--text-sm)",
+                    color: "var(--ink-2)",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={(e) =>
+                      setPg(e.target.checked ? { mode: "cursor" } : undefined)
+                    }
+                  />
+                  Paginate — fetch all pages, return the combined items
+                </label>
+                {on && (
+                  <>
+                    <Labeled label="Pagination style">
+                      <select
+                        value={mode}
+                        onChange={(e) => setPg({ ...pg, mode: e.target.value })}
+                        style={inputStyle}
+                      >
+                        <option value="cursor">
+                          Cursor / token in the response
+                        </option>
+                        <option value="page">Increment a page number</option>
+                        <option value="url">Follow a next-page URL</option>
+                      </select>
+                    </Labeled>
+                    <Labeled label="Items path (dotted; blank = whole body)">
+                      <input
+                        value={pg?.itemsPath ?? ""}
+                        onChange={(e) =>
+                          setPg({
+                            ...pg,
+                            itemsPath: e.target.value || undefined,
+                          })
+                        }
+                        style={inputStyle}
+                        placeholder="data"
+                      />
+                    </Labeled>
+                    {mode === "cursor" && (
+                      <>
+                        <Labeled label="Cursor path (in the response)">
+                          <input
+                            value={pg?.cursorPath ?? ""}
+                            onChange={(e) =>
+                              setPg({
+                                ...pg,
+                                cursorPath: e.target.value || undefined,
+                              })
+                            }
+                            style={inputStyle}
+                            placeholder="meta.next_cursor"
+                          />
+                        </Labeled>
+                        <Labeled label="Cursor query param">
+                          <input
+                            value={pg?.cursorParam ?? ""}
+                            onChange={(e) =>
+                              setPg({
+                                ...pg,
+                                cursorParam: e.target.value || undefined,
+                              })
+                            }
+                            style={inputStyle}
+                            placeholder="cursor"
+                          />
+                        </Labeled>
+                      </>
+                    )}
+                    {mode === "page" && (
+                      <>
+                        <Labeled label="Page query param">
+                          <input
+                            value={pg?.pageParam ?? ""}
+                            onChange={(e) =>
+                              setPg({
+                                ...pg,
+                                pageParam: e.target.value || undefined,
+                              })
+                            }
+                            style={inputStyle}
+                            placeholder="page"
+                          />
+                        </Labeled>
+                        <Labeled label="First page number">
+                          <input
+                            type="number"
+                            min={0}
+                            value={pg?.startPage ?? ""}
+                            onChange={(e) =>
+                              setPg({
+                                ...pg,
+                                startPage: e.target.value
+                                  ? Number(e.target.value)
+                                  : undefined,
+                              })
+                            }
+                            style={inputStyle}
+                            placeholder="1"
+                          />
+                        </Labeled>
+                      </>
+                    )}
+                    {mode === "url" && (
+                      <Labeled label="Next-URL path (absolute URL in the response)">
+                        <input
+                          value={pg?.nextUrlPath ?? ""}
+                          onChange={(e) =>
+                            setPg({
+                              ...pg,
+                              nextUrlPath: e.target.value || undefined,
+                            })
+                          }
+                          style={inputStyle}
+                          placeholder="links.next"
+                        />
+                      </Labeled>
+                    )}
+                    <Labeled label="Max pages (safety cap, ≤ 100)">
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={pg?.maxPages ?? ""}
+                        onChange={(e) =>
+                          setPg({
+                            ...pg,
+                            maxPages: e.target.value
+                              ? Number(e.target.value)
+                              : undefined,
+                          })
+                        }
+                        style={inputStyle}
+                        placeholder="10"
+                      />
+                    </Labeled>
+                    <label
+                      style={{
+                        display: "flex",
+                        gap: 6,
+                        alignItems: "center",
+                        fontSize: "var(--text-sm)",
+                        color: "var(--ink-2)",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={pg?.stopOnEmpty !== false}
+                        onChange={(e) =>
+                          setPg({
+                            ...pg,
+                            stopOnEmpty: e.target.checked ? undefined : false,
+                          })
+                        }
+                      />
+                      Stop when a page returns no items
+                    </label>
+                  </>
+                )}
+              </div>
+            );
+          })()}
         </>
       )}
 

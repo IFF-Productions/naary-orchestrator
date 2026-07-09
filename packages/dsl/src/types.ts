@@ -166,8 +166,41 @@ export interface HttpRequestNodeConfig {
   /** Abort the request after this many ms (default applied in the activity). */
   timeoutMs?: number;
   /** Flat per-call cost metered into the run budget (Arch§4.6) — HTTP has no
-   *  token cost, so spend is operator-configured. */
+   *  token cost, so spend is operator-configured. Metered PER PAGE when paginating. */
   costUsd?: number;
+  /** Auto-follow pages and return the accumulated items. The whole loop runs in the
+   *  activity (side-effecting), so the workflow stays deterministic. Omit for a single call. */
+  pagination?: HttpPaginationConfig;
+}
+
+/**
+ * HTTP pagination — the activity fetches pages until a stop condition and returns the
+ * concatenated items as the node's `body`. Every page URL is re-checked by the egress
+ * guard (a response-supplied `next` URL is attacker-influenceable → SSRF).
+ */
+export interface HttpPaginationConfig {
+  /** How the next page is located:
+   *  - `cursor`: read a token from each response, send it as a query param next time;
+   *  - `page`: increment a numeric page query param each request;
+   *  - `url`: follow an absolute next-page URL found in each response. */
+  mode: "cursor" | "page" | "url";
+  /** Dotted path (into the response body) to the array of items to accumulate. Omit
+   *  when the body itself is the array. */
+  itemsPath?: string;
+  /** `cursor` mode: dotted path in the body to the next cursor; empty/absent → stop. */
+  cursorPath?: string;
+  /** `cursor` mode: the query-param name that carries the cursor (default `cursor`). */
+  cursorParam?: string;
+  /** `page` mode: the query-param name to increment (default `page`). */
+  pageParam?: string;
+  /** `page` mode: the first page number (default 1). */
+  startPage?: number;
+  /** `url` mode: dotted path in the body to the absolute next-page URL; empty/absent → stop. */
+  nextUrlPath?: string;
+  /** Stop when a page yields no items (default true). */
+  stopOnEmpty?: boolean;
+  /** Hard cap on pages fetched — a safety bound (default 10, clamped to 100). */
+  maxPages?: number;
 }
 
 /**

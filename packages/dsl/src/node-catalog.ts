@@ -79,8 +79,9 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
   httpRequest: {
     group: "data-source",
     summary:
-      "HTTP/REST call; output {status,headers,body}. Branch on <id>.status.",
-    config: "{ method, url, headers?, query?, body?, connectionId? }",
+      "HTTP/REST call; output {status,headers,body}. Branch on <id>.status. With pagination, body is the combined items array.",
+    config:
+      "{ method, url, headers?, query?, body?, connectionId?, pagination?: { mode: cursor|page|url, itemsPath?, cursorPath?, cursorParam?, pageParam?, nextUrlPath?, maxPages? } }",
   },
   sqlQuery: {
     group: "data-source",

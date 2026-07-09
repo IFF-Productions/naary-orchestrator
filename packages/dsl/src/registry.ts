@@ -166,6 +166,19 @@ const CONFIG_SCHEMAS = {
     failOnErrorStatus: z.boolean().optional(),
     timeoutMs: z.number().optional(),
     costUsd: z.number().optional(),
+    pagination: z
+      .object({
+        mode: z.enum(["cursor", "page", "url"]),
+        itemsPath: z.string().optional(),
+        cursorPath: z.string().optional(),
+        cursorParam: z.string().optional(),
+        pageParam: z.string().optional(),
+        startPage: z.number().optional(),
+        nextUrlPath: z.string().optional(),
+        stopOnEmpty: z.boolean().optional(),
+        maxPages: z.number().optional(),
+      })
+      .optional(),
   }),
   sqlQuery: z.object({
     connectionId: z.string(),
