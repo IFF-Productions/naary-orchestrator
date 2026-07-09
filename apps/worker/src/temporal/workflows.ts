@@ -38,47 +38,9 @@ import {
   resolveSwitch,
   resolveText,
   resolveWebhookResponse,
+  asNodeConfig,
 } from "@naary/dsl";
-import type {
-  AggregateNodeConfig,
-  CodeNodeConfig,
-  CompareDatasetsNodeConfig,
-  CsvNodeConfig,
-  EncodeNodeConfig,
-  RandomNodeConfig,
-  DateTimeNodeConfig,
-  ExecuteSubWorkflowNodeConfig,
-  FilterNodeConfig,
-  ForEachNodeConfig,
-  GraphDef,
-  ListOpsNodeConfig,
-  HashNodeConfig,
-  HmacNodeConfig,
-  HtmlExtractNodeConfig,
-  IfNodeConfig,
-  JsonNodeConfig,
-  NumberNodeConfig,
-  HttpRequestNodeConfig,
-  JwtNodeConfig,
-  McpToolNodeConfig,
-  MergeNodeConfig,
-  NodeDef,
-  NodeRetryPolicy,
-  PollTriggerNodeConfig,
-  RenameKeysNodeConfig,
-  RespondToWebhookNodeConfig,
-  RssReadNodeConfig,
-  SendEmailNodeConfig,
-  SetNodeConfig,
-  SwitchNodeConfig,
-  TextNodeConfig,
-  SqlQueryNodeConfig,
-  SqlExecNodeConfig,
-  StopAndErrorNodeConfig,
-  TotpNodeConfig,
-  WaitNodeConfig,
-  XmlNodeConfig,
-} from "@naary/dsl";
+import type { GraphDef, NodeDef, NodeRetryPolicy } from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
 // Do NOT drop `type` — that would pull I/O code into the sandbox.
 import type * as activities from "./activities";
@@ -407,7 +369,7 @@ export async function runGraph(
         // Entry node: fetch the URL + detect change vs the persisted cursor (keyed by
         // workflowKey so it spans the scheduled runs). Output {changed, body}; branch
         // on `<id>.changed` to no-op when nothing's new.
-        const pollCfg = cfg as unknown as PollTriggerNodeConfig;
+        const pollCfg = asNodeConfig(cfg, "pollTrigger");
         const r = await callPoll(pollCfg, {
           tenantId: runCtx.tenantId,
           workflowKey: runCtx.workflowKey ?? "",
@@ -440,7 +402,7 @@ export async function runGraph(
       case "mcpTool": {
         // Resolving tool args from upstream outputs is deterministic graph work,
         // so it happens HERE; the I/O (token fetch + HTTP) is inside the activity.
-        const mcpCfg = cfg as unknown as McpToolNodeConfig;
+        const mcpCfg = asNodeConfig(cfg, "mcpTool");
         const over = retryOverride(node.retry, 60_000);
         const toolResult = await (over?.callMcpTool ?? callMcpTool)(
           {
@@ -466,7 +428,7 @@ export async function runGraph(
       case "httpRequest": {
         // Binding resolution is deterministic graph work (pure ctx path-reads), so
         // it runs HERE; the I/O (auth fetch, egress check, fetch) is in the activity.
-        const httpCfg = cfg as unknown as HttpRequestNodeConfig;
+        const httpCfg = asNodeConfig(cfg, "httpRequest");
         const over = retryOverride(node.retry, 150_000);
         const result = await (over?.callHttpRequest ?? callHttpRequest)(
           resolveHttpRequest(httpCfg, ctx),
@@ -492,7 +454,7 @@ export async function runGraph(
         // Param binding is deterministic graph work (pure ctx path-reads); the DSN
         // read + DB query (read-only) are in the activity. The sql text is never
         // built from bindings — only the params array (no SQL injection).
-        const sqlCfg = cfg as unknown as SqlQueryNodeConfig;
+        const sqlCfg = asNodeConfig(cfg, "sqlQuery");
         const over = retryOverride(node.retry, 150_000);
         const result = await (over?.callSqlQuery ?? callSqlQuery)(
           resolveSqlQuery(sqlCfg, ctx),
@@ -513,7 +475,7 @@ export async function runGraph(
         // A WRITE (INSERT/UPDATE/DELETE). Same binding rules as sqlQuery (params only,
         // never the SQL text); the DSN read + transactional write are in the activity,
         // which runs at-most-once (writes aren't idempotent).
-        const execCfg = cfg as unknown as SqlExecNodeConfig;
+        const execCfg = asNodeConfig(cfg, "sqlExec");
         const result = await callSqlExec(
           resolveSqlExec(execCfg, ctx),
           ctx.__input,
@@ -533,52 +495,52 @@ export async function runGraph(
         // Pure node: build the output object from static fields + upstream
         // bindings entirely in the interpreter (deterministic, no I/O, no cost).
         // Output IS the built object, so edges/nodes read `<nodeId>.<field>`.
-        const setCfg = cfg as unknown as SetNodeConfig;
+        const setCfg = asNodeConfig(cfg, "set");
         ctx[node.id] = resolveSet(setCfg, ctx);
         return null;
       }
       case "renameKeys": {
         // Pure node: reshape an upstream object's keys, entirely in the interpreter.
-        const rkCfg = cfg as unknown as RenameKeysNodeConfig;
+        const rkCfg = asNodeConfig(cfg, "renameKeys");
         ctx[node.id] = resolveRenameKeys(rkCfg, ctx);
         return null;
       }
       case "text": {
         // Pure node: one string op on an upstream value → { result }. Deterministic
         // (regex is pure; invalid patterns fail closed to null in resolveText).
-        const txtCfg = cfg as unknown as TextNodeConfig;
+        const txtCfg = asNodeConfig(cfg, "text");
         ctx[node.id] = resolveText(txtCfg, ctx);
         return null;
       }
       case "filter": {
         // Pure node: keep the upstream array items matching the per-item predicate.
         // Output IS the filtered array (downstream reads `<id>.0` or aggregates it).
-        const filterCfg = cfg as unknown as FilterNodeConfig;
+        const filterCfg = asNodeConfig(cfg, "filter");
         ctx[node.id] = resolveFilter(filterCfg, ctx);
         return null;
       }
       case "aggregate": {
         // Pure node: collapse an upstream array → { result }.
-        const aggCfg = cfg as unknown as AggregateNodeConfig;
+        const aggCfg = asNodeConfig(cfg, "aggregate");
         ctx[node.id] = resolveAggregate(aggCfg, ctx);
         return null;
       }
       case "listOps": {
         // Pure node: sort / limit / dedupe an upstream array → array.
-        const loCfg = cfg as unknown as ListOpsNodeConfig;
+        const loCfg = asNodeConfig(cfg, "listOps");
         ctx[node.id] = resolveListOps(loCfg, ctx);
         return null;
       }
       case "compareDatasets": {
         // Pure node: diff two upstream arrays by key → {added,removed,changed,same}.
-        const cdCfg = cfg as unknown as CompareDatasetsNodeConfig;
+        const cdCfg = asNodeConfig(cfg, "compareDatasets");
         ctx[node.id] = resolveCompareDatasets(cdCfg, ctx);
         return null;
       }
       case "xml": {
         // Parse XML→object / build object→XML in the activity (parser stays out of
         // the deterministic bundle). Input value resolved here (pure ctx read).
-        const xmlCfg = cfg as unknown as XmlNodeConfig;
+        const xmlCfg = asNodeConfig(cfg, "xml");
         const inputVal = getByPath(ctx[xmlCfg.from], xmlCfg.path);
         const result = await callXml(
           { operation: xmlCfg.operation },
@@ -595,7 +557,7 @@ export async function runGraph(
       case "htmlExtract": {
         // Pull values from an HTML string by CSS selector. HTML resolved here (pure ctx
         // read); the parse runs in the activity (parser out of the deterministic bundle).
-        const htmlCfg = cfg as unknown as HtmlExtractNodeConfig;
+        const htmlCfg = asNodeConfig(cfg, "htmlExtract");
         const htmlVal = getByPath(ctx[htmlCfg.from], htmlCfg.path);
         const res = await callHtmlExtract(
           { extractions: htmlCfg.extractions ?? [] },
@@ -612,7 +574,7 @@ export async function runGraph(
       case "csv": {
         // Parse CSV→rows / build rows→CSV. Input resolved here (pure ctx read); the parse
         // runs in the activity (parser out of the deterministic bundle).
-        const csvCfg = cfg as unknown as CsvNodeConfig;
+        const csvCfg = asNodeConfig(cfg, "csv");
         const csvVal = getByPath(ctx[csvCfg.from], csvCfg.path);
         const res = await callCsv(
           {
@@ -634,7 +596,7 @@ export async function runGraph(
         // The base value is resolved deterministically here (pure ctx read); the
         // CLOCK READ (when source is "now") happens in the activity, since time is
         // non-deterministic and must not touch workflow code.
-        const dtCfg = cfg as unknown as DateTimeNodeConfig;
+        const dtCfg = asNodeConfig(cfg, "dateTime");
         const src = dtCfg.source;
         const base =
           !src || src === "now"
@@ -652,7 +614,7 @@ export async function runGraph(
         // absorbs earlier ones), so all inbound parents have run — combine their
         // outputs from ctx. Pure: no I/O, no cost. `<mergeId>` holds the combined
         // value; downstream reads `<mergeId>.0`/`.1` (array) or fields (object).
-        const mergeCfg = (cfg ?? {}) as MergeNodeConfig;
+        const mergeCfg = asNodeConfig(cfg, "merge");
         const parents = mergeParents.get(node.id) ?? [];
         const inputs = parents.map((p) => ctx[p]);
         ctx[node.id] =
@@ -667,34 +629,34 @@ export async function runGraph(
       case "switch": {
         // Pure node: pick the first matching rule → { matched }. Downstream edges branch
         // on `<switchId>.matched`. Reuses evaluateCondition (structured, no eval).
-        const swCfg = cfg as unknown as SwitchNodeConfig;
+        const swCfg = asNodeConfig(cfg, "switch");
         ctx[node.id] = resolveSwitch(swCfg, ctx);
         return null;
       }
       case "if": {
         // Pure node: combine predicates with AND/OR → { result }. Downstream edges branch
         // on `<ifId>.result` (eq true / eq false).
-        const ifCfg = cfg as unknown as IfNodeConfig;
+        const ifCfg = asNodeConfig(cfg, "if");
         ctx[node.id] = resolveIf(ifCfg, ctx);
         return null;
       }
       case "json": {
         // Pure node: JSON parse/stringify (deterministic ES built-ins, no activity).
         // Malformed JSON on parse throws → a node failure onError:"continue" can catch.
-        const jsonCfg = cfg as unknown as JsonNodeConfig;
+        const jsonCfg = asNodeConfig(cfg, "json");
         ctx[node.id] = resolveJson(jsonCfg, ctx);
         return null;
       }
       case "number": {
         // Pure node: one arithmetic op on resolved operands → { result }.
-        const numCfg = cfg as unknown as NumberNodeConfig;
+        const numCfg = asNodeConfig(cfg, "number");
         ctx[node.id] = resolveNumber(numCfg, ctx);
         return null;
       }
       case "random": {
         // Generate a fresh random value. Runs in the activity — randomness must never touch
         // deterministic workflow code. No inputs. Output { value }.
-        const rndCfg = cfg as unknown as RandomNodeConfig;
+        const rndCfg = asNodeConfig(cfg, "random");
         const res = await callRandom(
           {
             operation: rndCfg.operation,
@@ -714,7 +676,7 @@ export async function runGraph(
       case "encode": {
         // Input resolved here (pure ctx read); the encode runs in the activity (Buffer for
         // base64/hex isn't in the deterministic bundle). Output { result }.
-        const encCfg = cfg as unknown as EncodeNodeConfig;
+        const encCfg = asNodeConfig(cfg, "encode");
         const encVal = getByPath(ctx[encCfg.from], encCfg.path);
         const res = await callEncode({ operation: encCfg.operation }, encVal, {
           tenantId: runCtx.tenantId,
@@ -727,7 +689,7 @@ export async function runGraph(
       case "hmac": {
         // Binding resolution is deterministic (pure ctx read); the key fetch +
         // signing happen in the activity (the key never enters workflow history).
-        const hmacCfg = cfg as unknown as HmacNodeConfig;
+        const hmacCfg = asNodeConfig(cfg, "hmac");
         const result = await callHmac(resolveHmac(hmacCfg, ctx), ctx.__input, {
           tenantId: runCtx.tenantId,
           executionId: wf.workflowInfo().workflowId,
@@ -739,7 +701,7 @@ export async function runGraph(
       case "hash": {
         // Keyless digest. Binding resolution is deterministic (pure ctx read); the hash
         // (node:crypto) runs in the activity, out of the deterministic bundle.
-        const hashCfg = cfg as unknown as HashNodeConfig;
+        const hashCfg = asNodeConfig(cfg, "hash");
         const result = await callHash(resolveHash(hashCfg, ctx), ctx.__input, {
           tenantId: runCtx.tenantId,
           executionId: wf.workflowInfo().workflowId,
@@ -749,7 +711,7 @@ export async function runGraph(
         return null;
       }
       case "jwt": {
-        const jwtCfg = cfg as unknown as JwtNodeConfig;
+        const jwtCfg = asNodeConfig(cfg, "jwt");
         const result = await callJwt(resolveJwt(jwtCfg, ctx), ctx.__input, {
           tenantId: runCtx.tenantId,
           executionId: wf.workflowInfo().workflowId,
@@ -761,7 +723,7 @@ export async function runGraph(
       case "totp": {
         // No bindings: the seed comes from the connection, the time from the clock
         // — both handled in the activity. Output is the current code.
-        const totpCfg = cfg as unknown as TotpNodeConfig;
+        const totpCfg = asNodeConfig(cfg, "totp");
         const result = await callTotp(totpCfg, ctx.__input, {
           tenantId: runCtx.tenantId,
           executionId: wf.workflowInfo().workflowId,
@@ -773,7 +735,7 @@ export async function runGraph(
       case "sendEmail": {
         // Binding resolution is deterministic (pure ctx read); the SMTP URI fetch +
         // send happen in the activity (URI/creds never enter workflow history).
-        const emailCfg = cfg as unknown as SendEmailNodeConfig;
+        const emailCfg = asNodeConfig(cfg, "sendEmail");
         const result = await callSendEmail(
           resolveSendEmail(emailCfg, ctx),
           ctx.__input,
@@ -792,7 +754,7 @@ export async function runGraph(
         // URL resolution is deterministic (pure ctx read); the fetch + XML parse
         // (I/O, egress-guarded) run in the activity. Output {items, count} so
         // downstream filter/listOps/aggregate can operate on `<nodeId>.items`.
-        const rssCfg = cfg as unknown as RssReadNodeConfig;
+        const rssCfg = asNodeConfig(cfg, "rssRead");
         const over = retryOverride(node.retry, 60_000);
         const result = await (over?.callRssRead ?? callRssRead)(
           resolveRss(rssCfg, ctx),
@@ -807,7 +769,7 @@ export async function runGraph(
         return null;
       }
       case "executeSubWorkflow": {
-        const subCfg = cfg as unknown as ExecuteSubWorkflowNodeConfig;
+        const subCfg = asNodeConfig(cfg, "executeSubWorkflow");
         // Recursion guard FIRST — never launch below the nesting cap (a graph that
         // calls itself would otherwise recurse forever). Reuses the circuit-breaker
         // terminal status (same "runaway protection tripped" intent).
@@ -877,7 +839,7 @@ export async function runGraph(
         // Map an array by running a saved graph once per item as a durable child
         // run. Same machinery as executeSubWorkflow, looped: depth guard + item cap
         // bound the fan-out; children run concurrently; results stay in item order.
-        const feCfg = cfg as unknown as ForEachNodeConfig;
+        const feCfg = asNodeConfig(cfg, "forEach");
         const depth = runCtx.subWorkflowDepth ?? 0;
         if (depth >= MAX_SUBWORKFLOW_DEPTH) return "circuit_open";
 
@@ -1018,7 +980,7 @@ export async function runGraph(
         return null;
       }
       case "wait": {
-        const waitCfg = cfg as unknown as WaitNodeConfig;
+        const waitCfg = asNodeConfig(cfg, "wait");
         if (waitCfg.mode === "webhook") {
           // Durable pause until an external system resumes the run (Signal + condition(),
           // exactly like humanApproval — no polling, survives crashes/days). An optional
@@ -1060,7 +1022,7 @@ export async function runGraph(
         // Terminal failure: throw a non-retryable ApplicationFailure so the run
         // ends as FAILED (surfaced in the Runs list + timeline) rather than
         // burning Temporal task retries. The message is static, non-secret text.
-        const errCfg = cfg as unknown as StopAndErrorNodeConfig;
+        const errCfg = asNodeConfig(cfg, "stopAndError");
         throw wf.ApplicationFailure.nonRetryable(
           errCfg.message && errCfg.message.trim()
             ? errCfg.message
@@ -1072,7 +1034,7 @@ export async function runGraph(
         // Pure node: set the response the webhook ingress returns synchronously,
         // then CONTINUE (respond fast, keep working). The response is exposed via
         // webhookResponseQuery, which the ingress polls.
-        const rwCfg = cfg as unknown as RespondToWebhookNodeConfig;
+        const rwCfg = asNodeConfig(cfg, "respondToWebhook");
         webhookResponse = resolveWebhookResponse(rwCfg, ctx);
         ctx[node.id] = { statusCode: webhookResponse.statusCode };
         return null;
@@ -1081,7 +1043,7 @@ export async function runGraph(
         // Sandboxed user JS runs in the activity (QuickJS is non-deterministic).
         // Pass the entry input + a __-stripped snapshot of upstream outputs; the
         // code's return value becomes this node's output.
-        const codeCfg = cfg as unknown as CodeNodeConfig;
+        const codeCfg = asNodeConfig(cfg, "code");
         const snapshot: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(ctx)) {
           if (!k.startsWith("__")) snapshot[k] = v;
