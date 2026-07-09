@@ -1797,16 +1797,32 @@ export interface HttpRequestConfig {
   failOnErrorStatus?: boolean;
   timeoutMs?: number;
   costUsd?: number;
+  /** Auto-follow pages (mirrors @naary/dsl's HttpPaginationConfig); the loop runs
+   *  entirely in this activity so the workflow stays deterministic. */
+  pagination?: {
+    mode: "cursor" | "page" | "url";
+    itemsPath?: string;
+    cursorPath?: string;
+    cursorParam?: string;
+    pageParam?: string;
+    startPage?: number;
+    nextUrlPath?: string;
+    stopOnEmpty?: boolean;
+    maxPages?: number;
+  };
 }
 
 export interface HttpRequestResult {
   status: "ok";
-  /** HTTP response status code — the graph branches on this (e.g. status gt 399). */
+  /** HTTP response status code — the graph branches on this (e.g. status gt 399).
+   *  When paginating, the status of the LAST page fetched. */
   httpStatus: number;
   headers: Record<string, string>;
   body: unknown;
   /** Metered cost of this call — the workflow accumulates it (Arch§4.6). */
   costUsd: number;
+  /** Pages fetched when paginating (absent for a single request). */
+  pages?: number;
 }
 
 /** Test seam: the network call + connection/egress resolution, swappable in tests. */
@@ -1851,14 +1867,6 @@ export async function callHttpRequest(
       ...authHeaders,
     };
 
-    // Append static query params, then SSRF-guard the FULLY-RESOLVED URL at call
-    // time (https + public host only; defeats DNS rebinding + upstream-built hosts).
-    let rawUrl = cfg.url;
-    const qs = new URLSearchParams(cfg.query ?? {}).toString();
-    if (qs) rawUrl += (rawUrl.includes("?") ? "&" : "?") + qs;
-    const url = await __httpDeps.assertEgressAllowed(rawUrl);
-    host = url.host;
-
     // A claim-checked upstream value (e.g. a large bound body) is resolved back to
     // its real value before the call — the workflow only carried the small reference.
     const resolvedBody = await resolveClaimChecks(cfg.body, store);
@@ -1875,77 +1883,216 @@ export async function callHttpRequest(
       }
     }
 
-    // Bound the request with a deadline so a hung server can't pin the activity.
-    const controller = new AbortController();
+    // The connection-derived auth header must NEVER ride to a different host. A
+    // paginated `url`-mode `next` URL comes from the (untrusted) response body, so a
+    // cross-origin next page gets the static, non-secret headers only — mirroring how
+    // browsers/curl drop `Authorization` across origins (Tier-1 rule 4).
+    const authKeys = new Set(
+      Object.keys(authHeaders).map((k) => k.toLowerCase()),
+    );
+    const headersNoAuth: Record<string, string> = {};
+    for (const [k, v] of Object.entries(headers)) {
+      if (!authKeys.has(k.toLowerCase())) headersNoAuth[k] = v;
+    }
+    const originOf = (u: string): string | null => {
+      try {
+        return new URL(u).origin;
+      } catch {
+        return null;
+      }
+    };
+    const baseOrigin = originOf(cfg.url);
+
     const timeoutMs = Math.min(
       cfg.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS,
       MAX_HTTP_TIMEOUT_MS,
     );
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    let res: Response;
-    try {
-      res = await __httpDeps.fetch(url, { ...init, signal: controller.signal });
-    } finally {
-      clearTimeout(timer);
+
+    // One page fetch. The egress guard runs on EVERY page URL — a response-supplied
+    // `next` URL (url mode) is attacker-influenceable, so pagination can never escape
+    // the https-and-public-host SSRF check. Bound each request with the deadline too.
+    const fetchPage = async (
+      reqUrl: string,
+      reqQuery: Record<string, string>,
+      useHeaders: Record<string, string> = headers,
+    ): Promise<{
+      res: Response;
+      body: unknown;
+      responseHeaders: Record<string, string>;
+    }> => {
+      let rawUrl = reqUrl;
+      const qs = new URLSearchParams(reqQuery).toString();
+      if (qs) rawUrl += (rawUrl.includes("?") ? "&" : "?") + qs;
+      const url = await __httpDeps.assertEgressAllowed(rawUrl);
+      host = url.host;
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      let res: Response;
+      try {
+        res = await __httpDeps.fetch(url, {
+          ...init,
+          headers: useHeaders,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+
+      const contentType = res.headers.get("content-type") ?? "";
+      const raw = await res.text();
+      let body: unknown = raw;
+      if (contentType.includes("json")) {
+        try {
+          body = raw.length > 0 ? JSON.parse(raw) : null;
+        } catch {
+          body = raw; // malformed JSON — hand back the text rather than failing
+        }
+      }
+      // Drop response-side credentials (Set-Cookie) before the headers land in ctx →
+      // Temporal history. The rest (content-type, etc.) is useful for branching.
+      const responseHeaders: Record<string, string> = {};
+      for (const [k, v] of res.headers.entries()) {
+        if (k.toLowerCase() === "set-cookie") continue;
+        responseHeaders[k] = v;
+      }
+      return { res, body, responseHeaders };
+    };
+
+    // `failOnErrorStatus` opts a flow into a hard non-retryable fail on status ≥ 400.
+    const checkStatus = (status: number): void => {
+      if (cfg.failOnErrorStatus && status >= 400) {
+        throw ApplicationFailure.nonRetryable(
+          `HTTP request returned status ${status}`,
+          "HTTP_ERROR_STATUS",
+          { httpStatus: status },
+        );
+      }
+    };
+
+    const finish = (
+      httpStatus: number,
+      responseHeaders: Record<string, string>,
+      body: unknown,
+      cost: number,
+      pages?: number,
+    ): HttpRequestResult => {
+      log.info(
+        {
+          activity: "callHttpRequest",
+          executionId: meta.executionId,
+          nodeId: meta.nodeId,
+          tenantId: meta.tenantId,
+          method: cfg.method,
+          host,
+          httpStatus,
+          costUsd: cost,
+          ...(pages !== undefined ? { pages } : {}),
+        },
+        "http request completed",
+      );
+      activityRuns.inc({ activity: "callHttpRequest", outcome: "ok" });
+      activityDuration.observe(
+        { activity: "callHttpRequest" },
+        secondsSince(startedAt),
+      );
+      if (cost > 0) runCostUsd.inc(cost);
+      return {
+        status: "ok",
+        httpStatus,
+        headers: responseHeaders,
+        body,
+        costUsd: cost,
+        ...(pages !== undefined ? { pages } : {}),
+      };
+    };
+
+    const pg = cfg.pagination;
+    if (!pg) {
+      const { res, body, responseHeaders } = await fetchPage(
+        cfg.url,
+        cfg.query ?? {},
+      );
+      checkStatus(res.status);
+      // Offload a large body so it can't blow Temporal's ~2MB payload cap (Arch§4.6).
+      const offloaded = await maybeOffload(body, store, {
+        keyPrefix: `http/${meta.tenantId}`,
+      });
+      return finish(res.status, responseHeaders, offloaded, cfg.costUsd ?? 0);
     }
 
-    const contentType = res.headers.get("content-type") ?? "";
-    const raw = await res.text();
-    let body: unknown = raw;
-    if (contentType.includes("json")) {
-      try {
-        body = raw.length > 0 ? JSON.parse(raw) : null;
-      } catch {
-        body = raw; // malformed JSON — hand back the text rather than failing
+    // --- Paginated: fetch pages until a stop condition; `body` is the accumulated
+    // items array. The whole loop is in this activity, so the workflow is unaffected. ---
+    const maxPages = Math.min(Math.max(pg.maxPages ?? 10, 1), 100);
+    const stopOnEmpty = pg.stopOnEmpty ?? true;
+    const items: unknown[] = [];
+    let cursor: unknown;
+    let nextUrl: string | undefined;
+    let page = pg.startPage ?? 1;
+    let lastStatus = 0;
+    let lastHeaders: Record<string, string> = {};
+    let pages = 0;
+
+    while (pages < maxPages) {
+      let reqUrl: string;
+      let reqQuery: Record<string, string>;
+      // Same-origin pages carry the auth header; a cross-origin `url`-mode next page
+      // gets the non-secret headers only (never leak the connection token off-host).
+      let reqHeaders = headers;
+      if (pg.mode === "url" && pages > 0) {
+        // A response-supplied next URL is already complete — don't re-append query.
+        reqUrl = nextUrl as string;
+        reqQuery = {};
+        if (baseOrigin === null || originOf(reqUrl) !== baseOrigin)
+          reqHeaders = headersNoAuth;
+      } else {
+        reqUrl = cfg.url;
+        reqQuery = { ...(cfg.query ?? {}) };
+        if (pg.mode === "page") reqQuery[pg.pageParam ?? "page"] = String(page);
+        if (pg.mode === "cursor" && cursor != null)
+          reqQuery[pg.cursorParam ?? "cursor"] = String(cursor);
+      }
+
+      const { res, body, responseHeaders } = await fetchPage(
+        reqUrl,
+        reqQuery,
+        reqHeaders,
+      );
+      pages++; // count every fetch performed (drives the page count + per-page cost)
+      checkStatus(res.status);
+      lastStatus = res.status;
+      lastHeaders = responseHeaders;
+
+      const raw = pg.itemsPath ? getByPath(body, pg.itemsPath) : body;
+      const pageItems = Array.isArray(raw) ? raw : [];
+      // Append without spreading (a huge page would overflow the arg stack).
+      for (const it of pageItems) items.push(it);
+      if (stopOnEmpty && pageItems.length === 0) break;
+
+      if (pg.mode === "cursor") {
+        const c = pg.cursorPath ? getByPath(body, pg.cursorPath) : undefined;
+        if (c == null || c === "") break;
+        cursor = c;
+      } else if (pg.mode === "url") {
+        const nu = pg.nextUrlPath ? getByPath(body, pg.nextUrlPath) : undefined;
+        if (nu == null || nu === "") break;
+        nextUrl = String(nu);
+      } else {
+        page++;
       }
     }
 
-    if (cfg.failOnErrorStatus && res.status >= 400) {
-      throw ApplicationFailure.nonRetryable(
-        `HTTP request returned status ${res.status}`,
-        "HTTP_ERROR_STATUS",
-        { httpStatus: res.status },
-      );
-    }
-
-    // Offload a large body so it can't blow Temporal's ~2MB payload cap (Arch§4.6).
-    const offloaded = await maybeOffload(body, store, {
+    const offloaded = await maybeOffload(items, store, {
       keyPrefix: `http/${meta.tenantId}`,
     });
-    // Drop response-side credentials (Set-Cookie) before the headers land in ctx →
-    // Temporal history. The rest (content-type, etc.) is useful for branching.
-    const responseHeaders: Record<string, string> = {};
-    for (const [k, v] of res.headers.entries()) {
-      if (k.toLowerCase() === "set-cookie") continue;
-      responseHeaders[k] = v;
-    }
-
-    log.info(
-      {
-        activity: "callHttpRequest",
-        executionId: meta.executionId,
-        nodeId: meta.nodeId,
-        tenantId: meta.tenantId,
-        method: cfg.method,
-        host,
-        httpStatus: res.status,
-        costUsd: cfg.costUsd ?? 0,
-      },
-      "http request completed",
+    // Each page is a real HTTP call → meter the flat cost per page.
+    return finish(
+      lastStatus,
+      lastHeaders,
+      offloaded,
+      (cfg.costUsd ?? 0) * pages,
+      pages,
     );
-    activityRuns.inc({ activity: "callHttpRequest", outcome: "ok" });
-    activityDuration.observe(
-      { activity: "callHttpRequest" },
-      secondsSince(startedAt),
-    );
-    if ((cfg.costUsd ?? 0) > 0) runCostUsd.inc(cfg.costUsd ?? 0);
-    return {
-      status: "ok",
-      httpStatus: res.status,
-      headers: responseHeaders,
-      body: offloaded,
-      costUsd: cfg.costUsd ?? 0,
-    };
   } catch (e) {
     activityRuns.inc({ activity: "callHttpRequest", outcome: "error" });
     activityDuration.observe(
