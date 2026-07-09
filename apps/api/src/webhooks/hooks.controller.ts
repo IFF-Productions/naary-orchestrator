@@ -6,10 +6,12 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
   Req,
   Res,
   UnauthorizedException,
 } from "@nestjs/common";
+import { verifyResumeToken } from "../executions/resume-token";
 
 /** Minimal Express response surface we use (avoids a direct @types/express dep). */
 interface Res {
@@ -33,6 +35,27 @@ export class HooksController {
     private readonly executions: ExecutionsService,
     private readonly graphs: GraphsService,
   ) {}
+
+  /**
+   * Resume ingress: an external system POSTs here to continue a run paused on a wait(webhook)
+   * node. Authenticated by the HMAC `token` over the workflowId (the URL is the credential — no
+   * bearer). The POST body becomes the node's `payload`. 202 on success; 409 if the run isn't
+   * paused. Declared BEFORE `:endpointId` for clarity (it's a distinct 2-segment path).
+   */
+  @Public()
+  @Post("resume/:workflowId")
+  @HttpCode(202)
+  async resume(
+    @Param("workflowId") workflowId: string,
+    @Query("token") token: string,
+    @Body() payload: unknown,
+  ): Promise<{ status: string }> {
+    if (!verifyResumeToken(workflowId, token)) {
+      throw new UnauthorizedException("Invalid or missing resume token");
+    }
+    await this.executions.resumeByToken(workflowId, payload ?? null);
+    return { status: "resumed" };
+  }
 
   /**
    * Webhook ingress: verify signature over the RAW body → dedupe on delivery id →

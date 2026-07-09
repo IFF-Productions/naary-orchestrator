@@ -3870,26 +3870,76 @@ function ConfigPanel({
 
       {kind === "wait" && (
         <>
-          <Labeled label="Wait (seconds)">
-            <input
-              type="number"
-              min={0}
-              value={num("durationSeconds") ?? ""}
-              onChange={(e) =>
-                onChange({
-                  durationSeconds: e.target.value
-                    ? Number(e.target.value)
-                    : undefined,
-                })
-              }
+          <Labeled label="Wait mode">
+            <select
+              value={str("mode") || "duration"}
+              onChange={(e) => onChange({ mode: e.target.value })}
               style={inputStyle}
-              placeholder="0"
-            />
+            >
+              <option value="duration">
+                Duration — pause for a fixed time
+              </option>
+              <option value="webhook">
+                Webhook — pause until an external system resumes
+              </option>
+            </select>
           </Labeled>
-          <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
-            Pauses the run with a durable timer — it survives restarts and costs
-            nothing while waiting.
-          </div>
+          {(str("mode") || "duration") === "webhook" ? (
+            <>
+              <Labeled label="Timeout (seconds, optional)">
+                <input
+                  type="number"
+                  min={0}
+                  value={num("timeoutSeconds") ?? ""}
+                  onChange={(e) =>
+                    onChange({
+                      timeoutSeconds: e.target.value
+                        ? Number(e.target.value)
+                        : undefined,
+                    })
+                  }
+                  style={inputStyle}
+                  placeholder="wait forever"
+                />
+              </Labeled>
+              <div
+                style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
+              >
+                Pauses until an external system POSTs the run's resume URL
+                (shown on the run page). Survives restarts for days. With a
+                timeout it auto-continues on elapse; the node output is{" "}
+                <code>
+                  {"{"}resumed, timedOut, payload{"}"}
+                </code>{" "}
+                — branch on <code>{node.id}.resumed</code>.
+              </div>
+            </>
+          ) : (
+            <>
+              <Labeled label="Wait (seconds)">
+                <input
+                  type="number"
+                  min={0}
+                  value={num("durationSeconds") ?? ""}
+                  onChange={(e) =>
+                    onChange({
+                      durationSeconds: e.target.value
+                        ? Number(e.target.value)
+                        : undefined,
+                    })
+                  }
+                  style={inputStyle}
+                  placeholder="0"
+                />
+              </Labeled>
+              <div
+                style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
+              >
+                Pauses the run with a durable timer — it survives restarts and
+                costs nothing while waiting.
+              </div>
+            </>
+          )}
         </>
       )}
 
