@@ -85,16 +85,15 @@ This answers the thread that motivated it — *"why not JSON schema?"* / *"why n
 Schema *can* work **once config is typed at the source** — an untyped `config` slot has no concrete
 shape to emit, so the decoder returns `{}`. Typing config in the DSL removes that specific cause.
 
-> **Unproven premise — flagged, not asserted.** That the generator will now *fill* config is a
-> **hypothesis this design does not yet prove**, and our own data cuts against a naïve version of
-> it. After PR #182 the generator returned empty **edges** *and* empty config under `Output.object`
-> — *even though edges were already concretely schema'd in #182* ([[ai-generate-503-empty-schema]]).
-> If schema *concreteness* were the whole blocker, edges should have filled. That points at the
-> **structured-output mode itself** (on this model / AI-Gateway) as a co-cause, not just the
-> permissive config slot — and this design proposes returning to exactly that mode. So the win
-> below is real for the worker/validation/forms **regardless**, but the generator claim is a
-> hypothesis with a cheap discriminating test (§4, Phase 1). Do not retire plain-text #183 until
-> that test passes with config **and** edges populated.
+> **Premise TESTED — and it did not hold for structured output (§4, Phase 1b, 2026-07-08).** The
+> "type config → structured output fills it" idea was a hypothesis, and the live experiment
+> resolved it against a mode switch: the reliable path is **plain-text generation (#183)**, which
+> already fills config *and* edges correctly. The #182 empty-**edges** data (edges concretely
+> schema'd yet still empty under `Output.object`) plus that result point at the structured-output
+> *mode* — not the untyped config slot — as the real generator blocker. **The registry does not
+> fix the generator by reviving structured output.** Its generator value is narrower (enrich the
+> plain-text prompt with concrete per-node config schema); its real payoff is the worker /
+> validation / forms wins below, which stand regardless.
 
 The DSL-typing value stands on its own — it kills the 35 worker casts, adds save-time validation,
 and powers forms — **independent of** how the generator experiment resolves.
@@ -130,18 +129,31 @@ high-value nodes (`agent`, `httpRequest`, `humanApproval`, `sendEmail`, `wait`, 
 `switch`) + permissive fallback, derived types with bidirectional parity guards, and a sanitized
 `nodeConfigJsonSchema`.
 
-**Phase 1b — the discriminating experiment (do this next; it decides #183).** Wire
-`nodeConfigJsonSchema` into the generator's `Output.object` and run ONE real generation on the
-PR-review prompt (mint a scoped `nry_` token, curl `POST /graphs/generate`, delete the row — the
-method from [[ai-generate-503-empty-schema]]). **Read both config AND edges in the output.**
-- **If both populate** → concreteness *was* the blocker; structured output is back, retire or
-  down-rank plain-text #183, proceed to Phase 2.
-- **If either comes back empty** (the outcome our #182 empty-edges data predicts) → the failure is
-  the structured-output *mode* on this model/gateway, not the config slot. Keep #183 as the
-  generation path; the schema foundation still pays off in Phases 2–4. Record which it was.
+**Phase 1b — the discriminating experiment (RUN 2026-07-08; result below).** The question was
+whether concrete config schema revives structured-output generation, or whether the failure is the
+`Output.object` *mode* itself. I ran a live generation (PR-review prompt, scoped `nry_` token vs
+the live API, row deleted after — the method from [[ai-generate-503-empty-schema]]).
 
-This one call is cheaper and far more informative than writing the remaining ~34 schemas, so it
-gates the Phase 2+ investment.
+**Result — the deployed generator is already #183 (plain-text `parseGraphJson`, NOT `Output.object`),
+and it produced a fully-correct graph:** 6 nodes, 5 edges, every config-bearing node filled with real
+values (GitHub `GET`/`POST` URLs, a task-specific agent `systemPrompt`, a 48h `humanApproval`), and
+`{{ nodeId.path }}` wiring. So the control confirms **plain-text #183 works**; combined with the
+#182 empty-**edges** evidence (edges were concretely schema'd yet still came back empty under
+`Output.object`), the conclusion is that the structured-output *mode* was the unreliable part on this
+model/gateway — **not** the permissive config slot. Concrete config schema is therefore *not* the
+lever that fixes generation.
+
+> **Caveat on rigor:** the control exercised the *deployed* plain-text path (settling #183 = keep),
+> not an `Output.object` + concrete-config build (that needs an API image rebuild). Given plain-text
+> already meets the goal, forcing the structured-output treatment is low marginal value; it's left as
+> an optional confirmation, not a blocker.
+
+**Decision:** keep plain-text #183 as the generation path — do **not** switch back to
+`Output.object`. Re-scope the registry's generator value from "revive structured output" to
+"**enrich the plain-text prompt**": feed `nodeConfigJsonSchema(type)` (concrete, sanitized) into the
+prompt in place of / alongside the prose `config:` hints from `nodeCatalogPrompt()`. The registry's
+*durable* wins (worker casts, save-time validation, forms) are unaffected and remain the main
+payoff.
 
 **Phase 2 — replace the interfaces + delete the casts (mechanical).**
 Convert the remaining `*NodeConfig` interfaces to `z.infer` of their registry schema. Make
@@ -209,8 +221,9 @@ Phase 1a is built and green — `packages/dsl/src/registry.ts` + `test/registry.
 
 Phase 1a (the DSL schema foundation) is landed and worth shipping on its own — it's the base every
 later phase builds on and its payoffs (killing the 35 worker casts, save-time validation, forms)
-don't depend on the generator. **Run Phase 1b before committing to Phase 2+**: it's one live
-generation that either revives structured-output generation or confirms plain-text #183 is the
-right path — and it costs a fraction of writing the remaining ~34 schemas. Let the result, not the
-design's optimism, decide #183. Phases 2–4 then follow as independent slices, each paying down one
-of the four disconnected consumers.
+don't depend on the generator. Phase 1b **ran** and settled the generator question: **keep
+plain-text #183** (it fills config + edges correctly); the registry does not need to switch the
+generator back to structured output. So the sequencing is: ship 1a, merge #183, then take Phases
+2–4 as independent slices (replace interfaces / kill casts → validate on write → auto-derive
+forms), each paying down one of the four disconnected consumers — with the generator left on its
+working plain-text path and optionally enriched by the registry's per-node schema in the prompt.
