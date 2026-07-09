@@ -63,6 +63,14 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
       "Runs the workflow on a cron schedule (synced server-side on save).",
     config: '{ cron: "0 9 * * 1-5" }',
   },
+  formTrigger: {
+    group: "trigger",
+    entry: true,
+    summary:
+      "Started by a hosted public form; its output IS the submitted fields {key: value}.",
+    config:
+      "{ title?, description?, submitLabel?, fields: [{ key, label, type: text|textarea|number|email|select, required?, options? }] }",
+  },
   // --- AI ---
   agent: {
     group: "ai",

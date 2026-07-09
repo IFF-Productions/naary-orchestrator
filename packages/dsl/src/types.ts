@@ -9,6 +9,7 @@ export type NodeType =
   | "errorTrigger" // entry node for an error-handler graph; output is the failure context
   | "pollTrigger" // entry node: polls a URL on an interval; output is {changed, body}
   | "scheduleTrigger" // entry node: runs the graph on a cron schedule (control-plane synced)
+  | "formTrigger" // entry node: started by a hosted public form; output is the submitted fields
   | "agent"
   | "mcpTool" // Slice #4: calls a remote MCP server tool via a connection
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}
@@ -108,6 +109,33 @@ export interface StartNodeConfig {
 export interface ScheduleTriggerNodeConfig {
   /** Cron expression (Temporal/standard). */
   cron: string;
+}
+
+/** One field on a form-trigger's hosted form. */
+export interface FormFieldDef {
+  /** Key in the submitted data object (and the trigger node's output). */
+  key: string;
+  /** Human label shown above the input. */
+  label: string;
+  type: "text" | "textarea" | "number" | "email" | "select";
+  required?: boolean;
+  placeholder?: string;
+  /** Choices for `type: "select"`. */
+  options?: string[];
+}
+
+/**
+ * Form trigger — the run starts from a hosted public form (design docs/design/FORM-TRIGGER.md).
+ * The submitted `{ key: value }` becomes the trigger node's output (like `webhookTrigger`'s
+ * output IS the event). The public form-serving + submit endpoint is a later slice; this is
+ * just the node + its field schema.
+ */
+export interface FormTriggerNodeConfig {
+  title?: string;
+  description?: string;
+  /** Submit-button label (default "Submit"). */
+  submitLabel?: string;
+  fields: FormFieldDef[];
 }
 
 /** Human-approval node config. The interpreter reads `timeoutHours` to bound the

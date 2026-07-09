@@ -45,6 +45,7 @@ import type {
   MergeNodeConfig,
   NodeType,
   NumberNodeConfig,
+  FormTriggerNodeConfig,
   PollTriggerNodeConfig,
   RandomNodeConfig,
   RenameKeysNodeConfig,
@@ -123,6 +124,21 @@ const CONFIG_SCHEMAS = {
     sampleInput: z.record(z.string(), z.unknown()).optional(),
   }),
   scheduleTrigger: z.object({ cron: z.string() }),
+  formTrigger: z.object({
+    title: z.string().optional(),
+    description: z.string().optional(),
+    submitLabel: z.string().optional(),
+    fields: z.array(
+      z.object({
+        key: z.string(),
+        label: z.string(),
+        type: z.enum(["text", "textarea", "number", "email", "select"]),
+        required: z.boolean().optional(),
+        placeholder: z.string().optional(),
+        options: z.array(z.string()).optional(),
+      }),
+    ),
+  }),
   pollTrigger: z.object({
     url: z.string(),
     intervalSeconds: z.number(),
@@ -536,6 +552,7 @@ export function nodeConfigJsonSchema(type: NodeType): Record<string, unknown> {
 
 // --- Derived TS types (Phase 2 points the interpreter's *NodeConfig at these) ------------------
 export type StartConfig = z.infer<typeof CONFIG_SCHEMAS.start>;
+export type FormTriggerConfig = z.infer<typeof CONFIG_SCHEMAS.formTrigger>;
 export type ScheduleTriggerConfig = z.infer<
   typeof CONFIG_SCHEMAS.scheduleTrigger
 >;
@@ -593,6 +610,7 @@ type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 const _configParity: {
   start: Exact<StartConfig, StartNodeConfig>;
   scheduleTrigger: Exact<ScheduleTriggerConfig, ScheduleTriggerNodeConfig>;
+  formTrigger: Exact<FormTriggerConfig, FormTriggerNodeConfig>;
   pollTrigger: Exact<PollTriggerConfig, PollTriggerNodeConfig>;
   mcpTool: Exact<McpToolConfig, McpToolNodeConfig>;
   httpRequest: Exact<HttpRequestConfig, HttpRequestNodeConfig>;
@@ -635,6 +653,7 @@ const _configParity: {
 } = {
   start: true,
   scheduleTrigger: true,
+  formTrigger: true,
   pollTrigger: true,
   mcpTool: true,
   httpRequest: true,
