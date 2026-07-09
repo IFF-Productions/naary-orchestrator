@@ -108,6 +108,34 @@ async function globalSetup(_config: FullConfig): Promise<void> {
     }),
   }).catch(() => undefined);
 
+  // Seed a wait(webhook) graph: start → wait(mode:webhook) → end. It parks the run
+  // in `awaiting_webhook` indefinitely until an external POST to the signed resume URL
+  // releases it — the durable human-in-the-loop path the resume e2e drives end-to-end.
+  // workflowKey "e2e-wait-webhook".
+  await fetch(`${API_BASE}/graphs`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      workflowKey: "e2e-wait-webhook",
+      name: "E2E wait for webhook",
+      graph: {
+        startNodeId: "s",
+        nodes: [
+          { id: "s", type: "start" },
+          { id: "w", type: "wait", config: { mode: "webhook" } },
+          { id: "e", type: "end" },
+        ],
+        edges: [
+          { from: "s", to: "w" },
+          { from: "w", to: "e" },
+        ],
+      },
+    }),
+  }).catch(() => undefined);
+
   const authDir = path.resolve(cwd, "e2e/.auth");
   mkdirSync(authDir, { recursive: true });
   writeFileSync(
