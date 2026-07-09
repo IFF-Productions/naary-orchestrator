@@ -37,7 +37,7 @@
     "quickjs-emscripten": "^0.32.0",
     "zod": "^4.4.3",
     "@ai-sdk/openai": "^4.0.8",
-    "@ai-sdk/google": "^4.0.8"
+    "@ai-sdk/google": "^4.0.10"
   },
   "devDependencies": {
     "@temporalio/testing": "^1.19.0",
