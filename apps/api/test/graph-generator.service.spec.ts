@@ -52,7 +52,7 @@ beforeEach(() => {
 
 describe("GraphGeneratorService", () => {
   it("returns a validated draft graph on the first attempt", async () => {
-    generateText.mockResolvedValue({ output: validOut });
+    generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
 
     const res = await makeService().generate("t-1", "email me a daily digest");
 
@@ -65,8 +65,8 @@ describe("GraphGeneratorService", () => {
 
   it("repairs once: invalid graph → feeds the error back → valid on retry", async () => {
     generateText
-      .mockResolvedValueOnce({ output: invalidOut })
-      .mockResolvedValueOnce({ output: validOut });
+      .mockResolvedValueOnce({ text: JSON.stringify(invalidOut) })
+      .mockResolvedValueOnce({ text: JSON.stringify(validOut) });
 
     const res = await makeService().generate("t-1", "do a thing");
 
@@ -78,7 +78,7 @@ describe("GraphGeneratorService", () => {
   });
 
   it("gives up with 422 when the repair is still invalid (no infinite loop)", async () => {
-    generateText.mockResolvedValue({ output: invalidOut });
+    generateText.mockResolvedValue({ text: JSON.stringify(invalidOut) });
 
     await expect(makeService().generate("t-1", "x")).rejects.toBeInstanceOf(
       UnprocessableEntityException,
@@ -113,7 +113,7 @@ describe("GraphGeneratorService", () => {
   });
 
   it("uses an explicitly requested provider (openai) and its key", async () => {
-    generateText.mockResolvedValue({ output: validOut });
+    generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
 
     await makeService().generate("t-1", "make a flow", "openai");
 
@@ -128,7 +128,7 @@ describe("GraphGeneratorService", () => {
       { provider: "anthropic", isValid: false },
       { provider: "openai", isValid: true },
     ]);
-    generateText.mockResolvedValue({ output: validOut });
+    generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
 
     await makeService().generate("t-1", "make a flow");
 
