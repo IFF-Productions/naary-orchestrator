@@ -1,0 +1,216 @@
+# Design — Type-safe DSL config (one schema per node, shared across packages)
+
+**Status:** proposed · **Date:** 2026-07-08 · **Purpose:** the DSL's node `config` is
+untyped (`Record<string, unknown>`), so every consumer — the interpreter, the API, the web
+canvas, and the AI generator — re-invents its own idea of what a node's config looks like, and
+none of them is enforced. Give each node type ONE schema in `@naary/dsl` and derive everything
+else (TS types, runtime validation, JSON Schema for the LLM, form metadata) from it. This is the
+principled fix for the empty-config generator bug ([[ai-generate-503-empty-schema]]) and the 35
+`as unknown as` casts in the worker.
+
+---
+
+## 1. What naary has today (grounded)
+
+The DSL already has most of the pieces — they're just disconnected:
+
+- **The node enum** — `NodeType` (42 members) in `packages/dsl/src/types.ts`, and
+  `CONDITION_OPS`. Exhaustive, enforced.
+- **~38 hand-written `*NodeConfig` interfaces** in `types.ts` (`HttpRequestNodeConfig`,
+  `SetNodeConfig`, `ApprovalNodeConfig`, …). These are **compile-time only, erased at runtime,
+  and wired to nothing** — `NodeDef.config` is typed `Record<string, unknown>`, not a union of
+  them. Notably there is **no `AgentNodeConfig`** — the single most important node has no config
+  type at all.
+- **`NODE_CATALOG`** — `Record<NodeType, { group, summary, config?, entry? }>` in
+  `node-catalog.ts`. Exhaustive by construction (`Record<NodeType, …>` makes a missing entry a
+  compile error). But `config` is a **prose hint string** (`"{ method, url, headers?, … }"`),
+  not a schema — good for a prompt, useless for validation or a form.
+- **The worker** (`apps/worker/src/temporal/workflows.ts`) reads `node.config ?? {}` and does
+  **35 `as unknown as XNodeConfig` casts** — an unchecked assertion per node kind. A typo in a
+  graph (`{ methdo: "GET" }`) sails through to the activity.
+- **The generator** (`apps/api/src/graphs/graph-generator.service.ts`) had to abandon JSON-Schema
+  structured output and fall back to plain-text + hand-parsing (PR #183) precisely because there
+  was no concrete per-node config schema to hand the model — a permissive `config` slot yields an
+  empty `{}` from the decoder ([[ai-generate-503-empty-schema]]).
+- **`zod` is already a dependency** of `apps/worker`, `apps/api`, and `packages/secrets` — but
+  **not** `packages/dsl`. Adding it to the DSL is consistent with the repo, not a new footprint.
+
+**The gap in one line:** the DSL knows *which* nodes exist and enforces that, but not *what shape
+each node's config is* — so config correctness is asserted, never checked, in four places
+independently.
+
+## 2. The idea — one schema per node, everything derived
+
+Collapse the three parallel lists (the 38 interfaces, the catalog's prose `config` hint, and each
+consumer's private assumptions) into **one registry keyed by `NodeType`, where each entry carries
+a real runtime schema for its config**:
+
+```ts
+// packages/dsl/src/registry.ts  (new)
+import { z } from "zod";
+
+export interface NodeSpec {
+  group: NodeGroup;
+  summary: string;             // (moved from NODE_CATALOG)
+  entry?: boolean;
+  config: z.ZodTypeAny;        // ← the new part: a real schema, not a hint string
+}
+
+export const NODE_REGISTRY = {
+  httpRequest: {
+    group: "data-source",
+    summary: "HTTP/REST call; output {status,headers,body}. Branch on <id>.status.",
+    config: z.object({
+      method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+      url: z.string().url(),
+      headers: z.record(z.string()).optional(),
+      // …the fields already spelled out in HttpRequestNodeConfig, now as schema
+    }),
+  },
+  // …one entry per NodeType
+} satisfies Record<NodeType, NodeSpec>;
+```
+
+From that single definition, **derive** every consumer's artifact:
+
+| Consumer | Derived from the schema | Replaces today |
+|---|---|---|
+| **DSL types** | `type HttpRequestConfig = z.infer<typeof NODE_REGISTRY.httpRequest.config>` | the 38 hand-written interfaces (mechanical) |
+| **Worker** | `NodeDef` becomes a discriminated union on `type`, so `node.config` is narrowed by `switch (node.type)` | the 35 `as unknown as` casts (compile-time proof, zero runtime cost) |
+| **API / save** | `graphSchema.safeParse(graph)` — real per-node config validation | structural-only `validateGraph` |
+| **Generator** | `z.toJSONSchema(nodeConfigSchema(type))` (zod v4, native) → **concrete** per-node config properties | plain-text + hand-parse (PR #183); structured output can fill config again |
+| **Web** | field list + kinds from `schema.shape` (or a thin `ui` map) → auto-built config panels | hand-maintained panels + `friendly-catalog` |
+
+This answers the thread that motivated it — *"why not JSON schema?"* / *"why not DTOs?"*: JSON
+Schema *can* work **once config is typed at the source** — an untyped `config` slot has no concrete
+shape to emit, so the decoder returns `{}`. Typing config in the DSL removes that specific cause.
+
+> **Unproven premise — flagged, not asserted.** That the generator will now *fill* config is a
+> **hypothesis this design does not yet prove**, and our own data cuts against a naïve version of
+> it. After PR #182 the generator returned empty **edges** *and* empty config under `Output.object`
+> — *even though edges were already concretely schema'd in #182* ([[ai-generate-503-empty-schema]]).
+> If schema *concreteness* were the whole blocker, edges should have filled. That points at the
+> **structured-output mode itself** (on this model / AI-Gateway) as a co-cause, not just the
+> permissive config slot — and this design proposes returning to exactly that mode. So the win
+> below is real for the worker/validation/forms **regardless**, but the generator claim is a
+> hypothesis with a cheap discriminating test (§4, Phase 1). Do not retire plain-text #183 until
+> that test passes with config **and** edges populated.
+
+The DSL-typing value stands on its own — it kills the 35 worker casts, adds save-time validation,
+and powers forms — **independent of** how the generator experiment resolves.
+
+## 3. The Tier-1 landmine — zod must not run in workflow code
+
+This is the one hard constraint and the design turns on respecting it.
+
+Zod is **runtime** validation. `workflows.ts` and the graph-traversal code are **deterministic**
+(CLAUDE.md Tier-1 rule 2) — a `.parse()` there means running validator logic inside the replayable
+workflow sandbox, and any version drift in zod's behavior would be a nondeterminism/replay hazard.
+
+**Rule: the interpreter consumes only the erased TYPES, never the schema values.**
+
+- Worker imports **`import type { HttpRequestConfig } from "@naary/dsl"`** — types only, erased at
+  compile time. The discriminated union gives it narrowing with **zero runtime zod** in the
+  workflow bundle.
+- Every actual `.parse()` / `.safeParse()` runs where I/O already lives: **the API** (on save /
+  in the generator) and **activities** (defensive parse at the activity boundary, if we want it).
+- Enforce it mechanically: the worker's workflow bundle must not import the registry *value*. A
+  lint rule / bundle check (`no zod in the workflow entrypoint`) keeps the boundary from eroding.
+
+zod already being a worker dependency (used in activities) is fine — the line isn't "zod in the
+worker package," it's "zod evaluated inside `workflows.ts`."
+
+## 4. Migration — incremental, never big-bang
+
+A permissive fallback for not-yet-migrated nodes means every phase ships on its own and no phase
+requires touching all 42 nodes at once.
+
+**Phase 1a — DSL schema foundation (done; §6).** `zod` in `@naary/dsl`, concrete schemas for the 8
+high-value nodes (`agent`, `httpRequest`, `humanApproval`, `sendEmail`, `wait`, `set`, `if`,
+`switch`) + permissive fallback, derived types with bidirectional parity guards, and a sanitized
+`nodeConfigJsonSchema`.
+
+**Phase 1b — the discriminating experiment (do this next; it decides #183).** Wire
+`nodeConfigJsonSchema` into the generator's `Output.object` and run ONE real generation on the
+PR-review prompt (mint a scoped `nry_` token, curl `POST /graphs/generate`, delete the row — the
+method from [[ai-generate-503-empty-schema]]). **Read both config AND edges in the output.**
+- **If both populate** → concreteness *was* the blocker; structured output is back, retire or
+  down-rank plain-text #183, proceed to Phase 2.
+- **If either comes back empty** (the outcome our #182 empty-edges data predicts) → the failure is
+  the structured-output *mode* on this model/gateway, not the config slot. Keep #183 as the
+  generation path; the schema foundation still pays off in Phases 2–4. Record which it was.
+
+This one call is cheaper and far more informative than writing the remaining ~34 schemas, so it
+gates the Phase 2+ investment.
+
+**Phase 2 — replace the interfaces + delete the casts (mechanical).**
+Convert the remaining `*NodeConfig` interfaces to `z.infer` of their registry schema. Make
+`NodeDef` a discriminated union (`{ id, type: "httpRequest", config: HttpRequestConfig } | …`).
+Delete the 35 `as unknown as` casts in `workflows.ts` — the compiler now narrows `node.config` per
+`case`. This is where the type safety becomes *enforced* rather than *asserted*.
+
+**Phase 3 — validate on the write path.**
+`validateGraph` (or a new `validateGraphConfig`) runs `graphSchema.safeParse` in the API DTO /
+save handler, returning per-node, per-field errors instead of a generic reject. Structural checks
+in `branch.ts` stay pure and unchanged; config validation is the additive layer.
+
+**Phase 4 — auto-derive the web forms.**
+Config panels and the Simple-mode `friendly-catalog` read the schema's `shape` (plus a thin `ui`
+hint map for labels/widget kind) instead of being hand-maintained in parallel. Retire the
+duplicated field lists.
+
+Each phase is independently shippable and independently reversible.
+
+## 5. Trade-offs & open questions (called out honestly)
+
+- **~38 schemas to write.** Mostly transcription — the interfaces already spell out every field.
+  The permissive fallback means it's a gradual sweep, not a wall.
+- **Graph versioning.** Schemas will evolve; an in-flight run's snapshot was validated against an
+  older shape. Mitigation: **validate strictly on write, leniently on read** — never re-validate a
+  historical graph snapshot against the current schema, and gate interpreter-visible shape changes
+  behind `workflow.patched()` / content-hash as we already do for graph edits.
+- **A sanitize pass is required, and the prototype proved it** — `z.toJSONSchema` emits an empty
+  `{}` for `z.unknown()` and open records (`body`, `outputSchema`, `fields`), which is the exact
+  shape Anthropic rejects. `registry.ts` post-processes those into a concrete `anyOf` union
+  before the schema reaches the generator. Fewer empty cases than the fully-untyped `config`, but
+  not zero — the pass is load-bearing, not optional.
+- **Registry value vs. catalog.** `NODE_CATALOG` (prose `config` hint) can be *generated from* the
+  registry (`nodeCatalogPrompt()` reads schema field names), or kept as the summary layer with the
+  schema alongside. Recommend: fold `group`/`summary`/`entry` into `NODE_REGISTRY` and derive the
+  prompt text, so there's genuinely one source.
+- **Bundle discipline is load-bearing.** If zod ever leaks into the workflow entrypoint, Tier-1
+  rule 2 is silently violated. This needs a guard (lint/bundle assertion), not just a convention.
+
+## 6. Prototype status (this slice)
+
+Phase 1a is built and green — `packages/dsl/src/registry.ts` + `test/registry.spec.ts` (5 tests),
+`tsc -b` clean, full dsl suite 133/133:
+
+- `zod` in `@naary/dsl`; concrete `config` schemas for the 8 Phase-1 nodes + permissive fallback
+  (`nodeConfigSchema(type)`).
+- Derived TS types (`z.infer`) with **bidirectional type-equivalence guards** (`Exact<A,B>`,
+  enforced by `tsc -b`) against all 7 interface-backed nodes — not a single-literal `satisfies`
+  check. This caught a **real divergence**: the naïve `z.enum(CONDITION_OPS)` widened `op` to
+  `string`, so the inferred `if`/`switch` config was *not* a faithful port; fixed with a
+  literal-preserving op tuple (itself completeness-guarded against `ConditionOp`). Phase 2 can now
+  swap interfaces for inferred types with build-enforced safety, not hope.
+- `nodeConfigJsonSchema(type)` → concrete, **Anthropic-safe** JSON Schema (the sanitize pass
+  above), verified by a deep "no empty `{}` anywhere" assertion — which itself surfaced the
+  `z.unknown()` → `{}` gotcha and proved the sanitize pass necessary.
+- Runtime enforcement demonstrated (`{ methdo, url: 42 }` rejected — a typo the untyped
+  `Record<string, unknown>` waved through).
+- `index.ts` deliberately does **not** re-export `registry.ts`, so the worker's `@naary/dsl`
+  surface stays zod-free (Tier-1 rule 2 honored by construction).
+
+**Not yet done / not yet proven:** Phase 1b — the generator experiment above — is unrun, so the
+"structured output fills config" claim is still a hypothesis and #183's fate is undecided.
+
+## 7. Recommendation
+
+Phase 1a (the DSL schema foundation) is landed and worth shipping on its own — it's the base every
+later phase builds on and its payoffs (killing the 35 worker casts, save-time validation, forms)
+don't depend on the generator. **Run Phase 1b before committing to Phase 2+**: it's one live
+generation that either revives structured-output generation or confirms plain-text #183 is the
+right path — and it costs a fraction of writing the remaining ~34 schemas. Let the result, not the
+design's optimism, decide #183. Phases 2–4 then follow as independent slices, each paying down one
+of the four disconnected consumers.
