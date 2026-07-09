@@ -6,6 +6,11 @@ export class GraphSummaryResponse {
   @ApiProperty({ example: "Support triage" }) name!: string;
   @ApiProperty({ example: 3 }) version!: number;
   @ApiProperty({ required: false, format: "date-time" }) updatedAt?: string;
+  @ApiProperty({
+    example: true,
+    description: "Whether automatic triggers fire.",
+  })
+  active!: boolean;
 }
 
 /** A generated draft graph (unsaved). */

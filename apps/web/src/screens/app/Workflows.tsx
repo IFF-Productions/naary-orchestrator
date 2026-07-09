@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Button, Card, Icon, SearchInput, StatusPill } from "../../components";
+import {
+  Button,
+  Card,
+  Icon,
+  SearchInput,
+  StatusPill,
+  Switch,
+} from "../../components";
 import { api, type GraphSummary, type RunSummary } from "../../lib/api";
 import { runStatusUi, successRate } from "../../lib/run-status";
 
@@ -9,7 +16,7 @@ import { runStatusUi, successRate } from "../../lib/run-status";
  * with REAL recent-run stats derived from the runs list (run count, success rate,
  * last status). Open one to edit it on the canvas, or create a new one.
  */
-const GRID = "2.2fr 1fr 0.8fr 1fr 90px";
+const GRID = "2.2fr 1fr 0.8fr 1fr 84px 90px";
 
 interface Row {
   graph: GraphSummary;
@@ -22,6 +29,8 @@ export function Workflows() {
   const navigate = useNavigate();
   const [graphs, setGraphs] = useState<GraphSummary[] | null>(null);
   const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [tenant, setTenant] = useState<string | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
   // Seed the filter from ?q= so the global topbar search lands here pre-filtered.
   const [searchParams] = useSearchParams();
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
@@ -36,17 +45,50 @@ export function Workflows() {
 
   useEffect(() => {
     let live = true;
-    Promise.all([api.listGraphs(), api.listRuns().catch(() => [])])
-      .then(([gs, rs]) => {
+    Promise.all([
+      api.listGraphs(),
+      api.listRuns().catch(() => []),
+      api
+        .getMe()
+        .then((m) => m.tenantId)
+        .catch(() => null),
+    ])
+      .then(([gs, rs, t]) => {
         if (!live) return;
         setGraphs(gs);
         setRuns(rs);
+        setTenant(t);
       })
       .catch((e) => live && setErr(e instanceof Error ? e.message : "failed"));
     return () => {
       live = false;
     };
   }, []);
+
+  async function toggleActive(workflowKey: string, next: boolean) {
+    if (!tenant || toggling) return;
+    setToggling(workflowKey);
+    // Optimistic: flip locally, revert on failure.
+    setGraphs(
+      (gs) =>
+        gs?.map((g) =>
+          g.workflowKey === workflowKey ? { ...g, active: next } : g,
+        ) ?? gs,
+    );
+    try {
+      await api.setWorkflowActive(tenant, workflowKey, next);
+    } catch {
+      setGraphs(
+        (gs) =>
+          gs?.map((g) =>
+            g.workflowKey === workflowKey ? { ...g, active: !next } : g,
+          ) ?? gs,
+      );
+      setErr("Could not change activation — try again.");
+    } finally {
+      setToggling(null);
+    }
+  }
 
   // Per-workflow stats from the runs list (newest-first), keyed by workflowKey.
   const rows = useMemo<Row[]>(() => {
@@ -141,6 +183,7 @@ export function Workflows() {
           <span>Last run</span>
           <span>Runs</span>
           <span>Success</span>
+          <span>Active</span>
           <span />
         </div>
 
@@ -236,6 +279,22 @@ export function Workflows() {
               style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
             >
               {r.success === null ? "—" : `${Math.round(r.success)}%`}
+            </span>
+            <span
+              onClick={(e) => e.stopPropagation()}
+              title={
+                r.graph.active
+                  ? "Active — automatic triggers fire"
+                  : "Inactive — triggers paused (manual runs still work)"
+              }
+              style={{ display: "inline-flex", alignItems: "center" }}
+            >
+              <Switch
+                checked={r.graph.active}
+                onChange={(next) =>
+                  void toggleActive(r.graph.workflowKey, next)
+                }
+              />
             </span>
             <span style={{ textAlign: "right" }}>
               <Button

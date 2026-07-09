@@ -103,6 +103,8 @@ export interface GraphSummary {
   name: string;
   version: number;
   updatedAt: string;
+  /** Whether the workflow's automatic triggers fire (n8n parity). Default true. */
+  active: boolean;
 }
 export interface NamedGraph {
   workflowKey: string;
@@ -457,6 +459,18 @@ export const api = {
     return http(
       `/tenants/${encodeURIComponent(tenantId)}/forms/${encodeURIComponent(formId)}`,
       { method: "DELETE" },
+    );
+  },
+  // Activate / deactivate a workflow (n8n parity): deactivating stops automatic triggers
+  // (webhook/form refused, schedules paused). Manual runs still work.
+  setWorkflowActive(
+    tenantId: string,
+    workflowKey: string,
+    active: boolean,
+  ): Promise<{ workflowKey: string; active: boolean }> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/workflows/${encodeURIComponent(workflowKey)}/active`,
+      { method: "PUT", body: JSON.stringify({ active }) },
     );
   },
   // PUBLIC (anonymous — no auth needed): the hosted form's definition + submit. Reached through

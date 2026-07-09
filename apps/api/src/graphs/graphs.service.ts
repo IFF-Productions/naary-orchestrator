@@ -26,6 +26,8 @@ export interface GraphSummary {
   name: string;
   version: number;
   updatedAt: string;
+  /** Whether the workflow's automatic triggers fire (n8n parity). Default true. */
+  active: boolean;
 }
 
 /**
@@ -108,10 +110,13 @@ export class GraphsService {
   /** One entry per workflowKey (its latest version), newest first — for the
    *  Workflows list. Names/keys only; no graph bodies. */
   async list(tenantId: string): Promise<GraphSummary[]> {
-    const rows = await getPrisma().graphDefinition.findMany({
-      where: { tenantId },
-      orderBy: { version: "desc" },
-    });
+    const [rows, inactive] = await Promise.all([
+      getPrisma().graphDefinition.findMany({
+        where: { tenantId },
+        orderBy: { version: "desc" },
+      }),
+      this.inactiveKeys(tenantId), // one query; everything else is active by default
+    ]);
     const latest = new Map<string, GraphSummary>();
     for (const r of rows) {
       if (!latest.has(r.workflowKey)) {
@@ -120,6 +125,7 @@ export class GraphsService {
           name: r.name,
           version: r.version,
           updatedAt: r.createdAt.toISOString(),
+          active: !inactive.has(r.workflowKey),
         });
       }
     }
@@ -181,6 +187,39 @@ export class GraphsService {
       where: { tenantId_workflowKey: { tenantId, workflowKey } },
       create: { tenantId, workflowKey, errorWorkflowKey },
       update: { errorWorkflowKey },
+    });
+  }
+
+  /** Whether this workflow's automatic triggers may fire. ABSENCE ⇒ ACTIVE (see the
+   *  WorkflowActivation model note): existing workflows have no row and must keep working. */
+  async isActive(tenantId: string, workflowKey: string): Promise<boolean> {
+    const row = await getPrisma().workflowActivation.findUnique({
+      where: { tenantId_workflowKey: { tenantId, workflowKey } },
+    });
+    return row?.active ?? true;
+  }
+
+  /** The set of workflowKeys this tenant has explicitly DEACTIVATED (rows with active=false).
+   *  Used to annotate the workflow list without an N+1 (everything else is active by default). */
+  async inactiveKeys(tenantId: string): Promise<Set<string>> {
+    const rows = await getPrisma().workflowActivation.findMany({
+      where: { tenantId, active: false },
+      select: { workflowKey: true },
+    });
+    return new Set(rows.map((r) => r.workflowKey));
+  }
+
+  /** Set this workflow's activation flag (upsert). Callers that also pause/unpause the workflow's
+   *  Temporal schedules must sequence those around this write (see SchedulesService.setActive). */
+  async setActive(
+    tenantId: string,
+    workflowKey: string,
+    active: boolean,
+  ): Promise<void> {
+    await getPrisma().workflowActivation.upsert({
+      where: { tenantId_workflowKey: { tenantId, workflowKey } },
+      create: { tenantId, workflowKey, active },
+      update: { active },
     });
   }
 }

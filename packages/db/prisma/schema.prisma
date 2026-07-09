@@ -112,6 +112,20 @@ model ErrorHandler {
   @@id([tenantId, workflowKey])
 }
 
+/** Per-workflow activation flag (n8n parity). When a workflow is INACTIVE its automatic triggers
+ *  don't fire: webhook/form ingress is refused, and its Temporal cron/poll schedules are paused.
+ *  Manual runs are always allowed. One row per (tenant, workflowKey); ABSENCE ⇒ ACTIVE — a
+ *  deliberate divergence from n8n's default-inactive, so existing webhooks/schedules keep working
+ *  (the toggle's value is the pause capability). Don't "fix" this default to inactive. */
+model WorkflowActivation {
+  tenantId    String
+  workflowKey String
+  active      Boolean  @default(true)
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  @@id([tenantId, workflowKey])
+}
+
 // Slice #4 — external integrations.
 
 model WebhookEndpoint {

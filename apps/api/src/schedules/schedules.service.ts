@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -106,14 +107,19 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
+    // Invariant: never leave a schedule running while the workflow is deactivated. If the workflow
+    // is inactive, create the schedule PAUSED (a fresh Temporal schedule is unpaused by default).
+    const paused = !(await this.graphs.isActive(tenantId, workflowKey));
+    if (paused) await this.pauseHandle(id, true);
+
     await getPrisma().schedule.create({
-      data: { id, tenantId, workflowKey, cron: cronExpr },
+      data: { id, tenantId, workflowKey, cron: cronExpr, paused },
     });
     return {
       id,
       workflowKey,
       cron: cronExpr,
-      paused: false,
+      paused,
       createdAt: new Date().toISOString(),
       nextRunAt: null,
     };
@@ -176,10 +182,21 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         },
       },
     });
+    // Invariant: a deactivated workflow's schedule must not fire. The delete-then-create above
+    // makes a fresh (unpaused) schedule on every save — re-pause it if the workflow is inactive,
+    // else a normal edit silently re-arms a deactivated poll trigger.
+    const paused = !(await this.graphs.isActive(tenantId, workflowKey));
+    if (paused) await this.pauseHandle(id, true);
     await getPrisma().schedule.upsert({
       where: { id },
-      create: { id, tenantId, workflowKey, cron: `every ${everySeconds}s` },
-      update: { cron: `every ${everySeconds}s` },
+      create: {
+        id,
+        tenantId,
+        workflowKey,
+        cron: `every ${everySeconds}s`,
+        paused,
+      },
+      update: { cron: `every ${everySeconds}s`, paused },
     });
   }
 
@@ -235,10 +252,14 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         },
       },
     });
+    // Invariant (see syncPollSchedule): re-pause the freshly-created cron schedule if the workflow
+    // is deactivated, so editing an inactive workflow doesn't re-arm its scheduleTrigger.
+    const paused = !(await this.graphs.isActive(tenantId, workflowKey));
+    if (paused) await this.pauseHandle(id, true);
     await getPrisma().schedule.upsert({
       where: { id },
-      create: { id, tenantId, workflowKey, cron },
-      update: { cron },
+      create: { id, tenantId, workflowKey, cron, paused },
+      update: { cron, paused },
     });
   }
 
@@ -283,30 +304,112 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
       .catch(() => undefined);
   }
 
+  /**
+   * Activate / deactivate a WORKFLOW (n8n parity) — flips the activation flag AND brings its
+   * Temporal cron/poll schedules in line. Ordering matters so no window fires against intent:
+   *  - deactivate: pause the schedules FIRST, then write flag=false (webhook/form keep working in
+   *    the tiny gap, but nothing fires that shouldn't);
+   *  - activate: write flag=true FIRST, then unpause the schedules.
+   * Covers ALL of the workflow's Schedule rows (poll/cron/manual) uniformly. The create-time
+   * invariant (schedules made paused when inactive) is the durable guarantee; this is the
+   * immediate effect on the existing schedules. A failed pause propagates (pauseHandle re-raises)
+   * so deactivation can't falsely report success while a schedule keeps firing.
+   *
+   * Known-narrow residual windows (no cross-service transaction): (a) a graph SAVE racing a
+   * deactivate can recreate a schedule unpaused if its `isActive` read lands before the flag
+   * commits; (b) a Temporal outage during the best-effort save-time re-pause. Both self-heal on the
+   * next save or toggle; closing them fully would need a fire-time activity gate in the interpreter.
+   */
+  async setActive(
+    tenantId: string,
+    workflowKey: string,
+    active: boolean,
+  ): Promise<void> {
+    const rows = await getPrisma().schedule.findMany({
+      where: { tenantId, workflowKey },
+      select: { id: true },
+    });
+    if (!active) {
+      for (const r of rows) await this.pauseHandle(r.id, true);
+      await getPrisma().schedule.updateMany({
+        where: { tenantId, workflowKey },
+        data: { paused: true },
+      });
+      await this.graphs.setActive(tenantId, workflowKey, false);
+    } else {
+      await this.graphs.setActive(tenantId, workflowKey, true);
+      for (const r of rows) await this.pauseHandle(r.id, false);
+      await getPrisma().schedule.updateMany({
+        where: { tenantId, workflowKey },
+        data: { paused: false },
+      });
+    }
+  }
+
+  /** Pause/unpause a Temporal schedule by id. Tolerates a genuinely-missing schedule (a Schedule
+   *  row without a live Temporal schedule — the same inconsistency `list()` tolerates) but RE-RAISES
+   *  a real failure: a deactivation that couldn't actually pause must fail loudly, not report
+   *  success while the schedule keeps firing (the schedule/poll path has no other gate). */
+  private async pauseHandle(id: string, paused: boolean): Promise<void> {
+    const handle = this.client.schedule.getHandle(id);
+    try {
+      if (paused) await handle.pause("workflow deactivated");
+      else await handle.unpause("workflow activated");
+    } catch (e) {
+      // Distinguish "schedule doesn't exist" (tolerable) from a real error by probing describe():
+      // if describe ALSO fails the schedule is gone (nothing to pause); otherwise it exists and the
+      // pause genuinely failed — propagate so the caller (setActive) doesn't falsely succeed.
+      const gone = await handle
+        .describe()
+        .then(() => false)
+        .catch(() => true);
+      if (gone) return;
+      throw e;
+    }
+  }
+
   async setPaused(
     tenantId: string,
     id: string,
     paused: boolean,
   ): Promise<void> {
-    await this.assertOwner(tenantId, id);
+    const row = await this.assertOwner(tenantId, id);
+    // Don't let the per-schedule RESUME route re-arm a workflow that's been DEACTIVATED — that
+    // would restart an automatic recurring trigger while the activation flag still says inactive
+    // (schedules fire straight to the worker with no gate). Reactivate the workflow instead.
+    if (!paused && !(await this.graphs.isActive(tenantId, row.workflowKey))) {
+      throw new ConflictException(
+        "Workflow is inactive — reactivate it to resume its schedules",
+      );
+    }
     const handle = this.client.schedule.getHandle(id);
     if (paused) await handle.pause("paused via API");
     else await handle.unpause("resumed via API");
     await getPrisma().schedule.update({ where: { id }, data: { paused } });
   }
 
-  /** Fire the schedule's workflow immediately (in addition to its cron). */
+  /** Fire the schedule's workflow immediately (in addition to its cron). Refused when the workflow
+   *  is deactivated (this is the schedule's automatic action — use a manual run to test instead). */
   async trigger(tenantId: string, id: string): Promise<void> {
-    await this.assertOwner(tenantId, id);
+    const row = await this.assertOwner(tenantId, id);
+    if (!(await this.graphs.isActive(tenantId, row.workflowKey))) {
+      throw new ConflictException(
+        "Workflow is inactive — reactivate it to trigger its schedule",
+      );
+    }
     await this.client.schedule.getHandle(id).trigger();
   }
 
-  private async assertOwner(tenantId: string, id: string): Promise<void> {
+  private async assertOwner(
+    tenantId: string,
+    id: string,
+  ): Promise<{ workflowKey: string }> {
     const row = await getPrisma().schedule.findUnique({ where: { id } });
     if (!row) throw new NotFoundException("Schedule not found");
     if (row.tenantId !== tenantId) {
       throw new ForbiddenException("Schedule belongs to another tenant");
     }
+    return { workflowKey: row.workflowKey };
   }
 }
 
