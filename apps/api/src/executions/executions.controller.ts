@@ -96,6 +96,21 @@ export class ExecutionsController {
     return { accepted: true };
   }
 
+  @ApiEndpoint({
+    summary: "Re-run a past run",
+    description:
+      "Starts a NEW run of the same workflow with the original trigger input (against the current graph). 400 if the run predates workflow-key tracking.",
+    created: StartExecutionResponse,
+    notFound: true,
+  })
+  @Post(":id/rerun")
+  rerun(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+  ): Promise<{ workflowId: string }> {
+    return this.executions.rerun(id, tenantId);
+  }
+
   /** The signed resume URL for a run paused on a wait(webhook) node (owner-scoped). Declared
    *  before `:id` so the literal `resume-url` segment is matched specifically. */
   @ApiEndpoint({

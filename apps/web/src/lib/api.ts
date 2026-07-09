@@ -261,6 +261,12 @@ export const api = {
       method: "POST",
     });
   },
+  // Re-run a past run with its original trigger input (against the current graph).
+  rerun(id: string): Promise<{ workflowId: string }> {
+    return http(`/executions/${encodeURIComponent(id)}/rerun`, {
+      method: "POST",
+    });
+  },
   // The tenant's runs paused for approval, each with its prompt (approvals inbox).
   listAwaitingApprovals(): Promise<AwaitingApproval[]> {
     return http("/executions/awaiting");

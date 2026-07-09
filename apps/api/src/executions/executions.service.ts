@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -10,6 +11,7 @@ import {
 import {
   type Client,
   type Connection,
+  defaultPayloadConverter,
   WorkflowNotFoundError,
 } from "@temporalio/client";
 import {
@@ -686,6 +688,71 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       if (ev) out.push(ev);
     }
     return out;
+  }
+
+  /**
+   * The trigger input a past run was STARTED with, read back from Temporal history
+   * (the durable source of truth). We decode the WorkflowExecutionStarted event's
+   * SECOND arg — `startGraph` starts the workflow with `[graph, input, runCtx]`, so
+   * `payloads[1]` is the input — using the default payload converter (this deployment
+   * configures no custom one). Works for ANY terminal state, including a FAILED run
+   * whose ctx `getState` can't return — which is exactly what a re-run needs. Returns
+   * undefined if the event/payload is missing or undecodable (caller falls back to the
+   * graph's default input). Nothing is surfaced to the user: the value is fed straight
+   * back into a new run, so no new payload exposure.
+   */
+  private async originalTriggerInput(
+    id: string,
+  ): Promise<Record<string, unknown> | undefined> {
+    let h: { events?: unknown[] | null };
+    try {
+      h = await this.client.workflow.getHandle(id).fetchHistory();
+    } catch (e) {
+      if (e instanceof WorkflowNotFoundError) {
+        throw new NotFoundException("Execution not found");
+      }
+      throw e;
+    }
+    const started = (h.events ?? []).find(
+      (ev) =>
+        (ev as { workflowExecutionStartedEventAttributes?: unknown })
+          .workflowExecutionStartedEventAttributes,
+    ) as
+      | {
+          workflowExecutionStartedEventAttributes?: {
+            input?: { payloads?: unknown[] };
+          };
+        }
+      | undefined;
+    const payloads =
+      started?.workflowExecutionStartedEventAttributes?.input?.payloads;
+    if (!payloads || payloads.length < 2) return undefined;
+    try {
+      const decoded = defaultPayloadConverter.fromPayload(payloads[1] as never);
+      return decoded == null ? undefined : (decoded as Record<string, unknown>);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Re-run a past execution: start a NEW run of the same saved workflow with the same
+   * trigger input the original was started with (n8n's "Retry"). It runs against the
+   * CURRENT graph (start snapshots the latest) — so re-running picks up any fix. The
+   * run is durable and metered exactly like any other start. Returns the new run id.
+   */
+  async rerun(id: string, tenantId: string): Promise<{ workflowId: string }> {
+    await this.assertOwner(id, tenantId);
+    const row = await getPrisma().execution.findUnique({
+      where: { workflowId: id },
+    });
+    if (!row?.workflowKey) {
+      throw new BadRequestException(
+        "This run predates workflow-key tracking and can't be re-run.",
+      );
+    }
+    const input = await this.originalTriggerInput(id);
+    return this.start(tenantId, input, row.workflowKey);
   }
 
   /** 404 if the execution is unknown, 403 if it belongs to another tenant. */
