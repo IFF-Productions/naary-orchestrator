@@ -132,6 +132,15 @@ jobs:
         env:
           DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}?schema=public
 
+      # Build the TS workspace packages ON THE HOST. The token-mint step below runs `ts-node`
+      # over apps/api source, which imports `@naary/db` — a workspace package resolved via its
+      # built `dist` (main/types). The stack build does this INSIDE Docker, but the host needs
+      # it too; without it the mint dies with "Cannot find module '@naary/db'", the token comes
+      # back empty, and every authenticated Playwright test lands on the workspace-error gate.
+      # (Prisma client already generated above.)
+      - name: Build workspace packages (host, for the ts-node mint)
+        run: pnpm exec tsc -b
+
       - name: Build + start the stack
         run: ${{ steps.compose.outputs.cmd }} up -d --build
 
