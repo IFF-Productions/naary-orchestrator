@@ -14,9 +14,9 @@ name: E2E
 #     user), auto-links Docker Desktop's bundled plugin into this user's ~/.docker/cli-plugins.
 #   - Node 22 + pnpm (the setup steps install pnpm; Node via setup-node)
 #   - Free ports 5432 / 7233 / 3000 / 8081, ~4 GB RAM
-#   - Google Chrome is fetched by `playwright install chrome` (needs its shared
-#     libs; on a bare Linux runner run `playwright install-deps chrome` once, or
-#     use a runner image that already has them).
+#   - Playwright's bundled Chromium is fetched per-user by `playwright install chromium`
+#     (no sudo, no system browser needed). We deliberately do NOT use the branded
+#     `channel: chrome`, whose install needs root and dies on a non-interactive runner.
 on:
   pull_request:
   push:
@@ -159,8 +159,11 @@ jobs:
           echo "::add-mask::$TOKEN"
           echo "E2E_API_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
-      - name: Install Playwright Chrome
-        run: pnpm --filter @naary/web exec playwright install chrome
+      # Bundled Chromium (per-user download, no sudo). NOT `install chrome` — the branded
+      # channel does a system-wide install that needs root, which fails on this non-interactive
+      # runner ("sudo: a terminal is required"). See apps/web/playwright.config.ts.
+      - name: Install Playwright Chromium
+        run: pnpm --filter @naary/web exec playwright install chromium
 
       - name: Run Playwright e2e
         run: pnpm --filter @naary/web test:e2e
