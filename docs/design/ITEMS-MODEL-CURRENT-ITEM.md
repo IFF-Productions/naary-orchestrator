@@ -73,6 +73,11 @@ guess):
    is a later design if ever.
 5. **`splitOut`↔`loopEnd` matching:** each `splitOut` matches the UNIQUE `loopEnd` reachable from it
    (well-defined under rule 2's no-nesting). Zero, or ≥2, candidate `loopEnd`s → save-time 400.
+6. **Linear region (A2 only).** The region between `splitOut` and `loopEnd` is a LINEAR chain (each
+   region node has exactly one in- and one out-edge within the region) — no branches/merges/loops
+   inside. This makes region execution a bounded `for` loop over `execNode` (no fan-out/merge/
+   continueAsNew leaking across the boundary), the smallest correct interpreter surgery. Non-linear
+   regions are a later slice; a drawn branch inside a region is a save-time 400.
 Violations are save-time errors naming the offending node id. This replaces the entire runtime
 lineage/participation machinery with a static, author-visible check — the fail-closed linchpin, so
 its adversarial cases (an edge sneaking across the region boundary) are the hardest-tested surface.
