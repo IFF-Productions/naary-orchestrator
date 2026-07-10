@@ -116,6 +116,28 @@ describe("ChatController (public)", () => {
     );
   });
 
+  it("still replies (and logs '') when the reply body is non-serializable", async () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular; // JSON.stringify would throw on this
+    const { controller, chats } = makeController({
+      endpoint: ENDPOINT,
+      awaitResult: { workflowId: "chat-1", response: { body: circular } },
+    });
+    const out = await controller.message("c-1", {
+      message: "hi",
+      sessionId: "s-1",
+    });
+    expect(out.status).toBe("replied");
+    // persistence is best-effort and must not throw on a non-serializable body
+    expect(chats.appendTurn).toHaveBeenCalledWith(
+      "t-1",
+      "c-1",
+      "s-1",
+      "hi",
+      "",
+    );
+  });
+
   it("does NOT persist a turn when the graph didn't reply in time", async () => {
     const { controller, chats } = makeController({
       endpoint: ENDPOINT,

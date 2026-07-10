@@ -5,6 +5,12 @@ const getBudget = vi.fn();
 const create = vi.fn();
 const msgFindMany = vi.fn();
 const msgCreate = vi.fn();
+// appendTurn writes via $transaction([create, create]) for atomicity. The mock records each
+// create's args (so ordering assertions still work) and returns a sentinel; $transaction just
+// awaits the array it's given.
+const txn = vi.fn(async (ops: unknown[]) =>
+  Promise.all(ops as Promise<unknown>[]),
+);
 
 vi.mock("@naary/usage", () => ({
   getBudget: (...a: unknown[]) => getBudget(...a),
@@ -12,7 +18,14 @@ vi.mock("@naary/usage", () => ({
 vi.mock("@naary/db", () => ({
   getPrisma: () => ({
     chatEndpoint: { create },
-    chatMessage: { findMany: msgFindMany, create: msgCreate },
+    chatMessage: {
+      findMany: msgFindMany,
+      create: (...a: unknown[]) => {
+        msgCreate(...a);
+        return Promise.resolve({});
+      },
+    },
+    $transaction: txn,
   }),
 }));
 

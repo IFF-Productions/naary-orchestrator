@@ -63,13 +63,9 @@ export class ChatController {
 
     const reply = response.body ?? null;
     // Persist the turn so the next message sees it. Best-effort — a store hiccup must not fail the
-    // reply the caller is waiting on.
-    const replyText =
-      typeof reply === "string"
-        ? reply
-        : reply == null
-          ? ""
-          : JSON.stringify(reply);
+    // reply the caller is waiting on. `stringify` is guarded because a circular/BigInt reply body
+    // would otherwise throw here and sink an otherwise-successful reply.
+    const replyText = stringifyReply(reply);
     await this.chats
       .appendTurn(
         endpoint.tenantId,
@@ -95,5 +91,17 @@ export class ChatController {
     const def = extractChatDefinition(snapshot.graph, chatId);
     if (!def) throw new NotFoundException("Unknown chat");
     return { endpoint, snapshot, def };
+  }
+}
+
+/** Reduce a reply body to text for the history log. Never throws — a non-serializable body
+ *  (circular refs, BigInt) falls back to "" so best-effort persistence can't sink the reply. */
+function stringifyReply(reply: unknown): string {
+  if (typeof reply === "string") return reply;
+  if (reply == null) return "";
+  try {
+    return JSON.stringify(reply) ?? "";
+  } catch {
+    return "";
   }
 }
