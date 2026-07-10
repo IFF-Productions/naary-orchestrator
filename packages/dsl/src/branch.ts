@@ -118,6 +118,18 @@ export function validateGraph(graph: GraphDef): GraphValidation {
   // Merge (fan-in join) supports UNCONDITIONAL inbound only: a conditional edge into
   // a merge could fail to fire, stranding the join (it would wait for a branch that
   // never arrives). Reject it here so the footgun can't reach a run (v1 limitation).
+  // EXCEPTION: a merge INSIDE an A4 items region (items §0.4.1) is handled by the per-item
+  // dead-branch pass, not the top-level walker — its conditional inbound is validated by
+  // computeItemsRegions, so exempt those.
+  const region = computeItemsRegions(graph);
+  const regionMergeIds = new Set<string>();
+  for (const r of region.regions) {
+    for (const id of r.regionNodeIds) {
+      if (graph.nodes.find((n) => n.id === id)?.type === "merge") {
+        regionMergeIds.add(id);
+      }
+    }
+  }
   const mergeIds = new Set(
     graph.nodes.filter((n) => n.type === "merge").map((n) => n.id),
   );
@@ -128,7 +140,11 @@ export function validateGraph(graph: GraphDef): GraphValidation {
     if (!ids.has(edge.to)) {
       return { valid: false, error: `edge.to '${edge.to}' is not a node` };
     }
-    if (edge.condition && mergeIds.has(edge.to)) {
+    if (
+      edge.condition &&
+      mergeIds.has(edge.to) &&
+      !regionMergeIds.has(edge.to)
+    ) {
       return {
         valid: false,
         error: `conditional edge into merge node '${edge.to}' is not supported (merge requires unconditional fan-in)`,
@@ -148,9 +164,9 @@ export function validateGraph(graph: GraphDef): GraphValidation {
       error: `startNodeId '${graph.startNodeId}' has no outgoing edge — the graph is disconnected`,
     };
   }
-  // Items model: a splitOut…loopEnd region must be a valid, linear, pure bracket (participation is
-  // drawn, not inferred — so the whole correctness story is this structural save-time check).
-  const region = computeItemsRegions(graph);
+  // Items model: a splitOut…loopEnd region must be a valid bracket (participation is drawn, not
+  // inferred — so the whole correctness story is this structural save-time check). Reuse the region
+  // computed above for the merge-exemption set.
   if (region.error) return { valid: false, error: region.error };
   return { valid: true };
 }

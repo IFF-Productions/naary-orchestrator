@@ -869,6 +869,233 @@ describe("runGraph interpreter — items model (splitOut region)", () => {
     });
   });
 
+  it("A4: routes each item down an if/else branch and rejoins at a merge (per-item sub-DAG)", async () => {
+    // sp → if(sp.big) → true:setBig / false:setSmall → merge → loopEnd(collects merge).
+    const a4Graph: GraphDef = {
+      startNodeId: "start",
+      nodes: [
+        { id: "start", type: "start" },
+        {
+          id: "sp",
+          type: "splitOut",
+          config: { from: "__input", path: "items" },
+        },
+        {
+          id: "if",
+          type: "if",
+          config: { conditions: [{ path: "sp.big", op: "eq", value: true }] },
+        },
+        {
+          id: "big",
+          type: "set",
+          config: {
+            fields: { branch: "big" },
+            fieldBindings: { n: { from: "sp", path: "n" } },
+          },
+        },
+        {
+          id: "small",
+          type: "set",
+          config: {
+            fields: { branch: "small" },
+            fieldBindings: { n: { from: "sp", path: "n" } },
+          },
+        },
+        { id: "m", type: "merge", config: { mode: "object" } },
+        { id: "le", type: "loopEnd", config: { from: "m" } },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "start", to: "sp" },
+        { from: "sp", to: "if" },
+        {
+          from: "if",
+          to: "big",
+          condition: { path: "if.result", op: "eq", value: true },
+        },
+        {
+          from: "if",
+          to: "small",
+          condition: { path: "if.result", op: "eq", value: false },
+        },
+        { from: "big", to: "m" },
+        { from: "small", to: "m" },
+        { from: "m", to: "le" },
+        { from: "le", to: "end" },
+      ],
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          a4Graph,
+          {
+            items: [
+              { n: 1, big: true },
+              { n: 2, big: false },
+              { n: 3, big: true },
+            ],
+          },
+          { tenantId: "t-a4" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-a4",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const final = await handle.query(stateQuery);
+      // each item took ITS branch and rejoined — the merge funnels the one live branch per item
+      expect(final.ctx.le).toEqual([
+        { branch: "big", n: 1 },
+        { branch: "small", n: 2 },
+        { branch: "big", n: 3 },
+      ]);
+    });
+  });
+
+  it("A4: parallel fan-out from splitOut — the merge combines BOTH live branches (object mode)", async () => {
+    // sp → {left, right} (both unconditional, both live) → merge(object) → loopEnd.
+    const parGraph: GraphDef = {
+      startNodeId: "start",
+      nodes: [
+        { id: "start", type: "start" },
+        {
+          id: "sp",
+          type: "splitOut",
+          config: { from: "__input", path: "items" },
+        },
+        {
+          id: "left",
+          type: "set",
+          config: { fieldBindings: { a: { from: "sp", path: "n" } } },
+        },
+        {
+          id: "right",
+          type: "set",
+          config: { fields: { tag: "x" } },
+        },
+        { id: "m", type: "merge", config: { mode: "object" } },
+        { id: "le", type: "loopEnd", config: { from: "m" } },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "start", to: "sp" },
+        { from: "sp", to: "left" },
+        { from: "sp", to: "right" },
+        { from: "left", to: "m" },
+        { from: "right", to: "m" },
+        { from: "m", to: "le" },
+        { from: "le", to: "end" },
+      ],
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          parGraph,
+          { items: [{ n: 5 }, { n: 6 }] },
+          { tenantId: "t-a4p" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-a4-parallel",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const final = await handle.query(stateQuery);
+      // both branches ran and the merge combined them, per item
+      expect(final.ctx.le).toEqual([
+        { a: 5, tag: "x" },
+        { a: 6, tag: "x" },
+      ]);
+    });
+  });
+
+  it("A4: onError:'continue' on a live-branch node writes {error} into the collected output", async () => {
+    // sp → json(parse a NON-JSON field, onError:continue) → merge → loopEnd. The parse throws each
+    // item; onError swallows it into {error}, which the merge funnels and loopEnd collects.
+    const graph: GraphDef = {
+      startNodeId: "start",
+      nodes: [
+        { id: "start", type: "start" },
+        {
+          id: "sp",
+          type: "splitOut",
+          config: { from: "__input", path: "items" },
+        },
+        {
+          id: "j",
+          type: "json",
+          config: { operation: "parse", from: "sp", path: "bad" },
+          onError: "continue",
+        },
+        { id: "m", type: "merge", config: { mode: "object" } },
+        { id: "le", type: "loopEnd", config: { from: "m" } },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "start", to: "sp" },
+        { from: "sp", to: "j" },
+        { from: "j", to: "m" },
+        { from: "m", to: "le" },
+        { from: "le", to: "end" },
+      ],
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [graph, { items: [{ bad: "xyz" }] }, { tenantId: "t-a4e" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-a4-onerror",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const final = await handle.query(stateQuery);
+      const le = final.ctx.le as { error?: string }[];
+      expect(le).toHaveLength(1);
+      expect(le[0].error).toBeTruthy(); // the parse failure surfaced as {error}, not a run failure
+    });
+  });
+
+  it("A4: fails closed when per-item activity executions exceed the cap", async () => {
+    // sp → httpRequest → merge → loopEnd (a4 because of the merge). One activity per item; 101 items
+    // trips MAX_A4_REGION_ACTIVITY_EXECUTIONS (100).
+    const graph: GraphDef = {
+      startNodeId: "start",
+      nodes: [
+        { id: "start", type: "start" },
+        {
+          id: "sp",
+          type: "splitOut",
+          config: { from: "__input", path: "items" },
+        },
+        {
+          id: "h",
+          type: "httpRequest",
+          config: { method: "GET", url: "https://x" },
+        },
+        { id: "m", type: "merge", config: { mode: "array" } },
+        { id: "le", type: "loopEnd", config: { from: "m" } },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "start", to: "sp" },
+        { from: "sp", to: "h" },
+        { from: "h", to: "m" },
+        { from: "m", to: "le" },
+        { from: "le", to: "end" },
+      ],
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const items = Array.from({ length: 101 }, (_, i) => ({ n: i }));
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [graph, { items }, { tenantId: "t-a4cap" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-a4-cap",
+      });
+      // The nonRetryable cap throw fails the run closed (Temporal wraps the inner ITEMS_A4_ACTIVITY_CAP
+      // message as a generic workflow failure). Failing at all is the guarantee under test.
+      await expect(handle.result()).rejects.toThrow();
+    });
+  });
+
   it("an EMPTY array runs the region zero times → loopEnd is []", async () => {
     const worker = await makeWorker();
     await worker.runUntil(async () => {

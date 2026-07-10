@@ -18,6 +18,7 @@ import type {
 } from "@naary/contracts";
 import {
   getByPath,
+  evaluateCondition,
   resolveTemplates,
   nextNodes,
   resolveAggregate,
@@ -94,6 +95,13 @@ const MAX_FOREACH_ITEMS = 100;
  *  BELOW the cap with a clear message; larger fan-out belongs in `forEach` (child runs, own history)
  *  or an upstream chunk. (Per-payload claim-check offload to lift this is a later slice.) */
 const MAX_MAP_BATCH_ITEMS = 100;
+
+/** Items model A4: max ACTIVITY executions across a per-item sub-DAG region in one run (design
+ *  §0.4.1). A4 regions run item-major and can't batch (branching), so each live activity occurrence is
+ *  its own Temporal command → history grows O(live activity executions). Fail closed here — a region
+ *  that needs more per-item activity fan-out with branching belongs in `forEach` (child run per item).
+ *  Distinct from MAX_MAP_BATCH_ITEMS, which caps a single A3 mapNode's batch, not a running total. */
+const MAX_A4_REGION_ACTIVITY_EXECUTIONS = 100;
 
 // The HTTP node's request deadline is user-configurable (up to MAX_HTTP_TIMEOUT_MS,
 // clamped in the activity), so it needs a start-to-close strictly ABOVE that cap —
@@ -318,9 +326,28 @@ export async function runGraph(
   // how many inbound branches have reached each merge so far — the last to arrive
   // runs it. Only nodes of type "merge" participate, so other multi-inbound nodes
   // (e.g. loop back-edges) keep their existing behavior.
+  const nodeById = new Map<string, NodeDef>(graph.nodes.map((n) => [n.id, n]));
+
+  // Items model (design ITEMS-MODEL-CURRENT-ITEM.md): precompute the splitOut→region map. Pure +
+  // deterministic (same source of truth the save-gate validates), so computing it never affects
+  // history; the per-item EXECUTION is what's gated by patched() below.
+  const itemsRegionBySplit = new Map<string, ItemsRegion>();
+  const a4RegionMergeIds = new Set<string>();
+  for (const r of computeItemsRegions(graph).regions) {
+    itemsRegionBySplit.set(r.splitOutId, r);
+    // A merge INSIDE an A4 region is owned by that region's per-item pass, NOT the top-level fan-in
+    // walker — so it must not participate in mergeParents/stranded-join. (Pre-A4 graphs have no region
+    // merge, so this set is empty for them and the top-level behavior is byte-identical.)
+    if (r.kind === "a4") {
+      for (const id of r.regionNodeIds) {
+        if (nodeById.get(id)?.type === "merge") a4RegionMergeIds.add(id);
+      }
+    }
+  }
+
   const mergeParents = new Map<string, string[]>();
   for (const n of graph.nodes) {
-    if (n.type === "merge") {
+    if (n.type === "merge" && !a4RegionMergeIds.has(n.id)) {
       mergeParents.set(
         n.id,
         graph.edges.filter((e) => e.to === n.id).map((e) => e.from),
@@ -330,14 +357,6 @@ export async function runGraph(
   const mergeArrivals: Record<string, number> = resume?.mergeArrivals
     ? { ...resume.mergeArrivals }
     : {};
-
-  // Items model (design ITEMS-MODEL-CURRENT-ITEM.md): precompute the splitOut→region map. Pure +
-  // deterministic (same source of truth the save-gate validates), so computing it never affects
-  // history; the per-item EXECUTION is what's gated by patched("items-model-v1") below.
-  const itemsRegionBySplit = new Map<string, ItemsRegion>();
-  for (const r of computeItemsRegions(graph).regions) {
-    itemsRegionBySplit.set(r.splitOutId, r);
-  }
 
   wf.setHandler(approvalSignal, (s) => {
     approval = s;
@@ -378,8 +397,6 @@ export async function runGraph(
       });
     }
   }
-
-  const nodeById = new Map<string, NodeDef>(graph.nodes.map((n) => [n.id, n]));
 
   /** Run one node's side effect. Returns a TERMINAL status to stop the whole run
    *  (rejected), or null to continue. Mutates ctx / cost via the closures. */
@@ -1308,7 +1325,107 @@ export async function runGraph(
             BATCHABLE_REGION_ACTIVITIES.has(nodeById.get(rid)?.type ?? ""),
           );
 
-          if (!hasActivity) {
+          // ORDER IS LOAD-BEARING (replay safety): `kind === "a4"` MUST short-circuit before
+          // `patched()`. A pre-A4 run has only linear regions, so it never CALLS this new patched()
+          // marker on replay and stays deterministic. Flipping the operands would make every in-flight
+          // linear run evaluate a new patched() on replay → nondeterminism. Do not reorder.
+          if (region.kind === "a4" && wf.patched("items-model-a4-v1")) {
+            // ── A4: PER-ITEM SUB-DAG (design §0.4.1) ──
+            // Item-major (branching breaks the A3 batch). For each item, one topological pass with
+            // dead-branch propagation: a region node is LIVE iff some in-edge's source is live AND its
+            // condition passes; if/switch mark exactly the matched edge live. A `merge` combines only
+            // its LIVE inputs. Topo order (from the validator) ⇒ every predecessor's liveness is known
+            // before a node is reached, so ONE pass suffices.
+            const regionSet = new Set(region.regionNodeIds);
+            const inEdgesOf = new Map<string, typeof graph.edges>();
+            for (const rid of region.regionNodeIds) {
+              inEdgesOf.set(
+                rid,
+                graph.edges.filter(
+                  (e) =>
+                    e.to === rid &&
+                    (e.from === splitOutId || regionSet.has(e.from)),
+                ),
+              );
+            }
+            let activityExecs = 0;
+
+            for (let i = 0; i < N; i++) {
+              stepCount++;
+              if (overBudget()) return "circuit_open";
+              ctx[splitOutId] = items[i];
+              const live = new Map<string, boolean>();
+
+              for (const rid of region.regionNodeIds) {
+                stepCount++;
+                if (overBudget()) return "circuit_open";
+                const rnode = nodeById.get(rid);
+                if (!rnode) return "invalid_graph";
+                // LIVE in-edges: source live (splitOut is always live) AND condition passes now.
+                const liveIns = (inEdgesOf.get(rid) ?? []).filter((e) => {
+                  const srcLive =
+                    e.from === splitOutId ? true : (live.get(e.from) ?? false);
+                  return (
+                    srcLive &&
+                    (!e.condition || evaluateCondition(e.condition, ctx))
+                  );
+                });
+                if (liveIns.length === 0) {
+                  live.set(rid, false);
+                  ctx[rid] = undefined; // dead this item — no run, no side effect
+                  continue;
+                }
+                live.set(rid, true);
+                currentNodeId = rid;
+
+                if (rnode.type === "merge") {
+                  // Combine only the LIVE inputs (a dead branch contributes nothing).
+                  const mode = (rnode.config as { mode?: string } | undefined)
+                    ?.mode;
+                  const inputs = liveIns.map((e) => ctx[e.from]);
+                  ctx[rid] =
+                    mode === "object"
+                      ? Object.assign(
+                          {},
+                          ...inputs.filter(
+                            (x) => x !== null && typeof x === "object",
+                          ),
+                        )
+                      : inputs;
+                  continue;
+                }
+                if (BATCHABLE_REGION_ACTIVITIES.has(rnode.type)) {
+                  activityExecs++;
+                  if (activityExecs > MAX_A4_REGION_ACTIVITY_EXECUTIONS) {
+                    throw wf.ApplicationFailure.nonRetryable(
+                      `splitOut region '${splitOutId}' ran ${activityExecs} per-item activities over the ${MAX_A4_REGION_ACTIVITY_EXECUTIONS} cap — use forEach for large branching fan-out`,
+                      "ITEMS_A4_ACTIVITY_CAP",
+                    );
+                  }
+                }
+                try {
+                  const t = await execNode(rnode);
+                  if (t !== null) return t;
+                } catch (err) {
+                  if (rnode.onError !== "continue") throw err;
+                  ctx[rid] = { error: nodeErrorMessage(err) };
+                }
+                // Per-execution budget cap inside the region (like the top-level loop).
+                if (
+                  runCtx.perExecutionCapUsd !== undefined &&
+                  costUsd >= runCtx.perExecutionCapUsd
+                ) {
+                  return "budget_exceeded";
+                }
+              }
+              collected.push(ctx[region.collectFrom]);
+              if (i === 0) {
+                firstIter = { [splitOutId]: items[0] };
+                for (const rid of region.regionNodeIds)
+                  firstIter[rid] = ctx[rid];
+              }
+            }
+          } else if (!hasActivity) {
             // ── ITEM-MAJOR (A2, unchanged) ──
             for (let i = 0; i < N; i++) {
               stepCount++; // the item itself is a step (bounds an empty region over a huge array)

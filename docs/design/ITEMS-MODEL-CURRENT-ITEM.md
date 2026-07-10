@@ -140,6 +140,16 @@ build A4 without a real user need; `forEach` covers the branching case today.
 
 ### 0.4.1. A4-full — UN-DEFERRED (concrete need confirmed): per-item sub-DAG design
 
+> **Status: IMPLEMENTED.** `computeItemsRegions` gained the A4 region kind (linear-first, A4-fallback —
+> so linear regions stay byte-identical); `validateGraph` exempts region-internal merges; the interpreter
+> runs A4 regions via a per-item topological dead-branch pass behind `wf.patched("items-model-a4-v1")`,
+> capped by `MAX_A4_REGION_ACTIVITY_EXECUTIONS`. Exhaustiveness landed as the SCOPED form the advisor
+> steered to: region branch points are restricted to `if`/`switch` whose out-edges provably cover every
+> outcome (`if` → true/false; `switch` → every rule name + fallback) via `<node>.<field> == <value>`
+> eq-edges, so every item always has a live path and `collectFrom` (a save-checked post-dominator) is
+> always defined — no runtime holes, no reversal of the merged fail-closed decision. No web changes: A4
+> is authored by drawing `if`/`switch`/`merge` inside an existing `splitOut…loopEnd` bracket.
+
 The deferral above was conditional ("do not build without a real user need"). A concrete need for
 per-item conditional routing WITH rejoin ("for each row, if X do A else B, then combine") was
 confirmed, so A4-full is now specced. This is the **highest-risk interpreter change in the program**;

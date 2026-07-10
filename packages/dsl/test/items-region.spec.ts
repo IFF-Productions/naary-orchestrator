@@ -40,6 +40,7 @@ describe("computeItemsRegions — valid brackets", () => {
         loopEndId: "le",
         regionNodeIds: ["set"],
         collectFrom: "set",
+        kind: "linear",
       },
     ]);
     expect(validateGraph(graph).valid).toBe(true);
@@ -113,9 +114,8 @@ describe("computeItemsRegions — fail closed (adversarial)", () => {
         { from: "b", to: "le" },
       ],
     };
-    expect(computeItemsRegions(graph).error).toMatch(
-      /conditional outgoing edge/,
-    );
+    // A `set` can't route items — a conditional out-edge in a region is only allowed on if/switch.
+    expect(computeItemsRegions(graph).error).toMatch(/conditional out-edge/);
     expect(validateGraph(graph).valid).toBe(false);
   });
 
@@ -216,7 +216,8 @@ describe("computeItemsRegions — fail closed (adversarial)", () => {
           ["a", "le"],
         ],
       ),
-      match: /branch/,
+      // `b` branches off but dead-ends (never reaches loopEnd) → SESE rejects it.
+      match: /does not reach loopEnd/,
     },
     {
       name: "join (boundary-crossing edge into a region node)",
@@ -237,7 +238,8 @@ describe("computeItemsRegions — fail closed (adversarial)", () => {
           ["r", "le"],
         ],
       ),
-      match: /join/,
+      // an outside node edging into region node `r` is a boundary crossing → single-entry violation.
+      match: /single-entry violation/,
     },
     {
       name: "nested splitOut",
@@ -299,7 +301,8 @@ describe("computeItemsRegions — fail closed (adversarial)", () => {
           ["sp", "b"],
         ],
       ),
-      match: /exactly one outgoing edge/,
+      // splitOut fans out but neither branch reaches a loopEnd → no region closer.
+      match: /no matching loopEnd/,
     },
   ];
 
@@ -307,6 +310,169 @@ describe("computeItemsRegions — fail closed (adversarial)", () => {
     it(`rejects: ${c.name}`, () => {
       expect(computeItemsRegions(c.graph).error).toMatch(c.match);
       // and validateGraph (the save-gate) surfaces it as invalid
+      expect(validateGraph(c.graph).valid).toBe(false);
+    });
+  }
+});
+
+// Conditional edge helper (the plain `g()` only makes unconditional edges).
+type CEdge = { from: string; to: string; condition?: object };
+function gc(nodes: NodeDef[], edges: CEdge[]): GraphDef {
+  return { startNodeId: nodes[0].id, nodes, edges };
+}
+const eq = (nodeId: string, field: string, value: unknown) => ({
+  path: `${nodeId}.${field}`,
+  op: "eq" as const,
+  value,
+});
+
+/** The canonical A4 if/else region: sp → if → (true→A | false→B) → merge → loopEnd, collect the merge. */
+function ifElseRegion(collectFrom = "m"): GraphDef {
+  return gc(
+    [
+      N("s", "start"),
+      N("sp", "splitOut", { from: "s", path: "items" }),
+      N("if", "if", { conditions: [] }),
+      N("A", "set", { fields: {} }),
+      N("B", "set", { fields: {} }),
+      N("m", "merge", { mode: "array" }),
+      N("le", "loopEnd", { from: collectFrom }),
+      N("e", "end"),
+    ],
+    [
+      { from: "s", to: "sp" },
+      { from: "sp", to: "if" },
+      { from: "if", to: "A", condition: eq("if", "result", true) },
+      { from: "if", to: "B", condition: eq("if", "result", false) },
+      { from: "A", to: "m" },
+      { from: "B", to: "m" },
+      { from: "m", to: "le" },
+      { from: "le", to: "e" },
+    ],
+  );
+}
+
+describe("computeItemsRegions — A4 non-linear regions (sub-DAG)", () => {
+  it("accepts an exhaustive if/else region rejoining at a merge", () => {
+    const { regions, error } = computeItemsRegions(ifElseRegion());
+    expect(error).toBeNull();
+    expect(regions).toHaveLength(1);
+    expect(regions[0].kind).toBe("a4");
+    expect(regions[0].collectFrom).toBe("m");
+    // topological order: if before its branches, both branches before the merge
+    const order = regions[0].regionNodeIds;
+    expect(order[0]).toBe("if");
+    expect(order.indexOf("A")).toBeLessThan(order.indexOf("m"));
+    expect(order.indexOf("B")).toBeLessThan(order.indexOf("m"));
+    expect(validateGraph(ifElseRegion()).valid).toBe(true);
+  });
+
+  it("accepts a switch region whose out-edges cover every rule + the fallback", () => {
+    const graph = gc(
+      [
+        N("s", "start"),
+        N("sp", "splitOut", { from: "s", path: "items" }),
+        N("sw", "switch", {
+          rules: [{ name: "a", condition: eq("sp", "k", 1) }],
+          fallback: "other",
+        }),
+        N("A", "set", { fields: {} }),
+        N("O", "set", { fields: {} }),
+        N("m", "merge", { mode: "array" }),
+        N("le", "loopEnd", { from: "m" }),
+        N("e", "end"),
+      ],
+      [
+        { from: "s", to: "sp" },
+        { from: "sp", to: "sw" },
+        { from: "sw", to: "A", condition: eq("sw", "matched", "a") },
+        { from: "sw", to: "O", condition: eq("sw", "matched", "other") },
+        { from: "A", to: "m" },
+        { from: "O", to: "m" },
+        { from: "m", to: "le" },
+        { from: "le", to: "e" },
+      ],
+    );
+    const { regions, error } = computeItemsRegions(graph);
+    expect(error).toBeNull();
+    expect(regions[0].kind).toBe("a4");
+  });
+
+  const a4Rejects: { name: string; graph: GraphDef; match: RegExp }[] = [
+    {
+      name: "non-exhaustive if (no false branch)",
+      graph: gc(
+        [
+          N("s", "start"),
+          N("sp", "splitOut", { from: "s", path: "items" }),
+          N("if", "if", { conditions: [] }),
+          N("A", "set", { fields: {} }),
+          N("le", "loopEnd", { from: "A" }),
+        ],
+        [
+          { from: "s", to: "sp" },
+          { from: "sp", to: "if" },
+          { from: "if", to: "A", condition: eq("if", "result", true) },
+          { from: "A", to: "le" },
+        ],
+      ),
+      match: /not exhaustive/,
+    },
+    {
+      name: "switch missing a fallback edge",
+      graph: gc(
+        [
+          N("s", "start"),
+          N("sp", "splitOut", { from: "s", path: "items" }),
+          N("sw", "switch", {
+            rules: [{ name: "a", condition: eq("sp", "k", 1) }],
+            fallback: "other",
+          }),
+          N("A", "set", { fields: {} }),
+          N("le", "loopEnd", { from: "A" }),
+        ],
+        [
+          { from: "s", to: "sp" },
+          { from: "sp", to: "sw" },
+          { from: "sw", to: "A", condition: eq("sw", "matched", "a") },
+          { from: "A", to: "le" },
+        ],
+      ),
+      match: /not exhaustive/,
+    },
+    {
+      name: "collectFrom on one branch (doesn't post-dominate)",
+      graph: ifElseRegion("A"), // collect the true-branch, not the merge
+      match: /not on every per-item path/,
+    },
+    {
+      name: "a durable node (wait) inside an A4 region",
+      graph: gc(
+        [
+          N("s", "start"),
+          N("sp", "splitOut", { from: "s", path: "items" }),
+          N("if", "if", { conditions: [] }),
+          N("A", "set", { fields: {} }),
+          N("w", "wait"),
+          N("m", "merge", { mode: "array" }),
+          N("le", "loopEnd", { from: "m" }),
+        ],
+        [
+          { from: "s", to: "sp" },
+          { from: "sp", to: "if" },
+          { from: "if", to: "A", condition: eq("if", "result", true) },
+          { from: "if", to: "w", condition: eq("if", "result", false) },
+          { from: "A", to: "m" },
+          { from: "w", to: "m" },
+          { from: "m", to: "le" },
+        ],
+      ),
+      match: /not allowed inside a splitOut region/,
+    },
+  ];
+  for (const c of a4Rejects) {
+    it(`rejects: ${c.name}`, () => {
+      expect(computeItemsRegions(c.graph).error).toMatch(c.match);
       expect(validateGraph(c.graph).valid).toBe(false);
     });
   }
