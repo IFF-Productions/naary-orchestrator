@@ -25,6 +25,11 @@ export const router = createBrowserRouter([
     path: "/f/:formId",
     ...lazy(() => import("./screens/FormPage"), "FormPage"),
   },
+  // Public hosted chat (chatTrigger) — anonymous, OUTSIDE RequireAuth.
+  {
+    path: "/c/:chatId",
+    ...lazy(() => import("./screens/ChatPage"), "ChatPage"),
+  },
   // Everything under here requires a Keycloak session or a pasted nry_ token.
   {
     element: <RequireAuth />,

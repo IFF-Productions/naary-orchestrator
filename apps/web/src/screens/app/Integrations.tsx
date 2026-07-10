@@ -3,10 +3,12 @@ import { Button, Icon, StatusPill, type RunState } from "../../components";
 import {
   api,
   type ApiTokenRow,
+  type ChatRow,
   type ConnectionRow,
   type FormRow,
   type MintedToken,
   type ProviderCredential,
+  type RegisteredChat,
   type RegisteredForm,
   type RegisteredWebhook,
   type WebhookRow,
@@ -85,6 +87,9 @@ const webhookUrl = (id: string): string =>
 
 /** The public, shareable URL of a hosted form — the `/f/:formId` page served outside auth. */
 const formUrl = (id: string): string => `${window.location.origin}/f/${id}`;
+
+/** The public, shareable URL of a hosted chat — the `/c/:chatId` page served outside auth. */
+const chatUrl = (id: string): string => `${window.location.origin}/c/${id}`;
 
 /** Small copy-to-clipboard button with brief "Copied ✓" feedback. */
 function UrlCopy({ url }: { url: string }) {
@@ -349,25 +354,29 @@ export function Integrations() {
   const [connections, setConnections] = useState<ConnectionRow[] | null>(null);
   const [webhooks, setWebhooks] = useState<WebhookRow[] | null>(null);
   const [forms, setForms] = useState<FormRow[] | null>(null);
+  const [chats, setChats] = useState<ChatRow[] | null>(null);
   const [credentials, setCredentials] = useState<ProviderCredential[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
   const [deletingHook, setDeletingHook] = useState<string | null>(null);
   const [deletingForm, setDeletingForm] = useState<string | null>(null);
+  const [deletingChat, setDeletingChat] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const { tenantId } = await api.getMe();
       setTenant(tenantId);
-      const [conns, hooks, formList, creds] = await Promise.all([
+      const [conns, hooks, formList, chatList, creds] = await Promise.all([
         api.listConnections(tenantId),
         api.listWebhooks(tenantId),
         api.listForms(tenantId).catch(() => []),
+        api.listChats(tenantId).catch(() => []),
         api.listCredentials(tenantId).catch(() => []),
       ]);
       setConnections(conns);
       setWebhooks(hooks);
       setForms(formList);
+      setChats(chatList);
       setCredentials(creds);
       setError(null);
     } catch (e) {
@@ -856,6 +865,119 @@ export function Integrations() {
           </div>
         ))}
       </div>
+
+      {/* ===== Chat endpoints ===== */}
+      <div style={{ ...monoLabel, margin: "24px 0 12px" }}>Chat endpoints</div>
+      <div
+        style={{
+          background: "var(--card)",
+          border: "1px solid var(--line)",
+          borderRadius: "var(--radius-lg)",
+          boxShadow: "var(--shadow-card)",
+          overflow: "hidden",
+        }}
+      >
+        {!loading && chats?.length === 0 && (
+          <div
+            style={{
+              padding: 16,
+              fontSize: "var(--text-body)",
+              color: "var(--ink-3)",
+            }}
+          >
+            No hosted chats yet — register one to serve a public chat widget
+            backed by a workflow.
+          </div>
+        )}
+        {(chats ?? []).map((c, i) => (
+          <div
+            key={c.id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "14px 16px",
+              borderBottom:
+                i < (chats?.length ?? 0) - 1
+                  ? "1px solid var(--line)"
+                  : undefined,
+            }}
+          >
+            <span
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: "var(--radius-md)",
+                background:
+                  "color-mix(in srgb, var(--node-agent) 15%, transparent)",
+                color: "var(--node-agent)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flex: "none",
+              }}
+            >
+              <Icon name="agent" size={17} />
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <a
+                href={chatUrl(c.id)}
+                target="_blank"
+                rel="noreferrer"
+                className="mono"
+                style={{
+                  display: "block",
+                  fontSize: "var(--text-sm)",
+                  fontWeight: "var(--weight-semibold)",
+                  color: "var(--ink)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  textDecoration: "none",
+                }}
+                title={chatUrl(c.id)}
+              >
+                {chatUrl(c.id)}
+              </a>
+              <div
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--ink-3)",
+                  marginTop: 2,
+                }}
+              >
+                public chat · {c.workflowId}
+              </div>
+            </div>
+            <UrlCopy url={chatUrl(c.id)} />
+            <StatusPill state="done" label="Active" />
+            <button
+              type="button"
+              className="btn btn-sm btn-secondary"
+              disabled={deletingChat === c.id}
+              title="Delete chat"
+              onClick={() => {
+                if (!tenant || deletingChat) return;
+                if (
+                  !window.confirm(
+                    "Delete this chat? Its public URL will stop working.",
+                  )
+                ) {
+                  return;
+                }
+                setDeletingChat(c.id);
+                void api
+                  .deleteChat(tenant, c.id)
+                  .then(() => load())
+                  .catch(() => setError("Could not delete the chat."))
+                  .finally(() => setDeletingChat(null));
+              }}
+            >
+              {deletingChat === c.id ? "Deleting…" : "Delete"}
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1032,7 +1154,125 @@ function AddIntegrations({
       >
         <FormForm tenant={tenant} onChanged={onChanged} />
       </Collapsible>
+      <Collapsible
+        title="Register a chat"
+        subtitle="Serve a public chat widget backed by a workflow"
+        accent="var(--node-agent)"
+      >
+        <ChatForm tenant={tenant} onChanged={onChanged} />
+      </Collapsible>
     </div>
+  );
+}
+
+/** Register a hosted chat for a workflow whose entry node is a chatTrigger. Mirrors FormForm; on
+ *  success it surfaces the shareable /c/ URL. 400s (with a hint) if the tenant has no budget cap. */
+function ChatForm({
+  tenant,
+  onChanged,
+}: {
+  tenant: string;
+  onChanged: () => Promise<void> | void;
+}) {
+  const [workflowId, setWorkflowId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [registered, setRegistered] = useState<RegisteredChat | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function submit() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await api.createChat(tenant, {
+        workflowId: workflowId.trim(),
+      });
+      setRegistered(res);
+      setWorkflowId("");
+      await onChanged();
+    } catch (e) {
+      setMsg(
+        e instanceof Error && /400/.test(e.message)
+          ? "Set a monthly budget for this tenant first — a public chat needs a spend cap (Billing)."
+          : "Could not register the chat.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <div style={{ marginBottom: 12 }}>
+        <span style={fieldLabel}>
+          Workflow key (its entry node must be a Chat)
+        </span>
+        <input
+          style={fieldStyle}
+          value={workflowId}
+          onChange={(e) => setWorkflowId(e.target.value)}
+          placeholder="support-chat"
+        />
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <Button
+          variant="primary"
+          disabled={busy || !workflowId.trim()}
+          onClick={() => void submit()}
+        >
+          {busy ? "Registering…" : "Register"}
+        </Button>
+        {msg && (
+          <span
+            style={{ fontSize: "var(--text-sm)", color: "var(--state-error)" }}
+          >
+            {msg}
+          </span>
+        )}
+      </div>
+
+      {registered && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: 12,
+            borderRadius: "var(--radius-md)",
+            background: "var(--brand-soft)",
+            border:
+              "1px solid color-mix(in srgb, var(--brand) 45%, transparent)",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-2)",
+              marginBottom: 8,
+            }}
+          >
+            Your chat is live. Share this public URL — anyone with it can chat
+            (no sign-in):
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <span
+              className="mono"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                fontSize: "var(--text-sm)",
+                color: "var(--ink)",
+                background: "var(--card)",
+                border: "1px solid var(--line-2)",
+                borderRadius: "var(--radius-sm)",
+                padding: "7px 9px",
+                wordBreak: "break-all",
+              }}
+            >
+              {chatUrl(registered.chatId)}
+            </span>
+            <UrlCopy url={chatUrl(registered.chatId)} />
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

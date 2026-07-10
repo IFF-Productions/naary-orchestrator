@@ -13,6 +13,7 @@ import { RequestLoggerMiddleware } from "./common/request-logger.middleware";
 import { BudgetModule } from "./budget/budget.module";
 import { ConnectionsModule } from "./connections/connections.module";
 import { ExecutionsModule } from "./executions/executions.module";
+import { ChatModule } from "./chat/chat.module";
 import { FormsModule } from "./forms/forms.module";
 import { GraphsModule } from "./graphs/graphs.module";
 import { HealthModule } from "./health/health.module";
@@ -45,6 +46,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     BudgetModule,
     WebhooksModule,
     FormsModule,
+    ChatModule,
     ConnectionsModule,
     MembersModule,
     MembershipModule,
