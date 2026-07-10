@@ -144,7 +144,7 @@ export interface FormTriggerNodeConfig {
 }
 
 /**
- * Chat trigger — the run starts from a hosted chat message (design docs/design/CHAT-TRIGGER-RAG.md).
+ * Chat trigger — the run starts from a hosted chat message (docs/design/CHAT-TRIGGER-RAG.md).
  * The inbound `{ message, sessionId }` becomes the trigger node's output (like `formTrigger`'s output
  * IS the submitted fields). The public chat page + durable per-session workflow are later slices;
  * this is just the node + its widget presentation.

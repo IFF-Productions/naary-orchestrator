@@ -97,9 +97,12 @@ interface NaaryData extends Record<string, unknown> {
 function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
   const kind = data.kind;
   const accent = ACCENT[kind];
+  // Keep in sync with compile-graph's ENTRY_TYPES — every entry node has no inbound handle.
   const isEntry =
     kind === "start" ||
     kind === "webhookTrigger" ||
+    kind === "scheduleTrigger" ||
+    kind === "pollTrigger" ||
     kind === "errorTrigger" ||
     kind === "formTrigger" ||
     kind === "chatTrigger";
