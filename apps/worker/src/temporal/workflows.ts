@@ -1361,6 +1361,14 @@ export async function runGraph(
                 }
                 costUsd += res.costUsd; // completed items already billed in-activity (fail-safe)
                 ctx.__costUsd = costUsd;
+                // Enforce the per-execution cap IN the region (like the top-level loop) so a batch
+                // that pushes over budget stops the remaining region nodes promptly.
+                if (
+                  runCtx.perExecutionCapUsd !== undefined &&
+                  costUsd >= runCtx.perExecutionCapUsd
+                ) {
+                  return "budget_exceeded";
+                }
                 regionOut.set(rid, res.outputs);
                 const anyError = res.outputs.some(
                   (o) =>

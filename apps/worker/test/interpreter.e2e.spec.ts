@@ -978,6 +978,43 @@ describe("runGraph interpreter — items model (splitOut region)", () => {
     });
   });
 
+  it("A3: the per-execution budget cap is enforced INSIDE a region (batch cost trips it)", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      // The mock mapNode charges items.length * 0.01 → 3 items = 0.03 > cap 0.02.
+      const graph: GraphDef = {
+        startNodeId: "start",
+        nodes: [
+          { id: "start", type: "start" },
+          {
+            id: "sp",
+            type: "splitOut",
+            config: { from: "__input", path: "items" },
+          },
+          { id: "ag", type: "agent", config: { systemPrompt: "x" } },
+          { id: "le", type: "loopEnd", config: { from: "ag" } },
+          { id: "end", type: "end" },
+        ],
+        edges: [
+          { from: "start", to: "sp" },
+          { from: "sp", to: "ag" },
+          { from: "ag", to: "le" },
+          { from: "le", to: "end" },
+        ],
+      };
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          graph,
+          { items: [{ n: 1 }, { n: 2 }, { n: 3 }] },
+          { tenantId: "t-a3", perExecutionCapUsd: 0.02 },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-budget",
+      });
+      expect((await handle.result()).status).toBe("budget_exceeded");
+    });
+  });
+
   it("A3: a batch over the MAX_MAP_BATCH_ITEMS cap FAILS CLOSED (payload-cap guard)", async () => {
     const worker = await makeWorker();
     await worker.runUntil(async () => {
