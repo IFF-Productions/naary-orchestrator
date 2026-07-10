@@ -169,6 +169,18 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
     summary: "Does nothing; a structural/placeholder node. Output is {}.",
     config: "{}",
   },
+  splitOut: {
+    group: "flow",
+    summary:
+      "Items model: split an array and run the linear region up to loopEnd once per item.",
+    config: "{ from, path? }",
+  },
+  loopEnd: {
+    group: "flow",
+    summary:
+      "Items model: close a splitOut region — collect the bound node's per-item outputs → array.",
+    config: "{ from }",
+  },
   csv: {
     group: "transform",
     summary: "Parse CSV text→rows / build rows→{csv}.",

@@ -26,6 +26,8 @@ export type NodeType =
   | "htmlExtract" // pull values out of an HTML string by CSS selector (activity)
   | "markdown" // convert an HTML string → Markdown (activity; node-html-parser)
   | "noOp" // does nothing; a structural/placeholder node — output {}
+  | "splitOut" // items model: opens a per-item region — reads an array, runs the region once per item
+  | "loopEnd" // items model: closes a per-item region — collects the region's per-item outputs → array
   | "csv" // parse CSV text→rows / build rows→CSV text (activity; papaparse)
   | "json" // pure: parse JSON text→value / stringify value→text
   | "number" // pure: arithmetic on numbers (add/sub/mul/div/mod/pow/round/floor/ceil/abs)
@@ -594,6 +596,23 @@ export interface MarkdownNodeConfig {
   from: string;
   /** Optional dotted path into that output (e.g. "body"). */
   path?: string;
+}
+
+/** splitOut (items model) — opens a per-item region over an upstream ARRAY. On iteration `i` the
+ *  node's output IS `array[i]`; the linear region between it and its `loopEnd` runs once per item.
+ *  See docs/design/ITEMS-MODEL-CURRENT-ITEM.md §0.2. */
+export interface SplitOutNodeConfig {
+  /** Upstream node id whose output holds (or contains, via `path`) the array to split. */
+  from: string;
+  /** Optional dotted path into that output pointing at the array. */
+  path?: string;
+}
+
+/** loopEnd (items model) — closes a per-item region. Its output is the ARRAY of the region node it
+ *  binds to (`from`), one element per iteration. After it, the run is back to a single value. */
+export interface LoopEndNodeConfig {
+  /** The region node whose per-iteration output to collect into an array. */
+  from: string;
 }
 
 /**

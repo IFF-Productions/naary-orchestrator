@@ -37,6 +37,8 @@ import type {
   HmacNodeConfig,
   HtmlExtractNodeConfig,
   MarkdownNodeConfig,
+  SplitOutNodeConfig,
+  LoopEndNodeConfig,
   HttpRequestNodeConfig,
   IfNodeConfig,
   JsonNodeConfig,
@@ -298,6 +300,13 @@ const CONFIG_SCHEMAS = {
   markdown: z.object({
     from: z.string(),
     path: z.string().optional(),
+  }),
+  splitOut: z.object({
+    from: z.string(),
+    path: z.string().optional(),
+  }),
+  loopEnd: z.object({
+    from: z.string(),
   }),
   csv: z.object({
     operation: z.enum(["parse", "build"]),
@@ -580,6 +589,8 @@ export type CompareDatasetsConfig = z.infer<
 export type XmlConfig = z.infer<typeof CONFIG_SCHEMAS.xml>;
 export type HtmlExtractConfig = z.infer<typeof CONFIG_SCHEMAS.htmlExtract>;
 export type MarkdownConfig = z.infer<typeof CONFIG_SCHEMAS.markdown>;
+export type SplitOutConfig = z.infer<typeof CONFIG_SCHEMAS.splitOut>;
+export type LoopEndConfig = z.infer<typeof CONFIG_SCHEMAS.loopEnd>;
 export type CsvConfig = z.infer<typeof CONFIG_SCHEMAS.csv>;
 export type JsonConfig = z.infer<typeof CONFIG_SCHEMAS.json>;
 export type NumberConfig = z.infer<typeof CONFIG_SCHEMAS.number>;
@@ -633,6 +644,8 @@ const _configParity: {
   xml: Exact<XmlConfig, XmlNodeConfig>;
   htmlExtract: Exact<HtmlExtractConfig, HtmlExtractNodeConfig>;
   markdown: Exact<MarkdownConfig, MarkdownNodeConfig>;
+  splitOut: Exact<SplitOutConfig, SplitOutNodeConfig>;
+  loopEnd: Exact<LoopEndConfig, LoopEndNodeConfig>;
   csv: Exact<CsvConfig, CsvNodeConfig>;
   json: Exact<JsonConfig, JsonNodeConfig>;
   number: Exact<NumberConfig, NumberNodeConfig>;
@@ -677,6 +690,8 @@ const _configParity: {
   xml: true,
   htmlExtract: true,
   markdown: true,
+  splitOut: true,
+  loopEnd: true,
   csv: true,
   json: true,
   number: true,

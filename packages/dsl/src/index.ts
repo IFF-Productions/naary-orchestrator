@@ -25,6 +25,11 @@ export {
 export { isPureNode, runPureNode } from "./pure-node";
 // Items model (design ITEMS-MODEL.md) — Slice 1 normalize primitive only; no interpreter change yet.
 export { type Item, toItems, itemsJson } from "./items";
+export {
+  computeItemsRegions,
+  type ItemsRegion,
+  type ItemsRegionResult,
+} from "./items-region";
 export { resolveHttpRequest, type ResolvedHttpRequest } from "./http-request";
 export {
   resolveSqlQuery,

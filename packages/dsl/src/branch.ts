@@ -1,3 +1,4 @@
+import { computeItemsRegions } from "./items-region";
 import { getByPath } from "./mcp-args";
 import type { EdgeCondition, GraphDef } from "./types";
 
@@ -147,5 +148,9 @@ export function validateGraph(graph: GraphDef): GraphValidation {
       error: `startNodeId '${graph.startNodeId}' has no outgoing edge — the graph is disconnected`,
     };
   }
+  // Items model: a splitOut…loopEnd region must be a valid, linear, pure bracket (participation is
+  // drawn, not inferred — so the whole correctness story is this structural save-time check).
+  const region = computeItemsRegions(graph);
+  if (region.error) return { valid: false, error: region.error };
   return { valid: true };
 }
