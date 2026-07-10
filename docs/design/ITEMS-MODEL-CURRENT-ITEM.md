@@ -39,6 +39,61 @@ Until this is decided, A2 is blocked (implementing the inference engine would fr
 §§1–8 below assume A-implicit; under A-explicit the cardinality rules stay identical but participation
 is the bracket, not inferred, and `sourceRefs`/lineage-guessing is removed wholesale.
 
+## 0.2. CHOSEN — A-explicit brackets. This section is the frozen spec; §§1–8 are superseded.
+
+The user chose **A-explicit** (§0.1). Participation is DRAWN, not inferred, which deletes
+`sourceRefs`, lineage-guessing, and all three prior landmines. The cardinality *semantics* (what a
+mapped node computes on iteration `i`) are unchanged; only WHICH nodes map changes — from "inferred
+from bindings" to "the nodes the author bracketed."
+
+### The two nodes
+- **`splitOut`** (region OPENER) — config `{ from, path? }`. Reads an ARRAY from a binding and opens
+  a per-item region: on iteration `i`, `ctx[splitOut.id] = array[i]`. (Non-array / empty → the region
+  runs 0 times; a non-array value is a save-time validation error.)
+- **`loopEnd`** (region CLOSER) — config `{ from }`. Gathers the per-iteration output of the region
+  node it binds to (its single incoming edge's source) into an ARRAY: `ctx[loopEnd.id] =
+  [out₀, out₁, …]`. After `loopEnd` the run is back to single-value (card 1). Exactly one `loopEnd`
+  matches each `splitOut`.
+
+### The region = the drawn subgraph (declared intent, VALIDATED AT SAVE — fail closed there, not at runtime)
+The region is the set of nodes on paths from `splitOut` to its matched `loopEnd`. `compileGraph` /
+`validateGraph` enforces, at SAVE time (so unsupported shapes are a 400, never a frozen runtime
+guess):
+1. **Single-entry / single-exit:** every path into the region passes through `splitOut`; every path
+   out passes through `loopEnd`. No edge crosses the region boundary bypassing the markers.
+2. **No nesting (v1):** a region contains no other `splitOut`/`loopEnd`. Nested maps are a later
+   slice; drawn nesting is rejected now.
+3. **No region node is also read from OUTSIDE the region** except via `loopEnd` (an outside node
+   binding to a per-item region node has no single value — rejected).
+4. **Pure nodes only inside a region (A2).** A region runs N times, so a durable/control node inside
+   it (`wait`, `humanApproval`, `respondToWebhook`, `executeSubWorkflow`, `forEach`, `agent`,
+   `mcpTool`, `httpRequest`, and any other activity) is a **save-time 400** — N durable pauses have
+   no way to say which iteration a single `approval`/`resume` signal answers (a frozen determinism
+   hole). A2 regions are PURE nodes; activities arrive in A3 (batched map-activity), durable-in-region
+   is a later design if ever.
+5. **`splitOut`↔`loopEnd` matching:** each `splitOut` matches the UNIQUE `loopEnd` reachable from it
+   (well-defined under rule 2's no-nesting). Zero, or ≥2, candidate `loopEnd`s → save-time 400.
+Violations are save-time errors naming the offending node id. This replaces the entire runtime
+lineage/participation machinery with a static, author-visible check — the fail-closed linchpin, so
+its adversarial cases (an edge sneaking across the region boundary) are the hardest-tested surface.
+
+### Runtime (interpreter, behind `wf.patched("items-model-v1")`)
+Reaching `splitOut` with `N` items: execute the region subgraph `N` times in declared topological
+order; on iteration `i`, `ctx[splitOut.id] = array[i]`, and region nodes write their per-iteration
+outputs into a scratch keyed by `(nodeId, i)`. `loopEnd` reads its source's `N` scratch outputs →
+one array. Region nodes read the CURRENT item because they bind to `splitOut` (or to region nodes,
+which are per-iteration). Outside the region: unchanged, single-value — so **a graph with no
+`splitOut` is byte-identical to today** (the back-compat wall). `N` counts toward the step breaker.
+
+### Why this is sound where the others weren't
+No `{from}` heuristic (participation is the drawn box), no cross-lineage zip (one region, one item
+stream), no reducer taxonomy needed at the engine level (`filter`/`limit` inside a region just run
+per-item like any node; array-level ops stay their normal selves outside). The only new frozen
+surface is the region-validity rules above — and those are checked at save, where a bad graph is a
+correctable 400, not a silent corruption.
+
+---
+
 ## 1. The core insight — cardinality propagates through bindings (no region detection)
 
 The hard part everyone hits is "which nodes run per-item, and over which list?" n8n answers it with an
