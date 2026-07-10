@@ -45,7 +45,7 @@ The four node modes (a trichotomy is not enough — the fourth, **reducer**, is 
 Everything downstream of a `splitOut` that is `"each"`/`"reducer"` fans out automatically; the first
 `"all"` on each path collapses it — **without** the interpreter computing a region. Single-item
 graphs (no `splitOut`) have `card ≡ 1`, no lineage, everywhere ⇒ **byte-identical to today** (the
-back-compat wall — but NOT a correctness proof; see §8 for the multi-item expected outputs that are).
+back-compat wall — but NOT a correctness proof; see §7 for the multi-item expected outputs that are).
 
 ### The current-item rule (what the advisor required, stated exactly)
 Inside iteration `i` of node `n`, EVERY `getByPath(ctx[from], path)` and every `resolveTemplates`
@@ -85,7 +85,7 @@ One field per node type in the registry; the interpreter reads it. Proposed:
   splitOut fans it out explicitly).
 
 Classification is a compile-time exhaustive map (like `NodeConfigMap`) so a new node must declare its
-mode. Getting a node's mode wrong is a semantic change → it is covered by the §7 parity test.
+mode. Getting a node's mode wrong is a semantic change → it is covered by the §8 parity test.
 
 ## 4. Determinism, history, billing (Tier-1)
 
@@ -127,7 +127,7 @@ Each slice ships green; the interpreter change is one patched gate introduced in
   `items` + lineage tags in the interpreter; `itemMode` registry (each/reducer/all/producer); the
   lineage-gated zip/broadcast frame execution for PURE `"each"` nodes; the `"reducer"` path
   (filter/listOps stay item-space, mint a new lineage); `splitOut` producer; `"all"` nodes read full
-  arrays; cross-lineage fail-closed; rewrite §2.1 items-authoritative. Ships all six §8 traces as
+  arrays; cross-lineage fail-closed; rewrite §2.1 items-authoritative. Ships all six §7 traces as
   tests. This is the slice that proves the model — pure nodes only (activities in A3).
 - **A3 — batched map-activity.** `agent`/`httpRequest`/`mcpTool`/… `"each"` nodes fan out via one
   `mapNode` activity (bounded concurrency, per-batch usage event). The headline: an agent over N rows.
@@ -136,7 +136,7 @@ Each slice ships green; the interpreter change is one patched gate introduced in
 - **A5 — authoring.** Canvas input panel shows the items table; run view shows per-item output + the
   failing item.
 
-## 8. Worked multi-item traces (the correctness spec — expected outputs frozen here)
+## 7. Worked multi-item traces (the correctness spec — expected outputs frozen here)
 
 The single-item equivalence test proves back-compat, not that the multi-item path is *right*. These
 are the authoritative expected outputs A2 must reproduce (each is a test):
@@ -156,12 +156,12 @@ are the authoritative expected outputs A2 must reproduce (each is a test):
 6. **same-lineage zip:** `splitOut([a,b])`(L₁) → `text`(L₁) and `number`(L₁), then `set` reading
    both text and number → same lineage L₁, card 2 → zips `(text₀,number₀),(text₁,number₁)`. Allowed.
 
-## 7. Non-negotiables / test obligations
+## 8. Non-negotiables / test obligations
 
 - **Single-item equivalence is the back-compat wall (NOT correctness):** a property test asserting
   every existing graph (card ≡ 1, no lineage) produces byte-identical `ctx` with the items path ON
-  vs OFF. Necessary, but it exercises none of §8 — the §8 traces are the correctness obligation.
-- **Cross-lineage fail-closed** (§8.5) and **reducer keeps item-space** (§8.2) are the two
+  vs OFF. Necessary, but it exercises none of §7 — the §7 traces are the correctness obligation.
+- **Cross-lineage fail-closed** (§7 trace 5) and **reducer keeps item-space** (§7 trace 2) are the two
   must-have multi-item tests; without them A2 can be green and still wrong.
 - `itemMode` map is exhaustive (build fails on a missing node) + a parity test pins each node's mode.
 - Zip/broadcast + incompatible-cardinality behavior is unit-tested at 0/1/N and N-vs-M.

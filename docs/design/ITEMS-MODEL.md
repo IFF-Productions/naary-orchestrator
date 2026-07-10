@@ -7,7 +7,7 @@
 
 ---
 
-## 0. Architecture finding — the original slice plan (§3.2) is unsound as written
+## 0. Architecture finding — the original per-item plan (§2.2 + §3) is unsound as written
 
 Reviewing Slice 2 surfaced two things that invalidate the "map pure item-wise nodes over items"
 step and must be decided **before** any `execNode` change (an interpreter change is frozen for all
@@ -50,8 +50,9 @@ for context but not taken.
   primitive as latent groundwork and de-prioritize the rest. Market the durable per-item strengths
   naary already has.
 
-§§2–3 below are the ORIGINAL plan; they stand only under decision (A) and are superseded by this
-section until (A) is explicitly chosen and re-specced.
+(A) is now chosen (see the decision block above). §§2–3 below (the original per-item design + slice
+plan) are therefore SUPERSEDED by the detailed design in `ITEMS-MODEL-CURRENT-ITEM.md`; §1 (the gap)
+and §§4–5 (non-negotiables, competitive framing) still stand.
 
 ---
 
