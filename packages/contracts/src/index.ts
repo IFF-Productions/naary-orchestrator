@@ -12,6 +12,9 @@ export const TASK_QUEUE = "orchestrator";
 /** Workflow type name — lets the client start runGraph by name if desired. */
 export const RUN_GRAPH_WORKFLOW = "runGraph";
 
+/** Workflow type name for the durable per-session chat workflow (design §2.1b, option A). */
+export const CHAT_SESSION_WORKFLOW = "chatSession";
+
 export type ExecutionStatus =
   | "running"
   | "awaiting_approval"
@@ -63,4 +66,33 @@ export interface WebhookResponse {
  *  sets it) — the ingress polls this to reply synchronously. */
 export const webhookResponseQuery = defineQuery<WebhookResponse | undefined>(
   "webhookResponse",
+);
+
+// --- Durable per-session chat (design §2.1b, option A) ---
+
+/** One user message signaled into a chat session workflow. `turnId` is minted by the API (a uuid,
+ *  never in workflow code) so concurrent messages get DISTINCT replies — the fix for the reply-Query
+ *  cross-talk race that got option A deferred. */
+export interface ChatTurnInput {
+  message: string;
+  turnId: string;
+}
+
+/** Deliver a user message to the durable chat session (queued + processed in order). */
+export const chatMessageSignal =
+  defineSignal<[ChatTurnInput]>("chatSessionMessage");
+
+/** The reply for one turn: `pending` until the session finishes running the graph for that
+ *  `turnId`, then `replied` with the `respondToWebhook` body. `unknown` once the reply has aged out
+ *  of the session's bounded recent-replies window (the client should stop polling and treat it as
+ *  timed out). */
+export interface ChatReplyState {
+  status: "pending" | "replied" | "unknown";
+  reply?: unknown;
+}
+
+/** Read a turn's reply by `turnId` — the API polls this after signaling (turn-id keyed, so two
+ *  concurrent messages never read each other's reply). */
+export const chatReplyQuery = defineQuery<ChatReplyState, [string]>(
+  "chatReply",
 );

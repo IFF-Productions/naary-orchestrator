@@ -11,7 +11,11 @@ import { Throttle } from "@nestjs/throttler";
 import { Public } from "../auth/public.decorator";
 import { ExecutionsService } from "../executions/executions.service";
 import { GraphsService } from "../graphs/graphs.service";
-import { extractChatDefinition, validateMessage } from "./chat-definition";
+import {
+  extractChatDefinition,
+  isDurableSession,
+  validateMessage,
+} from "./chat-definition";
 import { ChatService } from "./chat.service";
 
 /**
@@ -46,6 +50,25 @@ export class ChatController {
     const { endpoint, snapshot } = await this.resolve(chatId);
     const result = validateMessage(body);
     if (!result.ok) throw new BadRequestException(result.error);
+
+    // Durable per-session mode (design §2.1b, option A): the chatTrigger opted in AND we have a
+    // session to key on. The long-lived chatSession workflow owns memory + persistence (it seeds
+    // from and appends to the ChatMessage table), so the controller just signals + waits. Without a
+    // sessionId there's nothing to key a session on, so fall through to the per-message path (B).
+    if (result.sessionId && isDurableSession(snapshot.graph)) {
+      const { replied, reply } = await this.executions.sendChatSessionMessage(
+        endpoint.tenantId,
+        snapshot,
+        {
+          message: result.message,
+          sessionId: result.sessionId,
+          chatId,
+        },
+        endpoint.workflowId,
+      );
+      return replied ? { status: "replied", reply } : { status: "started" };
+    }
+
     // Cross-message memory (design §2.1b, B): load the session's history and thread it into the run
     // so the agent has context (bind an agent's prompt to `<chatTrigger>.history`).
     const history = await this.chats.loadHistory(

@@ -16,6 +16,9 @@ import {
 } from "@temporalio/client";
 import {
   approvalSignal,
+  chatMessageSignal,
+  chatReplyQuery,
+  CHAT_SESSION_WORKFLOW,
   resumeSignal,
   RUN_GRAPH_WORKFLOW,
   stateQuery,
@@ -359,6 +362,77 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     );
     const response = await this.pollForResponse(workflowId, opts);
     return response ? { workflowId, response } : { workflowId };
+  }
+
+  /**
+   * Send a message to a DURABLE per-session chat (design §2.1b, option A). `signalWithStart` starts
+   * the long-lived `chatSession` workflow on the first message of a session and signals it after; the
+   * turn-id keyed `chatReplyQuery` is then polled for this message's answer (so concurrent messages
+   * never read each other's reply). Degrades to `{ replied:false }` if the turn doesn't answer in time.
+   */
+  async sendChatSessionMessage(
+    tenantId: string,
+    snapshot: GraphSnapshot,
+    input: { message: string; sessionId: string; chatId: string },
+    workflowKey: string,
+    opts: { timeoutMs?: number; pollMs?: number } = {},
+  ): Promise<{ replied: boolean; reply?: unknown }> {
+    await this.assertActive(tenantId, workflowKey);
+    // Stable, deterministic session id — the SAME id for every message of this conversation, so
+    // signalWithStart routes them to one workflow. sessionId is sanitized (opaque, ≤200 chars).
+    const safeSession = input.sessionId.replace(/[^A-Za-z0-9_-]/g, "_");
+    const sessionWorkflowId = `chatsession-${tenantId}-${workflowKey}-${safeSession}`;
+    const turnId = randomUUID(); // minted here, never in workflow code (determinism)
+    const budget = await getBudget(tenantId);
+
+    await this.client.workflow.signalWithStart(CHAT_SESSION_WORKFLOW, {
+      workflowId: sessionWorkflowId,
+      taskQueue: TASK_QUEUE,
+      signal: chatMessageSignal,
+      signalArgs: [{ message: input.message, turnId }],
+      args: [
+        {
+          graph: snapshot.graph,
+          ctx: {
+            tenantId,
+            workflowKey,
+            perExecutionCapUsd: budget?.perExecutionCapUsd,
+            maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
+            graphContentHash: snapshot.contentHash,
+            graphVersion: snapshot.version,
+          },
+          chatId: input.chatId,
+          sessionId: input.sessionId,
+        },
+      ],
+    });
+
+    return this.pollForChatReply(sessionWorkflowId, turnId, opts);
+  }
+
+  /** Poll a chat session's reply for one turn until it's replied, ages out, or times out. */
+  private async pollForChatReply(
+    sessionWorkflowId: string,
+    turnId: string,
+    opts: { timeoutMs?: number; pollMs?: number } = {},
+  ): Promise<{ replied: boolean; reply?: unknown }> {
+    const timeoutMs = opts.timeoutMs ?? 30_000;
+    const pollMs = opts.pollMs ?? 150;
+    const handle = this.client.workflow.getHandle(sessionWorkflowId);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        const state = await handle.query(chatReplyQuery, turnId);
+        if (state.status === "replied")
+          return { replied: true, reply: state.reply };
+        // "unknown" only occurs after the reply aged out of the window (shouldn't happen inside the
+        // poll deadline) — keep polling until the deadline in case of a transient ordering.
+      } catch {
+        // Transient query/replay hiccup — keep polling.
+      }
+      await new Promise((r) => setTimeout(r, pollMs));
+    }
+    return { replied: false };
   }
 
   /**
