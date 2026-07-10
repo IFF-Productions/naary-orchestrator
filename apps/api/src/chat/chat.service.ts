@@ -66,26 +66,29 @@ export class ChatService {
     return getPrisma().chatEndpoint.findUnique({ where: { id: chatId } });
   }
 
-  /** Load the last `limit` turns of a session's conversation (oldest-first) to thread into the next
-   *  run's input, so the agent has memory (design §2.1b option B). Empty for a new session. */
+  /** Load the last `limit` MESSAGES (rows, not turns — a turn is two rows) of a session's
+   *  conversation, oldest-first, to thread into the next run's input so the agent has memory
+   *  (design §2.1b option B). Ordered by the monotonic `seq` so it's deterministic even when two
+   *  rows share a millisecond. Empty for a new session. Default 40 rows ≈ 20 turns. */
   async loadHistory(
     tenantId: string,
     chatId: string,
     sessionId: string,
-    limit = 20,
+    limit = 40,
   ): Promise<{ role: string; text: string }[]> {
     if (!sessionId) return [];
     const rows = await getPrisma().chatMessage.findMany({
       where: { tenantId, chatId, sessionId },
-      orderBy: { createdAt: "desc" },
-      take: Math.min(Math.max(limit, 1), 100),
+      orderBy: { seq: "desc" },
+      take: Math.min(Math.max(limit, 1), 200),
       select: { role: true, text: true },
     });
     return rows.reverse(); // desc fetch (newest N) → return oldest-first
   }
 
-  /** Persist a completed turn (user message + the assistant reply). Best-effort ordering via
-   *  createdAt; the user row is written first so it sorts before the reply. No-op without a session. */
+  /** Persist a completed turn (user message + the assistant reply) ATOMICALLY — both rows or
+   *  neither, so a failed second insert can't leave a half-turn. The user row is created first so
+   *  its `seq` sorts before the reply. No-op without a session. */
   async appendTurn(
     tenantId: string,
     chatId: string,
@@ -94,17 +97,20 @@ export class ChatService {
     assistantText: string,
   ): Promise<void> {
     if (!sessionId) return;
-    await getPrisma().chatMessage.create({
-      data: { tenantId, chatId, sessionId, role: "user", text: userText },
-    });
-    await getPrisma().chatMessage.create({
-      data: {
-        tenantId,
-        chatId,
-        sessionId,
-        role: "assistant",
-        text: assistantText,
-      },
-    });
+    const prisma = getPrisma();
+    await prisma.$transaction([
+      prisma.chatMessage.create({
+        data: { tenantId, chatId, sessionId, role: "user", text: userText },
+      }),
+      prisma.chatMessage.create({
+        data: {
+          tenantId,
+          chatId,
+          sessionId,
+          role: "assistant",
+          text: assistantText,
+        },
+      }),
+    ]);
   }
 }

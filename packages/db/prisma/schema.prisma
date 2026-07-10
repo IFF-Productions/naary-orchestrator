@@ -163,11 +163,14 @@ model ChatEndpoint {
   @@index([tenantId])
 }
 
-// Cross-message chat memory (design CHAT-TRIGGER-RAG.md §2.1b, option B): one row per turn, keyed by
-// (chat, session). Threaded into each per-message run so the agent has conversation context — a
-// strict prefix of the durable-session-workflow (option A), upgradeable later with no lock-in.
+// Cross-message chat memory (design CHAT-TRIGGER-RAG.md §2.1b, option B): TWO rows per turn (a user
+// row + an assistant row), keyed by (chat, session). Threaded into each per-message run so the agent
+// has conversation context — a strict prefix of the durable-session-workflow (option A), upgradeable
+// later with no lock-in. `seq` (BIGSERIAL) gives a total, monotonic insertion order so ordering is
+// deterministic even when two rows share a millisecond `createdAt`.
 model ChatMessage {
   id        String   @id @default(uuid())
+  seq       BigInt   @default(autoincrement())
   tenantId  String
   chatId    String
   sessionId String
@@ -175,7 +178,7 @@ model ChatMessage {
   text      String
   createdAt DateTime @default(now())
 
-  @@index([tenantId, chatId, sessionId, createdAt])
+  @@index([tenantId, chatId, sessionId, seq])
 }
 
 // RAG: a tenant-scoped vector store for the vectorUpsert / vectorQuery nodes (pgvector). The
