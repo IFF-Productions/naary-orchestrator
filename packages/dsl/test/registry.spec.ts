@@ -20,7 +20,10 @@ describe("node config registry (TYPED-DSL Phase 1)", () => {
     // every config-bearing node type now has a concrete, parity-guarded schema
     for (const t of NODE_TYPES) {
       const configLess =
-        t === "webhookTrigger" || t === "errorTrigger" || t === "end";
+        t === "webhookTrigger" ||
+        t === "errorTrigger" ||
+        t === "end" ||
+        t === "noOp";
       expect(hasConcreteConfig(t), t).toBe(!configLess);
     }
   });

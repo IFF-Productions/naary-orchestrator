@@ -2989,6 +2989,37 @@ function ConfigPanel({
         </>
       )}
 
+      {kind === "markdown" && (
+        <>
+          <Labeled label="Source node id">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="upstream-node-id"
+            />
+          </Labeled>
+          <Labeled label="Path (optional)">
+            <input
+              value={str("path")}
+              onChange={(e) => onChange({ path: e.target.value })}
+              style={inputStyle}
+              placeholder="body"
+            />
+          </Labeled>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
+            Converts that HTML string to Markdown →{" "}
+            <code>{node.id}.markdown</code>.
+          </div>
+        </>
+      )}
+
       {kind === "htmlExtract" &&
         (() => {
           const extractions =

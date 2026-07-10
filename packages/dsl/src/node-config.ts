@@ -29,6 +29,7 @@ import type {
   HashConfig,
   HmacConfig,
   HtmlExtractConfig,
+  MarkdownConfig,
   HttpRequestConfig,
   HumanApprovalConfig,
   IfConfig,
@@ -81,6 +82,8 @@ export interface NodeConfigMap {
   compareDatasets: CompareDatasetsConfig;
   xml: XmlConfig;
   htmlExtract: HtmlExtractConfig;
+  markdown: MarkdownConfig;
+  noOp: Record<string, unknown>;
   csv: CsvConfig;
   json: JsonConfig;
   number: NumberConfig;
