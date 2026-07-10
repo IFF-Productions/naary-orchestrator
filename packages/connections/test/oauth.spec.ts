@@ -129,6 +129,158 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     expect(fetchFn).toHaveBeenCalledOnce();
   });
 
+  it("stops serving a cached token once the connection is revoked (row gone)", async () => {
+    const { store } = fakeStore(baseCfg);
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(okJson({ access_token: "AT1", expires_in: 3600 }));
+    let clock = 1_000_000;
+    const now = () => clock;
+    // getById returns the live row first, then null after the revoke.
+    const getById = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "connected" })
+      .mockResolvedValue(null);
+
+    // 1) mint + cache the token
+    const t1 = await getOAuthAccessToken("t1", CONN, {
+      store,
+      fetchFn,
+      connections: { getById } as never,
+      now,
+    });
+    expect(t1).toBe("AT1");
+
+    // 2) within REVALIDATE_MS → served straight from cache, no status read
+    clock += 30_000;
+    await getOAuthAccessToken("t1", CONN, {
+      store,
+      fetchFn,
+      connections: { getById } as never,
+      now,
+    });
+    expect(getById).not.toHaveBeenCalled();
+    expect(fetchFn).toHaveBeenCalledOnce();
+
+    // 3) past REVALIDATE_MS, connection still live → revalidated, still cached
+    clock += 61_000;
+    await getOAuthAccessToken("t1", CONN, {
+      store,
+      fetchFn,
+      connections: { getById } as never,
+      now,
+    });
+    expect(getById).toHaveBeenCalledTimes(1);
+    expect(fetchFn).toHaveBeenCalledOnce(); // no re-refresh — token still fresh
+
+    // 4) past REVALIDATE_MS again, now revoked → evict + refresh path throws NeedsReauth
+    clock += 61_000;
+    const revokedStore = {
+      ...store,
+      get: async () => null, // secret removed by revoke
+    } as never;
+    await expect(
+      getOAuthAccessToken("t1", CONN, {
+        store: revokedStore,
+        fetchFn,
+        connections: { getById } as never,
+        now,
+      }),
+    ).rejects.toBeInstanceOf(NeedsReauthError);
+    expect(getById).toHaveBeenCalledTimes(2);
+  });
+
+  it("evicts the cached token and defers to refresh when no longer `connected`", async () => {
+    // needs_reauth normally means the refresh token is dead, so the refresh path throws.
+    // Here refresh is mocked to succeed to prove the CACHED token is dropped (re-fetched),
+    // not that a stale token keeps being served.
+    const { store } = fakeStore(baseCfg);
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(okJson({ access_token: "AT1", expires_in: 3600 }));
+    let clock = 2_000_000;
+    const now = () => clock;
+    const getById = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "connected" })
+      .mockResolvedValue({ status: "needs_reauth" });
+
+    await getOAuthAccessToken("t1", CONN, {
+      store,
+      fetchFn,
+      connections: { getById } as never,
+      now,
+    });
+    // live revalidation keeps serving
+    clock += 61_000;
+    const stillOk = await getOAuthAccessToken("t1", CONN, {
+      store,
+      fetchFn,
+      connections: { getById } as never,
+      now,
+    });
+    expect(stillOk).toBe("AT1");
+    // now needs_reauth → evict; refresh re-mints (secret still present here)
+    clock += 61_000;
+    await getOAuthAccessToken("t1", CONN, {
+      store,
+      fetchFn,
+      connections: { getById } as never,
+      now,
+    });
+    expect(fetchFn).toHaveBeenCalledTimes(2); // evicted → forced a refresh
+  });
+
+  it("dedupes concurrent revalidations onto ONE status read (no thundering herd)", async () => {
+    const { store } = fakeStore(baseCfg);
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(okJson({ access_token: "AT1", expires_in: 3600 }));
+    let clock = 3_000_000;
+    const now = () => clock;
+    let resolveGet: (v: { status: string }) => void = () => {};
+    const getById = vi
+      .fn()
+      .mockImplementationOnce(
+        () => new Promise((r) => (resolveGet = r as never)),
+      );
+
+    // mint + cache (no getById on the initial refresh path)
+    await getOAuthAccessToken("t1", CONN, {
+      store,
+      fetchFn,
+      connections: { getById } as never,
+      now,
+    });
+    // three concurrent calls all past REVALIDATE_MS → must share one getById
+    clock += 61_000;
+    const calls = Promise.all([
+      getOAuthAccessToken("t1", CONN, {
+        store,
+        fetchFn,
+        connections: { getById } as never,
+        now,
+      }),
+      getOAuthAccessToken("t1", CONN, {
+        store,
+        fetchFn,
+        connections: { getById } as never,
+        now,
+      }),
+      getOAuthAccessToken("t1", CONN, {
+        store,
+        fetchFn,
+        connections: { getById } as never,
+        now,
+      }),
+    ]);
+    await Promise.resolve();
+    resolveGet({ status: "connected" });
+    const tokens = await calls;
+    expect(tokens).toEqual(["AT1", "AT1", "AT1"]);
+    expect(getById).toHaveBeenCalledOnce(); // one DB read served all three
+  });
+
   it("serializes concurrent refreshes with the per-connection lock (one fetch)", async () => {
     const { store } = fakeStore(baseCfg);
     const fetchFn = vi
