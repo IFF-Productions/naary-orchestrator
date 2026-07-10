@@ -124,10 +124,13 @@ A2 regions are PURE nodes only. A3 lets a region contain `"each"` **activity** n
   zero-risk choice.)
 
 ### `mapNode` activity
-- Signature ≈ `mapNode(nodeType, perItemInputs[], meta) → { outputs[], costUsd, usageEvents }`. It
-  dispatches by `nodeType` to the SAME underlying activity impl A2/execNode uses (`runAgent`,
+- Signature ≈ `mapNode(nodeType, perItemInputs[], meta) → { outputs[], costUsd }` (the full return
+  contract, incl. per-item error handling and the `maxAttempts: 1` retry policy, is fixed under
+  "Retry + per-item errors" below — this bullet is just the shape).
+- It dispatches by `nodeType` to the SAME underlying activity impl A2/execNode uses (`runAgent`,
   `callHttpRequest`, `callMcpTool`), looping the N inputs with **bounded concurrency**
-  (`maxParallelItems`, default 10) and per-item checkpointing (Temporal heartbeat).
+  (`maxParallelItems`, default 10). Per-index heartbeat checkpointing (skip-completed-on-retry) is a
+  LATER slice — A3 uses `maxAttempts: 1` instead (see below), so there is no partial-retry to resume.
 - The interpreter passes ALREADY-RESOLVED per-item inputs (the exact payloads `execNode` would build
   for a single call), so `mapNode` contains no template/binding logic — it's a pure fan-out loop
   over an existing activity fn. Keeps determinism in the workflow, I/O in the activity (Tier-1 #3).
@@ -303,7 +306,9 @@ Each slice ships green; the interpreter change is one patched gate introduced in
   arrays; cross-lineage fail-closed; rewrite §2.1 items-authoritative. Ships all six §7 traces as
   tests. This is the slice that proves the model — pure nodes only (activities in A3).
 - **A3 — batched map-activity.** `agent`/`httpRequest`/`mcpTool`/… `"each"` nodes fan out via one
-  `mapNode` activity (bounded concurrency, per-batch usage event). The headline: an agent over N rows.
+  `mapNode` activity (bounded concurrency; **per-item** usage recording — fail-safe under partial
+  failure; `maxAttempts: 1`; per-item `{ error }` return). The headline: an agent over N rows. Full
+  frozen spec in §0.3.
 - **A4 — aggregation surface + `limit`.** Formalize `"all"` semantics, add `limit`; per-item error
   routing (an item's failure → `{ error }` in that item, continue) building on per-node onError.
 - **A5 — authoring.** Canvas input panel shows the items table; run view shows per-item output + the
