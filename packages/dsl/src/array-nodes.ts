@@ -95,8 +95,9 @@ export function resolveListOps(
 
   switch (config.operation) {
     case "limit": {
-      const n = config.count && config.count > 0 ? config.count : 0;
-      return arr.slice(0, n);
+      if (config.count == null) return arr;
+      if (config.count <= 0) return [];
+      return arr.slice(0, config.count);
     }
     case "dedupe": {
       const seen = new Set<string>();

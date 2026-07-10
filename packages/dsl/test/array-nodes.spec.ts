@@ -138,6 +138,12 @@ describe("resolveListOps", () => {
     ).toEqual([{ n: 3 }, { n: 1 }]);
   });
 
+  it("limit without count returns the full array", () => {
+    expect(resolveListOps({ from: "c", path: "rows", operation: "limit" }, { c })).toEqual(
+      c.rows,
+    );
+  });
+
   it("dedupe by field keeps first occurrence", () => {
     expect(
       resolveListOps(
