@@ -106,13 +106,13 @@ correctable 400, not a silent corruption.
 ## 0.4. A4 — non-linear regions (proposed; the effort/worth question is open)
 
 A2/A3 regions are a LINEAR pure/activity chain (conditional intra-region edges + branches/merges are
-a save-400). A4 would allow a per-item **sub-DAG**: branches (`if`/`switch` routing each ITEM down a
+a save-time 400). A4 would allow a per-item **sub-DAG**: branches (`if`/`switch` routing each ITEM down a
 different path) and a merge back, so "for each row, if X do A else B, then combine" runs per item.
 `limit` is NOT part of A4 — `listOps` already limits, and region-level limiting is just slicing the
 source array before `splitOut`.
 
 ### Why this is the hardest frozen slice
-The region would become a real sub-graph executed N times. The outer interpreter's per-item state —
+The region would become a real subgraph executed N times. The outer interpreter's per-item state —
 `nextNodes` edge-condition branching, the `merge` fan-in gate (`mergeArrivals`), `Promise.all`
 fan-out — all become **per-item** inside the region. Options:
 - **(i) Recurse the traversal per item.** Run a scoped `execChain`-like walk over the region sub-DAG,
@@ -129,7 +129,7 @@ So A4-full is **not a new capability** — it is an *inline optimization* of `fo
 branching case, trading the **highest frozen-interpreter risk in the whole items program** (a
 per-item sub-DAG with per-item merge-fan-in) to avoid child-run overhead on a niche path. That
 inverts the cost/value: high risk, low marginal value over what `forEach` already does. (The "read
-an `if` output field" idea is NOT a substitute — per-item *routing* needs the conditional edges A2/A3
+an `if` output field" idea is NOT a substitute — per-item *routing* needs the conditional edges that A2/A3
 ban; `forEach` is the honest, sufficient escape hatch, and it stands alone.)
 
 ### Verdict: DEFER A4 (recorded so it isn't naively re-opened)
