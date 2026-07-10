@@ -171,6 +171,18 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
     summary: "Convert an HTML string to Markdown → { markdown }.",
     config: "{ from, path? }",
   },
+  vectorUpsert: {
+    group: "data-source",
+    summary:
+      "RAG: embed text chunk(s) and store them in the tenant vector store → { upserted }.",
+    config: "{ collection, from, path? }",
+  },
+  vectorQuery: {
+    group: "data-source",
+    summary:
+      "RAG: embed a query and return the top-k nearest stored chunks → { matches }.",
+    config: "{ collection, from, path?, topK? }",
+  },
   noOp: {
     group: "flow",
     summary: "Does nothing; a structural/placeholder node. Output is {}.",

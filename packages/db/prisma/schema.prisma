@@ -163,6 +163,22 @@ model ChatEndpoint {
   @@index([tenantId])
 }
 
+// RAG: a tenant-scoped vector store for the vectorUpsert / vectorQuery nodes (pgvector). The
+// `embedding` column is a raw `vector(1536)` (OpenAI text-embedding-3-small) added in the migration;
+// `Unsupported` keeps Prisma aware of it without generating a client field — it's read/written via
+// raw SQL in the activity. Exact cosine search (`<=>`) for v1; no ivfflat index yet.
+model VectorChunk {
+  id         String                      @id @default(uuid())
+  tenantId   String
+  collection String // logical namespace within the tenant (e.g. "docs", "faq")
+  chunkText  String
+  embedding  Unsupported("vector(1536)")
+  metadata   Json?
+  createdAt  DateTime                    @default(now())
+
+  @@index([tenantId, collection])
+}
+
 // Delivery-id dedupe so provider retries don't start duplicate executions.
 model WebhookDelivery {
   id         String   @id @default(uuid())
