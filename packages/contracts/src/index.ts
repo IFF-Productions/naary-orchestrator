@@ -82,12 +82,13 @@ export interface ChatTurnInput {
 export const chatMessageSignal =
   defineSignal<[ChatTurnInput]>("chatSessionMessage");
 
-/** The reply for one turn: `pending` until the session finishes running the graph for that
- *  `turnId`, then `replied` with the `respondToWebhook` body. `unknown` once the reply has aged out
- *  of the session's bounded recent-replies window (the client should stop polling and treat it as
- *  timed out). */
+/** The reply for one turn: `pending` until the session finishes running the graph for that `turnId`,
+ *  then `replied` with the `respondToWebhook` body. `no_reply` when the turn ran but the graph set no
+ *  synchronous response (no respondToWebhook node) — a TERMINAL state, so the client stops polling and
+ *  reports "started" (matching the non-durable path), rather than waiting out the timeout. `unknown`
+ *  once the reply has aged out of the session's bounded recent-replies window. */
 export interface ChatReplyState {
-  status: "pending" | "replied" | "unknown";
+  status: "pending" | "replied" | "no_reply" | "unknown";
   reply?: unknown;
 }
 

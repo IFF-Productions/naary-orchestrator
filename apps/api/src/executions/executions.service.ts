@@ -425,6 +425,9 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         const state = await handle.query(chatReplyQuery, turnId);
         if (state.status === "replied")
           return { replied: true, reply: state.reply };
+        // The turn ran but the graph set no synchronous response — terminal, stop early and report
+        // "started" (matches the non-durable path) rather than waiting out the full timeout.
+        if (state.status === "no_reply") return { replied: false };
         // "unknown" only occurs after the reply aged out of the window (shouldn't happen inside the
         // poll deadline) — keep polling until the deadline in case of a transient ordering.
       } catch {

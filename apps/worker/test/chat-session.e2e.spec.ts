@@ -33,6 +33,17 @@ const echoChatGraph: GraphDef = {
   ],
 };
 
+// A chat graph with NO respondToWebhook — the run sets no synchronous response, so the child's
+// RunGraphResult.reply is `undefined` (distinct from a real empty `null` body).
+const noReplyChatGraph: GraphDef = {
+  startNodeId: "chat",
+  nodes: [
+    { id: "chat", type: "chatTrigger", config: {} as never },
+    { id: "end", type: "end" },
+  ],
+  edges: [{ from: "chat", to: "end" }],
+};
+
 const loadCalls: unknown[] = [];
 const appendCalls: {
   sessionId: string;
@@ -83,9 +94,13 @@ function makeWorker(): Promise<Worker> {
   });
 }
 
-function startArgs(sessionId: string, idleTimeoutMs?: number) {
+function startArgs(
+  sessionId: string,
+  idleTimeoutMs?: number,
+  graph: GraphDef = echoChatGraph,
+) {
   return {
-    graph: echoChatGraph,
+    graph,
     ctx: { tenantId: "t-chat", workflowKey: "support" },
     chatId: "c-1",
     sessionId,
@@ -177,6 +192,38 @@ describe("chatSession — durable per-session chat (design §2.1b, option A)", (
       await awaitReply(handle, "turn-1");
       // With no further messages, the idle condition fires → the session drains + returns.
       await handle.result(); // resolves (void) — a hang would time out this test
+    });
+  }, 60_000);
+
+  it("a turn with no respondToWebhook is `no_reply` and is NOT persisted", async () => {
+    appendCalls.length = 0;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.signalWithStart(
+        CHAT_SESSION_WORKFLOW,
+        {
+          workflowId: "chatsession-t-chat-support-noreply",
+          taskQueue: TASK_QUEUE,
+          signal: chatMessageSignal,
+          signalArgs: [{ message: "hi", turnId: "turn-1" }],
+          args: [startArgs("nr", undefined, noReplyChatGraph)],
+        },
+      );
+      // Poll until the turn is resolved: it must land on the TERMINAL `no_reply`, never `replied`.
+      let status = "pending";
+      for (
+        let i = 0;
+        i < 50 && (status === "pending" || status === "unknown");
+        i++
+      ) {
+        status = (await handle.query(chatReplyQuery, "turn-1")).status;
+        if (status === "pending" || status === "unknown")
+          await new Promise((r) => setTimeout(r, 20));
+      }
+      expect(status).toBe("no_reply");
+      // A no-reply turn isn't persisted — matches the non-durable "don't persist when no response".
+      expect(appendCalls).toHaveLength(0);
+      await handle.cancel().catch(() => undefined);
     });
   }, 60_000);
 });

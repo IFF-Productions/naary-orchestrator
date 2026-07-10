@@ -1659,7 +1659,14 @@ export async function runGraph(
 
   if (threw !== undefined) throw threw; // preserve FAILED semantics (no syncStatus)
   await syncStatus(); // final status + cost for the Runs list
-  return { status, ctx, reply: webhookResponse?.body };
+  // Distinguish "no respondToWebhook ran" (undefined) from "ran with an empty body" (null), so the
+  // durable chat session can tell a no-reply turn from a real empty reply — mirrors the ingress's
+  // `response.body ?? null`. Undefined ⇒ no synchronous reply at all.
+  return {
+    status,
+    ctx,
+    reply: webhookResponse ? (webhookResponse.body ?? null) : undefined,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1736,7 +1743,13 @@ export async function chatSession(
   });
   wf.setHandler(chatReplyQuery, (turnId: string): ChatReplyState => {
     const hit = recentReplies.find((r) => r.turnId === turnId);
-    if (hit) return { status: "replied", reply: hit.reply };
+    // A recorded turn whose reply is `undefined` ran but produced no synchronous response — terminal
+    // `no_reply` (the poll stops + reports "started"); a real reply is `null` at least, never undefined.
+    if (hit) {
+      return hit.reply === undefined
+        ? { status: "no_reply" }
+        : { status: "replied", reply: hit.reply };
+    }
     const inFlight =
       processing === turnId || queue.some((q) => q.turnId === turnId);
     return { status: inFlight ? "pending" : "unknown" };
@@ -1784,27 +1797,34 @@ export async function chatSession(
       replyBody = { error: "The chat run failed." };
     }
 
-    const assistantText = stringifyChatReply(replyBody);
-    history.push(
-      { role: "user", text: turn.message },
-      { role: "assistant", text: assistantText },
-    );
-    if (history.length > MAX_CHAT_HISTORY_MESSAGES) {
-      history = history.slice(history.length - MAX_CHAT_HISTORY_MESSAGES);
-    }
+    // Always record the turn's outcome so chatReplyQuery resolves promptly (a `undefined` reply →
+    // `no_reply`, so the API poll returns "started" instead of waiting out the timeout).
     recentReplies.push({ turnId: turn.turnId, reply: replyBody });
     if (recentReplies.length > MAX_CHAT_RECENT_REPLIES) recentReplies.shift();
     processing = undefined;
 
-    // Durable record of the turn (survives idle-expiry / CAN). Best-effort — a store hiccup must not
-    // kill a live conversation; the in-Temporal history still serves the current session.
-    await appendChatTurn({
-      tenantId: ctx.tenantId,
-      chatId,
-      sessionId,
-      userText: turn.message,
-      assistantText,
-    }).catch(() => undefined);
+    // Only a real reply advances memory: a turn with no synchronous response (no respondToWebhook)
+    // isn't persisted — matching the non-durable path, which doesn't persist when the graph didn't
+    // reply. (A per-turn child failure sets replyBody to an `{error}` object, which IS a reply.)
+    if (replyBody !== undefined) {
+      const assistantText = stringifyChatReply(replyBody);
+      history.push(
+        { role: "user", text: turn.message },
+        { role: "assistant", text: assistantText },
+      );
+      if (history.length > MAX_CHAT_HISTORY_MESSAGES) {
+        history = history.slice(history.length - MAX_CHAT_HISTORY_MESSAGES);
+      }
+      // Durable record of the turn (survives idle-expiry / CAN). Best-effort — a store hiccup must not
+      // kill a live conversation; the in-Temporal history still serves the current session.
+      await appendChatTurn({
+        tenantId: ctx.tenantId,
+        chatId,
+        sessionId,
+        userText: turn.message,
+        assistantText,
+      }).catch(() => undefined);
+    }
 
     // continueAsNew only when the queue is DRAINED (so no un-run message is lost) and history has
     // grown — carrying recentReplies so a client mid-poll still reads its reply.
