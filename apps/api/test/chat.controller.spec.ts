@@ -17,7 +17,11 @@ function makeController(opts: {
   graph?: GraphDef | null;
   awaitResult?: { workflowId: string; response?: { body?: unknown } };
 }) {
-  const chats = { getEndpoint: vi.fn().mockResolvedValue(opts.endpoint) };
+  const chats = {
+    getEndpoint: vi.fn().mockResolvedValue(opts.endpoint),
+    loadHistory: vi.fn().mockResolvedValue([]),
+    appendTurn: vi.fn().mockResolvedValue(undefined),
+  };
   const graphs = {
     getLatest: vi
       .fn()
@@ -81,9 +85,48 @@ describe("ChatController (public)", () => {
     expect(executions.startChatAwaitResponse).toHaveBeenCalledWith(
       "t-1",
       { graph: CHAT_GRAPH },
-      { message: "hello", sessionId: "s-1" },
+      { message: "hello", sessionId: "s-1", history: [] },
       "support-chat",
     );
+  });
+
+  it("threads session history into the run and persists the completed turn (memory)", async () => {
+    const { controller, chats, executions } = makeController({
+      endpoint: ENDPOINT,
+      awaitResult: { workflowId: "chat-1", response: { body: "the answer" } },
+    });
+    chats.loadHistory.mockResolvedValue([{ role: "user", text: "earlier" }]);
+
+    await controller.message("c-1", { message: "hello", sessionId: "s-1" });
+
+    // history loaded for this session and threaded into the run input
+    expect(chats.loadHistory).toHaveBeenCalledWith("t-1", "c-1", "s-1");
+    expect(executions.startChatAwaitResponse.mock.calls[0][2]).toEqual({
+      message: "hello",
+      sessionId: "s-1",
+      history: [{ role: "user", text: "earlier" }],
+    });
+    // the turn (user msg + reply) is persisted for the next message
+    expect(chats.appendTurn).toHaveBeenCalledWith(
+      "t-1",
+      "c-1",
+      "s-1",
+      "hello",
+      "the answer",
+    );
+  });
+
+  it("does NOT persist a turn when the graph didn't reply in time", async () => {
+    const { controller, chats } = makeController({
+      endpoint: ENDPOINT,
+      awaitResult: { workflowId: "chat-1" }, // no response
+    });
+    const out = await controller.message("c-1", {
+      message: "hi",
+      sessionId: "s-1",
+    });
+    expect(out).toEqual({ status: "started" });
+    expect(chats.appendTurn).not.toHaveBeenCalled();
   });
 
   it("POST returns status 'started' when the graph doesn't reply in time", async () => {

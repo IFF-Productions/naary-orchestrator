@@ -163,6 +163,21 @@ model ChatEndpoint {
   @@index([tenantId])
 }
 
+// Cross-message chat memory (design CHAT-TRIGGER-RAG.md §2.1b, option B): one row per turn, keyed by
+// (chat, session). Threaded into each per-message run so the agent has conversation context — a
+// strict prefix of the durable-session-workflow (option A), upgradeable later with no lock-in.
+model ChatMessage {
+  id        String   @id @default(uuid())
+  tenantId  String
+  chatId    String
+  sessionId String
+  role      String // "user" | "assistant"
+  text      String
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, chatId, sessionId, createdAt])
+}
+
 // RAG: a tenant-scoped vector store for the vectorUpsert / vectorQuery nodes (pgvector). The
 // `embedding` column is a raw `vector(1536)` (OpenAI text-embedding-3-small) added in the migration;
 // `Unsupported` keeps Prisma aware of it without generating a client field — it's read/written via

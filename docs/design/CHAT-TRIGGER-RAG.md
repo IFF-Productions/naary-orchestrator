@@ -29,6 +29,41 @@ Form Trigger mini-program just built (public entry surface + anonymous-submissio
   naary beats n8n's queue-mode memory caveats: the conversation state lives in Temporal, survives
   worker crashes, and can pause for days.
 
+### 2.1b Durable per-session workflow — design (the deferred differentiator)
+
+The public chat surface (#215) is **single-turn**: each `POST /chat/:id` is a fresh `runGraph` with
+no memory. This section designs the durable session so a conversation has memory across messages.
+
+**Session = one long-lived workflow** keyed deterministically by
+`chatsession-<tenantId>-<chatId>-<sessionId>`. Its only durable state is the conversation
+`history: {role, text}[]`.
+- **`POST /chat/:id`** → `signalWithStart(chatSession, {message})` (starts it on the first message,
+  signals it thereafter) → then Query the session for the reply.
+- **The session workflow loop:** `await condition(() => pending !== undefined, IDLE_TIMEOUT)`; on a
+  message it runs the chat graph, appends `{user}` + `{assistant}` to history, exposes the reply via
+  a Query, clears `pending`, loops. `continueAsNew(history)` when event history grows; the idle
+  timeout ends the session (frees the workflow) after N minutes of silence.
+
+**The hard part — how the session runs the graph + gets the reply.** `runGraph` returns
+`{status, ctx}`, but the reply (a `respondToWebhook` **body**) lives only in a query, not `ctx`.
+Options:
+- **(i) Child `runGraph` per message.** `wf.executeChild(runGraph, {args:[graph, {message, history}]})`
+  → the session reads the reply from the child. Requires **adding `reply?` to `RunGraphResult`** (=
+  the `respondToWebhook` body) so the child hands it back — a small, safe additive change. Clean
+  isolation; one child run per message (history bounded by the child, not the session).
+- **(ii) Session interprets inline.** Duplicates the interpreter in the session workflow — rejected
+  (violates interpreter-not-codegen).
+
+### The worth question (decide before building — this is the A4-style check)
+Is the long-lived-workflow worth it over a **session-history table** (`ChatMessage` rows keyed by
+sessionId, threaded into each per-message `runGraph`)? The table is simpler, n8n-equivalent, and
+already gives cross-message memory. The workflow's marginal value is: conversation state lives in
+Temporal (survives crashes, pauses for days, no separate store) and enables durable mid-conversation
+waits (an approval *inside* a chat turn). That differentiator is real but the table covers 90% of
+"chat with memory". **Recommendation:** decide (A) full session workflow — option (i), adds `reply`
+to `RunGraphResult` + a `chatSession` workflow + `signalWithStart` in the endpoint; or (B) the
+history-table (smaller, ships faster, defer the workflow until durable-in-turn waits are needed).
+
 ### 2.2 Retrieval — `vectorUpsert` + `vectorQuery` nodes (pgvector)
 - Storage: **pgvector** (we already run Postgres; no new datastore). A `VectorChunk` table
   `{ tenantId, collection, chunkText, embedding vector, metadata }`, tenant-scoped, `ivfflat` index.
