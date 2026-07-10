@@ -1,8 +1,58 @@
 # Design — The Items Model (per-item fan-out)
 
-**Status:** proposed · **Date:** 2026-07-09
+**Status:** proposed · **Slice 1 shipped (#206); Slice 2+ BLOCKED on the §0 architecture decision.**
+**Date:** 2026-07-09 (§0 added after the Slice-2 architecture review)
 **Prereq reading:** `N8N-PARITY-GAPS.md` §6.1 (this is that deferred item, specced).
 **Owner risk it retires:** per-item AI enrichment + the authoring feel the market expects.
+
+---
+
+## 0. Architecture finding — the original per-item plan (§2.2 + §3) is unsound as written
+
+Reviewing Slice 2 surfaced two things that invalidate the "map pure item-wise nodes over items"
+step and must be decided **before** any `execNode` change (an interpreter change is frozen for all
+in-flight runs by `workflow.patched()` — we cannot quietly fix mapping semantics later):
+
+1. **Items-authoritative INVERTS Slice 1's contract.** Slice 1 (#206) pinned
+   `items[nodeId] === toItems(ctx[nodeId])` — ctx is source of truth, items derived. But the moment a
+   producer (`splitOut`) emits N>1 items, `toItems(ctx)` (always length 1) can't represent them, so
+   the model must flip to **items-authoritative**: `items[nodeId]` is primary and `ctx[nodeId]` for
+   legacy binding reads becomes `items[nodeId][0].json` (n8n's "expressions default to the first
+   item"). That is a clean rule, but it is a **replacement** of §2.1, not an extension — adopting it
+   requires rewriting §2.1 in the same PR so the tree doesn't carry two contradictory contracts.
+
+2. **"Map over the incoming edge's source" is the WRONG AXIS.** naary decouples control-flow edges
+   from data: a node's inputs come from config `from` **bindings** that can reference *any* prior
+   node, not its edge predecessor. A `set` (edit-fields) node reads MANY bindings — so an
+   edge-based "single input" rule would push the node n8n most wants per-item into the run-once
+   bucket. Honest implicit per-item therefore requires a **current-item execution context**: inside
+   a mapped region, iteration `i` must make EVERY `getByPath(ctx[from], path)` read resolve to
+   `items[from][i].json` (and `resolveTemplates` likewise). naary has only a global `ctx` and no
+   such cursor — introducing one is a pervasive change to the whole resolution layer, not a slice.
+
+**Relevant context:** naary already has `forEach` (a child run per array item) + the array nodes
+(`listOps`/`aggregate`/`filter`/`compareDatasets`), which already cover "process each element of an
+array" — just not with n8n's *implicit* per-node fan-out authoring feel.
+
+### The decision — **(A) CHOSEN.** Detailed design: `ITEMS-MODEL-CURRENT-ITEM.md`.
+The full current-item model, designed there via **cardinality + lineage propagation** (no region
+detection): a fourth `"reducer"` mode so `split→filter→map` works, and cross-lineage zip that
+**fails closed** rather than positionally pairing independent lists. Options B/C below are recorded
+for context but not taken.
+- **(A) Full current-item model.** Introduce the per-item execution context (item-index resolution
+  through bindings). Faithful to n8n; large, invasive, highest frozen-by-patched risk — hence the
+  dedicated design doc, reviewed before any `execNode` change.
+- **(B) Explicit items construct.** Ship items as an explicit array capability — `splitOut`
+  (array→items) feeding an explicit map region — *without* claiming every node auto-maps. Smaller,
+  but overlaps heavily with the existing `forEach`.
+- **(C) Stop; lean on `forEach` + array nodes.** Conclude the implicit-items model is a poor fit for
+  naary's binding architecture and NOT worth freezing a deep interpreter semantic; keep Slice 1's
+  primitive as latent groundwork and de-prioritize the rest. Market the durable per-item strengths
+  naary already has.
+
+(A) is now chosen (see the decision block above). §§2–3 below (the original per-item design + slice
+plan) are therefore SUPERSEDED by the detailed design in `ITEMS-MODEL-CURRENT-ITEM.md`; §1 (the gap)
+and §§4–5 (non-negotiables, competitive framing) still stand.
 
 ---
 
