@@ -30,6 +30,8 @@ import type {
   HmacConfig,
   HtmlExtractConfig,
   MarkdownConfig,
+  VectorUpsertConfig,
+  VectorQueryConfig,
   SplitOutConfig,
   LoopEndConfig,
   HttpRequestConfig,
@@ -87,6 +89,8 @@ export interface NodeConfigMap {
   xml: XmlConfig;
   htmlExtract: HtmlExtractConfig;
   markdown: MarkdownConfig;
+  vectorUpsert: VectorUpsertConfig;
+  vectorQuery: VectorQueryConfig;
   noOp: Record<string, unknown>;
   splitOut: SplitOutConfig;
   loopEnd: LoopEndConfig;

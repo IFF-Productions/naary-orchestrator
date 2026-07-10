@@ -64,6 +64,8 @@ const {
   callXml,
   callHtmlExtract,
   callMarkdown,
+  callVectorUpsert,
+  callVectorQuery,
   callCsv,
   callEncode,
   callRandom,
@@ -622,6 +624,43 @@ export async function runGraph(
           nodeId: node.id,
         });
         ctx[node.id] = res.result;
+        return null;
+      }
+      case "vectorUpsert": {
+        // RAG: input resolved here (pure ctx read); the BYOK embed + pgvector write are in the
+        // activity (key never crosses the workflow boundary). Output { upserted }.
+        const vuCfg = asNodeConfig(cfg, "vectorUpsert");
+        const vuVal = getByPath(ctx[vuCfg.from], vuCfg.path);
+        const res = await callVectorUpsert(
+          { collection: vuCfg.collection },
+          vuVal,
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
+        ctx[node.id] = res.result;
+        costUsd += res.costUsd; // embedding spend, metered like any activity
+        ctx.__costUsd = costUsd;
+        return null;
+      }
+      case "vectorQuery": {
+        // RAG: embed the query + return the top-k nearest chunks (activity). Output { matches }.
+        const vqCfg = asNodeConfig(cfg, "vectorQuery");
+        const vqVal = getByPath(ctx[vqCfg.from], vqCfg.path);
+        const res = await callVectorQuery(
+          { collection: vqCfg.collection, topK: vqCfg.topK },
+          vqVal,
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
+        ctx[node.id] = res.result;
+        costUsd += res.costUsd;
+        ctx.__costUsd = costUsd;
         return null;
       }
       case "noOp": {

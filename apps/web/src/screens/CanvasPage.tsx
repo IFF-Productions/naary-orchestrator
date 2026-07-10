@@ -3071,6 +3071,75 @@ function ConfigPanel({
         </>
       )}
 
+      {(kind === "vectorUpsert" || kind === "vectorQuery") && (
+        <>
+          <Labeled label="Collection">
+            <input
+              value={str("collection")}
+              onChange={(e) => onChange({ collection: e.target.value })}
+              style={inputStyle}
+              placeholder="docs"
+            />
+          </Labeled>
+          <Labeled
+            label={
+              kind === "vectorUpsert"
+                ? "Text source node id (string or string[])"
+                : "Query source node id"
+            }
+          >
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="upstream-node-id"
+            />
+          </Labeled>
+          <Labeled label="Path (optional)">
+            <input
+              value={str("path")}
+              onChange={(e) => onChange({ path: e.target.value })}
+              style={inputStyle}
+              placeholder="message"
+            />
+          </Labeled>
+          {kind === "vectorQuery" && (
+            <Labeled label="Top K (default 4)">
+              <input
+                type="number"
+                value={str("topK")}
+                onChange={(e) =>
+                  onChange({
+                    topK: e.target.value ? Number(e.target.value) : undefined,
+                  })
+                }
+                style={inputStyle}
+                placeholder="4"
+              />
+            </Labeled>
+          )}
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
+            {kind === "vectorUpsert" ? (
+              <>
+                Embeds + stores the chunk(s) → <code>{node.id}.upserted</code>.
+                Needs an OpenAI key (Integrations).
+              </>
+            ) : (
+              <>
+                Returns the nearest chunks → <code>{node.id}.matches</code>.
+                Bind an agent's context to these for RAG.
+              </>
+            )}
+          </div>
+        </>
+      )}
+
       {kind === "splitOut" && (
         <>
           <Labeled label="Array source node id">

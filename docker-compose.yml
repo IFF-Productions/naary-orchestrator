@@ -31,7 +31,9 @@ x-backend-env: &backend-env
 
 services:
   postgres:
-    image: postgres:16
+    # pgvector/pgvector is a drop-in postgres:16 image with the `vector` extension preinstalled
+    # (needed by the RAG VectorChunk table). Standard postgres:16 otherwise, so nothing else changes.
+    image: pgvector/pgvector:pg16
     container_name: naary-postgres
     restart: unless-stopped
     environment:

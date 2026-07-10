@@ -25,6 +25,8 @@ export type NodeType =
   | "compareDatasets" // pure: diff two arrays by a key → {added,removed,changed,same}
   | "xml" // parse XML→object / build object→XML (activity; fast-xml-parser)
   | "htmlExtract" // pull values out of an HTML string by CSS selector (activity)
+  | "vectorUpsert" // RAG: embed text chunks + store them in the tenant vector store (activity)
+  | "vectorQuery" // RAG: embed a query + return the top-k nearest stored chunks (activity)
   | "markdown" // convert an HTML string → Markdown (activity; node-html-parser)
   | "noOp" // does nothing; a structural/placeholder node — output {}
   | "splitOut" // items model: opens a per-item region — reads an array, runs the region once per item
@@ -606,6 +608,28 @@ export interface HtmlExtractNodeConfig {
   path?: string;
   /** The fields to extract. */
   extractions: HtmlExtraction[];
+}
+
+/** vectorUpsert (RAG) — embed one or more text chunks and store them in the tenant's vector store
+ *  under `collection`. `from`/`path` resolve to a string or string[]. Output `{ upserted }`. */
+export interface VectorUpsertNodeConfig {
+  /** Logical namespace within the tenant (e.g. "docs"). */
+  collection: string;
+  /** Upstream node id whose output holds the chunk text (string) or chunks (string[]). */
+  from: string;
+  /** Optional dotted path into that output. */
+  path?: string;
+}
+
+/** vectorQuery (RAG) — embed a query string and return the `topK` nearest stored chunks from
+ *  `collection`. Output `{ matches: [{ chunkText, score, metadata? }] }`. */
+export interface VectorQueryNodeConfig {
+  collection: string;
+  /** Upstream node id whose output holds the query string. */
+  from: string;
+  path?: string;
+  /** How many nearest chunks to return (default 4). */
+  topK?: number;
 }
 
 /** Markdown node — convert an upstream HTML string to Markdown. Output is `{ markdown }`. */
