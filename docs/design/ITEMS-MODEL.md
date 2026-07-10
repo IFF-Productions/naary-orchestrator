@@ -34,10 +34,14 @@ in-flight runs by `workflow.patched()` — we cannot quietly fix mapping semanti
 (`listOps`/`aggregate`/`filter`/`compareDatasets`), which already cover "process each element of an
 array" — just not with n8n's *implicit* per-node fan-out authoring feel.
 
-### The decision (pick before building Slice 2+)
-- **(A) Full current-item model.** Introduce the per-item execution context (region + item-index
-  resolution). Faithful to n8n; large, invasive, and the frozen-by-patched risk is highest. Its own
-  detailed design before code.
+### The decision — **(A) CHOSEN.** Detailed design: `ITEMS-MODEL-CURRENT-ITEM.md`.
+The full current-item model, designed there via **cardinality + lineage propagation** (no region
+detection): a fourth `"reducer"` mode so `split→filter→map` works, and cross-lineage zip that
+**fails closed** rather than positionally pairing independent lists. Options B/C below are recorded
+for context but not taken.
+- **(A) Full current-item model.** Introduce the per-item execution context (item-index resolution
+  through bindings). Faithful to n8n; large, invasive, highest frozen-by-patched risk — hence the
+  dedicated design doc, reviewed before any `execNode` change.
 - **(B) Explicit items construct.** Ship items as an explicit array capability — `splitOut`
   (array→items) feeding an explicit map region — *without* claiming every node auto-maps. Smaller,
   but overlaps heavily with the existing `forEach`.
