@@ -103,6 +103,41 @@ correctable 400, not a silent corruption.
 
 ---
 
+## 0.4. A4 — non-linear regions (proposed; the effort/worth question is open)
+
+A2/A3 regions are a LINEAR pure/activity chain (conditional intra-region edges + branches/merges are
+a save-time 400). A4 would allow a per-item **sub-DAG**: branches (`if`/`switch` routing each ITEM down a
+different path) and a merge back, so "for each row, if X do A else B, then combine" runs per item.
+`limit` is NOT part of A4 — `listOps` already limits, and region-level limiting is just slicing the
+source array before `splitOut`.
+
+### Why this is the hardest frozen slice
+The region would become a real subgraph executed N times. The outer interpreter's per-item state —
+`nextNodes` edge-condition branching, the `merge` fan-in gate (`mergeArrivals`), `Promise.all`
+fan-out — all become **per-item** inside the region. Options:
+- **(i) Recurse the traversal per item.** Run a scoped `execChain`-like walk over the region sub-DAG,
+  once per item, with its OWN merge-arrival counters and a frame ctx. Faithful, but it re-implements
+  (or carefully reuses) the outer traversal with per-item isolation — a large change to the most
+  determinism-sensitive code, frozen by the same gate.
+- **(ii) Keep regions linear; add a per-item `switch`-with-branches as ONE node.** A single "route"
+  construct that picks a path from inline sub-configs — avoids sub-DAG execution but is a weaker,
+  bespoke model.
+
+### The decisive argument: per-item branching ALREADY EXISTS via `forEach`
+`forEach` runs a child graph per array item, and a child graph can contain **any** branches/merges.
+So A4-full is **not a new capability** — it is an *inline optimization* of `forEach` for the
+branching case, trading the **highest frozen-interpreter risk in the whole items program** (a
+per-item sub-DAG with per-item merge-fan-in) to avoid child-run overhead on a niche path. That
+inverts the cost/value: high risk, low marginal value over what `forEach` already does. (The "read
+an `if` output field" idea is NOT a substitute — per-item *routing* needs the conditional edges that A2/A3
+ban; `forEach` is the honest, sufficient escape hatch, and it stands alone.)
+
+### Verdict: DEFER A4 (recorded so it isn't naively re-opened)
+A2/A3 is a **complete, coherent milestone** — map + per-item LLM/API over N rows. A4 is a NEW,
+optional thing, not "finishing the program", and absent concrete demand for per-item conditional
+routing both A4-full and A4-min fail the worth test against their frozen-interpreter cost. Do not
+build A4 without a real user need; `forEach` covers the branching case today.
+
 ## 0.3. A3 — batched activities inside a region (proposed; frozen decisions flagged)
 
 A2 regions are PURE nodes only. A3 lets a region contain `"each"` **activity** nodes
