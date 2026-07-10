@@ -127,8 +127,25 @@ async function refreshGrant(
 // In-process access-token cache + per-connection refresh lock. NOTE: process-local
 // only — multiple worker processes can still race a refresh (documented limitation;
 // a distributed lock / Temporal serialization point is the real fix).
-const accessCache = new Map<string, { token: string; expiresAt: number }>();
+//
+// `checkedAt` bounds a cross-process revoke: a token minted here stays valid for its
+// full lifetime (~1h), but a revoke/`needs_reauth` happens in the API process and can't
+// reach this Map. So on a hit older than REVALIDATE_MS we re-read the connection's
+// status (one cheap indexed SELECT — far cheaper than the OAuth refresh POST the cache
+// exists to avoid) and stop serving if it's gone or no longer `connected`. Bounds a
+// revoked connection's blast radius to REVALIDATE_MS instead of the token's TTL.
+const accessCache = new Map<
+  string,
+  { token: string; expiresAt: number; checkedAt: number }
+>();
 const inflight = new Map<string, Promise<string>>();
+// Per-connection revalidation lock: concurrent callers past REVALIDATE_MS share ONE
+// status read (mirrors `inflight`), so the "at most one SELECT per 60s" bound holds
+// under load instead of a thundering herd of getById calls.
+const revalidating = new Map<string, Promise<boolean>>();
+
+/** Re-check a cached connection's status at most this often (revoke-staleness bound). */
+const REVALIDATE_MS = 60_000;
 
 export interface OAuthDeps {
   store?: SecretStore;
@@ -141,6 +158,7 @@ export interface OAuthDeps {
 export function __resetOAuthCaches(): void {
   accessCache.clear();
   inflight.clear();
+  revalidating.clear();
 }
 
 /**
@@ -157,7 +175,31 @@ export async function getOAuthAccessToken(
   const now = deps.now ?? (() => Date.now());
   const cached = accessCache.get(connectionId);
   if (cached && cached.expiresAt > now() + 30_000) {
-    return cached.token; // 30s clock-skew margin
+    // 30s clock-skew margin. Serve immediately if we revalidated recently; otherwise
+    // confirm the connection wasn't revoked / flipped to needs_reauth in another process.
+    if (now() - cached.checkedAt <= REVALIDATE_MS) {
+      return cached.token;
+    }
+    // Dedupe concurrent revalidations onto one shared status read.
+    let check = revalidating.get(connectionId);
+    if (!check) {
+      const connections = deps.connections ?? new ConnectionService();
+      check = connections
+        .getById(tenantId, connectionId)
+        .then((row) => row?.status === "connected")
+        .finally(() => revalidating.delete(connectionId));
+      revalidating.set(connectionId, check);
+    }
+    const stillConnected = await check;
+    // Re-read the entry: it may have been evicted/refreshed while we awaited.
+    const fresh = accessCache.get(connectionId);
+    if (stillConnected && fresh && fresh.expiresAt > now() + 30_000) {
+      fresh.checkedAt = now();
+      return fresh.token;
+    }
+    // Revoked (row gone) or no longer connected → stop serving the cached token and
+    // fall through to refresh (which throws NeedsReauth once the secret is removed).
+    accessCache.delete(connectionId);
   }
   const existing = inflight.get(connectionId);
   if (existing) return existing;
@@ -193,6 +235,7 @@ export async function getOAuthAccessToken(
     accessCache.set(connectionId, {
       token: tokens.access_token,
       expiresAt: now() + (tokens.expires_in ?? 3600) * 1000,
+      checkedAt: now(), // just minted → connection is live; start the revalidation clock
     });
     return tokens.access_token;
   })().finally(() => inflight.delete(connectionId));
