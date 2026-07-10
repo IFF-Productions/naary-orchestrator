@@ -45,6 +45,29 @@ describe("computeItemsRegions — valid brackets", () => {
     expect(validateGraph(graph).valid).toBe(true);
   });
 
+  it("ALLOWS the batchable activities (agent/httpRequest/mcpTool) inside a region (A3)", () => {
+    for (const type of ["agent", "httpRequest", "mcpTool"] as const) {
+      const graph = g(
+        [
+          N("s", "start"),
+          N("sp", "splitOut", { from: "s", path: "items" }),
+          N("a", type),
+          N("le", "loopEnd", { from: "a" }),
+          N("e", "end"),
+        ],
+        [
+          ["s", "sp"],
+          ["sp", "a"],
+          ["a", "le"],
+          ["le", "e"],
+        ],
+      );
+      const { regions, error } = computeItemsRegions(graph);
+      expect(error, type).toBeNull();
+      expect(regions[0].regionNodeIds).toEqual(["a"]);
+    }
+  });
+
   it("allows an EMPTY region collecting the splitOut itself", () => {
     const graph = g(
       [
@@ -141,18 +164,18 @@ describe("computeItemsRegions — fail closed (adversarial)", () => {
       match: /not allowed inside a splitOut region/,
     },
     {
-      name: "non-pure (activity) node inside region",
+      name: "a non-batchable/other node (rssRead) inside region",
       graph: g(
         [
           N("s", "start"),
           N("sp", "splitOut", { from: "s" }),
-          N("h", "httpRequest", { url: "https://x" }),
-          N("le", "loopEnd", { from: "h" }),
+          N("r", "rssRead", { url: "https://x" }),
+          N("le", "loopEnd", { from: "r" }),
         ],
         [
           ["s", "sp"],
-          ["sp", "h"],
-          ["h", "le"],
+          ["sp", "r"],
+          ["r", "le"],
         ],
       ),
       match: /not allowed inside a splitOut region/,

@@ -27,18 +27,30 @@ export interface ItemsRegionResult {
   error: string | null;
 }
 
-/** Node types allowed inside an A2 region: pure nodes (no I/O, deterministic) + the no-op. A2
- *  regions run N times with a single signal handler, so durable/activity nodes are rejected. */
+/** "each" activity nodes that A3 can BATCH inside a region: one `mapNode` activity per node per run
+ *  loops them over the N items (design §0.3). This set MUST match what the `mapNode` activity
+ *  dispatches — a node allowed here but unhandled there would pass save-validation then fail at run.
+ *  DURABLE/control nodes (wait/humanApproval/respondToWebhook/executeSubWorkflow/forEach) stay banned
+ *  (N durable pauses with one signal handler is the frozen determinism hole). */
+export const BATCHABLE_REGION_ACTIVITIES: ReadonlySet<string> = new Set([
+  "agent",
+  "httpRequest",
+  "mcpTool",
+]);
+
+/** Node types allowed inside a region: pure nodes + no-op (A2) + the batchable activities (A3). */
 function regionAllowed(type: string): boolean {
-  return isPureNode(type) || type === "noOp";
+  return (
+    isPureNode(type) || type === "noOp" || BATCHABLE_REGION_ACTIVITIES.has(type)
+  );
 }
 
 /**
  * Compute + validate every `splitOut` region by a purely structural walk (no bindings inspected):
  * from each `splitOut`, follow the unique linear chain of allowed nodes to its `loopEnd`. Any
- * branch/join, non-pure node, nested splitOut/loopEnd, missing/duplicate loopEnd, or dangling
- * `loopEnd` is a save-time error. Deterministic + pure — safe for both the API save-gate and the
- * interpreter precompute.
+ * branch/join, disallowed node (a non-pure node that isn't a batchable activity, or a durable/control
+ * node), nested splitOut/loopEnd, missing/duplicate loopEnd, or dangling `loopEnd` is a save-time
+ * error. Deterministic + pure — safe for both the API save-gate and the interpreter precompute.
  */
 export function computeItemsRegions(graph: GraphDef): ItemsRegionResult {
   const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
@@ -96,7 +108,7 @@ export function computeItemsRegions(graph: GraphDef): ItemsRegionResult {
       }
       if (!regionAllowed(node.type)) {
         return err(
-          `node '${cur}' (${node.type}) is not allowed inside a splitOut region — regions are pure nodes only in v1`,
+          `node '${cur}' (${node.type}) is not allowed inside a splitOut region — only pure nodes and the batchable activities (agent/httpRequest/mcpTool) may appear in a region`,
         );
       }
       if (inTo(cur).length !== 1) {
