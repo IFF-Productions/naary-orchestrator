@@ -1901,6 +1901,22 @@ function ConfigPanel({
               placeholder="Hi! How can I help?"
             />
           </Labeled>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-2)",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={Boolean(config.durableSession)}
+              onChange={(e) => onChange({ durableSession: e.target.checked })}
+            />
+            Durable session (remember the conversation across messages)
+          </label>
           <div
             style={{
               fontSize: "var(--text-xs)",
@@ -1908,8 +1924,10 @@ function ConfigPanel({
               marginTop: -6,
             }}
           >
-            The message + session id arrive as <code>{node.id}</code>. The
-            public chat page + durable session are later slices.
+            The message + session id arrive as <code>{node.id}</code>. With
+            durable session on, a long-lived per-session workflow holds the
+            conversation in Temporal; off, each message is threaded with the
+            saved history.
           </div>
         </>
       )}

@@ -31,6 +31,15 @@ Form Trigger mini-program just built (public entry surface + anonymous-submissio
 
 ### 2.1b Durable per-session workflow — design (the deferred differentiator)
 
+> **Status: BOTH shipped.** (B) the history-table shipped first (#218) as the low-regret default.
+> (A) the durable per-session workflow is now shipped too — opt-in via the chatTrigger's
+> `durableSession` flag (no migration; the flag rides in the versioned graph). A LAYERS ON B: the
+> session seeds its working history from, and appends each turn to, the same `ChatMessage` table, so
+> idle-expiry never loses memory. The race that got A deferred (a single shared reply Query) is fixed
+> by keying replies on an **API-minted `turnId`** — two concurrent messages never read each other's
+> reply. Reply plumbing uses option (i): a child `runGraph` per message returns its reply via the new
+> `RunGraphResult.reply`.
+
 The public chat surface (#215) is **single-turn**: each `POST /chat/:id` is a fresh `runGraph` with
 no memory. This section designs the durable session so a conversation has memory across messages.
 

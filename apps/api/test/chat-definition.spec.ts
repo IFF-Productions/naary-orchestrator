@@ -3,6 +3,7 @@ import type { GraphDef } from "@naary/dsl";
 import {
   MAX_MESSAGE_LENGTH,
   extractChatDefinition,
+  isDurableSession,
   validateMessage,
 } from "../src/chat/chat-definition";
 
@@ -86,5 +87,22 @@ describe("validateMessage", () => {
       ok: false,
       error: expect.stringMatching(/exceeds/),
     });
+  });
+});
+
+describe("isDurableSession", () => {
+  it("is true only when the chatTrigger opted in", () => {
+    expect(isDurableSession(chatGraph({ durableSession: true }))).toBe(true);
+    expect(isDurableSession(chatGraph({ durableSession: false }))).toBe(false);
+    expect(isDurableSession(chatGraph({}))).toBe(false); // default = option B
+  });
+
+  it("is false when the entry node isn't a chatTrigger", () => {
+    const g: GraphDef = {
+      startNodeId: "wh",
+      nodes: [{ id: "wh", type: "webhookTrigger" }],
+      edges: [],
+    };
+    expect(isDurableSession(g)).toBe(false);
   });
 });

@@ -40,6 +40,15 @@ export function extractChatDefinition(
   };
 }
 
+/** Whether the graph's chatTrigger opted into the durable per-session workflow (§2.1b, option A).
+ *  Read server-side only — it's a runtime behavior flag, never exposed in the public definition. */
+export function isDurableSession(graph: GraphDef): boolean {
+  const entry = graph.nodes.find((n) => n.id === graph.startNodeId);
+  if (!entry || entry.type !== "chatTrigger") return false;
+  const cfg = (entry.config ?? {}) as Partial<ChatTriggerNodeConfig>;
+  return cfg.durableSession === true;
+}
+
 export type MessageResult =
   | { ok: true; message: string; sessionId: string }
   | { ok: false; error: string };

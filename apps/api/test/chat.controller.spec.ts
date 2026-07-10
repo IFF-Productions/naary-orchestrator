@@ -16,6 +16,7 @@ function makeController(opts: {
   endpoint?: unknown;
   graph?: GraphDef | null;
   awaitResult?: { workflowId: string; response?: { body?: unknown } };
+  sessionResult?: { replied: boolean; reply?: unknown };
 }) {
   const chats = {
     getEndpoint: vi.fn().mockResolvedValue(opts.endpoint),
@@ -33,6 +34,9 @@ function makeController(opts: {
     startChatAwaitResponse: vi
       .fn()
       .mockResolvedValue(opts.awaitResult ?? { workflowId: "chat-1" }),
+    sendChatSessionMessage: vi
+      .fn()
+      .mockResolvedValue(opts.sessionResult ?? { replied: false }),
   };
   const controller = new ChatController(
     chats as never,
@@ -41,6 +45,19 @@ function makeController(opts: {
   );
   return { controller, chats, graphs, executions };
 }
+
+const DURABLE_GRAPH: GraphDef = {
+  startNodeId: "chat",
+  nodes: [
+    {
+      id: "chat",
+      type: "chatTrigger",
+      config: { title: "Support", durableSession: true } as never,
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [{ from: "chat", to: "end" }],
+};
 
 const ENDPOINT = { id: "c-1", tenantId: "t-1", workflowId: "support-chat" };
 
@@ -158,6 +175,54 @@ describe("ChatController (public)", () => {
     });
     const out = await controller.message("c-1", { message: "hello" });
     expect(out).toEqual({ status: "started" });
+  });
+
+  it("routes to the durable session workflow when the chatTrigger opted in (option A)", async () => {
+    const { controller, chats, executions } = makeController({
+      endpoint: ENDPOINT,
+      graph: DURABLE_GRAPH,
+      sessionResult: { replied: true, reply: "durable answer" },
+    });
+    const out = await controller.message("c-1", {
+      message: "hi",
+      sessionId: "s-1",
+    });
+    expect(out).toEqual({ status: "replied", reply: "durable answer" });
+    expect(executions.sendChatSessionMessage).toHaveBeenCalledWith(
+      "t-1",
+      { graph: DURABLE_GRAPH },
+      { message: "hi", sessionId: "s-1", chatId: "c-1" },
+      "support-chat",
+    );
+    // durable mode owns memory itself — the controller does NOT touch the table or the B path
+    expect(chats.loadHistory).not.toHaveBeenCalled();
+    expect(chats.appendTurn).not.toHaveBeenCalled();
+    expect(executions.startChatAwaitResponse).not.toHaveBeenCalled();
+  });
+
+  it("durable mode returns 'started' when the turn doesn't answer in time", async () => {
+    const { controller } = makeController({
+      endpoint: ENDPOINT,
+      graph: DURABLE_GRAPH,
+      sessionResult: { replied: false },
+    });
+    const out = await controller.message("c-1", {
+      message: "hi",
+      sessionId: "s-1",
+    });
+    expect(out).toEqual({ status: "started" });
+  });
+
+  it("falls back to the per-message path (B) when durable is set but there's no sessionId", async () => {
+    const { controller, executions } = makeController({
+      endpoint: ENDPOINT,
+      graph: DURABLE_GRAPH,
+      awaitResult: { workflowId: "chat-1", response: { body: "b-answer" } },
+    });
+    const out = await controller.message("c-1", { message: "hi" }); // no sessionId
+    expect(out).toEqual({ status: "replied", reply: "b-answer" });
+    expect(executions.sendChatSessionMessage).not.toHaveBeenCalled();
+    expect(executions.startChatAwaitResponse).toHaveBeenCalled();
   });
 
   it("POST 400s on a blank message and never starts a run", async () => {

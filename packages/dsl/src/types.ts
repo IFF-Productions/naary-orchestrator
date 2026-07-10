@@ -160,6 +160,11 @@ export interface ChatTriggerNodeConfig {
   placeholder?: string;
   /** The assistant's opening message shown before the first user turn. */
   greeting?: string;
+  /** Opt in to the durable per-session workflow (design §2.1b, option A): a long-lived,
+   *  turn-serialized session workflow holds the live conversation in Temporal and enables durable
+   *  mid-turn waits (e.g. an approval inside a chat turn). When false/omitted, each message is an
+   *  independent run threaded with the ChatMessage-table history (option B — the default). */
+  durableSession?: boolean;
 }
 
 /** Human-approval node config. The interpreter reads `timeoutHours` to bound the

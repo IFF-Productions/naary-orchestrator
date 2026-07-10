@@ -150,6 +150,8 @@ const CONFIG_SCHEMAS = {
     description: z.string().optional(),
     placeholder: z.string().optional(),
     greeting: z.string().optional(),
+    /** Opt in to the durable per-session workflow (§2.1b, option A). */
+    durableSession: z.boolean().optional(),
   }),
   pollTrigger: z.object({
     url: z.string(),

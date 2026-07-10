@@ -186,6 +186,62 @@ export async function setExecutionStatus(meta: {
     .catch(() => undefined);
 }
 
+/**
+ * Durable chat session (design §2.1b, option A): load the last `limit` MESSAGES of a session
+ * (oldest-first) so a freshly (re)started session workflow resumes with memory — the ChatMessage
+ * table is the durable backing store; the session's in-Temporal history is the live working copy.
+ * Mirrors the API's ChatService.loadHistory (ordered by the monotonic `seq`). Empty for a new
+ * session. Side effect (DB read) → activity, per Tier-1 #3.
+ */
+export async function loadChatHistory(meta: {
+  tenantId: string;
+  chatId: string;
+  sessionId: string;
+  limit?: number;
+}): Promise<{ role: string; text: string }[]> {
+  if (!meta.sessionId) return [];
+  const rows = await getPrisma().chatMessage.findMany({
+    where: {
+      tenantId: meta.tenantId,
+      chatId: meta.chatId,
+      sessionId: meta.sessionId,
+    },
+    orderBy: { seq: "desc" },
+    take: Math.min(Math.max(meta.limit ?? 40, 1), 200),
+    select: { role: true, text: true },
+  });
+  return rows.reverse();
+}
+
+/**
+ * Durable chat session: persist a completed turn (user + assistant rows) ATOMICALLY, so the table
+ * stays the durable record of the conversation even after the session workflow idle-expires. Mirrors
+ * ChatService.appendTurn. Side effect (DB write) → activity.
+ */
+export async function appendChatTurn(meta: {
+  tenantId: string;
+  chatId: string;
+  sessionId: string;
+  userText: string;
+  assistantText: string;
+}): Promise<void> {
+  if (!meta.sessionId) return;
+  const prisma = getPrisma();
+  const base = {
+    tenantId: meta.tenantId,
+    chatId: meta.chatId,
+    sessionId: meta.sessionId,
+  };
+  await prisma.$transaction([
+    prisma.chatMessage.create({
+      data: { ...base, role: "user", text: meta.userText },
+    }),
+    prisma.chatMessage.create({
+      data: { ...base, role: "assistant", text: meta.assistantText },
+    }),
+  ]);
+}
+
 export interface DateTimeResult {
   /** ISO-8601 string (UTC). */
   iso: string;
