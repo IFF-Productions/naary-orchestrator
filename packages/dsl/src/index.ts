@@ -23,6 +23,8 @@ export {
   type TemplateWarning,
 } from "./template";
 export { isPureNode, runPureNode } from "./pure-node";
+// Items model (design ITEMS-MODEL.md) — Slice 1 normalize primitive only; no interpreter change yet.
+export { type Item, toItems, itemsJson } from "./items";
 export { resolveHttpRequest, type ResolvedHttpRequest } from "./http-request";
 export {
   resolveSqlQuery,
