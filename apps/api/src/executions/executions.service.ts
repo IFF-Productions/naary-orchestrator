@@ -271,13 +271,15 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Start a webhook-triggered run; the verified event becomes the trigger output.
-   *  The caller resolved + snapshotted the graph from the DB. */
+   *  The caller resolved + snapshotted the graph from the DB. Refused when the workflow is
+   *  INACTIVE (n8n parity) — an automatic trigger, unlike a manual `start()`. */
   async startWebhook(
     tenantId: string,
     snapshot: GraphSnapshot,
     event: unknown,
     workflowKey: string,
   ): Promise<{ workflowId: string }> {
+    await this.assertActive(tenantId, workflowKey);
     return this.startGraph(
       `wh-${tenantId}`,
       snapshot,
@@ -288,13 +290,15 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Start a form-submission run; the validated+sanitized submission becomes the trigger output.
-   *  The caller resolved + snapshotted the graph (and confirmed its entry is a formTrigger). */
+   *  The caller resolved + snapshotted the graph (and confirmed its entry is a formTrigger).
+   *  Refused when the workflow is INACTIVE (n8n parity) — automatic, unlike a manual `start()`. */
   async startForm(
     tenantId: string,
     snapshot: GraphSnapshot,
     submission: Record<string, unknown>,
     workflowKey: string,
   ): Promise<{ workflowId: string }> {
+    await this.assertActive(tenantId, workflowKey);
     return this.startGraph(
       `form-${tenantId}`,
       snapshot,
@@ -350,6 +354,17 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       await new Promise((r) => setTimeout(r, pollMs));
     }
     return { workflowId };
+  }
+
+  /** Throw 409 if the workflow is deactivated. The gate for AUTOMATIC triggers only (webhook/form);
+   *  manual `start()` and schedule/poll (paused in Temporal when inactive) don't call this. */
+  private async assertActive(
+    tenantId: string,
+    workflowKey: string,
+  ): Promise<void> {
+    if (!(await this.graphs.isActive(tenantId, workflowKey))) {
+      throw new ConflictException("Workflow is inactive");
+    }
   }
 
   private async startGraph(
