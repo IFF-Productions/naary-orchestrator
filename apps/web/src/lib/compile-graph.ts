@@ -32,6 +32,7 @@ const ENTRY_TYPES: ReadonlySet<NodeType> = new Set<NodeType>([
   "webhookTrigger",
   "scheduleTrigger",
   "formTrigger",
+  "chatTrigger",
   "pollTrigger",
   "errorTrigger",
 ]);

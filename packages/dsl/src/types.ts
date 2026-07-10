@@ -10,6 +10,7 @@ export type NodeType =
   | "pollTrigger" // entry node: polls a URL on an interval; output is {changed, body}
   | "scheduleTrigger" // entry node: runs the graph on a cron schedule (control-plane synced)
   | "formTrigger" // entry node: started by a hosted public form; output is the submitted fields
+  | "chatTrigger" // entry node: started by a hosted chat message; output is { message, sessionId }
   | "agent"
   | "mcpTool" // Slice #4: calls a remote MCP server tool via a connection
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}
@@ -140,6 +141,23 @@ export interface FormTriggerNodeConfig {
   /** Submit-button label (default "Submit"). */
   submitLabel?: string;
   fields: FormFieldDef[];
+}
+
+/**
+ * Chat trigger — the run starts from a hosted chat message (docs/design/CHAT-TRIGGER-RAG.md).
+ * The inbound `{ message, sessionId }` becomes the trigger node's output (like `formTrigger`'s output
+ * IS the submitted fields). The public chat page + durable per-session workflow are later slices;
+ * this is just the node + its widget presentation.
+ */
+export interface ChatTriggerNodeConfig {
+  /** Widget heading. */
+  title?: string;
+  /** Sub-heading shown under the title. */
+  description?: string;
+  /** Placeholder text in the message input. */
+  placeholder?: string;
+  /** The assistant's opening message shown before the first user turn. */
+  greeting?: string;
 }
 
 /** Human-approval node config. The interpreter reads `timeoutHours` to bound the

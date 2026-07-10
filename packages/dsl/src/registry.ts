@@ -49,6 +49,7 @@ import type {
   NodeType,
   NumberNodeConfig,
   FormTriggerNodeConfig,
+  ChatTriggerNodeConfig,
   PollTriggerNodeConfig,
   RandomNodeConfig,
   RenameKeysNodeConfig,
@@ -141,6 +142,12 @@ const CONFIG_SCHEMAS = {
         options: z.array(z.string()).optional(),
       }),
     ),
+  }),
+  chatTrigger: z.object({
+    title: z.string().optional(),
+    description: z.string().optional(),
+    placeholder: z.string().optional(),
+    greeting: z.string().optional(),
   }),
   pollTrigger: z.object({
     url: z.string(),
@@ -567,6 +574,7 @@ export function nodeConfigJsonSchema(type: NodeType): Record<string, unknown> {
 // --- Derived TS types (Phase 2 points the interpreter's *NodeConfig at these) ------------------
 export type StartConfig = z.infer<typeof CONFIG_SCHEMAS.start>;
 export type FormTriggerConfig = z.infer<typeof CONFIG_SCHEMAS.formTrigger>;
+export type ChatTriggerConfig = z.infer<typeof CONFIG_SCHEMAS.chatTrigger>;
 export type ScheduleTriggerConfig = z.infer<
   typeof CONFIG_SCHEMAS.scheduleTrigger
 >;
@@ -628,6 +636,7 @@ const _configParity: {
   start: Exact<StartConfig, StartNodeConfig>;
   scheduleTrigger: Exact<ScheduleTriggerConfig, ScheduleTriggerNodeConfig>;
   formTrigger: Exact<FormTriggerConfig, FormTriggerNodeConfig>;
+  chatTrigger: Exact<ChatTriggerConfig, ChatTriggerNodeConfig>;
   pollTrigger: Exact<PollTriggerConfig, PollTriggerNodeConfig>;
   mcpTool: Exact<McpToolConfig, McpToolNodeConfig>;
   httpRequest: Exact<HttpRequestConfig, HttpRequestNodeConfig>;
@@ -674,6 +683,7 @@ const _configParity: {
   start: true,
   scheduleTrigger: true,
   formTrigger: true,
+  chatTrigger: true,
   pollTrigger: true,
   mcpTool: true,
   httpRequest: true,
