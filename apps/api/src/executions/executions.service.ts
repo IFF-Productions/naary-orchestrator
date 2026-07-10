@@ -545,10 +545,30 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     approved: boolean,
     comment?: string,
   ): Promise<void> {
+    const handle = this.client.workflow.getHandle(workflowId);
+    // GUARD (public signed link): only decide a run that is CURRENTLY awaiting approval. Temporal
+    // buffers a signal sent to a running-but-not-yet-paused run, so without this a stale link
+    // clicked later could be "saved up" and auto-satisfy a FUTURE humanApproval pause (a graph that
+    // loops or has multiple approvals). Query the live state first; anything but awaiting → 409.
+    let status: string;
     try {
-      await this.client.workflow
-        .getHandle(workflowId)
-        .signal(approvalSignal, { approved, ...(comment ? { comment } : {}) });
+      status = (await handle.query(stateQuery)).status;
+    } catch (e) {
+      if (e instanceof WorkflowNotFoundError) {
+        throw new ConflictException("Run not found or already closed.");
+      }
+      throw e;
+    }
+    if (status !== "awaiting_approval") {
+      throw new ConflictException(
+        "Run is not awaiting approval (already decided, completed, or timed out).",
+      );
+    }
+    try {
+      await handle.signal(approvalSignal, {
+        approved,
+        ...(comment ? { comment } : {}),
+      });
     } catch (e) {
       if (e instanceof WorkflowNotFoundError) {
         throw new ConflictException(

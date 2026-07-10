@@ -7,7 +7,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  * and it can't be forged without the server secret.
  *
  * IMPORTANT — the worker's notification activity mints the SAME token to build the link
- * (apps/worker/src/temporal/activities.ts, `mintApprovalToken`). Both use ENCRYPTION_KEY over
+ * (apps/worker/src/temporal/activities.ts, inside `approvalUrl()`). Both use ENCRYPTION_KEY over
  * "approval:"+workflowId; keep the two formulas identical or links won't verify.
  */
 function signingKey(): string {
