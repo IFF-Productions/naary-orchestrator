@@ -216,12 +216,16 @@ no durable/non-deterministic node in a region ⇒ identical replay. Branch execu
 not `Promise.all`, to keep order fixed and the code far simpler than the top-level walker.
 
 **Activities inside an A4 region** (`agent`/`httpRequest`/`mcpTool`) run **per item** (one activity
-command per live occurrence), NOT batched — branching breaks the node-major batch. History grows
-`O(live activity executions)`, so the cap is on **total in-region activity executions** — summed across
-`items × live activity-nodes`, not items alone (items-alone doesn't bound history when a region has
-several activity nodes). Fail closed above `MAX_MAP_BATCH_ITEMS` like A3, with a message pointing at
-`forEach` (child run per item, own history) for genuinely large branching fan-out. A pure A4 region
-(no activities) has no history-growth cost and is only bounded by the step circuit-breaker.
+command per live occurrence), NOT batched — branching breaks the node-major batch. Each live execution
+is its own Temporal command, so history grows `O(live activity executions)`. A4 therefore gets its OWN
+cap — a **new `MAX_A4_REGION_ACTIVITY_EXECUTIONS` constant** on the running count of activity executions
+across the whole region (`Σ over items of live activity-nodes on that item's path`) — NOT
+`MAX_MAP_BATCH_ITEMS`. The two are different quantities and stay separate: `MAX_MAP_BATCH_ITEMS` is an
+A3-only guard on a SINGLE `mapNode`'s batch size / payload (N configs + N outputs riding in one history
+event), which A4 never emits; an items-only cap wouldn't bound A4 at all once a region has several
+activity nodes. Fail closed above the A4 constant with a message pointing at `forEach` (child run per
+item, own history) for genuinely large branching fan-out. A pure A4 region (no activities) has no
+history-growth cost and is bounded only by the step circuit-breaker.
 
 **Cost/risk, stated honestly.** This re-implements a small, bounded dataflow evaluator (dead-branch
 propagation) rather than reusing the top-level `execChain` (whose run-global `mergeArrivals`,
