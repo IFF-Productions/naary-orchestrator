@@ -138,6 +138,110 @@ optional thing, not "finishing the program", and absent concrete demand for per-
 routing both A4-full and A4-min fail the worth test against their frozen-interpreter cost. Do not
 build A4 without a real user need; `forEach` covers the branching case today.
 
+### 0.4.1. A4-full — UN-DEFERRED (concrete need confirmed): per-item sub-DAG design
+
+The deferral above was conditional ("do not build without a real user need"). A concrete need for
+per-item conditional routing WITH rejoin ("for each row, if X do A else B, then combine") was
+confirmed, so A4-full is now specced. This is the **highest-risk interpreter change in the program**;
+it lands doc-first (this section) → review → implementation, exactly like A2 (#208→#209) and A3
+(#210→#211). It is gated by a NEW `wf.patched("items-model-a4-v1")` so in-flight A2/A3 runs never
+diverge, and it is **additive**: a linear region still takes the A2/A3 paths unchanged.
+
+**The region becomes a per-item sub-DAG.** The validator (`computeItemsRegions`) gains an A4 region
+kind: the nodes between `splitOut` and `loopEnd` may now form a DAG that additionally allows `if`,
+`switch`, and `merge` nodes and **conditional edges** (the exact things A2/A3 ban). Still banned:
+durable/control nodes (`wait`/`humanApproval`/`respondToWebhook`/`executeSubWorkflow`/`forEach`) and
+nested `splitOut`/`loopEnd` — an N-way durable pause is the frozen determinism hole, unchanged.
+
+**Region-kind dispatch (crisp, provably non-regressing).** A region is A4 iff it contains any
+`if`/`switch`/`merge` node OR any conditional intra-region edge; otherwise it is the EXISTING linear
+region and takes the A2 (item-major) / A3 (node-major) paths **byte-identically** — the A4 code is a
+new dispatch branch, never a rewrite of the linear path. The `patched("items-model-a4-v1")` gate
+protects version skew across a deploy; this predicate is what protects a linear region from
+accidentally entering the new evaluator.
+
+**Top-level validation must EXEMPT region-internal edges.** `validateGraph` today rejects a conditional
+edge pointing directly INTO a `merge`, and the top-level walker builds `mergeParents` + a stranded-join
+guard for every `merge`. Both would fire on an A4 region's `if → merge` rejoin and kill the graph
+before the region validator ever runs. So: region-internal edges/merges are **exempted** from the
+top-level conditional-edge-into-merge rule, and region merges are excluded from the global
+`mergeParents`/stranded-join machinery entirely — they are handled ONLY by the per-item pass, never the
+outer walker. **Audit result:** `validateGraph` (`branch.ts:131`) has exactly ONE rule touching
+merges/conditional edges — the conditional-edge-into-`merge` reject, which loops over ALL edges and
+would kill a region `if → merge`. The exemption is therefore a single localized change: skip that check
+when `edge.to` is a merge INSIDE an A4 region (the region set comes from `computeItemsRegions`, which
+`validateGraph` already calls at the end). The stranded-join guard + `mergeParents` live in
+`workflows.ts` (not `branch.ts`) and must likewise skip region merges, and the top-level `merge` case
+must skip a region merge so the outer walker never executes it (the per-item pass owns it).
+
+**The crux — per-item merge semantics (why this is hard).** With conditional routing, a `merge`'s
+*expected* inputs are **dynamic per item**: an item that takes the `if` branch never produces the
+`else` branch's output, so the top-level "wait for ALL inbound branches" (`mergeArrivals`) rule would
+wedge forever, and the existing `merge` node — which combines inputs by node-id straight out of
+`ctx` — would read the OTHER item-iteration's stale value for the branch that didn't run. Neither is
+correct per item. The resolution is a **dead-branch dataflow model**, evaluated fresh for each item:
+
+- Each region edge is `PENDING → LIVE` (its source ran and, if the edge is conditional, its condition
+  passed for this item) or `DEAD` (source ran and the condition failed, OR the source itself is DEAD).
+- A node is **ready** when every in-edge is resolved and ≥1 is LIVE; it is **dead** when every in-edge
+  is DEAD (it never runs for this item). `if`/`switch` mark exactly their matched out-edge LIVE and the
+  rest DEAD (single-path routing); unconditional out-edges are all LIVE (parallel fan-out still works).
+- A `merge` inside a region fires when all its in-edges are resolved and combines only its **LIVE**
+  inputs (a DEAD branch contributes nothing) — so it is a correct funnel for conditional routing AND a
+  correct combine for parallel fan-out, with the same rule.
+- **`collectFrom` must post-dominate the region** (be on every item's live path — e.g. the final
+  `merge`, or `splitOut`), else an item that routes the other way collects `undefined`. This is a new
+  save-time structural check, so a mis-drawn collect is a correctable 400, not a runtime hole.
+- **No-match exhaustiveness.** Post-domination guarantees "*if* a live path exists it hits
+  `collectFrom`" — it does NOT guarantee one exists: a `switch` whose rules all miss (or an `if` whose
+  edges are all conditional and none pass) marks every out-edge DEAD → no live path → `collectFrom`
+  collects `undefined` for that item. Resolution: **require a save-time exhaustive exit** at every
+  in-region branch point — a `switch` used in a region must have a default/fallthrough out-edge (an
+  unconditional edge, or n8n's "fallback output"), and an `if` fan-out must cover both truth values.
+  A branch point without a total cover is a 400. (Alternative considered + rejected: silently treating
+  no-match as "skip this item from the collected array" — that's an implicit filter, a surprising
+  semantic to freeze.)
+
+**Execution — item-major, single topological pass per item.** A4 regions are ALWAYS item-major (the A3
+node-major batch is impossible once items take different paths). The validator emits the region nodes
+in **topological order** and **rejects any back-edge/cycle** at save time (a 400) — the interpreter's
+fixed-order evaluation depends on this. For each item `i`: seed the frame (`ctx[splitOut] = items[i]`),
+then make ONE pass over the region nodes in that topo order with a LOCAL per-item edge-state map. A
+single pass suffices precisely because topo order guarantees every predecessor's LIVE/DEAD state is
+already resolved when a node is reached — no fixpoint loop needed. A node that resolves DEAD (all
+in-edges DEAD) is skipped; a live node runs (`execNode`), then its out-edges are marked LIVE/DEAD
+(conditional edges evaluated against this item's frame; `if`/`switch` mark exactly the matched edge
+LIVE). Collect `ctx[collectFrom]`. Determinism: fixed topo order (not arrival/`Promise.all` order) +
+no durable/non-deterministic node in a region ⇒ identical replay. Branch execution is **sequential**,
+not `Promise.all`, to keep order fixed and the code far simpler than the top-level walker.
+
+**Activities inside an A4 region** (`agent`/`httpRequest`/`mcpTool`) run **per item** (one activity
+command per live occurrence), NOT batched — branching breaks the node-major batch. Each live execution
+is its own Temporal command, so history grows `O(live activity executions)`. A4 therefore gets its OWN
+cap — a **new `MAX_A4_REGION_ACTIVITY_EXECUTIONS` constant** on the running count of activity executions
+across the whole region (`Σ over items of live activity-nodes on that item's path`) — NOT
+`MAX_MAP_BATCH_ITEMS`. The two are different quantities and stay separate: `MAX_MAP_BATCH_ITEMS` is an
+A3-only guard on a SINGLE `mapNode`'s batch size / payload (N configs + N outputs riding in one history
+event), which A4 never emits; an items-only cap wouldn't bound A4 at all once a region has several
+activity nodes. Fail closed above the A4 constant with a message pointing at `forEach` (child run per
+item, own history) for genuinely large branching fan-out. A pure A4 region (no activities) has no
+history-growth cost and is bounded only by the step circuit-breaker.
+
+**Cost/risk, stated honestly.** This re-implements a small, bounded dataflow evaluator (dead-branch
+propagation) rather than reusing the top-level `execChain` (whose run-global `mergeArrivals`,
+`Promise.all` fan-out, and continueAsNew make per-item isolation unsafe to bolt on). The blast radius
+is contained by: (1) the `patched()` gate, (2) additive region-kind dispatch (linear regions untouched),
+(3) all new structural rules checked at save (400, not runtime), (4) no durable nodes in a region, so no
+per-item pause/continueAsNew interaction. The validator's dead-branch reachability + `collectFrom`
+post-dominance checks are the correctness lynchpin and get the heaviest test coverage.
+
+**Sequencing (matches A2/A3: the frozen decision gets a review gate).** Because `patched()` can't be
+changed after it ships without corrupting in-flight runs, this doc lands FIRST as its own PR (3/3) and
+the frozen semantics are confirmed before the evaluator ships. Implementation then goes
+**validator-first** — `computeItemsRegions`'s A4 region kind is pure, save-time, and a wrong rule is a
+400, not a corruption; it encodes the same frozen rules and carries the heaviest tests — and the
+per-item interpreter evaluator lands LAST, on top of a validated, well-tested region model.
+
 ## 0.3. A3 — batched activities inside a region (proposed; frozen decisions flagged)
 
 A2 regions are PURE nodes only. A3 lets a region contain `"each"` **activity** nodes
