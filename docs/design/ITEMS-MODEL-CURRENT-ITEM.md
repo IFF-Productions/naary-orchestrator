@@ -103,6 +103,84 @@ correctable 400, not a silent corruption.
 
 ---
 
+## 0.3. A3 — batched activities inside a region (proposed; frozen decisions flagged)
+
+A2 regions are PURE nodes only. A3 lets a region contain `"each"` **activity** nodes
+(`agent`/`httpRequest`/`mcpTool` first; the rest later) so you can "call an LLM/API once per item"
+— without emitting one Temporal activity per item (that would grow event history O(items)).
+
+### Execution: NODE-major for activity regions (A2's item-major stays for pure-only)
+- A2's per-item loop calls `execNode` once per item — fine for pure nodes (no history events), but
+  an activity node there = **N activity commands** (O(items) history). A3 batches: for an activity
+  region node, the interpreter resolves the node's inputs for ALL N frames (deterministic, in
+  workflow: `resolveTemplates` + the node's arg resolution against frame `i`), then makes **ONE**
+  `mapNode` activity call with the N resolved inputs. One activity per node per run, not per item.
+- **FROZEN DECISION 1 (needs sign-off):** keep A2's exact **item-major loop for a pure-only region**
+  (byte-identical to shipped A2 — an in-flight A2 run always has a pure-only region, so its replay
+  is untouched), and use **node-major only when the region contains ≥1 activity node** (which can
+  only exist in an A3+ graph, i.e. a new run, patched=true). Same `patched("items-model-v1")` gate:
+  no existing run ever emits a `mapNode` command, so no v2 gate is needed. (Alternative — always
+  node-major — is command-neutral for pure regions too, but preserving the item-major path is the
+  zero-risk choice.)
+
+### `mapNode` activity
+- Signature ≈ `mapNode(nodeType, perItemInputs[], meta) → { outputs[], costUsd, usageEvents }`. It
+  dispatches by `nodeType` to the SAME underlying activity impl A2/execNode uses (`runAgent`,
+  `callHttpRequest`, `callMcpTool`), looping the N inputs with **bounded concurrency**
+  (`maxParallelItems`, default 10) and per-item checkpointing (Temporal heartbeat).
+- The interpreter passes ALREADY-RESOLVED per-item inputs (the exact payloads `execNode` would build
+  for a single call), so `mapNode` contains no template/binding logic — it's a pure fan-out loop
+  over an existing activity fn. Keeps determinism in the workflow, I/O in the activity (Tier-1 #3).
+
+### Billing (Tier-1 #6 — fail safe). DECISION 2 RESOLVED — per-item recording, not per-batch.
+The original "one aggregate usage event" idea is **wrong and violates Tier-1 #6**: if item 20 throws
+after items 1–19 made real LLM calls, the end-of-batch aggregate write never happens → 19 paid calls
+billed as **zero**. The underlying activities already record their own usage row IN-ACTIVITY per call
+(`runAgent` → `recordUsage(...)`, keyed by `meta.nodeId`). So `mapNode` simply **loops those
+activity fns unchanged**: each per-item call records its own row as it completes (N rows keyed by the
+same nodeId — fine; the ledger is Postgres, not history, and aggregates by node). A mid-batch failure
+leaves completed items already billed. `costUsd` returned = the sum of completed items, accumulated
+into the run budget. The "keep it to one event" instinct was about history/payload size, which the
+usage TABLE doesn't share.
+
+### Retry + per-item errors — A3 owns a MINIMAL per-item contract (forced by fail-safe billing)
+Batching amplifies the non-idempotent-retry hole: one `mapNode` activity doing N I/O calls, if it
+THREW mid-batch and Temporal retried the whole activity, would re-charge items 1–19 and duplicate
+POST/email side effects. So:
+- `mapNode` **catches per-item**, records the completed item's cost (in-activity, as above), and
+  **RETURNS `{ outputs, costUsd }`** where a failed item's output is `{ error }` — it does NOT throw
+  for item reasons. No item error → no whole-batch Temporal retry → no duplicate charges/effects.
+- `mapNode` runs with **`maxAttempts: 1`** (a genuine infra crash fails the node once; retrying a
+  batch of non-idempotent I/O is worse than failing). Documented frozen; per-index heartbeat
+  checkpointing (skip-completed-on-retry) is a later slice if transient resilience is wanted.
+- The WORKFLOW then applies the node's error policy: if any item errored and `onError !== "continue"`
+  → fail the node (cost already recorded); `onError: "continue"` → each errored item keeps `{ error }`
+  and the run proceeds. (This is the minimal slice of per-item error semantics A3 is forced to own;
+  richer per-item routing is A4.)
+- Bounded concurrency inside `mapNode`: `maxParallelItems` default 10.
+
+### FROZEN: the activity's `input` inside a region IS THE CURRENT ITEM
+Outside a region an activity's `input` is the run `__input`. INSIDE a region it is `ctx[splitOut]`
+(the current item `i`) — so "agent/http over N rows" works with the item as input, matching n8n
+(a node's input is the current item). Per-item variation still ALSO flows through templated config
+(`{{ splitOut.x }}`); a static-config agent now maps over the items as its input rather than making
+N identical calls.
+
+### Save-validation relaxation
+- `regionAllowed` gains the batchable `"each"` activities (`agent`/`httpRequest`/`mcpTool` in A3;
+  more later). Durable/control nodes STAY banned (`wait`/`humanApproval`/`respondToWebhook`/
+  `executeSubWorkflow`/`forEach`) — N durable pauses with one signal handler is the determinism hole
+  A2 §0.2 rule 4 forbids, unchanged.
+- The per-execution budget cap is checked before each `mapNode` (as today) — a region can't bypass it.
+
+### DECISION 1 — KEPT (item-major-for-pure + node-major-for-activity, one gate). Load-bearing reason:
+the graph is **content-hash-snapshotted at run start**, so a run's region shape (pure-only vs
+contains-activity) is immutable for its lifetime — an in-flight A2 run can never acquire an
+activity-in-region and can never take the node-major path, so no existing run emits a `mapNode`
+command and the single `patched("items-model-v1")` gate suffices. (`computeItemsRegions` runs on the
+snapshotted `graph` arg. Node-major is also provably identical to item-major for pure nodes — each
+reads prior region nodes at index `i` either way — so mixed regions are safe.)
+
 ## 1. The core insight — cardinality propagates through bindings (no region detection)
 
 The hard part everyone hits is "which nodes run per-item, and over which list?" n8n answers it with an
