@@ -395,6 +395,11 @@ export async function runGraph(
         // public endpoint). The submitted fields ARE the run input → this node's output.
         ctx[node.id] = ctx.__input;
         return null;
+      case "chatTrigger":
+        // Entry node: the run was started by a hosted chat message (public endpoint + durable
+        // session are later slices). The inbound { message, sessionId } IS the run input.
+        ctx[node.id] = ctx.__input;
+        return null;
       case "errorTrigger":
         // Entry node of an error-handler graph — its output is the failure context
         // the interpreter passed as this run's input.

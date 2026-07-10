@@ -71,6 +71,13 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
     config:
       "{ title?, description?, submitLabel?, fields: [{ key, label, type: text|textarea|number|email|select, required?, options? }] }",
   },
+  chatTrigger: {
+    group: "trigger",
+    entry: true,
+    summary:
+      "Started by a hosted chat message; its output IS { message, sessionId }.",
+    config: "{ title?, description?, placeholder?, greeting? }",
+  },
   // --- AI ---
   agent: {
     group: "ai",

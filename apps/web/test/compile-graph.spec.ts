@@ -73,6 +73,26 @@ describe("compileGraph", () => {
     });
   });
 
+  it("treats chatTrigger as an entry node (its config carries through)", () => {
+    const nodes: CanvasNode[] = [
+      {
+        id: "chat",
+        type: "chatTrigger",
+        position: at(0),
+        config: { title: "Support", greeting: "Hi!" },
+      },
+      { id: "end", type: "end", position: at(1) },
+    ];
+    const edges: CanvasEdge[] = [{ id: "e1", source: "chat", target: "end" }];
+    const { graph, error } = compileGraph(nodes, edges);
+    expect(error).toBeUndefined();
+    expect(graph?.startNodeId).toBe("chat");
+    expect(graph?.nodes.find((n) => n.id === "chat")?.config).toEqual({
+      title: "Support",
+      greeting: "Hi!",
+    });
+  });
+
   it("errors on an empty canvas", () => {
     expect(compileGraph([], []).error).toMatch(/empty canvas/i);
   });

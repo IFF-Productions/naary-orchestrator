@@ -101,7 +101,8 @@ function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
     kind === "start" ||
     kind === "webhookTrigger" ||
     kind === "errorTrigger" ||
-    kind === "formTrigger";
+    kind === "formTrigger" ||
+    kind === "chatTrigger";
   const subtitle = nodeSubtitle(kind, data.config);
   return (
     <div
@@ -1859,6 +1860,53 @@ function ConfigPanel({
             server-side when you save. Examples: <code>*/15 * * * *</code>{" "}
             (every 15 min), <code>0 9 * * 1-5</code> (weekdays 9am),{" "}
             <code>0 0 1 * *</code> (1st of the month).
+          </div>
+        </>
+      )}
+
+      {kind === "chatTrigger" && (
+        <>
+          <Labeled label="Chat title (optional)">
+            <input
+              value={str("title")}
+              onChange={(e) => onChange({ title: e.target.value })}
+              style={inputStyle}
+              placeholder="Ask us anything"
+            />
+          </Labeled>
+          <Labeled label="Description (optional)">
+            <input
+              value={str("description")}
+              onChange={(e) => onChange({ description: e.target.value })}
+              style={inputStyle}
+              placeholder="We're here to help."
+            />
+          </Labeled>
+          <Labeled label="Input placeholder (optional)">
+            <input
+              value={str("placeholder")}
+              onChange={(e) => onChange({ placeholder: e.target.value })}
+              style={inputStyle}
+              placeholder="Type a message…"
+            />
+          </Labeled>
+          <Labeled label="Greeting (optional)">
+            <input
+              value={str("greeting")}
+              onChange={(e) => onChange({ greeting: e.target.value })}
+              style={inputStyle}
+              placeholder="Hi! How can I help?"
+            />
+          </Labeled>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
+            The message + session id arrive as <code>{node.id}</code>. The
+            public chat page + durable session are later slices.
           </div>
         </>
       )}
