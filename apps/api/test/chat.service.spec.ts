@@ -24,6 +24,14 @@ describe("ChatService.createEndpoint", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("rejects a whitespace-only workflowId (would be an unusable endpoint)", async () => {
+    getBudget.mockResolvedValue({ monthlyCapUsd: 50 });
+    await expect(
+      new ChatService().createEndpoint("t-1", "   "),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("registers and returns the public path when a budget cap exists", async () => {
     getBudget.mockResolvedValue({ monthlyCapUsd: 50 });
     create.mockResolvedValue({ id: "c-1" });

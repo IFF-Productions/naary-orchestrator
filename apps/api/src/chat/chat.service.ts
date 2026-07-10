@@ -28,6 +28,10 @@ export class ChatService {
     tenantId: string,
     workflowId: string,
   ): Promise<RegisteredChat> {
+    // @IsNotEmpty() treats "   " as non-empty; trim + reject so we never register a chat whose
+    // workflowId can't resolve a graph (an unusable public endpoint).
+    const key = workflowId.trim();
+    if (!key) throw new BadRequestException("workflowId is required");
     const budget = await getBudget(tenantId);
     if (!budget) {
       throw new BadRequestException(
@@ -36,7 +40,7 @@ export class ChatService {
       );
     }
     const row = await getPrisma().chatEndpoint.create({
-      data: { tenantId, workflowId },
+      data: { tenantId, workflowId: key },
     });
     return { chatId: row.id, chatPath: `/c/${row.id}` };
   }

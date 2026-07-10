@@ -56,14 +56,18 @@ export function ChatPage() {
     setSending(true);
     try {
       const res = await api.sendChatMessage(chatId, text, sessionId.current);
+      // "started" = the workflow ran but didn't respond synchronously (no Respond node / timed out).
+      // Show that explicitly rather than a permanent "…" that looks like it's still typing.
       const reply =
-        res.reply == null
-          ? "…"
-          : typeof res.reply === "string"
-            ? res.reply
-            : typeof (res.reply as { reply?: unknown }).reply === "string"
-              ? String((res.reply as { reply?: unknown }).reply)
-              : JSON.stringify(res.reply);
+        res.status !== "replied"
+          ? "The assistant didn't reply in time — add a Respond node to your chat workflow."
+          : res.reply == null
+            ? "(no reply)"
+            : typeof res.reply === "string"
+              ? res.reply
+              : typeof (res.reply as { reply?: unknown }).reply === "string"
+                ? String((res.reply as { reply?: unknown }).reply)
+                : JSON.stringify(res.reply);
       setTurns((t) => [...t, { role: "assistant", text: reply }]);
     } catch {
       setTurns((t) => [
@@ -228,6 +232,7 @@ export function ChatPage() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder={def.placeholder ?? "Type a message…"}
+                aria-label="Chat message"
                 disabled={sending}
                 style={{
                   flex: 1,
