@@ -25,10 +25,18 @@ nodes.
 
 ### 2.1 Data shape (additive, back-compatible)
 - An edge value is normalized to `Item[]` where `Item = { json: Record<string, unknown>, binary?: BinaryRef }`.
-- `ctx[nodeId]` keeps holding the node's output, but the interpreter also tracks an **items view**
-  `items[nodeId]: Item[]`. A legacy single-object output is treated as `[{ json: output }]`
-  (one item). This is the migration hinge: **every existing graph keeps working** because one
-  object == a one-item array.
+- **COEXIST (decided — the hinge of the whole program):** `ctx[nodeId]` (a node's raw output)
+  CONTINUES to exist and stays the source of truth for every existing read — `getByPath(ctx[from],
+  path)`, edge conditions, bindings are **untouched**. The **items view** `items[nodeId]: Item[]`
+  is an ADDITIVE projection on top, defined as `items[nodeId] === toItems(ctx[nodeId])`. Because the
+  view is derived from `ctx` and never replaces it, no back-compat read ever reconstructs a scalar
+  from items — so there is deliberately **no `fromItems`** (its length-collapse would reintroduce the
+  wrapped-array-vs-two-item ambiguity this model exists to kill). A legacy single-object output is
+  `[{ json: output }]` (one item): **every existing graph keeps working** because one object == a
+  one-item array.
+- `Item` is minimal — `{ json }` — in Slice 1. `binary` is intentionally NOT modeled yet; when it
+  lands it MUST reuse the existing claim-check machinery (`resolveClaimChecks`/`maybeOffload`/the
+  object store), so it is defined WITH its consumer, later.
 - `binary` never inlines bytes into Temporal history — it's a claim-check reference to object
   storage (reuse the existing payload-offload store). Determinism + the 2MB payload cap are safe.
 
@@ -54,9 +62,13 @@ nodes.
 
 ## 3. Roadmap — stacked slices
 
-1. **Normalize layer (no behavior change).** Introduce `Item[]` + the `items[nodeId]` view;
-   wrap every current output as a one-item array; every node still sees `.json` of item 0. Ship
-   green with zero graph changes. *(Pure plumbing; the whole migration rests on this.)*
+1. **Normalize layer (no behavior change).** ✅ **SHIPPED (Slice 1).** Ships ONLY the normalize
+   primitive in `@naary/dsl` — `Item = { json }`, `toItems(value) = [{ json: value }]` (always
+   wraps; never splits an array; never auto-detects `Item[]`), and `itemsJson(items)`. **No
+   interpreter change** — the `items[nodeId]` view + map-over-items land in Slice 2 behind
+   `workflow.patched()`, per the COEXIST contract in §2.1. `fromItems` and `binary` are deliberately
+   deferred until they have a consumer (see §2.1). *(Pure plumbing; the whole migration rests on
+   the contract, not the two functions.)*
 2. **Item-wise pure map.** `itemMode` in the registry; interpreter maps pure item-wise nodes over
    items. `set`/`text`/`if`-per-item become real maps. Tests: 0/1/N items, empty array identity.
 3. **Batched map-activity for agent/httpRequest.** `mapNode` activity loops with bounded
