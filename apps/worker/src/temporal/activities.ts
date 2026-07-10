@@ -2654,8 +2654,10 @@ export async function mapNode(
       if (err instanceof ApplicationFailure && err.type === "MAPNODE_TYPE") {
         throw err;
       }
+      // Cap the per-item message (× N items enters history — keep the payload bounded).
+      const raw = err instanceof Error ? err.message : String(err);
       outputs[i] = {
-        error: err instanceof Error ? err.message : String(err),
+        error: raw.length > 500 ? `${raw.slice(0, 500)}…` : raw,
       };
     }
   };

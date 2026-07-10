@@ -99,10 +99,12 @@ const { callHttpRequest } = wf.proxyActivities<typeof activities>({
 
 // Items model A3: the batched per-item map. maxAttempts:1 — mapNode catches per-item errors and
 // returns them, so it only throws on a genuine infra crash; retrying a batch of non-idempotent I/O
-// would re-charge + duplicate side effects (design §0.3). Generous start-to-close: it makes up to N
-// underlying calls (bounded concurrency), each with its own in-activity deadline.
+// would re-charge + duplicate side effects (design §0.3). The start-to-close must cover the WORST
+// case, or a healthy batch times out (an infra-throw): up to MAX_MAP_BATCH_ITEMS (100) items at
+// concurrency 10 = 10 waves, and the slowest per-item deadline is httpRequest's ~150s → ~25 min.
+// 40 min leaves headroom; the per-item calls hold their own in-activity deadlines.
 const { mapNode } = wf.proxyActivities<typeof activities>({
-  startToCloseTimeout: "10 minutes",
+  startToCloseTimeout: "40 minutes",
   retry: { maximumAttempts: 1 },
 });
 

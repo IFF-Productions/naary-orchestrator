@@ -31,7 +31,7 @@ describe("mapNode (items model A3 batched map)", () => {
   });
 
   it("FAIL-SAFE: a mid-batch failure returns {error} for that item, keeps completed items billed, and never throws", async () => {
-    // item 1 (index 1) throws AFTER items 0 + 2 make real (billed) calls.
+    // the middle item (n===2, index 1) throws; the other two (n===1, n===3) make real billed calls.
     const runAgent = vi
       .spyOn(__mapDeps, "runAgent")
       .mockImplementation(async (_cfg, input) => {
@@ -55,6 +55,16 @@ describe("mapNode (items model A3 batched map)", () => {
     expect(res.outputs[2]).toMatchObject({ output: { n: 3 } });
     // cost = the TWO completed items only (the failed one made no billable return)
     expect(res.costUsd).toBeCloseTo(0.1);
+  });
+
+  it("caps a huge per-item error message (× N enters history)", async () => {
+    vi.spyOn(__mapDeps, "runAgent").mockRejectedValue(
+      new Error("x".repeat(5000)),
+    );
+    const res = await mapNode("agent", [{ cfg: {}, input: {} }], meta);
+    const msg = (res.outputs[0] as { error: string }).error;
+    expect(msg.length).toBeLessThanOrEqual(501); // 500 + the ellipsis
+    expect(msg.endsWith("…")).toBe(true);
   });
 
   it("shapes httpRequest output to {status, headers, body}", async () => {
