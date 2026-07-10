@@ -151,6 +151,18 @@ model FormEndpoint {
   @@index([tenantId])
 }
 
+// A hosted public chat (chatTrigger) that starts a workflow per message. Like FormEndpoint there is
+// NO secret — the opaque `id` is the only capability; the widget config is read live from the graph's
+// chatTrigger node. (design docs/design/CHAT-TRIGGER-RAG.md)
+model ChatEndpoint {
+  id         String   @id @default(uuid())
+  workflowId String // which graph (workflowKey) this chat starts
+  tenantId   String
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId])
+}
+
 // Delivery-id dedupe so provider retries don't start duplicate executions.
 model WebhookDelivery {
   id         String   @id @default(uuid())

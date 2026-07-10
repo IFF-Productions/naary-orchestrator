@@ -487,6 +487,39 @@ export const api = {
       body: JSON.stringify(data),
     });
   },
+  // --- Hosted chats (public chatTrigger endpoints) ---
+  listChats(tenantId: string): Promise<ChatRow[]> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/chats`);
+  },
+  createChat(
+    tenantId: string,
+    input: { workflowId: string },
+  ): Promise<RegisteredChat> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/chats`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+  deleteChat(tenantId: string, chatId: string): Promise<void> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/chats/${encodeURIComponent(chatId)}`,
+      { method: "DELETE" },
+    );
+  },
+  // PUBLIC (anonymous — no auth): the hosted chat's definition + send-a-message.
+  getChatDefinition(chatId: string): Promise<ChatDefinition> {
+    return http(`/chat/${encodeURIComponent(chatId)}`);
+  },
+  sendChatMessage(
+    chatId: string,
+    message: string,
+    sessionId: string,
+  ): Promise<{ status: string; reply?: unknown }> {
+    return http(`/chat/${encodeURIComponent(chatId)}`, {
+      method: "POST",
+      body: JSON.stringify({ message, sessionId }),
+    });
+  },
   // --- Billing ---
   // Budget config + live month-to-date spend. Tenant-scoped. The server returns 404
   // (→ generic Error, not UnauthorizedError) when no budget is configured.
@@ -622,6 +655,28 @@ export interface FormDefinition {
   description?: string;
   submitLabel?: string;
   fields: FormFieldView[];
+}
+
+/** A registered hosted-chat endpoint (no secret — the opaque id is the only capability). */
+export interface ChatRow {
+  id: string;
+  workflowId: string;
+  createdAt: string;
+}
+
+/** Returned when registering a chat — the public path to host/share. */
+export interface RegisteredChat {
+  chatId: string;
+  chatPath: string;
+}
+
+/** Public chat definition served to an anonymous browser — carries NO tenant/workflow ids. */
+export interface ChatDefinition {
+  chatId: string;
+  title?: string;
+  description?: string;
+  placeholder?: string;
+  greeting?: string;
 }
 
 /** A run paused at an approval, enriched with the node's prompt (approvals inbox). */

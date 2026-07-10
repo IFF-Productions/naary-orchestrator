@@ -1,0 +1,113 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { BadRequestException, NotFoundException } from "@nestjs/common";
+import type { GraphDef } from "@naary/dsl";
+import { ChatController } from "../src/chat/chat.controller";
+
+const CHAT_GRAPH: GraphDef = {
+  startNodeId: "chat",
+  nodes: [
+    { id: "chat", type: "chatTrigger", config: { title: "Support" } as never },
+    { id: "end", type: "end" },
+  ],
+  edges: [{ from: "chat", to: "end" }],
+};
+
+function makeController(opts: {
+  endpoint?: unknown;
+  graph?: GraphDef | null;
+  awaitResult?: { workflowId: string; response?: { body?: unknown } };
+}) {
+  const chats = { getEndpoint: vi.fn().mockResolvedValue(opts.endpoint) };
+  const graphs = {
+    getLatest: vi
+      .fn()
+      .mockResolvedValue(
+        opts.graph === null ? null : { graph: opts.graph ?? CHAT_GRAPH },
+      ),
+  };
+  const executions = {
+    startChatAwaitResponse: vi
+      .fn()
+      .mockResolvedValue(opts.awaitResult ?? { workflowId: "chat-1" }),
+  };
+  const controller = new ChatController(
+    chats as never,
+    graphs as never,
+    executions as never,
+  );
+  return { controller, chats, graphs, executions };
+}
+
+const ENDPOINT = { id: "c-1", tenantId: "t-1", workflowId: "support-chat" };
+
+describe("ChatController (public)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("GET serves the definition WITHOUT tenant/workflow identifiers", async () => {
+    const { controller } = makeController({ endpoint: ENDPOINT });
+    const def = await controller.definition("c-1");
+    const s = JSON.stringify(def);
+    expect(s).not.toContain("t-1");
+    expect(s).not.toContain("support-chat");
+    expect(def).toEqual({ chatId: "c-1", title: "Support" });
+  });
+
+  it("GET 404s when the graph's entry node isn't a chatTrigger", async () => {
+    const wh: GraphDef = {
+      startNodeId: "wh",
+      nodes: [{ id: "wh", type: "webhookTrigger" }],
+      edges: [],
+    };
+    const { controller } = makeController({ endpoint: ENDPOINT, graph: wh });
+    await expect(controller.definition("c-1")).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it("POST runs the chat and returns the graph's reply (no workflowId leaked)", async () => {
+    const { controller, executions } = makeController({
+      endpoint: ENDPOINT,
+      awaitResult: {
+        workflowId: "chat-t-1-9",
+        response: { body: { reply: "Hi there" } },
+      },
+    });
+    const out = await controller.message("c-1", {
+      message: "hello",
+      sessionId: "s-1",
+    });
+    expect(out).toEqual({ status: "replied", reply: { reply: "Hi there" } });
+    expect(JSON.stringify(out)).not.toContain("t-1");
+    expect(executions.startChatAwaitResponse).toHaveBeenCalledWith(
+      "t-1",
+      { graph: CHAT_GRAPH },
+      { message: "hello", sessionId: "s-1" },
+      "support-chat",
+    );
+  });
+
+  it("POST returns status 'started' when the graph doesn't reply in time", async () => {
+    const { controller } = makeController({
+      endpoint: ENDPOINT,
+      awaitResult: { workflowId: "chat-1" }, // no response
+    });
+    const out = await controller.message("c-1", { message: "hello" });
+    expect(out).toEqual({ status: "started" });
+  });
+
+  it("POST 400s on a blank message and never starts a run", async () => {
+    const { controller, executions } = makeController({ endpoint: ENDPOINT });
+    await expect(
+      controller.message("c-1", { message: "" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(executions.startChatAwaitResponse).not.toHaveBeenCalled();
+  });
+
+  it("POST 404s (no run) when the endpoint is unknown", async () => {
+    const { controller, executions } = makeController({ endpoint: null });
+    await expect(
+      controller.message("nope", { message: "hi" }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(executions.startChatAwaitResponse).not.toHaveBeenCalled();
+  });
+});

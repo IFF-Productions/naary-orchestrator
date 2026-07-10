@@ -328,6 +328,44 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       event,
       workflowKey,
     );
+    const response = await this.pollForResponse(workflowId, opts);
+    return response ? { workflowId, response } : { workflowId };
+  }
+
+  /**
+   * Start a CHAT run (input `{ message, sessionId }` from the chatTrigger) AND wait (bounded) for the
+   * graph's `respondToWebhook` node to set the reply — the chat's answer. Same durable-response
+   * mechanism as the webhook path; a run that never replies degrades to `{ workflowId }`. (Durable
+   * per-session conversation state is a later slice; this is single-turn.)
+   */
+  async startChatAwaitResponse(
+    tenantId: string,
+    snapshot: GraphSnapshot,
+    input: { message: string; sessionId: string },
+    workflowKey: string,
+    opts: { timeoutMs?: number; pollMs?: number } = {},
+  ): Promise<{ workflowId: string; response?: WebhookResponse }> {
+    await this.assertActive(tenantId, workflowKey);
+    const { workflowId } = await this.startGraph(
+      `chat-${tenantId}`,
+      snapshot,
+      input,
+      tenantId,
+      workflowKey,
+    );
+    const response = await this.pollForResponse(workflowId, opts);
+    return response ? { workflowId, response } : { workflowId };
+  }
+
+  /**
+   * Poll a run's `respondToWebhook` response query until it's set, the run closes, or the timeout
+   * elapses. Never throws (a query hiccup keeps polling); returns undefined if no response arrives.
+   * Shared by the webhook + chat synchronous-reply paths.
+   */
+  private async pollForResponse(
+    workflowId: string,
+    opts: { timeoutMs?: number; pollMs?: number } = {},
+  ): Promise<WebhookResponse | undefined> {
     const timeoutMs = opts.timeoutMs ?? 10_000;
     const pollMs = opts.pollMs ?? 150;
     const handle = this.client.workflow.getHandle(workflowId);
@@ -336,24 +374,21 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     while (Date.now() < deadline) {
       try {
         const response = await handle.query(webhookResponseQuery);
-        if (response) return { workflowId, response };
-        // Not set yet — stop early if the run has already closed. But re-query ONCE
-        // first: the run may have set the response AND completed between this query
-        // and the describe (the node is often right before `end`). A closed run
-        // still answers queries from its final state.
+        if (response) return response;
+        // Not set yet — stop early if the run has already closed, but re-query ONCE first (the run
+        // may have set the response AND completed between this query and the describe).
         const desc = await handle.describe();
         if (desc.status.name !== "RUNNING") {
-          const final = await handle
+          return await handle
             .query(webhookResponseQuery)
             .catch(() => undefined);
-          return final ? { workflowId, response: final } : { workflowId };
         }
       } catch {
         // Transient replay/worker hiccup — keep polling until the deadline.
       }
       await new Promise((r) => setTimeout(r, pollMs));
     }
-    return { workflowId };
+    return undefined;
   }
 
   /** Throw 409 if the workflow is deactivated. The gate for AUTOMATIC triggers only (webhook/form);

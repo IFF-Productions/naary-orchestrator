@@ -191,6 +191,42 @@ async function globalSetup(_config: FullConfig): Promise<void> {
     }),
   }).catch(() => undefined);
 
+  // Seed a chat-trigger graph: chatTrigger → respondToWebhook (echoes the message back as the reply)
+  // → end. Hermetic (no LLM). The chat-page e2e registers a chat against this key and messages it.
+  // workflowKey "e2e-chat".
+  await fetch(`${API_BASE}/graphs`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      workflowKey: "e2e-chat",
+      name: "E2E hosted chat",
+      graph: {
+        startNodeId: "chat",
+        nodes: [
+          {
+            id: "chat",
+            type: "chatTrigger",
+            config: { title: "E2E Chat", greeting: "Hi there!" },
+          },
+          {
+            id: "reply",
+            type: "respondToWebhook",
+            // Echo the inbound message straight back as the reply (proves the round-trip).
+            config: { bodyBinding: { from: "chat", path: "message" } },
+          },
+          { id: "end", type: "end" },
+        ],
+        edges: [
+          { from: "chat", to: "reply" },
+          { from: "reply", to: "end" },
+        ],
+      },
+    }),
+  }).catch(() => undefined);
+
   const authDir = path.resolve(cwd, "e2e/.auth");
   mkdirSync(authDir, { recursive: true });
   writeFileSync(
