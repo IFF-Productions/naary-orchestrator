@@ -20,7 +20,7 @@ beforeEach(() => {
   __setObjectStore(new MemoryObjectStore());
   executeRaw.mockReset().mockResolvedValue(1);
   queryRaw.mockReset().mockResolvedValue([]);
-  vi.spyOn(__agentDeps, "recordUsage").mockResolvedValue(undefined);
+  vi.spyOn(__agentDeps, "recordUsage").mockResolvedValue(undefined as never);
 });
 afterEach(() => vi.restoreAllMocks());
 
