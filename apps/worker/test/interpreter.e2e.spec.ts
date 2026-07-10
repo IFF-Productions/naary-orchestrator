@@ -901,6 +901,23 @@ describe("runGraph interpreter — items model (splitOut region)", () => {
     });
   });
 
+  it("region-node executions count toward the step breaker (a wide region × N trips it)", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      // start + splitOut + per item (item step + 1 region node) → exceeds a low cap mid-loop.
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          itemsGraph(),
+          { items: [{ n: 1 }, { n: 2 }, { n: 3 }, { n: 4 }, { n: 5 }] },
+          { tenantId: "t-items", maxStepsPerRun: 4 },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-breaker",
+      });
+      expect((await handle.result()).status).toBe("circuit_open");
+    });
+  });
+
   it("a missing/undefined split source is treated as empty (no error)", async () => {
     const worker = await makeWorker();
     await worker.runUntil(async () => {

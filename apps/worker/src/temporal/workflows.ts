@@ -1220,16 +1220,19 @@ export async function runGraph(
           const collected: unknown[] = [];
           let firstIter: Record<string, unknown> | undefined;
 
+          const overBudget = (): boolean =>
+            runCtx.maxStepsPerRun !== undefined &&
+            stepCount > runCtx.maxStepsPerRun;
+
           for (let i = 0; i < items.length; i++) {
-            stepCount++; // each item is a logical step (bounds a runaway splitOut via the breaker)
-            if (
-              runCtx.maxStepsPerRun !== undefined &&
-              stepCount > runCtx.maxStepsPerRun
-            ) {
-              return "circuit_open";
-            }
+            stepCount++; // the item itself is a step (bounds an empty region over a huge array)
+            if (overBudget()) return "circuit_open";
             ctx[current] = items[i]; // the current item — region nodes bind to splitOut to read it
             for (const rid of region.regionNodeIds) {
+              // Count EVERY region-node execution toward the breaker (like a node in the normal
+              // chain) so a wide region × N items can't outrun maxStepsPerRun.
+              stepCount++;
+              if (overBudget()) return "circuit_open";
               const rnode = nodeById.get(rid);
               if (!rnode) return "invalid_graph";
               currentNodeId = rid; // attribute a mid-region failure to the actual node, not splitOut

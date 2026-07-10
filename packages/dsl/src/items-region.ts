@@ -10,7 +10,7 @@
  * both call it, so they can never disagree about what a region is.
  */
 import { isPureNode } from "./pure-node";
-import type { GraphDef } from "./types";
+import type { EdgeDef, GraphDef } from "./types";
 
 export interface ItemsRegion {
   splitOutId: string;
@@ -42,15 +42,23 @@ function regionAllowed(type: string): boolean {
  */
 export function computeItemsRegions(graph: GraphDef): ItemsRegionResult {
   const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
+  // Precompute adjacency ONCE (O(edges)) so the per-splitOut walk is O(1) lookups, not repeated
+  // full-edge scans — this also runs in the interpreter precompute, so keep it linear.
+  const outEdges = new Map<string, EdgeDef[]>();
+  const inEdges = new Map<string, EdgeDef[]>();
+  for (const e of graph.edges) {
+    (outEdges.get(e.from) ?? outEdges.set(e.from, []).get(e.from)!).push(e);
+    (inEdges.get(e.to) ?? inEdges.set(e.to, []).get(e.to)!).push(e);
+  }
   const outFrom = (id: string): string[] =>
-    graph.edges.filter((e) => e.from === id).map((e) => e.to);
+    (outEdges.get(id) ?? []).map((e) => e.to);
   const inTo = (id: string): string[] =>
-    graph.edges.filter((e) => e.to === id).map((e) => e.from);
-  /** True if `id`'s single outgoing edge carries a condition. The region runs its body
-   *  UNCONDITIONALLY once per item, so a conditional edge inside it would be silently ignored —
-   *  reject it at save (the interpreter never evaluates intra-region conditions). */
+    (inEdges.get(id) ?? []).map((e) => e.from);
+  /** True if `id`'s outgoing edge carries a condition. The region runs its body UNCONDITIONALLY
+   *  once per item, so a conditional edge inside it would be silently ignored — reject it at save
+   *  (the interpreter never evaluates intra-region conditions). */
   const hasConditionalOut = (id: string): boolean =>
-    graph.edges.some((e) => e.from === id && e.condition !== undefined);
+    (outEdges.get(id) ?? []).some((e) => e.condition !== undefined);
 
   const regions: ItemsRegion[] = [];
   const claimedLoopEnds = new Set<string>();
