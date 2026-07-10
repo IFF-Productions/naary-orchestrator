@@ -65,4 +65,46 @@ export class ChatService {
   getEndpoint(chatId: string): Promise<ChatEndpoint | null> {
     return getPrisma().chatEndpoint.findUnique({ where: { id: chatId } });
   }
+
+  /** Load the last `limit` turns of a session's conversation (oldest-first) to thread into the next
+   *  run's input, so the agent has memory (design §2.1b option B). Empty for a new session. */
+  async loadHistory(
+    tenantId: string,
+    chatId: string,
+    sessionId: string,
+    limit = 20,
+  ): Promise<{ role: string; text: string }[]> {
+    if (!sessionId) return [];
+    const rows = await getPrisma().chatMessage.findMany({
+      where: { tenantId, chatId, sessionId },
+      orderBy: { createdAt: "desc" },
+      take: Math.min(Math.max(limit, 1), 100),
+      select: { role: true, text: true },
+    });
+    return rows.reverse(); // desc fetch (newest N) → return oldest-first
+  }
+
+  /** Persist a completed turn (user message + the assistant reply). Best-effort ordering via
+   *  createdAt; the user row is written first so it sorts before the reply. No-op without a session. */
+  async appendTurn(
+    tenantId: string,
+    chatId: string,
+    sessionId: string,
+    userText: string,
+    assistantText: string,
+  ): Promise<void> {
+    if (!sessionId) return;
+    await getPrisma().chatMessage.create({
+      data: { tenantId, chatId, sessionId, role: "user", text: userText },
+    });
+    await getPrisma().chatMessage.create({
+      data: {
+        tenantId,
+        chatId,
+        sessionId,
+        role: "assistant",
+        text: assistantText,
+      },
+    });
+  }
 }

@@ -341,7 +341,11 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   async startChatAwaitResponse(
     tenantId: string,
     snapshot: GraphSnapshot,
-    input: { message: string; sessionId: string },
+    input: {
+      message: string;
+      sessionId: string;
+      history?: { role: string; text: string }[];
+    },
     workflowKey: string,
     opts: { timeoutMs?: number; pollMs?: number } = {},
   ): Promise<{ workflowId: string; response?: WebhookResponse }> {

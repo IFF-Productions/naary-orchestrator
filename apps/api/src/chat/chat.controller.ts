@@ -46,17 +46,41 @@ export class ChatController {
     const { endpoint, snapshot } = await this.resolve(chatId);
     const result = validateMessage(body);
     if (!result.ok) throw new BadRequestException(result.error);
+    // Cross-message memory (design §2.1b, B): load the session's history and thread it into the run
+    // so the agent has context (bind an agent's prompt to `<chatTrigger>.history`).
+    const history = await this.chats.loadHistory(
+      endpoint.tenantId,
+      chatId,
+      result.sessionId,
+    );
     const { response } = await this.executions.startChatAwaitResponse(
       endpoint.tenantId,
       snapshot,
-      { message: result.message, sessionId: result.sessionId },
+      { message: result.message, sessionId: result.sessionId, history },
       endpoint.workflowId,
     );
-    // No workflowId leaked (it embeds the tenantId). The reply is whatever the graph's
-    // respondToWebhook node set; a graph that doesn't reply in time yields status "started".
-    return response
-      ? { status: "replied", reply: response.body ?? null }
-      : { status: "started" };
+    if (!response) return { status: "started" }; // ran but didn't reply in time — don't persist
+
+    const reply = response.body ?? null;
+    // Persist the turn so the next message sees it. Best-effort — a store hiccup must not fail the
+    // reply the caller is waiting on.
+    const replyText =
+      typeof reply === "string"
+        ? reply
+        : reply == null
+          ? ""
+          : JSON.stringify(reply);
+    await this.chats
+      .appendTurn(
+        endpoint.tenantId,
+        chatId,
+        result.sessionId,
+        result.message,
+        replyText,
+      )
+      .catch(() => undefined);
+    // No workflowId leaked (it embeds the tenantId).
+    return { status: "replied", reply };
   }
 
   /** Shared resolution: endpoint → current graph snapshot → public definition. 404 on any miss. */
