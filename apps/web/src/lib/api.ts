@@ -506,6 +506,34 @@ export const api = {
       { method: "DELETE" },
     );
   },
+  // PUBLIC (anonymous — no auth): approve/reject a run via a signed link token.
+  getApprovalPrompt(
+    workflowId: string,
+    token: string,
+  ): Promise<{
+    awaiting: boolean;
+    title?: string;
+    instructions?: string | null;
+  }> {
+    return http(
+      `/approvals/${encodeURIComponent(workflowId)}?token=${encodeURIComponent(token)}`,
+    );
+  },
+  decideApproval(
+    workflowId: string,
+    token: string,
+    decision: "approve" | "reject",
+    comment?: string,
+  ): Promise<{ status: string }> {
+    return http(`/approvals/${encodeURIComponent(workflowId)}/decide`, {
+      method: "POST",
+      body: JSON.stringify({
+        token,
+        decision,
+        ...(comment ? { comment } : {}),
+      }),
+    });
+  },
   // PUBLIC (anonymous — no auth): the hosted chat's definition + send-a-message.
   getChatDefinition(chatId: string): Promise<ChatDefinition> {
     return http(`/chat/${encodeURIComponent(chatId)}`);

@@ -30,6 +30,11 @@ export const router = createBrowserRouter([
     path: "/c/:chatId",
     ...lazy(() => import("./screens/ChatPage"), "ChatPage"),
   },
+  // Public approve/reject decision page (signed link) — anonymous, OUTSIDE RequireAuth.
+  {
+    path: "/approve/:workflowId",
+    ...lazy(() => import("./screens/ApprovePage"), "ApprovePage"),
+  },
   // Everything under here requires a Keycloak session or a pasted nry_ token.
   {
     element: <RequireAuth />,

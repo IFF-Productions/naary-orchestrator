@@ -537,6 +537,48 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Approve/reject a paused run authorized by a signed link token (not a bearer) — the public
+   *  approval-decision path. No tenant assertion (the HMAC token IS the authorization; the caller
+   *  verified it). Mirrors resumeByToken's closed-run handling. */
+  async decideByToken(
+    workflowId: string,
+    approved: boolean,
+    comment?: string,
+  ): Promise<void> {
+    const handle = this.client.workflow.getHandle(workflowId);
+    // GUARD (public signed link): only decide a run that is CURRENTLY awaiting approval. Temporal
+    // buffers a signal sent to a running-but-not-yet-paused run, so without this a stale link
+    // clicked later could be "saved up" and auto-satisfy a FUTURE humanApproval pause (a graph that
+    // loops or has multiple approvals). Query the live state first; anything but awaiting → 409.
+    let status: string;
+    try {
+      status = (await handle.query(stateQuery)).status;
+    } catch (e) {
+      if (e instanceof WorkflowNotFoundError) {
+        throw new ConflictException("Run not found or already closed.");
+      }
+      throw e;
+    }
+    if (status !== "awaiting_approval") {
+      throw new ConflictException(
+        "Run is not awaiting approval (already decided, completed, or timed out).",
+      );
+    }
+    try {
+      await handle.signal(approvalSignal, {
+        approved,
+        ...(comment ? { comment } : {}),
+      });
+    } catch (e) {
+      if (e instanceof WorkflowNotFoundError) {
+        throw new ConflictException(
+          "Run is not awaiting approval (already completed, rejected, or timed out).",
+        );
+      }
+      throw e;
+    }
+  }
+
   /** The relative resume-URL path for a run, for the owner's UI to display/copy. Tenant-scoped. */
   async getResumePath(workflowId: string, tenantId: string): Promise<string> {
     await this.assertOwner(workflowId, tenantId);
@@ -607,6 +649,38 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       }),
     );
     return items.filter((x): x is AwaitingApproval => x !== null);
+  }
+
+  /** Public (token-authed) approval prompt lookup by workflowId — for the signed-link decision page.
+   *  Resolves tenant/workflowKey from the Execution row (no bearer), confirms the run is still
+   *  awaiting, and returns the node's prompt. Degrades to `{ awaiting: false }` on any miss. */
+  async promptByWorkflowId(workflowId: string): Promise<{
+    awaiting: boolean;
+    title?: string;
+    instructions?: string | null;
+  }> {
+    const row = await getPrisma().execution.findUnique({
+      where: { workflowId },
+    });
+    if (!row) return { awaiting: false };
+    try {
+      const s = await this.client.workflow
+        .getHandle(workflowId)
+        .query(stateQuery);
+      if (s.status !== "awaiting_approval") return { awaiting: false };
+      const prompt = await this.approvalPrompt(
+        row.tenantId,
+        row.workflowKey,
+        s.currentNodeId,
+      );
+      return {
+        awaiting: true,
+        title: prompt.title,
+        instructions: prompt.instructions,
+      };
+    } catch {
+      return { awaiting: false };
+    }
   }
 
   /** Resolve a humanApproval node's title/instructions from the tenant's stored graph. */

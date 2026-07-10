@@ -848,11 +848,28 @@ export const __notifyDeps = {
   assertEgressAllowed,
 };
 
+/**
+ * Signed approve/reject decision link for the pause notification (the notification-links gap). MUST
+ * match the API's `mintApprovalToken` (apps/api/.../approval-token.ts): HMAC-SHA256(ENCRYPTION_KEY,
+ * "approval:"+workflowId) — the API verifies it. `APP_BASE_URL` prepends the host; without a key it
+ * returns undefined (no link). The recipient clicks it to Approve/Reject WITHOUT opening the app.
+ */
+function approvalUrl(workflowId: string): string | undefined {
+  const key = process.env.ENCRYPTION_KEY;
+  if (!key) return undefined;
+  const token = createHmac("sha256", key)
+    .update(`approval:${workflowId}`)
+    .digest("hex");
+  const base = (process.env.APP_BASE_URL ?? "").replace(/\/$/, "");
+  return `${base}/approve/${encodeURIComponent(workflowId)}?token=${token}`;
+}
+
 /** Human-readable line for the notification (what a Slack/Teams webhook shows). */
 function notificationText(input: NotificationInput): string {
   const wf = input.workflowKey ? `"${input.workflowKey}"` : "a workflow";
   if (input.kind === "approval_pending") {
-    return `⏳ Approval needed on ${wf}${input.title ? `: ${input.title}` : ""} (run ${input.workflowId}).`;
+    const url = approvalUrl(input.workflowId);
+    return `⏳ Approval needed on ${wf}${input.title ? `: ${input.title}` : ""} (run ${input.workflowId}).${url ? ` Approve or reject: ${url}` : ""}`;
   }
   return `❌ ${wf} run failed${input.detail ? ` (${input.detail})` : ""} — run ${input.workflowId}.`;
 }
@@ -889,6 +906,9 @@ export async function sendNotification(
           workflowId: input.workflowId,
           workflowKey: input.workflowKey,
           title: input.title,
+          ...(input.kind === "approval_pending"
+            ? { approvalUrl: approvalUrl(input.workflowId) }
+            : {}),
         }),
         signal: controller.signal,
       });
@@ -2696,7 +2716,10 @@ const EMBED_DIM = 1536;
 export const __ragDeps = {
   getKey: (tenantId: string): Promise<string> =>
     getCredentials().getDecryptedKey(tenantId, "openai"),
-  embedOne: async (apiKey: string, value: string): Promise<{ embedding: number[]; tokens: number }> => {
+  embedOne: async (
+    apiKey: string,
+    value: string,
+  ): Promise<{ embedding: number[]; tokens: number }> => {
     const { createOpenAI } = await import("@ai-sdk/openai");
     const r = await embed({
       model: createOpenAI({ apiKey }).embedding(EMBED_MODEL),
@@ -2724,7 +2747,10 @@ function toVectorLiteral(v: number[]): string {
 
 /** Record embedding token usage (fail-safe — never a silent free call, Tier-1 #6). Embedding cost
  *  may be unpriced (computeCost returns 0), which is fine: tokens are still ledgered. */
-async function recordEmbedUsage(meta: AgentMeta, tokens: number): Promise<number> {
+async function recordEmbedUsage(
+  meta: AgentMeta,
+  tokens: number,
+): Promise<number> {
   await __agentDeps.recordUsage({
     tenantId: meta.tenantId,
     executionId: meta.executionId,
