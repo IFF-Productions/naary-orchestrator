@@ -27,10 +27,22 @@ export interface ItemsRegionResult {
   error: string | null;
 }
 
-/** Node types allowed inside an A2 region: pure nodes (no I/O, deterministic) + the no-op. A2
- *  regions run N times with a single signal handler, so durable/activity nodes are rejected. */
+/** "each" activity nodes that A3 can BATCH inside a region: one `mapNode` activity per node per run
+ *  loops them over the N items (design §0.3). This set MUST match what the `mapNode` activity
+ *  dispatches — a node allowed here but unhandled there would pass save-validation then fail at run.
+ *  DURABLE/control nodes (wait/humanApproval/respondToWebhook/executeSubWorkflow/forEach) stay banned
+ *  (N durable pauses with one signal handler is the frozen determinism hole). */
+export const BATCHABLE_REGION_ACTIVITIES: ReadonlySet<string> = new Set([
+  "agent",
+  "httpRequest",
+  "mcpTool",
+]);
+
+/** Node types allowed inside a region: pure nodes + no-op (A2) + the batchable activities (A3). */
 function regionAllowed(type: string): boolean {
-  return isPureNode(type) || type === "noOp";
+  return (
+    isPureNode(type) || type === "noOp" || BATCHABLE_REGION_ACTIVITIES.has(type)
+  );
 }
 
 /**

@@ -40,6 +40,7 @@ import {
   resolveWebhookResponse,
   asNodeConfig,
   computeItemsRegions,
+  BATCHABLE_REGION_ACTIVITIES,
   type ItemsRegion,
 } from "@naary/dsl";
 import type { GraphDef, NodeDef, NodeRetryPolicy } from "@naary/dsl";
@@ -79,6 +80,13 @@ const MAX_SUBWORKFLOW_DEPTH = 5;
  *  than this trips the circuit breaker — filter/limit upstream first. */
 const MAX_FOREACH_ITEMS = 100;
 
+/** Items model A3: max items a single splitOut region batches through ONE mapNode activity. The N
+ *  resolved configs (in) + N outputs (out) ride in Temporal history verbatim (no global codec), so
+ *  a very large N would cross the ~2MB payload cap and hard-fail the history write. Fail closed
+ *  BELOW the cap with a clear message; larger fan-out belongs in `forEach` (child runs, own history)
+ *  or an upstream chunk. (Per-payload claim-check offload to lift this is a later slice.) */
+const MAX_MAP_BATCH_ITEMS = 100;
+
 // The HTTP node's request deadline is user-configurable (up to MAX_HTTP_TIMEOUT_MS,
 // clamped in the activity), so it needs a start-to-close strictly ABOVE that cap —
 // otherwise Temporal would kill a slow-but-running request and RETRY it, duplicating
@@ -87,6 +95,15 @@ const MAX_FOREACH_ITEMS = 100;
 const { callHttpRequest } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "150 seconds",
   retry: { maximumAttempts: 3 },
+});
+
+// Items model A3: the batched per-item map. maxAttempts:1 — mapNode catches per-item errors and
+// returns them, so it only throws on a genuine infra crash; retrying a batch of non-idempotent I/O
+// would re-charge + duplicate side effects (design §0.3). Generous start-to-close: it makes up to N
+// underlying calls (bounded concurrency), each with its own in-activity deadline.
+const { mapNode } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "10 minutes",
+  retry: { maximumAttempts: 1 },
 });
 
 // Same reasoning as callHttpRequest: the per-query timeout (≤ MAX_SQL_TIMEOUT_MS,
@@ -1200,6 +1217,7 @@ export async function runGraph(
       if (node.type === "splitOut" && wf.patched("items-model-v1")) {
         const region = itemsRegionBySplit.get(current);
         if (region) {
+          const splitOutId = current; // narrowed to string here (the while-loop guard); stable id
           const splitCfg = asNodeConfig(
             resolveTemplates(
               (node.config ?? {}) as Record<string, unknown>,
@@ -1217,37 +1235,164 @@ export async function runGraph(
             );
           }
           const items = Array.isArray(arr) ? arr : [];
-          const collected: unknown[] = [];
+          const N = items.length;
+          let collected: unknown[] = [];
           let firstIter: Record<string, unknown> | undefined;
 
           const overBudget = (): boolean =>
             runCtx.maxStepsPerRun !== undefined &&
             stepCount > runCtx.maxStepsPerRun;
 
-          for (let i = 0; i < items.length; i++) {
-            stepCount++; // the item itself is a step (bounds an empty region over a huge array)
+          // A3 (design §0.3): a region containing a batchable ACTIVITY node runs NODE-major (one
+          // mapNode activity per node, N items batched). A PURE-only region keeps A2's exact
+          // item-major loop — safe because the graph is content-hash-snapshotted at run start, so an
+          // in-flight A2 run's region can never gain an activity and always takes the item-major path.
+          const hasActivity = region.regionNodeIds.some((rid) =>
+            BATCHABLE_REGION_ACTIVITIES.has(nodeById.get(rid)?.type ?? ""),
+          );
+
+          if (!hasActivity) {
+            // ── ITEM-MAJOR (A2, unchanged) ──
+            for (let i = 0; i < N; i++) {
+              stepCount++; // the item itself is a step (bounds an empty region over a huge array)
+              if (overBudget()) return "circuit_open";
+              ctx[current] = items[i]; // the current item — region nodes bind to splitOut to read it
+              for (const rid of region.regionNodeIds) {
+                stepCount++; // count every region-node execution toward the breaker
+                if (overBudget()) return "circuit_open";
+                const rnode = nodeById.get(rid);
+                if (!rnode) return "invalid_graph";
+                currentNodeId = rid; // attribute a mid-region failure to the actual node
+                try {
+                  const t = await execNode(rnode);
+                  if (t !== null) return t; // defensive: pure region nodes never return terminal
+                } catch (err) {
+                  if (rnode.onError !== "continue") throw err;
+                  ctx[rid] = { error: nodeErrorMessage(err) };
+                }
+              }
+              collected.push(ctx[region.collectFrom]);
+              if (i === 0) {
+                firstIter = { [current]: items[0] };
+                for (const rid of region.regionNodeIds)
+                  firstIter[rid] = ctx[rid];
+              }
+            }
+          } else {
+            // ── NODE-MAJOR (A3): process each region node fully (all N items) before the next ──
+            const regionOut = new Map<string, unknown[]>();
+            regionOut.set(splitOutId, items); // splitOut's per-item output IS the items
+            // Set ctx to frame `i` (splitOut + prior region nodes at index i) so pure execNode and
+            // the config resolvers read the current item.
+            const frameAt = (i: number): void => {
+              ctx[splitOutId] = items[i];
+              for (const [nid, outs] of regionOut) ctx[nid] = outs[i];
+            };
+            // The N "item" steps (matches item-major's per-item increment); region-node steps are
+            // added per node below.
+            stepCount += N;
             if (overBudget()) return "circuit_open";
-            ctx[current] = items[i]; // the current item — region nodes bind to splitOut to read it
             for (const rid of region.regionNodeIds) {
-              // Count EVERY region-node execution toward the breaker (like a node in the normal
-              // chain) so a wide region × N items can't outrun maxStepsPerRun.
-              stepCount++;
+              stepCount += N; // N executions of this node
               if (overBudget()) return "circuit_open";
               const rnode = nodeById.get(rid);
               if (!rnode) return "invalid_graph";
-              currentNodeId = rid; // attribute a mid-region failure to the actual node, not splitOut
-              try {
-                const t = await execNode(rnode);
-                if (t !== null) return t; // defensive: today's pure region nodes never return terminal
-              } catch (err) {
-                if (rnode.onError !== "continue") throw err;
-                ctx[rid] = { error: nodeErrorMessage(err) };
+              currentNodeId = rid;
+
+              if (BATCHABLE_REGION_ACTIVITIES.has(rnode.type)) {
+                // Payload-cap guard: N configs + N outputs ride in history verbatim (see
+                // MAX_MAP_BATCH_ITEMS). Fail closed rather than a cryptic history-write failure.
+                if (N > MAX_MAP_BATCH_ITEMS) {
+                  throw wf.ApplicationFailure.nonRetryable(
+                    `splitOut region node '${rid}' would batch ${N} items over the ${MAX_MAP_BATCH_ITEMS} cap — chunk upstream or use forEach`,
+                    "ITEMS_BATCH_TOO_LARGE",
+                  );
+                }
+                if (N === 0) {
+                  regionOut.set(rid, []); // empty region: no work, no wasted mapNode command
+                  continue;
+                }
+                // Resolve each item's activity payload (deterministic, in workflow), then ONE mapNode.
+                const mapItems: activities.MapNodeItem[] = [];
+                for (let i = 0; i < N; i++) {
+                  frameAt(i);
+                  const cfgR = resolveTemplates(
+                    (rnode.config ?? {}) as Record<string, unknown>,
+                    ctx,
+                  );
+                  let cfg: unknown;
+                  if (rnode.type === "httpRequest") {
+                    cfg = resolveHttpRequest(
+                      asNodeConfig(cfgR, "httpRequest"),
+                      ctx,
+                    );
+                  } else if (rnode.type === "mcpTool") {
+                    const m = asNodeConfig(cfgR, "mcpTool");
+                    cfg = {
+                      connectionId: m.connectionId,
+                      tool: m.tool,
+                      arguments: resolveMcpArguments(m, ctx),
+                      costUsd: m.costUsd,
+                    };
+                  } else {
+                    cfg = cfgR; // agent uses its resolved config directly
+                  }
+                  mapItems.push({ cfg, input: items[i] }); // input = the current item (frozen §0.3)
+                }
+                let res: activities.MapNodeResult;
+                try {
+                  res = await mapNode(rnode.type, mapItems, {
+                    tenantId: runCtx.tenantId,
+                    executionId: wf.workflowInfo().workflowId,
+                    nodeId: rid,
+                  });
+                } catch (err) {
+                  // An INFRA-level mapNode crash (maxAttempts:1). Respect onError:"continue" like
+                  // execNode does; else fail the run. (Per-ITEM errors don't throw — see below.)
+                  if (rnode.onError !== "continue") throw err;
+                  const msg = nodeErrorMessage(err);
+                  regionOut.set(
+                    rid,
+                    Array.from({ length: N }, () => ({ error: msg })),
+                  );
+                  continue;
+                }
+                costUsd += res.costUsd; // completed items already billed in-activity (fail-safe)
+                ctx.__costUsd = costUsd;
+                regionOut.set(rid, res.outputs);
+                const anyError = res.outputs.some(
+                  (o) =>
+                    o !== null &&
+                    typeof o === "object" &&
+                    "error" in (o as object),
+                );
+                if (anyError && rnode.onError !== "continue") {
+                  throw wf.ApplicationFailure.nonRetryable(
+                    `mapNode: an item failed in region node '${rid}'`,
+                    "ITEMS_MAPNODE_ITEM",
+                  );
+                }
+              } else {
+                // Pure region node, node-major: run once per item against frame i.
+                const outs: unknown[] = [];
+                for (let i = 0; i < N; i++) {
+                  frameAt(i);
+                  try {
+                    const t = await execNode(rnode);
+                    if (t !== null) return t;
+                  } catch (err) {
+                    if (rnode.onError !== "continue") throw err;
+                    ctx[rid] = { error: nodeErrorMessage(err) };
+                  }
+                  outs.push(ctx[rid]);
+                }
+                regionOut.set(rid, outs);
               }
             }
-            collected.push(ctx[region.collectFrom]);
-            if (i === 0) {
-              firstIter = { [current]: items[0] };
-              for (const rid of region.regionNodeIds) firstIter[rid] = ctx[rid];
+            collected = regionOut.get(region.collectFrom) ?? [];
+            if (N > 0) {
+              firstIter = {};
+              for (const [nid, outs] of regionOut) firstIter[nid] = outs[0];
             }
           }
 

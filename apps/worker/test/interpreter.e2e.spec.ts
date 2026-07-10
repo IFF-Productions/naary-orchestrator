@@ -180,7 +180,21 @@ const mockActivities = {
   },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
   setExecutionStatus: async (): Promise<void> => undefined, // read-model push; no-op here
+  // Items model A3: the batched per-item map. Echo each item's input so the test can prove the
+  // interpreter passed the CURRENT ITEM per iteration (not the run input N times).
+  mapNode: async (
+    nodeType: string,
+    items: activities.MapNodeItem[],
+    _meta: activities.AgentMeta,
+  ): Promise<activities.MapNodeResult> => {
+    mapNodeCalls.push({ nodeType, count: items.length });
+    return {
+      outputs: items.map((it) => ({ ran: nodeType, on: it.input })),
+      costUsd: items.length * 0.01,
+    };
+  },
 };
+const mapNodeCalls: { nodeType: string; count: number }[] = [];
 const pollCalls: activities.PollMeta[] = [];
 let pollChanged = true;
 const notifyCalls: activities.NotificationInput[] = [];
@@ -915,6 +929,86 @@ describe("runGraph interpreter — items model (splitOut region)", () => {
         workflowId: "e2e-items-breaker",
       });
       expect((await handle.result()).status).toBe("circuit_open");
+    });
+  });
+
+  it("A3: an AGENT inside a region runs once per item via ONE batched mapNode (node-major)", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const graph: GraphDef = {
+        startNodeId: "start",
+        nodes: [
+          { id: "start", type: "start" },
+          {
+            id: "sp",
+            type: "splitOut",
+            config: { from: "__input", path: "items" },
+          },
+          { id: "ag", type: "agent", config: { systemPrompt: "classify" } },
+          { id: "le", type: "loopEnd", config: { from: "ag" } },
+          { id: "end", type: "end" },
+        ],
+        edges: [
+          { from: "start", to: "sp" },
+          { from: "sp", to: "ag" },
+          { from: "ag", to: "le" },
+          { from: "le", to: "end" },
+        ],
+      };
+      mapNodeCalls.length = 0;
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          graph,
+          { items: [{ n: 1 }, { n: 2 }, { n: 3 }] },
+          { tenantId: "t-a3" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-agent",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const final = await handle.query(stateQuery);
+      // loopEnd collected the per-item agent outputs — each got the CURRENT item as input.
+      expect(final.ctx.le).toEqual([
+        { ran: "agent", on: { n: 1 } },
+        { ran: "agent", on: { n: 2 } },
+        { ran: "agent", on: { n: 3 } },
+      ]);
+      // ONE mapNode activity handled all 3 items (not 3 separate agent activities).
+      expect(mapNodeCalls).toEqual([{ nodeType: "agent", count: 3 }]);
+    });
+  });
+
+  it("A3: a batch over the MAX_MAP_BATCH_ITEMS cap FAILS CLOSED (payload-cap guard)", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const graph: GraphDef = {
+        startNodeId: "start",
+        nodes: [
+          { id: "start", type: "start" },
+          {
+            id: "sp",
+            type: "splitOut",
+            config: { from: "__input", path: "items" },
+          },
+          { id: "ag", type: "agent", config: { systemPrompt: "x" } },
+          { id: "le", type: "loopEnd", config: { from: "ag" } },
+          { id: "end", type: "end" },
+        ],
+        edges: [
+          { from: "start", to: "sp" },
+          { from: "sp", to: "ag" },
+          { from: "ag", to: "le" },
+          { from: "le", to: "end" },
+        ],
+      };
+      const items = Array.from({ length: 101 }, (_, i) => ({ n: i })); // > cap (100)
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [graph, { items }, { tenantId: "t-a3", maxStepsPerRun: 1000 }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-batchcap",
+      });
+      // Fails closed (rejects) rather than crossing the ~2MB history payload cap.
+      await expect(handle.result()).rejects.toThrow();
     });
   });
 

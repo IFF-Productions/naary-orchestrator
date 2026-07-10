@@ -27,6 +27,7 @@ export { isPureNode, runPureNode } from "./pure-node";
 export { type Item, toItems, itemsJson } from "./items";
 export {
   computeItemsRegions,
+  BATCHABLE_REGION_ACTIVITIES,
   type ItemsRegion,
   type ItemsRegionResult,
 } from "./items-region";

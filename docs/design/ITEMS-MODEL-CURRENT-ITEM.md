@@ -138,9 +138,13 @@ A2 regions are PURE nodes only. A3 lets a region contain `"each"` **activity** n
 ### Billing (Tier-1 #6 — fail-safe). DECISION 2 RESOLVED — per-item recording, not per-batch.
 The original "one aggregate usage event" idea is **wrong and violates Tier-1 #6**: if item 20 throws
 after items 1–19 made real LLM calls, the end-of-batch aggregate write never happens → 19 paid calls
-billed as **zero**. The underlying activities already record their own usage row IN-ACTIVITY per call
-(`runAgent` → `recordUsage(...)`, keyed by `meta.nodeId`). So `mapNode` simply **loops those
-activity fns unchanged**: each per-item call records its own row as it completes (N rows keyed by the
+billed as **zero**. `runAgent` already records its own usage row IN-ACTIVITY per call (`recordUsage(...)`
+keyed by `meta.nodeId`) — so for the agent (the token-metered case that matters), `mapNode` simply
+**loops it unchanged** and each item's tokens land in the ledger as it completes. (`httpRequest` cost
+is ~0 and `mcpTool` cost is a flat operator-set value; those flow into the run budget only via
+`mapNode`'s returned `costUsd` sum — correct under per-ITEM failure, and lost only on a genuine
+mapNode infra-throw under `maxAttempts:1`, same narrow window as a single-call crash.) So `mapNode`
+**loops those activity fns unchanged**: each per-item call records its own row as it completes (N rows keyed by the
 same nodeId — fine; the ledger is Postgres, not history, and aggregates by node). A mid-batch failure
 leaves completed items already billed. `costUsd` returned = the sum of completed items, accumulated
 into the run budget. The "keep it to one event" instinct was about history/payload size, which the
