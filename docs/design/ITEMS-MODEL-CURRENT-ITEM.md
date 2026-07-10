@@ -135,7 +135,7 @@ A2 regions are PURE nodes only. A3 lets a region contain `"each"` **activity** n
   for a single call), so `mapNode` contains no template/binding logic — it's a pure fan-out loop
   over an existing activity fn. Keeps determinism in the workflow, I/O in the activity (Tier-1 #3).
 
-### Billing (Tier-1 #6 — fail safe). DECISION 2 RESOLVED — per-item recording, not per-batch.
+### Billing (Tier-1 #6 — fail-safe). DECISION 2 RESOLVED — per-item recording, not per-batch.
 The original "one aggregate usage event" idea is **wrong and violates Tier-1 #6**: if item 20 throws
 after items 1–19 made real LLM calls, the end-of-batch aggregate write never happens → 19 paid calls
 billed as **zero**. The underlying activities already record their own usage row IN-ACTIVITY per call
@@ -163,7 +163,7 @@ POST/email side effects. So:
 - Bounded concurrency inside `mapNode`: `maxParallelItems` default 10.
 
 ### FROZEN: the activity's `input` inside a region IS THE CURRENT ITEM
-Outside a region an activity's `input` is the run `__input`. INSIDE a region it is `ctx[splitOut]`
+Outside a region an activity's `input` is the run `__input`. INSIDE a region it is `ctx[splitOut.id]`
 (the current item `i`) — so "agent/http over N rows" works with the item as input, matching n8n
 (a node's input is the current item). Per-item variation still ALSO flows through templated config
 (`{{ splitOut.x }}`); a static-config agent now maps over the items as its input rather than making
@@ -268,12 +268,14 @@ mode. Getting a node's mode wrong is a semantic change → it is covered by the 
 - **One `patched()` gate** — `wf.patched("items-model-v1")` — wraps the entire per-item execution
   path. In-flight runs replay on the old single-value path; new runs use items. The gate is chosen
   ONCE and its semantics are frozen — hence this doc.
-- **Batched map-activity (Slice A3).** An `"each"` **activity** node with `card = N` dispatches ONE
-  activity `mapNode(type, cfg, frames[])` that loops the N frames **inside the activity** (all I/O in
-  the activity, per Tier-1 #3) with bounded concurrency (`maxParallelItems`, default 10) and per-item
-  checkpointing. NEVER one Temporal activity per item — event history stays O(nodes), not O(items).
-- **Billing:** the map-activity sums `totalUsage` across the N per-item LLM calls into ONE usage
-  event (fail-safe estimate if any item's usage is missing — never record zero).
+- **Batched map-activity (Slice A3) — see §0.3 for the frozen contract.** An `"each"` **activity**
+  node with `card = N` dispatches ONE activity `mapNode` that loops the N frames **inside the
+  activity** (all I/O in the activity, per Tier-1 #3) with bounded concurrency (`maxParallelItems`,
+  default 10) and **`maxAttempts: 1`** (no whole-batch retry; per-index checkpointing is a later
+  slice). NEVER one Temporal activity per item — event history stays O(nodes), not O(items).
+- **Billing (per §0.3):** `mapNode` loops the underlying activity fns, each of which records its own
+  usage row **per item as it completes** (fail-safe under partial failure — completed items stay
+  billed; never record zero). NOT one aggregate event.
 - **Payload cap:** `items[nodeId]` can be large → the existing claim-check offload applies to the
   whole items array; `binary` (still deferred) will be per-item claim-check refs.
 - **Fail closed on unaligned zip (frozen-forever ⇒ err, don't approximate):** an `"each"` node with
