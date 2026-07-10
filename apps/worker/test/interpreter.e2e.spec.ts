@@ -798,6 +798,173 @@ function makeWorker(): Promise<Worker> {
   });
 }
 
+/** Items model (design ITEMS-MODEL-CURRENT-ITEM.md) — a splitOut region runs its linear pure body
+ *  once per array element, and loopEnd collects the per-item outputs. Graph:
+ *  start → splitOut(__input.items) → set{doubled ← sp.n} → loopEnd(set) → end. */
+function itemsGraph(): GraphDef {
+  return {
+    startNodeId: "start",
+    nodes: [
+      { id: "start", type: "start" },
+      {
+        id: "sp",
+        type: "splitOut",
+        config: { from: "__input", path: "items" },
+      },
+      {
+        id: "map",
+        type: "set",
+        config: { fieldBindings: { doubled: { from: "sp", path: "n" } } },
+      },
+      { id: "le", type: "loopEnd", config: { from: "map" } },
+      { id: "end", type: "end" },
+    ],
+    edges: [
+      { from: "start", to: "sp" },
+      { from: "sp", to: "map" },
+      { from: "map", to: "le" },
+      { from: "le", to: "end" },
+    ],
+  };
+}
+
+describe("runGraph interpreter — items model (splitOut region)", () => {
+  it("runs the region once per item; loopEnd collects the per-item outputs (proves current-item)", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          itemsGraph(),
+          { items: [{ n: 1 }, { n: 2 }, { n: 3 }] },
+          { tenantId: "t-items" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-map",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const final = await handle.query(stateQuery);
+      // each iteration read the CURRENT item (sp.n = 1,2,3), not item 0 three times
+      expect(final.ctx.le).toEqual([
+        { doubled: 1 },
+        { doubled: 2 },
+        { doubled: 3 },
+      ]);
+      // items-authoritative: ctx of the region nodes is the FIRST item's projection
+      expect(final.ctx.sp).toEqual({ n: 1 });
+      expect(final.ctx.map).toEqual({ doubled: 1 });
+    });
+  });
+
+  it("an EMPTY array runs the region zero times → loopEnd is []", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [itemsGraph(), { items: [] }, { tenantId: "t-items" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-empty",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const final = await handle.query(stateQuery);
+      expect(final.ctx.le).toEqual([]);
+    });
+  });
+
+  it("a single-element array maps exactly once", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [itemsGraph(), { items: [{ n: 7 }] }, { tenantId: "t-items" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-single",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const final = await handle.query(stateQuery);
+      expect(final.ctx.le).toEqual([{ doubled: 7 }]);
+    });
+  });
+
+  it("FAILS CLOSED when the split source is a defined non-array (not silent empty)", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          itemsGraph(),
+          { items: "not-an-array" },
+          { tenantId: "t-items" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-nonarray",
+      });
+      // The run FAILS (rejects) rather than silently mapping 0 times — the ITEMS_NOT_ARRAY
+      // ApplicationFailure is wrapped by Temporal's WorkflowFailedError.
+      await expect(handle.result()).rejects.toThrow();
+    });
+  });
+
+  it("region-node executions count toward the step breaker (a wide region × N trips it)", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      // start + splitOut + per item (item step + 1 region node) → exceeds a low cap mid-loop.
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          itemsGraph(),
+          { items: [{ n: 1 }, { n: 2 }, { n: 3 }, { n: 4 }, { n: 5 }] },
+          { tenantId: "t-items", maxStepsPerRun: 4 },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-breaker",
+      });
+      expect((await handle.result()).status).toBe("circuit_open");
+    });
+  });
+
+  it("a missing/undefined split source is treated as empty (no error)", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [itemsGraph(), {}, { tenantId: "t-items" }], // no `items` key
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-missing",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      expect((await handle.query(stateQuery)).ctx.le).toEqual([]);
+    });
+  });
+
+  // Back-compat wall (design §8): a graph with NO splitOut must be byte-identical to before the
+  // items path existed — the patched gate is never entered.
+  it("a graph with no splitOut is unaffected by the items path", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const plain: GraphDef = {
+        startNodeId: "s",
+        nodes: [
+          { id: "s", type: "start" },
+          {
+            id: "set",
+            type: "set",
+            config: { fields: { hello: "world" } },
+          },
+          { id: "e", type: "end" },
+        ],
+        edges: [
+          { from: "s", to: "set" },
+          { from: "set", to: "e" },
+        ],
+      };
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [plain, {}, { tenantId: "t-plain" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-nosplit",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      expect((await handle.query(stateQuery)).ctx.set).toEqual({
+        hello: "world",
+      });
+    });
+  });
+});
+
 /** Poll a predicate until true or timeout — the agent activity has to run
  *  before the run reaches awaiting_approval, so a single immediate query races. */
 async function waitFor(

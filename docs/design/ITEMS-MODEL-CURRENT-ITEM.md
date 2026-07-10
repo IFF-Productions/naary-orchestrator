@@ -63,8 +63,12 @@ guess):
    out passes through `loopEnd`. No edge crosses the region boundary bypassing the markers.
 2. **No nesting (v1):** a region contains no other `splitOut`/`loopEnd`. Nested maps are a later
    slice; drawn nesting is rejected now.
-3. **No region node is also read from OUTSIDE the region** except via `loopEnd` (an outside node
-   binding to a per-item region node has no single value — rejected).
+3. **An outside node reading a region node resolves to the FIRST item** (items-authoritative §2 —
+   `ctx[regionNode]` is restored to its iteration-0 projection after the loop). This is defined,
+   non-corrupting behavior, so it is NOT rejected (A-explicit deleted binding inspection); it is the
+   n8n "expressions default to the first item" rule applied to a region node read from outside.
+   Conditional edges INSIDE a region, and a `loopEnd` fan-out (≥2 out-edges), ARE rejected at save
+   (the body runs unconditionally per item; the loop resumes via a single exit edge).
 4. **Pure nodes only inside a region (A2).** A region runs N times, so a durable/control node inside
    it (`wait`, `humanApproval`, `respondToWebhook`, `executeSubWorkflow`, `forEach`, `agent`,
    `mcpTool`, `httpRequest`, and any other activity) is a **save-time 400** — N durable pauses have

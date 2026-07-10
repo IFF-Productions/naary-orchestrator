@@ -30,6 +30,8 @@ import type {
   HmacConfig,
   HtmlExtractConfig,
   MarkdownConfig,
+  SplitOutConfig,
+  LoopEndConfig,
   HttpRequestConfig,
   HumanApprovalConfig,
   IfConfig,
@@ -84,6 +86,8 @@ export interface NodeConfigMap {
   htmlExtract: HtmlExtractConfig;
   markdown: MarkdownConfig;
   noOp: Record<string, unknown>;
+  splitOut: SplitOutConfig;
+  loopEnd: LoopEndConfig;
   csv: CsvConfig;
   json: JsonConfig;
   number: NumberConfig;

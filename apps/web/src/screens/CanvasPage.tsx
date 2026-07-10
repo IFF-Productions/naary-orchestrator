@@ -3020,6 +3020,61 @@ function ConfigPanel({
         </>
       )}
 
+      {kind === "splitOut" && (
+        <>
+          <Labeled label="Array source node id">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="upstream-node-id"
+            />
+          </Labeled>
+          <Labeled label="Path to the array (optional)">
+            <input
+              value={str("path")}
+              onChange={(e) => onChange({ path: e.target.value })}
+              style={inputStyle}
+              placeholder="items"
+            />
+          </Labeled>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
+            Runs the linear region up to <strong>Loop End</strong> once per
+            item; inside it, <code>{node.id}</code> is the current item. Region
+            nodes must be a straight, pure chain (validated on save).
+          </div>
+        </>
+      )}
+
+      {kind === "loopEnd" && (
+        <>
+          <Labeled label="Collect from region node id">
+            <input
+              value={str("from")}
+              onChange={(e) => onChange({ from: e.target.value })}
+              style={inputStyle}
+              placeholder="region-node-id"
+            />
+          </Labeled>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
+            <code>{node.id}</code> is the ARRAY of that node's per-item outputs.
+            After it, the flow is a single value again.
+          </div>
+        </>
+      )}
+
       {kind === "htmlExtract" &&
         (() => {
           const extractions =

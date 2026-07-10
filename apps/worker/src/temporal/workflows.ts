@@ -39,6 +39,8 @@ import {
   resolveText,
   resolveWebhookResponse,
   asNodeConfig,
+  computeItemsRegions,
+  type ItemsRegion,
 } from "@naary/dsl";
 import type { GraphDef, NodeDef, NodeRetryPolicy } from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
@@ -296,6 +298,14 @@ export async function runGraph(
   const mergeArrivals: Record<string, number> = resume?.mergeArrivals
     ? { ...resume.mergeArrivals }
     : {};
+
+  // Items model (design ITEMS-MODEL-CURRENT-ITEM.md): precompute the splitOut→region map. Pure +
+  // deterministic (same source of truth the save-gate validates), so computing it never affects
+  // history; the per-item EXECUTION is what's gated by patched("items-model-v1") below.
+  const itemsRegionBySplit = new Map<string, ItemsRegion>();
+  for (const r of computeItemsRegions(graph).regions) {
+    itemsRegionBySplit.set(r.splitOutId, r);
+  }
 
   wf.setHandler(approvalSignal, (s) => {
     approval = s;
@@ -1181,6 +1191,80 @@ export async function runGraph(
         return "invalid_graph";
       }
       currentNodeId = current;
+
+      // Items model (design ITEMS-MODEL-CURRENT-ITEM.md §0.2): a splitOut runs its LINEAR PURE
+      // region once per array element, then hands the collected array to loopEnd. The region is
+      // the DRAWN bracket (validated at save), so there is no participation inference here — just a
+      // bounded loop over execNode. Gated by patched() so runs that predate this stay replay-safe
+      // (old graphs have no splitOut, so they never reach this branch anyway).
+      if (node.type === "splitOut" && wf.patched("items-model-v1")) {
+        const region = itemsRegionBySplit.get(current);
+        if (region) {
+          const splitCfg = asNodeConfig(
+            resolveTemplates(
+              (node.config ?? {}) as Record<string, unknown>,
+              ctx,
+            ),
+            "splitOut",
+          );
+          const arr = getByPath(ctx[splitCfg.from], splitCfg.path);
+          // Fail closed on a DEFINED non-array source (a mis-binding) rather than silently mapping
+          // 0 times; a missing/null source is a legitimate "no items" → empty region.
+          if (arr !== undefined && arr !== null && !Array.isArray(arr)) {
+            throw wf.ApplicationFailure.nonRetryable(
+              `splitOut '${current}' source is not an array`,
+              "ITEMS_NOT_ARRAY",
+            );
+          }
+          const items = Array.isArray(arr) ? arr : [];
+          const collected: unknown[] = [];
+          let firstIter: Record<string, unknown> | undefined;
+
+          const overBudget = (): boolean =>
+            runCtx.maxStepsPerRun !== undefined &&
+            stepCount > runCtx.maxStepsPerRun;
+
+          for (let i = 0; i < items.length; i++) {
+            stepCount++; // the item itself is a step (bounds an empty region over a huge array)
+            if (overBudget()) return "circuit_open";
+            ctx[current] = items[i]; // the current item — region nodes bind to splitOut to read it
+            for (const rid of region.regionNodeIds) {
+              // Count EVERY region-node execution toward the breaker (like a node in the normal
+              // chain) so a wide region × N items can't outrun maxStepsPerRun.
+              stepCount++;
+              if (overBudget()) return "circuit_open";
+              const rnode = nodeById.get(rid);
+              if (!rnode) return "invalid_graph";
+              currentNodeId = rid; // attribute a mid-region failure to the actual node, not splitOut
+              try {
+                const t = await execNode(rnode);
+                if (t !== null) return t; // defensive: today's pure region nodes never return terminal
+              } catch (err) {
+                if (rnode.onError !== "continue") throw err;
+                ctx[rid] = { error: nodeErrorMessage(err) };
+              }
+            }
+            collected.push(ctx[region.collectFrom]);
+            if (i === 0) {
+              firstIter = { [current]: items[0] };
+              for (const rid of region.regionNodeIds) firstIter[rid] = ctx[rid];
+            }
+          }
+
+          // items-authoritative: leave ctx[regionNode] as the FIRST item's projection (matches the
+          // single-item world; an empty array leaves the splitOut/region outputs undefined).
+          if (firstIter) {
+            for (const k of Object.keys(firstIter)) ctx[k] = firstIter[k];
+          } else {
+            ctx[current] = undefined;
+            for (const rid of region.regionNodeIds) ctx[rid] = undefined;
+          }
+          ctx[region.loopEndId] = collected; // loopEnd's output IS the collected array
+          currentNodeId = region.loopEndId;
+          current = nextNodes(graph, region.loopEndId, ctx)[0]; // linear exit → single next
+          continue;
+        }
+      }
 
       // Fan-in join gate (Slice N5): when a branch reaches a merge, record its
       // arrival; if not all inbound branches are in yet, ABSORB this branch (stop
