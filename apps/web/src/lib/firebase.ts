@@ -15,9 +15,11 @@ import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
   getAuth,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
+  updateProfile,
 } from "firebase/auth";
 import { getToken } from "./auth";
 
@@ -63,13 +65,29 @@ export function loginWithEmail(
     : notConfigured();
 }
 
-export function signupWithEmail(
+export async function signupWithEmail(
   email: string,
   password: string,
+  displayName?: string,
 ): Promise<unknown> {
-  return auth
-    ? createUserWithEmailAndPassword(auth, email, password)
-    : notConfigured();
+  if (!auth) return notConfigured();
+  const cred = await createUserWithEmailAndPassword(auth, email, password);
+  // Persist the name the user typed as their Firebase displayName — BEST-EFFORT: the account
+  // already exists, so a failed profile update must NOT fail signup (which would report a
+  // false failure and invite duplicate-signup attempts). The name can be set later in Settings.
+  const name = displayName?.trim();
+  if (name) {
+    try {
+      await updateProfile(cred.user, { displayName: name });
+    } catch {
+      /* non-fatal — the user is signed up; only the display name didn't stick */
+    }
+  }
+  return cred;
+}
+
+export function sendPasswordReset(email: string): Promise<unknown> {
+  return auth ? sendPasswordResetEmail(auth, email) : notConfigured();
 }
 
 export function logout(): Promise<void> {

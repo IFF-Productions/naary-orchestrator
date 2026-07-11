@@ -40,15 +40,43 @@ const stats = [
 
 export function AuthPage() {
   const navigate = useNavigate();
-  const { login, loginEmail, signupEmail, configured } = useAuth();
+  const { login, loginEmail, signupEmail, resetPassword, configured } =
+    useAuth();
   const [mode, setMode] = useState<Mode>("login");
   const [showPassword, setShowPassword] = useState(false);
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [apiToken, setApiToken] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const copy = COPY[mode];
+
+  // "Forgot?" — send a Firebase password-reset email to the address in the email field.
+  async function forgotPassword(): Promise<void> {
+    setError(null);
+    setNotice(null);
+    // Password reset needs Firebase — in API-token-only builds it isn't available. Say so
+    // (consistent with how the rest of the page treats `configured`), rather than a generic
+    // "couldn't send".
+    if (!configured) {
+      setError(
+        "Password reset needs Firebase sign-in, which isn't configured here — use your API token instead.",
+      );
+      return;
+    }
+    if (!email.trim()) {
+      setError("Enter your email above first, then click Forgot.");
+      return;
+    }
+    try {
+      await resetPassword(email.trim());
+      setNotice(`Password reset email sent to ${email.trim()}.`);
+    } catch {
+      setError("Couldn't send a reset email. Check the address and try again.");
+    }
+  }
 
   // Email/password via Firebase. On success, onAuthStateChanged flips the session
   // and RequireAuth lets /app render. The pasted `nry_` token is the secondary
@@ -66,7 +94,8 @@ export function AuthPage() {
     }
     setBusy(true);
     try {
-      if (mode === "signup") await signupEmail(email.trim(), password);
+      if (mode === "signup")
+        await signupEmail(email.trim(), password, fullName.trim() || undefined);
       else await loginEmail(email.trim(), password);
       navigate("/app");
     } catch (e) {
@@ -334,6 +363,8 @@ export function AuthPage() {
                   type="text"
                   placeholder="Ada Lovelace"
                   autoComplete="name"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
                 />
               </Field>
             )}
@@ -355,7 +386,10 @@ export function AuthPage() {
                 mode === "login" ? (
                   <a
                     href="#"
-                    onClick={(e) => e.preventDefault()}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      void forgotPassword();
+                    }}
                     style={{
                       fontSize: 12,
                       color: "var(--ink-2)",
@@ -427,6 +461,17 @@ export function AuthPage() {
               }}
             >
               {error}
+            </div>
+          )}
+          {notice && (
+            <div
+              style={{
+                marginTop: 16,
+                fontSize: 12.5,
+                color: "var(--state-done)",
+              }}
+            >
+              {notice}
             </div>
           )}
           <div style={{ marginTop: 22 }}>
