@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GraphDef } from "../src/types";
 import {
+  collectUnresolved,
   lintBindings,
   lintTemplates,
   resolveTemplateString,
@@ -217,5 +218,64 @@ describe("lintBindings", () => {
       },
     ]);
     expect(lintBindings(graph)).toEqual([]);
+  });
+});
+
+describe("collectUnresolved (runtime: which source produced no output)", () => {
+  const ids = new Set(["trigger", "diff", "review", "comment"]);
+
+  it("flags a binding whose source ran but produced no output (sourceExists=true)", () => {
+    const node = {
+      id: "comment",
+      config: {
+        fieldBindings: {
+          owner: { from: "trigger", path: "repo.owner" }, // resolves
+          body: { from: "review", path: "output.review" }, // review has no output.review
+        },
+      },
+    };
+    // `review` exists in ctx but its output is empty — the source ran, yielded nothing.
+    const ctx = {
+      trigger: { repo: { owner: "octocat" } },
+      review: { output: {} },
+    };
+    const out = collectUnresolved(node, ctx, ids);
+    expect(out).toEqual([
+      {
+        nodeId: "comment",
+        field: "fieldBindings.body",
+        from: "review",
+        ref: "review.output.review",
+        sourceExists: true,
+      },
+    ]);
+  });
+
+  it("flags a `{{ }}` token whose source isn't a node (sourceExists=false)", () => {
+    const node = {
+      id: "review",
+      config: { systemPrompt: "Review this:\n{{ dif.body }}" }, // typo: "dif"
+    };
+    const out = collectUnresolved(node, { diff: { body: "x" } }, ids);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      nodeId: "review",
+      field: "systemPrompt",
+      from: "dif",
+      sourceExists: false,
+    });
+  });
+
+  it("reports nothing when every reference resolves (even to empty string / null)", () => {
+    const node = {
+      id: "comment",
+      config: {
+        title: "{{ diff.body }}",
+        fieldBindings: { body: { from: "review", path: "output.review" } },
+      },
+    };
+    // Present-but-empty values are NOT missing — only strictly-undefined sources are flagged.
+    const ctx = { diff: { body: "" }, review: { output: { review: null } } };
+    expect(collectUnresolved(node, ctx, ids)).toEqual([]);
   });
 });

@@ -862,6 +862,56 @@ function itemsGraph(): GraphDef {
   };
 }
 
+describe("runGraph interpreter — unresolved-input diagnostic (ctx.__unresolved)", () => {
+  it("records which source produced no output; a fully-resolved run has no __unresolved key", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      // `s` binds x from a node that doesn't exist; `ok` binds y from the trigger (resolves).
+      const graph: GraphDef = {
+        startNodeId: "trigger",
+        nodes: [
+          { id: "trigger", type: "webhookTrigger" },
+          {
+            id: "s",
+            type: "set",
+            config: { fieldBindings: { x: { from: "ghost", path: "y" } } },
+          },
+          {
+            id: "ok",
+            type: "set",
+            config: { fieldBindings: { y: { from: "trigger", path: "v" } } },
+          },
+          { id: "end", type: "end" },
+        ],
+        edges: [
+          { from: "trigger", to: "s" },
+          { from: "s", to: "ok" },
+          { from: "ok", to: "end" },
+        ],
+      };
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [graph, { v: 42 }, { tenantId: "t-unresolved" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-unresolved",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const final = await handle.query(stateQuery);
+      const diag = final.ctx.__unresolved as Record<string, unknown[]>;
+      // `s` is flagged with the missing source named; the resolved `ok` node is NOT present.
+      expect(diag.s).toEqual([
+        {
+          nodeId: "s",
+          field: "fieldBindings.x",
+          from: "ghost",
+          ref: "ghost.y",
+          sourceExists: false,
+        },
+      ]);
+      expect(diag.ok).toBeUndefined();
+    });
+  });
+});
+
 describe("runGraph interpreter — items model (splitOut region)", () => {
   it("runs the region once per item; loopEnd collects the per-item outputs (proves current-item)", async () => {
     const worker = await makeWorker();
