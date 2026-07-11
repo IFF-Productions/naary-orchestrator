@@ -72,9 +72,17 @@ export async function signupWithEmail(
 ): Promise<unknown> {
   if (!auth) return notConfigured();
   const cred = await createUserWithEmailAndPassword(auth, email, password);
-  // Persist the name the user typed at signup as their Firebase displayName.
+  // Persist the name the user typed as their Firebase displayName — BEST-EFFORT: the account
+  // already exists, so a failed profile update must NOT fail signup (which would report a
+  // false failure and invite duplicate-signup attempts). The name can be set later in Settings.
   const name = displayName?.trim();
-  if (name) await updateProfile(cred.user, { displayName: name });
+  if (name) {
+    try {
+      await updateProfile(cred.user, { displayName: name });
+    } catch {
+      /* non-fatal — the user is signed up; only the display name didn't stick */
+    }
+  }
   return cred;
 }
 

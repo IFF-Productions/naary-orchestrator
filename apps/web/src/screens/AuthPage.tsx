@@ -57,6 +57,15 @@ export function AuthPage() {
   async function forgotPassword(): Promise<void> {
     setError(null);
     setNotice(null);
+    // Password reset needs Firebase — in API-token-only builds it isn't available. Say so
+    // (consistent with how the rest of the page treats `configured`), rather than a generic
+    // "couldn't send".
+    if (!configured) {
+      setError(
+        "Password reset needs Firebase sign-in, which isn't configured here — use your API token instead.",
+      );
+      return;
+    }
     if (!email.trim()) {
       setError("Enter your email above first, then click Forgot.");
       return;
