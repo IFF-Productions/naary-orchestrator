@@ -163,13 +163,21 @@ save time (a correctable 400, never a runtime surprise):
 
 ## 9. Which integrations to add — prioritized backlog (the "what else" ask)
 
-Shipped: **GitHub + Jira + Slack**. Ordered by fit for AI-agent + HITL workflows; each is just a
-catalog entry once the pattern is in:
+Shipped: **GitHub + Jira + Slack + Notion**. Ordered by fit for AI-agent + HITL workflows; each is
+just a catalog entry once the pattern is in:
 
 **Tier 1 — highest leverage (recommended next):**
 - ~~**Slack** — post message / reply in thread / react.~~ **SHIPPED** — the notify/approve surface.
-- **Linear** — create/update issue, comment. Modern issue tracker; clean REST/GraphQL.
-- **Notion** — create page / append block / query database. Common knowledge-base sink.
+- ~~**Notion** — create page / append block / query database.~~ **SHIPPED** — added the `json` field
+  type (raw JSON value for schema-driven payloads) to make it fit; this also unlocks Airtable etc.
+- **Linear** — create/update issue, comment. **Needs a catalog extension: Linear is GraphQL-only**
+  (one endpoint, a query + variables), which the REST `pathTemplate`/method model can't express.
+  A `graphql` action kind (query template + variable mapping) is the next design step for it.
+
+**Catalog capabilities so far:** flat/nested JSON bodies (`bodyPath`), path/query/body fields, typed
+fields incl. **`json`** (raw value, bindable) for schema-driven payloads, per-provider `authScheme`
+(bearer / basic). **Still needs extension for:** GraphQL providers (Linear), non-header auth
+(Telegram's token-in-path, Twilio's form-encoded Basic).
 
 **Tier 2 — broad demand:**
 - **Google Sheets** (append row / read range) · **Airtable** (create/update record) ·

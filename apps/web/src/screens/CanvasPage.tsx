@@ -1890,25 +1890,38 @@ function ConfigPanel({
                   {action.write ? " · runs at-most-once (no retry)" : ""}
                 </div>
               )}
-              {(action?.fields ?? []).map((f) => (
-                <Labeled
-                  key={f.key}
-                  label={`${f.label}${f.required ? " *" : ""}`}
-                >
-                  <input
-                    type={f.type === "number" ? "number" : "text"}
-                    value={display(fields[f.key])}
-                    onChange={(e) => setField(f.key, f.type, e.target.value)}
-                    style={inputStyle}
-                    placeholder={
-                      f.hint ??
-                      (f.type === "string[]"
-                        ? "comma-separated, or bind from an upstream step"
-                        : "")
+              {(action?.fields ?? []).map((f) =>
+                f.type === "json" ? (
+                  // Schema-driven value (Notion properties, etc.) — a raw JSON editor.
+                  <JsonField
+                    key={f.key}
+                    label={`${f.label}${f.required ? " *" : ""}`}
+                    value={fields[f.key] as Record<string, unknown> | undefined}
+                    placeholder={f.hint ?? "{ }"}
+                    onChange={(v) =>
+                      onChange({ fields: { ...fields, [f.key]: v } })
                     }
                   />
-                </Labeled>
-              ))}
+                ) : (
+                  <Labeled
+                    key={f.key}
+                    label={`${f.label}${f.required ? " *" : ""}`}
+                  >
+                    <input
+                      type={f.type === "number" ? "number" : "text"}
+                      value={display(fields[f.key])}
+                      onChange={(e) => setField(f.key, f.type, e.target.value)}
+                      style={inputStyle}
+                      placeholder={
+                        f.hint ??
+                        (f.type === "string[]"
+                          ? "comma-separated, or bind from an upstream step"
+                          : "")
+                      }
+                    />
+                  </Labeled>
+                ),
+              )}
               <BindingsEditor
                 bindings={
                   obj("fieldBindings") as Record<string, BindingRow> | undefined
