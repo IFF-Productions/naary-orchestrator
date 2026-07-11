@@ -17,27 +17,9 @@ import {
   useNavigationType,
 } from "react-router-dom";
 import { useEffect } from "react";
+import { redactSecrets } from "./lib/sentry-scrub";
 
 const dsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
-
-/** Redact secret-shaped strings (bearer tokens, our `nry_` API tokens, provider keys). */
-const SECRET_RE =
-  /\b(?:Bearer\s+[\w.\-]+|nry_[A-Za-z0-9]+|sk-[A-Za-z0-9]+|gh[pousr]_[A-Za-z0-9]+)/g;
-function redact(value: unknown): unknown {
-  if (typeof value === "string") return value.replace(SECRET_RE, "[redacted]");
-  if (Array.isArray(value)) return value.map(redact);
-  if (value && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      // Drop auth headers / token fields outright, redact everything else in place.
-      out[k] = /authorization|token|secret|api[_-]?key|password/i.test(k)
-        ? "[redacted]"
-        : redact(v);
-    }
-    return out;
-  }
-  return value;
-}
 
 if (dsn) {
   Sentry.init({
@@ -65,8 +47,8 @@ if (dsn) {
     // Only propagate the trace header to our own API (avoid leaking it cross-origin).
     tracePropagationTargets: [/^\/(api)\//, /naar-y\.com/],
     // Security-critical: scrub secret-shaped data from every event + breadcrumb.
-    beforeSend: (event) => redact(event) as typeof event,
-    beforeBreadcrumb: (crumb) => redact(crumb) as typeof crumb,
+    beforeSend: (event) => redactSecrets(event) as typeof event,
+    beforeBreadcrumb: (crumb) => redactSecrets(crumb) as typeof crumb,
   });
 }
 
