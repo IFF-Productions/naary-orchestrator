@@ -252,6 +252,121 @@ the frozen semantics are confirmed before the evaluator ships. Implementation th
 400, not a corruption; it encodes the same frozen rules and carries the heaviest tests — and the
 per-item interpreter evaluator lands LAST, on top of a validated, well-tested region model.
 
+### 0.4.2. A5-trace — per-item INTERMEDIATE trace grid (proposed; doc-first, gated on the CAN answer)
+
+> **Status: PROPOSED (design-first, same cadence as A4 §0.4.1).** A5's shipped run-view table (PR #224)
+> shows a node's *collected result array* as rows. This section specs the strictly-larger view the user
+> asked to design before merging #224: a **per-item × per-region-node grid** — "for THIS item, what did
+> each node in the region produce, and which branch did it take."
+
+**The one question that picks the architecture (answer first, per the advisor): must the trace survive
+`continueAsNew` and be present for a COMPLETED run?** YES — completed and long (CAN-segmented) runs are
+exactly what an author inspects. A Temporal query reads state reconstructed by replaying *current-segment*
+history; after a CAN the old history is truncated, so an in-memory-only / query-only trace is **gone for
+precisely the runs we care about**. Therefore the trace MUST ride durable state: the workflow return value
+(read post-completion via `result()`/memo) and the CAN snapshot (carried across segments). Verified in
+`workflows.ts`: the top-level `continueAsNew` carries `ctx` **verbatim** (`:1647`, not `__*`-filtered) and
+the final `return { status, ctx, reply }` (`:1786`) carries `ctx` whole — so an inline key in `ctx`
+satisfies BOTH survival requirements with zero new plumbing.
+
+**Decision (MVP): an inline, size-capped `__regionTrace` key in `ctx`.** Shape:
+
+```
+ctx.__regionTrace = {
+  [splitOutId]: {
+    nodes: string[],                 // region node ids, in topo order (the columns)
+    truncatedItems?: number,         // N items beyond the cap that were NOT captured (never silent)
+    items: Array<{                   // one row per captured item (≤ MAX_TRACE_ITEMS)
+      [nodeId: string]:
+        | { v: unknown }             // LIVE — the node's output for this item (cell-capped)
+        | { dead: true }             // DEAD — no live in-edge (A4 dead branch); THE payload of this feature
+        | { err: string }            // node output was an onError:"continue" {error}
+    }>
+  }
+}
+```
+
+- **Why `__`-prefixed:** the existing `isNodeOutputKey` display filter (`RunDetail.tsx:51`) already drops
+  `__*` from the node-output list, and the child-projection / cost bookkeeping already live under `__*`.
+  So the trace is invisible to the normal outputs view and surfaced only by the dedicated grid — **no
+  change to node-output rendering, no risk of it leaking into `<nodeId>.*` template reads.**
+- **Tri-state cell is the feature, not decoration.** The `dead` state is literally "why did this item take
+  this branch" — it reuses the `live` Map already computed in the A4 per-item topological pass. Value /
+  dead / error is what a collected-array table (#224) fundamentally cannot show.
+
+**Sizing — reuse the house pattern, do NOT invent one.** A3 already solved "an O(N) per-item structure
+must not blow the ~2MB payload / event-history budget" with `MAX_MAP_BATCH_ITEMS = 100` fail-closed +
+"use forEach for more." Same move, three caps, all **fail-closed with a visible marker (never a silent
+drop)**: `MAX_TRACE_ITEMS` (first K rows, aligned with the run-view display cap; excess → `truncatedItems`),
+columns are naturally bounded by region node count, and each cell value is JSON-truncated to a byte cap
+(`{ v }` over the limit becomes `{ v: "<truncated N bytes>" }`). Because `__regionTrace` rides the CAN
+snapshot verbatim, these caps are what keep the carried state bounded (CLAUDE.md: pass refs, not blobs).
+
+**Escape hatch (named, NOT the MVP): storage claim-check.** When the caps bite for a legitimately large
+run, the trace can be written to object storage (the `storage` package) and `__regionTrace` holds a
+`{ ref }` instead of inline rows — same "pass refs, not blobs" move used for large node outputs. This is
+the ONLY part that adds an activity (a storage write) → it is a **new command → needs its own
+`wf.patched("items-trace-v1")` gate**.
+
+**Why the inline MVP needs no `patched()` — stated precisely, because the impl slice inherits this as a
+mandate.** The guarantee that licenses skipping the gate is **command-stream identity across replay, NOT
+state identity.** Replay memory is deliberately NOT byte-identical — `ctx` gains a `__regionTrace` key; that
+is fine, because Temporal's determinism contract is about the sequence of *commands* (activity scheduling,
+timers, CAN), not the heap. So the invariant the MVP must hold is **command-neutrality**, and it has TWO
+halves, both load-bearing:
+
+1. **No new command.** Capture writes only a plain key into an in-memory object — no activity, timer, or
+   signal. (The storage escape hatch breaks this half → hence its gate.)
+2. **`stepCount`-neutral.** This is the half that actually bites, and it lives *inside the exact loop the
+   capture edits.* `stepCount` gates the CAN decision (`stepCount >= cap`, `workflows.ts:1636–1638`) and is
+   incremented per region node in the A4 pass (`:1354`, `:1360`). If capture adds a `stepCount++` for a
+   cell, or restructures the loop so the counter lands differently, an in-flight run recorded under old
+   code and replayed under capture code reaches `continueAsNew` at a *different* step → a different command
+   → nondeterminism error. Capture MUST NOT touch `stepCount` (nor `overBudget`'s counter).
+
+So the license to skip `patched()` is precisely "capture issues no command **and** perturbs no
+command-affecting counter" — not the looser "it's only a `__` key." **Impl-slice verification obligation:**
+a **replay test** — record a run under a no-capture shim, replay the history under the capture code, assert
+no nondeterminism error. That is the check that discriminates safe from unsafe here, and it is strictly
+better than a defensive `patched()` (which would only inject a gratuitous `MarkerRecorded` event where the
+change is otherwise command-neutral).
+
+**Where capture happens (MVP scope, honestly fenced).** Capture reads `ctx[nodeId]` (and the A4 `live`
+Map) *inside the existing per-item in-workflow loops* — deterministic, no I/O. Two loops qualify today:
+the **A2 linear** item-major loop (every node live; a straightforward row per item) and the **A4** per-item
+topological pass (tri-state rows — the high-value case). **A3's node-major `mapNode` batch is explicitly a
+follow-up**, not MVP: its per-item values come back as a per-node array from one batched activity, so
+building the grid there means *transposing* mapNode's return — a different, larger change. Fencing it out
+keeps this the smallest correct surgery; A3 regions already expose per-item results via #224's array table.
+
+**A3 region → the grid must FAIL LEGIBLY (not blank, not half-populated).** A2/A3/A4 regions are
+indistinguishable to the author — all are drawn as the same `splitOut…loopEnd` brackets — so an author WILL
+open the trace grid on an A3 (batched-activity) region. Because A3 capture is fenced out, that region simply
+never populates `__regionTrace`. The run view MUST detect the absent trace and render an explicit message —
+"per-item trace unavailable for batched-activity regions — see the array table above" — pointing at #224's
+collected-array table, NOT an empty or partial grid. (This is a real user-visible surface, not just internal
+scope: "A3 exposes results via #224" describes the *collected array*, which is not the per-node grid — so
+the UI must say what the user actually sees.)
+
+**Determinism trap (Tier-1 rule #2), stated so it can't creep in:** capture per-item *values* from `ctx`
+only. Do **NOT** stamp per-item timings (`Date.now()`), counts of wall-clock, or anything non-deterministic
+into a cell — that is the obvious "nice to have" that breaks replay. Durations, if ever wanted, come from
+Temporal's event timestamps out-of-band, never from workflow code.
+
+**Reconciliation with PR #224 (the reason the merge was gated).** The grid does **not** subsume #224 and
+#224 does **not** block on the grid: #224's table renders *any* array-of-objects node output (aggregate,
+SQL, an HTTP list) — most of which are not regions at all — while the grid is region-scoped
+(`splitOut…loopEnd` only). Within a region they meet at exactly one column: the grid's `loopEnd` column IS
+#224's collected array for that node. So: **merge #224 as-is** (correct, general, additive); the trace grid
+lands later as a strictly-additive *second* view, opened from a region's `splitOut`/`loopEnd` node in the
+run view, reusing #224's `Table` component with tri-state cell styling (value / dimmed "dead" / red
+"error") and the `truncatedItems` footer.
+
+**Sequencing (matches A2/A3/A4: a frozen `patched()`-adjacent decision gets a review gate).** This doc lands
+first as its own PR; the inline-MVP implementation (capture in A2/A4 loops + the run-view grid) follows and,
+per the analysis above, needs **no** new `patched()`. Only if/when the storage escape hatch is built does a
+`wf.patched("items-trace-v1")` gate become mandatory — that is a separate, later slice.
+
 ## 0.3. A3 — batched activities inside a region (proposed; frozen decisions flagged)
 
 A2 regions are PURE nodes only. A3 lets a region contain `"each"` **activity** nodes
