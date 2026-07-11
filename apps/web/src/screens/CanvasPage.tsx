@@ -1896,8 +1896,10 @@ function ConfigPanel({
                   <JsonField
                     key={f.key}
                     label={`${f.label}${f.required ? " *" : ""}`}
-                    value={fields[f.key] as Record<string, unknown> | undefined}
+                    value={fields[f.key]}
                     placeholder={f.hint ?? "{ }"}
+                    // A `json` field accepts an object OR an array (e.g. Notion `children`).
+                    allowArray
                     onChange={(v) =>
                       onChange({ fields: { ...fields, [f.key]: v } })
                     }
@@ -5434,13 +5436,19 @@ function JsonField({
   value,
   placeholder,
   onChange,
+  allowArray = false,
 }: {
   label: string;
-  value: Record<string, unknown> | undefined;
+  value: unknown;
   placeholder?: string;
-  onChange: (v: Record<string, unknown> | undefined) => void;
+  onChange: (v: unknown) => void;
+  /** Accept a top-level JSON ARRAY as well as an object (e.g. an integration `json` field
+   *  like Notion's block `children`). Default: object-only (mcpTool args, etc.). */
+  allowArray?: boolean;
 }) {
-  const [text, setText] = useState(value ? JSON.stringify(value, null, 2) : "");
+  const [text, setText] = useState(
+    value !== undefined && value !== null ? JSON.stringify(value, null, 2) : "",
+  );
   const [error, setError] = useState<string | null>(null);
 
   function commit(next: string) {
@@ -5453,16 +5461,19 @@ function JsonField({
     }
     try {
       const parsed = JSON.parse(trimmed);
-      if (
-        typeof parsed !== "object" ||
-        parsed === null ||
-        Array.isArray(parsed)
-      ) {
-        setError("Must be a JSON object");
+      const isObject =
+        typeof parsed === "object" && parsed !== null && !Array.isArray(parsed);
+      const isArray = Array.isArray(parsed);
+      if (!isObject && !(allowArray && isArray)) {
+        setError(
+          allowArray
+            ? "Must be a JSON object or array"
+            : "Must be a JSON object",
+        );
         return;
       }
       setError(null);
-      onChange(parsed as Record<string, unknown>);
+      onChange(parsed);
     } catch {
       setError("Invalid JSON");
     }
