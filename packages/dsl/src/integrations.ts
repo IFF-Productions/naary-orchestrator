@@ -177,7 +177,8 @@ const GITHUB: IntegrationProvider = {
 };
 
 // ── Jira (Atlassian Cloud; base = the connection's site URL; REST v2 for plain-string
-//    descriptions. Auth = an Atlassian API token as a Bearer, or OAuth) ────────────────
+//    descriptions. Auth: an Atlassian API token via HTTP Basic (authScheme "basic",
+//    connection token = `email:api_token`), or an OAuth access token via Bearer) ───────
 const JIRA: IntegrationProvider = {
   key: "jira",
   label: "Jira",
@@ -291,9 +292,86 @@ const JIRA: IntegrationProvider = {
   ],
 };
 
+// ── Slack (Web API; static base slack.com/api; auth = a bot token `xoxb-…` as Bearer,
+//    stored on a "custom" connection) ────────────────────────────────────────────────
+const SLACK: IntegrationProvider = {
+  key: "slack",
+  label: "Slack",
+  baseUrl: "https://slack.com/api",
+  description: "Post to Slack — send a message, reply in a thread, or react.",
+  auth: "A custom connection whose token is a Slack bot token (`xoxb-…`) with the needed scopes (e.g. chat:write, reactions:write). The Server URL is unused (base is slack.com).",
+  actions: [
+    {
+      key: "post_message",
+      label: "Post message",
+      description: "Send a message to a channel (or reply in a thread).",
+      method: "POST",
+      pathTemplate: "/chat.postMessage",
+      write: true,
+      fields: [
+        {
+          key: "channel",
+          label: "Channel",
+          in: "body",
+          required: true,
+          hint: "#channel or a channel ID",
+        },
+        { key: "text", label: "Text", in: "body", required: true },
+        {
+          key: "threadTs",
+          label: "Thread ts",
+          in: "body",
+          required: false,
+          bodyPath: "thread_ts",
+          hint: "reply under this message ts",
+        },
+      ],
+    },
+    {
+      key: "update_message",
+      label: "Update message",
+      description: "Edit a message you posted.",
+      method: "POST",
+      pathTemplate: "/chat.update",
+      write: true,
+      fields: [
+        { key: "channel", label: "Channel", in: "body", required: true },
+        {
+          key: "ts",
+          label: "Message ts",
+          in: "body",
+          required: true,
+          hint: "timestamp of the message to edit",
+        },
+        { key: "text", label: "Text", in: "body", required: true },
+      ],
+    },
+    {
+      key: "add_reaction",
+      label: "Add reaction",
+      description: "React to a message with an emoji.",
+      method: "POST",
+      pathTemplate: "/reactions.add",
+      write: true,
+      fields: [
+        { key: "channel", label: "Channel", in: "body", required: true },
+        { key: "timestamp", label: "Message ts", in: "body", required: true },
+        {
+          key: "name",
+          label: "Emoji",
+          in: "body",
+          required: true,
+          hint: "emoji name without colons, e.g. white_check_mark",
+        },
+      ],
+    },
+  ],
+};
+
 export const INTEGRATION_CATALOG: Record<string, IntegrationProvider> = {
   github: GITHUB,
   jira: JIRA,
+  slack: SLACK,
 };
 
 /** The node type added to the palette per provider (the tile presets `provider`). */
@@ -413,9 +491,21 @@ export function validateIntegrationConfig(
   if (!config.connectionId) {
     return `integration '${config.provider}.${config.action}' needs a connectionId`;
   }
+  // A field is "supplied" only by a binding (resolved at runtime) or a NON-EMPTY static value.
+  // A present-but-empty static value ("" / null / [] ) counts as MISSING — otherwise it would
+  // pass the gate but be dropped by buildIntegrationRequest (which omits empties), sending a
+  // malformed path/body instead of failing fast here.
+  const hasBinding = (key: string): boolean =>
+    config.fieldBindings != null && key in config.fieldBindings;
+  const hasStaticValue = (key: string): boolean => {
+    if (config.fields == null || !(key in config.fields)) return false;
+    const v = config.fields[key];
+    if (v === undefined || v === null || v === "") return false;
+    if (Array.isArray(v) && v.length === 0) return false;
+    return true;
+  };
   const supplied = (key: string): boolean =>
-    (config.fields != null && key in config.fields) ||
-    (config.fieldBindings != null && key in config.fieldBindings);
+    hasBinding(key) || hasStaticValue(key);
 
   for (const field of action.fields) {
     if (field.required && !supplied(field.key)) {

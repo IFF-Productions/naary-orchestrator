@@ -85,6 +85,21 @@ describe("integration catalog — request construction", () => {
     expect(req.body).toEqual({ transition: { id: "31" } });
   });
 
+  it("Slack post_message → POST /chat.postMessage, threadTs maps to thread_ts", () => {
+    const req = buildIntegrationRequest("slack", "post_message", {
+      channel: "#test",
+      text: "hi",
+      threadTs: "1700000000.000100",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/chat.postMessage");
+    expect(req.body).toEqual({
+      channel: "#test",
+      text: "hi",
+      thread_ts: "1700000000.000100",
+    });
+  });
+
   it("omits missing optional body fields (a blank optional stays out of the payload)", () => {
     const req = buildIntegrationRequest("github", "create_issue", {
       owner: "o",
@@ -142,6 +157,24 @@ describe("integration save-gate validation", () => {
     expect(
       validateIntegrationConfig({ ...base, fields: { owner: "o", repo: "r" } }),
     ).toMatch(/missing required field 'title'/);
+  });
+
+  it("rejects a present-but-EMPTY static required field (matches build-time omission)", () => {
+    // "" / [] count as missing — else the gate passes but buildIntegrationRequest drops it.
+    expect(
+      validateIntegrationConfig({
+        ...base,
+        fields: { owner: "o", repo: "r", title: "" },
+      }),
+    ).toMatch(/missing required field 'title'/);
+    expect(
+      validateIntegrationConfig({
+        provider: "github",
+        action: "add_labels",
+        connectionId: "gh",
+        fields: { owner: "o", repo: "r", issueNumber: 1, labels: [] },
+      }),
+    ).toMatch(/missing required field 'labels'/);
   });
 
   it("rejects a missing path field", () => {

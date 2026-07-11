@@ -46,6 +46,7 @@ shows one tile per provider.
 
 - [GitHub](./github.md) — issues: get, create, comment, add labels.
 - [Jira](./jira.md) — tickets: get, create, comment, transition.
+- [Slack](./slack.md) — post message, update message, add reaction.
 
 More providers are a catalog entry away — see the prioritized backlog in
-`docs/design/INTEGRATION-NODES.md §9` (Slack, Linear, Notion, …).
+`docs/design/INTEGRATION-NODES.md §9` (Linear, Notion, …).

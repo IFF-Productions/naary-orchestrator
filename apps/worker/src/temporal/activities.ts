@@ -2063,13 +2063,14 @@ export const __httpDeps = {
     safeFetch(String(url), init as never) as unknown as Promise<Response>,
   resolveAuthHeader,
   assertEgressAllowed,
-  // The connection's site URL — the base for connection-based providers (e.g. Jira).
-  getConnectionServerUrl: async (
+  // The connection's site URL (base for connection-based providers like Jira) + its authMode
+  // (so a "basic"-scheme provider keeps Bearer for OAuth and only Basic-wraps a token).
+  getConnection: async (
     tenantId: string,
     connectionId: string,
-  ): Promise<string | null> => {
+  ): Promise<{ serverUrl: string; authMode: string } | null> => {
     const conn = await new ConnectionService().getById(tenantId, connectionId);
-    return conn?.serverUrl ?? null;
+    return conn ? { serverUrl: conn.serverUrl, authMode: conn.authMode } : null;
   },
 };
 
@@ -2400,14 +2401,19 @@ export async function callIntegration(
   }
   const provider = getIntegrationProvider(cfg.provider)!;
 
+  // Fetch the connection once if we need its site URL (Jira base) or its authMode (to decide
+  // Basic-vs-Bearer for a "basic"-scheme provider). GitHub needs neither.
+  const needsConnection =
+    provider.baseUrlFromConnection || provider.authScheme === "basic";
+  const conn = needsConnection
+    ? await __httpDeps.getConnection(meta.tenantId, cfg.connectionId)
+    : null;
+
   // Base URL: static (GitHub) or the connection's site (Jira). A connection-based provider
   // with no serverUrl is a config error, not a retry.
   let base = provider.baseUrl ?? null;
   if (provider.baseUrlFromConnection) {
-    base = await __httpDeps.getConnectionServerUrl(
-      meta.tenantId,
-      cfg.connectionId,
-    );
+    base = conn?.serverUrl ?? null;
     if (!base) {
       throw ApplicationFailure.nonRetryable(
         `integration '${cfg.provider}': connection '${cfg.connectionId}' has no server URL`,
@@ -2424,10 +2430,15 @@ export async function callIntegration(
       meta.tenantId,
       cfg.connectionId,
     );
-    // Jira Cloud + an API token uses HTTP Basic (`base64(email:token)`), not Bearer — the
-    // connection stores `email:token`, resolveAuthHeader hands it back as `Bearer email:token`,
-    // and we re-wrap it here. Bearer (GitHub, or Jira OAuth) is passed through unchanged.
-    if (provider.authScheme === "basic" && authHeaders.Authorization) {
+    // A "basic"-scheme provider (Jira Cloud) with an API TOKEN uses HTTP Basic
+    // (`base64(email:token)`): the connection stores `email:token`, resolveAuthHeader hands it
+    // back as `Bearer email:token`, and we re-wrap it. But an OAuth connection's access token IS
+    // a Bearer — pass it through unchanged (so Jira-over-OAuth keeps working).
+    if (
+      provider.authScheme === "basic" &&
+      conn?.authMode !== "oauth" &&
+      authHeaders.Authorization
+    ) {
       const raw = authHeaders.Authorization.replace(/^Bearer\s+/i, "");
       authHeaders.Authorization = `Basic ${Buffer.from(raw).toString("base64")}`;
     }

@@ -163,12 +163,11 @@ save time (a correctable 400, never a runtime surprise):
 
 ## 9. Which integrations to add — prioritized backlog (the "what else" ask)
 
-Slice 1 ships **GitHub + Jira**. Ordered by fit for AI-agent + HITL workflows; each is just a
+Shipped: **GitHub + Jira + Slack**. Ordered by fit for AI-agent + HITL workflows; each is just a
 catalog entry once the pattern is in:
 
 **Tier 1 — highest leverage (recommended next):**
-- **Slack** — post message / reply in thread / upload. The canonical "notify a human / ask for a
-  decision" surface; pairs with human-approval.
+- ~~**Slack** — post message / reply in thread / react.~~ **SHIPPED** — the notify/approve surface.
 - **Linear** — create/update issue, comment. Modern issue tracker; clean REST/GraphQL.
 - **Notion** — create page / append block / query database. Common knowledge-base sink.
 

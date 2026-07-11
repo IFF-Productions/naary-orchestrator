@@ -25,17 +25,20 @@ function res(
 const fetchMock = vi.fn();
 const authMock = vi.fn();
 const egressMock = vi.fn();
-const connUrlMock = vi.fn();
+const connMock = vi.fn();
 
 beforeEach(() => {
   fetchMock.mockReset();
   authMock.mockReset().mockResolvedValue({ Authorization: "Bearer tok-123" });
   egressMock.mockReset().mockImplementation(async (u: string) => new URL(u));
-  connUrlMock.mockReset().mockResolvedValue("https://acme.atlassian.net");
+  connMock.mockReset().mockResolvedValue({
+    serverUrl: "https://acme.atlassian.net",
+    authMode: "api_token",
+  });
   __httpDeps.fetch = fetchMock as never;
   __httpDeps.resolveAuthHeader = authMock as never;
   __httpDeps.assertEgressAllowed = egressMock as never;
-  __httpDeps.getConnectionServerUrl = connUrlMock as never;
+  __httpDeps.getConnection = connMock as never;
 });
 
 describe("callIntegration activity", () => {
@@ -92,7 +95,7 @@ describe("callIntegration activity", () => {
 
     await callIntegration(cfg, cfg.fields!, META);
 
-    expect(connUrlMock).toHaveBeenCalledWith("t1", "jira");
+    expect(connMock).toHaveBeenCalledWith("t1", "jira");
     const [url, init] = fetchMock.mock.calls[0];
     expect(url.toString()).toBe("https://acme.atlassian.net/rest/api/2/issue");
     expect(JSON.parse(init.body)).toEqual({
@@ -117,6 +120,24 @@ describe("callIntegration activity", () => {
     const [, init] = fetchMock.mock.calls[0];
     const expected = `Basic ${Buffer.from("me@acme.com:tok").toString("base64")}`;
     expect(init.headers.Authorization).toBe(expected);
+  });
+
+  it("Jira over OAuth keeps Bearer (an OAuth access token is not Basic-wrapped)", async () => {
+    connMock.mockResolvedValue({
+      serverUrl: "https://acme.atlassian.net",
+      authMode: "oauth",
+    });
+    authMock.mockResolvedValue({ Authorization: "Bearer oauth-access-token" });
+    fetchMock.mockResolvedValue(res(200, { key: "PROJ-1" }));
+    const cfg: IntegrationNodeConfig = {
+      provider: "jira",
+      action: "get_issue",
+      connectionId: "jira",
+      fields: { issueKey: "PROJ-1" },
+    };
+    await callIntegration(cfg, cfg.fields!, META);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers.Authorization).toBe("Bearer oauth-access-token");
   });
 
   it("GitHub keeps Bearer (authScheme default)", async () => {

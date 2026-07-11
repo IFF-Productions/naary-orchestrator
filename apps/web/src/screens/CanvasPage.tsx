@@ -1824,8 +1824,27 @@ function ConfigPanel({
           const provider = getIntegrationProvider(str("provider"));
           const action = provider?.actions.find((a) => a.key === str("action"));
           const fields = (obj("fields") ?? {}) as Record<string, unknown>;
-          const setField = (key: string, value: string) =>
-            onChange({ fields: { ...fields, [key]: value } });
+          // Coerce the typed-in string to the catalog field's type, so a static value is stored
+          // as the right JSON type (a number, or a string[] for labels) instead of a raw string
+          // that would build a malformed request.
+          const coerce = (type: string | undefined, raw: string): unknown => {
+            if (type === "number") return raw === "" ? "" : Number(raw);
+            if (type === "boolean") return raw === "true";
+            if (type === "string[]")
+              return raw
+                .split(/[\n,]/)
+                .map((s) => s.trim())
+                .filter((s) => s.length > 0);
+            return raw;
+          };
+          const setField = (
+            key: string,
+            type: string | undefined,
+            raw: string,
+          ) => onChange({ fields: { ...fields, [key]: coerce(type, raw) } });
+          // Render the stored value back into the input.
+          const display = (v: unknown): string =>
+            Array.isArray(v) ? v.join(", ") : v == null ? "" : String(v);
           return (
             <>
               <Labeled label="Provider">
@@ -1877,13 +1896,14 @@ function ConfigPanel({
                   label={`${f.label}${f.required ? " *" : ""}`}
                 >
                   <input
-                    value={String(fields[f.key] ?? "")}
-                    onChange={(e) => setField(f.key, e.target.value)}
+                    type={f.type === "number" ? "number" : "text"}
+                    value={display(fields[f.key])}
+                    onChange={(e) => setField(f.key, f.type, e.target.value)}
                     style={inputStyle}
                     placeholder={
                       f.hint ??
                       (f.type === "string[]"
-                        ? "usually bound from an upstream step"
+                        ? "comma-separated, or bind from an upstream step"
                         : "")
                     }
                   />
