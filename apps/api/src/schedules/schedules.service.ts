@@ -305,6 +305,42 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Tear down EVERY schedule a workflow owns — used when the workflow is deleted so no
+   * Temporal schedule outlives the graph and fires against a missing definition. Covers the
+   * auto poll/cron schedules (deterministic ids) and any user-created cron schedules (DB rows +
+   * their Temporal handles). Best-effort per handle (a missing one is fine).
+   */
+  async teardownForWorkflow(
+    tenantId: string,
+    workflowKey: string,
+  ): Promise<void> {
+    for (const id of [
+      `poll-${tenantId}-${workflowKey}`,
+      `cron-${tenantId}-${workflowKey}`,
+    ]) {
+      try {
+        await this.client.schedule.getHandle(id).delete();
+      } catch {
+        /* no such schedule */
+      }
+    }
+    const rows = await getPrisma().schedule.findMany({
+      where: { tenantId, workflowKey },
+      select: { id: true },
+    });
+    for (const r of rows) {
+      try {
+        await this.client.schedule.getHandle(r.id).delete();
+      } catch {
+        /* already gone */
+      }
+    }
+    await getPrisma()
+      .schedule.deleteMany({ where: { tenantId, workflowKey } })
+      .catch(() => undefined);
+  }
+
+  /**
    * Activate / deactivate a WORKFLOW (n8n parity) — flips the activation flag AND brings its
    * Temporal cron/poll schedules in line. Ordering matters so no window fires against intent:
    *  - deactivate: pause the schedules FIRST, then write flag=false (webhook/form keep working in

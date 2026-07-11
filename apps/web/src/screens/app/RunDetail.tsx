@@ -648,6 +648,24 @@ function RunView({ id }: { id: string }) {
         </Card>
       )}
 
+      {/* Run input — the payload that STARTED the run (webhook event, form submission,
+          or manual input), held in ctx.__input. Hidden from Node outputs (which drops __*). */}
+      {!error && state && state.ctx.__input !== undefined && (
+        <Card style={{ padding: "18px 20px", marginBottom: 16 }}>
+          <SectionTitle>Run input</SectionTitle>
+          <div
+            style={{
+              fontSize: "var(--text-2xs)",
+              color: "var(--ink-3)",
+              marginBottom: 8,
+            }}
+          >
+            The payload that started this run (trigger event / manual input).
+          </div>
+          <NodeOutputBody output={state.ctx.__input} />
+        </Card>
+      )}
+
       {!error && state && (
         <div
           style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16 }}

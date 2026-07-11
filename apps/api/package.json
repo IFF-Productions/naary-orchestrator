@@ -10,9 +10,9 @@
     "start": "ts-node src/main.ts"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.8",
+    "@ai-sdk/anthropic": "^4.0.12",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "ai": "7.0.15",
+    "ai": "7.0.22",
     "@naary/connections": "workspace:*",
     "@naary/contracts": "workspace:*",
     "@naary/db": "workspace:*",
@@ -20,10 +20,10 @@
     "@naary/secrets": "workspace:*",
     "zod": "^4.4.3",
     "@naary/usage": "workspace:*",
-    "@nestjs/common": "^11.1.27",
-    "@nestjs/core": "^11.1.27",
-    "@nestjs/platform-express": "^11.1.27",
-    "@temporalio/client": "1.19.0",
+    "@nestjs/common": "^11.1.28",
+    "@nestjs/core": "^11.1.28",
+    "@nestjs/platform-express": "^11.1.28",
+    "@temporalio/client": "1.20.2",
     "dotenv": "^17.4.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
@@ -38,10 +38,10 @@
     "@naary/temporal-config": "workspace:*",
     "@naary/metrics": "workspace:*",
     "@ai-sdk/openai": "^4.0.11",
-    "@ai-sdk/google": "^4.0.10",
-    "@nestjs/swagger": "^11.2.0"
+    "@ai-sdk/google": "^4.0.12",
+    "@nestjs/swagger": "^11.4.5"
   },
   "devDependencies": {
-    "@nestjs/testing": "^11.1.27"
+    "@nestjs/testing": "^11.1.28"
   }
 }

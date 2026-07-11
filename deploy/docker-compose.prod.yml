@@ -1,0 +1,54 @@
+# Production overlay: self-hosted server, exposed ONLY through a Cloudflare Tunnel.
+#
+# Run it together with the base compose from the repo root:
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
+#
+# What it changes vs the dev stack:
+#   1. Closes every published port. Nothing is on the public or LAN interface — the
+#      app is reachable ONLY via the tunnel. (postgres + the Temporal UI stay bound to
+#      127.0.0.1 for local ops / SSH port-forward, never the network.)
+#   2. Adds the `cloudflared` tunnel container (self-hosted Temporal is already in base).
+#
+# `!override` clears the base port list (Docker Compose >= 2.24). If your compose is
+# older, delete the `!override` tag and manually remove the `ports:` from the base file.
+
+services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:5432:5432" # local ops only (psql over SSH tunnel); never exposed
+    # Store the DB on the HOST filesystem (bind mount) instead of a named volume, so the
+    # data lives in a real folder you can back up/copy/restore — and it survives even
+    # `docker compose down -v` (which only removes named/anonymous volumes, not bind mounts).
+    # Path is relative to where you run compose (the repo root). Override with PG_DATA_DIR.
+    volumes: !override
+      - "${PG_DATA_DIR:-./data/postgres}:/var/lib/postgresql/data"
+
+  temporal:
+    ports: !override
+      - "127.0.0.1:8233:8233" # Temporal Web UI over `ssh -L 8233:localhost:8233 <server>`
+    # Persist the Temporal dev-server SQLite on the host too (same rationale as Postgres).
+    volumes: !override
+      - "${TEMPORAL_DATA_DIR:-./data/temporal}:/data"
+
+  api:
+    ports: !override [] # reached internally as api:3000 (via web's nginx proxy)
+    environment:
+      # The browser origin the SPA is served from — used for CORS on the control plane.
+      CORS_ORIGINS: "https://${PUBLIC_HOSTNAME:-naar-y.com}"
+
+  worker: {}
+
+  web:
+    ports: !override [] # cloudflared forwards to web:80 inside the compose network
+
+  # Cloudflare Tunnel: outbound-only connection to the edge. No inbound ports, free TLS,
+  # hidden origin. Token comes from `terraform output -raw tunnel_token`.
+  cloudflared:
+    image: cloudflare/cloudflared:latest # pin a tag for reproducibility, e.g. :2024.12.1
+    container_name: naary-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env (terraform output -raw tunnel_token)}
+    depends_on:
+      - web

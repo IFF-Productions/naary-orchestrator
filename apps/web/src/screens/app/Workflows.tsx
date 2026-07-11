@@ -31,6 +31,7 @@ export function Workflows() {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [tenant, setTenant] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   // Seed the filter from ?q= so the global topbar search lands here pre-filtered.
   const [searchParams] = useSearchParams();
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
@@ -87,6 +88,27 @@ export function Workflows() {
       setErr("Could not change activation — try again.");
     } finally {
       setToggling(null);
+    }
+  }
+
+  async function remove(workflowKey: string, name: string) {
+    if (deleting) return;
+    if (
+      !window.confirm(
+        `Delete workflow "${name}"? This removes the workflow and its webhooks, forms, chats, and schedules. Run history is kept. This can't be undone.`,
+      )
+    ) {
+      return;
+    }
+    setDeleting(workflowKey);
+    setErr(null);
+    try {
+      await api.deleteGraph(workflowKey);
+      setGraphs((gs) => gs?.filter((g) => g.workflowKey !== workflowKey) ?? gs);
+    } catch {
+      setErr("Could not delete the workflow — try again.");
+    } finally {
+      setDeleting(null);
     }
   }
 
@@ -296,7 +318,14 @@ export function Workflows() {
                 }
               />
             </span>
-            <span style={{ textAlign: "right" }}>
+            <span
+              style={{
+                textAlign: "right",
+                display: "inline-flex",
+                gap: 8,
+                justifyContent: "flex-end",
+              }}
+            >
               <Button
                 variant="secondary"
                 onClick={(e) => {
@@ -307,6 +336,16 @@ export function Workflows() {
                 }}
               >
                 Open
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={deleting === r.graph.workflowKey}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void remove(r.graph.workflowKey, r.graph.name);
+                }}
+              >
+                {deleting === r.graph.workflowKey ? "Deleting…" : "Delete"}
               </Button>
             </span>
           </div>

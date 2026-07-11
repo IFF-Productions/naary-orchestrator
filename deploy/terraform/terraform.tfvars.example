@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars (gitignored) and fill in. Or export as TF_VAR_* env vars.
+# The API token is a SECRET — never commit terraform.tfvars.
+
+cloudflare_api_token  = "your-cloudflare-api-token"   # Account: Cloudflare Tunnel:Edit + Zone: DNS:Edit
+cloudflare_account_id = "your-account-id"
+cloudflare_zone_id    = "the-zone-id-for-naar-y.com"
+
+hostname = "naar-y.com"    # or "app.naar-y.com"

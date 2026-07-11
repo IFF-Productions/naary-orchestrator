@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
@@ -163,6 +164,30 @@ export class GraphsController {
       version: snap.version,
       contentHash: snap.contentHash,
     };
+  }
+
+  /** Delete a workflow and everything bound to it (graph versions, activation, pins, error-handler
+   *  bindings, and its webhook/form/chat triggers + Temporal schedules). 404 if the key is unknown. */
+  @ApiEndpoint({
+    summary: "Delete a workflow",
+    description:
+      "Removes the graph (all versions) and its triggers/schedules. Execution history is kept.",
+    notFound: true,
+  })
+  @Delete(":workflowKey")
+  async remove(
+    @TenantId() tenantId: string,
+    @Param("workflowKey") workflowKey: string,
+  ): Promise<{ deleted: true }> {
+    // Tear down Temporal schedules first (external resource), then the DB rows.
+    await this.schedules
+      .teardownForWorkflow(tenantId, workflowKey)
+      .catch(() => undefined);
+    const deleted = await this.graphs.deleteWorkflow(tenantId, workflowKey);
+    if (!deleted) {
+      throw new NotFoundException(`No workflow '${workflowKey}'`);
+    }
+    return { deleted: true };
   }
 }
 

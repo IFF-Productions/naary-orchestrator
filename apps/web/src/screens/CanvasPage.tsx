@@ -28,6 +28,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   lintTemplates,
   getIntegrationProvider,
+  validateIntegrationConfig,
   type NodeType,
 } from "@naary/dsl";
 import { Button } from "../components";
@@ -111,6 +112,14 @@ function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
     kind === "formTrigger" ||
     kind === "chatTrigger";
   const subtitle = nodeSubtitle(kind, data.config);
+  // Integration nodes all share the type "integration" (LABEL[kind] would resolve to whichever
+  // tile is last), so title them by their PROVIDER (GitHub/Jira/Slack/Notion) from config.
+  const title =
+    kind === "integration"
+      ? (getIntegrationProvider(
+          ((data.config as { provider?: string })?.provider ?? "").trim(),
+        )?.label ?? "Integration")
+      : LABEL[kind];
   return (
     <div
       style={{
@@ -138,7 +147,7 @@ function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
           gap: 6,
         }}
       >
-        <span>{LABEL[kind]}</span>
+        <span>{title}</span>
         {data.pinned && (
           <span
             title="Has a pinned sample output"
@@ -400,6 +409,46 @@ export function CanvasPage() {
     () => (graph ? lintTemplates(graph) : []),
     [graph],
   );
+
+  // Non-blocking lint: nodes that reference a resource that doesn't exist yet — the #1 reason a
+  // saved workflow fails at RUN time (e.g. a template's placeholder `connectionId: "github"`).
+  // Cross-references each node's connection against the tenant's real connections, and runs the
+  // catalog-aware config check for integration nodes (missing required fields / bad action).
+  const resourceWarnings = useMemo(() => {
+    if (!graph) return [] as { nodeId: string; message: string }[];
+    const connIds = new Set(connections.map((c) => c.id));
+    const out: { nodeId: string; message: string }[] = [];
+    for (const node of graph.nodes) {
+      const cfg = (node.config ?? {}) as Record<string, unknown>;
+      const cid = typeof cfg.connectionId === "string" ? cfg.connectionId : "";
+      // A connection is named but isn't one of the tenant's real connections.
+      if (cid && !connIds.has(cid)) {
+        out.push({
+          nodeId: node.id,
+          message: `references connection "${cid}" which doesn't exist — create it in Integrations and pick it here`,
+        });
+      }
+      if (node.type === "integration") {
+        // Catalog-aware: unknown provider/action, missing required fields, or empty connection.
+        const err = validateIntegrationConfig(
+          cfg as unknown as Parameters<typeof validateIntegrationConfig>[0],
+        );
+        if (err) out.push({ nodeId: node.id, message: err });
+      } else if (
+        !cid &&
+        node.type in CONNECTION_TYPES &&
+        node.type !== "httpRequest"
+      ) {
+        // A non-integration node that needs a connection but has none (httpRequest's is optional).
+        out.push({
+          nodeId: node.id,
+          message:
+            "needs a connection — create one in Integrations and pick it",
+        });
+      }
+    }
+    return out;
+  }, [graph, connections]);
 
   // Overlay a 📌 badge on nodes with a pinned sample. Derived (not stored on the node) so pinning
   // doesn't churn the editable `nodes` state; onNodesChange still applies to `nodes`.
@@ -712,6 +761,24 @@ export function CanvasPage() {
           >
             ⚠ {templateWarnings.length} reference
             {templateWarnings.length > 1 ? "s" : ""}
+          </span>
+        )}
+        {resourceWarnings.length > 0 && (
+          <span
+            title={resourceWarnings
+              .map((w) => `${w.nodeId}: ${w.message}`)
+              .join("\n")}
+            style={{
+              fontSize: "var(--text-sm)",
+              padding: "3px 10px",
+              borderRadius: "var(--radius-full)",
+              background: "var(--state-error)",
+              color: "#fff",
+              cursor: "help",
+            }}
+          >
+            ⚠ {resourceWarnings.length} missing resource
+            {resourceWarnings.length > 1 ? "s" : ""}
           </span>
         )}
         <div style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
