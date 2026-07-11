@@ -26,6 +26,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
+  lintBindings,
   lintTemplates,
   getIntegrationProvider,
   validateIntegrationConfig,
@@ -399,9 +400,11 @@ export function CanvasPage() {
     return compileGraph(canvasNodes, canvasEdges);
   }, [nodes, edges]);
 
-  // Non-blocking lint: {{ nodeId.path }} tokens that reference a node not in the graph (typos).
+  // Non-blocking lint: references to a node not in the graph — both `{{ nodeId.path }}` string
+  // tokens AND structured `{from,path}` bindings (fieldBindings etc.). Each names WHICH source is
+  // missing, so a typo'd/deleted binding source is caught at author time, not as an empty run.
   const templateWarnings = useMemo(
-    () => (graph ? lintTemplates(graph) : []),
+    () => (graph ? [...lintTemplates(graph), ...lintBindings(graph)] : []),
     [graph],
   );
 
@@ -743,7 +746,7 @@ export function CanvasPage() {
         {templateWarnings.length > 0 && (
           <span
             title={templateWarnings
-              .map((w) => `${w.nodeId}.${w.field}: {{ ${w.ref} }} ${w.message}`)
+              .map((w) => `${w.nodeId} · ${w.field}: ${w.message} (${w.ref})`)
               .join("\n")}
             style={{
               fontSize: "var(--text-sm)",

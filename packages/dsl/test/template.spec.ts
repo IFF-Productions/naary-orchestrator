@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GraphDef } from "../src/types";
 import {
+  lintBindings,
   lintTemplates,
   resolveTemplateString,
   resolveTemplates,
@@ -126,7 +127,11 @@ describe("lintTemplates", () => {
     ]);
     const w = lintTemplates(graph);
     expect(w).toHaveLength(1);
-    expect(w[0]).toMatchObject({ nodeId: "http", field: "url", ref: "aget.output.id" });
+    expect(w[0]).toMatchObject({
+      nodeId: "http",
+      field: "url",
+      ref: "aget.output.id",
+    });
     expect(w[0].message).toContain("aget");
   });
 
@@ -148,5 +153,69 @@ describe("lintTemplates", () => {
       { id: "n", type: "set", config: { fields: { t: "\\{{ nope }}" } } },
     ]);
     expect(lintTemplates(graph)).toEqual([]);
+  });
+});
+
+describe("lintBindings", () => {
+  const g = (nodes: GraphDef["nodes"]): GraphDef => ({
+    startNodeId: "trigger",
+    nodes,
+    edges: [],
+  });
+
+  it("names the missing source of an integration fieldBinding whose `from` isn't a node", () => {
+    const graph = g([
+      { id: "trigger", type: "webhookTrigger" },
+      { id: "review", type: "agent" },
+      {
+        id: "comment",
+        type: "integration",
+        config: {
+          provider: "github",
+          action: "comment_issue",
+          fieldBindings: {
+            owner: { from: "trigger", path: "repository.owner.login" }, // valid
+            body: { from: "reviewer", path: "output.review" }, // typo: no "reviewer" node
+          },
+        },
+      },
+    ]);
+    const w = lintBindings(graph);
+    expect(w).toHaveLength(1);
+    expect(w[0]).toMatchObject({
+      nodeId: "comment",
+      field: "fieldBindings.body",
+      ref: "reviewer.output.review",
+    });
+    expect(w[0].message).toContain('"reviewer"');
+  });
+
+  it("no warnings when every binding source is a real node", () => {
+    const graph = g([
+      { id: "trigger", type: "webhookTrigger" },
+      {
+        id: "lookup",
+        type: "sqlQuery",
+        config: {
+          connectionId: "db",
+          sql: "SELECT 1 WHERE id = $1",
+          paramBindings: { 1: { from: "trigger", path: "userId" } },
+        },
+      },
+    ]);
+    expect(lintBindings(graph)).toEqual([]);
+  });
+
+  it("does NOT flag a plain string field named `from` (e.g. an email sender)", () => {
+    const graph = g([
+      { id: "trigger", type: "webhookTrigger" },
+      {
+        id: "mail",
+        type: "sendEmail",
+        // `from` here is a literal address string, NOT a {from,path} binding.
+        config: { from: "noreply@acme.com", to: "u@acme.com", subject: "hi" },
+      },
+    ]);
+    expect(lintBindings(graph)).toEqual([]);
   });
 });

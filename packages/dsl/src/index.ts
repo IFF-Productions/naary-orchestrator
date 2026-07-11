@@ -35,6 +35,7 @@ export {
   resolveTemplates,
   resolveTemplateString,
   lintTemplates,
+  lintBindings,
   type TemplateWarning,
 } from "./template";
 export { isPureNode, runPureNode } from "./pure-node";

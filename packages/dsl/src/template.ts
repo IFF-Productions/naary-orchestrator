@@ -100,6 +100,62 @@ export function lintTemplates(graph: GraphDef): TemplateWarning[] {
   return warnings;
 }
 
+/**
+ * Lint structured `{from, path?}` bindings (fieldBindings / paramBindings / argumentBindings /
+ * the bare `*Binding` fields) across a graph — the counterpart to `lintTemplates` for the
+ * NON-string binding shape the template linter can't see. Flags a binding whose `from` source
+ * isn't a node in the graph, naming WHICH source is missing. Same warning shape as a template
+ * warning so the canvas can show both together. WARNING-only (runtime resolves it to empty).
+ */
+export function lintBindings(graph: GraphDef): TemplateWarning[] {
+  const nodeIds = new Set(graph.nodes.map((n) => n.id));
+  const warnings: TemplateWarning[] = [];
+  for (const node of graph.nodes) {
+    walkForBindings(node.config, "", (field, from, path) => {
+      if (from && !nodeIds.has(from)) {
+        warnings.push({
+          nodeId: node.id,
+          field,
+          ref: path ? `${from}.${path}` : from,
+          message: `binds from unknown node "${from}" — will always be empty`,
+        });
+      }
+    });
+  }
+  return warnings;
+}
+
+/** Is `v` exactly the ArgBinding shape `{ from: string, path?: string }` — and nothing else?
+ *  The "nothing else" guard keeps a plain string field named `from` (e.g. an email sender) from
+ *  matching: those are strings, not objects, and any richer object has extra keys. */
+function isArgBinding(v: unknown): v is { from: string; path?: string } {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  const o = v as Record<string, unknown>;
+  if (typeof o.from !== "string") return false;
+  return Object.keys(o).every((k) => k === "from" || k === "path");
+}
+
+function walkForBindings(
+  v: unknown,
+  field: string,
+  cb: (field: string, from: string, path?: string) => void,
+): void {
+  if (isArgBinding(v)) {
+    // A binding is a leaf — don't recurse into its own from/path strings.
+    cb(field, v.from.trim(), typeof v.path === "string" ? v.path : undefined);
+    return;
+  }
+  if (Array.isArray(v)) {
+    v.forEach((x, i) => walkForBindings(x, `${field}[${i}]`, cb));
+    return;
+  }
+  if (v && typeof v === "object") {
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      walkForBindings(val, field ? `${field}.${k}` : k, cb);
+    }
+  }
+}
+
 function walkForTokens(
   v: unknown,
   field: string,
