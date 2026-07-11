@@ -15,9 +15,11 @@ import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
   getAuth,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
+  updateProfile,
 } from "firebase/auth";
 import { getToken } from "./auth";
 
@@ -63,13 +65,21 @@ export function loginWithEmail(
     : notConfigured();
 }
 
-export function signupWithEmail(
+export async function signupWithEmail(
   email: string,
   password: string,
+  displayName?: string,
 ): Promise<unknown> {
-  return auth
-    ? createUserWithEmailAndPassword(auth, email, password)
-    : notConfigured();
+  if (!auth) return notConfigured();
+  const cred = await createUserWithEmailAndPassword(auth, email, password);
+  // Persist the name the user typed at signup as their Firebase displayName.
+  const name = displayName?.trim();
+  if (name) await updateProfile(cred.user, { displayName: name });
+  return cred;
+}
+
+export function sendPasswordReset(email: string): Promise<unknown> {
+  return auth ? sendPasswordResetEmail(auth, email) : notConfigured();
 }
 
 export function logout(): Promise<void> {

@@ -18,6 +18,7 @@ import {
   firebaseConfigured,
   loginWithEmail,
   loginWithGoogle,
+  sendPasswordReset,
   signupWithEmail,
 } from "../lib/firebase";
 
@@ -38,7 +39,13 @@ export interface AuthState {
   login: () => Promise<void>;
   /** Email/password sign-in + sign-up (used by the auth screen). */
   loginEmail: (email: string, password: string) => Promise<void>;
-  signupEmail: (email: string, password: string) => Promise<void>;
+  signupEmail: (
+    email: string,
+    password: string,
+    fullName?: string,
+  ) => Promise<void>;
+  /** Send a Firebase password-reset email to the given address. */
+  resetPassword: (email: string) => Promise<void>;
   /** End the Firebase session and return to the sign-in screen. */
   logout: () => void;
 }
@@ -93,8 +100,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loginEmail: async (email, password) => {
       await loginWithEmail(email, password);
     },
-    signupEmail: async (email, password) => {
-      await signupWithEmail(email, password);
+    signupEmail: async (email, password, fullName) => {
+      await signupWithEmail(email, password, fullName);
+    },
+    resetPassword: async (email) => {
+      await sendPasswordReset(email);
     },
     logout: () => {
       void fbLogout();
