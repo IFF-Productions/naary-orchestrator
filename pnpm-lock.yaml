@@ -99,8 +99,8 @@ importers:
         specifier: ^6.5.0
         version: 6.5.0(@nestjs/common@11.1.27(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.27)(reflect-metadata@0.2.2)
       '@temporalio/client':
-        specifier: ^1.20.2
-        version: 1.20.2
+        specifier: 1.19.0
+        version: 1.19.0
       ai:
         specifier: 7.0.15
         version: 7.0.15(zod@4.4.3)
@@ -1842,16 +1842,8 @@ packages:
     resolution: {integrity: sha512-yFR29wM7pygfYvgZoyZVx0ZCCF/tBv9vQ4ynXsj6BM48+IEcWbuXxayNtp8aUpa7A9fpiiw/cP15ysyGYrrseA==}
     engines: {node: '>= 20.3.0'}
 
-  '@temporalio/client@1.20.2':
-    resolution: {integrity: sha512-z9CLE/K6yHQeI3ArF9Y7nao8urpZCrLF9FKPLr34TZQa6+UbuOABcKBaJOHUW/Ecjwtee0uFke/FF9oGx0A4Yw==}
-    engines: {node: '>= 20.3.0'}
-
   '@temporalio/common@1.19.0':
     resolution: {integrity: sha512-ifH7nnT5daOUiRt6Wty/Q1DaiHl3IUpDcFu+MOe0hNtIwzyEG7P0JV8UD3G6qynmqwQ/8fI6lPgiWZUJeyAPxQ==}
-    engines: {node: '>= 20.3.0'}
-
-  '@temporalio/common@1.20.2':
-    resolution: {integrity: sha512-MXWFfnb/1Y+pynT9d8DZaNeovMJwPgwaNLzCLJtLZf5Ufn/TtMZlrXkoiUPjr8ERLOs2v9K0jkq4g1XZT3CJgw==}
     engines: {node: '>= 20.3.0'}
 
   '@temporalio/core-bridge@1.19.0':
@@ -1864,10 +1856,6 @@ packages:
 
   '@temporalio/proto@1.19.0':
     resolution: {integrity: sha512-xL6lcacE18ywGRWEcZ1RhKqPnXEdQX0hhI+YEIZ+jdKU9S8ISJk9at1KR3w3krvxJ3ozOx+BcaCKBdQyI/qSXw==}
-    engines: {node: '>= 20.3.0'}
-
-  '@temporalio/proto@1.20.2':
-    resolution: {integrity: sha512-m/lfRAV4u0RQ9FszvH0c9+GEvRXZPLCQgSFaTb9BrLhuJFxUHgqc8gwbWhOyRG1pgAilRZtfkhOi/OLAUFDfNA==}
     engines: {node: '>= 20.3.0'}
 
   '@temporalio/testing@1.19.0':
@@ -5927,27 +5915,9 @@ snapshots:
       nexus-rpc: 0.0.2
       uuid: 14.0.1
 
-  '@temporalio/client@1.20.2':
-    dependencies:
-      '@grpc/grpc-js': 1.14.4
-      '@temporalio/common': 1.20.2
-      '@temporalio/proto': 1.20.2
-      abort-controller: 3.0.0
-      long: 5.3.2
-      nexus-rpc: 0.0.2
-      uuid: 14.0.1
-
   '@temporalio/common@1.19.0':
     dependencies:
       '@temporalio/proto': 1.19.0
-      long: 5.3.2
-      ms: 3.0.0-canary.1
-      nexus-rpc: 0.0.2
-      proto3-json-serializer: 2.0.2
-
-  '@temporalio/common@1.20.2':
-    dependencies:
-      '@temporalio/proto': 1.20.2
       long: 5.3.2
       ms: 3.0.0-canary.1
       nexus-rpc: 0.0.2
@@ -5967,11 +5937,6 @@ snapshots:
       nexus-rpc: 0.0.2
 
   '@temporalio/proto@1.19.0':
-    dependencies:
-      long: 5.3.2
-      protobufjs: 7.6.4
-
-  '@temporalio/proto@1.20.2':
     dependencies:
       long: 5.3.2
       protobufjs: 7.6.5
@@ -7161,7 +7126,7 @@ snapshots:
       node-fetch: 3.3.2
       object-hash: 3.0.0
       proto3-json-serializer: 3.0.4
-      protobufjs: 7.6.4
+      protobufjs: 7.6.5
       retry-request: 8.0.3
       rimraf: 5.0.10
     transitivePeerDependencies:
