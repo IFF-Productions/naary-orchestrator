@@ -602,7 +602,10 @@ export function Integrations() {
               <button
                 type="button"
                 className="btn btn-sm btn-secondary"
-                disabled={reconnecting === c.id}
+                // Disable ALL Reconnect buttons while any reconnect is in flight — the handler
+                // early-returns when `reconnecting` is set, so a per-row-only disable would make
+                // the other buttons look clickable but do nothing.
+                disabled={reconnecting !== null}
                 onClick={() => {
                   if (!tenant || reconnecting) return;
                   setReconnecting(c.id);
@@ -1762,11 +1765,23 @@ function ConnectForm({
       // OAuth needs an interactive consent handshake: kick off `oauth/start` and send the
       // browser to the provider's authorize URL. It redirects back to the API's
       // /oauth/callback, which persists the refresh token. (Token modes are done above.)
+      // The connection already EXISTS at this point; scope consent-start errors separately so
+      // a failure surfaces a specific message and refreshes the list (the created row shows up
+      // and can be retried via Reconnect) — not the misleading "could not connect" that would
+      // hide the created connection and invite duplicate creates on retry.
       if (authMode === "oauth") {
-        setMsg("Redirecting to authorize…");
-        const { authorizeUrl } = await api.startOauthConsent(tenant, conn.id);
-        window.location.assign(authorizeUrl);
-        return; // navigating away — leave the form as-is
+        try {
+          setMsg("Redirecting to authorize…");
+          const { authorizeUrl } = await api.startOauthConsent(tenant, conn.id);
+          window.location.assign(authorizeUrl);
+          return; // navigating away — leave the form as-is
+        } catch {
+          setMsg(
+            "Connection created, but starting authorization failed — use Reconnect on it to retry.",
+          );
+          await onChanged();
+          return;
+        }
       }
       setLabel("");
       setServerUrl("");
