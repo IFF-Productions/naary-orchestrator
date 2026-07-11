@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@naary/dsl": "workspace:*",
+    "@sentry/react": "^10.65.0",
     "@xyflow/react": "^12.11.2",
     "firebase": "^12.16.0",
     "react": "^19.2.7",
