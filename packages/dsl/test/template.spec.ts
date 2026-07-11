@@ -155,6 +155,18 @@ describe("lintTemplates", () => {
     ]);
     expect(lintTemplates(graph)).toEqual([]);
   });
+
+  it("does NOT flag `{{ __input.x }}` — a reserved runtime source, not a node", () => {
+    const graph = g([
+      { id: "start", type: "start" },
+      {
+        id: "http",
+        type: "httpRequest",
+        config: { url: "https://x/{{ __input.id }}", method: "GET" },
+      },
+    ]);
+    expect(lintTemplates(graph)).toEqual([]);
+  });
 });
 
 describe("lintBindings", () => {
@@ -215,6 +227,19 @@ describe("lintBindings", () => {
         type: "sendEmail",
         // `from` here is a literal address string, NOT a {from,path} binding.
         config: { from: "noreply@acme.com", to: "u@acme.com", subject: "hi" },
+      },
+    ]);
+    expect(lintBindings(graph)).toEqual([]);
+  });
+
+  it('does NOT flag `from: "__input"` — a reserved runtime source, not a node (splitOut)', () => {
+    const graph = g([
+      { id: "trigger", type: "webhookTrigger" },
+      {
+        id: "sp",
+        type: "splitOut",
+        // Reads the trigger input directly — __input is provided by the run context.
+        config: { from: "__input", path: "items" },
       },
     ]);
     expect(lintBindings(graph)).toEqual([]);
