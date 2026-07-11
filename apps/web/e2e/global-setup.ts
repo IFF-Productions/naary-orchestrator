@@ -72,7 +72,15 @@ async function globalSetup(_config: FullConfig): Promise<void> {
       graph: {
         startNodeId: "s",
         nodes: [
-          { id: "s", type: "start" },
+          // sampleInput seeds ctx.__input, so the run-detail "Run input" panel has
+          // a deterministic payload to assert against (session-fixes e2e).
+          {
+            id: "s",
+            type: "start",
+            config: {
+              sampleInput: { source: "e2e-run-input", ticket: "NAARY-42" },
+            },
+          },
           { id: "a", type: "set", config: { fields: { a: 1 } } },
           { id: "b", type: "set", config: { fields: { b: 2 } } },
           { id: "m", type: "merge", config: { mode: "array" } },
@@ -222,6 +230,44 @@ async function globalSetup(_config: FullConfig): Promise<void> {
         edges: [
           { from: "chat", to: "reply" },
           { from: "reply", to: "end" },
+        ],
+      },
+    }),
+  }).catch(() => undefined);
+
+  // Seed a saved graph containing a GitHub INTEGRATION node. Every integration tile shares the
+  // DSL type "integration", so a type-keyed label collapses to the last-registered tile ("Notion")
+  // and mislabels this GitHub node. The session-fixes e2e opens this workflow's detail page and
+  // asserts it reads "GitHub", guarding the provider-aware nodeDisplayLabel fix. workflowKey
+  // "e2e-integration".
+  await fetch(`${API_BASE}/graphs`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      workflowKey: "e2e-integration",
+      name: "E2E GitHub integration",
+      graph: {
+        startNodeId: "s",
+        nodes: [
+          { id: "s", type: "start" },
+          {
+            id: "gh",
+            type: "integration",
+            config: {
+              provider: "github",
+              action: "create_issue",
+              connectionId: "",
+              fields: {},
+            },
+          },
+          { id: "e", type: "end" },
+        ],
+        edges: [
+          { from: "s", to: "gh" },
+          { from: "gh", to: "e" },
         ],
       },
     }),

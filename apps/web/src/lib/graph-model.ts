@@ -3,6 +3,7 @@
  * by source/target) and compiles to the platform `@naary/dsl` GraphDef on save —
  * see compile-graph.ts. Positions are editor-only and don't reach the DSL.
  */
+import { getIntegrationProvider } from "@naary/dsl";
 import type { EdgeCondition, NodeType } from "@naary/dsl";
 
 export interface CanvasNode {
@@ -258,6 +259,27 @@ export const ACCENT = Object.fromEntries(
 export const NODE_LABEL = Object.fromEntries(
   NODE_KINDS.map((k) => [k.type, k.label]),
 ) as Record<NodeType, string>;
+
+/**
+ * The label to SHOW on a node — provider-aware. Every integration tile (GitHub, Jira,
+ * Slack, Notion, …) shares the DSL type `"integration"`, so NODE_LABEL["integration"]
+ * collapses to whichever tile was registered LAST ("Notion"). Rendering that verbatim
+ * mislabels every integration node. This resolves the real provider from the node's
+ * config so a GitHub node reads "GitHub". Use this at EVERY node render site (canvas,
+ * workflow detail, run view) — NODE_LABEL[type] alone is wrong for integrations.
+ */
+export function nodeDisplayLabel(
+  type: NodeType,
+  config?: Record<string, unknown> | null,
+): string {
+  if (type === "integration") {
+    const provider = (config as { provider?: string } | undefined)?.provider;
+    return (
+      getIntegrationProvider((provider ?? "").trim())?.label ?? "Integration"
+    );
+  }
+  return NODE_LABEL[type];
+}
 
 /** DSL node type → plain-language description, derived from the one registry. */
 export const NODE_DESCRIPTION = Object.fromEntries(
