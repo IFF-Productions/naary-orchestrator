@@ -55,7 +55,7 @@ import {
   VALUELESS_OPS,
   NODE_GROUPS,
   NODE_KINDS,
-  NODE_LABEL as LABEL,
+  nodeDisplayLabel,
   nodeSubtitle,
 } from "../lib/graph-model";
 
@@ -112,14 +112,9 @@ function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
     kind === "formTrigger" ||
     kind === "chatTrigger";
   const subtitle = nodeSubtitle(kind, data.config);
-  // Integration nodes all share the type "integration" (LABEL[kind] would resolve to whichever
-  // tile is last), so title them by their PROVIDER (GitHub/Jira/Slack/Notion) from config.
-  const title =
-    kind === "integration"
-      ? (getIntegrationProvider(
-          ((data.config as { provider?: string })?.provider ?? "").trim(),
-        )?.label ?? "Integration")
-      : LABEL[kind];
+  // Provider-aware: an integration node reads "GitHub"/"Jira"/…, not the shared type
+  // label "integration" (which collapses to the last-registered tile). See nodeDisplayLabel.
+  const title = nodeDisplayLabel(kind, data.config);
   return (
     <div
       style={{
@@ -1480,7 +1475,7 @@ function ConfigPanel({
               fontWeight: "var(--weight-semibold)",
             }}
           >
-            {LABEL[kind]}
+            {nodeDisplayLabel(kind, config)}
           </div>
           <div
             className="mono"

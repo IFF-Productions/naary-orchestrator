@@ -19,14 +19,13 @@ import {
   type WebhookRow,
 } from "../../lib/api";
 import { decompileGraph } from "../../lib/decompile-graph";
-import {
-  ACCENT,
-  NODE_LABEL as LABEL,
-  nodeSubtitle,
-} from "../../lib/graph-model";
+import { ACCENT, nodeDisplayLabel, nodeSubtitle } from "../../lib/graph-model";
 
 interface ViewData extends Record<string, unknown> {
   kind: NodeType;
+  // Provider-aware label (a GitHub integration reads "GitHub", not "Notion"), resolved
+  // from the node config at build time since ViewData doesn't carry the raw config.
+  label: string;
   subtitle?: string;
 }
 
@@ -55,7 +54,7 @@ function ViewNode({ data }: NodeProps<Node<ViewData>>) {
       <div
         style={{ padding: "9px 12px", fontWeight: "var(--weight-semibold)" }}
       >
-        {LABEL[data.kind]}
+        {data.label}
       </div>
       {data.subtitle && (
         <div
@@ -403,7 +402,7 @@ export function WorkflowDetail() {
                   padding: "2px 8px",
                 }}
               >
-                {LABEL[n.type]}
+                {nodeDisplayLabel(n.type, n.config)}
               </span>
             ))}
           </div>
@@ -423,7 +422,11 @@ function toFlow(graph: GraphDef): {
       id: n.id,
       type: "view",
       position: n.position,
-      data: { kind: n.type, subtitle: nodeSubtitle(n.type, n.config) },
+      data: {
+        kind: n.type,
+        label: nodeDisplayLabel(n.type, n.config),
+        subtitle: nodeSubtitle(n.type, n.config),
+      },
     })),
     edges: edges.map((e) => ({
       id: e.id,
