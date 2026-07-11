@@ -11,7 +11,10 @@ Manage Jira tickets — read, create, comment, and transition — from a workflo
    - **Type:** Jira / Atlassian
    - **Server URL:** your site, e.g. `https://your-company.atlassian.net` — this becomes the API
      base for the node.
-   - **Auth:** the API token (stored as the connection's Bearer token).
+   - **Auth (token):** `your-email@company.com:your-api-token` — the account email and the API
+     token joined by a colon. Jira Cloud + an API token authenticates with **HTTP Basic**
+     (`base64(email:token)`); the node builds that header for you from this value. (A Bearer OAuth
+     access token also works if your connection uses OAuth.)
 3. **Add the Jira node**, pick this connection, choose an action, and fill the fields.
 
 > Cloud only: an Atlassian Cloud site. Self-hosted Jira Data Center on a private network is not

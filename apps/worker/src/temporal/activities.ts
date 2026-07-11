@@ -2424,6 +2424,13 @@ export async function callIntegration(
       meta.tenantId,
       cfg.connectionId,
     );
+    // Jira Cloud + an API token uses HTTP Basic (`base64(email:token)`), not Bearer — the
+    // connection stores `email:token`, resolveAuthHeader hands it back as `Bearer email:token`,
+    // and we re-wrap it here. Bearer (GitHub, or Jira OAuth) is passed through unchanged.
+    if (provider.authScheme === "basic" && authHeaders.Authorization) {
+      const raw = authHeaders.Authorization.replace(/^Bearer\s+/i, "");
+      authHeaders.Authorization = `Basic ${Buffer.from(raw).toString("base64")}`;
+    }
     const headers: Record<string, string> = {
       Accept: "application/json",
       ...(provider.headers ?? {}),
@@ -2458,6 +2465,11 @@ export async function callIntegration(
         body = raw; // malformed JSON — hand back the text rather than failing
       }
     }
+    // Offload a large response so it can't blow Temporal's ~2MB payload cap (like httpRequest);
+    // the interpreter resolves the claim-check back before a downstream node reads it.
+    body = await maybeOffload(body, getObjectStore(), {
+      keyPrefix: `integration/${meta.tenantId}`,
+    });
     log.info(
       {
         activity: "callIntegration",

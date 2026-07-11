@@ -104,6 +104,34 @@ describe("callIntegration activity", () => {
     });
   });
 
+  it("Jira uses HTTP Basic — the resolved Bearer token is re-wrapped as base64(email:token)", async () => {
+    authMock.mockResolvedValue({ Authorization: "Bearer me@acme.com:tok" });
+    fetchMock.mockResolvedValue(res(200, { key: "PROJ-1" }));
+    const cfg: IntegrationNodeConfig = {
+      provider: "jira",
+      action: "get_issue",
+      connectionId: "jira",
+      fields: { issueKey: "PROJ-1" },
+    };
+    await callIntegration(cfg, cfg.fields!, META);
+    const [, init] = fetchMock.mock.calls[0];
+    const expected = `Basic ${Buffer.from("me@acme.com:tok").toString("base64")}`;
+    expect(init.headers.Authorization).toBe(expected);
+  });
+
+  it("GitHub keeps Bearer (authScheme default)", async () => {
+    fetchMock.mockResolvedValue(res(200, {}));
+    const cfg: IntegrationNodeConfig = {
+      provider: "github",
+      action: "get_issue",
+      connectionId: "gh",
+      fields: { owner: "o", repo: "r", issueNumber: 1 },
+    };
+    await callIntegration(cfg, cfg.fields!, META);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers.Authorization).toBe("Bearer tok-123");
+  });
+
   it("get_issue → GET, no body", async () => {
     fetchMock.mockResolvedValue(res(200, { number: 7 }));
     const cfg: IntegrationNodeConfig = {

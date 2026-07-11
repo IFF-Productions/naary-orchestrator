@@ -153,8 +153,11 @@ save time (a correctable 400, never a runtime surprise):
 - **Cloud only.** The SSRF egress guard blocks private hosts, so **GitHub Enterprise Server /
   self-hosted Jira on private networks won't work**. Cloud GitHub (`api.github.com`) and Atlassian
   Cloud sites are fine. Documented per node.
-- **Auth** is whatever the connection provides — a PAT/api_token (Bearer) or OAuth. GitHub → a PAT
-  or GitHub App token; Jira → an Atlassian API token (as a Bearer) or OAuth.
+- **Auth** is whatever the connection provides, shaped by the provider's `authScheme`. GitHub →
+  a PAT / GitHub App token as **Bearer** (`authScheme: "bearer"`, the default). Jira Cloud + an
+  Atlassian API token → **HTTP Basic** (`authScheme: "basic"`): the connection token is
+  `email:api_token`, sent as `Basic base64(email:api_token)` (Bearer is only for Jira's OAuth
+  access tokens). The activity performs the Bearer→Basic transform from the resolved token.
 - Per-node docs (`docs/integrations/*.md`) derive their action/field reference from the catalog so
   they can't drift.
 

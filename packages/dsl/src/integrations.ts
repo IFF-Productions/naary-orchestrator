@@ -53,6 +53,13 @@ export interface IntegrationProvider {
   baseUrl?: string;
   /** When true, the base URL is the CONNECTION's serverUrl (e.g. an Atlassian site). */
   baseUrlFromConnection?: boolean;
+  /**
+   * How the connection token becomes the Authorization header (default "bearer").
+   * "basic" = HTTP Basic — the stored token is `email:api_token` and is sent as
+   * `Basic base64(email:api_token)`. Jira Cloud + an Atlassian API token needs this
+   * (Bearer is only for its OAuth access tokens); GitHub is genuinely "bearer".
+   */
+  authScheme?: "bearer" | "basic";
   /** Provider-required static headers (non-secret), e.g. GitHub's Accept/version. */
   headers?: Record<string, string>;
   /** One-line description + setup note surfaced in the palette + docs. */
@@ -175,8 +182,9 @@ const JIRA: IntegrationProvider = {
   key: "jira",
   label: "Jira",
   baseUrlFromConnection: true,
+  authScheme: "basic",
   description: "Manage Jira tickets — read, create, comment, and transition.",
-  auth: "A Jira connection whose Server URL is your Atlassian site (https://you.atlassian.net) and whose token is an Atlassian API token (Bearer) or OAuth.",
+  auth: "A Jira connection whose Server URL is your Atlassian site (https://you.atlassian.net) and whose token is `your-email@company.com:your-api-token` (sent as HTTP Basic).",
   actions: [
     {
       key: "get_issue",
