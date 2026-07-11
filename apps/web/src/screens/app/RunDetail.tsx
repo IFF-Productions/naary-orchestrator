@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import type { RegionTrace, TraceCell } from "@naary/dsl";
 import {
   Button,
   Card,
@@ -201,18 +202,9 @@ function NodeOutputBody({ output }: { output: unknown }) {
 /* ---- Per-item trace grid (items-model A5 §0.4.2) --------------------------------
  * The worker publishes `ctx.__regionTrace` keyed by splitOut: each entry is either a grid
  * ({ nodes, items, truncatedItems? }) with tri-state cells (value / dead branch / error), or an
- * `{ unavailable: "batched" }` marker for A3 node-major regions (whose per-item values aren't
- * captured — the collected-array table above already shows their result). Rendering is pure — the
- * grid is data the run already carries. */
-type TraceCell = { v: unknown } | { dead: true } | { err: string };
-type RegionTrace =
-  | {
-      nodes: string[];
-      items: Record<string, TraceCell>[];
-      truncatedItems?: number;
-    }
-  | { unavailable: "batched" };
-
+ * `{ unavailable }` marker — "batched" for A3 node-major regions, "budget" when the aggregate trace
+ * byte cap was hit first. The collected-array table above still shows those regions' results.
+ * TraceCell / RegionTrace are the shared wire types from @naary/dsl (the worker writes them). */
 function TraceCellView({ cell }: { cell: TraceCell | undefined }) {
   if (!cell) return <span style={{ color: "var(--ink-3)" }}>—</span>;
   if ("dead" in cell)
@@ -262,8 +254,11 @@ function RegionTraceSection({ ctx }: { ctx: Record<string, unknown> }) {
                     marginTop: 4,
                   }}
                 >
-                  Per-item trace unavailable for batched-activity regions — see
-                  the collected array in <strong>Node outputs</strong> above.
+                  {trace.unavailable === "budget"
+                    ? "Per-item trace omitted — this run's trace exceeded the size budget."
+                    : "Per-item trace unavailable for batched-activity regions —"}{" "}
+                  see the collected array in <strong>Node outputs</strong>{" "}
+                  above.
                 </div>
               </div>
             );

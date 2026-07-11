@@ -47,6 +47,8 @@ import {
   computeItemsRegions,
   BATCHABLE_REGION_ACTIVITIES,
   type ItemsRegion,
+  type TraceCell,
+  type RegionTrace,
 } from "@naary/dsl";
 import type { GraphDef, NodeDef, NodeRetryPolicy } from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
@@ -111,18 +113,12 @@ const MAX_A4_REGION_ACTIVITY_EXECUTIONS = 100;
  *  value JSON-capped. A cell is tri-state — value / dead (A4 dead branch) / error. */
 const MAX_TRACE_ITEMS = 50;
 const MAX_TRACE_CELL_BYTES = 1000;
-type TraceCell = { v: unknown } | { dead: true } | { err: string };
-/** A traced region carries the grid; an A3 (node-major batched-activity) region carries an explicit
- *  `unavailable` marker instead — the run view is ctx-driven and can't see the graph, so the worker
- *  (which alone knows the branch taken) must signal "no per-item grid here" so the UI shows the
- *  legible "see the array table" message rather than nothing (design §0.4.2). */
-type RegionTrace =
-  | {
-      nodes: string[];
-      items: Record<string, TraceCell>[];
-      truncatedItems?: number;
-    }
-  | { unavailable: "batched" };
+/** Aggregate cap across ALL regions in one run segment. Per-region worst case is ~650KB (50 rows ×
+ *  ~13 cols × 1KB), so several full wide regions could otherwise push the CAN snapshot (:1647) + return
+ *  (:1786) past Temporal's ~2MB and FAIL AN OTHERWISE-HEALTHY RUN. A diagnostic must never do that:
+ *  once this budget is hit, later regions emit `{ unavailable: "budget" }` instead of a grid.
+ *  TraceCell / RegionTrace wire types are shared from @naary/dsl (worker writes, web renders). */
+const MAX_TRACE_TOTAL_BYTES = 512_000;
 
 /** One tri-state cell from a node's per-item output. `live=false` ⇒ dead branch (A4). An
  *  `onError:"continue"` result is `{ error }` ⇒ shown as `err`. Otherwise the value, JSON-capped so a
@@ -364,6 +360,10 @@ export async function runGraph(
   // a node counter — never a DB read in workflow code (CLAUDE.md rule 2; §3).
   let costUsd = resume?.costUsd ?? 0;
   let stepCount = resume?.stepCount ?? 0;
+  // Running total of per-item trace bytes across ALL regions this segment (§0.4.2 aggregate cap). Not
+  // carried across CAN — each segment re-budgets against its own fresh regions (prior segments' traces
+  // already rode their own snapshot). Command-neutral like the rest of the trace.
+  let traceBytes = 0;
 
   // Fan-in join state (Slice N5). `mergeParents` maps a merge node id → its inbound
   // parents' ids in DECLARED edge order (its length is the expected in-degree);
@@ -1673,15 +1673,27 @@ export async function runGraph(
               string,
               RegionTrace
             >;
-            trace[splitOutId] = traced
-              ? {
-                  nodes: traceNodes,
-                  items: traceRows,
-                  ...(N > MAX_TRACE_ITEMS
-                    ? { truncatedItems: N - MAX_TRACE_ITEMS }
-                    : {}),
-                }
-              : { unavailable: "batched" };
+            if (!traced) {
+              trace[splitOutId] = { unavailable: "batched" };
+            } else {
+              const grid: RegionTrace = {
+                nodes: traceNodes,
+                items: traceRows,
+                ...(N > MAX_TRACE_ITEMS
+                  ? { truncatedItems: N - MAX_TRACE_ITEMS }
+                  : {}),
+              };
+              // Aggregate byte cap: a diagnostic must never push the run payload over Temporal's ~2MB
+              // and fail an otherwise-healthy run. Measure this grid; if it would exceed the running
+              // budget, drop to the `budget` marker (fail closed, visible) rather than growing ctx.
+              const gridBytes = JSON.stringify(grid).length;
+              if (traceBytes + gridBytes > MAX_TRACE_TOTAL_BYTES) {
+                trace[splitOutId] = { unavailable: "budget" };
+              } else {
+                traceBytes += gridBytes;
+                trace[splitOutId] = grid;
+              }
+            }
           }
           currentNodeId = region.loopEndId;
           current = nextNodes(graph, region.loopEndId, ctx)[0]; // linear exit → single next

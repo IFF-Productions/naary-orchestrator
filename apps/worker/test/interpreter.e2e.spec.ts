@@ -1049,6 +1049,37 @@ describe("runGraph interpreter — items model (splitOut region)", () => {
     });
   });
 
+  it("A5-trace: __regionTrace SURVIVES continueAsNew (the load-bearing §0.4.2 claim)", async () => {
+    // The whole architecture rests on the trace surviving a CAN boundary (post-CAN history is
+    // truncated, so a live-only query would lose it). Force a CAN right after the region runs, then
+    // assert the completed run STILL carries the grid — proving ctx (and __regionTrace) rides the CAN.
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          itemsGraph(),
+          { items: [{ n: 1 }, { n: 2 }] },
+          // continueAsNewAfterSteps forces a CAN at the first boundary after the region (which alone
+          // bumps stepCount past 2); the run then resumes and completes in a fresh segment.
+          {
+            tenantId: "t-trace-can",
+            maxStepsPerRun: 100,
+            continueAsNewAfterSteps: 2,
+          },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-trace-can",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const final = await handle.query(stateQuery);
+      const trace = (final.ctx.__regionTrace as Record<string, unknown>).sp as {
+        items: Record<string, unknown>[];
+      };
+      expect(trace.items).toHaveLength(2); // grid intact across the CAN, not dropped
+      expect(trace.items[0].map).toEqual({ v: { doubled: 1 } });
+    });
+  });
+
   it("A4: parallel fan-out from splitOut — the merge combines BOTH live branches (object mode)", async () => {
     // sp → {left, right} (both unconditional, both live) → merge(object) → loopEnd.
     const parGraph: GraphDef = {
