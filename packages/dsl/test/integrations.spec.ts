@@ -113,6 +113,15 @@ describe("integration catalog — request construction", () => {
     });
   });
 
+  it("omits an OPTIONAL json field explicitly set to {} (empty = not sent)", () => {
+    const req = buildIntegrationRequest("notion", "query_database", {
+      databaseId: "db-1",
+      filter: {}, // empty optional filter — must not land in the body
+    });
+    expect(req.path).toBe("/databases/db-1/query");
+    expect(req.body).toBeUndefined();
+  });
+
   it("Notion append_block → path id + children json body", () => {
     const req = buildIntegrationRequest("notion", "append_block", {
       blockId: "blk-1",

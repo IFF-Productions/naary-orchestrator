@@ -520,6 +520,15 @@ function setPath(
   obj[keys[keys.length - 1]] = value;
 }
 
+/** A field value that carries nothing to send: unset, blank, empty array, or empty object.
+ *  Shared by request construction (omit it) and validation (treat as missing) so they agree. */
+export function isEmptyFieldValue(v: unknown): boolean {
+  if (v === undefined || v === null || v === "") return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === "object") return Object.keys(v as object).length === 0;
+  return false;
+}
+
 export interface BuiltIntegrationRequest {
   method: IntegrationAction["method"];
   /** Path portion with `{placeholders}` filled + the query string appended (no base URL). */
@@ -548,7 +557,7 @@ export function buildIntegrationRequest(
 
   for (const field of act.fields) {
     const value = fields[field.key];
-    const missing = value === undefined || value === null || value === "";
+    const missing = isEmptyFieldValue(value);
     if (field.in === "path") {
       // A required path field is validated at save time; at runtime substitute what we have.
       path = path.replace(
@@ -595,20 +604,10 @@ export function validateIntegrationConfig(
   // malformed path/body instead of failing fast here.
   const hasBinding = (key: string): boolean =>
     config.fieldBindings != null && key in config.fieldBindings;
-  const hasStaticValue = (key: string): boolean => {
-    if (config.fields == null || !(key in config.fields)) return false;
-    const v = config.fields[key];
-    if (v === undefined || v === null || v === "") return false;
-    if (Array.isArray(v) && v.length === 0) return false;
-    // An empty object ({}) for a `json` field is effectively unset.
-    if (
-      typeof v === "object" &&
-      !Array.isArray(v) &&
-      Object.keys(v as object).length === 0
-    )
-      return false;
-    return true;
-  };
+  const hasStaticValue = (key: string): boolean =>
+    config.fields != null &&
+    key in config.fields &&
+    !isEmptyFieldValue(config.fields[key]);
   const supplied = (key: string): boolean =>
     hasBinding(key) || hasStaticValue(key);
 
