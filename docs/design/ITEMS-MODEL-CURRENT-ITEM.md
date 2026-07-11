@@ -254,10 +254,17 @@ per-item interpreter evaluator lands LAST, on top of a validated, well-tested re
 
 ### 0.4.2. A5-trace — per-item INTERMEDIATE trace grid (proposed; doc-first, gated on the CAN answer)
 
-> **Status: PROPOSED (design-first, same cadence as A4 §0.4.1).** A5's shipped run-view table (PR #224)
-> shows a node's *collected result array* as rows. This section specs the strictly-larger view the user
-> asked to design before merging #224: a **per-item × per-region-node grid** — "for THIS item, what did
-> each node in the region produce, and which branch did it take."
+> **Status: IMPLEMENTED (inline-capped MVP).** The worker captures `ctx.__regionTrace` in the A2 and A4
+> per-item loops — PURE state (no command, no `stepCount` change), verified command-neutral by inspection,
+> so **no new `patched()`** (as argued below). A3 node-major regions emit an `{ unavailable: "batched" }`
+> marker; the run view renders the tri-state grid (value / dead / error) or the legible A3 message. Caps:
+> `MAX_TRACE_ITEMS = 50`, `MAX_TRACE_CELL_BYTES = 1000`, `truncatedItems` when over. The storage
+> escape-hatch (§ below) is NOT built. Tests: A2 grid, A3 unavailable, A4 tri-state (live/dead).
+>
+> **Status (orig): PROPOSED (design-first, same cadence as A4 §0.4.1).** A5's shipped run-view table (PR
+> #224) shows a node's *collected result array* as rows. This section specs the strictly-larger view the
+> user asked to design before merging #224: a **per-item × per-region-node grid** — "for THIS item, what
+> did each node in the region produce, and which branch did it take."
 
 **The one question that picks the architecture (answer first, per the advisor): must the trace survive
 `continueAsNew` and be present for a COMPLETED run?** YES — completed and long (CAN-segmented) runs are

@@ -32,6 +32,20 @@ export interface ItemsRegion {
   kind: "linear" | "a4";
 }
 
+/** Per-item trace grid (items-model §0.4.2), the wire shape shared by the worker (which writes it into
+ *  `ctx.__regionTrace`, keyed by splitOut id) and the run view (which renders it). A cell is tri-state:
+ *  the value, a dead branch (A4), or an `onError:"continue"` error. Defined here — beside the region
+ *  model it derives from — so worker and web share ONE definition (both already depend on @naary/dsl). */
+export type TraceCell = { v: unknown } | { dead: true } | { err: string };
+export type RegionTrace =
+  | {
+      nodes: string[];
+      items: Record<string, TraceCell>[];
+      truncatedItems?: number;
+    }
+  /** A3 node-major region carries no grid; `budget` = the aggregate trace byte cap was hit first. */
+  | { unavailable: "batched" | "budget" };
+
 export interface ItemsRegionResult {
   regions: ItemsRegion[];
   /** First structural violation (node id named), or null when every region is valid. */

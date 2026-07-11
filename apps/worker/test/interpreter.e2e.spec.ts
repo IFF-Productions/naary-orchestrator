@@ -866,6 +866,17 @@ describe("runGraph interpreter — items model (splitOut region)", () => {
       // items-authoritative: ctx of the region nodes is the FIRST item's projection
       expect(final.ctx.sp).toEqual({ n: 1 });
       expect(final.ctx.map).toEqual({ doubled: 1 });
+      // A5-trace: a linear (A2) region captures a per-item grid too — every node LIVE, one row per item.
+      const trace = (final.ctx.__regionTrace as Record<string, unknown>).sp as {
+        nodes: string[];
+        items: Record<string, unknown>[];
+      };
+      expect(trace.nodes).toEqual(["sp", "map"]);
+      expect(trace.items).toEqual([
+        { sp: { v: { n: 1 } }, map: { v: { doubled: 1 } } },
+        { sp: { v: { n: 2 } }, map: { v: { doubled: 2 } } },
+        { sp: { v: { n: 3 } }, map: { v: { doubled: 3 } } },
+      ]);
     });
   });
 
@@ -949,6 +960,123 @@ describe("runGraph interpreter — items model (splitOut region)", () => {
         { branch: "small", n: 2 },
         { branch: "big", n: 3 },
       ]);
+    });
+  });
+
+  it("A5-trace: captures a per-item tri-state grid (live value / dead branch) in __regionTrace", async () => {
+    // Same if/else region as the routing test — assert the intermediate trace, not just the collected
+    // output. Item 1 (big=true) → `big` live, `small` DEAD; item 2 (big=false) → the inverse.
+    const a4Graph: GraphDef = {
+      startNodeId: "start",
+      nodes: [
+        { id: "start", type: "start" },
+        {
+          id: "sp",
+          type: "splitOut",
+          config: { from: "__input", path: "items" },
+        },
+        {
+          id: "if",
+          type: "if",
+          config: { conditions: [{ path: "sp.big", op: "eq", value: true }] },
+        },
+        {
+          id: "big",
+          type: "set",
+          config: { fields: { branch: "big" } },
+        },
+        {
+          id: "small",
+          type: "set",
+          config: { fields: { branch: "small" } },
+        },
+        { id: "m", type: "merge", config: { mode: "object" } },
+        { id: "le", type: "loopEnd", config: { from: "m" } },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "start", to: "sp" },
+        { from: "sp", to: "if" },
+        {
+          from: "if",
+          to: "big",
+          condition: { path: "if.result", op: "eq", value: true },
+        },
+        {
+          from: "if",
+          to: "small",
+          condition: { path: "if.result", op: "eq", value: false },
+        },
+        { from: "big", to: "m" },
+        { from: "small", to: "m" },
+        { from: "m", to: "le" },
+        { from: "le", to: "end" },
+      ],
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          a4Graph,
+          {
+            items: [
+              { n: 1, big: true },
+              { n: 2, big: false },
+            ],
+          },
+          { tenantId: "t-trace" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-trace",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const final = await handle.query(stateQuery);
+      const trace = (final.ctx.__regionTrace as Record<string, unknown>).sp as {
+        nodes: string[];
+        items: Record<string, unknown>[];
+      };
+      // columns = splitOut (input item) then the region nodes in topo order
+      expect(trace.nodes).toEqual(["sp", "if", "small", "big", "m"]);
+      // item 1: big=true → `big` LIVE, `small` DEAD
+      expect(trace.items[0].sp).toEqual({ v: { n: 1, big: true } });
+      expect(trace.items[0].big).toEqual({ v: { branch: "big" } });
+      expect(trace.items[0].small).toEqual({ dead: true });
+      // item 2: big=false → the inverse
+      expect(trace.items[1].small).toEqual({ v: { branch: "small" } });
+      expect(trace.items[1].big).toEqual({ dead: true });
+      // __-prefixed → hidden from the node-output list (isNodeOutputKey drops __*)
+      expect(final.ctx.__regionTrace).toBeDefined();
+    });
+  });
+
+  it("A5-trace: __regionTrace SURVIVES continueAsNew (the load-bearing §0.4.2 claim)", async () => {
+    // The whole architecture rests on the trace surviving a CAN boundary (post-CAN history is
+    // truncated, so a live-only query would lose it). Force a CAN right after the region runs, then
+    // assert the completed run STILL carries the grid — proving ctx (and __regionTrace) rides the CAN.
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          itemsGraph(),
+          { items: [{ n: 1 }, { n: 2 }] },
+          // continueAsNewAfterSteps forces a CAN at the first boundary after the region (which alone
+          // bumps stepCount past 2); the run then resumes and completes in a fresh segment.
+          {
+            tenantId: "t-trace-can",
+            maxStepsPerRun: 100,
+            continueAsNewAfterSteps: 2,
+          },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-trace-can",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const final = await handle.query(stateQuery);
+      const trace = (final.ctx.__regionTrace as Record<string, unknown>).sp as {
+        items: Record<string, unknown>[];
+      };
+      expect(trace.items).toHaveLength(2); // grid intact across the CAN, not dropped
+      expect(trace.items[0].map).toEqual({ v: { doubled: 1 } });
     });
   });
 
@@ -1202,6 +1330,11 @@ describe("runGraph interpreter — items model (splitOut region)", () => {
       ]);
       // ONE mapNode activity handled all 3 items (not 3 separate agent activities).
       expect(mapNodeCalls).toEqual([{ nodeType: "agent", count: 3 }]);
+      // A5-trace: a node-major (batched-activity) region does NOT build a per-item grid — it emits the
+      // legible `unavailable` marker so the run view can point at the collected-array table instead.
+      expect((final.ctx.__regionTrace as Record<string, unknown>).sp).toEqual({
+        unavailable: "batched",
+      });
     });
   });
 

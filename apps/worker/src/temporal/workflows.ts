@@ -47,6 +47,8 @@ import {
   computeItemsRegions,
   BATCHABLE_REGION_ACTIVITIES,
   type ItemsRegion,
+  type TraceCell,
+  type RegionTrace,
 } from "@naary/dsl";
 import type { GraphDef, NodeDef, NodeRetryPolicy } from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
@@ -102,6 +104,45 @@ const MAX_MAP_BATCH_ITEMS = 100;
  *  that needs more per-item activity fan-out with branching belongs in `forEach` (child run per item).
  *  Distinct from MAX_MAP_BATCH_ITEMS, which caps a single A3 mapNode's batch, not a running total. */
 const MAX_A4_REGION_ACTIVITY_EXECUTIONS = 100;
+
+/** Per-item INTERMEDIATE trace grid (items-model §0.4.2). Capture is PURE STATE — it writes a
+ *  `__regionTrace` key into `ctx` and issues NO Temporal command and NO `stepCount` change, so it is
+ *  replay-safe by construction (needs no `patched()`) and rides the CAN snapshot (:1647) + return
+ *  (:1786) verbatim like the rest of `ctx`. The caps below are what keep that carried payload bounded
+ *  (CLAUDE.md ~2MB): first K items captured (excess → `truncatedItems`, never silent), each cell's
+ *  value JSON-capped. A cell is tri-state — value / dead (A4 dead branch) / error. */
+const MAX_TRACE_ITEMS = 50;
+const MAX_TRACE_CELL_BYTES = 1000;
+/** Aggregate cap across ALL regions in one run segment. Per-region worst case is ~650KB (50 rows ×
+ *  ~13 cols × 1KB), so several full wide regions could otherwise push the CAN snapshot (:1647) + return
+ *  (:1786) past Temporal's ~2MB and FAIL AN OTHERWISE-HEALTHY RUN. A diagnostic must never do that:
+ *  once this budget is hit, later regions emit `{ unavailable: "budget" }` instead of a grid.
+ *  TraceCell / RegionTrace wire types are shared from @naary/dsl (worker writes, web renders). */
+const MAX_TRACE_TOTAL_BYTES = 512_000;
+
+/** One tri-state cell from a node's per-item output. `live=false` ⇒ dead branch (A4). An
+ *  `onError:"continue"` result is `{ error }` ⇒ shown as `err`. Otherwise the value, JSON-capped so a
+ *  large output can't blow the carried payload (over the cap → a visible truncation marker). PURE. */
+function traceCell(value: unknown, live: boolean): TraceCell {
+  if (!live) return { dead: true };
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    "error" in (value as object)
+  ) {
+    return { err: String((value as { error: unknown }).error) };
+  }
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(value);
+  } catch {
+    return { v: "<unserializable>" };
+  }
+  if (json !== undefined && json.length > MAX_TRACE_CELL_BYTES) {
+    return { v: `<truncated ${json.length} bytes>` };
+  }
+  return { v: value };
+}
 
 // The HTTP node's request deadline is user-configurable (up to MAX_HTTP_TIMEOUT_MS,
 // clamped in the activity), so it needs a start-to-close strictly ABOVE that cap —
@@ -319,6 +360,10 @@ export async function runGraph(
   // a node counter — never a DB read in workflow code (CLAUDE.md rule 2; §3).
   let costUsd = resume?.costUsd ?? 0;
   let stepCount = resume?.stepCount ?? 0;
+  // Running total of per-item trace bytes across ALL regions this segment (§0.4.2 aggregate cap). Not
+  // carried across CAN — each segment re-budgets against its own fresh regions (prior segments' traces
+  // already rode their own snapshot). Command-neutral like the rest of the trace.
+  let traceBytes = 0;
 
   // Fan-in join state (Slice N5). `mergeParents` maps a merge node id → its inbound
   // parents' ids in DECLARED edge order (its length is the expected in-degree);
@@ -1312,6 +1357,15 @@ export async function runGraph(
           const N = items.length;
           let collected: unknown[] = [];
           let firstIter: Record<string, unknown> | undefined;
+          // Per-item trace grid (§0.4.2). Captured ONLY in the per-item in-workflow loops (A4, A2);
+          // the A3 node-major branch leaves `traced` false so the run view renders the legible
+          // "unavailable for batched-activity regions" message rather than a blank/partial grid.
+          // splitOut is column 0 (the input item that drives the branch); then region nodes in topo
+          // order. Capture is stepCount-neutral and issues no command — see traceCell / MAX_TRACE_*.
+          const traceRows: Record<string, TraceCell>[] = [];
+          const traceNodes = [splitOutId, ...region.regionNodeIds];
+          let traced = false;
+          let a3Unavailable = false; // A3 node-major region → emit the "unavailable" marker instead
 
           const overBudget = (): boolean =>
             runCtx.maxStepsPerRun !== undefined &&
@@ -1351,6 +1405,7 @@ export async function runGraph(
               }
             }
             let activityExecs = 0;
+            traced = true;
 
             for (let i = 0; i < N; i++) {
               stepCount++;
@@ -1421,6 +1476,15 @@ export async function runGraph(
                 }
               }
               collected.push(ctx[region.collectFrom]);
+              if (i < MAX_TRACE_ITEMS) {
+                // Tri-state row from the LIVE map (pure; no command, no stepCount).
+                const row: Record<string, TraceCell> = {
+                  [splitOutId]: traceCell(items[i], true),
+                };
+                for (const rid of region.regionNodeIds)
+                  row[rid] = traceCell(ctx[rid], live.get(rid) ?? false);
+                traceRows.push(row);
+              }
               if (i === 0) {
                 firstIter = { [splitOutId]: items[0] };
                 for (const rid of region.regionNodeIds)
@@ -1429,6 +1493,7 @@ export async function runGraph(
             }
           } else if (!hasActivity) {
             // ── ITEM-MAJOR (A2, unchanged) ──
+            traced = true;
             for (let i = 0; i < N; i++) {
               stepCount++; // the item itself is a step (bounds an empty region over a huge array)
               if (overBudget()) return "circuit_open";
@@ -1448,6 +1513,15 @@ export async function runGraph(
                 }
               }
               collected.push(ctx[region.collectFrom]);
+              if (i < MAX_TRACE_ITEMS) {
+                // Linear region: every node ran (live). An onError:"continue" cell shows as err.
+                const row: Record<string, TraceCell> = {
+                  [splitOutId]: traceCell(items[i], true),
+                };
+                for (const rid of region.regionNodeIds)
+                  row[rid] = traceCell(ctx[rid], true);
+                traceRows.push(row);
+              }
               if (i === 0) {
                 firstIter = { [current]: items[0] };
                 for (const rid of region.regionNodeIds)
@@ -1456,6 +1530,7 @@ export async function runGraph(
             }
           } else {
             // ── NODE-MAJOR (A3): process each region node fully (all N items) before the next ──
+            a3Unavailable = true; // per-item grid isn't built here (would need transposing mapNode)
             const regionOut = new Map<string, unknown[]>();
             regionOut.set(splitOutId, items); // splitOut's per-item output IS the items
             // Set ctx to frame `i` (splitOut + prior region nodes at index i) so pure execNode and
@@ -1589,6 +1664,37 @@ export async function runGraph(
             for (const rid of region.regionNodeIds) ctx[rid] = undefined;
           }
           ctx[region.loopEndId] = collected; // loopEnd's output IS the collected array
+          if (traced || a3Unavailable) {
+            // Publish under the `__` bookkeeping namespace (auto-hidden from the node-output list by
+            // isNodeOutputKey; surfaced only by the run view's trace grid). Keyed by splitOut so a
+            // graph with several regions carries one entry each. PURE — no command. A4/A2 emit the
+            // grid; A3 emits the `unavailable` marker so the UI can explain the gap.
+            const trace = (ctx.__regionTrace ??= {}) as Record<
+              string,
+              RegionTrace
+            >;
+            if (!traced) {
+              trace[splitOutId] = { unavailable: "batched" };
+            } else {
+              const grid: RegionTrace = {
+                nodes: traceNodes,
+                items: traceRows,
+                ...(N > MAX_TRACE_ITEMS
+                  ? { truncatedItems: N - MAX_TRACE_ITEMS }
+                  : {}),
+              };
+              // Aggregate byte cap: a diagnostic must never push the run payload over Temporal's ~2MB
+              // and fail an otherwise-healthy run. Measure this grid; if it would exceed the running
+              // budget, drop to the `budget` marker (fail closed, visible) rather than growing ctx.
+              const gridBytes = JSON.stringify(grid).length;
+              if (traceBytes + gridBytes > MAX_TRACE_TOTAL_BYTES) {
+                trace[splitOutId] = { unavailable: "budget" };
+              } else {
+                traceBytes += gridBytes;
+                trace[splitOutId] = grid;
+              }
+            }
+          }
           currentNodeId = region.loopEndId;
           current = nextNodes(graph, region.loopEndId, ctx)[0]; // linear exit → single next
           continue;

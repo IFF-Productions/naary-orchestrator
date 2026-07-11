@@ -30,6 +30,8 @@ export {
   BATCHABLE_REGION_ACTIVITIES,
   type ItemsRegion,
   type ItemsRegionResult,
+  type TraceCell,
+  type RegionTrace,
 } from "./items-region";
 export { resolveHttpRequest, type ResolvedHttpRequest } from "./http-request";
 export {
