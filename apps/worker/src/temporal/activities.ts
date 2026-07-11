@@ -2424,6 +2424,7 @@ export async function callIntegration(
   }
   const req = buildIntegrationRequest(cfg.provider, cfg.action, fields);
   const url = `${base!.replace(/\/$/, "")}${req.path}`;
+  const action = getIntegrationAction(cfg.provider, cfg.action);
 
   try {
     // Auth resolved in-memory here (Tier-1 rule 4) — never in config, never in history.
@@ -2446,6 +2447,9 @@ export async function callIntegration(
     const headers: Record<string, string> = {
       Accept: "application/json",
       ...(provider.headers ?? {}),
+      // Per-action header overrides (e.g. GitHub's diff media type) win over the provider
+      // defaults but never over auth (auth is spread last so it can't be clobbered).
+      ...(action?.headers ?? {}),
       ...authHeaders,
     };
     const init: RequestInit = { method: req.method, headers };
@@ -2486,7 +2490,6 @@ export async function callIntegration(
     // (owner/repo/number — no secrets; auth lives in headers) so the cause is diagnosable, plus
     // a GitHub-specific hint: GitHub returns 404/403 when a token can't see a PRIVATE repo — the
     // most common cause of a "correct endpoint but 404" write.
-    const action = getIntegrationAction(cfg.provider, cfg.action);
     if (action?.write && !res.ok) {
       const detail =
         body && typeof body === "object" && "message" in body

@@ -196,6 +196,25 @@ describe("callIntegration activity", () => {
     expect(fetchMock).toHaveBeenCalledOnce(); // at-most-once: not retried
   });
 
+  it("get_pull_request → sends the diff media type + returns the raw diff text", async () => {
+    const diff = "diff --git a/x b/x\n@@ -1 +1 @@\n-old\n+new\n";
+    fetchMock.mockResolvedValue(res(200, diff, "application/vnd.github.diff"));
+    const cfg: IntegrationNodeConfig = {
+      provider: "github",
+      action: "get_pull_request",
+      connectionId: "gh",
+      fields: { owner: "o", repo: "r", pullNumber: 237 },
+    };
+    const result = await callIntegration(cfg, cfg.fields!, META);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url.toString()).toBe("https://api.github.com/repos/o/r/pulls/237");
+    // Per-action header override wins over the provider's default Accept.
+    expect(init.headers.Accept).toBe("application/vnd.github.diff");
+    // Non-JSON content-type → body is the raw diff text, ready to feed an agent.
+    expect(result.body).toBe(diff);
+    expect(result.ok).toBe(true);
+  });
+
   it("fails non-retryable on an invalid config (missing required field)", async () => {
     const cfg: IntegrationNodeConfig = {
       provider: "github",

@@ -61,35 +61,69 @@ export const webhookSampleGraph: GraphDef = {
 };
 
 /**
- * Slice #4 B5 reference flow: GitHub PR webhook → agent reviews → MCP Tool node
- * comments back via a GitHub connection → human approval before any merge.
- * The mcpTool node's connectionId is per-tenant; set it to a real connection id.
+ * GitHub PR review — the "when a PR opens, review the code and comment back" flow.
+ * A PR-`opened` webhook → fetch the PR's unified DIFF via the native GitHub integration
+ * (get_pull_request with the diff media type) → an agent reviews the ACTUAL diff (injected
+ * into its prompt with `{{ diff.body }}`) → the review is posted back as a PR comment via
+ * the native integration → a human sign-off. Set every `github` connectionId to your real
+ * GitHub connection (a token with repo / issues:write on the target repo), and wire the
+ * webhook to the repo's `pull_request` event.
+ *
+ * NOTE: very large diffs may be claim-check offloaded; the agent then reviews PR metadata
+ * only. For big PRs, narrow the diff (e.g. a paths filter) upstream.
  */
 export const githubReviewGraph: GraphDef = {
   startNodeId: "trigger",
   nodes: [
     { id: "trigger", type: "webhookTrigger" },
     {
-      id: "agent",
+      // Fetch the PR as a unified diff (read action → retryable). Its `body` is the diff text.
+      id: "diff",
+      type: "integration",
+      config: {
+        provider: "github",
+        action: "get_pull_request",
+        connectionId: "github", // ← set to your GitHub connection id
+        fieldBindings: {
+          owner: { from: "trigger", path: "repository.owner.login" },
+          repo: { from: "trigger", path: "repository.name" },
+          pullNumber: { from: "trigger", path: "pull_request.number" },
+        },
+      },
+    },
+    {
+      id: "review",
       type: "agent",
       config: {
         provider: "anthropic",
         model: "claude-opus-4-8",
+        // The diff is injected via `{{ diff.body }}` (resolved from the get_pull_request
+        // output before this node runs) — so the agent reviews the real code, not metadata.
         systemPrompt:
-          "Review the pull request. Respond with a category and an urgency from 1-5.",
+          "You are a senior engineer reviewing a GitHub pull request. Review the unified diff below and write concise, actionable feedback in GitHub-flavored markdown — flag correctness bugs, security issues, and missing tests; skip style nits. If it looks good, say so briefly.\n\nDIFF:\n{{ diff.body }}",
+        outputSchema: {
+          type: "object",
+          properties: { review: { type: "string" } },
+          required: ["review"],
+          additionalProperties: false,
+        },
+        maxOutputTokens: 2048,
       },
     },
     {
+      // Post the review back on the PR (PRs comment through the issues endpoint). Write
+      // action → at-most-once; a non-2xx (e.g. a token without repo access) fails loudly.
       id: "comment",
-      type: "mcpTool",
+      type: "integration",
       config: {
-        connectionId: "github",
-        tool: "add_pull_request_comment",
-        // The comment receives the AGENT's review + the PR number from the
-        // trigger event — not the raw webhook payload (Slice #4 input bindings).
-        argumentBindings: {
-          pullNumber: { from: "trigger", path: "pull_request.number" },
-          body: { from: "agent", path: "output" },
+        provider: "github",
+        action: "comment_issue",
+        connectionId: "github", // ← set to your GitHub connection id
+        fieldBindings: {
+          owner: { from: "trigger", path: "repository.owner.login" },
+          repo: { from: "trigger", path: "repository.name" },
+          issueNumber: { from: "trigger", path: "pull_request.number" },
+          body: { from: "review", path: "output.review" },
         },
       },
     },
@@ -97,8 +131,9 @@ export const githubReviewGraph: GraphDef = {
     { id: "end", type: "end" },
   ],
   edges: [
-    { from: "trigger", to: "agent" },
-    { from: "agent", to: "comment" },
+    { from: "trigger", to: "diff" },
+    { from: "diff", to: "review" },
+    { from: "review", to: "comment" },
     { from: "comment", to: "approval" },
     { from: "approval", to: "end" },
   ],

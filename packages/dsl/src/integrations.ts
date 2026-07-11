@@ -44,6 +44,10 @@ export interface IntegrationAction {
    *  duplicate the create/update (design §4). Reads are retryable. */
   write: boolean;
   fields: IntegrationField[];
+  /** Per-action request headers (non-secret), merged OVER the provider's static headers —
+   *  e.g. GitHub's `Accept: application/vnd.github.diff` to fetch a PR as a unified diff
+   *  instead of JSON. Never carries auth (that's resolved in-activity). */
+  headers?: Record<string, string>;
   /** One-line description for the config panel + docs. */
   description: string;
 }
@@ -102,6 +106,35 @@ const GITHUB: IntegrationProvider = {
         {
           key: "issueNumber",
           label: "Issue number",
+          in: "path",
+          required: true,
+          type: "number",
+        },
+      ],
+    },
+    {
+      key: "get_pull_request",
+      label: "Get pull request (as diff)",
+      description:
+        "Fetch a PR's unified DIFF text (not JSON) — feed it to an agent to review the code changes.",
+      method: "GET",
+      pathTemplate: "/repos/{owner}/{repo}/pulls/{pullNumber}",
+      write: false,
+      // The `diff` media type makes GitHub return the raw unified diff as the body
+      // (text) instead of the PR's JSON — exactly what a code-review agent needs.
+      headers: { Accept: "application/vnd.github.diff" },
+      fields: [
+        {
+          key: "owner",
+          label: "Owner",
+          in: "path",
+          required: true,
+          hint: "org or user, e.g. octocat",
+        },
+        { key: "repo", label: "Repository", in: "path", required: true },
+        {
+          key: "pullNumber",
+          label: "PR number",
           in: "path",
           required: true,
           type: "number",
