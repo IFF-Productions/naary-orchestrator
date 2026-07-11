@@ -167,18 +167,33 @@ describe("callIntegration activity", () => {
     expect(init.body).toBeUndefined();
   });
 
-  it("returns a non-2xx for the graph to branch on (does NOT throw)", async () => {
-    fetchMock.mockResolvedValue(res(422, { message: "Validation Failed" }));
+  it("a READ action returns a non-2xx for the graph to branch on (does NOT throw)", async () => {
+    fetchMock.mockResolvedValue(res(404, { message: "Not Found" }));
     const cfg: IntegrationNodeConfig = {
       provider: "github",
-      action: "create_issue",
+      action: "get_issue", // read: a 404 "not found" is a meaningful, branchable result
       connectionId: "gh",
-      fields: { owner: "o", repo: "r", title: "t" },
+      fields: { owner: "o", repo: "r", issueNumber: 9 },
     };
     const result = await callIntegration(cfg, cfg.fields!, META);
-    expect(result.httpStatus).toBe(422);
+    expect(result.httpStatus).toBe(404);
     expect(result.ok).toBe(false);
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("a WRITE action FAILS loudly on a non-2xx (a POST that didn't happen isn't 'success')", async () => {
+    fetchMock.mockResolvedValue(res(404, { message: "Not Found" }));
+    const cfg: IntegrationNodeConfig = {
+      provider: "github",
+      action: "comment_issue", // write → hard fail, don't hand the 404 back as output
+      connectionId: "gh",
+      fields: { owner: "o", repo: "r", issueNumber: 9, body: "hi" },
+    };
+    // The failure names the status + resolved path + a GitHub token/private-repo hint.
+    await expect(callIntegration(cfg, cfg.fields!, META)).rejects.toThrow(
+      /comment_issue' failed: 404 Not Found.*\/repos\/o\/r\/issues\/9\/comments.*private/s,
+    );
+    expect(fetchMock).toHaveBeenCalledOnce(); // at-most-once: not retried
   });
 
   it("fails non-retryable on an invalid config (missing required field)", async () => {
