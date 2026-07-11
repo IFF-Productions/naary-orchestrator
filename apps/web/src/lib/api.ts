@@ -415,6 +415,18 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
+  // Begin interactive OAuth consent for a connection: returns the provider authorize
+  // URL for the browser to redirect to. The provider then redirects to the API's
+  // /oauth/callback, which exchanges the code and persists the encrypted refresh token.
+  startOauthConsent(
+    tenantId: string,
+    connectionId: string,
+  ): Promise<{ authorizeUrl: string }> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/connections/${encodeURIComponent(connectionId)}/oauth/start`,
+      { method: "POST" },
+    );
+  },
   // Disconnect (delete) a connection. Also removes its stored secret server-side.
   deleteConnection(tenantId: string, connectionId: string): Promise<void> {
     return http(
