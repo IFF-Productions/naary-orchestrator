@@ -4,7 +4,9 @@ import {
   apiEnrichGraph,
   dbReportGraph,
   feedDigestGraph,
+  githubIssueTriageGraph,
   githubReviewGraph,
+  jiraTicketGraph,
   moderationGraph,
   sampleGraph,
   supportReplyGraph,
@@ -91,6 +93,20 @@ const TEMPLATES: {
     description:
       "When a webhook fires, call a REST API and let an agent summarize the response. A starting point for 'when X happens, look up Y'.",
     graph: apiEnrichGraph,
+  },
+  {
+    key: "github-issue-triage",
+    name: "GitHub issue triage & act",
+    description:
+      "When a GitHub issue is opened, an agent triages it (summary, labels, priority) and acts back on the issue via your GitHub connection — posting the triage as a comment and applying the labels.",
+    graph: githubIssueTriageGraph,
+  },
+  {
+    key: "jira-ticket",
+    name: "Jira ticket from an intake",
+    description:
+      "Turn an inbound request (bug report, feature ask, support message) into a structured Jira ticket. An agent drafts it, a human approves it, then it's created in Jira via your connection.",
+    graph: jiraTicketGraph,
   },
 ];
 

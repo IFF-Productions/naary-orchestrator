@@ -14,6 +14,8 @@ export {
   dbReportGraph,
   moderationGraph,
   apiEnrichGraph,
+  githubIssueTriageGraph,
+  jiraTicketGraph,
 } from "./templates";
 export { getByPath, resolveMcpArguments } from "./mcp-args";
 export {

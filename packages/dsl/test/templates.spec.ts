@@ -3,6 +3,8 @@ import {
   apiEnrichGraph,
   dbReportGraph,
   feedDigestGraph,
+  githubIssueTriageGraph,
+  jiraTicketGraph,
   moderationGraph,
   supportReplyGraph,
 } from "../src";
@@ -18,6 +20,8 @@ const TEMPLATES: Record<string, GraphDef> = {
   dbReportGraph,
   moderationGraph,
   apiEnrichGraph,
+  githubIssueTriageGraph,
+  jiraTicketGraph,
 };
 
 describe("starter templates", () => {

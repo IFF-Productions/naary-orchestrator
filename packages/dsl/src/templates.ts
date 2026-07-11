@@ -204,6 +204,118 @@ export const moderationGraph: GraphDef = {
 };
 
 /**
+ * GitHub issue triage & act. A GitHub `issues` webhook (issue opened) → an agent
+ * triages it (one-line summary, labels, priority) → it acts back on the issue via
+ * a GitHub MCP connection: posts the triage as a comment AND applies the labels.
+ * The "when I create a GitHub issue, it acts" flow — point `github` at your GitHub
+ * MCP connection and wire the webhook to the repo's `issues` event.
+ */
+export const githubIssueTriageGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "triage",
+      type: "agent",
+      config: {
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        systemPrompt:
+          'A GitHub issue was just opened. Read its title and body and respond with ONLY a JSON object: { "summary": string (a one-line triage note), "labels": string[] (from: "bug", "enhancement", "question", "documentation"), "priority": "low" | "medium" | "high" }. Be decisive.',
+      },
+    },
+    {
+      id: "comment",
+      type: "mcpTool",
+      config: {
+        connectionId: "github",
+        tool: "add_issue_comment",
+        // Post the agent's triage summary back on the issue that triggered the run.
+        argumentBindings: {
+          issueNumber: { from: "trigger", path: "issue.number" },
+          body: { from: "triage", path: "output.summary" },
+        },
+      },
+    },
+    {
+      id: "label",
+      type: "mcpTool",
+      config: {
+        connectionId: "github",
+        tool: "add_issue_labels",
+        argumentBindings: {
+          issueNumber: { from: "trigger", path: "issue.number" },
+          labels: { from: "triage", path: "output.labels" },
+        },
+      },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "triage" },
+    { from: "triage", to: "comment" },
+    { from: "comment", to: "label" },
+    { from: "label", to: "end" },
+  ],
+};
+
+/**
+ * Jira ticket from an intake. An inbound webhook (a bug report, feature ask, or
+ * support message) → an agent structures it into a Jira ticket (summary, detail,
+ * type, priority) → a human reviews it → the approved ticket is created in Jira via
+ * an MCP connection. HITL by design: AI drafts the ticket, a person signs off before
+ * it lands. Point `jira` at your Atlassian/Jira MCP connection.
+ */
+export const jiraTicketGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "structure",
+      type: "agent",
+      config: {
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        systemPrompt:
+          'You turn an inbound request (a bug report, feature ask, or support message) into a Jira ticket. Respond with ONLY a JSON object: { "summary": string (a concise issue title), "description": string (clear, actionable detail), "issueType": "Bug" | "Task" | "Story", "priority": "Low" | "Medium" | "High" }.',
+      },
+    },
+    {
+      id: "approval",
+      type: "humanApproval",
+      config: {
+        title: "Approve the Jira ticket",
+        instructions:
+          "Review the AI-structured ticket (summary, type, priority) before it is created in Jira. Reject to discard it.",
+        timeoutHours: 24,
+      },
+    },
+    {
+      id: "create",
+      type: "mcpTool",
+      config: {
+        connectionId: "jira",
+        tool: "create_issue",
+        // Each Jira field is bound from the agent's structured output.
+        argumentBindings: {
+          summary: { from: "structure", path: "output.summary" },
+          description: { from: "structure", path: "output.description" },
+          issueType: { from: "structure", path: "output.issueType" },
+          priority: { from: "structure", path: "output.priority" },
+        },
+      },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "structure" },
+    { from: "structure", to: "approval" },
+    { from: "approval", to: "create" },
+    { from: "create", to: "end" },
+  ],
+};
+
+/**
  * API enrichment. Inbound webhook → a GET against a REST API → an agent
  * summarizes the response. Set the URL (and an optional `connectionId` for
  * authenticated APIs). A clean starting point for "when X happens, look up Y."
