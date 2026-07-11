@@ -516,10 +516,10 @@ function exhaustivenessError(node: NodeDef, outs: EdgeDef[]): string | null {
       // An unconditional out-edge always fires (all-match) — it can't express exclusive routing.
       return `branch node '${node.id}' (${node.type}) has an unconditional out-edge; a region branch must route via '${field} == <value>' edges covering every case`;
     }
-    if (
-      c.op !== "eq" ||
-      (c.path !== `${node.id}.${field}` && c.path !== field)
-    ) {
+    // Path MUST be the qualified `<id>.<field>`. A bare `field` reads `ctx.<field>` at runtime
+    // (evaluateCondition = getByPath(ctx, path)) — but the branch writes to `ctx.<id>.<field>`, so a
+    // bare path would silently never match, killing every out-edge for the item. Reject it here.
+    if (c.op !== "eq" || c.path !== `${node.id}.${field}`) {
       return `branch node '${node.id}' (${node.type}) out-edge condition must be '${node.id}.${field} == <value>' for exhaustive routing`;
     }
     covered.add(c.value);

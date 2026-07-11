@@ -121,18 +121,16 @@ export function validateGraph(graph: GraphDef): GraphValidation {
   // EXCEPTION: a merge INSIDE an A4 items region (items §0.4.1) is handled by the per-item
   // dead-branch pass, not the top-level walker — its conditional inbound is validated by
   // computeItemsRegions, so exempt those.
+  const mergeIds = new Set(
+    graph.nodes.filter((n) => n.type === "merge").map((n) => n.id),
+  );
   const region = computeItemsRegions(graph);
   const regionMergeIds = new Set<string>();
   for (const r of region.regions) {
     for (const id of r.regionNodeIds) {
-      if (graph.nodes.find((n) => n.id === id)?.type === "merge") {
-        regionMergeIds.add(id);
-      }
+      if (mergeIds.has(id)) regionMergeIds.add(id);
     }
   }
-  const mergeIds = new Set(
-    graph.nodes.filter((n) => n.type === "merge").map((n) => n.id),
-  );
   for (const edge of graph.edges) {
     if (!ids.has(edge.from)) {
       return { valid: false, error: `edge.from '${edge.from}' is not a node` };

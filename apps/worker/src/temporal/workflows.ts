@@ -1337,16 +1337,18 @@ export async function runGraph(
             // its LIVE inputs. Topo order (from the validator) ⇒ every predecessor's liveness is known
             // before a node is reached, so ONE pass suffices.
             const regionSet = new Set(region.regionNodeIds);
+            // Group in-region edges by their target in ONE pass over graph.edges (not a filter per
+            // region node) — this runs on the workflow task thread, so keep it O(edges), not O(nodes×edges).
             const inEdgesOf = new Map<string, typeof graph.edges>();
-            for (const rid of region.regionNodeIds) {
-              inEdgesOf.set(
-                rid,
-                graph.edges.filter(
-                  (e) =>
-                    e.to === rid &&
-                    (e.from === splitOutId || regionSet.has(e.from)),
-                ),
-              );
+            for (const e of graph.edges) {
+              if (
+                regionSet.has(e.to) &&
+                (e.from === splitOutId || regionSet.has(e.from))
+              ) {
+                const list = inEdgesOf.get(e.to);
+                if (list) list.push(e);
+                else inEdgesOf.set(e.to, [e]);
+              }
             }
             let activityExecs = 0;
 
