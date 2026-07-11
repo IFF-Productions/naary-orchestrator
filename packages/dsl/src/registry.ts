@@ -47,6 +47,7 @@ import type {
   JwtNodeConfig,
   ListOpsNodeConfig,
   McpToolNodeConfig,
+  IntegrationNodeConfig,
   MergeNodeConfig,
   NodeType,
   NumberNodeConfig,
@@ -182,6 +183,16 @@ const CONFIG_SCHEMAS = {
     arguments: z.record(z.string(), z.unknown()).optional(),
     argumentBindings: z.record(z.string(), argBinding).optional(),
     costUsd: z.number().optional(),
+  }),
+
+  // Native integration node — provider/action index into INTEGRATION_CATALOG; the
+  // catalog (not zod) enforces per-action required fields (see validateIntegrationConfig).
+  integration: z.object({
+    provider: z.string(),
+    action: z.string(),
+    connectionId: z.string(),
+    fields: z.record(z.string(), z.unknown()).optional(),
+    fieldBindings: z.record(z.string(), argBinding).optional(),
   }),
 
   // --- Data sources ---
@@ -596,6 +607,7 @@ export type ScheduleTriggerConfig = z.infer<
 export type PollTriggerConfig = z.infer<typeof CONFIG_SCHEMAS.pollTrigger>;
 export type AgentConfig = z.infer<typeof CONFIG_SCHEMAS.agent>;
 export type McpToolConfig = z.infer<typeof CONFIG_SCHEMAS.mcpTool>;
+export type IntegrationConfig = z.infer<typeof CONFIG_SCHEMAS.integration>;
 export type HttpRequestConfig = z.infer<typeof CONFIG_SCHEMAS.httpRequest>;
 export type SqlQueryConfig = z.infer<typeof CONFIG_SCHEMAS.sqlQuery>;
 export type SqlExecConfig = z.infer<typeof CONFIG_SCHEMAS.sqlExec>;
@@ -656,6 +668,7 @@ const _configParity: {
   chatTrigger: Exact<ChatTriggerConfig, ChatTriggerNodeConfig>;
   pollTrigger: Exact<PollTriggerConfig, PollTriggerNodeConfig>;
   mcpTool: Exact<McpToolConfig, McpToolNodeConfig>;
+  integration: Exact<IntegrationConfig, IntegrationNodeConfig>;
   httpRequest: Exact<HttpRequestConfig, HttpRequestNodeConfig>;
   sqlQuery: Exact<SqlQueryConfig, SqlQueryNodeConfig>;
   sqlExec: Exact<SqlExecConfig, SqlExecNodeConfig>;
@@ -705,6 +718,7 @@ const _configParity: {
   chatTrigger: true,
   pollTrigger: true,
   mcpTool: true,
+  integration: true,
   httpRequest: true,
   sqlQuery: true,
   sqlExec: true,

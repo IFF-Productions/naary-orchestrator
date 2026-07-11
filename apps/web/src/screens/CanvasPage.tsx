@@ -25,7 +25,11 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { lintTemplates, type NodeType } from "@naary/dsl";
+import {
+  lintTemplates,
+  getIntegrationProvider,
+  type NodeType,
+} from "@naary/dsl";
 import { Button } from "../components";
 import {
   api,
@@ -441,11 +445,12 @@ export function CanvasPage() {
     setEdges((es) => es.filter((e) => e.id !== id));
   }
 
-  function addNode(kind: NodeType) {
+  function addNode(kind: NodeType, preset?: Record<string, unknown>) {
     const id = `${kind}-${crypto.randomUUID().slice(0, 8)}`;
     // Drop in with working example config (single source: the node registry), so a
     // non-technical user sees filled-in fields — and a node they never open still runs.
-    const config = defaultConfigFor(kind);
+    // A palette tile may pass its own preset (e.g. GitHub vs Jira, both `integration`).
+    const config = preset ? structuredClone(preset) : defaultConfigFor(kind);
     setNodes((ns) => [
       ...ns,
       {
@@ -957,9 +962,9 @@ export function CanvasPage() {
                   {items.map((k) => (
                     <button
                       type="button"
-                      key={k.type}
-                      onClick={() => addNode(k.type)}
-                      title={NODE_DESCRIPTION[k.type]}
+                      key={k.label}
+                      onClick={() => addNode(k.type, k.defaultConfig)}
+                      title={k.description}
                       // Keep the accessible name exactly the label (the visible
                       // description div would otherwise widen it and break exact-name
                       // lookups, incl. the new-nodes Playwright spec).
@@ -969,7 +974,7 @@ export function CanvasPage() {
                         padding: "8px 10px",
                         borderRadius: "var(--radius-md)",
                         border: "1px solid var(--line-2)",
-                        borderLeft: `3px solid ${ACCENT[k.type]}`,
+                        borderLeft: `3px solid ${k.accent}`,
                         background: "var(--card)",
                         color: "var(--ink)",
                         cursor: "pointer",
@@ -987,7 +992,7 @@ export function CanvasPage() {
                           lineHeight: 1.35,
                         }}
                       >
-                        {NODE_DESCRIPTION[k.type]}
+                        {k.description}
                       </div>
                     </button>
                   ))}
@@ -1271,6 +1276,7 @@ interface BindingRow {
  *  forms (MCP servers = github/atlassian/custom; DB engines; smtp; signing). */
 const CONNECTION_TYPES: Record<string, ConnectionRow["type"][]> = {
   mcpTool: ["github", "atlassian", "custom"],
+  integration: ["github", "atlassian", "custom"],
   httpRequest: ["github", "atlassian", "custom"],
   sqlQuery: ["postgres", "mssql", "mysql"],
   sqlExec: ["postgres", "mssql", "mysql"],
@@ -1809,6 +1815,90 @@ function ConfigPanel({
           </Labeled>
         </>
       )}
+
+      {kind === "integration" &&
+        (() => {
+          // Data-driven from the integration catalog (@naary/dsl): provider is preset by the
+          // palette tile; the action list + its fields come from the catalog, so a new
+          // integration never needs a new panel branch.
+          const provider = getIntegrationProvider(str("provider"));
+          const action = provider?.actions.find((a) => a.key === str("action"));
+          const fields = (obj("fields") ?? {}) as Record<string, unknown>;
+          const setField = (key: string, value: string) =>
+            onChange({ fields: { ...fields, [key]: value } });
+          return (
+            <>
+              <Labeled label="Provider">
+                <input
+                  value={provider?.label ?? str("provider")}
+                  disabled
+                  style={inputStyle}
+                />
+              </Labeled>
+              <Labeled label="Connection">
+                <ConnectionSelect
+                  connections={connections}
+                  types={CONNECTION_TYPES[kind] ?? []}
+                  value={str("connectionId")}
+                  onChange={(id) => onChange({ connectionId: id })}
+                />
+              </Labeled>
+              <Labeled label="Action">
+                <select
+                  value={str("action")}
+                  // Switching action clears the static fields (each action has its own set).
+                  onChange={(e) =>
+                    onChange({ action: e.target.value, fields: {} })
+                  }
+                  style={inputStyle}
+                >
+                  {(provider?.actions ?? []).map((a) => (
+                    <option key={a.key} value={a.key}>
+                      {a.label}
+                    </option>
+                  ))}
+                </select>
+              </Labeled>
+              {action && (
+                <div
+                  style={{
+                    fontSize: "var(--text-xs)",
+                    color: "var(--ink-3)",
+                    marginTop: -4,
+                  }}
+                >
+                  {action.description}
+                  {action.write ? " · runs at-most-once (no retry)" : ""}
+                </div>
+              )}
+              {(action?.fields ?? []).map((f) => (
+                <Labeled
+                  key={f.key}
+                  label={`${f.label}${f.required ? " *" : ""}`}
+                >
+                  <input
+                    value={String(fields[f.key] ?? "")}
+                    onChange={(e) => setField(f.key, e.target.value)}
+                    style={inputStyle}
+                    placeholder={
+                      f.hint ??
+                      (f.type === "string[]"
+                        ? "usually bound from an upstream step"
+                        : "")
+                    }
+                  />
+                </Labeled>
+              ))}
+              <BindingsEditor
+                bindings={
+                  obj("fieldBindings") as Record<string, BindingRow> | undefined
+                }
+                upstreamIds={upstreamIds}
+                onChange={(v) => onChange({ fieldBindings: v })}
+              />
+            </>
+          );
+        })()}
 
       {kind === "pollTrigger" && (
         <>

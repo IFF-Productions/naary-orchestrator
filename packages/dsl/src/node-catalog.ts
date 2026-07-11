@@ -90,6 +90,13 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
     summary: "Calls a remote tool over MCP via a connection.",
     config: "{ connectionId, tool, argumentBindings?:{ <arg>:{from,path} } }",
   },
+  integration: {
+    group: "ai",
+    summary:
+      "Native provider action (GitHub/Jira/…) via a connection; output {status,ok,body}. Branch on <id>.status.",
+    config:
+      "{ provider, action, connectionId, fields?:{ <field>:value }, fieldBindings?:{ <field>:{from,path} } }",
+  },
   // --- Data sources ---
   httpRequest: {
     group: "data-source",

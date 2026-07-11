@@ -33,6 +33,8 @@ import {
   resolveHttpRequest,
   resolveJwt,
   resolveMcpArguments,
+  resolveIntegrationFields,
+  getIntegrationAction,
   resolveRenameKeys,
   resolveRss,
   resolveSendEmail,
@@ -153,6 +155,17 @@ const { callHttpRequest } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "150 seconds",
   retry: { maximumAttempts: 3 },
 });
+
+// Native integration node. READ actions are idempotent → normal retries. WRITE actions
+// (create_issue/comment/transition) run AT-MOST-ONCE — a lost response must not duplicate a
+// create (design §4, same reasoning as callSqlExec/callSendEmail). The interpreter picks the
+// proxy by the catalog action's `write` flag.
+const { callIntegration: callIntegrationRead } = wf.proxyActivities<
+  typeof activities
+>({ startToCloseTimeout: "60 seconds", retry: { maximumAttempts: 3 } });
+const { callIntegration: callIntegrationWrite } = wf.proxyActivities<
+  typeof activities
+>({ startToCloseTimeout: "60 seconds", retry: { maximumAttempts: 1 } });
 
 // Items model A3: the batched per-item map. maxAttempts:1 — mapNode catches per-item errors and
 // returns them, so it only throws on a genuine infra crash; retrying a batch of non-idempotent I/O
@@ -538,6 +551,28 @@ export async function runGraph(
         // (Arch§4.6) — commutative accumulation, same as the agent node.
         costUsd += toolResult.costUsd;
         ctx.__costUsd = costUsd;
+        return null;
+      }
+      case "integration": {
+        // Native provider action. Field resolution (static + bindings) is deterministic
+        // graph work → HERE; the auth fetch + egress + HTTP is in the activity. A WRITE
+        // action runs AT-MOST-ONCE (no retry) so a lost response can't duplicate a create
+        // (design §4); reads retry. No per-node retryOverride — the write/read split governs
+        // idempotency and a retry override must never re-enable retries on a write.
+        const iCfg = asNodeConfig(cfg, "integration");
+        const action = getIntegrationAction(iCfg.provider, iCfg.action);
+        const runIntegration = action?.write
+          ? callIntegrationWrite
+          : callIntegrationRead;
+        ctx[node.id] = await runIntegration(
+          iCfg,
+          resolveIntegrationFields(iCfg, ctx),
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
         return null;
       }
       case "httpRequest": {

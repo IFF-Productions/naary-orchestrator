@@ -14,8 +14,15 @@ describe("node registry (simpler-UX metadata)", () => {
   });
 
   it("NODE_DESCRIPTION covers every kind in the palette", () => {
-    for (const k of NODE_KINDS) {
-      expect(NODE_DESCRIPTION[k.type]).toBe(k.description);
+    // A NodeType may have MULTIPLE palette tiles (e.g. `integration` → GitHub + Jira),
+    // so NODE_DESCRIPTION (keyed by type) holds one of them; the palette renders each
+    // tile's own `description`. Assert every type resolves to a real description.
+    const byType = new Set(NODE_KINDS.map((k) => k.type));
+    for (const type of byType) {
+      const descs = NODE_KINDS.filter((k) => k.type === type).map(
+        (k) => k.description,
+      );
+      expect(descs, type).toContain(NODE_DESCRIPTION[type]);
     }
   });
 
