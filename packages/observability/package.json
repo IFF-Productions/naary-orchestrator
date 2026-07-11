@@ -10,9 +10,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@sentry/node": "^10.64.0"
+    "@sentry/node": "^10.65.0"
   },
   "devDependencies": {
-    "@types/node": "^26.1.0"
+    "@types/node": "^26.1.1"
   }
 }
