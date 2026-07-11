@@ -1,5 +1,25 @@
 # PLAN — Security Hardening Slice (must-fix tier from the QA / Architecture / Security reviews)
 
+> **STATUS 2026-07-10 — DELIVERED. All four release-blockers verified closed on `main`.** The
+> "0 / 32 findings fixed" line below reflects the review snapshot (2026-06-25) and is now stale;
+> the release-blocking tier this plan defines has since shipped (largely via the provisioning /
+> multi-user program). Verified against current code:
+> 1. **Auth + per-tenant authz** — `tenantId` comes from `@TenantId()` (resolved from the
+>    authenticated principal in `apps/api/src/auth/auth.guard.ts`), never from body/path; every
+>    `executions/:id*` handler is tenant-scoped (`executions.controller.ts` — e.g. `getState(id, tenantId)`).
+> 2. **Provider-error secret hygiene** — `providerErrorToFailure` (`apps/worker/src/temporal/activities.ts`)
+>    rethrows a fresh `ApplicationFailure` with only `statusCode` + a safe message, dropping headers/body.
+> 3. **Input validation** — global `ValidationPipe({ whitelist, forbidNonWhitelisted, transform })`
+>    (`apps/api/src/main.ts`) + per-route DTOs (`execution.dto.ts`, …).
+> 4. **Usage idempotency** — the ledger write is idempotent on `(executionId, nodeId)`
+>    (`packages/usage/src/usage.service.ts`), so an activity retry never double-bills.
+>
+> Bonus: QA#2 (cache-read tokens double-billed) is also closed — `inputTokens` and `cachedInputTokens`
+> are separate buckets and Anthropic's `inputTokens` already excludes cache reads
+> (`activities.ts` ~:1768, computeCost in `packages/usage/src/pricing.ts`).
+>
+> _Original plan (historical) follows._
+
 > Source: `REVIEW-VALIDATION.md` confirmed **0 / 32 findings fixed**. This slice takes
 > the tier all three reviewers converged on as release-blocking, and nothing else —
 > the rest stays in the backlog (`REVIEW-VALIDATION.md` §"Suggested order").
