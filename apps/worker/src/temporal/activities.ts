@@ -25,6 +25,7 @@ import {
   canonicalize,
   getByPath,
   buildIntegrationRequest,
+  getIntegrationAction,
   getIntegrationProvider,
   validateIntegrationConfig,
 } from "@naary/dsl";
@@ -2423,6 +2424,7 @@ export async function callIntegration(
   }
   const req = buildIntegrationRequest(cfg.provider, cfg.action, fields);
   const url = `${base!.replace(/\/$/, "")}${req.path}`;
+  const action = getIntegrationAction(cfg.provider, cfg.action);
 
   try {
     // Auth resolved in-memory here (Tier-1 rule 4) — never in config, never in history.
@@ -2445,6 +2447,9 @@ export async function callIntegration(
     const headers: Record<string, string> = {
       Accept: "application/json",
       ...(provider.headers ?? {}),
+      // Per-action header overrides (e.g. GitHub's diff media type) win over the provider
+      // defaults but never over auth (auth is spread last so it can't be clobbered).
+      ...(action?.headers ?? {}),
       ...authHeaders,
     };
     const init: RequestInit = { method: req.method, headers };
@@ -2476,6 +2481,32 @@ export async function callIntegration(
         body = raw; // malformed JSON — hand back the text rather than failing
       }
     }
+
+    // A side-effecting WRITE action that comes back non-2xx FAILS the node loudly — a POST
+    // that didn't happen must not read as success by handing back the error body as "output"
+    // (which silently buries e.g. a 404). READ actions still RETURN the status so a graph can
+    // branch on it (a 404 "not found" is a meaningful read result). Writes are at-most-once, so
+    // a clean non-retryable failure can't double-post. The message carries the resolved path
+    // (owner/repo/number — no secrets; auth lives in headers) so the cause is diagnosable, plus
+    // a GitHub-specific hint: GitHub returns 404/403 when a token can't see a PRIVATE repo — the
+    // most common cause of a "correct endpoint but 404" write.
+    if (action?.write && !res.ok) {
+      const detail =
+        body && typeof body === "object" && "message" in body
+          ? String((body as { message: unknown }).message)
+          : typeof body === "string" && body.length > 0
+            ? body.slice(0, 200)
+            : res.statusText;
+      const hint =
+        cfg.provider === "github" && (res.status === 404 || res.status === 403)
+          ? " — GitHub returns 404/403 when the connection's token lacks access to a (private) repo; check the token has repo / issues:write scope on this repository, or verify the resolved owner/repo/number."
+          : "";
+      throw ApplicationFailure.nonRetryable(
+        `integration '${cfg.provider}.${cfg.action}' failed: ${res.status} ${detail} [${req.method} ${req.path}]${hint}`,
+        "INTEGRATION_WRITE_FAILED",
+        { httpStatus: res.status },
+      );
+    }
     // Offload a large response so it can't blow Temporal's ~2MB payload cap (like httpRequest);
     // the interpreter resolves the claim-check back before a downstream node reads it.
     body = await maybeOffload(body, getObjectStore(), {
@@ -2501,6 +2532,9 @@ export async function callIntegration(
     return { status: "ok", httpStatus: res.status, ok: res.ok, body };
   } catch (e) {
     activityRuns.inc({ activity: "callIntegration", outcome: "error" });
+    // Our own typed failures (e.g. INTEGRATION_WRITE_FAILED) are already sanitized +
+    // carry the right retryability — rethrow as-is, never re-wrap them as retryable.
+    if (e instanceof ApplicationFailure) throw e;
     if (e instanceof NeedsReauthError) {
       throw ApplicationFailure.nonRetryable(
         "Connection needs re-authorization",

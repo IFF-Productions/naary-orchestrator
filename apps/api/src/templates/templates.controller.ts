@@ -56,7 +56,7 @@ const TEMPLATES: {
     key: "github-review",
     name: "GitHub PR review",
     description:
-      "Reviews a pull request, comments back via an MCP connection, then requires approval before merge.",
+      "When a PR opens, fetch its diff, let an agent review the actual code changes, post the review back as a PR comment via your GitHub connection, then a human sign-off. Wire the webhook to the repo's pull_request event.",
     graph: githubReviewGraph,
   },
   {

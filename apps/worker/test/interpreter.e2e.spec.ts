@@ -48,6 +48,22 @@ const mockActivities = {
       costUsd: 0,
     };
   },
+  callIntegration: async (
+    cfg: { provider: string; action: string },
+    fields: Record<string, unknown>,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.IntegrationResult> => {
+    integrationCalls.push({ cfg, fields });
+    // get_pull_request (read) → the raw diff text as body; writes → an ok create.
+    return cfg.action === "get_pull_request"
+      ? {
+          status: "ok",
+          httpStatus: 200,
+          ok: true,
+          body: "diff --git a/x b/x\n+new\n",
+        }
+      : { status: "ok", httpStatus: 201, ok: true, body: { id: 1 } };
+  },
   callHttpRequest: async (
     cfg: activities.HttpRequestConfig,
     _input: unknown,
@@ -245,6 +261,10 @@ const hmacCalls: activities.ResolvedHmac[] = [];
 const jwtCalls: activities.ResolvedJwt[] = [];
 const subResolveCalls: { tenantId: string; workflowKey: string }[] = [];
 const mcpCalls: activities.McpToolConfig[] = [];
+const integrationCalls: {
+  cfg: { provider: string; action: string };
+  fields: Record<string, unknown>;
+}[] = [];
 const httpCalls: activities.HttpRequestConfig[] = [];
 const sqlCalls: activities.SqlQueryConfig[] = [];
 const sqlExecCalls: activities.SqlExecConfig[] = [];
@@ -1611,10 +1631,15 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
     });
   });
 
-  it("B5 reference flow: webhook → agent → mcpTool → humanApproval composes", async () => {
+  it("B5 reference flow: webhook → get_pull_request(diff) → agent → comment_issue → humanApproval composes", async () => {
     const worker = await makeWorker();
     await worker.runUntil(async () => {
-      const event = { action: "opened", pull_request: { number: 99 } };
+      const event = {
+        action: "opened",
+        number: 99,
+        repository: { owner: { login: "octocat" }, name: "hello" },
+        pull_request: { number: 99 },
+      };
       const handle = await env.client.workflow.start(runGraph, {
         args: [githubReviewGraph, event, { tenantId: "t-ref" }],
         taskQueue: TASK_QUEUE,
@@ -1626,21 +1651,31 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
           (await handle.query(stateQuery)).status === "awaiting_approval",
       );
       const paused = await handle.query(stateQuery);
-      // trigger → agent → mcpTool all ran before the approval pause
+      // trigger → diff (integration read) → review (agent) → comment (integration write)
+      // all ran before the approval pause.
       expect(paused.ctx.trigger).toEqual(event);
-      expect(paused.ctx.agent).toMatchObject({ status: "ok" });
+      expect(paused.ctx.diff).toMatchObject({ status: "ok", ok: true });
+      expect(paused.ctx.review).toMatchObject({ status: "ok" });
       expect(paused.ctx.comment).toMatchObject({ status: "ok" });
-      // the mcpTool used the configured GitHub connection + tool, and the
-      // interpreter resolved its arguments from UPSTREAM outputs (not the raw
-      // event): pull number from the trigger, body from the agent's review.
-      expect(mcpCalls[mcpCalls.length - 1]).toMatchObject({
-        connectionId: "github",
-        tool: "add_pull_request_comment",
-        arguments: {
-          pullNumber: 99,
-          body: { category: "billing", urgency: 3 },
-        },
+      // The interpreter resolved each integration node's fields from UPSTREAM outputs:
+      // the diff FETCH uses get_pull_request with owner/repo/number from the trigger,
+      // and the comment POST is a comment_issue write on the same PR.
+      const fetchCall = integrationCalls[0];
+      expect(fetchCall.cfg).toMatchObject({
+        provider: "github",
+        action: "get_pull_request",
       });
+      expect(fetchCall.fields).toMatchObject({
+        owner: "octocat",
+        repo: "hello",
+        pullNumber: 99,
+      });
+      const commentCall = integrationCalls[integrationCalls.length - 1];
+      expect(commentCall.cfg).toMatchObject({
+        provider: "github",
+        action: "comment_issue",
+      });
+      expect(commentCall.fields).toMatchObject({ issueNumber: 99 });
 
       await handle.signal(approvalSignal, { approved: true });
       expect((await handle.result()).status).toBe("completed");
