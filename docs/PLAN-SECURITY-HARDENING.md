@@ -5,10 +5,14 @@
 > the release-blocking tier this plan defines has since shipped (largely via the provisioning /
 > multi-user program). Verified against current code:
 > 1. **Auth + per-tenant authz** — `tenantId` comes from `@TenantId()` (resolved from the
->    authenticated principal in `apps/api/src/auth/auth.guard.ts`), never from body/path; every
->    `executions/:id*` handler is tenant-scoped (`executions.controller.ts` — e.g. `getState(id, tenantId)`).
-> 2. **Provider-error secret hygiene** — `providerErrorToFailure` (`apps/worker/src/temporal/activities.ts`)
->    rethrows a fresh `ApplicationFailure` with only `statusCode` + a safe message, dropping headers/body.
+>    authenticated principal in `apps/api/src/auth/auth.guard.ts`), never trusted from the request
+>    **body/query**. A workspace *target* may be selected via the `/tenants/:id` path segment or the
+>    `X-Workspace-Id` header, but the guard **membership-checks it** before setting `req.principal`
+>    and fails closed (403) — so it's authorization-checked, not trusted. Every `executions/:id*`
+>    handler is tenant-scoped (`executions.controller.ts` — e.g. `getState(id, tenantId)`).
+> 2. **Provider-error secret hygiene** — `toSanitizedRetryable` (`apps/worker/src/temporal/activities.ts`)
+>    rethrows a fresh `ApplicationFailure` with only `statusCode` + a safe message, dropping the
+>    secret-bearing `APICallError` fields (headers/body/request) before they reach Temporal history/logs.
 > 3. **Input validation** — global `ValidationPipe({ whitelist, forbidNonWhitelisted, transform })`
 >    (`apps/api/src/main.ts`) + per-route DTOs (`execution.dto.ts`, …).
 > 4. **Usage idempotency** — the ledger write is idempotent on `(executionId, nodeId)`
