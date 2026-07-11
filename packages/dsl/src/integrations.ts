@@ -15,7 +15,9 @@ import type { ArgBinding, IntegrationNodeConfig } from "./types";
 import { getByPath } from "./mcp-args";
 
 export type FieldLocation = "path" | "query" | "body";
-export type FieldType = "string" | "number" | "boolean" | "string[]";
+/** `json` = a raw JSON value (object/array) for schema-driven payloads that a flat field can't
+ *  express, e.g. Notion's `properties` or an Airtable record's `fields`. */
+export type FieldType = "string" | "number" | "boolean" | "string[]" | "json";
 
 export interface IntegrationField {
   key: string;
@@ -368,10 +370,106 @@ const SLACK: IntegrationProvider = {
   ],
 };
 
+// ── Notion (REST v1; static base api.notion.com; auth = an internal integration token as
+//    Bearer; requires the Notion-Version header. Schema-driven payloads use `json` fields) ──
+const NOTION: IntegrationProvider = {
+  key: "notion",
+  label: "Notion",
+  baseUrl: "https://api.notion.com/v1",
+  headers: { "Notion-Version": "2022-06-28" },
+  description:
+    "Read and write Notion — get/query, create pages, append blocks.",
+  auth: "A custom connection whose token is a Notion internal integration token (`secret_…` / `ntn_…`); share the target pages/databases with the integration.",
+  actions: [
+    {
+      key: "get_page",
+      label: "Get page",
+      description: "Fetch a page's properties by id.",
+      method: "GET",
+      pathTemplate: "/pages/{pageId}",
+      write: false,
+      fields: [{ key: "pageId", label: "Page id", in: "path", required: true }],
+    },
+    {
+      key: "query_database",
+      label: "Query database",
+      description: "Query a database, optionally with a filter/sort.",
+      method: "POST",
+      pathTemplate: "/databases/{databaseId}/query",
+      write: false,
+      fields: [
+        { key: "databaseId", label: "Database id", in: "path", required: true },
+        {
+          key: "filter",
+          label: "Filter (JSON)",
+          in: "body",
+          required: false,
+          type: "json",
+          hint: "Notion filter object",
+        },
+        {
+          key: "pageSize",
+          label: "Page size",
+          in: "body",
+          required: false,
+          type: "number",
+          bodyPath: "page_size",
+        },
+      ],
+    },
+    {
+      key: "create_page",
+      label: "Create page",
+      description: "Create a page in a database or under a parent page.",
+      method: "POST",
+      pathTemplate: "/pages",
+      write: true,
+      fields: [
+        {
+          key: "parent",
+          label: "Parent (JSON)",
+          in: "body",
+          required: true,
+          type: "json",
+          hint: '{ "database_id": "…" } or { "page_id": "…" }',
+        },
+        {
+          key: "properties",
+          label: "Properties (JSON)",
+          in: "body",
+          required: true,
+          type: "json",
+          hint: "Notion property values keyed by property name",
+        },
+      ],
+    },
+    {
+      key: "append_block",
+      label: "Append blocks",
+      description: "Append child blocks to a page or block.",
+      method: "PATCH",
+      pathTemplate: "/blocks/{blockId}/children",
+      write: true,
+      fields: [
+        { key: "blockId", label: "Block/Page id", in: "path", required: true },
+        {
+          key: "children",
+          label: "Children (JSON)",
+          in: "body",
+          required: true,
+          type: "json",
+          hint: "array of Notion block objects",
+        },
+      ],
+    },
+  ],
+};
+
 export const INTEGRATION_CATALOG: Record<string, IntegrationProvider> = {
   github: GITHUB,
   jira: JIRA,
   slack: SLACK,
+  notion: NOTION,
 };
 
 /** The node type added to the palette per provider (the tile presets `provider`). */
@@ -422,6 +520,15 @@ function setPath(
   obj[keys[keys.length - 1]] = value;
 }
 
+/** A field value that carries nothing to send: unset, blank, empty array, or empty object.
+ *  Shared by request construction (omit it) and validation (treat as missing) so they agree. */
+export function isEmptyFieldValue(v: unknown): boolean {
+  if (v === undefined || v === null || v === "") return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === "object") return Object.keys(v as object).length === 0;
+  return false;
+}
+
 export interface BuiltIntegrationRequest {
   method: IntegrationAction["method"];
   /** Path portion with `{placeholders}` filled + the query string appended (no base URL). */
@@ -450,7 +557,7 @@ export function buildIntegrationRequest(
 
   for (const field of act.fields) {
     const value = fields[field.key];
-    const missing = value === undefined || value === null || value === "";
+    const missing = isEmptyFieldValue(value);
     if (field.in === "path") {
       // A required path field is validated at save time; at runtime substitute what we have.
       path = path.replace(
@@ -497,13 +604,10 @@ export function validateIntegrationConfig(
   // malformed path/body instead of failing fast here.
   const hasBinding = (key: string): boolean =>
     config.fieldBindings != null && key in config.fieldBindings;
-  const hasStaticValue = (key: string): boolean => {
-    if (config.fields == null || !(key in config.fields)) return false;
-    const v = config.fields[key];
-    if (v === undefined || v === null || v === "") return false;
-    if (Array.isArray(v) && v.length === 0) return false;
-    return true;
-  };
+  const hasStaticValue = (key: string): boolean =>
+    config.fields != null &&
+    key in config.fields &&
+    !isEmptyFieldValue(config.fields[key]);
   const supplied = (key: string): boolean =>
     hasBinding(key) || hasStaticValue(key);
 

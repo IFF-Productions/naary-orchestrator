@@ -100,6 +100,38 @@ describe("integration catalog — request construction", () => {
     });
   });
 
+  it("Notion create_page → json fields (parent/properties) pass through as objects", () => {
+    const req = buildIntegrationRequest("notion", "create_page", {
+      parent: { database_id: "db-1" },
+      properties: { Name: { title: [{ text: { content: "Hi" } }] } },
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/pages");
+    expect(req.body).toEqual({
+      parent: { database_id: "db-1" },
+      properties: { Name: { title: [{ text: { content: "Hi" } }] } },
+    });
+  });
+
+  it("omits an OPTIONAL json field explicitly set to {} (empty = not sent)", () => {
+    const req = buildIntegrationRequest("notion", "query_database", {
+      databaseId: "db-1",
+      filter: {}, // empty optional filter — must not land in the body
+    });
+    expect(req.path).toBe("/databases/db-1/query");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Notion append_block → path id + children json body", () => {
+    const req = buildIntegrationRequest("notion", "append_block", {
+      blockId: "blk-1",
+      children: [{ type: "paragraph" }],
+    });
+    expect(req.method).toBe("PATCH");
+    expect(req.path).toBe("/blocks/blk-1/children");
+    expect(req.body).toEqual({ children: [{ type: "paragraph" }] });
+  });
+
   it("omits missing optional body fields (a blank optional stays out of the payload)", () => {
     const req = buildIntegrationRequest("github", "create_issue", {
       owner: "o",
@@ -186,6 +218,17 @@ describe("integration save-gate validation", () => {
         fields: { owner: "o", repo: "r", body: "hi" },
       }),
     ).toMatch(/missing (required field|path field) 'issueNumber'/);
+  });
+
+  it("rejects an empty-object ({}) json required field", () => {
+    expect(
+      validateIntegrationConfig({
+        provider: "notion",
+        action: "create_page",
+        connectionId: "n",
+        fields: { parent: { database_id: "db" }, properties: {} },
+      }),
+    ).toMatch(/missing required field 'properties'/);
   });
 
   it("rejects unknown provider / action", () => {
