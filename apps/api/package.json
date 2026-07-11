@@ -37,7 +37,7 @@
     "@naary/logging": "workspace:*",
     "@naary/temporal-config": "workspace:*",
     "@naary/metrics": "workspace:*",
-    "@ai-sdk/openai": "^4.0.8",
+    "@ai-sdk/openai": "^4.0.11",
     "@ai-sdk/google": "^4.0.10",
     "@nestjs/swagger": "^11.2.0"
   },
