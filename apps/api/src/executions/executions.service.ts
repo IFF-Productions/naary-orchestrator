@@ -84,6 +84,13 @@ export interface AwaitingApproval {
   createdAt: string;
 }
 
+/** One run's outcome in a batch approve/reject — ok:false carries why it slipped. */
+export interface BatchDecisionResult {
+  workflowId: string;
+  ok: boolean;
+  error?: string;
+}
+
 /** Temporal closed-status name → our UI status string (COMPLETED handled via result()). */
 const TEMPORAL_CLOSED_STATUS: Record<string, RunSummary["status"]> = {
   FAILED: "failed",
@@ -594,6 +601,34 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       }
       throw e;
     }
+  }
+
+  /**
+   * Decide many paused runs at once with the SAME decision. Each run is signalled
+   * independently (de-duped so a double-selected id can't double-signal) — an
+   * already-closed or not-owned run must not abort the rest, so we `allSettled` and
+   * return a per-run outcome. The caller surfaces which ids slipped (ok:false).
+   */
+  async approveBatch(
+    ids: string[],
+    approved: boolean,
+    tenantId: string,
+    comment?: string,
+  ): Promise<BatchDecisionResult[]> {
+    const unique = [...new Set(ids)];
+    const settled = await Promise.allSettled(
+      unique.map((id) => this.approve(id, approved, tenantId, comment)),
+    );
+    return settled.map((r, i) =>
+      r.status === "fulfilled"
+        ? { workflowId: unique[i], ok: true }
+        : {
+            workflowId: unique[i],
+            ok: false,
+            error:
+              r.reason instanceof Error ? r.reason.message : String(r.reason),
+          },
+    );
   }
 
   /**

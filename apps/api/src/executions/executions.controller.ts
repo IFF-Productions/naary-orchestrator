@@ -2,10 +2,15 @@ import { Body, Controller, Get, HttpCode, Param, Post } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
 import { TenantId } from "../auth/tenant.decorator";
 import { ApiEndpoint } from "../swagger/api-decorators";
-import { ApproveDto, StartExecutionDto } from "./execution.dto";
+import {
+  ApproveBatchDto,
+  ApproveDto,
+  StartExecutionDto,
+} from "./execution.dto";
 import {
   AcceptedResponse,
   AwaitingApprovalResponse,
+  BatchDecisionItemResponse,
   ResumeUrlResponse,
   RunEventResponse,
   RunListItemResponse,
@@ -14,6 +19,7 @@ import {
 } from "./execution.response";
 import {
   type AwaitingApproval,
+  type BatchDecisionResult,
   ExecutionsService,
   type RunEvent,
   type RunStateView,
@@ -60,6 +66,28 @@ export class ExecutionsController {
   @Get("awaiting")
   awaiting(@TenantId() tenantId: string): Promise<AwaitingApproval[]> {
     return this.executions.listAwaiting(tenantId);
+  }
+
+  /** Decide many paused runs at once (same decision applied to each). Declared among the
+   *  literal routes, before `:id`, so the `approve-batch` segment isn't captured as an :id. */
+  @ApiEndpoint({
+    summary: "Approve or reject many paused runs at once",
+    description:
+      "Batch decision — each run is signalled independently; a per-run outcome is returned so an already-closed or not-owned run doesn't fail the whole batch.",
+    ok: [BatchDecisionItemResponse],
+  })
+  @Post("approve-batch")
+  @HttpCode(200)
+  approveBatch(
+    @TenantId() tenantId: string,
+    @Body() body: ApproveBatchDto,
+  ): Promise<BatchDecisionResult[]> {
+    return this.executions.approveBatch(
+      body.ids,
+      body.approved,
+      tenantId,
+      body.comment,
+    );
   }
 
   @ApiEndpoint({
