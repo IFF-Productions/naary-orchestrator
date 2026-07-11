@@ -19,6 +19,19 @@ export {
 } from "./templates";
 export { getByPath, resolveMcpArguments } from "./mcp-args";
 export {
+  INTEGRATION_CATALOG,
+  INTEGRATION_PROVIDERS,
+  getIntegrationProvider,
+  getIntegrationAction,
+  resolveIntegrationFields,
+  buildIntegrationRequest,
+  validateIntegrationConfig,
+  type IntegrationProvider,
+  type IntegrationAction,
+  type IntegrationField,
+  type BuiltIntegrationRequest,
+} from "./integrations";
+export {
   resolveTemplates,
   resolveTemplateString,
   lintTemplates,

@@ -41,6 +41,7 @@ import type {
   JwtConfig,
   ListOpsConfig,
   McpToolConfig,
+  IntegrationConfig,
   MergeConfig,
   FormTriggerConfig,
   ChatTriggerConfig,
@@ -76,6 +77,7 @@ export interface NodeConfigMap {
   chatTrigger: ChatTriggerConfig;
   agent: AgentConfig;
   mcpTool: McpToolConfig;
+  integration: IntegrationConfig;
   httpRequest: HttpRequestConfig;
   sqlQuery: SqlQueryConfig;
   sqlExec: SqlExecConfig;

@@ -21,9 +21,16 @@ import { XMLBuilder, XMLParser } from "fast-xml-parser";
 import { parse as parseHtml } from "node-html-parser";
 import Papa from "papaparse";
 import { getQuickJS, shouldInterruptAfterDeadline } from "quickjs-emscripten";
-import { canonicalize, getByPath } from "@naary/dsl";
+import {
+  canonicalize,
+  getByPath,
+  buildIntegrationRequest,
+  getIntegrationProvider,
+  validateIntegrationConfig,
+} from "@naary/dsl";
 import type {
   CodeNodeConfig,
+  IntegrationNodeConfig,
   GraphDef,
   PollTriggerNodeConfig,
   ResolvedHash,
@@ -44,6 +51,7 @@ export type {
 } from "@naary/dsl";
 import {
   BlockedEgressError,
+  ConnectionService,
   MissingConnectionTokenError,
   NeedsReauthError,
   assertEgressAllowed,
@@ -2055,6 +2063,15 @@ export const __httpDeps = {
     safeFetch(String(url), init as never) as unknown as Promise<Response>,
   resolveAuthHeader,
   assertEgressAllowed,
+  // The connection's site URL (base for connection-based providers like Jira) + its authMode
+  // (so a "basic"-scheme provider keeps Bearer for OAuth and only Basic-wraps a token).
+  getConnection: async (
+    tenantId: string,
+    connectionId: string,
+  ): Promise<{ serverUrl: string; authMode: string } | null> => {
+    const conn = await new ConnectionService().getById(tenantId, connectionId);
+    return conn ? { serverUrl: conn.serverUrl, authMode: conn.authMode } : null;
+  },
 };
 
 /**
@@ -2345,6 +2362,166 @@ export async function callHttpRequest(
     // Transient (network blip, DNS, abort/timeout): sanitized retryable so a request
     // object carrying the auth header can't be serialized into history.
     throw toSanitizedRetryable(e, "HTTP_TRANSIENT");
+  }
+}
+
+/** Structured result of an integration action — mirrors HttpRequestResult's branchable shape. */
+export interface IntegrationResult {
+  status: "ok";
+  httpStatus: number;
+  ok: boolean;
+  body: unknown;
+}
+
+/**
+ * Native integration node (design docs/design/INTEGRATION-NODES.md): a curated,
+ * connection-authed REST call. The catalog (in @naary/dsl) maps { provider, action } →
+ * method + path + body; this activity resolves auth IN-ACTIVITY (never in config/history),
+ * runs the SSRF egress guard, and returns the structured response so the graph can branch
+ * on `<id>.status`. A non-2xx is RETURNED (not thrown), like httpRequest. `fields` are the
+ * interpreter-resolved field values (static + bindings) — no ctx, no secrets, cross this boundary.
+ *
+ * WRITE actions are proxied AT-MOST-ONCE by the interpreter (no retry) — a lost response
+ * must not duplicate a create/comment (design §4).
+ */
+export async function callIntegration(
+  cfg: IntegrationNodeConfig,
+  fields: Record<string, unknown>,
+  meta: AgentMeta,
+): Promise<IntegrationResult> {
+  const startedAt = process.hrtime.bigint();
+  // Full catalog-aware validation (unknown provider/action, missing required/path field) →
+  // non-retryable, so a misconfigured node fails clearly rather than firing a bad request.
+  const invalid = validateIntegrationConfig(cfg);
+  if (invalid) {
+    throw ApplicationFailure.nonRetryable(
+      invalid,
+      "INTEGRATION_INVALID_CONFIG",
+    );
+  }
+  const provider = getIntegrationProvider(cfg.provider)!;
+
+  // Fetch the connection once if we need its site URL (Jira base) or its authMode (to decide
+  // Basic-vs-Bearer for a "basic"-scheme provider). GitHub needs neither.
+  const needsConnection =
+    provider.baseUrlFromConnection || provider.authScheme === "basic";
+  const conn = needsConnection
+    ? await __httpDeps.getConnection(meta.tenantId, cfg.connectionId)
+    : null;
+
+  // Base URL: static (GitHub) or the connection's site (Jira). A connection-based provider
+  // with no serverUrl is a config error, not a retry.
+  let base = provider.baseUrl ?? null;
+  if (provider.baseUrlFromConnection) {
+    base = conn?.serverUrl ?? null;
+    if (!base) {
+      throw ApplicationFailure.nonRetryable(
+        `integration '${cfg.provider}': connection '${cfg.connectionId}' has no server URL`,
+        "INTEGRATION_NO_BASE_URL",
+      );
+    }
+  }
+  const req = buildIntegrationRequest(cfg.provider, cfg.action, fields);
+  const url = `${base!.replace(/\/$/, "")}${req.path}`;
+
+  try {
+    // Auth resolved in-memory here (Tier-1 rule 4) — never in config, never in history.
+    const authHeaders = await __httpDeps.resolveAuthHeader(
+      meta.tenantId,
+      cfg.connectionId,
+    );
+    // A "basic"-scheme provider (Jira Cloud) with an API TOKEN uses HTTP Basic
+    // (`base64(email:token)`): the connection stores `email:token`, resolveAuthHeader hands it
+    // back as `Bearer email:token`, and we re-wrap it. But an OAuth connection's access token IS
+    // a Bearer — pass it through unchanged (so Jira-over-OAuth keeps working).
+    if (
+      provider.authScheme === "basic" &&
+      conn?.authMode !== "oauth" &&
+      authHeaders.Authorization
+    ) {
+      const raw = authHeaders.Authorization.replace(/^Bearer\s+/i, "");
+      authHeaders.Authorization = `Basic ${Buffer.from(raw).toString("base64")}`;
+    }
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      ...(provider.headers ?? {}),
+      ...authHeaders,
+    };
+    const init: RequestInit = { method: req.method, headers };
+    if (req.method !== "GET" && req.body !== undefined) {
+      init.body = JSON.stringify(req.body);
+      headers["Content-Type"] = "application/json";
+    }
+
+    const checked = await __httpDeps.assertEgressAllowed(url);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DEFAULT_HTTP_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await __httpDeps.fetch(checked, {
+        ...init,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const contentType = res.headers.get("content-type") ?? "";
+    const raw = await res.text();
+    let body: unknown = raw;
+    if (contentType.includes("json")) {
+      try {
+        body = raw.length > 0 ? JSON.parse(raw) : null;
+      } catch {
+        body = raw; // malformed JSON — hand back the text rather than failing
+      }
+    }
+    // Offload a large response so it can't blow Temporal's ~2MB payload cap (like httpRequest);
+    // the interpreter resolves the claim-check back before a downstream node reads it.
+    body = await maybeOffload(body, getObjectStore(), {
+      keyPrefix: `integration/${meta.tenantId}`,
+    });
+    log.info(
+      {
+        activity: "callIntegration",
+        executionId: meta.executionId,
+        nodeId: meta.nodeId,
+        tenantId: meta.tenantId,
+        provider: cfg.provider,
+        action: cfg.action,
+        httpStatus: res.status,
+      },
+      "integration call completed",
+    );
+    activityRuns.inc({ activity: "callIntegration", outcome: "ok" });
+    activityDuration.observe(
+      { activity: "callIntegration" },
+      secondsSince(startedAt),
+    );
+    return { status: "ok", httpStatus: res.status, ok: res.ok, body };
+  } catch (e) {
+    activityRuns.inc({ activity: "callIntegration", outcome: "error" });
+    if (e instanceof NeedsReauthError) {
+      throw ApplicationFailure.nonRetryable(
+        "Connection needs re-authorization",
+        "CONNECTION_REAUTH",
+        { connectionId: cfg.connectionId },
+      );
+    }
+    if (e instanceof MissingConnectionTokenError) {
+      throw ApplicationFailure.nonRetryable(
+        `integration '${cfg.provider}': connection '${cfg.connectionId}' has no token`,
+        "INTEGRATION_NO_TOKEN",
+      );
+    }
+    if (e instanceof BlockedEgressError) {
+      throw ApplicationFailure.nonRetryable(
+        "integration target blocked by egress policy (cloud hosts only)",
+        "INTEGRATION_EGRESS_BLOCKED",
+      );
+    }
+    // Transient — sanitized retryable (the interpreter runs WRITE actions at-most-once).
+    throw toSanitizedRetryable(e, "INTEGRATION_TRANSIENT");
   }
 }
 

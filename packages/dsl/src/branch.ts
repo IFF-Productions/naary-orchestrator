@@ -1,6 +1,7 @@
+import { getIntegrationAction, getIntegrationProvider } from "./integrations";
 import { computeItemsRegions } from "./items-region";
 import { getByPath } from "./mcp-args";
-import type { EdgeCondition, GraphDef } from "./types";
+import type { EdgeCondition, GraphDef, IntegrationNodeConfig } from "./types";
 
 /**
  * Pure, deterministic branching for the interpreter (Slice #6). No time, random,
@@ -166,5 +167,29 @@ export function validateGraph(graph: GraphDef): GraphValidation {
   // inferred — so the whole correctness story is this structural save-time check). Reuse the region
   // computed above for the merge-exemption set.
   if (region.error) return { valid: false, error: region.error };
+
+  // Integration nodes: strict on PRESENT values (like httpRequest's url) — a bogus provider
+  // or action (e.g. from a hand-edited or AI-generated graph) is rejected at save. Missing
+  // fields stay a draft; the activity does the full required-field check at run time.
+  for (const node of graph.nodes) {
+    if (node.type !== "integration") continue;
+    const cfg = (node.config ?? {}) as Partial<IntegrationNodeConfig>;
+    if (cfg.provider && !getIntegrationProvider(cfg.provider)) {
+      return {
+        valid: false,
+        error: `node '${node.id}': unknown integration provider '${cfg.provider}'`,
+      };
+    }
+    if (
+      cfg.provider &&
+      cfg.action &&
+      !getIntegrationAction(cfg.provider, cfg.action)
+    ) {
+      return {
+        valid: false,
+        error: `node '${node.id}': unknown action '${cfg.action}' for provider '${cfg.provider}'`,
+      };
+    }
+  }
   return { valid: true };
 }

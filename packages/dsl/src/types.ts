@@ -13,6 +13,7 @@ export type NodeType =
   | "chatTrigger" // entry node: started by a hosted chat message; output is { message, sessionId }
   | "agent"
   | "mcpTool" // Slice #4: calls a remote MCP server tool via a connection
+  | "integration" // native provider action (GitHub/Jira/…) via a catalog + connection
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}
   | "sqlQuery" // runs a read-only query against a tenant DB; output is {rows,rowCount}
   | "sqlExec" // runs a WRITE (INSERT/UPDATE/DELETE) in a txn; output is {rowsAffected}
@@ -186,6 +187,28 @@ export interface McpToolNodeConfig {
   argumentBindings?: Record<string, ArgBinding>;
   /** Flat per-call cost metered into the run budget (Slice #6 / Arch§4.6). */
   costUsd?: number;
+}
+
+/**
+ * Native integration node (design docs/design/INTEGRATION-NODES.md). One node type
+ * parameterized by { provider, action } that index into INTEGRATION_CATALOG; the
+ * catalog defines the HTTP method/path/fields, so adding an integration is a catalog
+ * entry, not a new node type.
+ *
+ * SECURITY (Tier-1 rule 4): like httpRequest, auth NEVER lives here — it comes via
+ * `connectionId`, resolved + attached IN the activity. `fields` are non-secret values.
+ */
+export interface IntegrationNodeConfig {
+  /** Catalog provider key, e.g. "github" | "jira". */
+  provider: string;
+  /** Catalog action key, e.g. "create_issue". */
+  action: string;
+  /** Connection supplying auth (+ the site base URL for connection-based providers). */
+  connectionId: string;
+  /** Static field values (catalog fields: path/query/body). */
+  fields?: Record<string, unknown>;
+  /** fieldKey → upstream output binding; overrides the static value of the same key. */
+  fieldBindings?: Record<string, ArgBinding>;
 }
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
