@@ -3183,9 +3183,11 @@ function ConfigPanel({
               marginTop: -6,
             }}
           >
-            Runs the linear region up to <strong>Loop End</strong> once per
-            item; inside it, <code>{node.id}</code> is the current item. Region
-            nodes must be a straight, pure chain (validated on save).
+            Runs the region up to <strong>Loop End</strong> once per item;
+            inside it, <code>{node.id}</code> is the current item. The region
+            can hold transforms, activities (Agent / HTTP / MCP), and{" "}
+            <strong>IF / Switch / Merge</strong> branching that rejoins before
+            Loop End — the shape is validated on save.
           </div>
         </>
       )}
