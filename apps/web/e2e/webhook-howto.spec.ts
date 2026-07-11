@@ -9,8 +9,12 @@ test("registering a webhook shows a copy-run signed curl", async ({ page }) => {
   // not mounted until opened) — click the header to reveal the register form.
   await page.getByRole("button", { name: /Register a webhook/ }).click();
 
-  // register against the seeded "default" workflow (generic provider)
-  await page.getByPlaceholder("wf-default").fill("default");
+  // register against the seeded "default" workflow — CHOSEN from the dropdown of saved
+  // workflows (no more typing a raw key). Scope to the select that has the "default" option
+  // so we don't hit the provider dropdown.
+  await page
+    .locator("select", { has: page.locator('option[value="default"]') })
+    .selectOption("default");
   await page.getByRole("button", { name: "Register", exact: true }).click();
 
   // the how-to panel appears with the signature scheme + the curl command

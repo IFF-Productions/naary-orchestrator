@@ -88,6 +88,31 @@ test("run detail: the 'Run input' panel shows the payload that started the run",
   await expect(page.getByText(/NAARY-42/)).toBeVisible();
 });
 
+test("webhook registration: pick the workflow from a dropdown of saved workflows", async ({
+  page,
+}) => {
+  await page.goto("/app/integrations");
+
+  // Open the (collapsed-by-default) webhook register form.
+  await page.getByRole("button", { name: /Register a webhook/ }).click();
+
+  // The workflow is now a SELECT populated with real saved workflows — not a free-text
+  // field (typing an unsaved/typo key was the "No graph seeded for '…'" 404 footgun).
+  const workflowSelect = page.locator("select", {
+    has: page.locator('option[value="default"]'),
+  });
+  await expect(workflowSelect).toBeVisible();
+  // Seeded workflows appear as options (label shows the name + key).
+  await expect(
+    workflowSelect.locator('option[value="e2e-integration"]'),
+  ).toHaveCount(1);
+
+  // Choosing one enables Register and the registration succeeds.
+  await workflowSelect.selectOption("default");
+  await page.getByRole("button", { name: "Register", exact: true }).click();
+  await expect(page.getByText("Trigger it (copy & run)")).toBeVisible();
+});
+
 test("workflows list: a workflow can be deleted", async ({ page }) => {
   // Create a throwaway workflow via the API so the test is self-contained and
   // survives retries (a fresh key each run — nothing to leak between attempts).

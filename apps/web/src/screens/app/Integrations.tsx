@@ -6,6 +6,7 @@ import {
   type ChatRow,
   type ConnectionRow,
   type FormRow,
+  type GraphSummary,
   type MintedToken,
   type ProviderCredential,
   type RegisteredChat,
@@ -1894,6 +1895,22 @@ function WebhookForm({
   const [registered, setRegistered] = useState<RegisteredWebhook | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // The tenant's saved workflows, for the picker below. Typing a key by hand was the
+  // #1 registration footgun ("No graph seeded for workflowKey '…'" 404s on a typo /
+  // an unsaved key) — so the workflow is CHOSEN from real, saved graphs, never typed.
+  const [workflows, setWorkflows] = useState<GraphSummary[]>([]);
+  useEffect(() => {
+    let alive = true;
+    api
+      .listGraphs()
+      .then((gs) => {
+        if (alive) setWorkflows(gs);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   async function submit() {
     setBusy(true);
@@ -1916,13 +1933,32 @@ function WebhookForm({
   return (
     <>
       <div style={{ marginBottom: 10 }}>
-        <span style={fieldLabel}>Workflow key (e.g. wf-default)</span>
-        <input
-          style={fieldStyle}
-          value={workflowId}
-          onChange={(e) => setWorkflowId(e.target.value)}
-          placeholder="wf-default"
-        />
+        <span style={fieldLabel}>Workflow to trigger</span>
+        {workflows.length === 0 ? (
+          <div
+            style={{
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-2)",
+              padding: "8px 0",
+            }}
+          >
+            No saved workflows yet — save one on the canvas first, then it'll
+            appear here.
+          </div>
+        ) : (
+          <select
+            style={fieldStyle}
+            value={workflowId}
+            onChange={(e) => setWorkflowId(e.target.value)}
+          >
+            <option value="">Select a workflow…</option>
+            {workflows.map((w) => (
+              <option key={w.workflowKey} value={w.workflowKey}>
+                {w.name} ({w.workflowKey})
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       <div style={{ marginBottom: 12 }}>
         <span style={fieldLabel}>Provider</span>
