@@ -358,6 +358,7 @@ export function Integrations() {
   const [credentials, setCredentials] = useState<ProviderCredential[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
+  const [reconnecting, setReconnecting] = useState<string | null>(null);
   const [deletingHook, setDeletingHook] = useState<string | null>(null);
   const [deletingForm, setDeletingForm] = useState<string | null>(null);
   const [deletingChat, setDeletingChat] = useState<string | null>(null);
@@ -597,6 +598,28 @@ export function Integrations() {
               state={connectionState(c.status)}
               label={CONNECTION_LABEL[c.status]}
             />
+            {c.status === "needs_reauth" && c.authMode === "oauth" && (
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                disabled={reconnecting === c.id}
+                onClick={() => {
+                  if (!tenant || reconnecting) return;
+                  setReconnecting(c.id);
+                  void api
+                    .startOauthConsent(tenant, c.id)
+                    .then(({ authorizeUrl }) =>
+                      window.location.assign(authorizeUrl),
+                    )
+                    .catch(() => {
+                      setError("Could not start re-authorization.");
+                      setReconnecting(null);
+                    });
+                }}
+              >
+                {reconnecting === c.id ? "Redirecting…" : "Reconnect"}
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-sm btn-secondary"
@@ -1729,13 +1752,22 @@ function ConnectForm({
     setBusy(true);
     setMsg(null);
     try {
-      await api.createConnection(tenant, {
+      const conn = await api.createConnection(tenant, {
         type,
         label: label.trim(),
         serverUrl: serverUrl.trim(),
         authMode,
         ...(token.trim() ? { token: token.trim() } : {}),
       });
+      // OAuth needs an interactive consent handshake: kick off `oauth/start` and send the
+      // browser to the provider's authorize URL. It redirects back to the API's
+      // /oauth/callback, which persists the refresh token. (Token modes are done above.)
+      if (authMode === "oauth") {
+        setMsg("Redirecting to authorize…");
+        const { authorizeUrl } = await api.startOauthConsent(tenant, conn.id);
+        window.location.assign(authorizeUrl);
+        return; // navigating away — leave the form as-is
+      }
       setLabel("");
       setServerUrl("");
       setToken("");
