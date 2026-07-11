@@ -18,8 +18,12 @@ vi.mock("ai", async (orig) => ({
 
 const getDecryptedKey = vi.fn();
 const listProviders = vi.fn();
+const listConnections = vi.fn().mockResolvedValue([]);
 function makeService(): GraphGeneratorService {
-  return new GraphGeneratorService({ getDecryptedKey, listProviders } as never);
+  return new GraphGeneratorService(
+    { getDecryptedKey, listProviders } as never,
+    { list: listConnections } as never,
+  );
 }
 
 // A structurally valid graph the model might emit.
@@ -61,6 +65,35 @@ describe("GraphGeneratorService", () => {
     expect(res.graph.nodes).toHaveLength(2);
     expect(getDecryptedKey).toHaveBeenCalledWith("t-1", "anthropic");
     expect(generateText).toHaveBeenCalledOnce();
+  });
+
+  it("grounds the model in the tenant's real connections + the integration action catalog", async () => {
+    listConnections.mockResolvedValue([
+      {
+        id: "conn_abc",
+        type: "github",
+        label: "GitHub (prod)",
+        serverUrl: "https://api.github.com",
+      },
+    ]);
+    generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
+
+    await makeService().generate("t-1", "comment on a github issue");
+
+    const prompt = generateText.mock.calls[0][0].prompt as string;
+    // The model is told the EXACT connection id (so it never invents "github").
+    expect(prompt).toContain('id="conn_abc"');
+    expect(prompt).toContain("AVAILABLE CONNECTIONS");
+    // …and the real integration provider/action list (so it can't invent an action).
+    expect(prompt).toContain('provider="github" action="create_issue"');
+  });
+
+  it("tells the model NOT to use connection-bound nodes when the tenant has none", async () => {
+    listConnections.mockResolvedValue([]);
+    generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
+    await makeService().generate("t-1", "do a thing");
+    const prompt = generateText.mock.calls[0][0].prompt as string;
+    expect(prompt).toContain("NO CONNECTIONS are configured");
   });
 
   it("repairs once: invalid graph → feeds the error back → valid on retry", async () => {

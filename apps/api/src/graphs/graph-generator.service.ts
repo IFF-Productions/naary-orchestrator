@@ -13,10 +13,12 @@ import {
 import type { GraphDef } from "@naary/dsl";
 import {
   CONDITION_OPS,
+  INTEGRATION_PROVIDERS,
   NODE_TYPES,
   nodeCatalogPrompt,
   validateGraph,
 } from "@naary/dsl";
+import { ConnectionService } from "@naary/connections";
 import { CredentialsService, MissingCredentialError } from "@naary/secrets";
 import { APICallError, generateText } from "ai";
 
@@ -86,7 +88,50 @@ ${nodeCatalogPrompt()}`;
 @Injectable()
 export class GraphGeneratorService {
   private readonly logger = new Logger(GraphGeneratorService.name);
-  constructor(private readonly credentials: CredentialsService) {}
+  constructor(
+    private readonly credentials: CredentialsService,
+    private readonly connections: ConnectionService,
+  ) {}
+
+  /**
+   * Ground the model in the tenant's ACTUAL resources so it doesn't invent connectionIds or
+   * unsupported provider actions (the #1 causes of AI-generated workflows failing at run time):
+   * the real connections (with their exact ids), and the integration catalog's provider→action
+   * list with required fields. Per-request (connections are tenant-specific).
+   */
+  private async buildResourceContext(tenantId: string): Promise<string> {
+    const conns = await this.connections.list(tenantId).catch(() => []);
+    const lines: string[] = [];
+    if (conns.length > 0) {
+      lines.push(
+        "AVAILABLE CONNECTIONS — for any node that needs a connectionId, use ONE of these EXACT id values. NEVER invent a connectionId. If none fits, leave connectionId empty:",
+        ...conns.map(
+          (c) =>
+            `- id="${c.id}"  type=${c.type}${c.label ? `  (${c.label})` : ""}`,
+        ),
+      );
+    } else {
+      lines.push(
+        "NO CONNECTIONS are configured. Do NOT add nodes that require a connectionId (integration, mcpTool, sqlQuery, sqlExec, sendEmail); if you must, leave connectionId empty so the user fills it.",
+      );
+    }
+    lines.push(
+      "",
+      "INTEGRATION node actions (set config.provider + config.action to one of these; fill the required fields via fields/fieldBindings). There is NO action beyond these — do not invent one (e.g. there is no 'push commit'):",
+    );
+    for (const p of INTEGRATION_PROVIDERS) {
+      for (const a of p.actions) {
+        const req = a.fields
+          .filter((f) => f.required)
+          .map((f) => f.key)
+          .join(", ");
+        lines.push(
+          `- provider="${p.key}" action="${a.key}"${req ? `  required: ${req}` : ""}`,
+        );
+      }
+    }
+    return lines.join("\n") + "\n\n";
+  }
 
   /**
    * Generate a workflow graph from a natural-language description. The tenant's own
@@ -108,18 +153,33 @@ export class GraphGeneratorService {
       provider,
     );
 
+    // Ground the model in this tenant's real connections + the integration action catalog.
+    const resources = await this.buildResourceContext(tenantId);
+
     // First attempt.
-    let out = await this.callModel(chosen, apiKey, description);
+    let out = await this.callModel(
+      chosen,
+      apiKey,
+      description,
+      undefined,
+      resources,
+    );
     this.logDraftShape("first", out);
     let graph = toGraphDef(out);
     let check = this.validate(graph);
 
     // One repair retry: feed the validator error back so the model fixes it.
     if (!check.valid) {
-      out = await this.callModel(chosen, apiKey, description, {
-        previous: JSON.stringify(out),
-        error: check.error ?? "invalid graph",
-      });
+      out = await this.callModel(
+        chosen,
+        apiKey,
+        description,
+        {
+          previous: JSON.stringify(out),
+          error: check.error ?? "invalid graph",
+        },
+        resources,
+      );
       this.logDraftShape(`repair(${check.error})`, out);
       graph = toGraphDef(out);
       check = this.validate(graph);
@@ -219,6 +279,7 @@ export class GraphGeneratorService {
     apiKey: string,
     description: string,
     repair?: { previous: string; error: string },
+    resources = "",
   ): Promise<GraphDraft> {
     const userPrompt = repair
       ? `The previous graph was invalid: ${repair.error}\n\nPrevious graph:\n${repair.previous}\n\nFix it. Original request:\n${description}`
@@ -232,8 +293,10 @@ export class GraphGeneratorService {
       const result = await generateText({
         model: buildGenModel(provider, apiKey),
         system: SYSTEM_PROMPT,
-        prompt: `${userPrompt}\n\nRespond with ONLY the JSON graph object — start at { and end at }. No prose, no markdown code fences.`,
-        maxOutputTokens: 8000,
+        prompt: `${userPrompt}\n\n${resources}Respond with ONLY the JSON graph object — start at { and end at }. No prose, no markdown code fences.`,
+        // Headroom for large multi-branch workflows — a truncated response is unparseable
+        // JSON (→ 422). Models used here (opus/gpt-4.1/gemini-2.5-pro) all support this.
+        maxOutputTokens: 16000,
       });
       text = result.text;
     } catch (e) {

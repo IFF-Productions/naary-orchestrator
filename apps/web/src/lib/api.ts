@@ -150,6 +150,12 @@ export const api = {
   getGraph(workflowKey: string): Promise<NamedGraph> {
     return http(`/graphs/${encodeURIComponent(workflowKey)}`);
   },
+  // Delete a workflow (all versions) + its triggers/schedules. Run history is kept.
+  deleteGraph(workflowKey: string): Promise<{ deleted: true }> {
+    return http(`/graphs/${encodeURIComponent(workflowKey)}`, {
+      method: "DELETE",
+    });
+  },
   // --- Pinned node outputs (authoring-only samples; the interpreter never reads them) ---
   listPins(workflowKey: string): Promise<Record<string, unknown>> {
     return http(`/graphs/${encodeURIComponent(workflowKey)}/pins`);

@@ -1,4 +1,5 @@
 import { Global, Module } from "@nestjs/common";
+import { ConnectionService } from "@naary/connections";
 import { CredentialsService } from "@naary/secrets";
 import { SchedulesModule } from "../schedules/schedules.module";
 import { GraphGeneratorService } from "./graph-generator.service";
@@ -16,6 +17,8 @@ import { GraphsService } from "./graphs.service";
     // Plain class from @naary/secrets (reads ENCRYPTION_KEY at construction); the
     // generator decrypts the tenant's provider key in-request for the model call.
     { provide: CredentialsService, useFactory: () => new CredentialsService() },
+    // The generator lists the tenant's connections so it uses real connectionIds.
+    { provide: ConnectionService, useFactory: () => new ConnectionService() },
   ],
   exports: [GraphsService, GraphGeneratorService],
 })

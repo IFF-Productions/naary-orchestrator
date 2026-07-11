@@ -222,4 +222,50 @@ export class GraphsService {
       update: { active },
     });
   }
+
+  /**
+   * Delete a workflow and everything that points at it, in one transaction: all graph versions,
+   * its authoring/runtime rows (activation, pins, poll cursor, error-handler bindings in BOTH
+   * directions) and its triggers (webhook / form / chat endpoints). Temporal SCHEDULES are torn
+   * down separately by the caller (SchedulesService.teardownForWorkflow) since they're an external
+   * resource. Execution history is intentionally KEPT (it's an audit record).
+   *
+   * Returns false if there was no graph under this key (→ the controller 404s).
+   */
+  async deleteWorkflow(
+    tenantId: string,
+    workflowKey: string,
+  ): Promise<boolean> {
+    const existed = await getPrisma().graphDefinition.findFirst({
+      where: { tenantId, workflowKey },
+      select: { workflowKey: true },
+    });
+    if (!existed) return false;
+
+    const p = getPrisma();
+    await p.$transaction([
+      p.graphDefinition.deleteMany({ where: { tenantId, workflowKey } }),
+      p.workflowActivation.deleteMany({ where: { tenantId, workflowKey } }),
+      p.pinnedData.deleteMany({ where: { tenantId, workflowKey } }),
+      p.pollState.deleteMany({ where: { tenantId, workflowKey } }),
+      // Error-handler bindings where this key is EITHER the failing workflow or the handler.
+      p.errorHandler.deleteMany({
+        where: {
+          tenantId,
+          OR: [{ workflowKey }, { errorWorkflowKey: workflowKey }],
+        },
+      }),
+      // Triggers reference the graph key as `workflowId`.
+      p.webhookEndpoint.deleteMany({
+        where: { tenantId, workflowId: workflowKey },
+      }),
+      p.formEndpoint.deleteMany({
+        where: { tenantId, workflowId: workflowKey },
+      }),
+      p.chatEndpoint.deleteMany({
+        where: { tenantId, workflowId: workflowKey },
+      }),
+    ]);
+    return true;
+  }
 }

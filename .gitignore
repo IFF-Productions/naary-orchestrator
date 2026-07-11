@@ -16,3 +16,6 @@ temporal.db
 temporal.db-shm
 temporal.db-wal
 _design-reference/
+
+# Bind-mounted DB / Temporal data (self-host deploy)
+/data/
