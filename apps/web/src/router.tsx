@@ -1,7 +1,12 @@
+import * as Sentry from "@sentry/react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppShell } from "./app/AppShell";
 import { RequireBuilder } from "./app/RequireBuilder";
 import { RequireAuth } from "./auth/RequireAuth";
+
+// Wrap the data-router factory so Sentry names navigation transactions by route
+// pattern (not raw URL). No-op unless Sentry initialized (see instrument.ts).
+const createRouter = Sentry.wrapCreateBrowserRouterV7(createBrowserRouter);
 
 const lazy = (
   importer: () => Promise<Record<string, React.ComponentType>>,
@@ -13,7 +18,7 @@ const lazy = (
   },
 });
 
-export const router = createBrowserRouter([
+export const router = createRouter([
   { path: "/", element: <Navigate to="/app" replace /> },
   {
     path: "/design",
