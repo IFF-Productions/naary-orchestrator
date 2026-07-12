@@ -18,15 +18,20 @@ describe("metrics", () => {
     expect(text).toContain('naary_test_total{outcome="fail"} 1');
   });
 
-  it("records histogram observations", async () => {
+  it("records histogram observations (value form AND labels+value form)", async () => {
     const h = histogram({
       name: "naary_test_duration_seconds",
       help: "test histogram",
+      labelNames: ["activity"],
     });
+    // Both call shapes must still reach Prometheus after the Sentry dual-emit wrap.
     h.observe(0.5);
+    h.observe({ activity: "callAgent" }, 1.5);
     const text = await renderMetrics();
-    expect(text).toContain("naary_test_duration_seconds_count 1");
-    expect(text).toContain("naary_test_duration_seconds_sum 0.5");
+    expect(text).toContain("naary_test_duration_seconds_count 1"); // the no-label series
+    expect(text).toContain(
+      'naary_test_duration_seconds_count{activity="callAgent"} 1',
+    );
   });
 
   it("metrics register to the shared registry", () => {
