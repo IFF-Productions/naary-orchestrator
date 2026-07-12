@@ -17,7 +17,7 @@ import {
   connectionSecretKey,
 } from "./connection.service";
 import { assertEgressAllowed } from "./egress";
-import { NeedsReauthError } from "./errors";
+import { AuthConfigError, NeedsReauthError } from "./errors";
 import { safeFetch } from "./safe-fetch";
 
 const GITHUB_API = "https://api.github.com";
@@ -101,7 +101,8 @@ export async function getInstallationToken(
 ): Promise<string> {
   const cfg = __ghAppDeps.config();
   if (!cfg) {
-    throw new Error(
+    // Platform misconfig, not a tenant problem → AuthConfigError (worker: non-retryable).
+    throw new AuthConfigError(
       "GitHub App not configured (set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY)",
     );
   }
@@ -153,15 +154,31 @@ export async function resolveGithubAppHeader(
   connectionId: string,
   deps: { connections?: ConnectionService; grantJson: string | null },
 ): Promise<Record<string, string>> {
-  if (!deps.grantJson) {
-    throw new NeedsReauthError(connectionId); // no stored installation → must (re)install
+  const connections = deps.connections ?? new ConnectionService();
+  // A missing OR malformed grant is deterministic — nothing to retry. Flip the connection to
+  // needs_reauth (so its state matches reality, like the 401/404 exchange path) and throw
+  // NeedsReauthError (worker: non-retryable). Without this, a bad grant would throw a bare
+  // SyntaxError → treated as a retryable transient, looping while status stays "connected".
+  let installationId: string | undefined;
+  if (deps.grantJson) {
+    try {
+      installationId = (JSON.parse(deps.grantJson) as GithubAppGrant)
+        .installationId;
+    } catch {
+      /* fall through to reauth below */
+    }
   }
-  const grant = JSON.parse(deps.grantJson) as GithubAppGrant;
+  if (!installationId) {
+    await connections.setStatus(tenantId, connectionId, "needs_reauth");
+    throw new NeedsReauthError(connectionId); // no usable installation → must (re)install
+  }
   const token = await getInstallationToken(
     tenantId,
     connectionId,
-    grant.installationId,
-    { connections: deps.connections },
+    installationId,
+    {
+      connections,
+    },
   );
   return { Authorization: `Bearer ${token}` };
 }
@@ -200,7 +217,7 @@ export async function startGithubAppInstall(opts: {
 }): Promise<{ installUrl: string; state: string }> {
   const cfg = __ghAppDeps.config();
   if (!cfg?.slug) {
-    throw new Error(
+    throw new AuthConfigError(
       "GitHub App install not configured (set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_APP_SLUG)",
     );
   }

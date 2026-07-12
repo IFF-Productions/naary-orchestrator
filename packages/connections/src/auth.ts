@@ -5,7 +5,11 @@ import { resolveGithubAppHeader } from "./github-app";
 import { getOAuthAccessToken } from "./oauth";
 
 // Re-export so existing imports from '@naary/connections' keep working.
-export { MissingConnectionTokenError, NeedsReauthError } from "./errors";
+export {
+  AuthConfigError,
+  MissingConnectionTokenError,
+  NeedsReauthError,
+} from "./errors";
 
 export interface AuthDeps {
   connections?: ConnectionService;

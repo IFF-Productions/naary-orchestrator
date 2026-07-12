@@ -1,12 +1,13 @@
 import { generateKeyPairSync } from "node:crypto";
 import { decodeProtectedHeader, decodeJwt } from "jose";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { NeedsReauthError } from "../src/errors";
+import { AuthConfigError, NeedsReauthError } from "../src/errors";
 import {
   __ghAppDeps,
   __resetGithubAppCache,
   completeGithubAppInstall,
   getInstallationToken,
+  resolveGithubAppHeader,
   startGithubAppInstall,
 } from "../src/github-app";
 import { connectionSecretKey } from "../src/connection.service";
@@ -102,12 +103,41 @@ describe("getInstallationToken", () => {
     expect(setStatus).not.toHaveBeenCalled();
   });
 
-  it("throws when the GitHub App isn't configured", async () => {
+  it("throws AuthConfigError (non-retryable in worker) when the GitHub App isn't configured", async () => {
     __ghAppDeps.config = () => null;
     await expect(
       getInstallationToken("t1", "conn-1", "42", { connections }),
-    ).rejects.toThrow(/not configured/);
+    ).rejects.toBeInstanceOf(AuthConfigError);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveGithubAppHeader", () => {
+  it("flips status to needs_reauth on a MISSING grant (not just throws)", async () => {
+    await expect(
+      resolveGithubAppHeader("t1", "conn-1", { connections, grantJson: null }),
+    ).rejects.toBeInstanceOf(NeedsReauthError);
+    expect(setStatus).toHaveBeenCalledWith("t1", "conn-1", "needs_reauth");
+  });
+
+  it("flips status to needs_reauth on a MALFORMED grant (deterministic, not a retry)", async () => {
+    await expect(
+      resolveGithubAppHeader("t1", "conn-1", {
+        connections,
+        grantJson: "{not json",
+      }),
+    ).rejects.toBeInstanceOf(NeedsReauthError);
+    expect(setStatus).toHaveBeenCalledWith("t1", "conn-1", "needs_reauth");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("mints a Bearer header from a valid grant", async () => {
+    fetchMock.mockResolvedValue(okTokenRes("ghs_fromgrant"));
+    const h = await resolveGithubAppHeader("t1", "conn-1", {
+      connections,
+      grantJson: JSON.stringify({ installationId: "42" }),
+    });
+    expect(h).toEqual({ Authorization: "Bearer ghs_fromgrant" });
   });
 });
 

@@ -51,6 +51,7 @@ export type {
   ResolvedSendEmail,
 } from "@naary/dsl";
 import {
+  AuthConfigError,
   BlockedEgressError,
   ConnectionService,
   MissingConnectionTokenError,
@@ -2350,6 +2351,9 @@ export async function callHttpRequest(
         { host },
       );
     }
+    if (e instanceof AuthConfigError) {
+      throw ApplicationFailure.nonRetryable(e.message, "AUTH_NOT_CONFIGURED");
+    }
     if (
       e instanceof MissingConnectionTokenError ||
       e instanceof NeedsReauthError
@@ -2535,6 +2539,10 @@ export async function callIntegration(
     // Our own typed failures (e.g. INTEGRATION_WRITE_FAILED) are already sanitized +
     // carry the right retryability — rethrow as-is, never re-wrap them as retryable.
     if (e instanceof ApplicationFailure) throw e;
+    if (e instanceof AuthConfigError) {
+      // Platform misconfig (e.g. GitHub App env unset) — retrying can't fix it.
+      throw ApplicationFailure.nonRetryable(e.message, "AUTH_NOT_CONFIGURED");
+    }
     if (e instanceof NeedsReauthError) {
       throw ApplicationFailure.nonRetryable(
         "Connection needs re-authorization",
