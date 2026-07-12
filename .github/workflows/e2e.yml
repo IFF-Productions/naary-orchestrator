@@ -155,13 +155,11 @@ jobs:
             echo "Docker daemon reachable as user '$(whoami)'."
             exit 0
           fi
+          echo "Runner account: $(whoami)" >&2
           cat >&2 <<'MSG'
-          ::error::Cannot reach the Docker daemon as this runner user. macOS Docker Desktop is PER-USER: its socket is owned by the user who installed it, so another user is denied. Fix one of:
-            1) Run the GitHub Actions runner as the user who owns Docker Desktop; or
-            2) Give the runner user its OWN daemon with Colima (recommended for a headless/secondary user):
-                 brew install colima docker docker-compose
-                 colima start        # creates a docker socket owned by this user
-               then re-run. (Keep Colima running, e.g. `brew services` or a login item.)
+          ::error::Cannot reach the Docker daemon as the runner account. Docker Desktop is PER-USER and its engine endpoint is access-restricted, so a runner on a different (or service) account is denied even though Docker is installed. Fix one of:
+            WINDOWS (this runner runs as NetworkService): Docker Desktop exposes the docker_engine named pipe to the local 'docker-users' group and runs per-user. Either (a) run the GitHub Actions runner SERVICE as the user who owns Docker Desktop and keep Docker Desktop running for that user (start it at login); or (b) add the runner account to the local 'docker-users' group AND run the engine in a context it can reach (Docker Desktop running, or Docker Engine as a service / WSL2 backend). Then restart the runner.
+            macOS: run the runner as the Docker-Desktop owner, or give the runner user its own daemon (colima start).
           MSG
           exit 1
 
