@@ -40,17 +40,33 @@ jobs:
         shell: powershell
         run: |
           $bin = $null
+          $roots = @()
           $git = Get-Command git -ErrorAction SilentlyContinue
-          if ($git) {
-            $cand = Join-Path (Split-Path (Split-Path $git.Source)) 'bin'
-            if (Test-Path (Join-Path $cand 'bash.exe')) { $bin = $cand }
+          if ($git) { $roots += (Split-Path (Split-Path $git.Source)) }
+          $roots += @(
+            "$env:ProgramFiles\Git",
+            "${env:ProgramFiles(x86)}\Git",
+            "$env:LOCALAPPDATA\Programs\Git",
+            "C:\Git",
+            "$env:ProgramData\chocolatey\lib\git\tools\git",
+            "$env:USERPROFILE\scoop\apps\git\current"
+          )
+          foreach ($r in $roots) {
+            foreach ($sub in @('bin', 'usr\bin')) {
+              if (Test-Path (Join-Path (Join-Path $r $sub) 'bash.exe')) { $bin = (Join-Path $r $sub); break }
+            }
+            if ($bin) { break }
           }
           if (-not $bin) {
-            foreach ($p in @("$env:ProgramFiles\Git\bin", "${env:ProgramFiles(x86)}\Git\bin", "$env:LOCALAPPDATA\Programs\Git\bin")) {
-              if (Test-Path (Join-Path $p 'bash.exe')) { $bin = $p; break }
-            }
+            $w = (& where.exe bash 2>$null) | Where-Object { $_ -and ($_ -notmatch 'System32') }
+            if ($w) { $bin = Split-Path $w[0] }
           }
-          if (-not $bin) { throw "Git Bash (bash.exe) not found. Install Git for Windows or add its bin dir to the runner PATH." }
+          if (-not $bin) {
+            Write-Host "PATH=$env:PATH"
+            Write-Host "where git:"; (& where.exe git 2>$null) | ForEach-Object { Write-Host "  $_" }
+            Write-Host "where bash:"; (& where.exe bash 2>$null) | ForEach-Object { Write-Host "  $_" }
+            throw "Git Bash (bash.exe) not found. Install Git for Windows or add its bin dir to the runner PATH."
+          }
           Add-Content -Path $env:GITHUB_PATH -Value $bin
           Write-Host "Git Bash on PATH: $bin"
 
