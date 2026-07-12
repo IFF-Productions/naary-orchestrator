@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Web app image: build the Vite SPA, then serve the static bundle with nginx.
 # Build context is the REPO ROOT (see docker-compose.yml) so the pnpm workspace
 # resolves — the web app may import browser-safe workspace types (@naary/contracts).
@@ -38,7 +39,10 @@ COPY . .
 # dist/ is .dockerignore'd, and the web build is vite-only so it won't build deps
 # itself), then typecheck + vite build (the web `build` script). tsc -b on dsl
 # follows its project references, so any transitive package is built too.
-RUN pnpm install --frozen-lockfile \
+# BuildKit cache mount for the pnpm store (see the backend Dockerfile) — persists the
+# downloaded packages across builds so a source change doesn't re-download them. Build-only.
+RUN --mount=type=cache,target=/pnpm-store \
+  pnpm install --frozen-lockfile --store-dir /pnpm-store \
   && pnpm --filter @naary/dsl run build \
   && pnpm --filter @naary/web run build
 
