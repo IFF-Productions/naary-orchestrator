@@ -35,7 +35,10 @@ export {
   resolveTemplates,
   resolveTemplateString,
   lintTemplates,
+  lintBindings,
+  collectUnresolved,
   type TemplateWarning,
+  type UnresolvedRef,
 } from "./template";
 export { isPureNode, runPureNode } from "./pure-node";
 // Items model (design ITEMS-MODEL.md) — Slice 1 normalize primitive only; no interpreter change yet.

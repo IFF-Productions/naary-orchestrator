@@ -76,6 +76,13 @@ export interface TemplateWarning {
 // A `{{ path }}` token, not escaped. Mirrors resolveTemplateString.
 const LINT_RE = /\\\{\{|\{\{\s*([^{}]+?)\s*\}\}/g;
 
+/** A `__`-prefixed source (e.g. `__input`) is a RESERVED runtime source, not a node — the run
+ *  context provides it, so a reference to it is always valid and must never be linted as unknown.
+ *  splitOut/loopEnd commonly bind `from: "__input"` to read the trigger input directly. */
+function isReservedSource(from: string): boolean {
+  return from.startsWith("__");
+}
+
 /**
  * Lint `{{ nodeId.path }}` tokens across a graph's string config. Flags tokens whose referenced
  * node id isn't a node in the graph — an always-empty reference (a typo). A WARNING, not an error:
@@ -87,7 +94,7 @@ export function lintTemplates(graph: GraphDef): TemplateWarning[] {
   for (const node of graph.nodes) {
     walkForTokens(node.config, "", (field, ref) => {
       const refNode = ref.split(".")[0]?.trim();
-      if (refNode && !nodeIds.has(refNode)) {
+      if (refNode && !isReservedSource(refNode) && !nodeIds.has(refNode)) {
         warnings.push({
           nodeId: node.id,
           field,
@@ -98,6 +105,118 @@ export function lintTemplates(graph: GraphDef): TemplateWarning[] {
     });
   }
   return warnings;
+}
+
+/**
+ * Lint structured `{from, path?}` bindings (fieldBindings / paramBindings / argumentBindings /
+ * the bare `*Binding` fields) across a graph — the counterpart to `lintTemplates` for the
+ * NON-string binding shape the template linter can't see. Flags a binding whose `from` source
+ * isn't a node in the graph, naming WHICH source is missing. Same warning shape as a template
+ * warning so the canvas can show both together. WARNING-only (runtime resolves it to empty).
+ */
+export function lintBindings(graph: GraphDef): TemplateWarning[] {
+  const nodeIds = new Set(graph.nodes.map((n) => n.id));
+  const warnings: TemplateWarning[] = [];
+  for (const node of graph.nodes) {
+    walkForBindings(node.config, "", (field, from, path) => {
+      if (from && !isReservedSource(from) && !nodeIds.has(from)) {
+        warnings.push({
+          nodeId: node.id,
+          field,
+          ref: path ? `${from}.${path}` : from,
+          message: `binds from unknown node "${from}" — will always be empty`,
+        });
+      }
+    });
+  }
+  return warnings;
+}
+
+/** An input reference (a `{{ }}` token OR a `{from,path}` binding) that resolved to nothing
+ *  when its node ran — i.e. its source produced no output. Diagnostic surfaced on the run detail
+ *  so an empty/failed node names WHICH source was missing, instead of looking silently "fine". */
+export interface UnresolvedRef {
+  /** The node whose input didn't resolve. */
+  nodeId: string;
+  /** Dotted path to the offending config field, e.g. "fieldBindings.body" or "systemPrompt". */
+  field: string;
+  /** The source node id the reference reads from. */
+  from: string;
+  /** The full reference (source + path) for display, e.g. "review.output.review". */
+  ref: string;
+  /** true → `from` IS a node in the graph, so it ran but produced no output on this branch;
+   *  false → `from` isn't a node at all (a typo'd / deleted source). */
+  sourceExists: boolean;
+}
+
+/**
+ * Collect a node's input references that resolve to `undefined` against the CURRENT run context —
+ * i.e. the source produced no output. Pure + deterministic (only `getByPath` over `ctx`), so the
+ * interpreter can call it in workflow code and stash the result in `ctx.__unresolved` (replay-safe,
+ * no Temporal command). Covers BOTH `{{ }}` string tokens and structured `{from,path}` bindings.
+ * A reference whose value is present (even `null` / `""`) is NOT reported — only strictly missing.
+ */
+export function collectUnresolved(
+  node: { id: string; config?: unknown },
+  ctx: Record<string, unknown>,
+  nodeIds: Set<string>,
+): UnresolvedRef[] {
+  const out: UnresolvedRef[] = [];
+  const push = (field: string, from: string, ref: string) => {
+    if (from) {
+      out.push({
+        nodeId: node.id,
+        field,
+        from,
+        ref,
+        sourceExists: nodeIds.has(from),
+      });
+    }
+  };
+  // `{{ source.path }}` tokens — unresolved when the whole dotted lookup yields undefined.
+  walkForTokens(node.config, "", (field, ref) => {
+    if (getByPath(ctx, ref) === undefined) {
+      push(field, ref.split(".")[0]?.trim() ?? "", ref);
+    }
+  });
+  // `{from, path?}` bindings — unresolved when getByPath(ctx[from], path) is undefined.
+  walkForBindings(node.config, "", (field, from, path) => {
+    if (getByPath(ctx[from], path) === undefined) {
+      push(field, from, path ? `${from}.${path}` : from);
+    }
+  });
+  return out;
+}
+
+/** Is `v` exactly the ArgBinding shape `{ from: string, path?: string }` — and nothing else?
+ *  The "nothing else" guard keeps a plain string field named `from` (e.g. an email sender) from
+ *  matching: those are strings, not objects, and any richer object has extra keys. */
+function isArgBinding(v: unknown): v is { from: string; path?: string } {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  const o = v as Record<string, unknown>;
+  if (typeof o.from !== "string") return false;
+  return Object.keys(o).every((k) => k === "from" || k === "path");
+}
+
+function walkForBindings(
+  v: unknown,
+  field: string,
+  cb: (field: string, from: string, path?: string) => void,
+): void {
+  if (isArgBinding(v)) {
+    // A binding is a leaf — don't recurse into its own from/path strings.
+    cb(field, v.from.trim(), typeof v.path === "string" ? v.path : undefined);
+    return;
+  }
+  if (Array.isArray(v)) {
+    v.forEach((x, i) => walkForBindings(x, `${field}[${i}]`, cb));
+    return;
+  }
+  if (v && typeof v === "object") {
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      walkForBindings(val, field ? `${field}.${k}` : k, cb);
+    }
+  }
 }
 
 function walkForTokens(

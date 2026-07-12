@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { GraphDef } from "../src/types";
 import {
+  collectUnresolved,
+  lintBindings,
   lintTemplates,
   resolveTemplateString,
   resolveTemplates,
@@ -126,7 +128,11 @@ describe("lintTemplates", () => {
     ]);
     const w = lintTemplates(graph);
     expect(w).toHaveLength(1);
-    expect(w[0]).toMatchObject({ nodeId: "http", field: "url", ref: "aget.output.id" });
+    expect(w[0]).toMatchObject({
+      nodeId: "http",
+      field: "url",
+      ref: "aget.output.id",
+    });
     expect(w[0].message).toContain("aget");
   });
 
@@ -148,5 +154,153 @@ describe("lintTemplates", () => {
       { id: "n", type: "set", config: { fields: { t: "\\{{ nope }}" } } },
     ]);
     expect(lintTemplates(graph)).toEqual([]);
+  });
+
+  it("does NOT flag `{{ __input.x }}` — a reserved runtime source, not a node", () => {
+    const graph = g([
+      { id: "start", type: "start" },
+      {
+        id: "http",
+        type: "httpRequest",
+        config: { url: "https://x/{{ __input.id }}", method: "GET" },
+      },
+    ]);
+    expect(lintTemplates(graph)).toEqual([]);
+  });
+});
+
+describe("lintBindings", () => {
+  const g = (nodes: GraphDef["nodes"]): GraphDef => ({
+    startNodeId: "trigger",
+    nodes,
+    edges: [],
+  });
+
+  it("names the missing source of an integration fieldBinding whose `from` isn't a node", () => {
+    const graph = g([
+      { id: "trigger", type: "webhookTrigger" },
+      { id: "review", type: "agent" },
+      {
+        id: "comment",
+        type: "integration",
+        config: {
+          provider: "github",
+          action: "comment_issue",
+          fieldBindings: {
+            owner: { from: "trigger", path: "repository.owner.login" }, // valid
+            body: { from: "reviewer", path: "output.review" }, // typo: no "reviewer" node
+          },
+        },
+      },
+    ]);
+    const w = lintBindings(graph);
+    expect(w).toHaveLength(1);
+    expect(w[0]).toMatchObject({
+      nodeId: "comment",
+      field: "fieldBindings.body",
+      ref: "reviewer.output.review",
+    });
+    expect(w[0].message).toContain('"reviewer"');
+  });
+
+  it("no warnings when every binding source is a real node", () => {
+    const graph = g([
+      { id: "trigger", type: "webhookTrigger" },
+      {
+        id: "lookup",
+        type: "sqlQuery",
+        config: {
+          connectionId: "db",
+          sql: "SELECT 1 WHERE id = $1",
+          paramBindings: { 1: { from: "trigger", path: "userId" } },
+        },
+      },
+    ]);
+    expect(lintBindings(graph)).toEqual([]);
+  });
+
+  it("does NOT flag a plain string field named `from` (e.g. an email sender)", () => {
+    const graph = g([
+      { id: "trigger", type: "webhookTrigger" },
+      {
+        id: "mail",
+        type: "sendEmail",
+        // `from` here is a literal address string, NOT a {from,path} binding.
+        config: { from: "noreply@acme.com", to: "u@acme.com", subject: "hi" },
+      },
+    ]);
+    expect(lintBindings(graph)).toEqual([]);
+  });
+
+  it('does NOT flag `from: "__input"` — a reserved runtime source, not a node (splitOut)', () => {
+    const graph = g([
+      { id: "trigger", type: "webhookTrigger" },
+      {
+        id: "sp",
+        type: "splitOut",
+        // Reads the trigger input directly — __input is provided by the run context.
+        config: { from: "__input", path: "items" },
+      },
+    ]);
+    expect(lintBindings(graph)).toEqual([]);
+  });
+});
+
+describe("collectUnresolved (runtime: which source produced no output)", () => {
+  const ids = new Set(["trigger", "diff", "review", "comment"]);
+
+  it("flags a binding whose source ran but produced no output (sourceExists=true)", () => {
+    const node = {
+      id: "comment",
+      config: {
+        fieldBindings: {
+          owner: { from: "trigger", path: "repo.owner" }, // resolves
+          body: { from: "review", path: "output.review" }, // review has no output.review
+        },
+      },
+    };
+    // `review` exists in ctx but its output is empty — the source ran, yielded nothing.
+    const ctx = {
+      trigger: { repo: { owner: "octocat" } },
+      review: { output: {} },
+    };
+    const out = collectUnresolved(node, ctx, ids);
+    expect(out).toEqual([
+      {
+        nodeId: "comment",
+        field: "fieldBindings.body",
+        from: "review",
+        ref: "review.output.review",
+        sourceExists: true,
+      },
+    ]);
+  });
+
+  it("flags a `{{ }}` token whose source isn't a node (sourceExists=false)", () => {
+    const node = {
+      id: "review",
+      config: { systemPrompt: "Review this:\n{{ dif.body }}" }, // typo: "dif"
+    };
+    const out = collectUnresolved(node, { diff: { body: "x" } }, ids);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      nodeId: "review",
+      field: "systemPrompt",
+      from: "dif",
+      sourceExists: false,
+    });
+  });
+
+  it("reports nothing when every reference resolves (even to empty string / null)", () => {
+    const node = {
+      id: "comment",
+      config: {
+        title: "{{ diff.body }}",
+        fieldBindings: { body: { from: "review", path: "output.review" } },
+      },
+    };
+    // Present-but-empty values are NOT missing — only strictly-undefined sources are flagged.
+    const ctx = { diff: { body: "" }, review: { output: { review: null } } };
+    expect(collectUnresolved(node, ctx, ids)).toEqual([]);
   });
 });

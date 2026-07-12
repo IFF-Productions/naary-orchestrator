@@ -20,6 +20,7 @@ import {
   getByPath,
   evaluateCondition,
   resolveTemplates,
+  collectUnresolved,
   nextNodes,
   resolveAggregate,
   resolveCompareDatasets,
@@ -51,6 +52,7 @@ import {
   type ItemsRegion,
   type TraceCell,
   type RegionTrace,
+  type UnresolvedRef,
 } from "@naary/dsl";
 import type { GraphDef, NodeDef, NodeRetryPolicy } from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
@@ -385,6 +387,9 @@ export async function runGraph(
   // runs it. Only nodes of type "merge" participate, so other multi-inbound nodes
   // (e.g. loop back-edges) keep their existing behavior.
   const nodeById = new Map<string, NodeDef>(graph.nodes.map((n) => [n.id, n]));
+  // Graph node-id set — lets the unresolved-input diagnostic tell "source ran but was empty"
+  // (a real node) from "source doesn't exist" (a typo/deleted node). Pure + precomputed once.
+  const nodeIdSet = new Set(nodeById.keys());
 
   // Items model (design ITEMS-MODEL-CURRENT-ITEM.md): precompute the splitOut→region map. Pure +
   // deterministic (same source of truth the save-gate validates), so computing it never affects
@@ -465,6 +470,21 @@ export async function runGraph(
       (node.config ?? {}) as Record<string, unknown>,
       ctx,
     );
+    // Diagnose inputs (tokens + bindings) whose SOURCE produced no output — so an empty/failed
+    // node names WHICH source was missing on the run detail. Pure + deterministic (getByPath over
+    // ctx), issues NO Temporal command → replay-safe by construction, like __regionTrace (needs no
+    // patched()). Keyed by node id so a re-run in a loop overwrites rather than piling up.
+    const missing = collectUnresolved(node, ctx, nodeIdSet);
+    if (missing.length > 0) {
+      const diag = (ctx.__unresolved ??= {}) as Record<string, UnresolvedRef[]>;
+      diag[node.id] = missing;
+    } else if (ctx.__unresolved && typeof ctx.__unresolved === "object") {
+      // A prior pass (loop re-run) may have flagged this node — clear it, and drop the
+      // whole key when nothing remains so a fully-resolved run's ctx is byte-identical.
+      const diag = ctx.__unresolved as Record<string, UnresolvedRef[]>;
+      delete diag[node.id];
+      if (Object.keys(diag).length === 0) delete ctx.__unresolved;
+    }
     switch (node.type) {
       case "start":
       case "end":
