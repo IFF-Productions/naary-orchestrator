@@ -1,6 +1,11 @@
 import "./env"; // MUST be first — loads .env before @naary/* modules evaluate
 import { initMetrics } from "@naary/metrics";
-import { captureError, flushSentry, initSentry } from "@naary/observability";
+import {
+  captureError,
+  flushSentry,
+  initSentry,
+  traceActivities,
+} from "@naary/observability";
 
 // Init Sentry before the worker boots. No-op unless SENTRY_DSN is set; events are
 // scrubbed of secrets. (Capture is I/O — it lives here + in activities, NEVER in
@@ -81,7 +86,11 @@ async function run(): Promise<void> {
       namespace,
       taskQueue: TASK_QUEUE,
       workflowsPath: require.resolve("./temporal/workflows"),
-      activities,
+      // Wrap each activity so its execution is a span (activity.<name>). Preserves the
+      // object keys, so Temporal's dispatch-by-name is unchanged. Each activity span is a
+      // ROOT span (its own trace) — trace context can't cross the Temporal boundary without
+      // putting non-deterministic data through workflow code; correlate via tenantId/executionId.
+      activities: traceActivities(activities),
     });
     log.info({ taskQueue: TASK_QUEUE, address, namespace }, "worker polling");
     await worker.run();

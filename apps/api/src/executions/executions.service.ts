@@ -31,6 +31,7 @@ import {
 } from "@naary/contracts";
 import type { GraphDef, NodeDef } from "@naary/dsl";
 import { getPrisma } from "@naary/db";
+import { TracedClass } from "@naary/observability";
 import { getBudget } from "@naary/usage";
 import { executionsStarted } from "../common/metrics";
 import { type GraphSnapshot, GraphsService } from "../graphs/graphs.service";
@@ -236,6 +237,7 @@ function startSampleInput(
  * workflowId is never enough to act on a run.
  */
 @Injectable()
+@TracedClass()
 export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   private client!: Client;
   private connection!: Connection;

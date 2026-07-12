@@ -67,4 +67,32 @@ describe("scrubEvent", () => {
     expect(JSON.stringify(out)).not.toContain("LEAKED");
     expect((out.tags as { tenantId: string }).tenantId).toBe("t-1");
   });
+
+  it("scrubs a PERFORMANCE transaction event (beforeSendTransaction path)", () => {
+    // Auto-instrumentation (http/prisma) writes URLs + SQL onto span attributes — this is
+    // the shape that ships via beforeSendTransaction, which must be scrubbed like an error.
+    const txn = {
+      type: "transaction",
+      transaction: "POST /executions/:id/approve",
+      spans: [
+        {
+          description: "GET /hooks/resume/run-1?token=nry_leakedresumetoken123",
+          data: {
+            "http.url":
+              "https://x/hooks/resume/run-1?token=nry_leakedresumetoken123",
+            "db.statement": "SELECT * FROM users",
+          },
+        },
+      ],
+      contexts: { trace: { trace_id: "abc" } },
+    };
+    const out = scrubEvent(txn as Record<string, unknown>);
+    const s = JSON.stringify(out);
+    expect(s).not.toContain("nry_leakedresumetoken123");
+    // Non-secret trace + SQL structure survive (only the secret substring is redacted).
+    expect(
+      (out.contexts as { trace: { trace_id: string } }).trace.trace_id,
+    ).toBe("abc");
+    expect(s).toContain("SELECT");
+  });
 });
