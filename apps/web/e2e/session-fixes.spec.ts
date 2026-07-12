@@ -63,15 +63,22 @@ test("workflow detail: a saved GitHub integration node reads 'GitHub'", async ({
   await expect(page.getByText("Notion")).toHaveCount(0);
 });
 
-test("canvas: an integration node with no connection shows a missing-resource warning", async ({
+test("canvas: an integration node with no connection shows an issue warning", async ({
   page,
 }) => {
   await page.goto("/app/canvas");
   await expect(page.getByText("ADD NODE")).toBeVisible();
 
-  // A freshly placed GitHub tile has an empty connectionId → the canvas lint flags it.
+  // A freshly placed GitHub tile has no connection → the canvas flags an issue. Since PR #242
+  // the two warning pills were merged into ONE clickable "⚠ N issues" pill whose details live
+  // in a collapsible panel — so assert the pill, then expand it to see the specific reason.
   await page.getByRole("button", { name: "GitHub", exact: true }).click();
-  await expect(page.getByText(/missing resource/i)).toBeVisible();
+  const issuesPill = page.getByRole("button", { name: /\d+ issue/i });
+  await expect(issuesPill).toBeVisible();
+  await issuesPill.click();
+  await expect(
+    page.getByText(/needs a connection|which doesn't exist/i).first(),
+  ).toBeVisible();
 });
 
 test("run detail: the 'Run input' panel shows the payload that started the run", async ({
