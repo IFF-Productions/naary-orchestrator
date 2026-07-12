@@ -76,10 +76,10 @@ today's flow assumes **Dynamic Client Registration + `.well-known` discovery** o
 4. **Atlassian 3LO wiring**: fixed-client authorize/token (reusing `exchangeCode`/`refreshGrant`
    with a **confidential** client — pass `client_secret` on the token call; today's DCR path is a
    public client with `token_endpoint_auth_method: "none"`).
-5. **Atlassian inbound webhook verification** — currently a fail-closed stub
-   (`webhook.service.ts:125-129`). Needs Atlassian's scheme (or Connect lifecycle) implemented.
-6. **Connection-save/"test" validation** — today a connection saves without any live check; an
+5. **Connection-save/"test" validation** — today a connection saves without any live check; an
    app grant should verify (list installations / call `/myself`) and set `status` accordingly.
+6. **(Optional) Atlassian inbound webhook verification** — currently a fail-closed stub
+   (`webhook.service.ts:125-129`). Needs Atlassian's scheme (or Connect lifecycle) implemented.
 
 ## 3. Provider specifics
 
