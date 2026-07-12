@@ -22,9 +22,17 @@ on:
   push:
     branches: [main]
 
+# The e2e stack is a SINGLETON on the runner host: fixed container names
+# (naary-postgres), fixed host ports (5432/7233/3000/8081), and one shared named
+# volume (naary-pgdata). Two e2e runs on the same host would collide — port binds
+# conflict, and each run's pre-`up` `down -v` would nuke the other's database
+# mid-run. So serialize e2e REPO-WIDE (not per-ref), and QUEUE rather than cancel
+# so an in-flight run finishes cleanly instead of being killed mid-stack by a newer
+# PR (which would also leave the shared stack half-torn-down). Correctness over
+# speed: e2e is a heavy singleton, so serial is the only safe schedule.
 concurrency:
-  group: e2e-${{ github.ref }}
-  cancel-in-progress: true
+  group: e2e-global
+  cancel-in-progress: false
 
 jobs:
   e2e:
