@@ -11,26 +11,26 @@ import {
   Res,
   UnauthorizedException,
 } from "@nestjs/common";
+import { createLogger } from "@naary/logging";
+import { Public } from "../auth/public.decorator";
 import { verifyResumeToken } from "../executions/resume-token";
+import { ExecutionsService } from "../executions/executions.service";
+import { GraphsService } from "../graphs/graphs.service";
+import { type WebhookProvider, WebhookService } from "./webhook.service";
 
 /** Minimal Express response surface we use (avoids a direct @types/express dep). */
 interface Res {
   status(code: number): unknown;
   set(headers: Record<string, string>): unknown;
 }
-import { createLogger } from "@naary/logging";
-import { Public } from "../auth/public.decorator";
-import { ExecutionsService } from "../executions/executions.service";
-import { GraphsService } from "../graphs/graphs.service";
-import { type WebhookProvider, WebhookService } from "./webhook.service";
-
-/** Structured logger for the webhook ingress. Scrubs secrets; never logs the body/headers. */
-const log = createLogger({ component: "api" });
 
 /** Express request augmented by NestFactory({ rawBody: true }). */
 interface RawReq {
   rawBody?: Buffer;
 }
+
+/** Structured logger for the webhook ingress. Scrubs secrets; never logs the body/headers. */
+const log = createLogger({ component: "api" });
 
 @Controller("hooks")
 export class HooksController {
