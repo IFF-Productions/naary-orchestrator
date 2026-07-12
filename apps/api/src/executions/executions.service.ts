@@ -33,6 +33,7 @@ import type { GraphDef, NodeDef } from "@naary/dsl";
 import { getPrisma } from "@naary/db";
 import { TracedClass } from "@naary/observability";
 import { getBudget } from "@naary/usage";
+import { assertWithinMonthlyBudget } from "../budget/budget-guard";
 import { executionsStarted } from "../common/metrics";
 import { type GraphSnapshot, GraphsService } from "../graphs/graphs.service";
 import { connectTemporal } from "../temporal/client";
@@ -393,6 +394,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     const sessionWorkflowId = `chatsession-${tenantId}-${workflowKey}-${safeSession}`;
     const turnId = randomUUID(); // minted here, never in workflow code (determinism)
     const budget = await getBudget(tenantId);
+    // Same fast-fail gate as startGraph — a chat turn is a run start too.
+    await assertWithinMonthlyBudget(tenantId, budget);
 
     await this.client.workflow.signalWithStart(CHAT_SESSION_WORKFLOW, {
       workflowId: sessionWorkflowId,
@@ -501,6 +504,10 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   ): Promise<{ workflowId: string }> {
     const workflowId = `${prefix}-${randomUUID()}`;
     const budget = await getBudget(tenantId);
+    // Fast-fail if the workspace is already over its monthly cap (covers start/webhook/form,
+    // which all funnel here). Optimization only — reserveBudget in the agent activity is the
+    // authoritative guard; this just avoids starting a run that would die at the first agent.
+    await assertWithinMonthlyBudget(tenantId, budget);
     // Bind the current error handler (if any) at start — the interpreter starts it
     // detached on failure. Read now (deterministic in-workflow needs it via args).
     const errorWorkflowKey = await this.graphs.getErrorHandler(

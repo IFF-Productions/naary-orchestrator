@@ -16,6 +16,20 @@ export async function monthToDateSpend(tenantId: string): Promise<number> {
   return Number(Number(agg._sum.costUsd ?? 0).toFixed(6));
 }
 
+/**
+ * Is the tenant AT or OVER its monthly cap right now? A fast-fail pre-check for the run-start
+ * gate — the authoritative per-call guard is still `reserveBudget` inside the agent activity.
+ * Returns false when no cap is configured (cap unset / <= 0 ⇒ never gated). Reuses
+ * monthToDateSpend, the same source the budget dashboard view reads, so they can't drift.
+ */
+export async function isOverMonthlyBudget(
+  tenantId: string,
+  monthlyCapUsd?: number | null,
+): Promise<boolean> {
+  if (monthlyCapUsd == null || monthlyCapUsd <= 0) return false;
+  return (await monthToDateSpend(tenantId)) >= monthlyCapUsd;
+}
+
 /** Matches runAgent's maxOutputTokens — the worst-case output we'd pay for. */
 export const DEFAULT_MAX_OUTPUT_TOKENS = 1024;
 

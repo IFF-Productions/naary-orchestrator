@@ -5,7 +5,11 @@ vi.mock("@naary/db", () => ({
   getPrisma: () => ({ usageEvent: { aggregate } }),
 }));
 
-import { estimateCallCost, monthToDateSpend } from "../src/spend";
+import {
+  estimateCallCost,
+  isOverMonthlyBudget,
+  monthToDateSpend,
+} from "../src/spend";
 
 beforeEach(() => aggregate.mockReset());
 
@@ -24,6 +28,22 @@ describe("monthToDateSpend", () => {
   it("is 0 for a tenant with no usage (null sum)", async () => {
     aggregate.mockResolvedValue({ _sum: { costUsd: null } });
     expect(await monthToDateSpend("t1")).toBe(0);
+  });
+});
+
+describe("isOverMonthlyBudget", () => {
+  it("is true only when month-to-date spend meets/exceeds the cap", async () => {
+    aggregate.mockResolvedValue({ _sum: { costUsd: "10.00" } });
+    expect(await isOverMonthlyBudget("t1", 10)).toBe(true); // at the cap
+    expect(await isOverMonthlyBudget("t1", 10.01)).toBe(false); // just under
+    expect(await isOverMonthlyBudget("t1", 5)).toBe(true); // over
+  });
+
+  it("is false (never gated) when no cap is configured", async () => {
+    expect(await isOverMonthlyBudget("t1", undefined)).toBe(false);
+    expect(await isOverMonthlyBudget("t1", null)).toBe(false);
+    expect(await isOverMonthlyBudget("t1", 0)).toBe(false);
+    expect(aggregate).not.toHaveBeenCalled(); // short-circuits before the DB read
   });
 });
 
