@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
 import { canonicalize, type GraphDef, validateGraph } from "@naary/dsl";
+import { TracedClass } from "@naary/observability";
 // Runtime config validation is imported from the registry module DIRECTLY (not via the package
 // index) so it never rides the worker's `@naary/dsl` import surface — that's what keeps zod out of
 // the deterministic workflow bundle (Tier-1 rule 2). Deep `dist/` path because the repo uses
@@ -37,6 +38,7 @@ export interface GraphSummary {
  * edit can't corrupt an in-flight run.
  */
 @Injectable()
+@TracedClass()
 export class GraphsService {
   async upsert(
     tenantId: string,

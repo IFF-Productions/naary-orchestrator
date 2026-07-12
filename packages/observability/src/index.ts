@@ -11,6 +11,14 @@ import * as Sentry from "@sentry/node";
 import { scrubEvent } from "./scrub";
 
 export { redactString, deepScrub, scrubEvent } from "./scrub";
+export {
+  withSpan,
+  Traced,
+  TracedClass,
+  traceActivities,
+  type SpanAttrs,
+  type SpanOptions,
+} from "./spans";
 
 let enabled = false;
 
@@ -23,11 +31,23 @@ export function initSentry(opts: { component: "api" | "worker" }): void {
     release: process.env.SENTRY_RELEASE,
     // Opt-in performance tracing; 0 (off) unless explicitly configured.
     tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? "0"),
+    // Auto-instrument Prisma so every DB query is a child span in the trace waterfall.
+    // Works out of the box on Prisma v6/v7 (vendored OTel instrumentation, no schema
+    // change). Merged WITH the SDK defaults (httpIntegration etc. are preserved). Relies
+    // on initSentry() running before @naary/db/@prisma/client is required — main.ts and
+    // worker.ts call it before the app/activity imports (CommonJS preserves require order).
+    integrations: [Sentry.prismaIntegration()],
     // Never attach IPs / cookies / user PII automatically.
     sendDefaultPii: false,
     initialScope: { tags: { component: opts.component } },
-    // Security-critical: scrub every outgoing event (and breadcrumbs).
+    // Security-critical: scrub every outgoing event (and breadcrumbs). Error events fire
+    // beforeSend; PERFORMANCE transactions fire beforeSendTransaction — a SEPARATE hook,
+    // so it must be scrubbed too or auto-instrumented span attributes (request URLs incl.
+    // signed resume-token links, SQL text) would ship unscrubbed. scrubEvent/deepScrub is
+    // shape-agnostic, so it cleans the transaction's spans[].data / description as well.
     beforeSend: (event) =>
+      scrubEvent(event as unknown as Record<string, unknown>) as never,
+    beforeSendTransaction: (event) =>
       scrubEvent(event as unknown as Record<string, unknown>) as never,
     beforeBreadcrumb: (crumb) =>
       scrubEvent(crumb as unknown as Record<string, unknown>) as never,
