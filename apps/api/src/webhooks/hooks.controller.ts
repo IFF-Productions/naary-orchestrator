@@ -18,10 +18,14 @@ interface Res {
   status(code: number): unknown;
   set(headers: Record<string, string>): unknown;
 }
+import { createLogger } from "@naary/logging";
 import { Public } from "../auth/public.decorator";
 import { ExecutionsService } from "../executions/executions.service";
 import { GraphsService } from "../graphs/graphs.service";
 import { type WebhookProvider, WebhookService } from "./webhook.service";
+
+/** Structured logger for the webhook ingress. Scrubs secrets; never logs the body/headers. */
+const log = createLogger({ component: "api" });
 
 /** Express request augmented by NestFactory({ rawBody: true }). */
 interface RawReq {
@@ -71,15 +75,28 @@ export class HooksController {
     @Headers() headers: Record<string, string>,
     @Res({ passthrough: true }) res: Res,
   ): Promise<unknown> {
+    // One structured line per ingress with LATENCY (durationMs) — makes a slow/timing-out
+    // webhook visible without guessing. Never logs the body/headers/secret (ids only).
+    const startedAt = Date.now();
+    const ms = () => Date.now() - startedAt;
+
     // Audit S-4: reject unsigned requests BEFORE the DB read + AES-decrypt, so a
     // caller who only knows an endpoint id can't force per-request DB/crypto work.
     // The signature header is the same for every provider (X-Hub-Signature-256).
     if (!headers["x-hub-signature-256"]) {
+      log.warn(
+        { endpointId, durationMs: ms() },
+        "webhook rejected: no signature",
+      );
       throw new UnauthorizedException("Missing signature");
     }
 
     const endpoint = await this.webhooks.getEndpoint(endpointId);
     if (!endpoint) {
+      log.warn(
+        { endpointId, durationMs: ms() },
+        "webhook rejected: unknown endpoint",
+      );
       throw new NotFoundException("Unknown webhook endpoint");
     }
     const provider = endpoint.provider as WebhookProvider;
@@ -95,6 +112,10 @@ export class HooksController {
         this.webhooks.decryptSigningSecret(endpoint), // decrypt at-rest secret
       )
     ) {
+      log.warn(
+        { endpointId, provider, tenantId: endpoint.tenantId, durationMs: ms() },
+        "webhook rejected: invalid signature",
+      );
       throw new UnauthorizedException("Invalid signature");
     }
 
@@ -104,6 +125,10 @@ export class HooksController {
       deliveryId &&
       (await this.webhooks.isDuplicateDelivery(endpointId, deliveryId))
     ) {
+      log.info(
+        { endpointId, provider, deliveryId, durationMs: ms() },
+        "webhook duplicate ignored",
+      );
       return { status: "duplicate_ignored" }; // 2xx so the provider stops retrying
     }
 
@@ -115,10 +140,28 @@ export class HooksController {
       endpoint.workflowId,
     );
     if (!snapshot) {
+      log.warn(
+        {
+          endpointId,
+          provider,
+          tenantId: endpoint.tenantId,
+          workflowKey: endpoint.workflowId,
+          durationMs: ms(),
+        },
+        "webhook rejected: no graph for workflowKey",
+      );
       throw new NotFoundException(
         `No graph seeded for workflowKey '${endpoint.workflowId}'`,
       );
     }
+
+    const base = {
+      endpointId,
+      provider,
+      deliveryId,
+      tenantId: endpoint.tenantId,
+      workflowKey: endpoint.workflowId,
+    };
 
     // If the graph has a respondToWebhook node, wait (bounded) for its response and
     // return it synchronously; otherwise stay fire-and-forget (202, unchanged).
@@ -133,6 +176,16 @@ export class HooksController {
           event,
           endpoint.workflowId,
         );
+      log.info(
+        {
+          ...base,
+          workflowId,
+          mode: "sync",
+          responded: !!response,
+          durationMs: ms(),
+        },
+        "webhook started (await-response)",
+      );
       if (response) {
         res.status(response.statusCode);
         if (response.headers) res.set(response.headers);
@@ -147,6 +200,10 @@ export class HooksController {
       snapshot,
       event,
       endpoint.workflowId, // the registry workflowKey this endpoint triggers
+    );
+    log.info(
+      { ...base, workflowId, mode: "async", durationMs: ms() },
+      "webhook started",
     );
     return { status: "started", workflowId };
   }

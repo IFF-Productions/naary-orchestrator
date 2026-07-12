@@ -2520,7 +2520,11 @@ export async function callIntegration(
         tenantId: meta.tenantId,
         provider: cfg.provider,
         action: cfg.action,
+        method: req.method,
+        path: req.path,
         httpStatus: res.status,
+        ok: res.ok,
+        durationMs: Math.round(secondsSince(startedAt) * 1000),
       },
       "integration call completed",
     );
@@ -2532,6 +2536,23 @@ export async function callIntegration(
     return { status: "ok", httpStatus: res.status, ok: res.ok, body };
   } catch (e) {
     activityRuns.inc({ activity: "callIntegration", outcome: "error" });
+    // Log the failure with call context (the logger scrubs; no secrets/bodies) so an
+    // integration error — the 404/403 write-fail, a transient network error — is visible.
+    log.warn(
+      {
+        activity: "callIntegration",
+        executionId: meta.executionId,
+        nodeId: meta.nodeId,
+        tenantId: meta.tenantId,
+        provider: cfg.provider,
+        action: cfg.action,
+        method: req.method,
+        path: req.path,
+        durationMs: Math.round(secondsSince(startedAt) * 1000),
+        err: e instanceof Error ? e.message : String(e),
+      },
+      "integration call failed",
+    );
     // Our own typed failures (e.g. INTEGRATION_WRITE_FAILED) are already sanitized +
     // carry the right retryability — rethrow as-is, never re-wrap them as retryable.
     if (e instanceof ApplicationFailure) throw e;
