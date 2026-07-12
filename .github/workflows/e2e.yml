@@ -43,6 +43,12 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted]
     timeout-minutes: 30
+    # Windows runner: the platform default step shell is PowerShell, which can't run the bash
+    # `run:` scripts (heredocs, `set -e`). Force bash for every step; the
+    # ensure-git-bash-on-path composite action (below) makes that bash Git Bash, not WSL.
+    defaults:
+      run:
+        shell: bash
     env:
       # Test-only stack credentials (NOT real secrets). Shared by the compose stack
       # (via the .env written below) and the host-side token mint.
@@ -53,6 +59,10 @@ jobs:
       E2E_TENANT: t-demo
     steps:
       - uses: actions/checkout@v4
+
+      # On a self-hosted Windows runner, make `shell: bash` resolve to Git Bash (not the
+      # System32 WSL launcher). Shared composite action — keep the logic in ONE place.
+      - uses: ./.github/actions/ensure-git-bash-on-path
 
       # Resolve the Compose command once, and self-heal the common self-hosted-Mac case.
       #
@@ -109,13 +119,11 @@ jobs:
             echo "Docker daemon reachable as user '$(whoami)'."
             exit 0
           fi
+          echo "Runner account: $(whoami)" >&2
           cat >&2 <<'MSG'
-          ::error::Cannot reach the Docker daemon as this runner user. macOS Docker Desktop is PER-USER: its socket is owned by the user who installed it, so another user is denied. Fix one of:
-            1) Run the GitHub Actions runner as the user who owns Docker Desktop; or
-            2) Give the runner user its OWN daemon with Colima (recommended for a headless/secondary user):
-                 brew install colima docker docker-compose
-                 colima start        # creates a docker socket owned by this user
-               then re-run. (Keep Colima running, e.g. `brew services` or a login item.)
+          ::error::Cannot reach the Docker daemon as the runner account. Docker Desktop is PER-USER and its engine endpoint is access-restricted, so a runner on a different (or service) account is denied even though Docker is installed. Fix one of:
+            WINDOWS (runner service accounts, e.g. NetworkService — see 'Runner account' above): Docker Desktop exposes the docker_engine named pipe to the local 'docker-users' group and runs per-user. Either (a) run the GitHub Actions runner SERVICE as the user who owns Docker Desktop and keep Docker Desktop running for that user (start it at login); or (b) add the runner account to the local 'docker-users' group AND run the engine in a context it can reach (Docker Desktop running, or Docker Engine as a service / WSL2 backend). Then restart the runner.
+            macOS: run the runner as the Docker-Desktop owner, or give the runner user its own daemon (colima start).
           MSG
           exit 1
 

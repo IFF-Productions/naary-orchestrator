@@ -27,8 +27,18 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted]
     timeout-minutes: 20
+    # Windows runner: the platform default step shell is PowerShell, which can't run the
+    # bash `run:` scripts (heredocs, `set -e`). Force bash for every step; the
+    # ensure-git-bash-on-path composite action (below) makes that bash Git Bash, not WSL.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
+
+      # On a self-hosted Windows runner, make `shell: bash` resolve to Git Bash (not the
+      # System32 WSL launcher). Shared composite action — keep the logic in ONE place.
+      - uses: ./.github/actions/ensure-git-bash-on-path
 
       - uses: pnpm/action-setup@v4
         with:
