@@ -74,7 +74,7 @@ jobs:
               if (Test-Path (Join-Path $p 'bash.exe')) { $bin = $p; break }
             }
           }
-          if (-not $bin) { throw "Git Bash (bash.exe) not found — install Git for Windows or add its bin to the runner PATH." }
+          if (-not $bin) { throw "Git Bash (bash.exe) not found. Install Git for Windows or add its bin dir to the runner PATH." }
           Add-Content -Path $env:GITHUB_PATH -Value $bin
           Write-Host "Git Bash on PATH: $bin"
 
