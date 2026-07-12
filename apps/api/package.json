@@ -16,6 +16,7 @@
     "@naary/connections": "workspace:*",
     "@naary/contracts": "workspace:*",
     "@naary/db": "workspace:*",
+    "@naary/flags": "workspace:*",
     "@naary/dsl": "workspace:*",
     "@naary/secrets": "workspace:*",
     "zod": "^4.4.3",
