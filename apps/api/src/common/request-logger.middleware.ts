@@ -40,7 +40,9 @@ export class RequestLoggerMiddleware implements NestMiddleware {
       const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
       const method = req.method ?? "UNKNOWN";
       const status = String(res.statusCode);
-      const path = req.originalUrl ?? req.url ?? "";
+      // Log the PATHNAME only — strip any query string. A `?token=...`/`?code=...` would
+      // both leak a secret into logs and inflate log cardinality/length.
+      const path = (req.originalUrl ?? req.url ?? "").split("?")[0];
       const durationMs = Math.round(elapsedMs * 100) / 100;
       // Low-cardinality labels only (method + status) — never the path (ids).
       httpRequests.inc({ method, status });
@@ -48,7 +50,7 @@ export class RequestLoggerMiddleware implements NestMiddleware {
       this.logger.info(
         {
           requestId,
-          method: req.method,
+          method, // the computed value (req.method is optional; avoid logging undefined)
           path,
           statusCode: res.statusCode,
           durationMs,
