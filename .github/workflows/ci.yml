@@ -30,6 +30,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Self-hosted Windows: `shell: bash` resolves `bash` from PATH, but Git for Windows only
+      # adds its `cmd` dir (git.exe) to PATH — NOT `bin` (bash.exe). So `bash` falls back to
+      # C:\Windows\System32\bash.exe = the WSL launcher ("no installed distributions"). Derive
+      # Git's bin from git's own location (or common install dirs) and prepend it so every later
+      # `shell: bash` step finds Git Bash. Runs via PowerShell so it isn't subject to the bug.
+      - name: Put Git Bash on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $bin = $null
+          $git = Get-Command git -ErrorAction SilentlyContinue
+          if ($git) {
+            $cand = Join-Path (Split-Path (Split-Path $git.Source)) 'bin'
+            if (Test-Path (Join-Path $cand 'bash.exe')) { $bin = $cand }
+          }
+          if (-not $bin) {
+            foreach ($p in @("$env:ProgramFiles\Git\bin", "${env:ProgramFiles(x86)}\Git\bin", "$env:LOCALAPPDATA\Programs\Git\bin")) {
+              if (Test-Path (Join-Path $p 'bash.exe')) { $bin = $p; break }
+            }
+          }
+          if (-not $bin) { throw "Git Bash (bash.exe) not found — install Git for Windows or add its bin to the runner PATH." }
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+          Write-Host "Git Bash on PATH: $bin"
+
       - uses: pnpm/action-setup@v4
         with:
           version: 11.9.0
