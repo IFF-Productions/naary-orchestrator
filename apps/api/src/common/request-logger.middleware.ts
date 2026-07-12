@@ -40,19 +40,25 @@ export class RequestLoggerMiddleware implements NestMiddleware {
       const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
       const method = req.method ?? "UNKNOWN";
       const status = String(res.statusCode);
+      // Log the PATHNAME only — strip any query string. A `?token=...`/`?code=...` would
+      // both leak a secret into logs and inflate log cardinality/length.
+      const path = (req.originalUrl ?? req.url ?? "").split("?")[0];
+      const durationMs = Math.round(elapsedMs * 100) / 100;
       // Low-cardinality labels only (method + status) — never the path (ids).
       httpRequests.inc({ method, status });
       httpDuration.observe({ method, status }, elapsedMs / 1000);
       this.logger.info(
         {
           requestId,
-          method: req.method,
-          path: req.originalUrl ?? req.url,
+          method, // the computed value (req.method is optional; avoid logging undefined)
+          path,
           statusCode: res.statusCode,
-          durationMs: Math.round(elapsedMs * 100) / 100,
+          durationMs,
           tenantId: req.principal?.tenantId,
         },
-        "request",
+        // A descriptive message (not a bare "request") so it reads meaningfully in a log
+        // search / Sentry Logs, e.g. "POST /hooks/abc -> 202 (15.3ms)". Fields stay for filtering.
+        `${method} ${path} -> ${status} (${durationMs}ms)`,
       );
     });
 
