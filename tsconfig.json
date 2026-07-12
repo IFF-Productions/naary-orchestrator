@@ -12,6 +12,7 @@
     { "path": "./packages/observability" },
     { "path": "./packages/logging" },
     { "path": "./packages/temporal-config" },
-    { "path": "./packages/metrics" }
+    { "path": "./packages/metrics" },
+    { "path": "./packages/flags" }
   ]
 }
