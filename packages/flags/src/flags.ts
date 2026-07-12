@@ -113,7 +113,7 @@ export function flag(
  */
 export async function getAllFlags(
   tenantId: string,
-): Promise<Record<string, boolean>> {
+): Promise<Record<FlagKey, boolean>> {
   const client = OpenFeature.getClient();
   const ctx = ctxFor(tenantId);
   const entries = await Promise.all(
@@ -125,5 +125,6 @@ export async function getAllFlags(
         ] as const,
     ),
   );
-  return Object.fromEntries(entries);
+  // Keys come from the catalog, so the map is exactly the known FlagKey set.
+  return Object.fromEntries(entries) as Record<FlagKey, boolean>;
 }

@@ -61,8 +61,9 @@ describe("configured provider (InMemory stands in for Flagsmith)", () => {
       }) as never,
     );
     expect(initFlags()).toBe(true);
-    // setProvider is non-awaited; wait for the provider to be ready before asserting.
-    await new Promise((r) => setTimeout(r, 10));
+    // setProvider is non-awaited; poll until the provider warms up (deterministic, not a
+    // fixed sleep that could flake on slow CI) — it resolves the configured value once ready.
+    await expect.poll(() => flag("chat-rag", false, "tenant-1")).toBe(true);
 
     await expect(flag("chat-rag", false, "tenant-1")).resolves.toBe(true);
     const all = await getAllFlags("tenant-1");

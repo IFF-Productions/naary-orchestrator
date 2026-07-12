@@ -39,7 +39,7 @@ export class MeController {
   @UserScoped()
   async flags(
     @CurrentPrincipal() principal: Principal,
-  ): Promise<{ flags: Record<string, boolean> }> {
+  ): Promise<MeFlagsResponse> {
     return { flags: await getAllFlags(principal.tenantId) };
   }
 }
