@@ -16,7 +16,7 @@
 import { FlagsmithOpenFeatureProvider } from "@openfeature/flagsmith-provider";
 import { type EvaluationContext, OpenFeature } from "@openfeature/server-sdk";
 import { Flagsmith } from "flagsmith-nodejs";
-import { ALL_FLAG_SPECS, FLAG_CATALOG, type FlagKey } from "./catalog";
+import { ALL_FLAG_SPECS, type FlagKey } from "./catalog";
 
 /** Platform-level Flagsmith config, from env. Null when flags aren't configured. */
 export interface FlagsConfig {
