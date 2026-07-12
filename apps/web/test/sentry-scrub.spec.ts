@@ -92,4 +92,18 @@ describe("redactSecrets (browser Sentry scrubber)", () => {
     expect(out.b).toBe(true);
     expect(out.z).toBe(null);
   });
+
+  it("does NOT throw on circular objects (console can capture them)", () => {
+    // consoleLoggingIntegration may capture circular/huge objects; the scrubber must not
+    // blow the stack (that would crash beforeSendLog). It marks the cycle and still scrubs.
+    const a: Record<string, unknown> = { token: "nry_leak12345", ok: "keep" };
+    a.self = a;
+    let out: Record<string, unknown> = {};
+    expect(() => {
+      out = redactSecrets(a) as Record<string, unknown>;
+    }).not.toThrow();
+    expect(out.token).toBe("[redacted]");
+    expect(out.ok).toBe("keep");
+    expect(out.self).toBe("[Circular]");
+  });
 });

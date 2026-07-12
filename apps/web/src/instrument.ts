@@ -21,6 +21,16 @@ import { redactSecrets } from "./lib/sentry-scrub";
 
 const dsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
 
+/** Scrub, but NEVER throw from a Sentry hook — a scrub failure must not break the app or
+ *  block telemetry. On failure DROP the payload (return null) rather than ship it unscrubbed. */
+function safeScrub<T>(value: T): T | null {
+  try {
+    return redactSecrets(value) as T;
+  } catch {
+    return null;
+  }
+}
+
 if (dsn) {
   Sentry.init({
     dsn,
@@ -53,9 +63,10 @@ if (dsn) {
     // Only propagate the trace header to our own API (avoid leaking it cross-origin).
     tracePropagationTargets: [/^\/(api)\//, /naar-y\.com/],
     // Security-critical: scrub secret-shaped data from every event + breadcrumb + log.
-    beforeSend: (event) => redactSecrets(event) as typeof event,
-    beforeSendLog: (log) => redactSecrets(log) as typeof log,
-    beforeBreadcrumb: (crumb) => redactSecrets(crumb) as typeof crumb,
+    // safeScrub never throws (console can capture circular/huge objects) — drops on failure.
+    beforeSend: (event) => safeScrub(event),
+    beforeSendLog: (log) => safeScrub(log),
+    beforeBreadcrumb: (crumb) => safeScrub(crumb),
   });
 }
 
