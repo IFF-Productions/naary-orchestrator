@@ -1,0 +1,51 @@
+name: Ensure Git Bash on PATH (Windows)
+description: >
+  On a self-hosted Windows runner, `shell: bash` resolves `bash` from PATH, but Git for
+  Windows only puts its `cmd` dir (git.exe) on PATH — not `bin` (bash.exe). Without this,
+  `bash` falls back to C:\Windows\System32\bash.exe (the WSL launcher, "no installed
+  distributions"). This finds Git's bin (system-wide / choco / scoop / portable, or via
+  `where bash`) and prepends it to PATH so later `shell: bash` steps use Git Bash. No-op on
+  non-Windows runners. Requires the repo to be checked out first (it's a local action).
+
+runs:
+  using: composite
+  steps:
+    - name: Put Git Bash on PATH (Windows)
+      if: runner.os == 'Windows'
+      shell: powershell
+      run: |
+        $bin = $null
+        $roots = @()
+        $git = Get-Command git -ErrorAction SilentlyContinue
+        if ($git -and $git.Source) { $roots += (Split-Path (Split-Path $git.Source)) }
+        $roots += @(
+          "$env:ProgramFiles\Git",
+          "${env:ProgramFiles(x86)}\Git",
+          "$env:LOCALAPPDATA\Programs\Git",
+          "C:\Git",
+          "$env:ProgramData\chocolatey\lib\git\tools\git",
+          "$env:USERPROFILE\scoop\apps\git\current"
+        )
+        foreach ($r in $roots) {
+          if ([string]::IsNullOrWhiteSpace($r)) { continue }  # skip blanks (e.g. unset ProgramFiles(x86))
+          foreach ($sub in @('bin', 'usr\bin')) {
+            $cand = Join-Path (Join-Path $r $sub) 'bash.exe'
+            if (Test-Path $cand) { $bin = (Split-Path $cand); break }
+          }
+          if ($bin) { break }
+        }
+        if (-not $bin) {
+          $w = (& where.exe bash 2>$null) | Where-Object { $_ -and ($_ -notmatch 'System32') }
+          if ($w) { $bin = Split-Path $w[0] }
+        }
+        if (-not $bin) {
+          Write-Host "PATH=$env:PATH"
+          Write-Host "where git:"; (& where.exe git 2>$null) | ForEach-Object { Write-Host "  $_" }
+          Write-Host "where bash:"; (& where.exe bash 2>$null) | ForEach-Object { Write-Host "  $_" }
+          throw "Git Bash (bash.exe) not found. Install Git for Windows or add its bin dir to the runner PATH."
+        }
+        # GITHUB_PATH must be UTF-8. Windows PowerShell 5.1's Add-Content/Out-File default
+        # encodings vary (ANSI / UTF-16 / UTF-8-with-BOM) and can corrupt the file command,
+        # so write UTF-8 WITHOUT a BOM via .NET to guarantee the runner reads it.
+        [System.IO.File]::AppendAllText($env:GITHUB_PATH, "$bin`r`n", (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "Git Bash on PATH: $bin"
