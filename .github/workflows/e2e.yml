@@ -126,6 +126,15 @@ jobs:
           ENCRYPTION_KEY=${ENCRYPTION_KEY}
           ENV
 
+      # Start from a CLEAN slate. A self-hosted runner PERSISTS named volumes between runs, and
+      # `naary-pgdata` is one — so a postgres data dir first-initialized on a PRIOR run keeps its
+      # OLD password (POSTGRES_PASSWORD is honored only on first init with an empty data dir). The
+      # result is "password authentication failed for user naary" at the host-side token mint,
+      # while `pg_isready` still reports the stack healthy (it never authenticates). Tearing the
+      # stack + its volumes down first forces postgres to re-init with THIS run's password.
+      - name: Tear down any prior stack + volumes
+        run: ${{ steps.compose.outputs.cmd }} down -v --remove-orphans || true
+
       - name: Build + start the stack
         run: ${{ steps.compose.outputs.cmd }} up -d --build
 
