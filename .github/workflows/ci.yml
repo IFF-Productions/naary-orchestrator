@@ -27,6 +27,12 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted]
     timeout-minutes: 20
+    # Windows runner: the platform default step shell is PowerShell, which can't run the
+    # bash `run:` scripts (heredocs, `set -e`). Force bash for every step; the "Put Git Bash
+    # on PATH" step below (explicit shell: powershell) ensures that bash IS Git Bash, not WSL.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
