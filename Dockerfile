@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Shared backend image for BOTH the NestJS API and the Temporal worker — they
 # run the same monorepo and differ only by the `command` set in docker-compose.
 #
@@ -33,7 +34,13 @@ COPY . .
 # `tsc -b` build is REQUIRED — ts-node does not transpile imported packages.
 # A throwaway DATABASE_URL satisfies prisma.config.ts at generate time (generate
 # never connects); it is build-only and not persisted into the image.
-RUN pnpm install --frozen-lockfile \
+# BuildKit cache mount for the pnpm store: `COPY . .` above invalidates this layer on
+# any source change, but the store (downloaded tarballs) persists across builds, so the
+# install re-links from cache instead of re-downloading ~800 packages. Build-only — the
+# store isn't in the final image, so runtime is byte-identical. Needs BuildKit (compose
+# v2 / Docker Desktop default; the `# syntax` directive enables the --mount frontend).
+RUN --mount=type=cache,target=/pnpm-store \
+  pnpm install --frozen-lockfile --store-dir /pnpm-store \
   && DATABASE_URL="postgresql://build:build@localhost:5432/build" \
      pnpm --filter @naary/db exec prisma generate \
   && pnpm exec tsc -b
