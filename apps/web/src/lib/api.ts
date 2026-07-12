@@ -263,6 +263,18 @@ export const api = {
       body: JSON.stringify({ approved, ...(comment ? { comment } : {}) }),
     });
   },
+  // Decide many paused runs at once (same decision). Returns a per-run outcome so the
+  // UI can show which ids slipped (already closed / no longer awaiting) without failing all.
+  approveBatch(
+    ids: string[],
+    approved: boolean,
+    comment?: string,
+  ): Promise<BatchDecisionResult[]> {
+    return http("/executions/approve-batch", {
+      method: "POST",
+      body: JSON.stringify({ ids, approved, ...(comment ? { comment } : {}) }),
+    });
+  },
   // Cancel a running run (terminates the workflow). 409 if already finished.
   cancelRun(id: string): Promise<{ accepted: true }> {
     return http(`/executions/${encodeURIComponent(id)}/cancel`, {
@@ -733,6 +745,13 @@ export interface AwaitingApproval {
   title: string;
   instructions: string | null;
   createdAt: string;
+}
+
+/** One run's outcome in a batch approve/reject — ok:false carries why it slipped. */
+export interface BatchDecisionResult {
+  workflowId: string;
+  ok: boolean;
+  error?: string;
 }
 
 export interface RunSummary {

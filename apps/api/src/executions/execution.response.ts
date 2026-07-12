@@ -37,6 +37,21 @@ export class AcceptedResponse {
   @ApiProperty({ example: true }) accepted!: boolean;
 }
 
+/** Per-run outcome of a batch approve/reject. `ok:false` runs were already closed or not
+ *  owned by the tenant; they don't fail the batch — the caller can show which ones slipped. */
+export class BatchDecisionItemResponse {
+  @ApiProperty({ example: "run-8f3a1c2e" }) workflowId!: string;
+  @ApiProperty({ example: true }) ok!: boolean;
+  @ApiProperty({
+    required: false,
+    nullable: true,
+    example:
+      "Execution is not awaiting approval (already completed, rejected, or failed).",
+    description: "Why this run wasn't decided (present only when ok is false).",
+  })
+  error?: string | null;
+}
+
 /** The resume-URL path for a run paused on a wait(webhook) node (host prepended client-side). */
 export class ResumeUrlResponse {
   @ApiProperty({

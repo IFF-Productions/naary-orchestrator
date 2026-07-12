@@ -29,13 +29,26 @@ export function Approvals() {
   const simple = mode === "simple";
   const [items, setItems] = useState<AwaitingApproval[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [comments, setComments] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  // Multi-select for batch decisions. `selected` holds workflowIds; `batchBusy` locks
+  // every control (single + batch) while a batch call is in flight.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchReason, setBatchReason] = useState("");
 
   async function load() {
     try {
-      setItems(await api.listAwaitingApprovals());
+      const next = await api.listAwaitingApprovals();
+      setItems(next);
       setError(null);
+      // Drop selections for runs that are no longer awaiting (decided elsewhere / timed out).
+      const live = new Set(next.map((x) => x.workflowId));
+      setSelected((s) => {
+        const kept = [...s].filter((id) => live.has(id));
+        return kept.length === s.size ? s : new Set(kept);
+      });
     } catch (e) {
       setError(
         e instanceof UnauthorizedError
@@ -52,8 +65,18 @@ export function Approvals() {
     return () => clearInterval(t);
   }, []);
 
+  function toggle(id: string) {
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   async function decide(item: AwaitingApproval, approved: boolean) {
     setBusy(item.workflowId);
+    setNotice(null);
     try {
       await api.approve(
         item.workflowId,
@@ -64,11 +87,50 @@ export function Approvals() {
       setItems((xs) =>
         (xs ?? []).filter((x) => x.workflowId !== item.workflowId),
       );
+      setSelected((s) => {
+        if (!s.has(item.workflowId)) return s;
+        const next = new Set(s);
+        next.delete(item.workflowId);
+        return next;
+      });
     } catch {
       // The run may have just been decided elsewhere or timed out — reload to reconcile.
       await load();
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function decideBatch(approved: boolean) {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    setBatchBusy(true);
+    setNotice(null);
+    try {
+      const results = await api.approveBatch(
+        ids,
+        approved,
+        batchReason.trim() || undefined,
+      );
+      const okIds = new Set(
+        results.filter((r) => r.ok).map((r) => r.workflowId),
+      );
+      // Drop the runs that were decided; KEEP any that slipped so the reviewer still sees them.
+      setItems((xs) => (xs ?? []).filter((x) => !okIds.has(x.workflowId)));
+      setSelected((s) => new Set([...s].filter((id) => !okIds.has(id))));
+      const failed = results.length - okIds.size;
+      if (failed > 0) {
+        setNotice(
+          `${okIds.size} ${approved ? "approved" : "rejected"}, ${failed} could not be decided (already decided, closed, or timed out) — refreshed.`,
+        );
+        await load();
+      } else {
+        setBatchReason("");
+      }
+    } catch {
+      await load();
+    } finally {
+      setBatchBusy(false);
     }
   }
 
@@ -119,6 +181,19 @@ export function Approvals() {
         </Card>
       )}
 
+      {notice && (
+        <Card>
+          <div
+            style={{
+              color: "var(--ink-2)",
+              fontSize: "var(--text-body)",
+            }}
+          >
+            {notice}
+          </div>
+        </Card>
+      )}
+
       {!error && items?.length === 0 && (
         <Card>
           <div
@@ -133,6 +208,80 @@ export function Approvals() {
         </Card>
       )}
 
+      {(items?.length ?? 0) > 0 &&
+        (() => {
+          const ids = items?.map((x) => x.workflowId) ?? [];
+          const allSelected =
+            ids.length > 0 && ids.every((id) => selected.has(id));
+          const count = selected.size;
+          return (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: 10,
+                padding: "10px 12px",
+                marginBottom: 12,
+                borderRadius: "var(--radius-sm)",
+                border: "1px solid var(--line)",
+                background: "var(--surface-2, var(--card))",
+              }}
+            >
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: "var(--text-body)",
+                  color: "var(--ink-2)",
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  disabled={batchBusy}
+                  onChange={(e) =>
+                    setSelected(e.target.checked ? new Set(ids) : new Set())
+                  }
+                />
+                {count > 0 ? `${count} selected` : "Select all"}
+              </label>
+              <input
+                value={batchReason}
+                onChange={(e) => setBatchReason(e.target.value)}
+                placeholder="Reason for the batch (optional)"
+                disabled={batchBusy || count === 0}
+                style={{
+                  flex: "1 1 200px",
+                  minWidth: 160,
+                  padding: "7px 10px",
+                  borderRadius: "var(--radius-sm)",
+                  border: "1px solid var(--line)",
+                  background: "var(--card)",
+                  color: "var(--ink)",
+                  fontSize: "var(--text-body)",
+                }}
+              />
+              <Button
+                variant="positive"
+                disabled={batchBusy || count === 0}
+                onClick={() => void decideBatch(true)}
+              >
+                Approve selected
+              </Button>
+              <Button
+                variant="danger"
+                disabled={batchBusy || count === 0}
+                onClick={() => void decideBatch(false)}
+              >
+                Reject selected
+              </Button>
+            </div>
+          );
+        })()}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {items?.map((it) => (
           <Card key={it.workflowId}>
@@ -144,15 +293,25 @@ export function Approvals() {
                   gap: 12,
                 }}
               >
-                <div
+                <label
                   style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
                     fontSize: "var(--text-lg)",
                     fontWeight: "var(--weight-semibold)",
                     color: "var(--ink)",
+                    cursor: "pointer",
                   }}
                 >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(it.workflowId)}
+                    disabled={batchBusy || busy === it.workflowId}
+                    onChange={() => toggle(it.workflowId)}
+                  />
                   {it.title}
-                </div>
+                </label>
                 <button
                   type="button"
                   onClick={() => navigate(`/app/runs/${it.workflowId}`)}
@@ -190,7 +349,7 @@ export function Approvals() {
                   }))
                 }
                 placeholder="Add a reason (optional)"
-                disabled={busy === it.workflowId}
+                disabled={busy === it.workflowId || batchBusy}
                 style={{
                   padding: "7px 10px",
                   borderRadius: "var(--radius-sm)",
@@ -203,14 +362,14 @@ export function Approvals() {
               <div style={{ display: "flex", gap: 8 }}>
                 <Button
                   variant="positive"
-                  disabled={busy === it.workflowId}
+                  disabled={busy === it.workflowId || batchBusy}
                   onClick={() => void decide(it, true)}
                 >
                   Approve
                 </Button>
                 <Button
                   variant="danger"
-                  disabled={busy === it.workflowId}
+                  disabled={busy === it.workflowId || batchBusy}
                   onClick={() => void decide(it, false)}
                 >
                   Reject
