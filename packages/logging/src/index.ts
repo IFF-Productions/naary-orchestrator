@@ -14,7 +14,7 @@
  * (worker side) only — same rule as @naary/observability.
  */
 import { randomUUID } from "node:crypto";
-import { deepScrub, redactString } from "@naary/observability";
+import { deepScrub, getTraceContext, redactString } from "@naary/observability";
 import pino, { type DestinationStream, type Logger } from "pino";
 
 export type { Logger } from "pino";
@@ -38,6 +38,12 @@ export function createLogger(
     base: { component: opts.component },
     // ISO timestamps over pino's default epoch-ms — readable in a log search UI.
     timestamp: pino.stdTimeFunctions.isoTime,
+    // Stamp every line with the active Sentry trace/span id (when tracing is on) so a
+    // stdout log line cross-links to its Sentry trace, and vice-versa. No-op ({}) when
+    // there's no active span (Sentry off / outside a traced scope) — cheap per call.
+    mixin() {
+      return getTraceContext() ?? {};
+    },
     formatters: {
       // Emit the level as a word ("info") instead of a number (30).
       level: (label: string) => ({ level: label }),

@@ -65,6 +65,16 @@ describe("createLogger", () => {
       "[REDACTED]",
     );
   });
+
+  it("adds NO trace_id/span_id when there's no active span (Sentry off)", () => {
+    // The trace-correlation mixin stamps ids only inside a live traced scope; with Sentry
+    // off it must be a clean no-op so it never adds noise to normal (untraced) logs.
+    const { lines, stream } = capture();
+    const log = createLogger({ component: "api" }, stream);
+    log.info("plain");
+    expect(lines[0].trace_id).toBeUndefined();
+    expect(lines[0].span_id).toBeUndefined();
+  });
 });
 
 describe("newCorrelationId", () => {
