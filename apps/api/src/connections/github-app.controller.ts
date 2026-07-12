@@ -31,14 +31,18 @@ export class GithubAppController {
     ok: GithubAppInstallStartResponse,
   })
   @Post("tenants/:id/connections/github-app/install/start")
-  start(
+  async start(
     @Param("id") tenantId: string,
     @Body() body: GithubAppInstallStartDto,
   ): Promise<{ installUrl: string }> {
-    return startGithubAppInstall({
+    // Return ONLY installUrl — the `state` is a single-use CSRF credential already embedded in
+    // installUrl; surfacing it as a separate field would leak it out-of-band and diverge from
+    // the Swagger contract (GithubAppInstallStartResponse has just installUrl).
+    const { installUrl } = await startGithubAppInstall({
       tenantId,
       label: body.label?.trim() || "GitHub",
     });
+    return { installUrl };
   }
 
   @ApiOperation({

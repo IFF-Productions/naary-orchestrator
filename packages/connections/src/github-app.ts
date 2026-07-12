@@ -47,7 +47,7 @@ export interface GithubAppGrant {
   installationId: string;
 }
 
-/** Injectable seam (mirrors __httpDeps / __oauthDeps) so tests mock the token exchange + config. */
+/** Injectable seam (like the worker's __httpDeps) so tests mock the token exchange + config. */
 export const __ghAppDeps = {
   fetch: safeFetch as unknown as typeof fetch,
   assertEgressAllowed,
@@ -76,7 +76,16 @@ async function signAppJwt(
   cfg: GithubAppConfig,
   nowMs: number,
 ): Promise<string> {
-  const key = createPrivateKey(cfg.privateKey);
+  let key: ReturnType<typeof createPrivateKey>;
+  try {
+    key = createPrivateKey(cfg.privateKey);
+  } catch {
+    // A present-but-malformed key is a PLATFORM misconfig — retrying can't fix it, so map
+    // to AuthConfigError (worker: non-retryable AUTH_NOT_CONFIGURED), not a generic retry loop.
+    throw new AuthConfigError(
+      "GITHUB_APP_PRIVATE_KEY is not a valid PEM private key (PKCS#1 or PKCS#8)",
+    );
+  }
   const iat = Math.floor(nowMs / 1000) - 60;
   return new SignJWT({})
     .setProtectedHeader({ alg: "RS256" })
@@ -86,18 +95,20 @@ async function signAppJwt(
     .sign(key);
 }
 
+/** When GitHub's `expires_at` is missing/unparseable, cache for this long instead of NaN (which
+ *  would disable caching → re-exchange on every call). Conservative vs the real ~1h lifetime. */
+const FALLBACK_TTL_MS = 30 * 60_000;
+
 /**
  * Mint (or serve cached) an installation access token for a GitHub App installation. Cached for
- * its lifetime (~1h minus skew), single-flight per installation. A 401/404 means the app was
- * uninstalled or the installation revoked → flip the connection to needs_reauth + throw
- * NeedsReauthError (callIntegration maps it to non-retryable); other non-2xx / network errors
- * throw (retryable upstream).
+ * its lifetime (~1h minus skew), single-flight per installation. PURE w.r.t. connection state: a
+ * 401/404 (installation uninstalled/revoked) throws NeedsReauthError but does NOT flip any
+ * connection — the token cache is keyed by INSTALLATION (which several connections may share), so
+ * the per-connection status flip is the caller's job (resolveGithubAppHeader). Other non-2xx /
+ * network errors throw (retryable upstream); a missing/invalid app key throws AuthConfigError.
  */
 export async function getInstallationToken(
-  tenantId: string,
-  connectionId: string,
   installationId: string,
-  deps: { connections?: ConnectionService } = {},
 ): Promise<string> {
   const cfg = __ghAppDeps.config();
   if (!cfg) {
@@ -108,12 +119,14 @@ export async function getInstallationToken(
   }
   const now = __ghAppDeps.now();
   const cached = tokenCache.get(installationId);
-  if (cached && cached.expiresAtMs - SKEW_MS > now) return cached.token;
+  if (cached) {
+    if (cached.expiresAtMs - SKEW_MS > now) return cached.token;
+    tokenCache.delete(installationId); // expired — evict so the map stays bounded to live installs
+  }
 
   const existing = inflight.get(installationId);
   if (existing) return existing;
 
-  const connections = deps.connections ?? new ConnectionService();
   const p = (async () => {
     const appJwt = await signAppJwt(cfg, now);
     const url = `${GITHUB_API}/app/installations/${encodeURIComponent(
@@ -129,8 +142,9 @@ export async function getInstallationToken(
       },
     });
     if (res.status === 401 || res.status === 404) {
-      await connections.setStatus(tenantId, connectionId, "needs_reauth");
-      throw new NeedsReauthError(connectionId);
+      // Installation gone. Carry the installationId in the error; the caller re-wraps it with
+      // its own connectionId + flips that connection's status (see resolveGithubAppHeader).
+      throw new NeedsReauthError(installationId);
     }
     if (!res.ok) {
       throw new Error(
@@ -138,9 +152,10 @@ export async function getInstallationToken(
       );
     }
     const body = (await res.json()) as { token: string; expires_at: string };
+    const parsed = Date.parse(body.expires_at);
     tokenCache.set(installationId, {
       token: body.token,
-      expiresAtMs: Date.parse(body.expires_at),
+      expiresAtMs: Number.isNaN(parsed) ? now + FALLBACK_TTL_MS : parsed,
     });
     return body.token;
   })().finally(() => inflight.delete(installationId));
@@ -172,15 +187,19 @@ export async function resolveGithubAppHeader(
     await connections.setStatus(tenantId, connectionId, "needs_reauth");
     throw new NeedsReauthError(connectionId); // no usable installation → must (re)install
   }
-  const token = await getInstallationToken(
-    tenantId,
-    connectionId,
-    installationId,
-    {
-      connections,
-    },
-  );
-  return { Authorization: `Bearer ${token}` };
+  try {
+    const token = await getInstallationToken(installationId);
+    return { Authorization: `Bearer ${token}` };
+  } catch (e) {
+    if (e instanceof NeedsReauthError) {
+      // Installation revoked/uninstalled. getInstallationToken is keyed by installation and stays
+      // pure, so flip THIS connection's status here and re-wrap the error with its connectionId —
+      // that way two connections sharing one installation each get flipped by their own caller.
+      await connections.setStatus(tenantId, connectionId, "needs_reauth");
+      throw new NeedsReauthError(connectionId);
+    }
+    throw e;
+  }
 }
 
 // ── Install (connect) flow ─────────────────────────────────────────────────────────────
@@ -277,6 +296,11 @@ export async function completeGithubAppInstall(opts: {
   // Consume immediately (single-use, before any create) so a leaked state can't be replayed.
   await store.remove(tenantId, installStateKey(opts.state));
   const s = JSON.parse(raw) as InstallStateBlob;
+  // Defence-in-depth: the tenant baked into the state blob must match the one derived from the
+  // state prefix. A mismatch means a tampered state or corrupted storage — refuse it.
+  if (s.tenantId !== tenantId) {
+    throw new Error("GitHub install state tenant mismatch");
+  }
   if (typeof s.expiresAt === "number" && s.expiresAt < now()) {
     throw new Error("GitHub install state expired");
   }

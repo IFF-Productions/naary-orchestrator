@@ -53,9 +53,7 @@ describe("getInstallationToken", () => {
   it("signs an RS256 app JWT from a PKCS#1 key and exchanges it for an installation token", async () => {
     fetchMock.mockResolvedValue(okTokenRes("ghs_installtoken"));
 
-    const token = await getInstallationToken("t1", "conn-1", "42", {
-      connections,
-    });
+    const token = await getInstallationToken("42");
 
     expect(token).toBe("ghs_installtoken");
     const [url, init] = fetchMock.mock.calls[0];
@@ -76,38 +74,58 @@ describe("getInstallationToken", () => {
 
   it("caches the token (a second call within its TTL does NOT re-exchange)", async () => {
     fetchMock.mockResolvedValue(okTokenRes("ghs_cached"));
-    await getInstallationToken("t1", "conn-1", "42", { connections });
-    await getInstallationToken("t1", "conn-1", "42", { connections });
+    await getInstallationToken("42");
+    await getInstallationToken("42");
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("401/404 (uninstalled / revoked) → needs_reauth + NeedsReauthError, not a retry", async () => {
+  it("401/404 (uninstalled / revoked) → NeedsReauthError; stays PURE (no setStatus)", async () => {
     fetchMock.mockResolvedValue({
       status: 404,
       ok: false,
     } as unknown as Response);
-    await expect(
-      getInstallationToken("t1", "conn-1", "42", { connections }),
-    ).rejects.toBeInstanceOf(NeedsReauthError);
-    expect(setStatus).toHaveBeenCalledWith("t1", "conn-1", "needs_reauth");
+    await expect(getInstallationToken("42")).rejects.toBeInstanceOf(
+      NeedsReauthError,
+    );
+    // The per-connection status flip is the caller's job (resolveGithubAppHeader), NOT here —
+    // the cache/exchange is keyed by installation, which several connections may share.
+    expect(setStatus).not.toHaveBeenCalled();
   });
 
-  it("throws (retryable) on a transient non-2xx without flipping status", async () => {
+  it("throws (retryable) on a transient non-2xx", async () => {
     fetchMock.mockResolvedValue({
       status: 500,
       ok: false,
     } as unknown as Response);
-    await expect(
-      getInstallationToken("t1", "conn-1", "42", { connections }),
-    ).rejects.toThrow(/exchange failed: 500/);
-    expect(setStatus).not.toHaveBeenCalled();
+    await expect(getInstallationToken("42")).rejects.toThrow(
+      /exchange failed: 500/,
+    );
   });
 
-  it("throws AuthConfigError (non-retryable in worker) when the GitHub App isn't configured", async () => {
+  it("caches with a fallback TTL when expires_at is unparseable (not NaN → no re-exchange)", async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => ({ token: "ghs_badexp", expires_at: "not-a-date" }),
+    } as unknown as Response);
+    await getInstallationToken("42");
+    await getInstallationToken("42"); // second call within the fallback TTL → served from cache
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("throws AuthConfigError when the GitHub App isn't configured", async () => {
     __ghAppDeps.config = () => null;
-    await expect(
-      getInstallationToken("t1", "conn-1", "42", { connections }),
-    ).rejects.toBeInstanceOf(AuthConfigError);
+    await expect(getInstallationToken("42")).rejects.toBeInstanceOf(
+      AuthConfigError,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("throws AuthConfigError (non-retryable) when the private key is malformed", async () => {
+    __ghAppDeps.config = () => ({ appId: "123456", privateKey: "not-a-pem" });
+    await expect(getInstallationToken("42")).rejects.toBeInstanceOf(
+      AuthConfigError,
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -138,6 +156,21 @@ describe("resolveGithubAppHeader", () => {
       grantJson: JSON.stringify({ installationId: "42" }),
     });
     expect(h).toEqual({ Authorization: "Bearer ghs_fromgrant" });
+  });
+
+  it("flips THIS connection to needs_reauth when the installation is revoked (401/404)", async () => {
+    fetchMock.mockResolvedValue({
+      status: 404,
+      ok: false,
+    } as unknown as Response);
+    await expect(
+      resolveGithubAppHeader("t1", "conn-1", {
+        connections,
+        grantJson: JSON.stringify({ installationId: "42" }),
+      }),
+    ).rejects.toBeInstanceOf(NeedsReauthError);
+    // Re-wrapped with THIS connection's id (not the installation id) + status flipped here.
+    expect(setStatus).toHaveBeenCalledWith("t1", "conn-1", "needs_reauth");
   });
 });
 
