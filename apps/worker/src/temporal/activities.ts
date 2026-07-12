@@ -1993,6 +1993,10 @@ export async function callMcpTool(
         { connectionId: cfg.connectionId },
       );
     }
+    if (e instanceof AuthConfigError) {
+      // Platform misconfig (e.g. GitHub App env unset) — retrying can't fix it.
+      throw ApplicationFailure.nonRetryable(e.message, "AUTH_NOT_CONFIGURED");
+    }
     if (
       e instanceof MissingConnectionTokenError ||
       e instanceof NeedsReauthError
