@@ -2014,6 +2014,18 @@ function ConfigPanel({
           const provider = getIntegrationProvider(str("provider"));
           const action = provider?.actions.find((a) => a.key === str("action"));
           const fields = (obj("fields") ?? {}) as Record<string, unknown>;
+          // A field can be satisfied by an upstream BINDING (below) instead of a typed value —
+          // so a required field bound from a prior step is NOT "missing". Look up the binding
+          // per field to show a "bound from …" hint and drop the required `*` nag when bound.
+          const fieldBindings = (obj("fieldBindings") ?? {}) as Record<
+            string,
+            { from?: string; path?: string }
+          >;
+          const boundFrom = (key: string): string | null => {
+            const b = fieldBindings[key];
+            if (!b?.from) return null;
+            return b.path ? `${b.from}.${b.path}` : b.from;
+          };
           // Coerce the typed-in string to the catalog field's type, so a static value is stored
           // as the right JSON type (a number, or a string[] for labels) instead of a raw string
           // that would build a malformed request.
@@ -2080,40 +2092,64 @@ function ConfigPanel({
                   {action.write ? " · runs at-most-once (no retry)" : ""}
                 </div>
               )}
-              {(action?.fields ?? []).map((f) =>
-                f.type === "json" ? (
-                  // Schema-driven value (Notion properties, etc.) — a raw JSON editor.
-                  <JsonField
-                    key={f.key}
-                    label={`${f.label}${f.required ? " *" : ""}`}
-                    value={fields[f.key]}
-                    placeholder={f.hint ?? "{ }"}
-                    // A `json` field accepts an object OR an array (e.g. Notion `children`).
-                    allowArray
-                    onChange={(v) =>
-                      onChange({ fields: { ...fields, [f.key]: v } })
-                    }
-                  />
-                ) : (
-                  <Labeled
-                    key={f.key}
-                    label={`${f.label}${f.required ? " *" : ""}`}
+              {(action?.fields ?? []).map((f) => {
+                const bound = boundFrom(f.key);
+                // Bound → the upstream value overrides any typed value at run time, and it
+                // satisfies "required", so show a hint + drop the `*` nag instead of the star.
+                const label = bound
+                  ? `${f.label} · bound`
+                  : `${f.label}${f.required ? " *" : ""}`;
+                const hint = bound ? (
+                  <div
+                    className="mono"
+                    style={{
+                      fontSize: "var(--text-2xs)",
+                      color: "var(--ink-3)",
+                      marginTop: 3,
+                    }}
                   >
-                    <input
-                      type={f.type === "number" ? "number" : "text"}
-                      value={display(fields[f.key])}
-                      onChange={(e) => setField(f.key, f.type, e.target.value)}
-                      style={inputStyle}
-                      placeholder={
-                        f.hint ??
-                        (f.type === "string[]"
-                          ? "comma-separated, or bind from an upstream step"
-                          : "")
+                    ↳ from {bound} (upstream value overrides this)
+                  </div>
+                ) : null;
+                return f.type === "json" ? (
+                  // Schema-driven value (Notion properties, etc.) — a raw JSON editor.
+                  <div key={f.key}>
+                    <JsonField
+                      label={label}
+                      value={fields[f.key]}
+                      placeholder={f.hint ?? "{ }"}
+                      // A `json` field accepts an object OR an array (e.g. Notion `children`).
+                      allowArray
+                      onChange={(v) =>
+                        onChange({ fields: { ...fields, [f.key]: v } })
                       }
                     />
-                  </Labeled>
-                ),
-              )}
+                    {hint}
+                  </div>
+                ) : (
+                  <div key={f.key}>
+                    <Labeled label={label}>
+                      <input
+                        type={f.type === "number" ? "number" : "text"}
+                        value={display(fields[f.key])}
+                        onChange={(e) =>
+                          setField(f.key, f.type, e.target.value)
+                        }
+                        style={inputStyle}
+                        placeholder={
+                          bound
+                            ? "bound from an upstream step ↓"
+                            : (f.hint ??
+                              (f.type === "string[]"
+                                ? "comma-separated, or bind from an upstream step"
+                                : ""))
+                        }
+                      />
+                    </Labeled>
+                    {hint}
+                  </div>
+                );
+              })}
               <BindingsEditor
                 bindings={
                   obj("fieldBindings") as Record<string, BindingRow> | undefined
