@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getTraceContext } from "../src/index";
 import { Traced, TracedClass, traceActivities, withSpan } from "../src/spans";
 
 /**
@@ -60,6 +61,12 @@ describe("@Traced / @TracedClass (behavior-preserving)", () => {
     const s = new Svc();
     expect(s.sync(21)).toBe(42);
     expect(await s.asyncName("ada")).toBe("hi ada");
+  });
+});
+
+describe("getTraceContext", () => {
+  it("returns undefined when there is no active span (Sentry off)", () => {
+    expect(getTraceContext()).toBeUndefined();
   });
 });
 

@@ -31,12 +31,17 @@ export function initSentry(opts: { component: "api" | "worker" }): void {
     release: process.env.SENTRY_RELEASE,
     // Opt-in performance tracing; 0 (off) unless explicitly configured.
     tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? "0"),
-    // Auto-instrument Prisma so every DB query is a child span in the trace waterfall.
-    // Works out of the box on Prisma v6/v7 (vendored OTel instrumentation, no schema
-    // change). Merged WITH the SDK defaults (httpIntegration etc. are preserved). Relies
-    // on initSentry() running before @naary/db/@prisma/client is required — main.ts and
-    // worker.ts call it before the app/activity imports (CommonJS preserves require order).
-    integrations: [Sentry.prismaIntegration()],
+    // Sentry Logs: forward our structured pino logs to Sentry's Logs product so they're
+    // searchable next to traces + errors (auto-correlated to the active trace). Both the
+    // flag and the integration are required; pinoIntegration auto-instruments every pino
+    // logger, so createLogger() needs no transport wiring.
+    enableLogs: true,
+    // Auto-instrument Prisma (every DB query → a child span; Prisma v6/v7 out of the box,
+    // no schema change) and pino (every log line → a Sentry log). Merged WITH the SDK
+    // defaults (httpIntegration etc. preserved). Relies on initSentry() running before
+    // @prisma/client / the pino loggers are created — main.ts + worker.ts call it before
+    // the app/activity imports (CommonJS preserves require order).
+    integrations: [Sentry.prismaIntegration(), Sentry.pinoIntegration()],
     // Never attach IPs / cookies / user PII automatically.
     sendDefaultPii: false,
     initialScope: { tags: { component: opts.component } },
@@ -49,6 +54,11 @@ export function initSentry(opts: { component: "api" | "worker" }): void {
       scrubEvent(event as unknown as Record<string, unknown>) as never,
     beforeSendTransaction: (event) =>
       scrubEvent(event as unknown as Record<string, unknown>) as never,
+    // Sentry Logs egress hook — its own path, so scrub it too. pino lines are already
+    // scrubbed at the pino hook before forwarding, but a direct Sentry.logger.* call
+    // (or the console integration) would otherwise bypass the scrubber.
+    beforeSendLog: (log) =>
+      scrubEvent(log as unknown as Record<string, unknown>) as never,
     beforeBreadcrumb: (crumb) =>
       scrubEvent(crumb as unknown as Record<string, unknown>) as never,
   });
@@ -78,6 +88,20 @@ export function captureError(error: unknown, context: ErrorContext = {}): void {
       ...(context.where ? { where: context.where } : {}),
     },
   });
+}
+
+/**
+ * The active span's trace/span ids, for stamping structured logs so a log line can be
+ * pivoted to its Sentry trace (and vice-versa). Returns undefined when there's no active
+ * span (Sentry off, or outside any traced scope). Safe + cheap to call per log line.
+ */
+export function getTraceContext():
+  { trace_id: string; span_id: string } | undefined {
+  const span = Sentry.getActiveSpan();
+  if (!span) return undefined;
+  const ctx = span.spanContext();
+  if (!ctx?.traceId) return undefined;
+  return { trace_id: ctx.traceId, span_id: ctx.spanId };
 }
 
 /** Flush buffered events on shutdown (best-effort). */
