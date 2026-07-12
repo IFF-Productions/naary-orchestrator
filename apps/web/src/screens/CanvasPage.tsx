@@ -2017,10 +2017,7 @@ function ConfigPanel({
           // A field can be satisfied by an upstream BINDING (below) instead of a typed value —
           // so a required field bound from a prior step is NOT "missing". Look up the binding
           // per field to show a "bound from …" hint and drop the required `*` nag when bound.
-          const fieldBindings = (obj("fieldBindings") ?? {}) as Record<
-            string,
-            { from?: string; path?: string }
-          >;
+          const fieldBindings = (obj("fieldBindings") ?? {}) as Record<string, BindingRow>;
           const boundFrom = (key: string): string | null => {
             const b = fieldBindings[key];
             if (!b?.from) return null;
