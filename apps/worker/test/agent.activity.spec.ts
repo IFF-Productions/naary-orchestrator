@@ -243,4 +243,54 @@ describe("runAgent", () => {
     expect(recordUsage).not.toHaveBeenCalled();
     expect(generateText).not.toHaveBeenCalled();
   });
+
+  const OK = {
+    output: { category: "billing", urgency: 1 },
+    text: "{}",
+    totalUsage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+  };
+
+  it("cacheSystemPrompt: marks the system prompt as an ephemeral cache breakpoint", async () => {
+    generateText.mockResolvedValue(OK);
+    await runAgent({ ...CFG, cacheSystemPrompt: true }, { msg: "x" }, META);
+
+    const arg = generateText.mock.calls[0][0] as {
+      system?: string;
+      messages?: {
+        role: string;
+        content: string;
+        providerOptions?: Record<string, unknown>;
+      }[];
+    };
+    // Uses the messages form (not flat system/prompt) with the system block cacheable.
+    expect(arg.system).toBeUndefined();
+    const sys = arg.messages?.find((m) => m.role === "system");
+    expect(sys?.content).toBe("classify");
+    expect(sys?.providerOptions).toEqual({
+      anthropic: { cacheControl: { type: "ephemeral" } },
+    });
+  });
+
+  it("default (off): uses the flat system/prompt form, no cacheControl", async () => {
+    generateText.mockResolvedValue(OK);
+    await runAgent(CFG, { msg: "x" }, META);
+
+    const arg = generateText.mock.calls[0][0] as {
+      system?: string;
+      messages?: unknown;
+    };
+    expect(arg.system).toBe("classify");
+    expect(arg.messages).toBeUndefined();
+  });
+
+  it("cacheSystemPrompt is IGNORED for non-anthropic providers", async () => {
+    generateText.mockResolvedValue(OK);
+    await runAgent(
+      { ...CFG, provider: "openai", model: "gpt-4o", cacheSystemPrompt: true },
+      { msg: "x" },
+      META,
+    );
+    const arg = generateText.mock.calls[0][0] as { messages?: unknown };
+    expect(arg.messages).toBeUndefined(); // flat form — caching is anthropic-only
+  });
 });

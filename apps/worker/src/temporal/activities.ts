@@ -143,6 +143,9 @@ export interface AgentConfig {
   temperature?: number;
   /** Per-node output cap; omitted ⇒ MAX_OUTPUT_TOKENS. Also sizes the budget estimate. */
   maxOutputTokens?: number;
+  /** Opt-in Anthropic prompt caching of the system prompt (default off). Only worthwhile for a
+   *  high-volume agent reusing a large, stable system prompt within Anthropic's ~5-min TTL. */
+  cacheSystemPrompt?: boolean;
 }
 
 export interface AgentMeta {
@@ -1754,10 +1757,32 @@ export async function runAgent(
       reservationId = res.id;
     }
 
+    // Opt-in Anthropic prompt caching (default off): mark the STABLE system prompt as an
+    // ephemeral cache breakpoint so repeated calls reuse it within Anthropic's ~5-min TTL.
+    // Anthropic-only (cacheControl is its provider option) and needs the `messages` form to
+    // carry providerOptions; a short prompt is a no-op below Anthropic's min cacheable size,
+    // and billing already meters cache-read tokens separately (see the usage read below).
+    const cachePrompt =
+      cfg.cacheSystemPrompt === true &&
+      provider === "anthropic" &&
+      !!cfg.systemPrompt;
+
     const result = await generateText({
       model: buildModel(provider, model, apiKey),
-      system: cfg.systemPrompt,
-      prompt: JSON.stringify(input),
+      ...(cachePrompt
+        ? {
+            messages: [
+              {
+                role: "system" as const,
+                content: cfg.systemPrompt as string,
+                providerOptions: {
+                  anthropic: { cacheControl: { type: "ephemeral" } },
+                },
+              },
+              { role: "user" as const, content: JSON.stringify(input) },
+            ],
+          }
+        : { system: cfg.systemPrompt, prompt: JSON.stringify(input) }),
       output: Output.object({
         // Per-node schema when configured (QA#9), else the default shape.
         schema: cfg.outputSchema

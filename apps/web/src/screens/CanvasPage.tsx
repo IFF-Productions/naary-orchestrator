@@ -1951,6 +1951,37 @@ function ConfigPanel({
               placeholder="1024 (default)"
             />
           </Labeled>
+
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-2)",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={Boolean(config.cacheSystemPrompt)}
+              onChange={(e) =>
+                onChange({ cacheSystemPrompt: e.target.checked || undefined })
+              }
+            />
+            Cache the system prompt (Anthropic)
+          </label>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
+            Only worth it for a HIGH-VOLUME agent reusing a large, stable system
+            prompt within ~5&nbsp;minutes. For one-shot flows it can slightly
+            increase cost (a cache-write premium with no reuse), so leave it off
+            unless this agent runs often with the same prompt.
+          </div>
         </>
       )}
 
@@ -2017,7 +2048,10 @@ function ConfigPanel({
           // A field can be satisfied by an upstream BINDING (below) instead of a typed value —
           // so a required field bound from a prior step is NOT "missing". Look up the binding
           // per field to show a "bound from …" hint and drop the required `*` nag when bound.
-          const fieldBindings = (obj("fieldBindings") ?? {}) as Record<string, BindingRow>;
+          const fieldBindings = (obj("fieldBindings") ?? {}) as Record<
+            string,
+            BindingRow
+          >;
           const boundFrom = (key: string): string | null => {
             const b = fieldBindings[key];
             if (!b?.from) return null;

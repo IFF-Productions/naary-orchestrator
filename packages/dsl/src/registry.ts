@@ -176,6 +176,12 @@ const CONFIG_SCHEMAS = {
     maxOutputTokens: z.number().optional(),
     /** JSON-schema-ish object describing the agent's structured output, if any. */
     outputSchema: z.record(z.string(), z.unknown()).optional(),
+    /** Opt-in Anthropic prompt caching of the (stable) system prompt. Default OFF: it only
+     *  pays off for HIGH-VOLUME agents reusing the same large system prompt within Anthropic's
+     *  ~5-min cache TTL — a one-shot call PAYS a ~25% cache-WRITE premium with no read to offset
+     *  it. Enable only for a hot, large-prompt agent. Anthropic no-ops caching below its minimum
+     *  cacheable block size, so a short prompt with this on is simply unaffected. */
+    cacheSystemPrompt: z.boolean().optional(),
   }),
   mcpTool: z.object({
     connectionId: z.string(),
