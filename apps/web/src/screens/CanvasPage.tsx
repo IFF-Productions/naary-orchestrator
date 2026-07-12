@@ -96,6 +96,8 @@ interface NaaryData extends Record<string, unknown> {
   config?: Record<string, unknown>;
   /** Injected for rendering: this node has a pinned authoring sample (📌 badge). */
   pinned?: boolean;
+  /** Injected for rendering: this node has lint issues (⚠ badge); text is the tooltip. */
+  warning?: string;
 }
 
 /** A node on the canvas: accent bar, label, and connection handles. Entry nodes
@@ -121,8 +123,12 @@ function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
       style={{
         minWidth: 132,
         borderRadius: "var(--radius-md)",
-        border: `1px solid ${accent}`,
-        outline: selected ? `2px solid ${accent}` : "none",
+        border: data.warning
+          ? "1px solid var(--state-paused)"
+          : `1px solid ${accent}`,
+        outline: selected
+          ? `2px solid ${data.warning ? "var(--state-paused)" : accent}`
+          : "none",
         background: "var(--card)",
         color: "var(--ink)",
         fontFamily: "var(--font-sans)",
@@ -144,14 +150,21 @@ function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
         }}
       >
         <span>{title}</span>
-        {data.pinned && (
-          <span
-            title="Has a pinned sample output"
-            style={{ fontSize: "var(--text-xs)" }}
-          >
-            📌
-          </span>
-        )}
+        <span style={{ display: "flex", gap: 4 }}>
+          {data.warning && (
+            <span title={data.warning} style={{ fontSize: "var(--text-xs)" }}>
+              ⚠️
+            </span>
+          )}
+          {data.pinned && (
+            <span
+              title="Has a pinned sample output"
+              style={{ fontSize: "var(--text-xs)" }}
+            >
+              📌
+            </span>
+          )}
+        </span>
       </div>
       {subtitle && (
         <div
@@ -249,6 +262,8 @@ export function CanvasPage() {
   // next run. Blank ⇒ the server falls back to the sample (api.startExecution).
   const [showInput, setShowInput] = useState(false);
   const [runInput, setRunInput] = useState("");
+  // Whether the issues panel (lint warnings + missing resources) is expanded.
+  const [showIssues, setShowIssues] = useState(false);
   // AI workflow builder: describe a flow → generate a draft onto the canvas.
   const [showAi, setShowAi] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
@@ -448,21 +463,66 @@ export function CanvasPage() {
     return out;
   }, [graph, connections]);
 
-  // Overlay a 📌 badge on nodes with a pinned sample. Derived (not stored on the node) so pinning
-  // doesn't churn the editable `nodes` state; onNodesChange still applies to `nodes`.
+  // Every canvas issue as one flat, displayable list: unknown-source references (from the
+  // template/binding linter — names the node + field + which source is missing) plus missing
+  // resources (unmatched connections / bad integration config). This is what the issues panel
+  // renders and what marks the offending nodes.
+  const allIssues = useMemo(
+    () => [
+      ...templateWarnings.map((w) => ({
+        nodeId: w.nodeId,
+        field: w.field as string | undefined,
+        ref: w.ref as string | undefined,
+        message: w.message,
+        kind: "reference" as const,
+      })),
+      ...resourceWarnings.map((w) => ({
+        nodeId: w.nodeId,
+        field: undefined as string | undefined,
+        ref: undefined as string | undefined,
+        message: w.message,
+        kind: "resource" as const,
+      })),
+    ],
+    [templateWarnings, resourceWarnings],
+  );
+
+  // node id → its issue lines (for the ⚠ tooltip on the node badge).
+  const issuesByNode = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const it of allIssues) {
+      const line = it.field ? `${it.field}: ${it.message}` : it.message;
+      m.set(it.nodeId, [...(m.get(it.nodeId) ?? []), line]);
+    }
+    return m;
+  }, [allIssues]);
+
+  // Overlay a 📌 badge on nodes with a pinned sample and a ⚠ badge on nodes with issues. Derived
+  // (not stored on the node) so it doesn't churn the editable `nodes` state; onNodesChange still
+  // applies to `nodes`. Returns the node unchanged when neither overlay differs (no render churn).
   const flowNodes = useMemo(
     () =>
-      nodes.map((n) =>
-        Object.hasOwn(pins, n.id)
-          ? { ...n, data: { ...n.data, pinned: true } }
-          : n.data.pinned
-            ? { ...n, data: { ...n.data, pinned: false } }
-            : n,
-      ),
-    [nodes, pins],
+      nodes.map((n) => {
+        const pinned = Object.hasOwn(pins, n.id);
+        const warning = issuesByNode.get(n.id)?.join("\n");
+        if ((n.data.pinned ?? false) === pinned && n.data.warning === warning) {
+          return n;
+        }
+        return { ...n, data: { ...n.data, pinned, warning } };
+      }),
+    [nodes, pins, issuesByNode],
   );
 
   const selected = nodes.find((n) => n.selected);
+
+  // Jump to a node from the issues panel: select it (opens its inspector) and clear other selection.
+  function selectNode(id: string): void {
+    setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === id })));
+    setEdges((es) =>
+      es.map((e) => (e.selected ? { ...e, selected: false } : e)),
+    );
+    setShowIssues(true);
+  }
   const selectedEdge = edges.find((e) => e.selected);
 
   // Webhook endpoint URLs registered for THIS workflow (shown in the webhook node).
@@ -743,41 +803,27 @@ export function CanvasPage() {
         >
           {graph ? "valid" : (error ?? "invalid")}
         </span>
-        {templateWarnings.length > 0 && (
-          <span
-            title={templateWarnings
-              .map((w) => `${w.nodeId} · ${w.field}: ${w.message} (${w.ref})`)
-              .join("\n")}
+        {allIssues.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowIssues((s) => !s)}
+            title="Show details of every issue"
             style={{
               fontSize: "var(--text-sm)",
               padding: "3px 10px",
+              border: "none",
               borderRadius: "var(--radius-full)",
-              background: "var(--state-paused)",
+              background:
+                resourceWarnings.length > 0
+                  ? "var(--state-error)"
+                  : "var(--state-paused)",
               color: "#fff",
-              cursor: "help",
+              cursor: "pointer",
             }}
           >
-            ⚠ {templateWarnings.length} reference
-            {templateWarnings.length > 1 ? "s" : ""}
-          </span>
-        )}
-        {resourceWarnings.length > 0 && (
-          <span
-            title={resourceWarnings
-              .map((w) => `${w.nodeId}: ${w.message}`)
-              .join("\n")}
-            style={{
-              fontSize: "var(--text-sm)",
-              padding: "3px 10px",
-              borderRadius: "var(--radius-full)",
-              background: "var(--state-error)",
-              color: "#fff",
-              cursor: "help",
-            }}
-          >
-            ⚠ {resourceWarnings.length} missing resource
-            {resourceWarnings.length > 1 ? "s" : ""}
-          </span>
+            ⚠ {allIssues.length} issue{allIssues.length > 1 ? "s" : ""}{" "}
+            {showIssues ? "▲" : "▼"}
+          </button>
         )}
         <div style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
           {status && (
@@ -822,6 +868,85 @@ export function CanvasPage() {
           </Button>
         </div>
       </header>
+
+      {showIssues && allIssues.length > 0 && (
+        <div
+          style={{
+            padding: "10px 16px",
+            borderBottom: "1px solid var(--line)",
+            background: "var(--surface)",
+            maxHeight: 220,
+            overflowY: "auto",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginBottom: 8,
+            }}
+          >
+            {allIssues.length} issue{allIssues.length > 1 ? "s" : ""} — click
+            one to jump to its node. References point at a source that doesn't
+            exist; resources are unmatched connections/config.
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {allIssues.map((it, i) => (
+              <button
+                type="button"
+                key={`${it.nodeId}.${it.field ?? ""}.${i}`}
+                onClick={() => selectNode(it.nodeId)}
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  flexWrap: "wrap",
+                  gap: 6,
+                  textAlign: "left",
+                  width: "100%",
+                  padding: "6px 8px",
+                  border: "1px solid var(--line)",
+                  borderRadius: "var(--radius-sm)",
+                  background: "var(--card)",
+                  color: "var(--ink)",
+                  fontSize: "var(--text-body)",
+                  cursor: "pointer",
+                }}
+              >
+                <span
+                  style={{
+                    width: 7,
+                    height: 7,
+                    borderRadius: "50%",
+                    flex: "none",
+                    alignSelf: "center",
+                    background:
+                      it.kind === "resource"
+                        ? "var(--state-error)"
+                        : "var(--state-paused)",
+                  }}
+                />
+                <span
+                  className="mono"
+                  style={{ fontWeight: "var(--weight-semibold)" }}
+                >
+                  {it.nodeId}
+                </span>
+                {it.field && (
+                  <span className="mono" style={{ color: "var(--ink-2)" }}>
+                    · {it.field}
+                  </span>
+                )}
+                <span style={{ color: "var(--ink-1)" }}>— {it.message}</span>
+                {it.ref && (
+                  <span className="mono" style={{ color: "var(--ink-3)" }}>
+                    ({it.ref})
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {showAi && (
         <div
