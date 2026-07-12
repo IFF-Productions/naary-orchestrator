@@ -37,17 +37,24 @@ function redactString(s: string): string {
 
 /**
  * Recursively scrub a value (object / array / string / primitive). Returns a new value;
- * does not mutate the input. Safe on cyclic-free Sentry payloads (events aren't cyclic).
+ * does not mutate the input. CYCLE-SAFE + depth-bounded: console logging captures arbitrary
+ * objects (circular refs, huge trees), so a naive recursion could blow the stack and crash
+ * the beforeSendLog hook. A revisited object → "[Circular]"; past the depth cap → "[Truncated]".
  */
 export function redactSecrets(value: unknown): unknown {
+  return scrub(value, 0, new WeakSet());
+}
+
+function scrub(value: unknown, depth: number, seen: WeakSet<object>): unknown {
   if (typeof value === "string") return redactString(value);
-  if (Array.isArray(value)) return value.map(redactSecrets);
-  if (value && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = SENSITIVE_KEY_RE.test(k) ? REDACTED : redactSecrets(v);
-    }
-    return out;
+  if (value === null || typeof value !== "object") return value;
+  if (depth > 8) return "[Truncated]";
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((v) => scrub(v, depth + 1, seen));
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    out[k] = SENSITIVE_KEY_RE.test(k) ? REDACTED : scrub(v, depth + 1, seen);
   }
-  return value;
+  return out;
 }
