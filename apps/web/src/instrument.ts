@@ -28,6 +28,10 @@ if (dsn) {
     release: import.meta.env.VITE_APP_VERSION as string | undefined,
     // Never attach IPs / cookies / user PII automatically (matches the backend).
     sendDefaultPii: false,
+    // Forward the SPA's logs to Sentry Logs (mirrors the backend). enableLogs + the console
+    // integration send console.{log,info,warn,error,…} as searchable logs, correlated to the
+    // active trace. Scrubbed via beforeSendLog below (a console line could echo a token).
+    enableLogs: true,
     integrations: [
       // react-router-dom v7 (data router) — page-load + navigation transactions.
       Sentry.reactRouterV7BrowserTracingIntegration({
@@ -37,6 +41,8 @@ if (dsn) {
         createRoutesFromChildren,
         matchRoutes,
       }),
+      // Capture console calls as Sentry logs.
+      Sentry.consoleLoggingIntegration(),
     ],
     // Opt-in sample rate; default 0.1 so production isn't fully traced. Override with
     // VITE_SENTRY_TRACES_SAMPLE_RATE at build time.
@@ -46,8 +52,9 @@ if (dsn) {
     ),
     // Only propagate the trace header to our own API (avoid leaking it cross-origin).
     tracePropagationTargets: [/^\/(api)\//, /naar-y\.com/],
-    // Security-critical: scrub secret-shaped data from every event + breadcrumb.
+    // Security-critical: scrub secret-shaped data from every event + breadcrumb + log.
     beforeSend: (event) => redactSecrets(event) as typeof event,
+    beforeSendLog: (log) => redactSecrets(log) as typeof log,
     beforeBreadcrumb: (crumb) => redactSecrets(crumb) as typeof crumb,
   });
 }
