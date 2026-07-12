@@ -53,10 +53,19 @@ export function deepScrub<T>(value: T, depth = 0, seen = new WeakSet()): T {
   }
   const obj = value as Record<string, unknown>;
   for (const key of Object.keys(obj)) {
+    // Sentry transaction/span objects expose GETTER-ONLY (and non-writable) fields; assigning
+    // to them throws "Cannot set property … which has only a getter" and crashed
+    // beforeSendTransaction on every traced request. Only reassign a writable data slot; for a
+    // read-only slot, still RECURSE into its value so nested mutable secrets are scrubbed in
+    // place — we just never write the slot itself.
+    const desc = Object.getOwnPropertyDescriptor(obj, key);
+    const settable = !desc || (desc.writable !== false && !desc.get);
     if (SENSITIVE_KEY.test(key)) {
-      obj[key] = REDACTED;
-    } else {
+      if (settable) obj[key] = REDACTED;
+    } else if (settable) {
       obj[key] = deepScrub(obj[key], depth + 1, seen);
+    } else {
+      deepScrub(obj[key], depth + 1, seen); // recurse without reassigning the read-only slot
     }
   }
   return value;

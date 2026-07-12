@@ -50,6 +50,26 @@ describe("deepScrub", () => {
     a.self = a;
     expect(() => deepScrub(a)).not.toThrow();
   });
+
+  it("does not throw on GETTER-ONLY properties (Sentry span/transaction objects)", () => {
+    // Reproduces the prod crash: Sentry transaction/span objects expose read-only accessors;
+    // assigning to them threw "Cannot set property … which has only a getter".
+    const span: Record<string, unknown> = {
+      token: "nry_leak123456",
+      ok: "keep",
+    };
+    Object.defineProperty(span, "spanId", {
+      get: () => "abc",
+      enumerable: true,
+    }); // getter-only
+    const txn = { type: "transaction", spans: [span] };
+
+    expect(() => deepScrub(txn)).not.toThrow();
+    // Writable sibling secret is still redacted; the read-only accessor is left intact.
+    expect((txn.spans[0] as Record<string, unknown>).token).toBe("[REDACTED]");
+    expect((txn.spans[0] as Record<string, unknown>).ok).toBe("keep");
+    expect((txn.spans[0] as Record<string, unknown>).spanId).toBe("abc");
+  });
 });
 
 describe("scrubEvent", () => {
