@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@naary/observability": "workspace:*",
     "prom-client": "^15.1.3"
   }
 }

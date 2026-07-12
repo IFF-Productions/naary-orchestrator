@@ -19,6 +19,12 @@ export {
   type SpanAttrs,
   type SpanOptions,
 } from "./spans";
+export {
+  metricCount,
+  metricDistribution,
+  metricGauge,
+  type MetricAttributes,
+} from "./metrics";
 
 let enabled = false;
 
@@ -41,7 +47,13 @@ export function initSentry(opts: { component: "api" | "worker" }): void {
     // defaults (httpIntegration etc. preserved). Relies on initSentry() running before
     // @prisma/client / the pino loggers are created — main.ts + worker.ts call it before
     // the app/activity imports (CommonJS preserves require order).
-    integrations: [Sentry.prismaIntegration(), Sentry.pinoIntegration()],
+    integrations: [
+      Sentry.prismaIntegration(),
+      Sentry.pinoIntegration(),
+      // Node runtime metrics (event-loop lag, memory, GC) → Sentry, mirroring what
+      // prom-client's collectDefaultMetrics already exposes for the /metrics scrape.
+      Sentry.nodeRuntimeMetricsIntegration(),
+    ],
     // Never attach IPs / cookies / user PII automatically.
     sendDefaultPii: false,
     initialScope: { tags: { component: opts.component } },
