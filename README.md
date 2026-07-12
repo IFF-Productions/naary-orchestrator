@@ -6,7 +6,7 @@ workflow interprets that graph** at runtime. The differentiator over n8n / Flowi
 Sim is **durable, long-running, human-in-the-loop execution** — flows that pause for
 days and survive crashes.
 
-This repo implements **Slice #1: the durable interpreter spine** (`PLAN.md`) and
+This repo implements **Slice #21: the durable interpreter spine** (`PLAN.md`) and
 **Slice #2: real agent + BYOK secrets + spend tracking** (`PLAN-SLICE-2.md`). Slice #1
 proves the riskiest capability — a generic workflow that walks a graph, pauses durably
 for human approval, and resumes, surviving a worker crash. Slice #2 makes the agent
