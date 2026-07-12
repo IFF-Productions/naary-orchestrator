@@ -2450,6 +2450,9 @@ export async function callIntegration(
   const req = buildIntegrationRequest(cfg.provider, cfg.action, fields);
   const url = `${base!.replace(/\/$/, "")}${req.path}`;
   const action = getIntegrationAction(cfg.provider, cfg.action);
+  // req.path is "path + query string" — log the PATH ONLY so query-param values can't leak
+  // into logs (and to keep cardinality low). The template placeholders are non-secret ids.
+  const loggedPath = req.path.split("?")[0];
 
   try {
     // Auth resolved in-memory here (Tier-1 rule 4) — never in config, never in history.
@@ -2545,7 +2548,11 @@ export async function callIntegration(
         tenantId: meta.tenantId,
         provider: cfg.provider,
         action: cfg.action,
+        method: req.method,
+        path: loggedPath,
         httpStatus: res.status,
+        ok: res.ok,
+        durationMs: Math.round(secondsSince(startedAt) * 1000),
       },
       "integration call completed",
     );
@@ -2557,6 +2564,23 @@ export async function callIntegration(
     return { status: "ok", httpStatus: res.status, ok: res.ok, body };
   } catch (e) {
     activityRuns.inc({ activity: "callIntegration", outcome: "error" });
+    // Log the failure with call context (the logger scrubs; no secrets/bodies) so an
+    // integration error — the 404/403 write-fail, a transient network error — is visible.
+    log.warn(
+      {
+        activity: "callIntegration",
+        executionId: meta.executionId,
+        nodeId: meta.nodeId,
+        tenantId: meta.tenantId,
+        provider: cfg.provider,
+        action: cfg.action,
+        method: req.method,
+        path: loggedPath,
+        durationMs: Math.round(secondsSince(startedAt) * 1000),
+        err: e instanceof Error ? e.message : String(e),
+      },
+      "integration call failed",
+    );
     // Our own typed failures (e.g. INTEGRATION_WRITE_FAILED) are already sanitized +
     // carry the right retryability — rethrow as-is, never re-wrap them as retryable.
     if (e instanceof ApplicationFailure) throw e;
