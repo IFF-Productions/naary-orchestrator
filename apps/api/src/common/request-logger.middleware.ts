@@ -40,6 +40,8 @@ export class RequestLoggerMiddleware implements NestMiddleware {
       const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
       const method = req.method ?? "UNKNOWN";
       const status = String(res.statusCode);
+      const path = req.originalUrl ?? req.url ?? "";
+      const durationMs = Math.round(elapsedMs * 100) / 100;
       // Low-cardinality labels only (method + status) — never the path (ids).
       httpRequests.inc({ method, status });
       httpDuration.observe({ method, status }, elapsedMs / 1000);
@@ -47,12 +49,14 @@ export class RequestLoggerMiddleware implements NestMiddleware {
         {
           requestId,
           method: req.method,
-          path: req.originalUrl ?? req.url,
+          path,
           statusCode: res.statusCode,
-          durationMs: Math.round(elapsedMs * 100) / 100,
+          durationMs,
           tenantId: req.principal?.tenantId,
         },
-        "request",
+        // A descriptive message (not a bare "request") so it reads meaningfully in a log
+        // search / Sentry Logs, e.g. "POST /hooks/abc -> 202 (15.3ms)". Fields stay for filtering.
+        `${method} ${path} -> ${status} (${durationMs}ms)`,
       );
     });
 
