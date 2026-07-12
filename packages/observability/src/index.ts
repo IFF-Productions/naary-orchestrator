@@ -28,6 +28,20 @@ export {
 
 let enabled = false;
 
+/**
+ * Scrub an outgoing Sentry payload, but NEVER throw into the SDK's send pipeline: if scrubbing
+ * fails, DROP the event (return null) rather than risk shipping unscrubbed data. Belt to
+ * deepScrub's braces — a scrub bug must degrade telemetry, not crash the request path (a throw
+ * here previously spammed errors on every traced request via beforeSendTransaction).
+ */
+function safeScrub(event: unknown): unknown {
+  try {
+    return scrubEvent(event as Record<string, unknown>);
+  } catch {
+    return null; // drop rather than leak
+  }
+}
+
 export function initSentry(opts: { component: "api" | "worker" }): void {
   const dsn = process.env.SENTRY_DSN;
   if (!dsn) return; // disabled — no DSN configured
@@ -62,17 +76,13 @@ export function initSentry(opts: { component: "api" | "worker" }): void {
     // so it must be scrubbed too or auto-instrumented span attributes (request URLs incl.
     // signed resume-token links, SQL text) would ship unscrubbed. scrubEvent/deepScrub is
     // shape-agnostic, so it cleans the transaction's spans[].data / description as well.
-    beforeSend: (event) =>
-      scrubEvent(event as unknown as Record<string, unknown>) as never,
-    beforeSendTransaction: (event) =>
-      scrubEvent(event as unknown as Record<string, unknown>) as never,
+    beforeSend: (event) => safeScrub(event) as never,
+    beforeSendTransaction: (event) => safeScrub(event) as never,
     // Sentry Logs egress hook — its own path, so scrub it too. pino lines are already
     // scrubbed at the pino hook before forwarding, but a direct Sentry.logger.* call
     // (or the console integration) would otherwise bypass the scrubber.
-    beforeSendLog: (log) =>
-      scrubEvent(log as unknown as Record<string, unknown>) as never,
-    beforeBreadcrumb: (crumb) =>
-      scrubEvent(crumb as unknown as Record<string, unknown>) as never,
+    beforeSendLog: (log) => safeScrub(log) as never,
+    beforeBreadcrumb: (crumb) => safeScrub(crumb) as never,
   });
   enabled = true;
 }
