@@ -14,6 +14,7 @@ import {
   useState,
 } from "react";
 import {
+  AccessNotAllowedError,
   type Workspace,
   api,
   getActiveWorkspace,
@@ -28,6 +29,8 @@ export interface WorkspaceState {
   activeId: string | null;
   /** Authenticated but belongs to no workspace → show the create screen. */
   needsWorkspace: boolean;
+  /** Signed in, but the server's access allowlist rejected this user → show NotAvailable. */
+  accessDenied: boolean;
   /** Failed to load the workspace list (network/server). */
   error?: string;
   /** Switch the active workspace (persists + re-scopes subsequent requests). */
@@ -53,6 +56,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [accessDenied, setAccessDenied] = useState(false);
 
   const load = useCallback(async (): Promise<Workspace[]> => {
     const list = await api.getMyWorkspaces();
@@ -70,7 +74,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       try {
         await load();
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (cancelled) return;
+        // A rejected user is a distinct state (NotAvailable screen), not a load error.
+        if (e instanceof AccessNotAllowedError) setAccessDenied(true);
+        else setError(e instanceof Error ? e.message : String(e));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -103,7 +110,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     loading,
     workspaces,
     activeId,
-    needsWorkspace: !loading && !error && workspaces.length === 0,
+    needsWorkspace:
+      !loading && !error && !accessDenied && workspaces.length === 0,
+    accessDenied,
     error,
     setActive,
     create,

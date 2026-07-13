@@ -5,7 +5,7 @@ import {
   type ExecutionContext,
 } from "@nestjs/common";
 import type { Reflector } from "@nestjs/core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiTokenService } from "../src/auth/api-token.service";
 import { AuthGuard } from "../src/auth/auth.guard";
 import type { FirebaseVerifier } from "../src/auth/firebase-verifier";
@@ -376,5 +376,80 @@ describe("AuthGuard", () => {
     await expect(makeGuard().canActivate(ctx(req))).rejects.toBeInstanceOf(
       ForbiddenException,
     );
+  });
+});
+
+describe("AuthGuard — access allowlist (ACCESS_ALLOWED_EMAILS)", () => {
+  const KEY = "ACCESS_ALLOWED_EMAILS";
+  const saved = process.env[KEY];
+  afterEach(() => {
+    if (saved === undefined) delete process.env[KEY];
+    else process.env[KEY] = saved;
+  });
+
+  function bearerFirebase(user: unknown): FakeReq {
+    firebaseEnabled = true;
+    firebaseVerify.mockResolvedValue(user);
+    return { headers: { authorization: "Bearer good.jwt" } };
+  }
+
+  it("lets an allowed, email-VERIFIED user through (user-scoped route)", async () => {
+    process.env[KEY] = "me@acme.com, other@acme.com";
+    userScoped = true; // isolate the allowlist from workspace resolution
+    const req = bearerFirebase({
+      userId: "u-1",
+      email: "ME@acme.com", // case-insensitive
+      emailVerified: true,
+    });
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+  });
+
+  it("403s an allowed email that is NOT verified (the key hole)", async () => {
+    process.env[KEY] = "me@acme.com";
+    userScoped = true;
+    const req = bearerFirebase({
+      userId: "u-1",
+      email: "me@acme.com",
+      emailVerified: false,
+    });
+    await expect(makeGuard().canActivate(ctx(req))).rejects.toMatchObject({
+      response: { code: "access_not_allowed" },
+    });
+  });
+
+  it("403s a verified user whose email is NOT on the list, with the marker", async () => {
+    process.env[KEY] = "me@acme.com";
+    userScoped = true;
+    const req = bearerFirebase({
+      userId: "u-9",
+      email: "stranger@evil.com",
+      emailVerified: true,
+    });
+    await expect(makeGuard().canActivate(ctx(req))).rejects.toMatchObject({
+      response: { code: "access_not_allowed" },
+    });
+    expect(ensureMembership).not.toHaveBeenCalled(); // blocked before any provisioning
+  });
+
+  it("is OPEN when the env var is unset (no allowlist)", async () => {
+    delete process.env[KEY];
+    userScoped = true;
+    const req = bearerFirebase({
+      userId: "u-1",
+      email: "anyone@anywhere.com",
+      emailVerified: false, // verification only matters when the list is active
+    });
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+  });
+
+  it("does NOT gate `nry_` API tokens (owner capability) even when the list is set", async () => {
+    process.env[KEY] = "me@acme.com";
+    verify.mockResolvedValue("t-1");
+    const req: FakeReq = {
+      headers: { authorization: "Bearer nry_owner" },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(firebaseVerify).not.toHaveBeenCalled();
   });
 });

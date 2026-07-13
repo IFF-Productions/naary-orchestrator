@@ -8,6 +8,7 @@
 import { Navigate, Outlet } from "react-router-dom";
 import { Button } from "../components";
 import { hasToken } from "../lib/auth";
+import { NotAvailable } from "../screens/NotAvailable";
 import { CreateWorkspace } from "../workspace/CreateWorkspace";
 import {
   WorkspaceProvider,
@@ -34,9 +35,12 @@ export function RequireAuth() {
 /** Gates the app on workspace resolution: loading → nothing; error → retry; no workspace →
  *  create screen; otherwise the routed app. */
 function WorkspaceGate() {
-  const { loading, error, needsWorkspace, refresh } = useWorkspace();
+  const { loading, error, needsWorkspace, accessDenied, refresh } =
+    useWorkspace();
 
   if (loading) return null;
+  // Signed in, but the server's access allowlist rejected this user (early access).
+  if (accessDenied) return <NotAvailable />;
   if (error) {
     return (
       <div
