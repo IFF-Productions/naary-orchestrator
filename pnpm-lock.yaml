@@ -287,6 +287,9 @@ importers:
       '@naary/secrets':
         specifier: workspace:*
         version: link:../secrets
+      jose:
+        specifier: ^6.2.3
+        version: 6.2.3
       undici:
         specifier: ^8.7.0
         version: 8.7.0

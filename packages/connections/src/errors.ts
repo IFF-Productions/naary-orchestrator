@@ -14,3 +14,15 @@ export class NeedsReauthError extends Error {
     this.name = "NeedsReauthError";
   }
 }
+
+/**
+ * Thrown when a PLATFORM auth prerequisite is missing (e.g. the GitHub App isn't
+ * configured — no GITHUB_APP_ID / private key). This is an OPS problem, not a tenant
+ * reconnect: retrying can't fix it, so the worker maps it to a NON-retryable failure
+ * (and it must NOT flip the connection to needs_reauth — nothing the user can do). */
+export class AuthConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuthConfigError";
+  }
+}
