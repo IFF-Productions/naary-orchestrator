@@ -275,6 +275,16 @@ export const api = {
       body: JSON.stringify({ ids, approved, ...(comment ? { comment } : {}) }),
     });
   },
+  // Archive/restore many runs at once. Per-run outcome, like approveBatch.
+  archiveBatch(
+    ids: string[],
+    archived: boolean,
+  ): Promise<BatchDecisionResult[]> {
+    return http("/executions/archive-batch", {
+      method: "POST",
+      body: JSON.stringify({ ids, archived }),
+    });
+  },
   // Cancel a running run (terminates the workflow). 409 if already finished.
   cancelRun(id: string): Promise<{ accepted: true }> {
     return http(`/executions/${encodeURIComponent(id)}/cancel`, {
