@@ -5,8 +5,9 @@ clones a repo, lets Claude Code edit it, and opens a PR. This doc specifies the 
 program and **slices it so the dangerous boundary (the sandbox) ships and is proven
 first** — before any credentialed VCS-write flow rides on top of it.
 
-Related: [[APP-AUTH]] (GitHub App installation tokens — the VCS-write credential),
-[[N8N-PARITY-GAPS]] (nodes), the `agent` node (`runAgent`) is the activity template.
+Related: [APP-AUTH](./APP-AUTH.md) (GitHub App installation tokens — the VCS-write
+credential), [N8N-PARITY-GAPS](./N8N-PARITY-GAPS.md) (nodes), the `agent` node
+(`runAgent`) is the activity template.
 
 ---
 
@@ -202,7 +203,7 @@ Each slice is the smallest end-to-end step that proves the next risk.
   Option-C sandbox (Open Decision #1).
 - **Slice 3 — Commit → push branch → open PR (idempotent).** The activity (outside the
   sandbox) applies the diff, commits, pushes a deterministic branch, opens/reuses a PR via
-  the installation token. Reuses [[APP-AUTH]] token minting.
+  the installation token. Reuses [APP-AUTH](./APP-AUTH.md) token minting.
 - **Slice 4 — Canvas/config UX.** Full inspector (repo/connection picker, prompt +
   bindings, tool/permission selector, cost caps), catalog polish, error-handling wiring.
 - **Slice 5 — Egress + isolation hardening.** Enforce the `api.anthropic.com` allowlist at
