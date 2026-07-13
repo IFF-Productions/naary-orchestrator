@@ -33,6 +33,7 @@ import {
   type NodeType,
 } from "@naary/dsl";
 import { Button } from "../components";
+import { ExpressionField } from "../components/ExpressionField";
 import {
   api,
   type ConnectionRow,
@@ -231,6 +232,12 @@ export function CanvasPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [nodes, setNodes] = useState<Node<NaaryData>[]>(SEED_NODES);
   const [edges, setEdges] = useState<FlowEdge[]>(SEED_EDGES);
+  // Stable node-id → kind map for the ExpressionField autocomplete fallback. Memoized so it
+  // doesn't get a new identity every render (which would bust the field's `refs` memo).
+  const nodeKinds = useMemo(
+    () => Object.fromEntries(nodes.map((n) => [n.id, n.data.kind])),
+    [nodes],
+  );
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [name, setName] = useState("Canvas draft");
@@ -1256,6 +1263,8 @@ export function CanvasPage() {
                   upstreamIds={nodes
                     .filter((n) => n.id !== selected.id)
                     .map((n) => n.id)}
+                  edges={edges}
+                  nodeKinds={nodeKinds}
                   hookUrls={hookUrls}
                   connections={connections}
                   pins={pins}
@@ -1532,6 +1541,8 @@ function ConnectionSelect({
 function ConfigPanel({
   node,
   upstreamIds,
+  edges,
+  nodeKinds,
   hookUrls,
   connections,
   pins,
@@ -1545,6 +1556,8 @@ function ConfigPanel({
 }: {
   node: Node<NaaryData>;
   upstreamIds: string[];
+  edges: { source: string; target: string }[];
+  nodeKinds: Record<string, string>;
   hookUrls: string[];
   connections: ConnectionRow[];
   pins: Record<string, unknown>;
@@ -1562,6 +1575,26 @@ function ConfigPanel({
   const num = (k: string) => config[k] as number | undefined;
   const obj = (k: string) =>
     (config[k] as Record<string, unknown> | undefined) ?? undefined;
+
+  // A text field that understands {{ node.path }} — highlighting + autocomplete. Use for
+  // free-text config that the runtime templates (URLs, bodies, prompts, email fields), NOT
+  // for selects/numbers/secrets/JSON. Wraps the value/onChange({[k]:v}) boilerplate.
+  const exprText = (
+    k: string,
+    opts?: { multiline?: boolean; placeholder?: string; minHeight?: string },
+  ) => (
+    <ExpressionField
+      value={str(k)}
+      onChange={(v) => onChange({ [k]: v })}
+      nodeId={node.id}
+      edges={edges}
+      pins={pins}
+      nodeKinds={nodeKinds}
+      multiline={opts?.multiline}
+      placeholder={opts?.placeholder}
+      minHeight={opts?.minHeight}
+    />
+  );
 
   return (
     <div
@@ -1918,13 +1951,11 @@ function ConfigPanel({
               label="System prompt"
               value={`~${Math.ceil(str("systemPrompt").length / 4)} tok`}
             />
-            <textarea
-              value={str("systemPrompt")}
-              onChange={(e) => onChange({ systemPrompt: e.target.value })}
-              rows={5}
-              style={textareaStyle}
-              placeholder="You are a support triage agent…"
-            />
+            {exprText("systemPrompt", {
+              multiline: true,
+              minHeight: "7em",
+              placeholder: "You are a support triage agent…",
+            })}
           </div>
 
           <div>
@@ -2160,22 +2191,40 @@ function ConfigPanel({
                 ) : (
                   <div key={f.key}>
                     <Labeled label={label}>
-                      <input
-                        type={f.type === "number" ? "number" : "text"}
-                        value={display(fields[f.key])}
-                        onChange={(e) =>
-                          setField(f.key, f.type, e.target.value)
-                        }
-                        style={inputStyle}
-                        placeholder={
-                          bound
-                            ? "bound from an upstream step ↓"
-                            : (f.hint ??
-                              (f.type === "string[]"
-                                ? "comma-separated, or bind from an upstream step"
-                                : ""))
-                        }
-                      />
+                      {f.type === "string" ? (
+                        // Free-text integration field (e.g. repo/owner/number) — supports
+                        // {{ upstream.path }} with highlighting + autocomplete.
+                        <ExpressionField
+                          value={display(fields[f.key])}
+                          onChange={(v) => setField(f.key, f.type, v)}
+                          nodeId={node.id}
+                          edges={edges}
+                          pins={pins}
+                          nodeKinds={nodeKinds}
+                          placeholder={
+                            bound
+                              ? "bound from an upstream step ↓"
+                              : (f.hint ?? "value or {{ upstream.path }}")
+                          }
+                        />
+                      ) : (
+                        <input
+                          type={f.type === "number" ? "number" : "text"}
+                          value={display(fields[f.key])}
+                          onChange={(e) =>
+                            setField(f.key, f.type, e.target.value)
+                          }
+                          style={inputStyle}
+                          placeholder={
+                            bound
+                              ? "bound from an upstream step ↓"
+                              : (f.hint ??
+                                (f.type === "string[]"
+                                  ? "comma-separated, or bind from an upstream step"
+                                  : ""))
+                          }
+                        />
+                      )}
                     </Labeled>
                     {hint}
                   </div>
@@ -2195,12 +2244,9 @@ function ConfigPanel({
       {kind === "pollTrigger" && (
         <>
           <Labeled label="URL to poll">
-            <input
-              value={str("url")}
-              onChange={(e) => onChange({ url: e.target.value })}
-              style={inputStyle}
-              placeholder="https://api.example.com/resource"
-            />
+            {exprText("url", {
+              placeholder: "https://api.example.com/resource",
+            })}
           </Labeled>
           <Labeled label="Check every (seconds)">
             <input
@@ -2514,12 +2560,9 @@ function ConfigPanel({
             </select>
           </Labeled>
           <Labeled label="URL">
-            <input
-              value={str("url")}
-              onChange={(e) => onChange({ url: e.target.value })}
-              style={inputStyle}
-              placeholder="https://api.example.com/v1/things"
-            />
+            {exprText("url", {
+              placeholder: "https://api.example.com/v1/things",
+            })}
           </Labeled>
 
           <BindingsEditor
@@ -4706,29 +4749,16 @@ function ConfigPanel({
             />
           </Labeled>
           <Labeled label="To">
-            <input
-              value={str("to")}
-              onChange={(e) => onChange({ to: e.target.value })}
-              style={inputStyle}
-              placeholder="user@example.com"
-            />
+            {exprText("to", { placeholder: "user@example.com" })}
           </Labeled>
           <Labeled label="Subject">
-            <input
-              value={str("subject")}
-              onChange={(e) => onChange({ subject: e.target.value })}
-              style={inputStyle}
-              placeholder="Your workflow finished"
-            />
+            {exprText("subject", { placeholder: "Your workflow finished" })}
           </Labeled>
           <Labeled label="Body (text)">
-            <textarea
-              value={str("text")}
-              onChange={(e) => onChange({ text: e.target.value })}
-              rows={4}
-              style={textareaStyle}
-              placeholder="Plain-text body…"
-            />
+            {exprText("text", {
+              multiline: true,
+              placeholder: "Plain-text body…",
+            })}
           </Labeled>
           <BindingsEditor
             bindings={
@@ -4754,12 +4784,7 @@ function ConfigPanel({
       {kind === "rssRead" && (
         <>
           <Labeled label="Feed URL (https)">
-            <input
-              value={str("url")}
-              onChange={(e) => onChange({ url: e.target.value })}
-              style={inputStyle}
-              placeholder="https://example.com/feed.xml"
-            />
+            {exprText("url", { placeholder: "https://example.com/feed.xml" })}
           </Labeled>
           <BindingsEditor
             bindings={
@@ -5077,13 +5102,10 @@ function ConfigPanel({
             />
           </Labeled>
           <Labeled label="Instructions">
-            <textarea
-              value={str("instructions")}
-              onChange={(e) => onChange({ instructions: e.target.value })}
-              rows={3}
-              style={textareaStyle}
-              placeholder="What the approver should check…"
-            />
+            {exprText("instructions", {
+              multiline: true,
+              placeholder: "What the approver should check…",
+            })}
           </Labeled>
           <Labeled label="Auto-reject after (hours)">
             <input

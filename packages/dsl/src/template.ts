@@ -37,6 +37,37 @@ export function resolveTemplateString(
   );
 }
 
+/** A located `{{ path }}` token — for AUTHORING tools (syntax highlighting / autocomplete). */
+export interface TemplateToken {
+  /** String offset of the opening `{{`. */
+  start: number;
+  /** String offset just past the closing `}}`. */
+  end: number;
+  /** The trimmed inner reference (e.g. `hook.repository.name`). */
+  path: string;
+}
+
+/**
+ * Locate every `{{ path }}` token in a string, using the SAME `EMBED_RE` the runtime resolves
+ * with — so an editor's highlighter/autocomplete can never drift from what actually resolves.
+ * Escaped `\{{` literals are skipped (they aren't tokens). Pure; never throws.
+ */
+export function templateTokens(s: string): TemplateToken[] {
+  const out: TemplateToken[] = [];
+  const re = new RegExp(EMBED_RE.source, "g"); // own lastIndex; don't mutate the shared regex
+  let m: RegExpExecArray | null;
+  // biome-ignore lint/suspicious/noAssignInExpressions: standard regex.exec loop
+  while ((m = re.exec(s)) !== null) {
+    if (m[0] === "\\{{") continue; // escaped literal `\{{`, not a token
+    out.push({
+      start: m.index,
+      end: m.index + m[0].length,
+      path: (m[1] ?? "").trim(),
+    });
+  }
+  return out;
+}
+
 /**
  * Deep-resolve `{{ … }}` tokens in every string of a node's config against `ctx`. Returns a new
  * config (arrays + nested objects walked); non-strings and untokened strings pass through

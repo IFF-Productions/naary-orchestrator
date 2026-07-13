@@ -6,6 +6,7 @@ import {
   lintTemplates,
   resolveTemplateString,
   resolveTemplates,
+  templateTokens,
 } from "../src/template";
 
 const ctx = {
@@ -77,6 +78,36 @@ describe("resolveTemplateString", () => {
       "a",
       "b",
     ]);
+  });
+});
+
+describe("templateTokens (authoring: locate tokens for highlighting)", () => {
+  it("returns start/end offsets + trimmed path for each token", () => {
+    const s = "hi {{ start.subject }} x {{ a.b }}";
+    const toks = templateTokens(s);
+    expect(toks).toHaveLength(2);
+    // First token spans exactly the `{{ … }}` and carries the trimmed inner path.
+    expect(s.slice(toks[0].start, toks[0].end)).toBe("{{ start.subject }}");
+    expect(toks[0].path).toBe("start.subject");
+    expect(s.slice(toks[1].start, toks[1].end)).toBe("{{ a.b }}");
+    expect(toks[1].path).toBe("a.b");
+  });
+
+  it("skips an escaped `\\{{` literal (matches the runtime, which emits a literal `{{`)", () => {
+    const s = "literal \\{{ not a token }} then {{ real.one }}";
+    const toks = templateTokens(s);
+    // Only the un-escaped token is returned.
+    expect(toks).toHaveLength(1);
+    expect(toks[0].path).toBe("real.one");
+    // And the runtime agrees the escape is a literal, not a resolved token.
+    expect(resolveTemplateString("\\{{ x }}", {})).toBe("{{ x }}");
+  });
+
+  it("handles node ids with hyphens and no tokens", () => {
+    expect(templateTokens("{{ agent-1a2b.output }}")[0].path).toBe(
+      "agent-1a2b.output",
+    );
+    expect(templateTokens("no tokens here")).toEqual([]);
   });
 });
 
