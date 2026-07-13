@@ -26,6 +26,16 @@ export class WebhookEndpointResponse {
   createdAt!: Date;
 }
 
+/** A freshly rotated signing secret — returned exactly once (the endpoint id/URL are unchanged). */
+export class RotatedSecretResponse {
+  @ApiProperty({
+    example: "3f9a…c1",
+    description:
+      "The NEW HMAC signing secret — returned exactly once, on rotation.",
+  })
+  signingSecret!: string;
+}
+
 /** Acknowledgement that a webhook endpoint was deleted. */
 export class DeletedResponse {
   @ApiProperty({ example: true }) deleted!: boolean;
