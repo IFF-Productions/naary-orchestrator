@@ -24,6 +24,33 @@ interface GuardRequest extends RequestWithPrincipal {
 const WORKSPACE_HEADER = "x-workspace-id";
 
 /**
+ * Optional single-/few-user allowlist (early-access lockdown). `ACCESS_ALLOWED_EMAILS` is a
+ * comma-separated list; when set, ONLY those (verified) Firebase emails may sign in — every
+ * other user gets 403 `access_not_allowed` and the SPA shows a "not available yet" screen.
+ * UNSET/empty ⇒ open (unchanged behaviour). Returns null when open, else a lowercased Set.
+ *
+ * Note: this gates Firebase USER sign-ins only. `nry_` API tokens are explicit owner-created
+ * capabilities and pass regardless (they back the CLI/MCP) — see the caller.
+ */
+export function parseAllowedEmails(
+  raw: string | undefined,
+): Set<string> | null {
+  const list = (raw ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  return list.length > 0 ? new Set(list) : null;
+}
+
+/** Response body for a blocked user — the SPA keys its NotAvailable screen on `code`. */
+const ACCESS_NOT_ALLOWED = {
+  statusCode: 403,
+  error: "Forbidden",
+  code: "access_not_allowed",
+  message: "Naary isn't open to your account yet.",
+} as const;
+
+/**
  * Global dual-auth guard.
  *
  * Authenticates `Authorization: Bearer <token>` as EITHER a Firebase ID token (humans —
@@ -44,13 +71,25 @@ const WORKSPACE_HEADER = "x-workspace-id";
 @Injectable()
 export class AuthGuard implements CanActivate {
   private readonly logger = new Logger(AuthGuard.name);
+  /** Early-access allowlist (see parseAllowedEmails). null = open. Computed once at boot. */
+  private readonly allowedEmails = parseAllowedEmails(
+    process.env.ACCESS_ALLOWED_EMAILS,
+  );
 
   constructor(
     private readonly tokens: ApiTokenService,
     private readonly firebase: FirebaseVerifier,
     private readonly reflector: Reflector,
     private readonly memberships: MembershipService,
-  ) {}
+  ) {
+    // Log the lock state at boot (COUNT only, never the emails) so a misspelled env var —
+    // which silently means "wide open" — is easy to catch after deploy.
+    this.logger.log(
+      this.allowedEmails
+        ? `access allowlist: ${this.allowedEmails.size} email(s)`
+        : "access allowlist: disabled (open)",
+    );
+  }
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
@@ -95,6 +134,17 @@ export class AuthGuard implements CanActivate {
     }
     const user = await this.firebase.verify(token);
     if (!user) throw new UnauthorizedException("Invalid credentials");
+
+    // Early-access allowlist: only listed, EMAIL-VERIFIED users may sign in. Verified matters —
+    // an unverified account could otherwise claim an allowed address. Checked BEFORE any
+    // membership backfill so a blocked user never gets a workspace provisioned. `nry_` tokens
+    // (handled above) intentionally bypass this — they're owner-created capabilities.
+    if (this.allowedEmails) {
+      const email = user.email?.trim().toLowerCase();
+      if (!email || !user.emailVerified || !this.allowedEmails.has(email)) {
+        throw new ForbiddenException(ACCESS_NOT_ALLOWED);
+      }
+    }
 
     // Tenants this user may reach = their memberships ∪ {legacy claim tenant}. The claim is
     // a TRANSITIONAL owner grant (existing single-tenant users); migrate it to a Membership

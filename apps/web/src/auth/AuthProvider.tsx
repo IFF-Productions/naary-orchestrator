@@ -30,6 +30,8 @@ export interface AuthState {
   /** Firebase uid and tenant custom-claim, when signed in. */
   subject?: string;
   tenant?: string;
+  /** Signed-in user's email, when available (shown on the NotAvailable screen). */
+  email?: string;
   /** Whether the signed-in user's email is verified — gates workspace creation. */
   emailVerified: boolean;
   /** True when a Firebase web config was provided at build time (else login is
@@ -92,6 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     authenticated: Boolean(user),
     subject: user?.uid,
     tenant,
+    email: user?.email ?? undefined,
     emailVerified: Boolean(user?.emailVerified),
     configured: firebaseConfigured,
     login: async () => {

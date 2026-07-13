@@ -18,6 +18,15 @@ export class UnauthorizedError extends Error {
     this.name = "UnauthorizedError";
   }
 }
+
+/** Thrown when the server's access allowlist rejects this (authenticated) user — the SPA
+ *  shows a "not available yet" screen. Distinct from a generic 403 (membership/tenant). */
+export class AccessNotAllowedError extends Error {
+  constructor(message?: string) {
+    super(message ?? "Your account doesn't have access yet.");
+    this.name = "AccessNotAllowedError";
+  }
+}
 export type ExecutionStatus =
   | "running"
   | "awaiting_approval"
@@ -89,6 +98,17 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (res.status === 401) throw new UnauthorizedError();
   if (!res.ok) {
+    // A 403 carrying the access-allowlist marker → a specific error (the NotAvailable screen).
+    // Only this exact code, so an ordinary 403 (membership/tenant) still surfaces generically.
+    if (res.status === 403) {
+      const body = (await res.json().catch(() => null)) as {
+        code?: string;
+        message?: string;
+      } | null;
+      if (body?.code === "access_not_allowed") {
+        throw new AccessNotAllowedError(body.message);
+      }
+    }
     throw new Error(`${init?.method ?? "GET"} ${path} → ${res.status}`);
   }
   // 204 / empty body (e.g. DELETE) — nothing to parse.

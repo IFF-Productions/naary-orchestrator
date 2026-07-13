@@ -131,6 +131,10 @@ services:
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
       FIREBASE_SERVICE_ACCOUNT_JSON: ${FIREBASE_SERVICE_ACCOUNT_JSON:-}
       FIREBASE_TENANT_CLAIM: ${FIREBASE_TENANT_CLAIM:-tenant}
+      # Early-access allowlist (comma-separated emails). Unset ⇒ open sign-up. See
+      # deploy/.env.prod.example. Gates Firebase user logins only; nry_ tokens + public
+      # ingress are unaffected.
+      ACCESS_ALLOWED_EMAILS: ${ACCESS_ALLOWED_EMAILS:-}
       # Feature flags (OpenFeature + Flagsmith) — api-only (only @naary/api imports
       # @naary/flags). OFF unless FLAGSMITH_ENVIRONMENT_KEY (server-side `ser.` key) is
       # set: no key ⇒ every flag resolves to its safe code default (fail-safe). For a
