@@ -873,13 +873,16 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     });
     return Promise.all(
       rows.map(async (r) => {
-        const startedAt = r.createdAt.toISOString();
+        const createdAt = r.createdAt.toISOString();
         const base = {
           workflowId: r.workflowId,
           workflowKey: r.workflowKey,
           costUsd: r.costUsd !== null ? Number(r.costUsd) : null,
-          startedAt,
-          createdAt: startedAt,
+          // startedAt currently mirrors the DB row time; createdAt reads the DB field
+          // directly (per its docstring) rather than aliasing startedAt, so a future
+          // real Temporal start time can diverge without silently moving createdAt.
+          startedAt: createdAt,
+          createdAt,
           archived: r.archivedAt !== null,
         };
         if (isTerminalStatus(r.status)) {

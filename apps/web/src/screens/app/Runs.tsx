@@ -393,6 +393,7 @@ export function Runs() {
                   icon="refresh"
                   iconOnly
                   title="Re-run with the same input"
+                  aria-label="Re-run with the same input"
                   disabled={rerunning === r.workflowId}
                   onClick={(e) => void rerun(r.workflowId, e)}
                 />
@@ -403,6 +404,11 @@ export function Runs() {
                 icon={r.archived ? "eye" : "archive"}
                 iconOnly
                 title={
+                  r.archived
+                    ? "Restore to the Runs list"
+                    : "Archive — hide from this list"
+                }
+                aria-label={
                   r.archived
                     ? "Restore to the Runs list"
                     : "Archive — hide from this list"
