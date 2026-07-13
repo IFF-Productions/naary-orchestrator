@@ -12,6 +12,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@naary/db": "workspace:*",
     "@naary/secrets": "workspace:*",
+    "jose": "^6.2.3",
     "undici": "^8.7.0"
   },
   "devDependencies": {

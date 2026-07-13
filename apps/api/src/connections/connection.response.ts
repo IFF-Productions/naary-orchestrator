@@ -29,7 +29,7 @@ export class ConnectionResponse {
   serverUrl!: string;
   @ApiProperty({
     example: "pat",
-    enum: ["api_token", "pat", "oauth", "connection_string"],
+    enum: ["api_token", "pat", "oauth", "github_app", "connection_string"],
   })
   authMode!: string;
   @ApiProperty({
@@ -58,4 +58,13 @@ export class OAuthStartResponse {
 /** Result of the OAuth callback — the connection whose refresh token was persisted. */
 export class OAuthCallbackResponse {
   @ApiProperty({ example: "conn_9f3ab2" }) connectionId!: string;
+}
+
+/** Result of starting a GitHub App install — the github.com install URL for the browser. */
+export class GithubAppInstallStartResponse {
+  @ApiProperty({
+    example: "https://github.com/apps/naary/installations/new?state=...",
+    description: "Redirect the browser here to install the app + pick repos.",
+  })
+  installUrl!: string;
 }

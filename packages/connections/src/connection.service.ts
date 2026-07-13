@@ -11,7 +11,8 @@ export type ConnectionType =
   | "mysql"
   | "signing"
   | "smtp";
-export type AuthMode = "api_token" | "pat" | "oauth" | "connection_string";
+export type AuthMode =
+  "api_token" | "pat" | "oauth" | "github_app" | "connection_string";
 export type ConnectionStatus = "connected" | "needs_reauth" | "error";
 
 /** Connection types that are SQL databases (the engine the sqlQuery/sqlExec nodes use). */

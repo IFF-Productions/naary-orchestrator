@@ -1,10 +1,15 @@
 import { SecretStore } from "@naary/secrets";
 import { ConnectionService, connectionSecretKey } from "./connection.service";
 import { MissingConnectionTokenError } from "./errors";
+import { resolveGithubAppHeader } from "./github-app";
 import { getOAuthAccessToken } from "./oauth";
 
 // Re-export so existing imports from '@naary/connections' keep working.
-export { MissingConnectionTokenError, NeedsReauthError } from "./errors";
+export {
+  AuthConfigError,
+  MissingConnectionTokenError,
+  NeedsReauthError,
+} from "./errors";
 
 export interface AuthDeps {
   connections?: ConnectionService;
@@ -46,6 +51,19 @@ export async function resolveAuthHeader(
       connections,
     });
     return { Authorization: `Bearer ${accessToken}` };
+  }
+
+  if (conn.authMode === "github_app") {
+    // The stored grant is the installation id (NOT a token); mint a short-lived installation
+    // access token from the platform app credentials (cached + single-flight in github-app.ts).
+    const grantJson = await store.get(
+      tenantId,
+      connectionSecretKey(connectionId),
+    );
+    return resolveGithubAppHeader(tenantId, connectionId, {
+      connections,
+      grantJson,
+    });
   }
 
   throw new Error(`Unsupported authMode '${conn.authMode}'`);
