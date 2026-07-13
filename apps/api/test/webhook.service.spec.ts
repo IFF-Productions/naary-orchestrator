@@ -5,12 +5,21 @@ import { AesGcmKeyEncryptor } from "@naary/secrets";
 const m = vi.hoisted(() => ({
   create: vi.fn(),
   findMany: vi.fn(),
+  findFirst: vi.fn(),
+  updateMany: vi.fn(),
+  update: vi.fn(),
   deliveryCreate: vi.fn(),
   deliveryDeleteMany: vi.fn(),
 }));
 vi.mock("@naary/db", () => ({
   getPrisma: () => ({
-    webhookEndpoint: { create: m.create, findMany: m.findMany },
+    webhookEndpoint: {
+      create: m.create,
+      findMany: m.findMany,
+      findFirst: m.findFirst,
+      updateMany: m.updateMany,
+      update: m.update,
+    },
     webhookDelivery: {
       create: m.deliveryCreate,
       deleteMany: m.deliveryDeleteMany,
@@ -33,8 +42,85 @@ const sign = (body: Buffer, secret: string) =>
 beforeEach(() => {
   m.create.mockReset();
   m.findMany.mockReset();
+  m.findFirst.mockReset();
+  m.updateMany.mockReset();
+  m.update.mockReset().mockResolvedValue({});
   m.deliveryCreate.mockReset();
   m.deliveryDeleteMany.mockReset().mockResolvedValue({ count: 0 });
+});
+
+describe("WebhookService.updateEndpoint", () => {
+  it("updates workflow + provider tenant-scoped, then returns the fresh view", async () => {
+    m.updateMany.mockResolvedValue({ count: 1 });
+    const view = {
+      id: "ep_1",
+      provider: "generic",
+      workflowId: "wf-2",
+      createdAt: new Date(),
+    };
+    m.findFirst.mockResolvedValue(view);
+
+    const out = await svc.updateEndpoint("t1", "ep_1", {
+      workflowId: "wf-2",
+      provider: "generic",
+    });
+
+    expect(m.updateMany).toHaveBeenCalledWith({
+      where: { id: "ep_1", tenantId: "t1" },
+      data: { workflowId: "wf-2", provider: "generic" },
+    });
+    expect(out).toEqual(view);
+    // The re-read is tenant-scoped and excludes the secret.
+    expect(m.findFirst.mock.calls[0][0].where).toEqual({
+      id: "ep_1",
+      tenantId: "t1",
+    });
+    expect(m.findFirst.mock.calls[0][0].select).not.toHaveProperty(
+      "signingSecret",
+    );
+  });
+
+  it("returns null (→404) when the endpoint isn't this tenant's", async () => {
+    m.updateMany.mockResolvedValue({ count: 0 });
+    const out = await svc.updateEndpoint("t1", "ep_other", {
+      provider: "generic",
+    });
+    expect(out).toBeNull();
+    expect(m.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("an empty patch skips the write and just returns the current view", async () => {
+    m.findFirst.mockResolvedValue({
+      id: "ep_1",
+      provider: "github",
+      workflowId: "wf-1",
+      createdAt: new Date(),
+    });
+    const out = await svc.updateEndpoint("t1", "ep_1", {});
+    expect(m.updateMany).not.toHaveBeenCalled();
+    expect(out?.id).toBe("ep_1");
+  });
+});
+
+describe("WebhookService.rotateSecret", () => {
+  it("mints a NEW encrypted secret and returns the plaintext once", async () => {
+    m.findFirst.mockResolvedValue({ id: "ep_1" });
+
+    const out = await svc.rotateSecret("t1", "ep_1");
+
+    expect(out?.signingSecret).toMatch(/^[0-9a-f]{64}$/); // 32 random bytes, hex
+    const data = m.update.mock.calls[0][0].data;
+    // Stored value is the ENCRYPTED blob, never the plaintext.
+    expect(data.signingSecret).not.toContain(out?.signingSecret);
+    expect(() => JSON.parse(data.signingSecret)).not.toThrow();
+  });
+
+  it("returns null (→404) and writes nothing when not this tenant's endpoint", async () => {
+    m.findFirst.mockResolvedValue(null);
+    const out = await svc.rotateSecret("t1", "ep_other");
+    expect(out).toBeNull();
+    expect(m.update).not.toHaveBeenCalled();
+  });
 });
 
 describe("WebhookService.list", () => {

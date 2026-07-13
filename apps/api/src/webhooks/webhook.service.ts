@@ -83,6 +83,62 @@ export class WebhookService {
     });
   }
 
+  /**
+   * Update a webhook endpoint's configuration IN PLACE — retarget the workflow it triggers
+   * and/or change the provider (signature/delivery scheme). The endpoint id, ingress URL and
+   * signing secret are UNCHANGED, so the provider's config keeps working. Tenant-scoped (can't
+   * touch another tenant's). Returns the updated view, or null if the endpoint isn't this
+   * tenant's (→ 404). To rotate the secret, use rotateSecret.
+   */
+  async updateEndpoint(
+    tenantId: string,
+    endpointId: string,
+    patch: { workflowId?: string; provider?: WebhookProvider },
+  ): Promise<WebhookEndpointView | null> {
+    const data: { workflowId?: string; provider?: string } = {};
+    if (patch.workflowId !== undefined) data.workflowId = patch.workflowId;
+    if (patch.provider !== undefined) data.provider = patch.provider;
+    if (Object.keys(data).length > 0) {
+      const res = await getPrisma().webhookEndpoint.updateMany({
+        where: { id: endpointId, tenantId },
+        data,
+      });
+      if (res.count === 0) return null; // not this tenant's / unknown
+    }
+    // Re-read tenant-scoped (also serves an empty patch as "fetch current, 404 if not owned").
+    return getPrisma().webhookEndpoint.findFirst({
+      where: { id: endpointId, tenantId },
+      select: { id: true, provider: true, workflowId: true, createdAt: true },
+    });
+  }
+
+  /**
+   * Rotate a webhook endpoint's signing secret: mint a NEW secret, store it encrypted, and
+   * return the plaintext exactly once (like creation). The endpoint id/URL are unchanged — only
+   * the HMAC key. Any provider still signing with the old secret will fail verification until
+   * reconfigured. Tenant-scoped; null if the endpoint isn't this tenant's (→ 404).
+   */
+  async rotateSecret(
+    tenantId: string,
+    endpointId: string,
+  ): Promise<{ signingSecret: string } | null> {
+    const owned = await getPrisma().webhookEndpoint.findFirst({
+      where: { id: endpointId, tenantId },
+      select: { id: true },
+    });
+    if (!owned) return null;
+    const signingSecret = randomBytes(32).toString("hex");
+    await getPrisma().webhookEndpoint.update({
+      where: { id: endpointId },
+      data: {
+        signingSecret: JSON.stringify(
+          this.encryptor.encrypt(signingSecret, tenantId),
+        ),
+      },
+    });
+    return { signingSecret };
+  }
+
   /** Delete a tenant's webhook endpoint by id (tenant-scoped so it can't touch another's).
    *  Returns true if a row was removed. Any inbound call to that ingress then 404s. */
   async deleteEndpoint(tenantId: string, endpointId: string): Promise<boolean> {

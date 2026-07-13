@@ -522,6 +522,27 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
+  // Update a webhook endpoint's config (workflow/provider) IN PLACE — same id/URL/secret.
+  updateWebhook(
+    tenantId: string,
+    endpointId: string,
+    patch: { workflowId?: string; provider?: string },
+  ): Promise<WebhookRow> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/webhooks/${encodeURIComponent(endpointId)}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+    );
+  },
+  // Rotate a webhook's signing secret. Returns the NEW secret ONCE (store it now).
+  rotateWebhookSecret(
+    tenantId: string,
+    endpointId: string,
+  ): Promise<{ signingSecret: string }> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/webhooks/${encodeURIComponent(endpointId)}/rotate-secret`,
+      { method: "POST" },
+    );
+  },
   deleteWebhook(tenantId: string, endpointId: string): Promise<void> {
     return http(
       `/tenants/${encodeURIComponent(tenantId)}/webhooks/${encodeURIComponent(endpointId)}`,
