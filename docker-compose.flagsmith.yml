@@ -65,7 +65,9 @@ services:
       DJANGO_SECRET_KEY: ${FLAGSMITH_DJANGO_SECRET_KEY:-dev-only-flagsmith-secret-change-me}
       DJANGO_ALLOWED_HOSTS: '*'
       # Let the dashboard's SPA call its own API at the mapped host port.
-      DJANGO_CSRF_TRUSTED_ORIGINS: http://localhost:8000
+      # Both hostnames for the same 127.0.0.1:8000 binding — a dashboard opened via
+      # 127.0.0.1 (not just localhost) must also pass Django's CSRF origin check on login/POST.
+      DJANGO_CSRF_TRUSTED_ORIGINS: http://localhost:8000,http://127.0.0.1:8000
     ports:
       # localhost-only: the dashboard/API is dev tooling, not a public surface.
       - '127.0.0.1:8000:8000'
