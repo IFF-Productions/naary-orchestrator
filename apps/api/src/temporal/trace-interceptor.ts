@@ -1,6 +1,7 @@
 /**
  * Temporal CLIENT interceptor that stamps the active Sentry trace onto the headers of
- * `startWorkflow` / `signalWithStart` calls. Combined with the worker's workflow + activity
+ * `client.workflow.start` / `signalWithStart` (the calls ExecutionsService makes to launch a
+ * run). Combined with the worker's workflow + activity
  * interceptors, this is what makes an API request → workflow → activities show up as ONE
  * connected Sentry trace instead of disconnected roots.
  *
