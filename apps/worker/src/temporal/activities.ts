@@ -925,11 +925,13 @@ export const __notifyDeps = {
  */
 function approvalUrl(workflowId: string): string | undefined {
   const key = process.env.ENCRYPTION_KEY;
-  if (!key) return undefined;
+  const base = (process.env.APP_BASE_URL ?? "").replace(/\/$/, "");
+  // Both are required for an absolute, clickable link. Without APP_BASE_URL the URL would be
+  // relative (`/approve/…`) — useless as a Slack url-button — so omit it (like runUrl).
+  if (!key || !base) return undefined;
   const token = createHmac("sha256", key)
     .update(`approval:${workflowId}`)
     .digest("hex");
-  const base = (process.env.APP_BASE_URL ?? "").replace(/\/$/, "");
   return `${base}/approve/${encodeURIComponent(workflowId)}?token=${token}`;
 }
 
