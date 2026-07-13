@@ -1047,10 +1047,19 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     } catch {
       graph = undefined;
     }
-    if (graph == null || typeof graph !== "object") {
+    // Require a GraphDef-SHAPED object (nodes[] + startNodeId), not just any object — an array
+    // or arbitrary payload would decode fine here but then throw in the web decompiler.
+    const g = graph as { nodes?: unknown; startNodeId?: unknown } | null;
+    if (
+      g == null ||
+      typeof g !== "object" ||
+      Array.isArray(g) ||
+      !Array.isArray(g.nodes) ||
+      typeof g.startNodeId !== "string"
+    ) {
       throw new NotFoundException("This run's graph snapshot is unavailable.");
     }
-    return { graph: graph as Record<string, unknown> };
+    return { graph: g as Record<string, unknown> };
   }
 
   /**
