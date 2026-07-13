@@ -20,7 +20,9 @@ export function useMediaQuery(query: string): boolean {
       typeof window !== "undefined" && window.matchMedia
         ? window.matchMedia(query).matches
         : false,
-    () => false, // server snapshot: assume desktop (no match)
+    // Server snapshot: no query matches (SSR renders the mobile-first / base branch — e.g.
+    // both PHONE and DESKTOP read false). The client re-evaluates on hydration.
+    () => false,
   );
 }
 

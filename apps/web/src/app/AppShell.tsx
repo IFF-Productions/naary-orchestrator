@@ -328,15 +328,17 @@ export function AppShell() {
           >
             <Icon name="logout" size={14} />
           </button>
-          {/* Manual collapse — desktop/tablet only; the phone drawer doesn't collapse. */}
-          {!phone && (
+          {/* Manual collapse — DESKTOP only. On tablet the rail is automatic (belowRail),
+              so toggling `collapsed` there is a no-op; on phone it's a drawer. */}
+          {!belowRail && (
             <button
-              title={rail ? "Expand" : "Collapse"}
+              title={collapsed ? "Expand" : "Collapse"}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
               onClick={() => setCollapsed((c) => !c)}
               className="btn btn-secondary btn-icon btn-sm"
             >
               <Icon
-                name={rail ? "sidebar-expand" : "sidebar-collapse"}
+                name={collapsed ? "sidebar-expand" : "sidebar-collapse"}
                 size={14}
               />
             </button>
@@ -447,14 +449,17 @@ export function AppShell() {
               icon={theme === "dark" ? "moon" : "sun"}
               onClick={toggleTheme}
               title="Toggle theme"
+              aria-label="Toggle theme"
             />
             <NotificationsBell />
-            {/* Icon-only on phone to keep the topbar to one row. */}
+            {/* Icon-only on phone to keep the topbar to one row. aria-label keeps the icon-only
+                variant named (title alone isn't a reliable accessible name). */}
             <Button
               variant="primary"
               icon="plus"
               iconOnly={phone}
               title="New workflow"
+              aria-label="New workflow"
               onClick={() => navigate("/app/canvas")}
             >
               {phone ? undefined : "New workflow"}
