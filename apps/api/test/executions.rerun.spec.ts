@@ -120,3 +120,47 @@ describe("rerun", () => {
     );
   });
 });
+
+describe("runGraph (snapshot for the run-detail canvas)", () => {
+  it("returns the snapshot graph decoded from history (payloads[0])", async () => {
+    findUnique.mockResolvedValue({ workflowId: "wf", tenantId: "t-1" });
+    const service = makeService(
+      vi.fn().mockResolvedValue(startedWith({ orderId: 1 })),
+    );
+
+    const out = await service.runGraph("wf", "t-1");
+
+    // startedWith puts this graph at payloads[0].
+    expect(out.graph).toEqual({ nodes: [], edges: [], startNodeId: "s" });
+  });
+
+  it("forbids a run owned by another tenant (no history read)", async () => {
+    findUnique.mockResolvedValue({ workflowId: "wf", tenantId: "other" });
+    const fetchHistory = vi.fn();
+    const service = makeService(fetchHistory);
+
+    await expect(service.runGraph("wf", "t-1")).rejects.toThrow(
+      /another tenant/,
+    );
+    expect(fetchHistory).not.toHaveBeenCalled();
+  });
+
+  it("404s when the start event carries no payloads", async () => {
+    findUnique.mockResolvedValue({ workflowId: "wf", tenantId: "t-1" });
+    const service = makeService(
+      vi.fn().mockResolvedValue({
+        events: [
+          {
+            workflowExecutionStartedEventAttributes: {
+              input: { payloads: [] },
+            },
+          },
+        ],
+      }),
+    );
+
+    await expect(service.runGraph("wf", "t-1")).rejects.toThrow(
+      /no stored graph snapshot/,
+    );
+  });
+});

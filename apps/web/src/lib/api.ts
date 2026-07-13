@@ -294,6 +294,10 @@ export const api = {
   getState(id: string): Promise<ExecutionState> {
     return http(`/executions/${encodeURIComponent(id)}`);
   },
+  // The graph SNAPSHOT this run executed (accurate to what ran) — for the run-detail canvas.
+  getRunGraph(id: string): Promise<{ graph: GraphDef }> {
+    return http(`/executions/${encodeURIComponent(id)}/graph`);
+  },
   // The signed resume-URL path for a run paused on a wait(webhook) node.
   getResumeUrl(id: string): Promise<{ path: string }> {
     return http(`/executions/${encodeURIComponent(id)}/resume-url`);
