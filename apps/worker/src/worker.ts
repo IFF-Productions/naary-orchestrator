@@ -22,6 +22,7 @@ import { createLogger } from "@naary/logging";
 import { metricsContentType, renderMetrics } from "@naary/metrics";
 import { createKeyEncryptor } from "@naary/secrets";
 import { temporalConnectionConfig } from "@naary/temporal-config";
+import { sentryTraceActivityInterceptors } from "./temporal/activity-trace-interceptor";
 import * as activities from "./temporal/activities";
 
 // Structured logger for worker BOOT code only. NOT imported by workflows.ts —
@@ -86,11 +87,20 @@ async function run(): Promise<void> {
       namespace,
       taskQueue: TASK_QUEUE,
       workflowsPath: require.resolve("./temporal/workflows"),
-      // Wrap each activity so its execution is a span (activity.<name>). Preserves the
-      // object keys, so Temporal's dispatch-by-name is unchanged. Each activity span is a
-      // ROOT span (its own trace) — trace context can't cross the Temporal boundary without
-      // putting non-deterministic data through workflow code; correlate via tenantId/executionId.
+      // Wrap each activity so its execution is a span (activity.<name>). Preserves the object
+      // keys, so Temporal's dispatch-by-name is unchanged.
       activities: traceActivities(activities),
+      // Distributed tracing across the Temporal boundary (one connected Sentry trace for
+      // API→workflow→activity). The workflow module (sandbox-safe, deterministic) forwards the
+      // Sentry trace headers from the run's start headers onto each scheduled activity; the
+      // activity interceptor continues that trace so the activity.<name> span above becomes a
+      // CHILD of the API request span instead of a disconnected root. No-op when tracing is off.
+      interceptors: {
+        workflowModules: [
+          require.resolve("./temporal/workflow-trace-interceptors"),
+        ],
+        activity: [sentryTraceActivityInterceptors],
+      },
     });
     log.info({ taskQueue: TASK_QUEUE, address, namespace }, "worker polling");
     await worker.run();

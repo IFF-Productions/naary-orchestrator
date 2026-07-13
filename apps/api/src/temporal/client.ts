@@ -1,5 +1,6 @@
 import { temporalConnectionConfig } from "@naary/temporal-config";
 import { Client, Connection } from "@temporalio/client";
+import { sentryTraceClientInterceptor } from "./trace-interceptor";
 
 /**
  * Factory for a connected Temporal Client (used by the NestJS control plane).
@@ -22,5 +23,14 @@ export async function connectTemporal(): Promise<{
     apiKey,
     metadata,
   });
-  return { client: new Client({ connection, namespace }), connection };
+  // Client interceptor injects the active Sentry trace into workflow start/signal headers so the
+  // worker continues the SAME trace (one cross-service trace). No-op when tracing is off.
+  return {
+    client: new Client({
+      connection,
+      namespace,
+      interceptors: { workflow: [sentryTraceClientInterceptor()] },
+    }),
+    connection,
+  };
 }
