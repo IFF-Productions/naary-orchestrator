@@ -1039,7 +1039,14 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     if (!payloads || payloads.length < 1) {
       throw new NotFoundException("This run has no stored graph snapshot.");
     }
-    const graph = defaultPayloadConverter.fromPayload(payloads[0] as never);
+    let graph: unknown;
+    try {
+      // fromPayload can throw on a malformed/unknown payload — treat that as "no usable
+      // snapshot" (404), not an unhandled 500 (mirrors originalTriggerInput's guard).
+      graph = defaultPayloadConverter.fromPayload(payloads[0] as never);
+    } catch {
+      graph = undefined;
+    }
     if (graph == null || typeof graph !== "object") {
       throw new NotFoundException("This run's graph snapshot is unavailable.");
     }

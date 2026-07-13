@@ -450,6 +450,9 @@ function RunView({ id }: { id: string }) {
   // Fetch the run's executed graph snapshot once (immutable for the life of the run).
   useEffect(() => {
     let cancelled = false;
+    // Clear the previous run's graph immediately so navigating between runs (this screen
+    // isn't unmounted) never flashes — or keeps showing — the wrong run's canvas.
+    setGraph(null);
     api.getRunGraph(id).then(
       (r) => {
         if (!cancelled) setGraph(r.graph);

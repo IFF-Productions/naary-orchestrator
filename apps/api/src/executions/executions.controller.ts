@@ -155,8 +155,8 @@ export class ExecutionsController {
     return { path: await this.executions.getResumePath(id, tenantId) };
   }
 
-  /** The graph SNAPSHOT this run executed (from Temporal history), for the run-detail
-   *  canvas. Declared before `:id` so the literal `graph` segment isn't captured as an :id. */
+  /** The graph SNAPSHOT this run executed (from Temporal history), for the run-detail canvas.
+   *  (`:id/graph` and `:id` differ in segment count, so no route-ordering conflict.) */
   @ApiEndpoint({
     summary: "Get the graph a run executed",
     description:

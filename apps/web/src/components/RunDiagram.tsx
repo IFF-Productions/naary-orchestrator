@@ -82,7 +82,9 @@ function RunNode({ data }: NodeProps<Node<RunNodeData>>) {
             borderRadius: "50%",
             flex: "none",
             background: color,
-            animation: live ? "blink 1.4s ease-in-out infinite" : undefined,
+            animation: live
+              ? "naaryBlink 1.4s ease-in-out infinite"
+              : undefined,
           }}
         />
         {data.label}
