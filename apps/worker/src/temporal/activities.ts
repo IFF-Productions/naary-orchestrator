@@ -920,8 +920,9 @@ export const __notifyDeps = {
 /**
  * Signed approve/reject decision link for the pause notification (the notification-links gap). MUST
  * match the API's `mintApprovalToken` (apps/api/.../approval-token.ts): HMAC-SHA256(ENCRYPTION_KEY,
- * "approval:"+workflowId) — the API verifies it. `APP_BASE_URL` prepends the host; without a key it
- * returns undefined (no link). The recipient clicks it to Approve/Reject WITHOUT opening the app.
+ * "approval:"+workflowId) — the API verifies it. `APP_BASE_URL` prepends the host; it returns
+ * undefined when EITHER the encryption key OR APP_BASE_URL is missing (a relative /approve/… link
+ * is useless as a Slack button). The recipient clicks it to Approve/Reject WITHOUT opening the app.
  */
 function approvalUrl(workflowId: string): string | undefined {
   const key = process.env.ENCRYPTION_KEY;
