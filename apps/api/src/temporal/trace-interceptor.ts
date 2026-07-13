@@ -22,21 +22,27 @@ import {
 type Payload = ReturnType<typeof defaultPayloadConverter.toPayload>;
 type Headers = Record<string, Payload>;
 
-/** Merge the active Sentry trace headers (as Temporal payloads) into an outgoing header map. */
+/** Merge the active Sentry trace headers (as Temporal payloads) into an outgoing header map.
+ *  Wrapped so a tracing bug can NEVER break a workflow start — telemetry must not affect the
+ *  request path (on any error, return the original headers untouched). */
 function injectTrace(headers: Headers): Headers {
-  const trace = getSentryTraceHeaders();
-  const extra: Headers = {};
-  if (trace[SENTRY_TRACE_HEADER]) {
-    extra[SENTRY_TRACE_HEADER] = defaultPayloadConverter.toPayload(
-      trace[SENTRY_TRACE_HEADER],
-    );
+  try {
+    const trace = getSentryTraceHeaders();
+    const extra: Headers = {};
+    if (trace[SENTRY_TRACE_HEADER]) {
+      extra[SENTRY_TRACE_HEADER] = defaultPayloadConverter.toPayload(
+        trace[SENTRY_TRACE_HEADER],
+      );
+    }
+    if (trace[BAGGAGE_HEADER]) {
+      extra[BAGGAGE_HEADER] = defaultPayloadConverter.toPayload(
+        trace[BAGGAGE_HEADER],
+      );
+    }
+    return Object.keys(extra).length ? { ...headers, ...extra } : headers;
+  } catch {
+    return headers; // tracing is best-effort; never fail the start over it
   }
-  if (trace[BAGGAGE_HEADER]) {
-    extra[BAGGAGE_HEADER] = defaultPayloadConverter.toPayload(
-      trace[BAGGAGE_HEADER],
-    );
-  }
-  return Object.keys(extra).length ? { ...headers, ...extra } : headers;
 }
 
 export function sentryTraceClientInterceptor(): WorkflowClientInterceptor {

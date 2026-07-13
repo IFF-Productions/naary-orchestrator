@@ -49,15 +49,29 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     // Unexpected: do NOT serialize the error message/stack (a DB or provider
-    // error can embed secrets) — log only safe identifiers (route + ids) so the
-    // line ties to the request's access log via requestId. The full (scrubbed)
-    // exception goes to Sentry for triage.
+    // error can embed secrets) — but the error's TYPE and machine CODE are safe and
+    // highly diagnostic (a Temporal DEADLINE_EXCEEDED vs a Prisma P2002 vs a generic
+    // Error), and without them "unhandled error" is undebuggable from logs alone. Log
+    // route + ids + errorName/errorCode; the full (scrubbed) exception goes to Sentry.
+    const err = exception as {
+      name?: string;
+      code?: string | number;
+      constructor?: { name?: string };
+    };
     this.logger.error(
       {
         requestId: req?.id,
         tenantId: req?.principal?.tenantId,
         method: req?.method,
         path: req?.url,
+        // constructor name (e.g. "TransportError", "PrismaClientKnownRequestError"),
+        // falling back to .name. Never the message.
+        errorName: err?.constructor?.name ?? err?.name,
+        // A machine code when present: gRPC status ("DEADLINE_EXCEEDED"/4), Prisma "P2002",
+        // Node "ECONNREFUSED", etc. These are non-secret identifiers, not free-form text.
+        ...(typeof err?.code === "string" || typeof err?.code === "number"
+          ? { errorCode: err.code }
+          : {}),
       },
       "unhandled error",
     );
