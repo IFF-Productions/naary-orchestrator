@@ -21,6 +21,7 @@ import {
   GenerateGraphResponse,
   GraphDetailResponse,
   GraphSummaryResponse,
+  GraphVersionResponse,
   SaveGraphResponse,
 } from "./graph.response";
 import { type GraphSummary, GraphsService } from "./graphs.service";
@@ -68,6 +69,21 @@ export class GraphsController {
     @Body() body: GenerateGraphDto,
   ): Promise<{ name: string; graph: GraphDef }> {
     return this.generator.generate(tenantId, body.prompt, body.provider);
+  }
+
+  /** Every stored version of a workflowKey (newest first) — powers the "re-run at
+   *  version" picker. Identity only, no graph bodies. */
+  @ApiEndpoint({
+    summary: "List a workflow's versions",
+    description: "Newest first; identity only (no graph bodies).",
+    ok: [GraphVersionResponse],
+  })
+  @Get(":workflowKey/versions")
+  listVersions(
+    @TenantId() tenantId: string,
+    @Param("workflowKey") workflowKey: string,
+  ): Promise<{ version: number; contentHash: string; createdAt: string }[]> {
+    return this.graphs.listVersions(tenantId, workflowKey);
   }
 
   /** The latest graph for a workflowKey — used to open it in the canvas. */

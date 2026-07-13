@@ -41,6 +41,14 @@ export class SaveGraphResponse {
   contentHash!: string;
 }
 
+/** One stored version of a workflow (identity only, no graph body). */
+export class GraphVersionResponse {
+  @ApiProperty({ example: 3 }) version!: number;
+  @ApiProperty({ description: "sha256 of the canonical graph." })
+  contentHash!: string;
+  @ApiProperty({ format: "date-time" }) createdAt!: string;
+}
+
 /** A workflow's bound error-handler key (null = none). */
 export class ErrorHandlerResponse {
   @ApiProperty({ nullable: true, example: "on-failure-alert" })

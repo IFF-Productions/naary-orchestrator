@@ -9,8 +9,9 @@ import { Button, Icon, StatusPill } from "../../components";
 import { api, type RunSummary, UnauthorizedError } from "../../lib/api";
 import { isFailure, isTerminal, runStatusUi } from "../../lib/run-status";
 import { useMode } from "../../mode";
+import { RerunMenu, VersionBadge } from "./RerunMenu";
 
-const COLS = "28px 1.5fr 1fr 0.9fr 0.7fr 0.7fr 0.6fr";
+const COLS = "28px 1.4fr 1fr 0.5fr 0.8fr 0.6fr 0.7fr 0.6fr";
 
 /** Compact relative time from an ISO timestamp (no date lib). */
 function ago(iso: string): string {
@@ -45,7 +46,6 @@ export function Runs() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
   const [starting, setStarting] = useState(false);
-  const [rerunning, setRerunning] = useState<string | null>(null);
   // Set of in-flight archive/restore ids — a Set (not a single id) so archiving two rows in
   // quick succession disables each independently instead of the second clobbering the first.
   const [archiving, setArchiving] = useState<ReadonlySet<string>>(
@@ -216,20 +216,6 @@ export function Runs() {
       }
       return new Set([...s, ...rows.map((r) => r.workflowId)]);
     });
-  }
-
-  async function rerun(id: string, e: ReactMouseEvent) {
-    e.stopPropagation(); // don't also navigate into the (old) run
-    setRerunning(id);
-    setError(null);
-    try {
-      const { workflowId } = await api.rerun(id);
-      navigate(`/app/runs/${encodeURIComponent(workflowId)}`);
-    } catch {
-      setError("Could not re-run (the run may predate re-run support).");
-    } finally {
-      setRerunning(null);
-    }
   }
 
   async function startRun() {
@@ -497,6 +483,7 @@ export function Runs() {
           </span>
           <span>Run</span>
           <span>{simple ? "Automation" : "Workflow"}</span>
+          <span>Version</span>
           <span>Status</span>
           <span>Cost</span>
           <span>Started</span>
@@ -579,6 +566,9 @@ export function Runs() {
               {r.workflowKey ?? "—"}
             </span>
             <span>
+              <VersionBadge version={r.graphVersion} />
+            </span>
+            <span>
               <StatusPill {...runStatusUi(r.status)} />
             </span>
             <span
@@ -601,15 +591,14 @@ export function Runs() {
               }}
             >
               {isTerminal(r.status) && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  icon="refresh"
-                  iconOnly
-                  title="Re-run with the same input"
-                  aria-label="Re-run with the same input"
-                  disabled={rerunning === r.workflowId}
-                  onClick={(e) => void rerun(r.workflowId, e)}
+                <RerunMenu
+                  runId={r.workflowId}
+                  workflowKey={r.workflowKey}
+                  currentVersion={r.graphVersion}
+                  onRerun={(newId) =>
+                    navigate(`/app/runs/${encodeURIComponent(newId)}`)
+                  }
+                  onError={setError}
                 />
               )}
               <Button

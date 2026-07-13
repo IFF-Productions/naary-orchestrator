@@ -67,6 +67,9 @@ export interface RunSummary {
   createdAt: string;
   /** Soft-archived (hidden from the default Runs list). */
   archived: boolean;
+  /** The GraphDefinition version this run snapshotted at start; null for
+   *  pre-migration rows (version wasn't recorded). */
+  graphVersion: number | null;
 }
 
 /** Live run detail — like ExecutionState but with the widened status (a run can be
@@ -258,17 +261,25 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Manual start. `tenantId` comes from the authenticated principal (not the body);
-   *  runs the tenant's latest graph for `workflowKey` (default "default"; the canvas
-   *  saves + runs "canvas"). The chosen graph must already be saved. */
+   *  runs the tenant's graph for `workflowKey` (default "default"; the canvas
+   *  saves + runs "canvas"). The chosen graph must already be saved. Pass
+   *  `graphVersion` to run a SPECIFIC saved version (e.g. re-run at an older/newer
+   *  version); omit for the latest. */
   async start(
     tenantId: string,
     input?: Record<string, unknown>,
     workflowKey: string = DEFAULT_WORKFLOW_KEY,
+    graphVersion?: number,
   ): Promise<{ workflowId: string }> {
-    const snapshot = await this.graphs.getLatest(tenantId, workflowKey);
+    const snapshot =
+      graphVersion === undefined
+        ? await this.graphs.getLatest(tenantId, workflowKey)
+        : await this.graphs.getVersion(tenantId, workflowKey, graphVersion);
     if (!snapshot) {
       throw new NotFoundException(
-        `No '${workflowKey}' graph for this tenant — save one first`,
+        graphVersion === undefined
+          ? `No '${workflowKey}' graph for this tenant — save one first`
+          : `No version ${graphVersion} of '${workflowKey}' for this tenant`,
       );
     }
     // Default input precedence: explicit body input → the Start node's configured
@@ -542,9 +553,15 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    // Record ownership so approve/getState can be authorized by tenant.
+    // Record ownership so approve/getState can be authorized by tenant, plus the
+    // snapshotted version for the Runs list / run detail (the memo/history also hold it).
     await getPrisma().execution.create({
-      data: { workflowId, tenantId, workflowKey },
+      data: {
+        workflowId,
+        tenantId,
+        workflowKey,
+        graphVersion: snapshot.version,
+      },
     });
     executionsStarted.inc({ workflowKey });
     return { workflowId };
@@ -910,6 +927,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           startedAt: createdAt,
           createdAt,
           archived: r.archivedAt !== null,
+          graphVersion: r.graphVersion,
         };
         if (isTerminalStatus(r.status)) {
           return { ...base, status: r.status as RunSummary["status"] };
@@ -1066,7 +1084,11 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   async runGraph(
     id: string,
     tenantId: string,
-  ): Promise<{ graph: Record<string, unknown> }> {
+  ): Promise<{
+    graph: Record<string, unknown>;
+    version: number | null;
+    workflowKey: string | null;
+  }> {
     await this.assertOwner(id, tenantId);
     let h: { events?: unknown[] | null };
     try {
@@ -1119,16 +1141,35 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     ) {
       throw new NotFoundException("This run's graph snapshot is unavailable.");
     }
-    return { graph: g as Record<string, unknown> };
+    // Version + workflowKey come from the Execution read-model row (the same source the
+    // Runs list uses, so the detail label matches the list) — not re-decoded from history.
+    // These let the detail view label the executed graph and drive the re-run-at-version
+    // picker. version is null for pre-migration runs; workflowKey null for very old rows.
+    const row = await getPrisma().execution.findUnique({
+      where: { workflowId: id },
+      select: { graphVersion: true, workflowKey: true },
+    });
+    return {
+      graph: g as Record<string, unknown>,
+      version: row?.graphVersion ?? null,
+      workflowKey: row?.workflowKey ?? null,
+    };
   }
 
   /**
    * Re-run a past execution: start a NEW run of the same saved workflow with the same
-   * trigger input the original was started with (n8n's "Retry"). It runs against the
-   * CURRENT graph (start snapshots the latest) — so re-running picks up any fix. The
-   * run is durable and metered exactly like any other start. Returns the new run id.
+   * trigger input the original was started with (n8n's "Retry"). By default it runs
+   * against the CURRENT graph (start snapshots the latest) — so re-running picks up any
+   * fix. Pass `graphVersion` to re-run at a SPECIFIC saved version (newer or older) of
+   * the run's OWN workflowKey — the version is resolved against that key only, never an
+   * arbitrary (key, version) from the caller. The run is durable and metered exactly
+   * like any other start. Returns the new run id.
    */
-  async rerun(id: string, tenantId: string): Promise<{ workflowId: string }> {
+  async rerun(
+    id: string,
+    tenantId: string,
+    graphVersion?: number,
+  ): Promise<{ workflowId: string }> {
     await this.assertOwner(id, tenantId);
     const row = await getPrisma().execution.findUnique({
       where: { workflowId: id },
@@ -1139,7 +1180,9 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       );
     }
     const input = await this.originalTriggerInput(id);
-    return this.start(tenantId, input, row.workflowKey);
+    // workflowKey is the run's OWN key; graphVersion (if given) is resolved against
+    // that key inside start() — the caller can't target another workflow's version.
+    return this.start(tenantId, input, row.workflowKey, graphVersion);
   }
 
   /** 404 if the execution is unknown, 403 if it belongs to another tenant. */

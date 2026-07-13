@@ -155,6 +155,45 @@ export class GraphsService {
       : null;
   }
 
+  /** A SPECIFIC version's snapshot (for re-running a run at a chosen version).
+   *  Tenant- + key-scoped; null if that (key, version) doesn't exist for the tenant. */
+  async getVersion(
+    tenantId: string,
+    workflowKey: string,
+    version: number,
+  ): Promise<GraphSnapshot | null> {
+    const row = await getPrisma().graphDefinition.findUnique({
+      where: {
+        tenantId_workflowKey_version: { tenantId, workflowKey, version },
+      },
+    });
+    return row
+      ? {
+          graph: row.graph as unknown as GraphDef,
+          contentHash: row.contentHash,
+          version: row.version,
+        }
+      : null;
+  }
+
+  /** Every stored version of a workflowKey, newest first — identity only, no graph
+   *  bodies (cheap; powers the "re-run at version" picker). */
+  async listVersions(
+    tenantId: string,
+    workflowKey: string,
+  ): Promise<{ version: number; contentHash: string; createdAt: string }[]> {
+    const rows = await getPrisma().graphDefinition.findMany({
+      where: { tenantId, workflowKey },
+      orderBy: { version: "desc" },
+      select: { version: true, contentHash: true, createdAt: true },
+    });
+    return rows.map((r) => ({
+      version: r.version,
+      contentHash: r.contentHash,
+      createdAt: r.createdAt.toISOString(),
+    }));
+  }
+
   private latestRow(tenantId: string, workflowKey: string) {
     return getPrisma().graphDefinition.findFirst({
       where: { tenantId, workflowKey },

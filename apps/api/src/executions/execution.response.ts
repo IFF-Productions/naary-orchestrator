@@ -36,6 +36,13 @@ export class RunListItemResponse {
     description: "Soft-archived (hidden by default).",
   })
   archived!: boolean;
+  @ApiProperty({
+    nullable: true,
+    example: 3,
+    description:
+      "The workflow graph version this run snapshotted at start; null for pre-migration rows.",
+  })
+  graphVersion!: number | null;
 }
 
 /** A run paused for approval, enriched with the humanApproval node's prompt. */
@@ -110,6 +117,20 @@ export class RunGraphResponse {
       "The version-pinned GraphDef the run walked (nodes, edges, startNodeId).",
   })
   graph!: Record<string, unknown>;
+  @ApiProperty({
+    nullable: true,
+    example: 3,
+    description:
+      "The workflow graph version this run executed; null for pre-migration runs.",
+  })
+  version!: number | null;
+  @ApiProperty({
+    nullable: true,
+    example: "support-triage",
+    description:
+      "The run's workflowKey (drives the re-run-at-version picker); null for very old runs.",
+  })
+  workflowKey!: string | null;
 }
 
 /** One entry in a run's execution log (derived from Temporal history). */

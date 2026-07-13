@@ -444,6 +444,7 @@ export async function runGraph(
       workflowId: wf.workflowInfo().workflowId,
       tenantId: runCtx.tenantId,
       workflowKey: runCtx.workflowKey,
+      graphVersion: runCtx.graphVersion,
     });
   }
 

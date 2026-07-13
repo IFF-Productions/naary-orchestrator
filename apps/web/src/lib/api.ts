@@ -126,6 +126,12 @@ export interface GraphSummary {
   /** Whether the workflow's automatic triggers fire (n8n parity). Default true. */
   active: boolean;
 }
+/** One stored version of a workflow (identity only) — for the re-run-at-version picker. */
+export interface GraphVersion {
+  version: number;
+  contentHash: string;
+  createdAt: string;
+}
 export interface NamedGraph {
   workflowKey: string;
   name: string;
@@ -311,10 +317,12 @@ export const api = {
       method: "POST",
     });
   },
-  // Re-run a past run with its original trigger input (against the current graph).
-  rerun(id: string): Promise<{ workflowId: string }> {
+  // Re-run a past run with its original trigger input. Against the current graph by
+  // default; pass `graphVersion` to re-run at a specific saved version (newer or older).
+  rerun(id: string, graphVersion?: number): Promise<{ workflowId: string }> {
     return http(`/executions/${encodeURIComponent(id)}/rerun`, {
       method: "POST",
+      body: JSON.stringify(graphVersion !== undefined ? { graphVersion } : {}),
     });
   },
   // Soft-archive a run (hide it from the default Runs list). Read-model only.
@@ -337,8 +345,17 @@ export const api = {
     return http(`/executions/${encodeURIComponent(id)}`);
   },
   // The graph SNAPSHOT this run executed (accurate to what ran) — for the run-detail canvas.
-  getRunGraph(id: string): Promise<{ graph: GraphDef }> {
+  // `version` is the executed graph version; `workflowKey` drives the re-run-at-version picker.
+  getRunGraph(id: string): Promise<{
+    graph: GraphDef;
+    version: number | null;
+    workflowKey: string | null;
+  }> {
     return http(`/executions/${encodeURIComponent(id)}/graph`);
+  },
+  // Every stored version of a workflow (newest first) — powers the "re-run at version" picker.
+  listGraphVersions(workflowKey: string): Promise<GraphVersion[]> {
+    return http(`/graphs/${encodeURIComponent(workflowKey)}/versions`);
   },
   // The signed resume-URL path for a run paused on a wait(webhook) node.
   getResumeUrl(id: string): Promise<{ path: string }> {
@@ -846,6 +863,8 @@ export interface RunSummary {
   createdAt: string;
   /** Soft-archived (hidden from the default Runs list). */
   archived: boolean;
+  /** The workflow graph version this run snapshotted at start; null for older runs. */
+  graphVersion: number | null;
 }
 export interface UsageReport {
   totalCostUsd: number;
