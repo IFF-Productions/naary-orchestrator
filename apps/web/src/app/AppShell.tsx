@@ -129,6 +129,16 @@ export function AppShell() {
   useEffect(() => {
     if (!phone) setDrawerOpen(false);
   }, [phone]);
+  // Escape closes the drawer (the hamburger is inert with the background while it's open, so
+  // the keyboard dismiss path is Escape + the backdrop click).
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrawerOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
 
   // Global search: jump to Workflows filtered by the query (Workflows reads ?q). In Simple mode
   // that route is hidden, so land on the automations list instead.
@@ -354,7 +364,11 @@ export function AppShell() {
       </aside>
 
       {/* ===== MAIN ===== */}
+      {/* `inert` while the phone drawer is open so the content behind it (topbar + main) is
+          out of the tab order + hidden from assistive tech — a modal drawer. The backdrop is a
+          sibling (not inert), so it still closes on click; Escape closes it too (below). */}
       <div
+        inert={phone && drawerOpen}
         style={{
           flex: 1,
           display: "flex",
