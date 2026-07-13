@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __notifyDeps, sendNotification } from "../src/temporal/activities";
 
 const fetch = vi.fn();
@@ -8,8 +8,23 @@ let settings: {
   onRunFailed: boolean;
 } | null;
 
+// Capture the env we mutate so it can't leak into other test files (Vitest reuses workers).
+const savedEnv = {
+  APP_BASE_URL: process.env.APP_BASE_URL,
+  ENCRYPTION_KEY: process.env.ENCRYPTION_KEY,
+};
+afterEach(() => {
+  for (const k of ["APP_BASE_URL", "ENCRYPTION_KEY"] as const) {
+    if (savedEnv[k] === undefined) delete process.env[k];
+    else process.env[k] = savedEnv[k];
+  }
+});
+
 beforeEach(() => {
   fetch.mockReset().mockResolvedValue({ ok: true } as never);
+  // Deep-link URLs are built from these; without them the links are omitted.
+  process.env.APP_BASE_URL = "https://app.naary.test";
+  process.env.ENCRYPTION_KEY = "test-encryption-key";
   settings = {
     webhookUrl: "https://hooks.example.com/x",
     onApprovalPending: true,
@@ -45,6 +60,80 @@ describe("sendNotification", () => {
     expect(body.kind).toBe("approval_pending");
     expect(body.text).toContain("Ship it?"); // the { text } Slack/Teams show
     expect(body.workflowId).toBe("wf-1");
+  });
+
+  it("carries MULTIPLE deep-linked entries (Approve/Reject + View run) for an approval", async () => {
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      title: "Ship?",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+
+    // Structured `actions` = the multiple entries a recipient acts on.
+    expect(body.actions.map((a: { label: string }) => a.label)).toEqual([
+      "Approve / Reject",
+      "View run",
+    ]);
+    // Deep link to the resource to act on.
+    expect(body.runUrl).toBe("https://app.naary.test/app/runs/wf-1");
+    expect(body.approvalUrl).toContain(
+      "https://app.naary.test/approve/wf-1?token=",
+    );
+    // Slack Block Kit: a section + an actions block with two url-buttons.
+    const actionsBlock = body.blocks.find(
+      (b: { type: string }) => b.type === "actions",
+    );
+    expect(actionsBlock.elements).toHaveLength(2);
+    expect(actionsBlock.elements[1].url).toBe(body.runUrl);
+    // Slack requires an action_id on every button (else invalid_blocks).
+    expect(
+      actionsBlock.elements.every(
+        (el: { action_id?: string }) => !!el.action_id,
+      ),
+    ).toBe(true);
+  });
+
+  it("includes a View-run deep link on a failed-run notification (the prior gap)", async () => {
+    await sendNotification({
+      ...BASE,
+      kind: "run_failed",
+      detail: "timed_out",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+
+    expect(body.runUrl).toBe("https://app.naary.test/app/runs/wf-1");
+    expect(body.text).toContain("https://app.naary.test/app/runs/wf-1");
+    expect(body.actions).toEqual([
+      { label: "View run", url: "https://app.naary.test/app/runs/wf-1" },
+    ]);
+    // No approval action on a failure.
+    expect(body.approvalUrl).toBeUndefined();
+  });
+
+  it("omits deep links (no blocks actions) when APP_BASE_URL is unset", async () => {
+    process.env.APP_BASE_URL = "";
+    await sendNotification({ ...BASE, kind: "run_failed" });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    expect(body.runUrl).toBeUndefined();
+    expect(body.actions).toEqual([]);
+    // Only the section block remains — no actions row.
+    expect(
+      body.blocks.some((b: { type: string }) => b.type === "actions"),
+    ).toBe(false);
+  });
+
+  it("omits the approve link (not a relative URL) for an approval when APP_BASE_URL is unset", async () => {
+    process.env.APP_BASE_URL = "";
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      title: "Ship?",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    // Regression: approvalUrl must not fall back to a relative `/approve/…` (a broken Slack button).
+    expect(body.approvalUrl).toBeUndefined();
+    expect(body.actions).toEqual([]);
   });
 
   it("is a NO-OP when no webhook URL is configured", async () => {
