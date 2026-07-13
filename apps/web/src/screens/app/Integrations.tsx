@@ -1147,6 +1147,13 @@ function AddIntegrations({
         <ConnectForm tenant={tenant} onChanged={onChanged} />
       </Collapsible>
       <Collapsible
+        title="Connect GitHub (App)"
+        subtitle="Install the GitHub App to authorize repos — no personal token"
+        accent="var(--brand)"
+      >
+        <GithubAppForm tenant={tenant} />
+      </Collapsible>
+      <Collapsible
         title="Connect a database"
         subtitle="For the SQL Query / SQL Exec nodes"
         accent="var(--node-sql, var(--brand))"
@@ -1724,6 +1731,64 @@ function SigningForm({
           onClick={() => void submit()}
         >
           {busy ? "Saving…" : "Save"}
+        </Button>
+        {msg && (
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
+            {msg}
+          </span>
+        )}
+      </div>
+    </>
+  );
+}
+
+/** Install the GitHub App for this tenant. INVERTED vs the MCP ConnectForm (which creates the
+ *  connection up-front): GitHub yields no installation id until AFTER the user installs, so this
+ *  only sends a label and full-page-navigates to github.com. The user picks repos; GitHub then
+ *  redirects to the API's /github-app/callback, which creates the github_app connection from the
+ *  returned installation_id. That callback currently returns JSON (like the OAuth callback), so the
+ *  browser lands on the API response — the new connection appears on the NEXT visit to
+ *  /app/integrations, not via an auto-return. (Redirecting BOTH callbacks back to the SPA is a
+ *  tracked follow-up.) Hence no onChanged (we navigate away) and no token field — the app install
+ *  itself IS the credential; no PAT is ever entered or stored. */
+function GithubAppForm({ tenant }: { tenant: string }) {
+  const [label, setLabel] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function install() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      setMsg("Redirecting to GitHub…");
+      const { installUrl } = await api.startGithubAppInstall(tenant, {
+        label: label.trim() || "GitHub",
+      });
+      window.location.assign(installUrl); // navigate to github.com — leave the form as-is
+    } catch {
+      setMsg("Could not start the GitHub App install — try again.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <div style={{ marginBottom: 12 }}>
+        <span style={fieldLabel}>Label</span>
+        <input
+          style={fieldStyle}
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="GitHub (prod)"
+        />
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <Button
+          variant="primary"
+          disabled={busy}
+          onClick={() => void install()}
+        >
+          {busy ? "Redirecting…" : "Install GitHub App"}
         </Button>
         {msg && (
           <span style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
