@@ -21,7 +21,8 @@
     "dev:build": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build",
     "dev:logs": "docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f api worker",
     "dev:down": "docker compose -f docker-compose.yml -f docker-compose.dev.yml down",
-    "dev:web": "pnpm --filter @naary/web dev"
+    "dev:web": "pnpm --filter @naary/web dev",
+    "prod": "docker compose --env-file ./deploy/.env -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build"
   },
   "devDependencies": {
     "@swc/core": "^1.15.43",
