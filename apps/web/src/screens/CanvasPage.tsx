@@ -694,9 +694,11 @@ export function CanvasPage() {
       setStatus(error ?? "Fix the graph's issues before exporting.");
       return;
     }
-    // One resolved name drives the payload, the filename slug, and the status message so they
-    // never diverge (a blank/whitespace name → "workflow" everywhere, not a mix).
+    // One resolved name drives the payload name AND the status message (they always match).
+    // The FILENAME is its slug — a filesystem-safe form that can differ from the display name
+    // (e.g. "My Flow" → my-flow.json, or "---" → the DEFAULT_KEY fallback), which is expected.
     const exportName = name.trim() || "workflow";
+    const exportSlug = slugify(exportName);
     const payload = { naaryFlow: 1, name: exportName, graph };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: "application/json",
@@ -704,8 +706,7 @@ export function CanvasPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    // slugify trims separators + falls back to a default, so "---" can't make "---.json".
-    a.download = `${slugify(exportName)}.json`;
+    a.download = `${exportSlug}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();
