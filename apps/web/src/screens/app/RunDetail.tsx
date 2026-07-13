@@ -457,8 +457,12 @@ function RunView({ id }: { id: string }) {
       (r) => {
         if (!cancelled) setGraph(r.graph);
       },
-      () => {
-        /* snapshot unavailable (e.g. a pre-snapshot run) — canvas section is skipped */
+      (e) => {
+        // A 404 is expected for pre-snapshot runs — skip the canvas silently. Anything else
+        // (500, auth/routing) is unexpected: log it so a real failure is detectable, not hidden.
+        if (!(e instanceof Error) || !/→ 404$/.test(e.message)) {
+          console.warn("run-detail canvas: graph fetch failed", e);
+        }
       },
     );
     return () => {

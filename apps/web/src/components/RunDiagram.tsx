@@ -143,8 +143,12 @@ export function RunDiagram({
   status,
   height = 340,
 }: RunDiagramProps) {
+  // The BFS layout is a pure function of the (immutable-for-a-run) graph — memoize it on
+  // `graph` alone so it isn't recomputed on every poll (ctx/status/currentNodeId change).
+  const layout = useMemo(() => decompileGraph(graph), [graph]);
+
   const { nodes, edges } = useMemo(() => {
-    const { nodes: gn, edges: ge } = decompileGraph(graph);
+    const { nodes: gn, edges: ge } = layout;
     const ids = new Set(gn.map((n) => n.id));
     const executed = new Set(Object.keys(ctx).filter((k) => ids.has(k)));
 
@@ -183,7 +187,7 @@ export function RunDiagram({
       };
     });
     return { nodes: flowNodes, edges: flowEdges };
-  }, [graph, ctx, currentNodeId, status]);
+  }, [layout, ctx, currentNodeId, status]);
 
   return (
     <div style={{ height, width: "100%" }}>
