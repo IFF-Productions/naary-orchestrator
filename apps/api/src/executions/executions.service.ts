@@ -1030,6 +1030,73 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * The graph a past run EXECUTED, read back from Temporal history (the durable source of
+   * truth). `startGraph` starts the workflow with `[graph, input, runCtx]`, so `payloads[0]`
+   * is the version-pinned snapshot the run actually walked — accurate even if the saved
+   * workflow was edited since (unlike fetching the latest by key). Owner-scoped; used by the
+   * run-detail canvas to draw the executed path. 404 if the run or its snapshot is gone.
+   * Read-only projection — the graph is definition data (no secrets), safe to return.
+   */
+  async runGraph(
+    id: string,
+    tenantId: string,
+  ): Promise<{ graph: Record<string, unknown> }> {
+    await this.assertOwner(id, tenantId);
+    let h: { events?: unknown[] | null };
+    try {
+      h = await this.client.workflow.getHandle(id).fetchHistory();
+    } catch (e) {
+      if (e instanceof WorkflowNotFoundError) {
+        throw new NotFoundException("Execution not found");
+      }
+      throw e;
+    }
+    const started = (h.events ?? []).find(
+      (ev) =>
+        (ev as { workflowExecutionStartedEventAttributes?: unknown })
+          .workflowExecutionStartedEventAttributes,
+    ) as
+      | {
+          workflowExecutionStartedEventAttributes?: {
+            input?: { payloads?: unknown[] };
+          };
+        }
+      | undefined;
+    const payloads =
+      started?.workflowExecutionStartedEventAttributes?.input?.payloads;
+    if (!payloads || payloads.length < 1) {
+      throw new NotFoundException("This run has no stored graph snapshot.");
+    }
+    let graph: unknown;
+    try {
+      // fromPayload can throw on a malformed/unknown payload — treat that as "no usable
+      // snapshot" (404), not an unhandled 500 (mirrors originalTriggerInput's guard).
+      graph = defaultPayloadConverter.fromPayload(payloads[0] as never);
+    } catch {
+      graph = undefined;
+    }
+    // Require a GraphDef-SHAPED object (nodes[] + edges[] + startNodeId), not just any object
+    // — an array or arbitrary payload would decode fine here but then throw in the web
+    // decompiler, which iterates graph.nodes AND graph.edges.
+    const g = graph as {
+      nodes?: unknown;
+      edges?: unknown;
+      startNodeId?: unknown;
+    } | null;
+    if (
+      g == null ||
+      typeof g !== "object" ||
+      Array.isArray(g) ||
+      !Array.isArray(g.nodes) ||
+      !Array.isArray(g.edges) ||
+      typeof g.startNodeId !== "string"
+    ) {
+      throw new NotFoundException("This run's graph snapshot is unavailable.");
+    }
+    return { graph: g as Record<string, unknown> };
+  }
+
+  /**
    * Re-run a past execution: start a NEW run of the same saved workflow with the same
    * trigger input the original was started with (n8n's "Retry"). It runs against the
    * CURRENT graph (start snapshots the latest) — so re-running picks up any fix. The

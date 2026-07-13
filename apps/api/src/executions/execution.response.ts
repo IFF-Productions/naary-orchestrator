@@ -101,6 +101,17 @@ export class RunStateResponse {
   ctx!: Record<string, unknown>;
 }
 
+/** The graph snapshot a run executed — for the run-detail canvas (read-only). */
+export class RunGraphResponse {
+  @ApiProperty({
+    type: "object",
+    additionalProperties: true,
+    description:
+      "The version-pinned GraphDef the run walked (nodes, edges, startNodeId).",
+  })
+  graph!: Record<string, unknown>;
+}
+
 /** One entry in a run's execution log (derived from Temporal history). */
 export class RunEventResponse {
   @ApiProperty({ example: 12 }) id!: number;

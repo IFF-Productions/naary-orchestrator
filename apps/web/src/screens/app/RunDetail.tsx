@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import type { RegionTrace, TraceCell, UnresolvedRef } from "@naary/dsl";
+import type {
+  GraphDef,
+  RegionTrace,
+  TraceCell,
+  UnresolvedRef,
+} from "@naary/dsl";
 import {
   Button,
   Card,
@@ -10,6 +15,7 @@ import {
   Table,
   type Column,
 } from "../../components";
+import { RunDiagram } from "../../components/RunDiagram";
 import {
   api,
   type ExecutionState,
@@ -418,6 +424,9 @@ function RunView({ id }: { id: string }) {
   const [acting, setActing] = useState(false);
   const [resumeUrl, setResumeUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // The graph SNAPSHOT this run executed (immutable → fetched once). null while loading or if
+  // the snapshot is unavailable (older runs) — the canvas section just doesn't render then.
+  const [graph, setGraph] = useState<GraphDef | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const poll = useCallback(async () => {
@@ -436,6 +445,29 @@ function RunView({ id }: { id: string }) {
     } finally {
       setLoading(false);
     }
+  }, [id]);
+
+  // Fetch the run's executed graph snapshot once (immutable for the life of the run).
+  useEffect(() => {
+    let cancelled = false;
+    // Clear the previous run's graph immediately so navigating between runs (this screen
+    // isn't unmounted) never flashes — or keeps showing — the wrong run's canvas.
+    setGraph(null);
+    api.getRunGraph(id).then(
+      (r) => {
+        if (!cancelled) setGraph(r.graph);
+      },
+      (e) => {
+        // A 404 is expected for pre-snapshot runs — skip the canvas silently. Anything else
+        // (500, auth/routing) is unexpected: log it so a real failure is detectable, not hidden.
+        if (!(e instanceof Error) || !/→ 404$/.test(e.message)) {
+          console.warn("run-detail canvas: graph fetch failed", e);
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   // Poll until the run reaches a terminal status (then stop — closed runs don't change).
@@ -724,6 +756,30 @@ function RunView({ id }: { id: string }) {
           <div style={{ color: "var(--ink-3)", fontSize: "var(--text-body)" }}>
             Loading…
           </div>
+        </Card>
+      )}
+
+      {/* Workflow canvas — the graph this run executed, with the path it took highlighted.
+          Green = ran, ember/amber = the current step, dim = not reached. */}
+      {!error && state && graph && (
+        <Card style={{ padding: "16px 18px 14px", marginBottom: 16 }}>
+          <SectionTitle>Workflow canvas</SectionTitle>
+          <div
+            style={{
+              fontSize: "var(--text-2xs)",
+              color: "var(--ink-3)",
+              marginBottom: 10,
+            }}
+          >
+            The graph this run executed — green nodes ran; the highlighted node
+            is the current step; dimmed nodes weren't reached.
+          </div>
+          <RunDiagram
+            graph={graph}
+            ctx={state.ctx}
+            currentNodeId={state.currentNodeId}
+            status={state.status}
+          />
         </Card>
       )}
 

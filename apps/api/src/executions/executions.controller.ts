@@ -21,6 +21,7 @@ import {
   BatchDecisionItemResponse,
   ResumeUrlResponse,
   RunEventResponse,
+  RunGraphResponse,
   RunListItemResponse,
   RunStateResponse,
   StartExecutionResponse,
@@ -197,6 +198,23 @@ export class ExecutionsController {
     @Param("id") id: string,
   ): Promise<ResumeUrlResponse> {
     return { path: await this.executions.getResumePath(id, tenantId) };
+  }
+
+  /** The graph SNAPSHOT this run executed (from Temporal history), for the run-detail canvas.
+   *  (`:id/graph` and `:id` differ in segment count, so no route-ordering conflict.) */
+  @ApiEndpoint({
+    summary: "Get the graph a run executed",
+    description:
+      "The version-pinned graph snapshot the run actually walked (accurate even if the workflow was later edited).",
+    ok: RunGraphResponse,
+    notFound: true,
+  })
+  @Get(":id/graph")
+  runGraph(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+  ): Promise<{ graph: Record<string, unknown> }> {
+    return this.executions.runGraph(id, tenantId);
   }
 
   @ApiEndpoint({
