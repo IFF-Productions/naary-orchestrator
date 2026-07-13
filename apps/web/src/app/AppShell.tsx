@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Navigate,
   NavLink,
@@ -10,6 +10,12 @@ import { useAuth } from "../auth/AuthProvider";
 import { Button, Icon, SearchInput } from "../components";
 import type { IconName } from "../components";
 import { clearToken } from "../lib/auth";
+import {
+  BELOW_RAIL_QUERY,
+  DESKTOP_QUERY,
+  PHONE_QUERY,
+  useMediaQuery,
+} from "../lib/useMediaQuery";
 import { PAGE_META } from "../lib/mock";
 import { useMode } from "../mode";
 import { useTheme } from "../theme";
@@ -93,7 +99,16 @@ const SIMPLE_ALLOWED = [
 ];
 
 export function AppShell() {
+  // Responsive shell (mirrors the Naary design comp): phone < 720 → slide-in drawer +
+  // hamburger; tablet 720–1080 → auto icon-rail; desktop ≥ 1080 → full sidebar + search.
+  const phone = useMediaQuery(PHONE_QUERY);
+  const belowRail = useMediaQuery(BELOW_RAIL_QUERY);
+  const showSearch = useMediaQuery(DESKTOP_QUERY);
   const [collapsed, setCollapsed] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // Icon-only rail: on tablet automatically, or when the user collapses on desktop.
+  // Never on phone — there the sidebar is a full-width drawer showing labels.
+  const rail = !phone && (belowRail || collapsed);
   const { theme, toggleTheme } = useTheme();
   const { mode } = useMode();
   const { logout } = useAuth();
@@ -106,6 +121,9 @@ export function AppShell() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [title, sub] = PAGE_META[pathname] ?? ["Naary", ""];
+
+  // Close the mobile drawer on any navigation (nav item, search, "New workflow", logo).
+  useEffect(() => setDrawerOpen(false), [pathname]);
 
   // Global search: jump to Workflows filtered by the query (Workflows reads ?q). In Simple mode
   // that route is hidden, so land on the automations list instead.
@@ -120,7 +138,7 @@ export function AppShell() {
     );
     setSearch("");
   };
-  const labelOp = collapsed ? 0 : 1;
+  const labelOp = rail ? 0 : 1;
 
   // Mode gating: Simple users get the friendly nav + are redirected away from Builder-only routes.
   const simple = mode === "simple";
@@ -140,6 +158,35 @@ export function AppShell() {
 
   if (simpleBlocked) return <Navigate to="/app/automations" replace />;
 
+  // Sidebar: a fixed slide-in drawer on phone, an in-flow column (rail or full) otherwise.
+  const sideBase: React.CSSProperties = {
+    background: "var(--bg-2)",
+    borderRight: "1px solid var(--line)",
+    display: "flex",
+    flexDirection: "column",
+    minHeight: 0,
+    overflow: "hidden",
+  };
+  const sideStyle: React.CSSProperties = phone
+    ? {
+        ...sideBase,
+        position: "fixed",
+        top: 0,
+        left: 0,
+        bottom: 0,
+        width: 262,
+        zIndex: 60,
+        transform: `translateX(${drawerOpen ? "0" : "-115%"})`,
+        transition: "transform .22s ease",
+        boxShadow: drawerOpen ? "0 24px 70px -12px rgba(0,0,0,.75)" : "none",
+      }
+    : {
+        ...sideBase,
+        width: rail ? 70 : 244,
+        flex: "none",
+        transition: "width .16s ease",
+      };
+
   return (
     <div
       style={{
@@ -149,20 +196,21 @@ export function AppShell() {
         background: "var(--bg)",
       }}
     >
+      {/* Backdrop behind the mobile drawer — tap to close. Phone + open only. */}
+      {phone && drawerOpen && (
+        <div
+          onClick={() => setDrawerOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(4,6,10,.55)",
+            zIndex: 55,
+          }}
+        />
+      )}
+
       {/* ===== SIDEBAR ===== */}
-      <aside
-        style={{
-          width: collapsed ? 70 : 244,
-          flex: "none",
-          background: "var(--bg-2)",
-          borderRight: "1px solid var(--line)",
-          display: "flex",
-          flexDirection: "column",
-          minHeight: 0,
-          transition: "width .16s ease",
-          overflow: "hidden",
-        }}
-      >
+      <aside style={sideStyle}>
         {/* brand + workspace */}
         <div
           style={{
@@ -198,7 +246,7 @@ export function AppShell() {
                 <NavRow
                   key={it.to}
                   item={it}
-                  collapsed={collapsed}
+                  collapsed={rail}
                   labelOp={labelOp}
                 />
               ))}
@@ -206,12 +254,7 @@ export function AppShell() {
           ))}
           <div style={{ flex: 1 }} />
           {footerItems.map((it) => (
-            <NavRow
-              key={it.to}
-              item={it}
-              collapsed={collapsed}
-              labelOp={labelOp}
-            />
+            <NavRow key={it.to} item={it} collapsed={rail} labelOp={labelOp} />
           ))}
         </nav>
 
@@ -222,9 +265,9 @@ export function AppShell() {
             borderTop: "1px solid var(--line)",
             padding: 10,
             display: "flex",
-            // Collapsed: stack avatar + toggle vertically and center them so the
+            // Rail: stack avatar + toggle vertically and center them so the
             // toggle fits the 70px rail instead of overflowing the row.
-            flexDirection: collapsed ? "column" : "row",
+            flexDirection: rail ? "column" : "row",
             alignItems: "center",
             justifyContent: "center",
             gap: 9,
@@ -258,7 +301,7 @@ export function AppShell() {
               flex: 1,
               minWidth: 0,
               opacity: labelOp,
-              display: collapsed ? "none" : "block",
+              display: rail ? "none" : "block",
             }}
           >
             <div
@@ -285,16 +328,19 @@ export function AppShell() {
           >
             <Icon name="logout" size={14} />
           </button>
-          <button
-            title={collapsed ? "Expand" : "Collapse"}
-            onClick={() => setCollapsed((c) => !c)}
-            className="btn btn-secondary btn-icon btn-sm"
-          >
-            <Icon
-              name={collapsed ? "sidebar-expand" : "sidebar-collapse"}
-              size={14}
-            />
-          </button>
+          {/* Manual collapse — desktop/tablet only; the phone drawer doesn't collapse. */}
+          {!phone && (
+            <button
+              title={rail ? "Expand" : "Collapse"}
+              onClick={() => setCollapsed((c) => !c)}
+              className="btn btn-secondary btn-icon btn-sm"
+            >
+              <Icon
+                name={rail ? "sidebar-expand" : "sidebar-collapse"}
+                size={14}
+              />
+            </button>
+          )}
         </div>
       </aside>
 
@@ -322,50 +368,71 @@ export function AppShell() {
             zIndex: 10,
           }}
         >
+          {/* Hamburger — phone only; opens the sidebar drawer. */}
+          {phone && (
+            <button
+              type="button"
+              aria-label="Menu"
+              title="Menu"
+              onClick={() => setDrawerOpen((o) => !o)}
+              className="btn btn-secondary btn-icon"
+            >
+              <Icon name="menu" size={18} />
+            </button>
+          )}
           <div
             style={{
               fontSize: "var(--text-lg)",
               fontWeight: "var(--weight-semibold)",
               color: "var(--ink)",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
             }}
           >
             {title}
           </div>
-          <span
-            className="mono"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: "var(--text-2xs)",
-              fontWeight: "var(--weight-medium)",
-              color: "var(--brand)",
-              background: "var(--brand-soft)",
-              border:
-                "1px solid color-mix(in srgb, var(--brand) 30%, transparent)",
-              padding: "3px 9px",
-              borderRadius: "var(--radius-sm)",
-            }}
-          >
+          {/* Env badge — hidden on phone to save the row. */}
+          {!phone && (
             <span
+              className="mono"
               style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: "var(--brand)",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: "var(--text-2xs)",
+                fontWeight: "var(--weight-medium)",
+                color: "var(--brand)",
+                background: "var(--brand-soft)",
+                border:
+                  "1px solid color-mix(in srgb, var(--brand) 30%, transparent)",
+                padding: "3px 9px",
+                borderRadius: "var(--radius-sm)",
               }}
-            />
-            Production
-          </span>
+            >
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: "var(--brand)",
+                }}
+              />
+              Production
+            </span>
+          )}
 
-          <div style={{ marginLeft: 18, width: 300 }}>
-            <SearchInput
-              placeholder="Search workflows…"
-              value={search}
-              onChange={setSearch}
-              onSubmit={runSearch}
-            />
-          </div>
+          {/* Search — desktop (≥1080) only. */}
+          {showSearch && (
+            <div style={{ marginLeft: 18, width: 300 }}>
+              <SearchInput
+                placeholder="Search workflows…"
+                value={search}
+                onChange={setSearch}
+                onSubmit={runSearch}
+              />
+            </div>
+          )}
 
           <div
             style={{
@@ -382,12 +449,15 @@ export function AppShell() {
               title="Toggle theme"
             />
             <NotificationsBell />
+            {/* Icon-only on phone to keep the topbar to one row. */}
             <Button
               variant="primary"
               icon="plus"
+              iconOnly={phone}
+              title="New workflow"
               onClick={() => navigate("/app/canvas")}
             >
-              New workflow
+              {phone ? undefined : "New workflow"}
             </Button>
           </div>
         </header>
