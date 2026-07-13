@@ -133,7 +133,7 @@ axes:
 
 **Recommendation: C** (dispatch to an isolated sandbox pool), hardenable to **D**. It is
 the only option that simultaneously gives real isolation, a place to pin the egress
-allowlist, and the §2.2 credential split — without the §Option-B host-root footgun.
+allowlist, and the §2.2 credential split — without Option B's host-root footgun.
 
 **This is the user's infra call** (it implies standing up a sandbox pool / choosing a
 provider). It is called out as **Open Decision #1** in §8. Slice 1 (read-only, Option A
@@ -192,10 +192,13 @@ Each slice is the smallest end-to-end step that proves the next risk.
   (schema → catalog → interpreter case → `callClaudeCode` activity → BYOK key → usage →
   UI), running `claude -p --permission-mode plan` with tools clamped to `Read,Grep,Glob`,
   **no Bash, no writes, no repo clone** (operates on an inline/attached working set or a
-  read-only checkout). **Goal: prove the isolation boundary and the plumbing** — BYOK key
-  containment, egress allowlist, usage recording, heartbeat/timeout — before any
-  credentialed write rides on it. Verifiable without the full sandbox pool (Option A with
-  clamped tools is acceptable *because it can't write or shell out*).
+  read-only checkout). **Goal: prove the plumbing + the read-only posture** — BYOK key
+  containment, usage recording, heartbeat/timeout, and that a clamped toolset genuinely
+  can't write or shell out — before any credentialed write rides on it. Verifiable under
+  **Option A** (worker-container) *precisely because* the model can't write or shell out, so
+  its weak egress control isn't yet load-bearing. **The `api.anthropic.com` egress allowlist
+  is NOT proven here** — it requires the Option-C sandbox and lands with Slice 2 / the §5
+  hardening slice. (So Slice 1 proves isolation-by-capability-clamp, not isolation-by-network.)
 - **Slice 2 — Repo clone (read) + write in the sandbox, diff captured.** Activity clones
   via the App token (read) into the sandbox working tree **with the git remote/token
   stripped** (§2.2), runs `--permission-mode acceptEdits`, captures the resulting diff to
