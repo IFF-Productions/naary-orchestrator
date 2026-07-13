@@ -131,6 +131,13 @@ services:
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
       FIREBASE_SERVICE_ACCOUNT_JSON: ${FIREBASE_SERVICE_ACCOUNT_JSON:-}
       FIREBASE_TENANT_CLAIM: ${FIREBASE_TENANT_CLAIM:-tenant}
+      # Feature flags (OpenFeature + Flagsmith) — api-only (only @naary/api imports
+      # @naary/flags). OFF unless FLAGSMITH_ENVIRONMENT_KEY (server-side `ser.` key) is
+      # set: no key ⇒ every flag resolves to its safe code default (fail-safe). For a
+      # self-hosted instance, set FLAGSMITH_API_URL to the in-stack service and bring it
+      # up with the docker-compose.flagsmith.yml overlay; unset ⇒ Flagsmith SaaS.
+      FLAGSMITH_ENVIRONMENT_KEY: ${FLAGSMITH_ENVIRONMENT_KEY:-}
+      FLAGSMITH_API_URL: ${FLAGSMITH_API_URL:-}
     ports:
       - '3000:3000'
     depends_on:

@@ -1,0 +1,87 @@
+# OPT-IN overlay: a self-hosted Flagsmith so feature flags can actually flip locally
+# (verify the OpenFeature `targetingKey` → Flagsmith identity mapping per tenant — the one
+# risk @naary/flags can't prove without a live instance). Flags stay FAIL-SAFE: the api only
+# talks to Flagsmith when FLAGSMITH_ENVIRONMENT_KEY is set, so NOT running this overlay just
+# means every flag resolves to its safe code default (packages/flags/src/catalog.ts).
+#
+# Why a SEPARATE file (not a service in the base docker-compose.yml):
+#  - Feature flags are optional infra — the base stack must boot without a Flagsmith.
+#  - Because it's never in the base compose, the e2e stack (docker-compose.yml +
+#    docker-compose.e2e.yml) never includes it, so it needs NO e2e isolation override
+#    (unlike a base service — see docker-compose.e2e.yml's header).
+#  - Flagsmith gets its OWN Postgres + volume here so it's fully removable and never
+#    touches the app's `postgres`/`naary-pgdata`.
+#
+# ── Bring it up (alongside the app stack) ──────────────────────────────────────────────
+#   docker compose -f docker-compose.yml -f docker-compose.flagsmith.yml up -d flagsmith
+# (or just the flag services standalone:)
+#   docker compose -f docker-compose.flagsmith.yml up -d
+#
+# ── One-time: create the server-side environment key ───────────────────────────────────
+#   1. Open the dashboard at http://localhost:8000 → sign up (the first user is the admin).
+#   2. Create Organisation → Project → pick an environment (e.g. "Development").
+#   3. Settings → SDK Keys → copy the *server-side* key (starts with `ser.`).
+#   4. Create the flags you want to flip, matching the catalog keys
+#      (chat-rag, new-canvas-inspector) as BOOLEAN flags.
+#
+# ── Wire the api to it (repo-root .env) ────────────────────────────────────────────────
+#   FLAGSMITH_ENVIRONMENT_KEY=ser.xxxxxxxxxxxxxxxxxxxxx
+#   FLAGSMITH_API_URL=http://flagsmith:8000/api/v1/   # in-stack service DNS (NOT localhost)
+#   then: docker compose -f docker-compose.yml -f docker-compose.flagsmith.yml up -d api
+#
+# ── Verify the flag flips per tenant ───────────────────────────────────────────────────
+#   curl -s localhost:3000/me/flags -H "authorization: Bearer <nry_ token>"
+#   → toggle a flag in the Flagsmith UI (or target a specific identity = tenantId) and
+#     re-curl; the value changes. Unreachable/unset ⇒ code defaults (fail-safe), never a 500.
+#
+# ── Tear down (only ever removes the flag stack + its volume) ───────────────────────────
+#   docker compose -f docker-compose.flagsmith.yml down -v
+
+services:
+  flagsmith-postgres:
+    image: postgres:15-alpine
+    container_name: naary-flagsmith-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: flagsmith
+      POSTGRES_USER: flagsmith
+      POSTGRES_PASSWORD: flagsmith # dev-only; this DB holds flag definitions, not app secrets
+    volumes:
+      - flagsmith-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U flagsmith -d flagsmith']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  flagsmith:
+    image: flagsmith/flagsmith:2.180.0 # pinned (pre-1.0 SDK is pinned too; keep infra in lockstep)
+    container_name: naary-flagsmith
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://flagsmith:flagsmith@flagsmith-postgres:5432/flagsmith
+      # Dev-only Django secret — this instance signs its own sessions; not an app credential.
+      # Override in any shared/self-host deployment.
+      DJANGO_SECRET_KEY: ${FLAGSMITH_DJANGO_SECRET_KEY:-dev-only-flagsmith-secret-change-me}
+      DJANGO_ALLOWED_HOSTS: '*'
+      # Let the dashboard's SPA call its own API at the mapped host port.
+      DJANGO_CSRF_TRUSTED_ORIGINS: http://localhost:8000
+    ports:
+      # localhost-only: the dashboard/API is dev tooling, not a public surface.
+      - '127.0.0.1:8000:8000'
+    depends_on:
+      flagsmith-postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://localhost:8000/health\").getcode()==200 else 1)"',
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+volumes:
+  flagsmith-pgdata:
