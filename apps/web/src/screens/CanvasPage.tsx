@@ -23,7 +23,14 @@ import {
   Position,
   ReactFlow,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   lintBindings,
@@ -242,6 +249,8 @@ export function CanvasPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [name, setName] = useState("Canvas draft");
   const [paletteQuery, setPaletteQuery] = useState("");
+  // Hidden file input backing the "Import" button (a graph JSON → canvas draft).
+  const importInputRef = useRef<HTMLInputElement>(null);
   // Drag-resizable side panels (palette + node inspector). Widths persist per browser.
   const panelsRowRef = useRef<HTMLDivElement>(null);
   const [paletteWidth, setPaletteWidth] = useState(
@@ -676,6 +685,90 @@ export function CanvasPage() {
     }
   }
 
+  // Export the current (valid) graph as a portable JSON file — the same GraphDef the API
+  // stores, wrapped with the display name so an import round-trips. Invalid graphs can't be
+  // exported (nothing runnable to serialize) — the reason is surfaced instead.
+  function exportGraph() {
+    if (!graph) {
+      setStatus(error ?? "Fix the graph's issues before exporting.");
+      return;
+    }
+    const payload = { naaryFlow: 1, name: name.trim() || "workflow", graph };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const slug =
+      (name.trim() || "workflow")
+        .replace(/[^a-z0-9-_]+/gi, "-")
+        .toLowerCase() || "workflow";
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${slug}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setStatus(`Exported "${name}".`);
+  }
+
+  // Import a graph JSON (raw GraphDef or a { name, graph } export) as a NEW unsaved draft —
+  // mirrors the generate/template path (decompile → editable flow), so Save persists a new
+  // workflow rather than overwriting whatever was open.
+  function importFromFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // let the same file be re-picked later
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(String(reader.result));
+      } catch {
+        setStatus("Import failed — the file isn't valid JSON.");
+        return;
+      }
+      const wrapper =
+        parsed && typeof parsed === "object"
+          ? (parsed as Record<string, unknown>)
+          : {};
+      const gd = ("graph" in wrapper ? wrapper.graph : parsed) as {
+        nodes?: unknown;
+        startNodeId?: unknown;
+      };
+      if (
+        !gd ||
+        typeof gd !== "object" ||
+        !Array.isArray(gd.nodes) ||
+        typeof gd.startNodeId !== "string"
+      ) {
+        setStatus(
+          "Import failed — not a Naary graph (missing nodes/startNodeId).",
+        );
+        return;
+      }
+      try {
+        const { nodes: cn, edges: ce } = decompileGraph(gd as never);
+        setNodes(toFlowNodes(cn));
+        setEdges(toFlowEdges(ce));
+      } catch {
+        setStatus(
+          "Import failed — the graph couldn't be loaded onto the canvas.",
+        );
+        return;
+      }
+      const importedName =
+        typeof wrapper.name === "string" && wrapper.name.trim()
+          ? wrapper.name
+          : file.name.replace(/\.json$/i, "");
+      setName(importedName || "Imported workflow");
+      setWorkflowKey("");
+      if (keyParam || templateParam) setSearchParams({}, { replace: true });
+      setStatus(`Imported "${importedName}" — review, then Save to keep it.`);
+    };
+    reader.readAsText(file);
+  }
+
   async function save(): Promise<string | null> {
     if (!graph) {
       setStatus(error ?? "Graph is not runnable.");
@@ -858,6 +951,30 @@ export function CanvasPage() {
             onClick={() => setShowInput((s) => !s)}
           >
             {showInput ? "Hide input" : "Input"}
+          </Button>
+          {/* Import a graph JSON as a new draft; export the current valid graph to a file. */}
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/json,.json"
+            style={{ display: "none" }}
+            onChange={importFromFile}
+          />
+          <Button
+            variant="secondary"
+            disabled={busy}
+            onClick={() => importInputRef.current?.click()}
+            title="Load a graph JSON as a new draft"
+          >
+            Import
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={busy || !graph}
+            onClick={exportGraph}
+            title="Download this graph as JSON"
+          >
+            Export
           </Button>
           <Button
             variant="secondary"
