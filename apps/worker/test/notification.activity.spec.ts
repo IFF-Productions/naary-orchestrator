@@ -94,6 +94,56 @@ describe("sendNotification", () => {
     ).toBe(true);
   });
 
+  it("formats Slack blocks: a header + a fields section with the run as an inline link", async () => {
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      title: "Ship it?",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+
+    // A header block leads the message (rich formatting, not one flat line).
+    const header = body.blocks.find(
+      (b: { type: string }) => b.type === "header",
+    );
+    expect(header.text.type).toBe("plain_text");
+    expect(header.text.text).toContain("Approval needed");
+
+    // The section carries mrkdwn fields, and the Run field is an ACTUAL link
+    // (<url|label>) to the run — not a bare id reference.
+    const section = body.blocks.find(
+      (b: { type: string; fields?: unknown }) =>
+        b.type === "section" && b.fields,
+    );
+    const joined = section.fields
+      .map((f: { text: string }) => f.text)
+      .join("\n");
+    expect(joined).toContain("<https://app.naary.test/app/runs/wf-1|run wf-1>");
+    expect(joined).toContain("*Workflow*");
+    expect(joined).toContain("Ship it?"); // the approval title, as a field
+  });
+
+  it("renders the run id (no link) in the fields section when APP_BASE_URL is unset", async () => {
+    process.env.APP_BASE_URL = "";
+    await sendNotification({
+      ...BASE,
+      kind: "run_failed",
+      detail: "timed_out",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    const section = body.blocks.find(
+      (b: { type: string; fields?: unknown }) =>
+        b.type === "section" && b.fields,
+    );
+    const joined = section.fields
+      .map((f: { text: string }) => f.text)
+      .join("\n");
+    // No URL to link to → the bare id in backticks, and no <…|…> link markup.
+    expect(joined).toContain("`wf-1`");
+    expect(joined).not.toContain("|run wf-1>");
+    expect(joined).toContain("timed_out"); // the failure reason, as a field
+  });
+
   it("includes a View-run deep link on a failed-run notification (the prior gap)", async () => {
     await sendNotification({
       ...BASE,
