@@ -86,6 +86,12 @@ describe("sendNotification", () => {
     );
     expect(actionsBlock.elements).toHaveLength(2);
     expect(actionsBlock.elements[1].url).toBe(body.runUrl);
+    // Slack requires an action_id on every button (else invalid_blocks).
+    expect(
+      actionsBlock.elements.every(
+        (el: { action_id?: string }) => !!el.action_id,
+      ),
+    ).toBe(true);
   });
 
   it("includes a View-run deep link on a failed-run notification (the prior gap)", async () => {

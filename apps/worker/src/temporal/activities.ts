@@ -981,8 +981,11 @@ function notificationBlocks(
   if (actions.length)
     blocks.push({
       type: "actions",
-      elements: actions.map((a) => ({
+      elements: actions.map((a, i) => ({
         type: "button",
+        // Slack rejects an actions block whose buttons lack an action_id (invalid_blocks),
+        // even for url-only buttons — derive a stable one from the label.
+        action_id: `${a.label.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_${i}`,
         text: { type: "plain_text", text: a.label },
         url: a.url,
       })),
