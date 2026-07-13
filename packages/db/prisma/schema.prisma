@@ -41,10 +41,12 @@ model Execution {
   // interaction, and the worker's status/cost pushes never touch it.
   archivedAt  DateTime?
 
-  // The Runs list is `where {tenantId, archivedAt IS [NOT] NULL} orderBy createdAt desc`
-  // — a composite lets PG satisfy the filter AND the sort from one index (audit A-4). The
-  // second index adds archivedAt so BOTH views (active = NULL, archived = NOT NULL) stay
-  // index-covered; the first is kept for any non-archive-filtered reads.
+  // Runs list = `where {tenantId, archivedAt IS [NOT] NULL} orderBy createdAt desc`.
+  // For the DEFAULT view (archivedAt IS NULL — an equality), (tenantId, archivedAt, createdAt)
+  // serves the filter AND the createdAt sort from one index. For the ARCHIVED view
+  // (archivedAt IS NOT NULL — a range), the index still narrows the filter but createdAt isn't
+  // the leading sort key, so PG may add a sort; acceptable (archived is the rarer view). The
+  // (tenantId, createdAt) index covers any non-archive-filtered read.
   @@index([tenantId, createdAt])
   @@index([tenantId, archivedAt, createdAt])
 }

@@ -5,6 +5,8 @@
 -- AddColumn (nullable, no default → instant, no table rewrite)
 ALTER TABLE "Execution" ADD COLUMN "archivedAt" TIMESTAMP(3);
 
--- Cover both list views (`where {tenantId, archivedAt IS NULL | IS NOT NULL} ORDER BY createdAt DESC`)
--- from one index, mirroring the existing (tenantId, createdAt) index.
+-- Index for the list views. The DEFAULT view (archivedAt IS NULL, an equality) gets both the
+-- filter and the createdAt sort from this index; the ARCHIVED view (archivedAt IS NOT NULL, a
+-- range) uses it to narrow the filter but createdAt isn't the leading sort key, so PG may still
+-- sort (acceptable — archived is the rarer view). Mirrors the existing (tenantId, createdAt) index.
 CREATE INDEX "Execution_tenantId_archivedAt_createdAt_idx" ON "Execution"("tenantId", "archivedAt", "createdAt");
