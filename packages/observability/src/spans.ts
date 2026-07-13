@@ -115,10 +115,12 @@ export function TracedClass(opts: { op?: string } = {}) {
  * the keys (only the values are wrapped), so activity names — and Temporal's dispatch —
  * are unchanged.
  *
- * NOTE: worker activity spans are ROOT spans (their own trace), NOT children of the API
- * request that started the run — trace context cannot cross the Temporal boundary without
- * putting non-deterministic data through workflow code. Correlate an activity trace to its
- * run via the tenantId/executionId on its logs, not via a single waterfall.
+ * The `activity.<name>` span is a CHILD of the API request span when trace context was
+ * propagated across the Temporal boundary (the client + workflow + activity interceptors in
+ * apps/{api,worker} carry `sentry-trace`/`baggage` through workflow → activity headers, and the
+ * activity interceptor runs `continueSentryTrace` around this call). When no trace was propagated
+ * (tracing off, or a run started before that wiring), it degrades to a ROOT span — still correct,
+ * just not stitched into a single waterfall. See temporal-trace.ts.
  */
 export function traceActivities<T extends Record<string, unknown>>(
   activities: T,

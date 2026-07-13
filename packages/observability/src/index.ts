@@ -25,6 +25,13 @@ export {
   metricGauge,
   type MetricAttributes,
 } from "./metrics";
+export {
+  SENTRY_TRACE_HEADER,
+  BAGGAGE_HEADER,
+  getSentryTraceHeaders,
+  continueSentryTrace,
+  type SentryTraceHeaders,
+} from "./temporal-trace";
 
 let enabled = false;
 
