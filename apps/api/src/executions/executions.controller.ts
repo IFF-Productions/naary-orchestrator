@@ -13,6 +13,7 @@ import { ApiEndpoint } from "../swagger/api-decorators";
 import {
   ApproveBatchDto,
   ApproveDto,
+  ArchiveBatchDto,
   StartExecutionDto,
 } from "./execution.dto";
 import {
@@ -100,6 +101,22 @@ export class ExecutionsController {
       tenantId,
       body.comment,
     );
+  }
+
+  /** Archive/restore many runs at once. Literal route before `:id`, like approve-batch. */
+  @ApiEndpoint({
+    summary: "Archive or restore many runs at once",
+    description:
+      "Soft-archives (or restores) each listed run independently; a per-run outcome is returned so a not-owned/unknown id doesn't fail the whole batch.",
+    ok: [BatchDecisionItemResponse],
+  })
+  @Post("archive-batch")
+  @HttpCode(200)
+  archiveBatch(
+    @TenantId() tenantId: string,
+    @Body() body: ArchiveBatchDto,
+  ): Promise<BatchDecisionResult[]> {
+    return this.executions.archiveBatch(body.ids, tenantId, body.archived);
   }
 
   @ApiEndpoint({

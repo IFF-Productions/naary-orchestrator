@@ -52,6 +52,46 @@ describe("setArchived", () => {
   });
 });
 
+describe("archiveBatch", () => {
+  it("archives owned runs and reports the ones that slip (per-run outcome)", async () => {
+    findUnique.mockImplementation(({ where }) =>
+      Promise.resolve(
+        where.workflowId === "other"
+          ? { workflowId: "other", tenantId: "someone-else" }
+          : { workflowId: where.workflowId, tenantId: "t-1" },
+      ),
+    );
+
+    const out = await makeService().archiveBatch(
+      ["wf-1", "other", "wf-2"],
+      "t-1",
+      true,
+    );
+
+    expect(out).toEqual([
+      { workflowId: "wf-1", ok: true },
+      {
+        workflowId: "other",
+        ok: false,
+        error: expect.stringContaining("another tenant"),
+      },
+      { workflowId: "wf-2", ok: true },
+    ]);
+    expect(update).toHaveBeenCalledTimes(2); // only the two owned runs were written
+  });
+
+  it("dedupes repeated ids", async () => {
+    findUnique.mockResolvedValue({ workflowId: "wf-1", tenantId: "t-1" });
+    const out = await makeService().archiveBatch(
+      ["wf-1", "wf-1"],
+      "t-1",
+      false,
+    );
+    expect(out).toHaveLength(1);
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("list archived filter", () => {
   const row = {
     workflowId: "wf-1",

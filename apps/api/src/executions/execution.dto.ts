@@ -80,3 +80,23 @@ export class ApproveBatchDto {
   @IsString()
   comment?: string;
 }
+
+export class ArchiveBatchDto {
+  @ApiProperty({
+    type: [String],
+    example: ["run-8f3a1c2e", "run-1b7d9f04"],
+    description: "workflowIds of the runs to archive/restore together.",
+  })
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(200)
+  @IsString({ each: true })
+  ids!: string[];
+
+  @ApiProperty({
+    example: true,
+    description: "true archives every listed run, false restores every one.",
+  })
+  @IsBoolean()
+  archived!: boolean;
+}

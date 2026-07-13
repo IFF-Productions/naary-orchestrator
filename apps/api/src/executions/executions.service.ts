@@ -750,6 +750,32 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Archive (or restore) many runs at once. Each is settled independently (mirrors
+   * approveBatch): one not-owned/unknown id doesn't fail the whole batch — the caller gets a
+   * per-run outcome so it can drop the successes and surface the rest.
+   */
+  async archiveBatch(
+    ids: string[],
+    tenantId: string,
+    archived: boolean,
+  ): Promise<BatchDecisionResult[]> {
+    const unique = [...new Set(ids)];
+    const settled = await Promise.allSettled(
+      unique.map((id) => this.setArchived(id, tenantId, archived)),
+    );
+    return settled.map((r, i) =>
+      r.status === "fulfilled"
+        ? { workflowId: unique[i], ok: true }
+        : {
+            workflowId: unique[i],
+            ok: false,
+            error:
+              r.reason instanceof Error ? r.reason.message : String(r.reason),
+          },
+    );
+  }
+
+  /**
    * The tenant's runs currently paused for human approval, each enriched with the
    * approval node's prompt (title/instructions) resolved from the stored graph — so
    * the inbox shows WHAT is being approved, not just that something is waiting.

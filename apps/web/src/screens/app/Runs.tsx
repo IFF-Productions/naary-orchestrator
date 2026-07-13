@@ -10,7 +10,7 @@ import { api, type RunSummary, UnauthorizedError } from "../../lib/api";
 import { isFailure, isTerminal, runStatusUi } from "../../lib/run-status";
 import { useMode } from "../../mode";
 
-const COLS = "1.5fr 1fr 0.9fr 0.7fr 0.7fr 0.6fr";
+const COLS = "28px 1.5fr 1fr 0.9fr 0.7fr 0.7fr 0.6fr";
 
 /** Compact relative time from an ISO timestamp (no date lib). */
 function ago(iso: string): string {
@@ -53,6 +53,13 @@ export function Runs() {
   );
   const [showArchived, setShowArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Multi-select for bulk actions (archive/restore + approve/deny). `selected` holds
+  // workflowIds; `bulkBusy` locks every control while a batch call is in flight.
+  const [selected, setSelected] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   // Monotonic request id: concurrent loads (initial / Refresh / view toggle) can resolve out
   // of order — only the newest is allowed to write `runs`, so a slow earlier request (e.g. the
   // other view) can't clobber the current one.
@@ -65,6 +72,12 @@ export function Runs() {
       if (seq !== loadSeq.current) return; // superseded by a newer load
       setRuns(rows);
       setError(null);
+      // Drop selections for runs that dropped off the list (archived elsewhere, aged out).
+      const live = new Set(rows.map((r) => r.workflowId));
+      setSelected((s) => {
+        const kept = [...s].filter((id) => live.has(id));
+        return kept.length === s.size ? s : new Set(kept);
+      });
     } catch (e) {
       if (seq !== loadSeq.current) return;
       setError(
@@ -83,7 +96,70 @@ export function Runs() {
     const next = !showArchived;
     setShowArchived(next);
     setRuns(null);
+    setSelected(new Set()); // selection is per-view
+    setNotice(null);
     void load(next);
+  }
+
+  function toggleSelect(id: string, e: ReactMouseEvent) {
+    e.stopPropagation(); // don't navigate into the run
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+
+  // Archive (or restore, in the archived view) every selected run in one call. Successes leave
+  // the current list; any that slip (not owned / already gone) stay + are reported.
+  async function bulkArchive() {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    setNotice(null);
+    setError(null);
+    try {
+      const results = await api.archiveBatch(ids, !showArchived);
+      const okIds = new Set(
+        results.filter((r) => r.ok).map((r) => r.workflowId),
+      );
+      setRuns((prev) => prev?.filter((r) => !okIds.has(r.workflowId)) ?? null);
+      setSelected((s) => new Set([...s].filter((id) => !okIds.has(id))));
+      const failed = results.length - okIds.size;
+      const verb = showArchived ? "restored" : "archived";
+      if (failed > 0)
+        setNotice(`${okIds.size} ${verb}, ${failed} could not be updated.`);
+    } catch {
+      setError("Bulk archive failed — please retry.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  // Approve/deny every selected run that's awaiting a decision. approveBatch tolerates runs
+  // that aren't awaiting (they come back ok:false), so we report how many actually decided.
+  async function bulkDecide(approved: boolean) {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    setNotice(null);
+    setError(null);
+    try {
+      const results = await api.approveBatch(ids, approved);
+      const okCount = results.filter((r) => r.ok).length;
+      const failed = results.length - okCount;
+      setNotice(
+        `${okCount} ${approved ? "approved" : "denied"}` +
+          (failed > 0 ? `, ${failed} were not awaiting a decision.` : "."),
+      );
+      setSelected(new Set());
+      await load(); // statuses changed — refresh
+    } catch {
+      setError("Bulk decision failed — please retry.");
+    } finally {
+      setBulkBusy(false);
+    }
   }
 
   // Archive (active view) or restore (archived view). Either way the run leaves the
@@ -121,6 +197,26 @@ export function Runs() {
         r.workflowId.includes(query) ||
         (r.workflowKey ?? "").includes(query),
     );
+
+  // Selection derived state. Select-all applies to the CURRENTLY VISIBLE rows. Approve/Deny are
+  // only meaningful for runs paused on a humanApproval node (awaiting_approval).
+  const allVisibleSelected =
+    rows.length > 0 && rows.every((r) => selected.has(r.workflowId));
+  const approvableSelected = (runs ?? []).filter(
+    (r) => selected.has(r.workflowId) && r.status === "awaiting_approval",
+  ).length;
+  function toggleSelectAll() {
+    setSelected((s) => {
+      const everyChecked =
+        rows.length > 0 && rows.every((r) => s.has(r.workflowId));
+      if (everyChecked) {
+        const n = new Set(s);
+        for (const r of rows) n.delete(r.workflowId);
+        return n;
+      }
+      return new Set([...s, ...rows.map((r) => r.workflowId)]);
+    });
+  }
 
   async function rerun(id: string, e: ReactMouseEvent) {
     e.stopPropagation(); // don't also navigate into the (old) run
@@ -223,6 +319,93 @@ export function Runs() {
         </div>
       )}
 
+      {notice && (
+        <div
+          style={{
+            marginBottom: 14,
+            padding: "8px 12px",
+            borderRadius: "var(--radius-sm)",
+            background: "var(--surface)",
+            border: "1px solid var(--line)",
+            color: "var(--ink-2)",
+            fontSize: "var(--text-sm)",
+          }}
+        >
+          {notice}
+        </div>
+      )}
+
+      {/* Bulk action bar — appears when rows are selected. */}
+      {selected.size > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 8,
+            marginBottom: 14,
+            padding: "9px 12px",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid var(--line-2)",
+            background: "var(--card-2)",
+          }}
+        >
+          <span
+            style={{
+              fontSize: "var(--text-sm)",
+              fontWeight: "var(--weight-semibold)",
+              color: "var(--ink)",
+            }}
+          >
+            {selected.size} selected
+          </span>
+          <div style={{ flex: 1 }} />
+          {!showArchived && (
+            <>
+              <Button
+                size="sm"
+                variant="positive"
+                disabled={bulkBusy || approvableSelected === 0}
+                title={
+                  approvableSelected === 0
+                    ? "None of the selected runs are awaiting approval"
+                    : `Approve ${approvableSelected} awaiting run(s)`
+                }
+                onClick={() => void bulkDecide(true)}
+              >
+                Approve
+                {approvableSelected > 0 ? ` (${approvableSelected})` : ""}
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                disabled={bulkBusy || approvableSelected === 0}
+                onClick={() => void bulkDecide(false)}
+              >
+                Deny{approvableSelected > 0 ? ` (${approvableSelected})` : ""}
+              </Button>
+            </>
+          )}
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={showArchived ? "eye" : "archive"}
+            disabled={bulkBusy}
+            onClick={() => void bulkArchive()}
+          >
+            {showArchived ? "Restore selected" : "Archive selected"}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={bulkBusy}
+            onClick={() => setSelected(new Set())}
+          >
+            Clear
+          </Button>
+        </div>
+      )}
+
       <div
         style={{
           display: "flex",
@@ -302,6 +485,16 @@ export function Runs() {
             textTransform: "uppercase",
           }}
         >
+          <span style={{ display: "flex", alignItems: "center" }}>
+            <input
+              type="checkbox"
+              aria-label="Select all runs"
+              title="Select all"
+              checked={allVisibleSelected}
+              disabled={rows.length === 0 || bulkBusy}
+              onChange={toggleSelectAll}
+            />
+          </span>
           <span>Run</span>
           <span>{simple ? "Automation" : "Workflow"}</span>
           <span>Status</span>
@@ -352,8 +545,21 @@ export function Runs() {
               borderBottom: "1px solid var(--line)",
               alignItems: "center",
               cursor: "pointer",
+              background: selected.has(r.workflowId)
+                ? "var(--brand-soft)"
+                : undefined,
             }}
           >
+            <span style={{ display: "flex", alignItems: "center" }}>
+              <input
+                type="checkbox"
+                aria-label={`Select run ${r.workflowId}`}
+                checked={selected.has(r.workflowId)}
+                disabled={bulkBusy}
+                onClick={(e) => toggleSelect(r.workflowId, e)}
+                onChange={() => {}}
+              />
+            </span>
             <span
               className="mono"
               style={{
