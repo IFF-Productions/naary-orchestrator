@@ -1,13 +1,17 @@
-# Production overlay: self-hosted server, exposed ONLY through a Cloudflare Tunnel.
+# Production overlay: self-hosted app (api/worker/web/postgres), exposed ONLY through a
+# Cloudflare Tunnel, with Temporal on TEMPORAL CLOUD (not a local container).
 #
-# Run it together with the base compose from the repo root:
-#   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
+# Run it together with the base compose from the repo root (or `pnpm prod`):
+#   docker compose --env-file ./deploy/.env -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
 #
 # What it changes vs the dev stack:
 #   1. Closes every published port. Nothing is on the public or LAN interface — the
-#      app is reachable ONLY via the tunnel. (postgres + the Temporal UI stay bound to
-#      127.0.0.1 for local ops / SSH port-forward, never the network.)
-#   2. Adds the `cloudflared` tunnel container (self-hosted Temporal is already in base).
+#      app is reachable ONLY via the tunnel. (postgres stays bound to 127.0.0.1 for
+#      local ops / SSH port-forward, never the network.)
+#   2. Adds the `cloudflared` tunnel container.
+#   3. Uses Temporal Cloud: the base `temporal` start-dev container is profile-gated OFF
+#      and api/worker connect to Cloud via env (deploy/.env.prod.example). Durable +
+#      managed — no local SQLite to corrupt.
 #
 # `!override` clears the base port list (Docker Compose >= 2.24). If your compose is
 # older, delete the `!override` tag and manually remove the `ports:` from the base file.
@@ -23,20 +27,33 @@ services:
     volumes: !override
       - "${PG_DATA_DIR:-./data/postgres}:/var/lib/postgresql/data"
 
+  # Temporal is TEMPORAL CLOUD in prod, not a local container — durable, managed, and
+  # immune to the single-file SQLite corruption that took down the dev server. The app
+  # connects to Cloud purely via env (TEMPORAL_ADDRESS/NAMESPACE/API_KEY — see
+  # deploy/.env.prod.example; handled by @naary/temporal-config, no code change).
+  # Profile-gate the base start-dev service so `up` never starts it. (A profiled service
+  # is skipped unless its profile is enabled — hence api/worker also drop it from
+  # depends_on below, or compose would error referencing an unstarted service.)
   temporal:
-    ports: !override
-      - "127.0.0.1:8233:8233" # Temporal Web UI over `ssh -L 8233:localhost:8233 <server>`
-    # Persist the Temporal dev-server SQLite on the host too (same rationale as Postgres).
-    volumes: !override
-      - "${TEMPORAL_DATA_DIR:-./data/temporal}:/data"
+    profiles: ["local-temporal-disabled"]
 
   api:
     ports: !override [] # reached internally as api:3000 (via web's nginx proxy)
     environment:
       # The browser origin the SPA is served from — used for CORS on the control plane.
       CORS_ORIGINS: "https://${PUBLIC_HOSTNAME:-naar-y.com}"
+    # Drop the local-temporal dependency (Temporal is Cloud); keep DB + migrations.
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
-  worker: {}
+  worker:
+    # Drop the local-temporal dependency (Temporal is Cloud); wait only for migrations.
+    depends_on: !override
+      migrate:
+        condition: service_completed_successfully
 
   web:
     ports: !override [] # cloudflared forwards to web:80 inside the compose network
