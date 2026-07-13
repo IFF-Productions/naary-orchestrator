@@ -53,4 +53,23 @@ describe("buildExpressionRefs", () => {
     expect(refs.keysAt("nope")).toEqual([]); // no pin
     expect(refs.keysAt("__input")).toEqual([]); // reserved, unpinned
   });
+
+  it("falls back to the node kind's known output keys when unpinned", () => {
+    // No pin for `hook`, but we know its kind → offer the static output shape.
+    const refs = buildExpressionRefs(
+      "comment",
+      edges,
+      {},
+      { hook: "httpRequest" },
+    );
+    expect(refs.keysAt("hook").sort()).toEqual(["body", "headers", "status"]);
+    // A pin still wins over the static fallback.
+    const pinned = buildExpressionRefs(
+      "comment",
+      edges,
+      { hook: { onlyThis: 1 } },
+      { hook: "httpRequest" },
+    );
+    expect(pinned.keysAt("hook")).toEqual(["onlyThis"]);
+  });
 });

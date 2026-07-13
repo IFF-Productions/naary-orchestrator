@@ -33,6 +33,8 @@ export interface ExpressionFieldProps {
   edges: RefEdge[];
   /** Pinned sample outputs per node — the source for `.`-path autocomplete. */
   pins: Record<string, unknown>;
+  /** node id → kind, for the static output-shape autocomplete fallback (unpinned nodes). */
+  nodeKinds?: Record<string, string>;
   multiline?: boolean;
   placeholder?: string;
   minHeight?: string;
@@ -44,11 +46,17 @@ export function ExpressionField({
   nodeId,
   edges,
   pins,
+  nodeKinds,
   multiline,
   placeholder,
   minHeight,
 }: ExpressionFieldProps) {
-  const refs: ExpressionRefs = buildExpressionRefs(nodeId, edges, pins);
+  const refs: ExpressionRefs = buildExpressionRefs(
+    nodeId,
+    edges,
+    pins,
+    nodeKinds,
+  );
   const fallback = multiline ? (
     <textarea
       value={value}
