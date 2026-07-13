@@ -31,7 +31,6 @@ import {
   ExecutionsService,
   type RunEvent,
   type RunStateView,
-  type RunSummary,
 } from "./executions.service";
 
 @ApiBearerAuth("bearer")
@@ -64,7 +63,7 @@ export class ExecutionsController {
   listRuns(
     @TenantId() tenantId: string,
     @Query("archived") archived?: string,
-  ): Promise<RunSummary[]> {
+  ): Promise<RunListItemResponse[]> {
     return this.executions.list(tenantId, 50, archived === "true");
   }
 

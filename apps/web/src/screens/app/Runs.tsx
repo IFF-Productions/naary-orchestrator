@@ -46,7 +46,11 @@ export function Runs() {
   const [filter, setFilter] = useState("All");
   const [starting, setStarting] = useState(false);
   const [rerunning, setRerunning] = useState<string | null>(null);
-  const [archiving, setArchiving] = useState<string | null>(null);
+  // Set of in-flight archive/restore ids — a Set (not a single id) so archiving two rows in
+  // quick succession disables each independently instead of the second clobbering the first.
+  const [archiving, setArchiving] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [showArchived, setShowArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Monotonic request id: concurrent loads (initial / Refresh / view toggle) can resolve out
@@ -90,7 +94,7 @@ export function Runs() {
     e: ReactMouseEvent,
   ) {
     e.stopPropagation();
-    setArchiving(id);
+    setArchiving((s) => new Set(s).add(id));
     setError(null);
     try {
       await (archived ? api.unarchiveRun(id) : api.archiveRun(id));
@@ -100,7 +104,11 @@ export function Runs() {
         archived ? "Could not restore the run." : "Could not archive the run.",
       );
     } finally {
-      setArchiving(null);
+      setArchiving((s) => {
+        const n = new Set(s);
+        n.delete(id);
+        return n;
+      });
     }
   }
 
@@ -413,7 +421,7 @@ export function Runs() {
                     ? "Restore to the Runs list"
                     : "Archive — hide from this list"
                 }
-                disabled={archiving === r.workflowId}
+                disabled={archiving.has(r.workflowId)}
                 onClick={(e) => void toggleArchive(r.workflowId, r.archived, e)}
               />
             </span>
