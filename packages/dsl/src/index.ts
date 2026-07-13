@@ -34,9 +34,11 @@ export {
 export {
   resolveTemplates,
   resolveTemplateString,
+  templateTokens,
   lintTemplates,
   lintBindings,
   collectUnresolved,
+  type TemplateToken,
   type TemplateWarning,
   type UnresolvedRef,
 } from "./template";

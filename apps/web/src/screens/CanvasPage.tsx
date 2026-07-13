@@ -33,6 +33,7 @@ import {
   type NodeType,
 } from "@naary/dsl";
 import { Button } from "../components";
+import { ExpressionField } from "../components/ExpressionField";
 import {
   api,
   type ConnectionRow,
@@ -1256,6 +1257,7 @@ export function CanvasPage() {
                   upstreamIds={nodes
                     .filter((n) => n.id !== selected.id)
                     .map((n) => n.id)}
+                  edges={edges}
                   hookUrls={hookUrls}
                   connections={connections}
                   pins={pins}
@@ -1532,6 +1534,7 @@ function ConnectionSelect({
 function ConfigPanel({
   node,
   upstreamIds,
+  edges,
   hookUrls,
   connections,
   pins,
@@ -1545,6 +1548,7 @@ function ConfigPanel({
 }: {
   node: Node<NaaryData>;
   upstreamIds: string[];
+  edges: { source: string; target: string }[];
   hookUrls: string[];
   connections: ConnectionRow[];
   pins: Record<string, unknown>;
@@ -1918,12 +1922,15 @@ function ConfigPanel({
               label="System prompt"
               value={`~${Math.ceil(str("systemPrompt").length / 4)} tok`}
             />
-            <textarea
+            <ExpressionField
+              multiline
               value={str("systemPrompt")}
-              onChange={(e) => onChange({ systemPrompt: e.target.value })}
-              rows={5}
-              style={textareaStyle}
-              placeholder="You are a support triage agent…"
+              onChange={(v) => onChange({ systemPrompt: v })}
+              nodeId={node.id}
+              edges={edges}
+              pins={pins}
+              minHeight="7em"
+              placeholder="You are a support triage agent… use {{ hook.body }}"
             />
           </div>
 
