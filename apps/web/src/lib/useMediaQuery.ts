@@ -1,5 +1,19 @@
 import { useSyncExternalStore } from "react";
 
+// One MediaQueryList per distinct query, reused across renders/components. useSyncExternalStore
+// calls getSnapshot on every render, so creating a fresh MQL each time would churn objects AND
+// desync the snapshot's MQL from the subscribed one. The cache keeps them the same instance.
+const mqlCache = new Map<string, MediaQueryList>();
+function getMql(query: string): MediaQueryList | null {
+  if (typeof window === "undefined" || !window.matchMedia) return null;
+  let mql = mqlCache.get(query);
+  if (!mql) {
+    mql = window.matchMedia(query);
+    mqlCache.set(query, mql);
+  }
+  return mql;
+}
+
 /**
  * Subscribe to a CSS media query and re-render only when it flips (not on every
  * resize pixel). Backed by `matchMedia` via useSyncExternalStore so it's SSR-safe
@@ -11,15 +25,12 @@ import { useSyncExternalStore } from "react";
 export function useMediaQuery(query: string): boolean {
   return useSyncExternalStore(
     (onChange) => {
-      if (typeof window === "undefined" || !window.matchMedia) return () => {};
-      const mql = window.matchMedia(query);
+      const mql = getMql(query);
+      if (!mql) return () => {};
       mql.addEventListener("change", onChange);
       return () => mql.removeEventListener("change", onChange);
     },
-    () =>
-      typeof window !== "undefined" && window.matchMedia
-        ? window.matchMedia(query).matches
-        : false,
+    () => getMql(query)?.matches ?? false,
     // Server snapshot: no query matches (SSR renders the mobile-first / base branch — e.g.
     // both PHONE and DESKTOP read false). The client re-evaluates on hydration.
     () => false,

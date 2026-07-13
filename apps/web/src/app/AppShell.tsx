@@ -210,7 +210,9 @@ export function AppShell() {
       )}
 
       {/* ===== SIDEBAR ===== */}
-      <aside style={sideStyle}>
+      {/* `inert` when the phone drawer is closed: it's only moved off-screen with transform,
+          so without this its links/buttons stay keyboard-focusable + exposed to assistive tech. */}
+      <aside style={sideStyle} inert={phone && !drawerOpen}>
         {/* brand + workspace */}
         <div
           style={{
