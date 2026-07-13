@@ -445,6 +445,19 @@ export const api = {
       { method: "POST" },
     );
   },
+  // Begin a GitHub App install: returns the github.com install URL for the browser to
+  // redirect to. INVERTED vs OAuth — the connection does NOT exist yet: GitHub yields an
+  // installation_id only AFTER the user installs, so the API's GET /github-app/callback
+  // creates the github_app connection from it and redirects back. We send only a label.
+  startGithubAppInstall(
+    tenantId: string,
+    input: { label: string },
+  ): Promise<{ installUrl: string }> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/connections/github-app/install/start`,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  },
   // Disconnect (delete) a connection. Also removes its stored secret server-side.
   deleteConnection(tenantId: string, connectionId: string): Promise<void> {
     return http(
@@ -642,7 +655,7 @@ export type ConnectionType =
   | "signing"
   | "smtp";
 export type ConnectionAuthMode =
-  "api_token" | "pat" | "oauth" | "connection_string";
+  "api_token" | "pat" | "oauth" | "connection_string" | "github_app";
 
 /** A connected MCP server / app / database (mirrors the API's ConnectionView; Date → string over JSON). */
 export interface ConnectionRow {
