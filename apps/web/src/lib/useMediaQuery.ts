@@ -27,8 +27,14 @@ export function useMediaQuery(query: string): boolean {
     (onChange) => {
       const mql = getMql(query);
       if (!mql) return () => {};
-      mql.addEventListener("change", onChange);
-      return () => mql.removeEventListener("change", onChange);
+      // Prefer the modern API; fall back to the deprecated addListener/removeListener for
+      // older Safari and some matchMedia polyfills (test envs) that lack addEventListener.
+      if (mql.addEventListener) {
+        mql.addEventListener("change", onChange);
+        return () => mql.removeEventListener("change", onChange);
+      }
+      mql.addListener(onChange);
+      return () => mql.removeListener(onChange);
     },
     () => getMql(query)?.matches ?? false,
     // Server snapshot: no query matches (SSR renders the mobile-first / base branch — e.g.

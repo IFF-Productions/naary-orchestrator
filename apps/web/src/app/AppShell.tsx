@@ -124,6 +124,11 @@ export function AppShell() {
 
   // Close the mobile drawer on any navigation (nav item, search, "New workflow", logo).
   useEffect(() => setDrawerOpen(false), [pathname]);
+  // Also close it when leaving phone width, so a resize back to phone doesn't reopen a
+  // drawer left "open" from before (drawerOpen is only consulted while phone is true).
+  useEffect(() => {
+    if (!phone) setDrawerOpen(false);
+  }, [phone]);
 
   // Global search: jump to Workflows filtered by the query (Workflows reads ?q). In Simple mode
   // that route is hidden, so land on the automations list instead.
@@ -378,6 +383,7 @@ export function AppShell() {
               type="button"
               aria-label="Menu"
               title="Menu"
+              aria-expanded={drawerOpen}
               onClick={() => setDrawerOpen((o) => !o)}
               className="btn btn-secondary btn-icon"
             >
