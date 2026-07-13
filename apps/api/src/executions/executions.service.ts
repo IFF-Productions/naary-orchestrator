@@ -65,6 +65,8 @@ export interface RunSummary {
   startedAt: string;
   /** DB record time, ISO (kept for time-bucketed charts). */
   createdAt: string;
+  /** Soft-archived (hidden from the default Runs list). */
+  archived: boolean;
 }
 
 /** Live run detail — like ExecutionState but with the widened status (a run can be
@@ -731,6 +733,23 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Soft-archive (hide from the default Runs list) or restore a run. Read-model-only:
+   * flips `archivedAt` on the PG row and never touches Temporal — a running run can be
+   * archived and keeps executing; unarchiving is just clearing the flag. Owner-scoped.
+   */
+  async setArchived(
+    id: string,
+    tenantId: string,
+    archived: boolean,
+  ): Promise<void> {
+    await this.assertOwner(id, tenantId);
+    await getPrisma().execution.update({
+      where: { workflowId: id },
+      data: { archivedAt: archived ? new Date() : null },
+    });
+  }
+
+  /**
    * The tenant's runs currently paused for human approval, each enriched with the
    * approval node's prompt (title/instructions) resolved from the stored graph — so
    * the inbox shows WHAT is being approved, not just that something is waiting.
@@ -841,9 +860,14 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
    * caught with a cheap describe() ONLY (no history replay). Genuinely
    * running/awaiting runs keep their pushed status.
    */
-  async list(tenantId: string, limit = 50): Promise<RunSummary[]> {
+  async list(
+    tenantId: string,
+    limit = 50,
+    archived = false,
+  ): Promise<RunSummary[]> {
     const rows = await getPrisma().execution.findMany({
-      where: { tenantId },
+      // Default view hides archived runs; `archived: true` shows only the archived ones.
+      where: { tenantId, archivedAt: archived ? { not: null } : null },
       orderBy: { createdAt: "desc" },
       take: Math.min(Math.max(limit, 1), 100),
     });
@@ -856,6 +880,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           costUsd: r.costUsd !== null ? Number(r.costUsd) : null,
           startedAt,
           createdAt: startedAt,
+          archived: r.archivedAt !== null,
         };
         if (isTerminalStatus(r.status)) {
           return { ...base, status: r.status as RunSummary["status"] };

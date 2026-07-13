@@ -1,4 +1,12 @@
-import { Body, Controller, Get, HttpCode, Param, Post } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
 import { TenantId } from "../auth/tenant.decorator";
 import { ApiEndpoint } from "../swagger/api-decorators";
@@ -23,6 +31,7 @@ import {
   ExecutionsService,
   type RunEvent,
   type RunStateView,
+  type RunSummary,
 } from "./executions.service";
 
 @ApiBearerAuth("bearer")
@@ -43,17 +52,20 @@ export class ExecutionsController {
     return this.executions.start(tenantId, body.input, body.workflowKey);
   }
 
-  /** Recent runs for the authenticated tenant (newest first). */
+  /** Recent runs for the authenticated tenant (newest first). `?archived=true`
+   *  returns the soft-archived runs instead of the active (default) list. */
   @ApiEndpoint({
     summary: "List recent runs",
-    description: "Recent runs for the tenant (newest first).",
+    description:
+      "Recent runs for the tenant (newest first). `archived=true` shows the archived runs instead.",
     ok: [RunListItemResponse],
   })
   @Get()
   listRuns(
     @TenantId() tenantId: string,
-  ): Promise<{ workflowId: string; createdAt: string }[]> {
-    return this.executions.list(tenantId);
+    @Query("archived") archived?: string,
+  ): Promise<RunSummary[]> {
+    return this.executions.list(tenantId, 50, archived === "true");
   }
 
   /** The tenant's runs paused for approval, each with its prompt (the inbox). Must
@@ -121,6 +133,40 @@ export class ExecutionsController {
     @Param("id") id: string,
   ): Promise<{ accepted: true }> {
     await this.executions.cancel(id, tenantId);
+    return { accepted: true };
+  }
+
+  @ApiEndpoint({
+    summary: "Archive a run",
+    description:
+      "Soft-hides the run from the default Runs list (read-model only — the workflow is untouched).",
+    ok: AcceptedResponse,
+    notFound: true,
+  })
+  @Post(":id/archive")
+  @HttpCode(200)
+  async archive(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+  ): Promise<{ accepted: true }> {
+    await this.executions.setArchived(id, tenantId, true);
+    return { accepted: true };
+  }
+
+  @ApiEndpoint({
+    summary: "Restore an archived run",
+    description:
+      "Clears the archived flag so the run reappears in the Runs list.",
+    ok: AcceptedResponse,
+    notFound: true,
+  })
+  @Post(":id/unarchive")
+  @HttpCode(200)
+  async unarchive(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+  ): Promise<{ accepted: true }> {
+    await this.executions.setArchived(id, tenantId, false);
     return { accepted: true };
   }
 

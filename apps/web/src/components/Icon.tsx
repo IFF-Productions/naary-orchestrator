@@ -41,6 +41,7 @@ export type IconName =
   | "info"
   | "more"
   | "trash"
+  | "archive"
   | "copy"
   | "filter"
   | "flame"
@@ -114,6 +115,8 @@ const PATHS: Record<IconName, string> = {
   more: '<circle cx="12" cy="5" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none"/>',
   trash:
     '<path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" stroke-linecap="round" stroke-linejoin="round"/>',
+  archive:
+    '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" stroke-linejoin="round"/><path d="M10 12h4" stroke-linecap="round"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8" stroke-linecap="round"/>',
   filter: '<path d="M3 5h18l-7 8v6l-4 2v-8L3 5z" stroke-linejoin="round"/>',
   flame:

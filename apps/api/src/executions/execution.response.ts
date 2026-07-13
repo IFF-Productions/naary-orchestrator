@@ -14,6 +14,11 @@ export class RunListItemResponse {
   @ApiProperty({ example: "run-8f3a1c2e" }) workflowId!: string;
   @ApiProperty({ format: "date-time", example: "2026-07-04T12:00:00.000Z" })
   createdAt!: string;
+  @ApiProperty({
+    example: false,
+    description: "Soft-archived (hidden by default).",
+  })
+  archived!: boolean;
 }
 
 /** A run paused for approval, enriched with the humanApproval node's prompt. */

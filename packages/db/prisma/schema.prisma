@@ -36,10 +36,16 @@ model Execution {
   status      String   @default("running")
   costUsd     Decimal? @db.Decimal(12, 6)
   createdAt   DateTime @default(now())
+  // Soft-archive: a user hides a run from the Runs list without deleting it. NULL = active
+  // (the default view); non-null = archived + when. Purely a read-model flag — no Temporal
+  // interaction, and the worker's status/cost pushes never touch it.
+  archivedAt  DateTime?
 
   // The Runs list is `where {tenantId} orderBy createdAt desc` — a composite lets PG
-  // satisfy the filter AND the sort from one index (audit A-4).
+  // satisfy the filter AND the sort from one index (audit A-4). The archived filter adds
+  // archivedAt so the default (active-only) and archived views both stay index-covered.
   @@index([tenantId, createdAt])
+  @@index([tenantId, archivedAt, createdAt])
 }
 
 // Recurring runs: a Temporal Schedule (cron) that starts a workflow. The row is
