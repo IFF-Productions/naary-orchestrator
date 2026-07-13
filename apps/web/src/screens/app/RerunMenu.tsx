@@ -154,10 +154,19 @@ export function RerunMenu({
             style={{
               fontSize: "var(--text-xs)",
               color: "var(--ink-3)",
-              padding: "6px 8px 4px",
+              padding: "6px 8px 2px",
             }}
           >
             Re-run at version
+          </div>
+          <div
+            style={{
+              fontSize: 10,
+              color: "var(--ink-3)",
+              padding: "0 8px 6px",
+            }}
+          >
+            Uses this run's original trigger input.
           </div>
           {versions === null ? (
             <div
