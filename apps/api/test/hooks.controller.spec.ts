@@ -10,6 +10,7 @@ function makeDeps(graphNodes: { type: string }[]) {
     decryptSigningSecret: vi.fn().mockReturnValue("secret"),
     deliveryHeaderFor: vi.fn().mockReturnValue("x-github-delivery"),
     isDuplicateDelivery: vi.fn().mockResolvedValue(false),
+    removeDelivery: vi.fn().mockResolvedValue(undefined),
   };
   const executions = {
     startWebhook: vi.fn().mockResolvedValue({ workflowId: "wf-plain" }),
@@ -29,7 +30,7 @@ function makeDeps(graphNodes: { type: string }[]) {
     executions as never,
     graphs as never,
   );
-  return { controller, webhooks, executions, res, req, headers };
+  return { controller, webhooks, executions, graphs, res, req, headers };
 }
 
 describe("HooksController.ingress", () => {
@@ -108,5 +109,73 @@ describe("HooksController.ingress", () => {
     expect(executions.startWebhook).toHaveBeenCalled();
     expect(res.status).not.toHaveBeenCalled();
     expect(body).toEqual({ status: "started", workflowId: "wf-plain" });
+  });
+
+  const deliv = { "x-github-delivery": "d-1" };
+
+  it("duplicate delivery → duplicate_ignored, never starts a run", async () => {
+    const { controller, webhooks, executions, req, res, headers } = makeDeps([
+      { type: "webhookTrigger" },
+    ]);
+    webhooks.isDuplicateDelivery.mockResolvedValue(true);
+    const body = await controller.ingress(
+      "ep-1",
+      req as never,
+      {},
+      { ...headers, ...deliv },
+      res as never,
+    );
+    expect(body).toEqual({ status: "duplicate_ignored" });
+    expect(executions.startWebhook).not.toHaveBeenCalled();
+  });
+
+  it("no graph seeded → 404 and the delivery is NOT recorded (retry can start once seeded)", async () => {
+    const { controller, webhooks, graphs, req, res, headers } = makeDeps([]);
+    graphs.getLatest.mockResolvedValue(null);
+    await expect(
+      controller.ingress(
+        "ep-1",
+        req as never,
+        {},
+        { ...headers, ...deliv },
+        res as never,
+      ),
+    ).rejects.toMatchObject({ status: 404 });
+    // The dedupe store is only touched once we've committed to processing.
+    expect(webhooks.isDuplicateDelivery).not.toHaveBeenCalled();
+    expect(webhooks.removeDelivery).not.toHaveBeenCalled();
+  });
+
+  it("start throws (e.g. inactive workflow) → rolls back the dedupe record and rethrows", async () => {
+    const { controller, webhooks, executions, req, res, headers } = makeDeps([
+      { type: "webhookTrigger" },
+    ]);
+    executions.startWebhook.mockRejectedValue(new Error("workflow inactive"));
+    await expect(
+      controller.ingress(
+        "ep-1",
+        req as never,
+        {},
+        { ...headers, ...deliv },
+        res as never,
+      ),
+    ).rejects.toThrow("workflow inactive");
+    // The recorded delivery is un-burned so the provider's retry isn't swallowed.
+    expect(webhooks.removeDelivery).toHaveBeenCalledWith("ep-1", "d-1");
+  });
+
+  it("start succeeds → the dedupe record is KEPT (not rolled back)", async () => {
+    const { controller, webhooks, req, res, headers } = makeDeps([
+      { type: "agent" },
+    ]);
+    await controller.ingress(
+      "ep-1",
+      req as never,
+      {},
+      { ...headers, ...deliv },
+      res as never,
+    );
+    expect(webhooks.isDuplicateDelivery).toHaveBeenCalledWith("ep-1", "d-1");
+    expect(webhooks.removeDelivery).not.toHaveBeenCalled();
   });
 });

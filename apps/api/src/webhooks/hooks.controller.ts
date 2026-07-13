@@ -119,22 +119,13 @@ export class HooksController {
       throw new UnauthorizedException("Invalid signature");
     }
 
-    // Dedupe AFTER verifying (don't let unsigned requests touch the store).
-    const deliveryId = headers[this.webhooks.deliveryHeaderFor(provider)];
-    if (
-      deliveryId &&
-      (await this.webhooks.isDuplicateDelivery(endpointId, deliveryId))
-    ) {
-      log.info(
-        { endpointId, provider, deliveryId, durationMs: ms() },
-        "webhook duplicate ignored",
-      );
-      return { status: "duplicate_ignored" }; // 2xx so the provider stops retrying
-    }
-
-    // Resolve the tenant's current graph version for this endpoint's workflowKey
-    // from Postgres (so a github-review endpoint reaches the reference flow, not
-    // the default). Unknown/unseeded key → 404. The snapshot is version-pinned.
+    // Resolve the graph BEFORE recording the delivery for dedupe. Order matters:
+    // recording a delivery is a COMMIT to processing it — the @@unique row suppresses
+    // every future retry of the same id for the whole retention window. Unknown/unseeded
+    // key → 404 (config not finished); doing this first means a not-yet-seeded endpoint
+    // doesn't burn the delivery so the provider's retry works once the graph exists.
+    // The snapshot is version-pinned (so a github-review endpoint reaches the reference
+    // flow, not the default).
     const snapshot = await this.graphs.getLatest(
       endpoint.tenantId,
       endpoint.workflowId,
@@ -155,6 +146,23 @@ export class HooksController {
       );
     }
 
+    // Dedupe AFTER verifying + confirming there's a graph to run. Recording BEFORE the
+    // start still wins the race against a concurrent duplicate (the @@unique constraint),
+    // but we roll it back if the start throws (below) so a transient failure — an INACTIVE
+    // workflow, Temporal down — doesn't permanently swallow the delivery as a duplicate.
+    const deliveryId = headers[this.webhooks.deliveryHeaderFor(provider)];
+    let recorded = false;
+    if (deliveryId) {
+      if (await this.webhooks.isDuplicateDelivery(endpointId, deliveryId)) {
+        log.info(
+          { endpointId, provider, deliveryId, durationMs: ms() },
+          "webhook duplicate ignored",
+        );
+        return { status: "duplicate_ignored" }; // 2xx so the provider stops retrying
+      }
+      recorded = true;
+    }
+
     const base = {
       endpointId,
       provider,
@@ -163,48 +171,61 @@ export class HooksController {
       workflowKey: endpoint.workflowId,
     };
 
-    // If the graph has a respondToWebhook node, wait (bounded) for its response and
-    // return it synchronously; otherwise stay fire-and-forget (202, unchanged).
-    const wantsResponse = snapshot.graph.nodes.some(
-      (n) => n.type === "respondToWebhook",
-    );
-    if (wantsResponse) {
-      const { workflowId, response } =
-        await this.executions.startWebhookAwaitResponse(
-          endpoint.tenantId,
-          snapshot,
-          event,
-          endpoint.workflowId,
-        );
-      log.info(
-        {
-          ...base,
-          workflowId,
-          mode: "sync",
-          responded: !!response,
-          durationMs: ms(),
-        },
-        "webhook started (await-response)",
+    // From here we START the run. If it throws, roll back the dedupe record so the
+    // provider's retry isn't swallowed as a duplicate — the id is only "spent" once a
+    // run actually starts. (The run id is random per start, so the sole residual risk
+    // is a start that succeeds server-side but whose ack is lost → a retry double-runs;
+    // inherent to at-least-once delivery, and far rarer than the burn this replaces.)
+    try {
+      // If the graph has a respondToWebhook node, wait (bounded) for its response and
+      // return it synchronously; otherwise stay fire-and-forget (202, unchanged).
+      const wantsResponse = snapshot.graph.nodes.some(
+        (n) => n.type === "respondToWebhook",
       );
-      if (response) {
-        res.status(response.statusCode);
-        if (response.headers) res.set(response.headers);
-        return response.body ?? null;
+      if (wantsResponse) {
+        const { workflowId, response } =
+          await this.executions.startWebhookAwaitResponse(
+            endpoint.tenantId,
+            snapshot,
+            event,
+            endpoint.workflowId,
+          );
+        log.info(
+          {
+            ...base,
+            workflowId,
+            mode: "sync",
+            responded: !!response,
+            durationMs: ms(),
+          },
+          "webhook started (await-response)",
+        );
+        if (response) {
+          res.status(response.statusCode);
+          if (response.headers) res.set(response.headers);
+          return response.body ?? null;
+        }
+        // Ran but didn't respond in time (e.g. it paused first) — fall back to 202.
+        return { status: "started", workflowId };
       }
-      // Ran but didn't respond in time (e.g. it paused first) — fall back to 202.
-      return { status: "started", workflowId };
-    }
 
-    const { workflowId } = await this.executions.startWebhook(
-      endpoint.tenantId,
-      snapshot,
-      event,
-      endpoint.workflowId, // the registry workflowKey this endpoint triggers
-    );
-    log.info(
-      { ...base, workflowId, mode: "async", durationMs: ms() },
-      "webhook started",
-    );
-    return { status: "started", workflowId };
+      const { workflowId } = await this.executions.startWebhook(
+        endpoint.tenantId,
+        snapshot,
+        event,
+        endpoint.workflowId, // the registry workflowKey this endpoint triggers
+      );
+      log.info(
+        { ...base, workflowId, mode: "async", durationMs: ms() },
+        "webhook started",
+      );
+      return { status: "started", workflowId };
+    } catch (err) {
+      // The run didn't start — un-burn the delivery so a retry can try again.
+      if (recorded && deliveryId) {
+        await this.webhooks.removeDelivery(endpointId, deliveryId);
+      }
+      throw err;
+    }
   }
 }
