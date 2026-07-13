@@ -287,6 +287,18 @@ export const api = {
       method: "POST",
     });
   },
+  // Soft-archive a run (hide it from the default Runs list). Read-model only.
+  archiveRun(id: string): Promise<{ accepted: true }> {
+    return http(`/executions/${encodeURIComponent(id)}/archive`, {
+      method: "POST",
+    });
+  },
+  // Restore an archived run back into the Runs list.
+  unarchiveRun(id: string): Promise<{ accepted: true }> {
+    return http(`/executions/${encodeURIComponent(id)}/unarchive`, {
+      method: "POST",
+    });
+  },
   // The tenant's runs paused for approval, each with its prompt (approvals inbox).
   listAwaitingApprovals(): Promise<AwaitingApproval[]> {
     return http("/executions/awaiting");
@@ -344,9 +356,9 @@ export const api = {
   revokeApiToken(id: string): Promise<void> {
     return http(`/tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
-  // Recent runs for the tenant (identity + start time; status is on the detail view).
-  listRuns(): Promise<RunSummary[]> {
-    return http("/executions");
+  // Recent runs for the tenant. `archived` returns the hidden runs instead of the default list.
+  listRuns(archived = false): Promise<RunSummary[]> {
+    return http(archived ? "/executions?archived=true" : "/executions");
   },
   // Usage ledger (tokens + cost only). Tenant-scoped — pass the tenantId from getMe().
   getUsage(tenantId: string): Promise<UsageReport> {
@@ -777,6 +789,8 @@ export interface RunSummary {
   costUsd: number | null;
   startedAt: string;
   createdAt: string;
+  /** Soft-archived (hidden from the default Runs list). */
+  archived: boolean;
 }
 export interface UsageReport {
   totalCostUsd: number;

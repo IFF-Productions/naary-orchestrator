@@ -1,11 +1,16 @@
-import { type MouseEvent as ReactMouseEvent, useEffect, useState } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Icon, StatusPill } from "../../components";
 import { api, type RunSummary, UnauthorizedError } from "../../lib/api";
 import { isFailure, isTerminal, runStatusUi } from "../../lib/run-status";
 import { useMode } from "../../mode";
 
-const COLS = "1.5fr 1fr 0.9fr 0.7fr 0.7fr 0.4fr";
+const COLS = "1.5fr 1fr 0.9fr 0.7fr 0.7fr 0.6fr";
 
 /** Compact relative time from an ISO timestamp (no date lib). */
 function ago(iso: string): string {
@@ -41,13 +46,27 @@ export function Runs() {
   const [filter, setFilter] = useState("All");
   const [starting, setStarting] = useState(false);
   const [rerunning, setRerunning] = useState<string | null>(null);
+  // Set of in-flight archive/restore ids — a Set (not a single id) so archiving two rows in
+  // quick succession disables each independently instead of the second clobbering the first.
+  const [archiving, setArchiving] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [showArchived, setShowArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Monotonic request id: concurrent loads (initial / Refresh / view toggle) can resolve out
+  // of order — only the newest is allowed to write `runs`, so a slow earlier request (e.g. the
+  // other view) can't clobber the current one.
+  const loadSeq = useRef(0);
 
-  async function load() {
+  async function load(archived = showArchived) {
+    const seq = ++loadSeq.current;
     try {
-      setRuns(await api.listRuns());
+      const rows = await api.listRuns(archived);
+      if (seq !== loadSeq.current) return; // superseded by a newer load
+      setRuns(rows);
       setError(null);
     } catch (e) {
+      if (seq !== loadSeq.current) return;
       setError(
         e instanceof UnauthorizedError
           ? "Not authenticated — sign in (or set an API token) to see runs."
@@ -57,8 +76,41 @@ export function Runs() {
   }
 
   useEffect(() => {
-    void load();
+    void load(false);
   }, []);
+
+  function toggleArchivedView() {
+    const next = !showArchived;
+    setShowArchived(next);
+    setRuns(null);
+    void load(next);
+  }
+
+  // Archive (active view) or restore (archived view). Either way the run leaves the
+  // current list — it moves to the other view — so we drop it optimistically.
+  async function toggleArchive(
+    id: string,
+    archived: boolean,
+    e: ReactMouseEvent,
+  ) {
+    e.stopPropagation();
+    setArchiving((s) => new Set(s).add(id));
+    setError(null);
+    try {
+      await (archived ? api.unarchiveRun(id) : api.archiveRun(id));
+      setRuns((prev) => prev?.filter((r) => r.workflowId !== id) ?? null);
+    } catch {
+      setError(
+        archived ? "Could not restore the run." : "Could not archive the run.",
+      );
+    } finally {
+      setArchiving((s) => {
+        const n = new Set(s);
+        n.delete(id);
+        return n;
+      });
+    }
+  }
 
   const activeFilter = FILTERS.find((f) => f.label === filter) ?? FILTERS[0];
   const rows = (runs ?? [])
@@ -128,17 +180,26 @@ export function Runs() {
               marginTop: 2,
             }}
           >
-            {simple
-              ? `Every time your automations ran${runs ? ` · ${runs.length} recent` : ""}`
-              : `Durable execution log${runs ? ` · ${runs.length} recent` : ""}`}
+            {showArchived
+              ? `Archived runs${runs ? ` · ${runs.length}` : ""}`
+              : simple
+                ? `Every time your automations ran${runs ? ` · ${runs.length} recent` : ""}`
+                : `Durable execution log${runs ? ` · ${runs.length} recent` : ""}`}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          {!simple && (
+          {!simple && !showArchived && (
             <Button icon="play" onClick={startRun} disabled={starting}>
               {starting ? "Starting…" : "Start test run"}
             </Button>
           )}
+          <Button
+            icon="archive"
+            variant={showArchived ? "primary" : "secondary"}
+            onClick={toggleArchivedView}
+          >
+            {showArchived ? "Back to runs" : "Archived"}
+          </Button>
           <Button icon="refresh" onClick={() => void load()}>
             Refresh
           </Button>
@@ -268,9 +329,11 @@ export function Runs() {
               color: "var(--ink-3)",
             }}
           >
-            {simple
-              ? "No runs yet — open an automation and press “Run now”."
-              : "No runs yet — start one from the canvas or “Start test run”."}
+            {showArchived
+              ? "No archived runs — use the archive button on a run to hide it here."
+              : simple
+                ? "No runs yet — open an automation and press “Run now”."
+                : "No runs yet — start one from the canvas or “Start test run”."}
           </div>
         )}
 
@@ -326,28 +389,41 @@ export function Runs() {
             </span>
             <span
               style={{
-                textAlign: "right",
                 display: "flex",
                 justifyContent: "flex-end",
+                gap: 6,
               }}
             >
-              {isTerminal(r.status) ? (
+              {isTerminal(r.status) && (
                 <Button
                   size="sm"
                   variant="secondary"
                   icon="refresh"
                   iconOnly
                   title="Re-run with the same input"
+                  aria-label="Re-run with the same input"
                   disabled={rerunning === r.workflowId}
                   onClick={(e) => void rerun(r.workflowId, e)}
                 />
-              ) : (
-                <Icon
-                  name="chevron-right"
-                  size={14}
-                  style={{ color: "var(--ink-3)" }}
-                />
               )}
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={r.archived ? "eye" : "archive"}
+                iconOnly
+                title={
+                  r.archived
+                    ? "Restore to the Runs list"
+                    : "Archive — hide from this list"
+                }
+                aria-label={
+                  r.archived
+                    ? "Restore to the Runs list"
+                    : "Archive — hide from this list"
+                }
+                disabled={archiving.has(r.workflowId)}
+                onClick={(e) => void toggleArchive(r.workflowId, r.archived, e)}
+              />
             </span>
           </div>
         ))}
