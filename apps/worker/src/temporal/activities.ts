@@ -933,14 +933,58 @@ function approvalUrl(workflowId: string): string | undefined {
   return `${base}/approve/${encodeURIComponent(workflowId)}?token=${token}`;
 }
 
-/** Human-readable line for the notification (what a Slack/Teams webhook shows). */
+/** Deep link to the run detail page — the resource the recipient needs to act on. Needs
+ *  APP_BASE_URL (the SPA host); without it there's no absolute URL to build, so undefined. */
+function runUrl(workflowId: string): string | undefined {
+  const base = (process.env.APP_BASE_URL ?? "").replace(/\/$/, "");
+  if (!base) return undefined;
+  return `${base}/app/runs/${encodeURIComponent(workflowId)}`;
+}
+
+/** Human-readable line for the notification (what a Slack/Teams webhook shows). Includes a
+ *  deep link to the resource to act on: the signed approve/reject link for a pause, otherwise
+ *  the run detail page. */
 function notificationText(input: NotificationInput): string {
   const wf = input.workflowKey ? `"${input.workflowKey}"` : "a workflow";
+  const run = runUrl(input.workflowId);
   if (input.kind === "approval_pending") {
     const url = approvalUrl(input.workflowId);
     return `⏳ Approval needed on ${wf}${input.title ? `: ${input.title}` : ""} (run ${input.workflowId}).${url ? ` Approve or reject: ${url}` : ""}`;
   }
-  return `❌ ${wf} run failed${input.detail ? ` (${input.detail})` : ""} — run ${input.workflowId}.`;
+  return `❌ ${wf} run failed${input.detail ? ` (${input.detail})` : ""} — run ${input.workflowId}.${run ? ` View: ${run}` : ""}`;
+}
+
+/**
+ * Slack Block Kit blocks: the message text plus an `actions` row of link-buttons — the
+ * "multiple entries" a recipient can act on (Approve/Reject, View run) instead of one bare
+ * line. Slack renders `blocks` when present; generic/Teams hooks fall back to `text` + the
+ * flat fields. Buttons carry absolute `url`s, so no Slack interactivity wiring is needed.
+ */
+function notificationBlocks(
+  input: NotificationInput,
+  text: string,
+): { blocks: unknown[]; actions: { label: string; url: string }[] } {
+  const actions: { label: string; url: string }[] = [];
+  if (input.kind === "approval_pending") {
+    const approve = approvalUrl(input.workflowId);
+    if (approve) actions.push({ label: "Approve / Reject", url: approve });
+  }
+  const run = runUrl(input.workflowId);
+  if (run) actions.push({ label: "View run", url: run });
+
+  const blocks: unknown[] = [
+    { type: "section", text: { type: "mrkdwn", text } },
+  ];
+  if (actions.length)
+    blocks.push({
+      type: "actions",
+      elements: actions.map((a) => ({
+        type: "button",
+        text: { type: "plain_text", text: a.label },
+        url: a.url,
+      })),
+    });
+  return { blocks, actions };
 }
 
 /**
@@ -962,19 +1006,25 @@ export async function sendNotification(
 
     await __notifyDeps.assertEgressAllowed(settings.webhookUrl); // https + public
     const text = notificationText(input);
+    const { blocks, actions } = notificationBlocks(input, text);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
     try {
       await __notifyDeps.fetch(settings.webhookUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        // `text` is Slack/Teams-friendly; the structured fields serve generic hooks.
+        // `text` is the Slack/Teams fallback line; `blocks` render the action buttons
+        // (View run / Approve / Reject) in Slack; the flat fields + `actions`/`runUrl`
+        // serve generic hooks that want structured data.
         body: JSON.stringify({
           text,
+          blocks,
           kind: input.kind,
           workflowId: input.workflowId,
           workflowKey: input.workflowKey,
           title: input.title,
+          runUrl: runUrl(input.workflowId),
+          actions,
           ...(input.kind === "approval_pending"
             ? { approvalUrl: approvalUrl(input.workflowId) }
             : {}),
