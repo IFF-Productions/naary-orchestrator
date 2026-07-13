@@ -9,9 +9,26 @@ export class StartExecutionResponse {
   workflowId!: string;
 }
 
-/** One row in the recent-runs list (newest first). */
+/** One row in the recent-runs list (newest first). Mirrors the service's RunSummary — the
+ *  live status/cost are projected onto the row, not just identity + time. */
 export class RunListItemResponse {
   @ApiProperty({ example: "run-8f3a1c2e" }) workflowId!: string;
+  @ApiProperty({ nullable: true, example: "support-triage" })
+  workflowKey!: string | null;
+  @ApiProperty({
+    example: "completed",
+    description:
+      "App status or a Temporal close reason (failed | timed_out | terminated | canceled | unknown).",
+  })
+  status!: string;
+  @ApiProperty({
+    nullable: true,
+    example: 0.0142,
+    description: "Run cost in USD.",
+  })
+  costUsd!: number | null;
+  @ApiProperty({ format: "date-time", example: "2026-07-04T12:00:00.000Z" })
+  startedAt!: string;
   @ApiProperty({ format: "date-time", example: "2026-07-04T12:00:00.000Z" })
   createdAt!: string;
   @ApiProperty({

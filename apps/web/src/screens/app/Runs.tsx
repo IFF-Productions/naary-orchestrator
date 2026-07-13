@@ -1,4 +1,9 @@
-import { type MouseEvent as ReactMouseEvent, useEffect, useState } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Icon, StatusPill } from "../../components";
 import { api, type RunSummary, UnauthorizedError } from "../../lib/api";
@@ -44,12 +49,20 @@ export function Runs() {
   const [archiving, setArchiving] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Monotonic request id: concurrent loads (initial / Refresh / view toggle) can resolve out
+  // of order — only the newest is allowed to write `runs`, so a slow earlier request (e.g. the
+  // other view) can't clobber the current one.
+  const loadSeq = useRef(0);
 
   async function load(archived = showArchived) {
+    const seq = ++loadSeq.current;
     try {
-      setRuns(await api.listRuns(archived));
+      const rows = await api.listRuns(archived);
+      if (seq !== loadSeq.current) return; // superseded by a newer load
+      setRuns(rows);
       setError(null);
     } catch (e) {
+      if (seq !== loadSeq.current) return;
       setError(
         e instanceof UnauthorizedError
           ? "Not authenticated — sign in (or set an API token) to see runs."
