@@ -157,6 +157,10 @@ export default function ExpressionEditor({
       onChange={(v) => onChange(multiline ? v : v.replace(/\n/g, ""))}
       extensions={extensions}
       basicSetup={basicSetup}
+      // `theme="none"` disables @uiw's built-in LIGHT theme (white bg + dark text), which
+      // otherwise wins and makes the field unreadable in dark mode. Our exprTheme drives the
+      // look via theme-aware CSS vars (var(--card)/var(--ink)) so it tracks light + dark.
+      theme="none"
       placeholder={placeholder}
       minHeight={multiline ? (minHeight ?? "6em") : undefined}
       indentWithTab={false} // Tab is for accepting completions, not indenting
