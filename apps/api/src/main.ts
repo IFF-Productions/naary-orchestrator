@@ -1,5 +1,6 @@
 import "./env"; // MUST be first — loads + validates .env before @naary/* modules evaluate
 import "reflect-metadata";
+import { initFlags } from "@naary/flags";
 import { initMetrics } from "@naary/metrics";
 import { initSentry } from "@naary/observability";
 
@@ -8,6 +9,9 @@ import { initSentry } from "@naary/observability";
 initSentry({ component: "api" });
 // Tag metrics with the component + collect default Node/process metrics.
 initMetrics({ component: "api" });
+// Wire the feature-flag provider (Flagsmith). Fail-safe + non-blocking: no
+// FLAGSMITH_ENVIRONMENT_KEY ⇒ code defaults; a slow/down Flagsmith never stalls boot.
+initFlags();
 
 import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";

@@ -18,4 +18,14 @@ describe("MeController", () => {
       subject: undefined,
     });
   });
+
+  it("returns this tenant's flags at their code defaults when the provider is unconfigured", async () => {
+    // No FLAGSMITH key ⇒ the OpenFeature Noop provider ⇒ every catalog flag = its safe default.
+    const c = new MeController();
+    const { flags } = await c.flags({ tenantId: "t-1" });
+    expect(flags).toEqual({
+      "chat-rag": false,
+      "new-canvas-inspector": false,
+    });
+  });
 });

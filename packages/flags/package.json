@@ -1,0 +1,20 @@
+{
+  "name": "@naary/flags",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Feature flags for api (+ later worker activities). OpenFeature abstraction with a Flagsmith provider, env-gated + fail-safe (no key ⇒ code defaults). Server-side eval keyed on tenantId; NEVER imported by workflow code (varying network call breaks determinism).",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@openfeature/server-sdk": "1.22.0",
+    "@openfeature/flagsmith-provider": "0.1.2",
+    "flagsmith-nodejs": "6.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0"
+  }
+}
