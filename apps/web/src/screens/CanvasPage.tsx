@@ -694,22 +694,24 @@ export function CanvasPage() {
       setStatus(error ?? "Fix the graph's issues before exporting.");
       return;
     }
-    const payload = { naaryFlow: 1, name: name.trim() || "workflow", graph };
+    // One resolved name drives the payload, the filename slug, and the status message so they
+    // never diverge (a blank/whitespace name → "workflow" everywhere, not a mix).
+    const exportName = name.trim() || "workflow";
+    const payload = { naaryFlow: 1, name: exportName, graph };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    // slugify trims separators + falls back to a default, so a name like "---" can't
-    // produce a "---.json" filename.
-    a.download = `${slugify(name)}.json`;
+    // slugify trims separators + falls back to a default, so "---" can't make "---.json".
+    a.download = `${slugify(exportName)}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     // Defer revocation — revoking synchronously can cancel the download in some browsers.
     setTimeout(() => URL.revokeObjectURL(url), 0);
-    setStatus(`Exported "${name}".`);
+    setStatus(`Exported "${exportName}".`);
   }
 
   // Import a graph JSON (raw GraphDef or a { name, graph } export) as a NEW unsaved draft —
@@ -762,14 +764,17 @@ export function CanvasPage() {
         );
         return;
       }
-      const importedName =
+      // Resolve the applied name ONCE (wrapper name → filename → fallback) so the name set on
+      // state and the name shown in the status message can't diverge on an empty edge case.
+      const fromWrapper =
         typeof wrapper.name === "string" && wrapper.name.trim()
           ? wrapper.name
           : file.name.replace(/\.json$/i, "");
-      setName(importedName || "Imported workflow");
+      const appliedName = fromWrapper.trim() || "Imported workflow";
+      setName(appliedName);
       setWorkflowKey("");
       if (keyParam || templateParam) setSearchParams({}, { replace: true });
-      setStatus(`Imported "${importedName}" — review, then Save to keep it.`);
+      setStatus(`Imported "${appliedName}" — review, then Save to keep it.`);
     };
     reader.readAsText(file);
   }

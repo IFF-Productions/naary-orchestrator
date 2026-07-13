@@ -20,7 +20,9 @@ test("export downloads a graph JSON, and import loads it back", async ({
     page.getByRole("button", { name: "Export" }).click(),
   ]);
   expect(download.suggestedFilename()).toMatch(/\.json$/);
-  const exported = JSON.parse(readFileSync(await download.path(), "utf8"));
+  const dlPath = await download.path();
+  expect(dlPath).toBeTruthy(); // null if downloads are disabled — fail clearly, not on readFileSync
+  const exported = JSON.parse(readFileSync(dlPath as string, "utf8"));
   expect(exported.naaryFlow).toBe(1);
   expect(Array.isArray(exported.graph.nodes)).toBe(true);
   expect(typeof exported.graph.startNodeId).toBe("string");
