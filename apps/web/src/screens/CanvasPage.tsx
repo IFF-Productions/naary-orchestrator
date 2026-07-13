@@ -37,6 +37,7 @@ import {
   lintTemplates,
   getIntegrationProvider,
   validateIntegrationConfig,
+  type GraphDef,
   type NodeType,
 } from "@naary/dsl";
 import { Button } from "../components";
@@ -698,17 +699,16 @@ export function CanvasPage() {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
-    const slug =
-      (name.trim() || "workflow")
-        .replace(/[^a-z0-9-_]+/gi, "-")
-        .toLowerCase() || "workflow";
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${slug}.json`;
+    // slugify trims separators + falls back to a default, so a name like "---" can't
+    // produce a "---.json" filename.
+    a.download = `${slugify(name)}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    // Defer revocation — revoking synchronously can cancel the download in some browsers.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
     setStatus(`Exported "${name}".`);
   }
 
@@ -720,6 +720,8 @@ export function CanvasPage() {
     e.target.value = ""; // let the same file be re-picked later
     if (!file) return;
     const reader = new FileReader();
+    reader.onerror = () =>
+      setStatus("Import failed — the file couldn't be read.");
     reader.onload = () => {
       let parsed: unknown;
       try {
@@ -734,21 +736,24 @@ export function CanvasPage() {
           : {};
       const gd = ("graph" in wrapper ? wrapper.graph : parsed) as {
         nodes?: unknown;
+        edges?: unknown;
         startNodeId?: unknown;
       };
+      // decompileGraph maps graph.nodes AND graph.edges → both must be arrays, plus a start id.
       if (
         !gd ||
         typeof gd !== "object" ||
         !Array.isArray(gd.nodes) ||
+        !Array.isArray(gd.edges) ||
         typeof gd.startNodeId !== "string"
       ) {
         setStatus(
-          "Import failed — not a Naary graph (missing nodes/startNodeId).",
+          "Import failed — not a Naary graph (needs nodes[], edges[], startNodeId).",
         );
         return;
       }
       try {
-        const { nodes: cn, edges: ce } = decompileGraph(gd as never);
+        const { nodes: cn, edges: ce } = decompileGraph(gd as GraphDef);
         setNodes(toFlowNodes(cn));
         setEdges(toFlowEdges(ce));
       } catch {
