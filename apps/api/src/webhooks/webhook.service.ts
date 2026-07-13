@@ -167,4 +167,18 @@ export class WebhookService {
       .catch(() => undefined); // retention is best-effort; don't fail the webhook
     return false;
   }
+
+  /**
+   * Undo a dedupe record — used to ROLL BACK when the run fails to start after we
+   * recorded the delivery. Without this, a transient start failure (workflow inactive,
+   * Temporal down) would burn the delivery id for the whole retention window, so every
+   * provider retry returns `duplicate_ignored` and the run never fires. Best-effort:
+   * if the delete itself fails, the caller still surfaces the original start error
+   * (the provider retries; worst case the id stays recorded, i.e. today's behavior).
+   */
+  async removeDelivery(endpointId: string, deliveryId: string): Promise<void> {
+    await getPrisma()
+      .webhookDelivery.deleteMany({ where: { endpointId, deliveryId } })
+      .catch(() => undefined);
+  }
 }
