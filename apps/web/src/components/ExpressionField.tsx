@@ -1,15 +1,22 @@
 /**
  * A config field that understands `{{ node.path }}` expressions: syntax-highlighted + autocompleted
- * (see ExpressionEditor). The heavy CodeMirror editor is loaded LAZILY; until it's ready (or if it
- * fails to load) this renders a plain, fully-functional input/textarea bound to the same value, so
- * authoring never breaks or loses data.
+ * (see ExpressionEditor). The heavy CodeMirror editor is loaded LAZILY; while it loads (Suspense) OR
+ * if the chunk fails to load (ErrorBoundary) this renders a plain, fully-functional input/textarea
+ * bound to the same value, so authoring never breaks or loses data.
  */
-import { type CSSProperties, Suspense, lazy } from "react";
+import {
+  type CSSProperties,
+  Component,
+  type ReactNode,
+  Suspense,
+  lazy,
+  useMemo,
+} from "react";
 import {
   type ExpressionRefs,
+  type RefEdge,
   buildExpressionRefs,
 } from "../lib/expression-refs";
-import type { RefEdge } from "../lib/expression-refs";
 
 const ExpressionEditor = lazy(() => import("./ExpressionEditor"));
 
@@ -23,6 +30,20 @@ const fieldStyle: CSSProperties = {
   fontSize: "var(--text-body)",
   fontFamily: "var(--font-sans)",
 };
+
+/** Renders `fallback` if a child throws — here, a failed CodeMirror chunk load. */
+class EditorErrorBoundary extends Component<
+  { fallback: ReactNode; children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
 
 export interface ExpressionFieldProps {
   value: string;
@@ -51,12 +72,13 @@ export function ExpressionField({
   placeholder,
   minHeight,
 }: ExpressionFieldProps) {
-  const refs: ExpressionRefs = buildExpressionRefs(
-    nodeId,
-    edges,
-    pins,
-    nodeKinds,
+  // Memoized so keystrokes (value changes) don't rebuild refs → don't churn the CodeMirror
+  // `extensions` memo (which is keyed on refs identity) on every character typed.
+  const refs: ExpressionRefs = useMemo(
+    () => buildExpressionRefs(nodeId, edges, pins, nodeKinds),
+    [nodeId, edges, pins, nodeKinds],
   );
+
   const fallback = multiline ? (
     <textarea
       value={value}
@@ -75,15 +97,17 @@ export function ExpressionField({
   );
 
   return (
-    <Suspense fallback={fallback}>
-      <ExpressionEditor
-        value={value}
-        onChange={onChange}
-        refs={refs}
-        multiline={multiline}
-        placeholder={placeholder}
-        minHeight={minHeight}
-      />
-    </Suspense>
+    <EditorErrorBoundary fallback={fallback}>
+      <Suspense fallback={fallback}>
+        <ExpressionEditor
+          value={value}
+          onChange={onChange}
+          refs={refs}
+          multiline={multiline}
+          placeholder={placeholder}
+          minHeight={minHeight}
+        />
+      </Suspense>
+    </EditorErrorBoundary>
   );
 }

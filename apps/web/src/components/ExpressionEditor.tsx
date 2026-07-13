@@ -82,16 +82,18 @@ function exprCompletionSource(refs: ExpressionRefs) {
     const before = ctx.state.sliceDoc(0, ctx.pos);
     const open = before.lastIndexOf("{{");
     if (open === -1) return null; // not inside a token
+    if (before[open - 1] === "\\") return null; // escaped `\{{` — a literal, not a token
     if (before.indexOf("}}", open) !== -1) return null; // token already closed before the cursor
-    const inner = before.slice(open + 2).replace(/^\s+/, ""); // "hook.repo" | "h"
-    if (!/^[\w.$]*$/.test(inner)) return null; // only simple dotted refs
+    const inner = before.slice(open + 2).replace(/^\s+/, ""); // "agent-1a.repo" | "h"
+    // Allow the chars real refs use: node ids are `${kind}-${uuid}` (hyphens!), then dotted keys.
+    if (!/^[\w.$-]*$/.test(inner)) return null;
     const dot = inner.lastIndexOf(".");
     if (dot === -1) {
-      // Completing a node id.
+      // Completing a node id (hyphenated).
       return {
         from: ctx.pos - inner.length,
         options: refs.nodeIds.map((id) => ({ label: id, type: "variable" })),
-        validFor: /^[\w$]*$/,
+        validFor: /^[\w$-]*$/,
       };
     }
     // Completing a key under the dotted base.
@@ -100,7 +102,7 @@ function exprCompletionSource(refs: ExpressionRefs) {
     return {
       from: ctx.pos - seg.length,
       options: refs.keysAt(base).map((k) => ({ label: k, type: "property" })),
-      validFor: /^[\w$]*$/,
+      validFor: /^[\w$-]*$/,
     };
   };
 }

@@ -232,6 +232,12 @@ export function CanvasPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [nodes, setNodes] = useState<Node<NaaryData>[]>(SEED_NODES);
   const [edges, setEdges] = useState<FlowEdge[]>(SEED_EDGES);
+  // Stable node-id → kind map for the ExpressionField autocomplete fallback. Memoized so it
+  // doesn't get a new identity every render (which would bust the field's `refs` memo).
+  const nodeKinds = useMemo(
+    () => Object.fromEntries(nodes.map((n) => [n.id, n.data.kind])),
+    [nodes],
+  );
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [name, setName] = useState("Canvas draft");
@@ -1258,9 +1264,7 @@ export function CanvasPage() {
                     .filter((n) => n.id !== selected.id)
                     .map((n) => n.id)}
                   edges={edges}
-                  nodeKinds={Object.fromEntries(
-                    nodes.map((n) => [n.id, n.data.kind]),
-                  )}
+                  nodeKinds={nodeKinds}
                   hookUrls={hookUrls}
                   connections={connections}
                   pins={pins}
