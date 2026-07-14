@@ -962,25 +962,66 @@ function notificationText(input: NotificationInput): string {
 }
 
 /**
- * Slack Block Kit blocks: the message text plus an `actions` row of link-buttons — the
- * "multiple entries" a recipient can act on (Approve/Reject, View run) instead of one bare
- * line. Slack renders `blocks` when present; generic/Teams hooks fall back to `text` + the
- * flat fields. Buttons carry absolute `url`s, so no Slack interactivity wiring is needed.
+ * Slack Block Kit blocks: a header + a fields section (where the run is an actual inline
+ * `<url|…>` link, not a bare id reference) + an `actions` row of link-buttons — the
+ * "multiple entries" a recipient can act on (Approve/Reject, View run). Slack renders
+ * `blocks` when present; generic/Teams hooks fall back to top-level `text` + the flat
+ * fields. Buttons carry absolute `url`s, so no Slack interactivity wiring is needed.
  */
+/** Escape the three characters Slack treats as mrkdwn control chars (& < >) so an id/label
+ *  containing them can't break a `<url|label>` link or inject markup. `&` first, always. */
+function slackEscape(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function notificationBlocks(
   input: NotificationInput,
-  text: string,
+  _text: string,
 ): { blocks: unknown[]; actions: { label: string; url: string }[] } {
+  const isApproval = input.kind === "approval_pending";
+
   const actions: { label: string; url: string }[] = [];
-  if (input.kind === "approval_pending") {
+  if (isApproval) {
     const approve = approvalUrl(input.workflowId);
     if (approve) actions.push({ label: "Approve / Reject", url: approve });
   }
   const run = runUrl(input.workflowId);
   if (run) actions.push({ label: "View run", url: run });
 
+  // The run as an ACTUAL clickable link when we have a URL, not a bare id reference. The
+  // label is escaped so a workflowId with & < > can't break the `<url|label>` markup (the
+  // URL itself is already encodeURIComponent'd by runUrl, so it needs no escaping).
+  const runId = slackEscape(input.workflowId);
+  const runField = run ? `<${run}|run ${runId}>` : `\`${runId}\``;
+  const fields: { type: "mrkdwn"; text: string }[] = [
+    {
+      type: "mrkdwn",
+      text: `*Workflow*\n${input.workflowKey ? `\`${slackEscape(input.workflowKey)}\`` : "_unnamed_"}`,
+    },
+    { type: "mrkdwn", text: `*Run*\n${runField}` },
+  ];
+  if (isApproval && input.title)
+    fields.push({
+      type: "mrkdwn",
+      text: `*Awaiting*\n${slackEscape(input.title)}`,
+    });
+  if (!isApproval && input.detail)
+    fields.push({
+      type: "mrkdwn",
+      text: `*Reason*\n\`${slackEscape(input.detail)}\``,
+    });
+
   const blocks: unknown[] = [
-    { type: "section", text: { type: "mrkdwn", text } },
+    {
+      type: "header",
+      // header is plain_text only; unicode emoji render with emoji:true.
+      text: {
+        type: "plain_text",
+        text: isApproval ? "⏳ Approval needed" : "❌ Run failed",
+        emoji: true,
+      },
+    },
+    { type: "section", fields },
   ];
   if (actions.length)
     blocks.push({
