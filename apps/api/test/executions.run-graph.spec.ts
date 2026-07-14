@@ -54,6 +54,35 @@ describe("runGraph (snapshot for the run-detail canvas)", () => {
     expect(out.graph).toEqual(GRAPH);
   });
 
+  it("returns the version + workflowKey from the Execution read-model row", async () => {
+    findUnique.mockResolvedValue({
+      workflowId: "wf",
+      tenantId: "t-1",
+      graphVersion: 3,
+      workflowKey: "refunds",
+    });
+    const service = makeService(
+      vi.fn().mockResolvedValue(startedWithGraph(GRAPH)),
+    );
+
+    const out = await service.runGraph("wf", "t-1");
+
+    expect(out.version).toBe(3);
+    expect(out.workflowKey).toBe("refunds");
+  });
+
+  it("returns null version/workflowKey for a pre-migration row", async () => {
+    findUnique.mockResolvedValue({ workflowId: "wf", tenantId: "t-1" });
+    const service = makeService(
+      vi.fn().mockResolvedValue(startedWithGraph(GRAPH)),
+    );
+
+    const out = await service.runGraph("wf", "t-1");
+
+    expect(out.version).toBeNull();
+    expect(out.workflowKey).toBeNull();
+  });
+
   it("forbids a run owned by another tenant (no history read)", async () => {
     findUnique.mockResolvedValue({ workflowId: "wf", tenantId: "other" });
     const fetchHistory = vi.fn();

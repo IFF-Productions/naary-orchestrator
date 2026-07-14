@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GraphDef } from "@naary/dsl";
 
 const findFirst = vi.fn();
+const findUnique = vi.fn();
+const findMany = vi.fn();
 const create = vi.fn();
 // deleteWorkflow fans a $transaction across every table that points at a workflow key.
 // Each model's deleteMany is a spy so we can assert WHAT got deleted (and that nothing
@@ -20,7 +22,13 @@ const del = {
 const $transaction = vi.fn(async (ops: unknown[]) => Promise.all(ops));
 vi.mock("@naary/db", () => ({
   getPrisma: () => ({
-    graphDefinition: { findFirst, create, deleteMany: del.graphDefinition },
+    graphDefinition: {
+      findFirst,
+      findUnique,
+      findMany,
+      create,
+      deleteMany: del.graphDefinition,
+    },
     workflowActivation: { deleteMany: del.workflowActivation },
     pinnedData: { deleteMany: del.pinnedData },
     pollState: { deleteMany: del.pollState },
@@ -47,6 +55,8 @@ const graph: GraphDef = {
 
 beforeEach(() => {
   findFirst.mockReset();
+  findUnique.mockReset();
+  findMany.mockReset();
   create.mockReset();
   $transaction.mockClear();
   for (const spy of Object.values(del)) spy.mockReset();
@@ -180,6 +190,62 @@ describe("GraphsService.upsert", () => {
         _uiNote: "keep me",
       });
     });
+  });
+});
+
+describe("GraphsService.getVersion", () => {
+  it("returns a specific version's snapshot, scoped to (tenant, key, version)", async () => {
+    findUnique.mockResolvedValue({
+      graph,
+      contentHash: hashGraph(graph),
+      version: 2,
+    });
+
+    const snap = await new GraphsService().getVersion("t1", "refunds", 2);
+
+    expect(snap?.version).toBe(2);
+    expect(snap?.contentHash).toBe(hashGraph(graph));
+    // Composite-unique lookup — never resolves another tenant's or key's row.
+    expect(findUnique).toHaveBeenCalledWith({
+      where: {
+        tenantId_workflowKey_version: {
+          tenantId: "t1",
+          workflowKey: "refunds",
+          version: 2,
+        },
+      },
+    });
+  });
+
+  it("returns null when that (key, version) doesn't exist (→ 404 at the caller)", async () => {
+    findUnique.mockResolvedValue(null);
+    const snap = await new GraphsService().getVersion("t1", "refunds", 99);
+    expect(snap).toBeNull();
+  });
+});
+
+describe("GraphsService.listVersions", () => {
+  it("lists every version newest-first, identity only (no graph bodies)", async () => {
+    const now = new Date("2026-07-13T00:00:00.000Z");
+    findMany.mockResolvedValue([
+      { version: 3, contentHash: "h3", createdAt: now },
+      { version: 2, contentHash: "h2", createdAt: now },
+      { version: 1, contentHash: "h1", createdAt: now },
+    ]);
+
+    const out = await new GraphsService().listVersions("t1", "refunds");
+
+    expect(out.map((v) => v.version)).toEqual([3, 2, 1]);
+    expect(out[0]).toEqual({
+      version: 3,
+      contentHash: "h3",
+      createdAt: now.toISOString(),
+    });
+    const arg = findMany.mock.calls[0][0];
+    expect(arg.where).toEqual({ tenantId: "t1", workflowKey: "refunds" });
+    expect(arg.orderBy).toEqual({ version: "desc" });
+    // No graph body selected — the picker only needs identity.
+    expect(arg.select).not.toHaveProperty("graph");
   });
 });
 

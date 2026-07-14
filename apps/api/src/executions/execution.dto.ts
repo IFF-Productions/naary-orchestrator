@@ -4,9 +4,11 @@ import {
   ArrayNotEmpty,
   IsArray,
   IsBoolean,
+  IsInt,
   IsObject,
   IsOptional,
   IsString,
+  Min,
 } from "class-validator";
 
 export class StartExecutionDto {
@@ -31,6 +33,20 @@ export class StartExecutionDto {
   @IsOptional()
   @IsString()
   workflowKey?: string;
+}
+
+/** Re-run a past run. By default re-runs against the workflow's LATEST graph; pass
+ *  `graphVersion` to re-run at a specific saved version (of the run's own workflow). */
+export class RerunDto {
+  @ApiPropertyOptional({
+    example: 2,
+    description:
+      "A specific saved version of this run's workflow to re-run at (newer or older). Omit to re-run against the latest.",
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  graphVersion?: number;
 }
 
 export class ApproveDto {

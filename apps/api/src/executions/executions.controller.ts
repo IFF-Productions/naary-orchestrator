@@ -14,6 +14,7 @@ import {
   ApproveBatchDto,
   ApproveDto,
   ArchiveBatchDto,
+  RerunDto,
   StartExecutionDto,
 } from "./execution.dto";
 import {
@@ -190,7 +191,7 @@ export class ExecutionsController {
   @ApiEndpoint({
     summary: "Re-run a past run",
     description:
-      "Starts a NEW run of the same workflow with the original trigger input (against the current graph). 400 if the run predates workflow-key tracking.",
+      "Starts a NEW run of the same workflow with the original trigger input. Re-runs against the current graph by default; pass `graphVersion` to re-run at a specific saved version (newer or older). 400 if the run predates workflow-key tracking; 404 if the version doesn't exist.",
     created: StartExecutionResponse,
     notFound: true,
   })
@@ -198,8 +199,12 @@ export class ExecutionsController {
   rerun(
     @TenantId() tenantId: string,
     @Param("id") id: string,
+    // Default to {} so a legacy caller that POSTs with no body (the pre-version
+    // behaviour) still re-runs against the latest graph instead of hitting an
+    // undefined-body read.
+    @Body() body: RerunDto = {},
   ): Promise<{ workflowId: string }> {
-    return this.executions.rerun(id, tenantId);
+    return this.executions.rerun(id, tenantId, body?.graphVersion);
   }
 
   /** The signed resume URL for a run paused on a wait(webhook) node (owner-scoped). Declared
@@ -230,7 +235,11 @@ export class ExecutionsController {
   runGraph(
     @TenantId() tenantId: string,
     @Param("id") id: string,
-  ): Promise<{ graph: Record<string, unknown> }> {
+  ): Promise<{
+    graph: Record<string, unknown>;
+    version: number | null;
+    workflowKey: string | null;
+  }> {
     return this.executions.runGraph(id, tenantId);
   }
 

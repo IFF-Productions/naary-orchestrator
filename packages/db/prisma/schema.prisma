@@ -31,6 +31,10 @@ model Execution {
   workflowId  String   @id // Temporal workflowId
   tenantId    String
   workflowKey String? // the graph key this run started (null for pre-migration rows)
+  // The GraphDefinition.version this run snapshotted at start — shown on the Runs list /
+  // run detail, and the anchor for "re-run at a chosen version". NULL for pre-migration
+  // rows and any run whose version wasn't recorded (the memo/history still holds it).
+  graphVersion Int?
   // Read-model projection pushed by the interpreter (Temporal stays the source of
   // truth) so the Runs list is a single PG read — no per-run Temporal RPCs.
   status      String   @default("running")

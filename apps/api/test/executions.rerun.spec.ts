@@ -63,7 +63,32 @@ describe("rerun", () => {
 
     expect(out).toEqual({ workflowId: "wf-new" });
     // input read from history (not ctx) → works even for a FAILED original run.
-    expect(start).toHaveBeenCalledWith("t-1", { orderId: 42 }, "refunds");
+    // No graphVersion → undefined 4th arg (re-run against the latest graph).
+    expect(start).toHaveBeenCalledWith(
+      "t-1",
+      { orderId: 42 },
+      "refunds",
+      undefined,
+    );
+  });
+
+  it("threads a chosen graphVersion through to start (re-run at a specific version)", async () => {
+    findUnique.mockResolvedValue({
+      workflowId: "wf-old",
+      tenantId: "t-1",
+      workflowKey: "refunds",
+    });
+    const service = makeService(
+      vi.fn().mockResolvedValue(startedWith({ orderId: 7 })),
+    );
+    const start = vi
+      .spyOn(service, "start")
+      .mockResolvedValue({ workflowId: "wf-new" });
+
+    await service.rerun("wf-old", "t-1", 2);
+
+    // The version is resolved against the run's OWN workflowKey inside start().
+    expect(start).toHaveBeenCalledWith("t-1", { orderId: 7 }, "refunds", 2);
   });
 
   it("falls back to default input when the start payload is missing/undecodable", async () => {
@@ -89,7 +114,7 @@ describe("rerun", () => {
 
     await service.rerun("wf-old", "t-1");
 
-    expect(start).toHaveBeenCalledWith("t-1", undefined, "wk");
+    expect(start).toHaveBeenCalledWith("t-1", undefined, "wk", undefined);
   });
 
   it("rejects a run that predates workflow-key tracking (400, no start)", async () => {

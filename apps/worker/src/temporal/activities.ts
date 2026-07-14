@@ -166,6 +166,7 @@ export async function recordExecution(meta: {
   workflowId: string;
   tenantId: string;
   workflowKey?: string;
+  graphVersion?: number;
 }): Promise<void> {
   await getPrisma().execution.upsert({
     where: { workflowId: meta.workflowId },
@@ -173,6 +174,9 @@ export async function recordExecution(meta: {
       workflowId: meta.workflowId,
       tenantId: meta.tenantId,
       workflowKey: meta.workflowKey ?? null,
+      // Only scheduled runs create here (API runs are pre-created with the version);
+      // record the snapshotted version so scheduled runs show it too.
+      graphVersion: meta.graphVersion ?? null,
     },
     update: {}, // already recorded — don't clobber the original createdAt
   });

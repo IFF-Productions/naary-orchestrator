@@ -23,6 +23,7 @@ import {
   UnauthorizedError,
 } from "../../lib/api";
 import { isTerminal, runStatusUi } from "../../lib/run-status";
+import { RerunMenu, VersionBadge } from "./RerunMenu";
 
 export function RunDetail() {
   const { id = "" } = useParams();
@@ -427,6 +428,10 @@ function RunView({ id }: { id: string }) {
   // The graph SNAPSHOT this run executed (immutable → fetched once). null while loading or if
   // the snapshot is unavailable (older runs) — the canvas section just doesn't render then.
   const [graph, setGraph] = useState<GraphDef | null>(null);
+  // The executed graph's version + the run's workflowKey (for the re-run-at-version picker),
+  // fetched alongside the snapshot. null until loaded / for pre-snapshot runs.
+  const [runVersion, setRunVersion] = useState<number | null>(null);
+  const [runWorkflowKey, setRunWorkflowKey] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const poll = useCallback(async () => {
@@ -453,9 +458,15 @@ function RunView({ id }: { id: string }) {
     // Clear the previous run's graph immediately so navigating between runs (this screen
     // isn't unmounted) never flashes — or keeps showing — the wrong run's canvas.
     setGraph(null);
+    setRunVersion(null);
+    setRunWorkflowKey(null);
     api.getRunGraph(id).then(
       (r) => {
-        if (!cancelled) setGraph(r.graph);
+        if (!cancelled) {
+          setGraph(r.graph);
+          setRunVersion(r.version);
+          setRunWorkflowKey(r.workflowKey);
+        }
       },
       (e) => {
         // A 404 is expected for pre-snapshot runs — skip the canvas silently. Anything else
@@ -533,19 +544,6 @@ function RunView({ id }: { id: string }) {
       await poll();
     } catch {
       setError("Could not cancel the run (it may have already finished).");
-    } finally {
-      setActing(false);
-    }
-  }
-
-  async function rerun() {
-    setActing(true);
-    try {
-      // Starts a fresh run with the original trigger input; jump to it.
-      const { workflowId } = await api.rerun(id);
-      navigate(`/app/runs/${workflowId}`);
-    } catch {
-      setError("Could not re-run (this run may predate re-run support).");
     } finally {
       setActing(false);
     }
@@ -659,14 +657,15 @@ function RunView({ id }: { id: string }) {
           </div>
         )}
         {status && isTerminal(status) && (
-          <Button
-            variant="secondary"
-            icon="refresh"
-            disabled={acting}
-            onClick={rerun}
-          >
-            Re-run
-          </Button>
+          <RerunMenu
+            runId={id}
+            workflowKey={runWorkflowKey}
+            currentVersion={runVersion}
+            size="md"
+            label="Re-run"
+            onRerun={(newId) => navigate(`/app/runs/${newId}`)}
+            onError={setError}
+          />
         )}
       </div>
 
@@ -867,6 +866,9 @@ function RunView({ id }: { id: string }) {
             <SectionTitle>Run summary</SectionTitle>
             <SummaryRow label="Status">
               {ui ? <StatusPill state={ui.state} label={ui.label} /> : "—"}
+            </SummaryRow>
+            <SummaryRow label="Graph version">
+              <VersionBadge version={runVersion} />
             </SummaryRow>
             {running && (
               <SummaryRow label="Current node">
