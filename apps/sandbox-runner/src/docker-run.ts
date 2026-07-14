@@ -1,0 +1,101 @@
+/**
+ * The security-critical `docker run` argv for an ephemeral codeAgent sandbox container
+ * (design CLAUDE-CODE-NODE.md §8b.1). Pure + unit-tested so the isolation flags are pinned
+ * and reviewable. The runner service (which holds Docker access) execFile's `docker` with
+ * this argv — NEVER via a shell, so the workflow-supplied `agentArgs` (prompt/model/…) can't
+ * inject `docker`/shell arguments.
+ *
+ * Guarantees encoded here:
+ *  - image + network + limits are RUNNER config, never workflow-controlled (§ runner as a
+ *    root-privileged injection surface).
+ *  - the Anthropic key is forwarded by NAME (`-e ANTHROPIC_API_KEY`), never inline on the argv
+ *    (which would show in `ps`/`docker inspect`); the runner sets it in the exec env.
+ *  - the git token is NEVER passed to the sandbox (the two-box split, §2.2).
+ *  - egress is the internal no-gateway network + the allowlist proxy (§2.3); HTTPS_PROXY is
+ *    how the LEGITIMATE Anthropic call routes, NOT the security boundary (that's the network).
+ *  - `--rm`, read-only root + tmpfs, no-new-privileges, cap-drop ALL, cpu/mem/pids caps.
+ */
+
+export interface SandboxLimits {
+  cpus: string; // e.g. "1.0"
+  memoryMb: number; // e.g. 2048
+  pids: number; // e.g. 256
+}
+
+export interface SandboxRunSpec {
+  /** The PINNED sandbox image (runner config). Rejected if not in `allowedImages`. */
+  image: string;
+  /** The internal, no-gateway Docker network the sandbox joins. */
+  network: string;
+  /** The allowlist proxy URL the sandbox uses to reach Anthropic (and only Anthropic). */
+  proxyUrl: string;
+  /** Host path bind-mounted as the working tree at /work. */
+  workdir: string;
+  /** The coding-CLI argv (e.g. claude -p …). Data only — never shell-interpreted. */
+  agentArgs: string[];
+  limits: SandboxLimits;
+}
+
+/** Images the runner is willing to launch. The workflow can NEVER choose the image. */
+export const ALLOWED_SANDBOX_IMAGES = ["naary-claude-sandbox:latest"] as const;
+
+/** The env var name the sandbox reads its key from (forwarded by name, value from exec env). */
+export const SANDBOX_KEY_ENV = "ANTHROPIC_API_KEY";
+
+export function assertPinnedImage(image: string): void {
+  if (!(ALLOWED_SANDBOX_IMAGES as readonly string[]).includes(image)) {
+    throw new Error(
+      `sandbox-runner: refusing to launch un-pinned image "${image}"`,
+    );
+  }
+}
+
+/**
+ * Build the `docker run …` argv. The returned array is passed to execFile("docker", args)
+ * — no shell. The Anthropic key is forwarded by name only; the caller must set it in the
+ * exec environment (`{ ANTHROPIC_API_KEY: key }`), never inline it here.
+ */
+export function buildSandboxDockerArgs(spec: SandboxRunSpec): string[] {
+  assertPinnedImage(spec.image);
+  if (!spec.network || /\s/.test(spec.network)) {
+    throw new Error("sandbox-runner: invalid network name");
+  }
+  const { cpus, memoryMb, pids } = spec.limits;
+  return [
+    "run",
+    "--rm",
+    // Isolation: internal network (no gateway) is the egress boundary.
+    "--network",
+    spec.network,
+    // Filesystem: read-only root + a small writable tmpfs; the working tree is the only mount.
+    "--read-only",
+    "--tmpfs",
+    "/tmp:size=256m",
+    "-v",
+    `${spec.workdir}:/work`,
+    "-w",
+    "/work",
+    // Privilege containment.
+    "--security-opt",
+    "no-new-privileges",
+    "--cap-drop",
+    "ALL",
+    // Resource caps — bound a runaway/adversarial run.
+    "--cpus",
+    cpus,
+    "--memory",
+    `${memoryMb}m`,
+    "--pids-limit",
+    String(pids),
+    // Route the (only-allowed) Anthropic call through the allowlist proxy.
+    "-e",
+    `HTTPS_PROXY=${spec.proxyUrl}`,
+    "-e",
+    `HTTP_PROXY=${spec.proxyUrl}`,
+    // Forward the key BY NAME — value comes from the runner's exec env, never the argv.
+    "-e",
+    SANDBOX_KEY_ENV,
+    spec.image,
+    ...spec.agentArgs,
+  ];
+}

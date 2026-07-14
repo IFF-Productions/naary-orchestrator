@@ -1,0 +1,38 @@
+# codeAgent sandbox isolation (design CLAUDE-CODE-NODE.md §8b.1). Two networks realize the
+# containment; the sandbox-runner service (a later slice) launches ephemeral `claude` containers
+# onto `sandbox-internal` only.
+#
+#   sandbox-internal   — internal:true → NO default gateway. A container here cannot route to
+#                        the internet, the host, cloud metadata (169.254.169.254), or other
+#                        stacks. The ONLY thing it can reach is the proxy (same network).
+#   sandbox-egress     — an ordinary bridge; ONLY the proxy sits on it, giving the proxy (and
+#                        nothing else) a path to the internet.
+#
+# The proxy straddles both and allowlists exactly api.anthropic.com:443 (squid-allowlist.conf).
+# Net effect: a fully-hijacked sandbox can reach Anthropic (to function) and nothing else —
+# structurally, not by politely honoring an env var.
+
+networks:
+  sandbox-internal:
+    name: naary-sandbox-internal
+    internal: true
+  sandbox-egress:
+    name: naary-sandbox-egress
+
+services:
+  sandbox-proxy:
+    image: ubuntu/squid:6.6-24.04_beta
+    container_name: naary-sandbox-proxy
+    restart: unless-stopped
+    networks:
+      - sandbox-internal # the sandbox reaches the proxy here…
+      - sandbox-egress # …and the proxy reaches Anthropic out here
+    volumes:
+      - ./squid-allowlist.conf:/etc/squid/squid.conf:ro
+    # Belt-and-braces hardening on the proxy container itself.
+    read_only: true
+    tmpfs:
+      - /var/spool/squid
+      - /var/run
+    security_opt:
+      - no-new-privileges:true
