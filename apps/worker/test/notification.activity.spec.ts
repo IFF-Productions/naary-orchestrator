@@ -106,6 +106,7 @@ describe("sendNotification", () => {
     const header = body.blocks.find(
       (b: { type: string }) => b.type === "header",
     );
+    expect(header).toBeTruthy();
     expect(header.text.type).toBe("plain_text");
     expect(header.text.text).toContain("Approval needed");
 
@@ -115,12 +116,38 @@ describe("sendNotification", () => {
       (b: { type: string; fields?: unknown }) =>
         b.type === "section" && b.fields,
     );
+    expect(section).toBeTruthy();
     const joined = section.fields
       .map((f: { text: string }) => f.text)
       .join("\n");
     expect(joined).toContain("<https://app.naary.test/app/runs/wf-1|run wf-1>");
     expect(joined).toContain("*Workflow*");
     expect(joined).toContain("Ship it?"); // the approval title, as a field
+  });
+
+  it("escapes Slack mrkdwn control chars (& < >) in interpolated ids/labels", async () => {
+    await sendNotification({
+      tenantId: "t1",
+      workflowId: "wf-<a&b>",
+      workflowKey: "orders<x>",
+      kind: "run_failed",
+      detail: "timeout & <reset>",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    const section = body.blocks.find(
+      (b: { type: string; fields?: unknown }) =>
+        b.type === "section" && b.fields,
+    );
+    expect(section).toBeTruthy();
+    const joined = section.fields
+      .map((f: { text: string }) => f.text)
+      .join("\n");
+    // The raw control chars must not appear inside the link label / fields — they're escaped,
+    // so they can't break the <url|label> markup.
+    expect(joined).toContain("run wf-&lt;a&amp;b&gt;");
+    expect(joined).toContain("orders&lt;x&gt;");
+    expect(joined).toContain("timeout &amp; &lt;reset&gt;");
+    expect(joined).not.toMatch(/run wf-<a&b>/);
   });
 
   it("renders the run id (no link) in the fields section when APP_BASE_URL is unset", async () => {
@@ -135,6 +162,7 @@ describe("sendNotification", () => {
       (b: { type: string; fields?: unknown }) =>
         b.type === "section" && b.fields,
     );
+    expect(section).toBeTruthy();
     const joined = section.fields
       .map((f: { text: string }) => f.text)
       .join("\n");

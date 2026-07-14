@@ -964,6 +964,12 @@ function notificationText(input: NotificationInput): string {
  * `blocks` when present; generic/Teams hooks fall back to top-level `text` + the flat
  * fields. Buttons carry absolute `url`s, so no Slack interactivity wiring is needed.
  */
+/** Escape the three characters Slack treats as mrkdwn control chars (& < >) so an id/label
+ *  containing them can't break a `<url|label>` link or inject markup. `&` first, always. */
+function slackEscape(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function notificationBlocks(
   input: NotificationInput,
   _text: string,
@@ -978,21 +984,28 @@ function notificationBlocks(
   const run = runUrl(input.workflowId);
   if (run) actions.push({ label: "View run", url: run });
 
-  // The run as an ACTUAL clickable link when we have a URL, not a bare id reference.
-  const runField = run
-    ? `<${run}|run ${input.workflowId}>`
-    : `\`${input.workflowId}\``;
+  // The run as an ACTUAL clickable link when we have a URL, not a bare id reference. The
+  // label is escaped so a workflowId with & < > can't break the `<url|label>` markup (the
+  // URL itself is already encodeURIComponent'd by runUrl, so it needs no escaping).
+  const runId = slackEscape(input.workflowId);
+  const runField = run ? `<${run}|run ${runId}>` : `\`${runId}\``;
   const fields: { type: "mrkdwn"; text: string }[] = [
     {
       type: "mrkdwn",
-      text: `*Workflow*\n${input.workflowKey ? `\`${input.workflowKey}\`` : "_unnamed_"}`,
+      text: `*Workflow*\n${input.workflowKey ? `\`${slackEscape(input.workflowKey)}\`` : "_unnamed_"}`,
     },
     { type: "mrkdwn", text: `*Run*\n${runField}` },
   ];
   if (isApproval && input.title)
-    fields.push({ type: "mrkdwn", text: `*Awaiting*\n${input.title}` });
+    fields.push({
+      type: "mrkdwn",
+      text: `*Awaiting*\n${slackEscape(input.title)}`,
+    });
   if (!isApproval && input.detail)
-    fields.push({ type: "mrkdwn", text: `*Reason*\n\`${input.detail}\`` });
+    fields.push({
+      type: "mrkdwn",
+      text: `*Reason*\n\`${slackEscape(input.detail)}\``,
+    });
 
   const blocks: unknown[] = [
     {
