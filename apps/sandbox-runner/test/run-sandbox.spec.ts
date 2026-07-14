@@ -68,6 +68,29 @@ describe("runSandbox", () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
+  it("redacts the key from stdout + diff (defense in depth if the CLI echoes it)", async () => {
+    exec = vi.fn(async (file: string) =>
+      file === "git"
+        ? { stdout: "+ANTHROPIC_API_KEY=sk-ant-secret", exitCode: 0 }
+        : { stdout: "leaked sk-ant-secret in output", exitCode: 0 },
+    );
+    const out = await runSandbox(REQ, CFG, exec as unknown as Exec);
+    expect(out.stdout).not.toContain("sk-ant-secret");
+    expect(out.diff).not.toContain("sk-ant-secret");
+    expect(out.diff).toContain("[REDACTED]");
+  });
+
+  it("throws when git diff fails (workdir isn't a git repo) — no misleading diff", async () => {
+    exec = vi.fn(async (file: string) =>
+      file === "git"
+        ? { stdout: "fatal: not a git repository", exitCode: 128 }
+        : { stdout: "{}", exitCode: 0 },
+    );
+    await expect(runSandbox(REQ, CFG, exec as unknown as Exec)).rejects.toThrow(
+      /could not compute the diff/,
+    );
+  });
+
   it("validates agentArgs + a required key", async () => {
     await expect(
       runSandbox(

@@ -108,10 +108,17 @@ export async function runSandbox(
     timeoutMs: req.timeoutMs ?? cfg.defaultTimeoutMs,
   });
 
-  // Capture the sandbox's edits as a diff (git is in the tree; no network/token involved).
-  const { stdout: diff } = await exec("git", ["-C", workdir, "diff"], {
-    timeoutMs: 30_000,
-  });
+  // Capture the sandbox's edits as a diff. A non-zero git exit means we can't trust the
+  // output as a diff (e.g. not a git repo) — surface it rather than returning a misleading
+  // "diff" alongside the docker exit code.
+  const git = await exec("git", ["-C", workdir, "diff"], { timeoutMs: 30_000 });
+  if (git.exitCode !== 0) {
+    throw new Error("sandbox-runner: could not compute the diff (git failed)");
+  }
 
-  return { exitCode, stdout, diff };
+  // Defense in depth: even though the key is forwarded by env (not argv), redact it from the
+  // returned text in case the CLI echoed its env or the model wrote it into a file (→ diff).
+  const redact = (s: string) =>
+    req.anthropicKey ? s.split(req.anthropicKey).join("[REDACTED]") : s;
+  return { exitCode, stdout: redact(stdout), diff: redact(git.stdout) };
 }

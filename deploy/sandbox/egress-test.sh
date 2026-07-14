@@ -43,14 +43,15 @@ sleep 3
 docker pull -q "$CURL" >/dev/null 2>&1 || true
 
 echo "▸ ALLOWED path — Anthropic via the proxy should connect:"
-# A TLS CONNECT that reaches Anthropic returns a real HTTP status (401 w/o a key). Blocked
-# would be a non-zero curl exit (proxy refuses the CONNECT). We only assert reachability.
+# A TLS CONNECT that genuinely reaches Anthropic returns an UPSTREAM 4xx (401/405 without a
+# valid request). Require a 4xx (excluding 407 = proxy-auth) so a proxy-generated 5xx (squid
+# up but upstream unreachable) doesn't read as a false pass — the real TLS tunnel must work.
 code=$(in_sandbox -sS --max-time 25 -x "$PROXY" -o /dev/null -w '%{http_code}' \
   https://api.anthropic.com/v1/messages 2>/dev/null)
-if [ -n "$code" ] && [ "$code" != "000" ]; then
-  pass "api.anthropic.com reachable via proxy (HTTP $code)"
+if [ "$code" -ge 400 ] 2>/dev/null && [ "$code" -lt 500 ] && [ "$code" != 407 ]; then
+  pass "api.anthropic.com reachable via proxy (upstream HTTP $code)"
 else
-  fail "api.anthropic.com NOT reachable via proxy (the legitimate path is broken)"
+  fail "api.anthropic.com NOT reachable via proxy (got '$code' — tunnel broken/proxy 5xx)"
 fi
 
 echo "▸ BLOCKED paths — everything else must fail:"
@@ -79,7 +80,8 @@ fi
 echo "▸ tearing down…" # (the EXIT trap runs cleanup)
 
 if [ "$FAILED" -eq 0 ]; then
-  echo "✅ EGRESS ISOLATION PROVEN — sandbox reaches Anthropic only."
+  echo "✅ EGRESS OK — Anthropic reachable via the allowlist proxy; the probed exfil paths"
+  echo "   (non-allowlisted host via proxy, direct public IP, cloud metadata) are blocked."
   exit 0
 fi
 echo "❌ EGRESS ISOLATION FAILED — do NOT enable codeAgent write mode."

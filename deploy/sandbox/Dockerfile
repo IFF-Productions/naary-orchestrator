@@ -10,12 +10,16 @@
 
 FROM node:22-bookworm-slim
 
+# Pin the CLI for reproducible, security-sensitive builds. Override per deploy to a known-good
+# version:  docker build --build-arg CLAUDE_CODE_VERSION=1.2.3 …  (default `latest` for dev).
+ARG CLAUDE_CODE_VERSION=latest
+
 # `git` for in-tree diffs (no network — the remote/token never enter here); `ca-certificates`
 # for TLS to the proxy. curl kept out of the shipped image (it's only for the egress test).
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
-  && npm install -g @anthropic-ai/claude-code \
+  && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
   && npm cache clean --force
 
 # Non-root: the model's tools run as an unprivileged user (defense in depth alongside the
