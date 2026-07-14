@@ -461,6 +461,32 @@ export const api = {
       body: JSON.stringify(patch),
     });
   },
+  // Send a test message to the configured webhook. Returns a result (not a throw) so the
+  // UI can show the server's specific failure reason (bad URL, non-2xx, unreachable).
+  async testNotification(
+    tenantId: string,
+  ): Promise<{ ok: boolean; message?: string }> {
+    const token = await getBearerToken();
+    const res = await fetch(
+      `${BASE}/tenants/${encodeURIComponent(tenantId)}/notifications/test`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+          ...(activeWorkspaceId ? { "x-workspace-id": activeWorkspaceId } : {}),
+        },
+      },
+    );
+    if (res.ok) return { ok: true };
+    const body = (await res.json().catch(() => null)) as {
+      message?: string;
+    } | null;
+    return {
+      ok: false,
+      message: body?.message ?? `Request failed (${res.status}).`,
+    };
+  },
   // --- Integrations ---
   // Provider API keys (BYOK). The key is NEVER returned — list yields names + validity.
   listCredentials(tenantId: string): Promise<ProviderCredential[]> {
