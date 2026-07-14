@@ -1,4 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { Button, Icon } from "../../components";
 import { api, type GraphVersion } from "../../lib/api";
 
@@ -65,7 +70,7 @@ export function RerunMenu({
     };
   }, [open]);
 
-  async function toggle(e: React.MouseEvent) {
+  async function toggle(e: ReactMouseEvent) {
     e.stopPropagation();
     const next = !open;
     setOpen(next);
@@ -80,7 +85,7 @@ export function RerunMenu({
     }
   }
 
-  async function run(version: number | undefined, e: React.MouseEvent) {
+  async function run(version: number | undefined, e: ReactMouseEvent) {
     e.stopPropagation();
     setBusy(true);
     setOpen(false);

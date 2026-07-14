@@ -199,9 +199,12 @@ export class ExecutionsController {
   rerun(
     @TenantId() tenantId: string,
     @Param("id") id: string,
-    @Body() body: RerunDto,
+    // Default to {} so a legacy caller that POSTs with no body (the pre-version
+    // behaviour) still re-runs against the latest graph instead of hitting an
+    // undefined-body read.
+    @Body() body: RerunDto = {},
   ): Promise<{ workflowId: string }> {
-    return this.executions.rerun(id, tenantId, body.graphVersion);
+    return this.executions.rerun(id, tenantId, body?.graphVersion);
   }
 
   /** The signed resume URL for a run paused on a wait(webhook) node (owner-scoped). Declared
