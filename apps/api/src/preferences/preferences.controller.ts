@@ -32,6 +32,8 @@ export class PreferencesController {
     @CurrentPrincipal() principal: Principal,
     @Body() body: SavePreferencesDto,
   ): Promise<PreferenceView> {
-    return this.preferences.save(principal.userId, body.mode ?? null);
+    // Pass the body through as a patch — the service writes only the keys present, so a
+    // mode-only save leaves the dashboard untouched and vice-versa.
+    return this.preferences.save(principal.userId, body);
   }
 }

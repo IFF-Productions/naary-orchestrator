@@ -1,5 +1,5 @@
 import { ApiProperty } from "@nestjs/swagger";
-import type { PreferenceMode } from "./preferences.service";
+import type { DashboardItem, PreferenceMode } from "./preferences.service";
 
 /** Per-user preferences (null = unset → client default). */
 export class PreferencesResponse {
@@ -10,4 +10,12 @@ export class PreferencesResponse {
     description: "Experience variant, or null if the user hasn't chosen one.",
   })
   mode!: PreferenceMode | null;
+
+  @ApiProperty({
+    type: "array",
+    nullable: true,
+    description:
+      "Customizable Overview layout [{ id, hidden, span }], or null if never customized.",
+  })
+  dashboard!: DashboardItem[] | null;
 }

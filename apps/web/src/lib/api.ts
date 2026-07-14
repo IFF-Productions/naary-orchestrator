@@ -126,6 +126,13 @@ export interface GraphSummary {
   /** Whether the workflow's automatic triggers fire (n8n parity). Default true. */
   active: boolean;
 }
+/** One widget's placement on the customizable Overview (order = array position). */
+export interface DashboardItem {
+  id: string;
+  hidden: boolean;
+  /** 12-col grid span: 4 (third), 6 (half), or 12 (full). */
+  span: number;
+}
 /** One stored version of a workflow (identity only) — for the re-run-at-version picker. */
 export interface GraphVersion {
   version: number;
@@ -373,15 +380,30 @@ export const api = {
   getMyWorkspaces(): Promise<Workspace[]> {
     return http("/me/workspaces");
   },
-  // Per-user preferences (experience mode) — cross-device, keyed to the user server-side.
-  // `mode` is null when the user hasn't chosen (or for API-token principals with no uid).
-  getPreferences(): Promise<{ mode: string | null }> {
+  // Per-user preferences (experience mode + dashboard layout) — cross-device, keyed to the
+  // user server-side. Fields are null when unset (or for API-token principals with no uid).
+  getPreferences(): Promise<{
+    mode: string | null;
+    dashboard: DashboardItem[] | null;
+  }> {
     return http("/me/preferences");
   },
-  savePreferences(mode: string | null): Promise<{ mode: string | null }> {
+  // Save the experience mode only (the PUT omits `dashboard`, so it's left untouched).
+  savePreferences(
+    mode: string | null,
+  ): Promise<{ mode: string | null; dashboard: DashboardItem[] | null }> {
     return http("/me/preferences", {
       method: "PUT",
       body: JSON.stringify({ mode }),
+    });
+  },
+  // Save the Overview layout only (omits `mode`, so the experience mode is untouched).
+  saveDashboard(
+    dashboard: DashboardItem[] | null,
+  ): Promise<{ mode: string | null; dashboard: DashboardItem[] | null }> {
+    return http("/me/preferences", {
+      method: "PUT",
+      body: JSON.stringify({ dashboard }),
     });
   },
   // Create a new workspace owned by the caller. The tenantId is server-generated (never
