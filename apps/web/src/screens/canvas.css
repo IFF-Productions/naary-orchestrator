@@ -1,0 +1,56 @@
+/* Theme the stock react-flow (@xyflow) chrome to the Naary design tokens — the default
+   controls ship as a white button stack that clashes with the dark canvas (and doesn't
+   adapt to the light theme). Imported AFTER @xyflow/react/dist/style.css so these win. */
+
+.react-flow__controls {
+  box-shadow: var(--shadow-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.react-flow__controls-button {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  width: 26px;
+  height: 26px;
+  transition: background 0.14s ease;
+}
+.react-flow__controls-button:hover {
+  background: var(--card-2);
+}
+.react-flow__controls-button:last-child {
+  border-bottom: none;
+}
+.react-flow__controls-button svg {
+  fill: var(--ink-2);
+  max-width: 12px;
+  max-height: 12px;
+}
+.react-flow__controls-button:hover svg {
+  fill: var(--ink);
+}
+
+/* Selection + connection accents use the brand instead of react-flow blue. */
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:focus .react-flow__edge-path {
+  stroke: var(--brand);
+}
+.react-flow__handle {
+  background: var(--brand);
+  border-color: var(--card);
+}
+.react-flow__attribution {
+  background: transparent;
+}
+.react-flow__attribution a {
+  color: var(--ink-3);
+}
+
+/* Background dots: CSS wins over react-flow's SVG presentation attribute, so the grid
+   tracks the theme instead of a fixed gray. */
+.react-flow__background circle {
+  fill: var(--line-2);
+}
+.react-flow__background path {
+  stroke: var(--line-2);
+}
