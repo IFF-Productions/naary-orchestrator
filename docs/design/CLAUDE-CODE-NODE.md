@@ -347,7 +347,71 @@ loop:
 
 The node authenticates `claude -p` with the **tenant's Anthropic API key (BYOK)**, exactly
 like the `agent` node — separate from any personal Claude *subscription*. A subscription
-`CLAUDE_CODE_OAUTH_TOKEN` could back it later, but BYOK is the multi-tenant default.
+`CLAUDE_CODE_OAUTH_TOKEN` could back it later, but BYOK is the multi-tenant default. (Auth is
+**per-driver** — see §8c; Cursor/Copilot bring their own credential.)
+
+### 8b.5 Not Claude-only — a multi-CLI **driver** abstraction (see §8c)
+
+The node is **tool-agnostic**: the destination is to run *any* agentic coding CLI (Claude
+Code, Cursor CLI, GitHub Copilot CLI) via a pluggable driver. Everything above (ephemeral
+container-per-run, the two-box git-token split, the ask→pause→resume loop, PR idempotency)
+is **driver-independent** — only the in-container command, auth env, output parsing, and
+resume mechanism vary. Claude Code is driver #1; the seam is built from the start so adding
+Cursor/Copilot is a new adapter, not a new node.
+
+---
+
+## 8c. CLI-driver abstraction (multi-tool: claude · cursor · copilot)
+
+The node type carries a `tool` selector; a **driver registry** maps it to an adapter. This
+mirrors the codebase's integration-catalog philosophy (adding a tool = a catalog entry +
+image + auth mapping, not a new node type). The sandbox-runner stays CLI-agnostic — it's
+handed an image + command + env and returns the diff/output; the **driver** owns what's
+CLI-specific.
+
+### Driver interface (what each adapter provides)
+
+```ts
+interface CliAgentDriver {
+  tool: "claude" | "cursor" | "copilot";
+  image: string;                 // container image with the CLI installed (per-tool or shared)
+  // Build the argv for a headless, non-interactive run (+ a resume variant if supported).
+  invoke(opts: { prompt: string; workdir: string; sessionId?: string; limits: Limits }): string[];
+  // Auth env injected into the container (per-tool secret; git token NEVER included).
+  authEnv(cred: TenantCredential): Record<string, string>;
+  // Parse the CLI's output → a normalized envelope the workflow understands.
+  parse(stdout: string, exitCode: number): {
+    result?: string; diff?: string;
+    questions?: string[];        // structured "needs input" (drives the Q&A pause)
+    sessionId?: string;          // for --resume, if the CLI supports it
+    usage?: { costUsd?: number; tokens?: number };
+    isError: boolean;
+  };
+  capabilities: { headless: boolean; resume: boolean; structuredQuestions: boolean };
+}
+```
+
+### Capability reality per CLI (honest, drives what each supports)
+
+| Driver | Headless | Resume (Q&A loop) | Structured output | Auth | Notes |
+|---|---|---|---|---|---|
+| **claude** (Claude Code) | ✅ `claude -p` | ✅ `--resume <id>` | ✅ `--output-format json` (`is_error`, `total_usage`) | Anthropic BYOK key (or `CLAUDE_CODE_OAUTH_TOKEN`) | Reference driver — full ask→pause→resume + fail-safe usage. Driver #1. |
+| **cursor** (Cursor CLI / `cursor-agent`) | ✅ headless/print mode | ⚠️ session model differs — verify at build | partial (text/JSON varies) | Cursor account/key | Close to Claude Code; confirm resume + question emission before wiring the Q&A loop. |
+| **copilot** (GitHub Copilot CLI) | ⚠️ evolving toward agentic | ⚠️ limited/none today | limited | GitHub / `gh` auth | Most limited for the edit→PR→resume loop; may land as a plan/suggest-only driver first. |
+
+Drivers **advertise capabilities**; the workflow degrades gracefully — a driver without
+`resume`/`structuredQuestions` simply doesn't offer the Q&A pause (it runs once and returns
+its result), so the node works for every tool at the level that tool supports. The CLI
+details for Cursor/Copilot must be **verified against their live docs at build time** (like
+we did for the Teams envelope) — not wired from memory.
+
+### Build implication
+
+- **Slice 1** builds the node + the **driver seam** with the **claude** driver only. `tool`
+  defaults to `claude`; the registry + interface exist so a Cursor/Copilot adapter is
+  additive.
+- Config gains `tool: "claude" | "cursor" | "copilot"` (§7); the runner image is selected by
+  the driver; per-tool auth comes from the tenant's connection/credential for that tool.
 
 ---
 
