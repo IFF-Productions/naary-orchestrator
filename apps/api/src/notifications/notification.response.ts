@@ -10,6 +10,13 @@ export class NotificationSettingsResponse {
   webhookUrl!: string | null;
 
   @ApiProperty({
+    enum: ["slack", "teams"],
+    example: "slack",
+    description: "Payload format posted to the webhook.",
+  })
+  channel!: "slack" | "teams";
+
+  @ApiProperty({
     example: true,
     description: "Notify when a run pauses for approval.",
   })

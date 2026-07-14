@@ -24,6 +24,7 @@ export function Settings() {
   // Notifications
   const [notif, setNotif] = useState<NotificationSettings>({
     webhookUrl: "",
+    channel: "slack",
     onApprovalPending: true,
     onRunFailed: true,
   });
@@ -95,6 +96,7 @@ export function Settings() {
     try {
       const saved = await api.saveNotifications(tenant, {
         webhookUrl: notif.webhookUrl?.trim() || null,
+        channel: notif.channel,
         onApprovalPending: notif.onApprovalPending,
         onRunFailed: notif.onRunFailed,
       });
@@ -301,17 +303,66 @@ export function Settings() {
           }}
         >
           Get pinged when a run needs a human — an approval can wait for days,
-          so it shouldn't rely on someone watching the inbox. Paste a Slack,
-          Teams, or generic incoming-webhook URL; we POST a JSON message on each
+          so it shouldn't rely on someone watching the inbox. We POST a
+          formatted message (with Approve / Reject / View-run buttons) on each
           event.
         </div>
+        <Field label="Format">
+          <div style={{ display: "flex", gap: 8 }}>
+            {(["slack", "teams"] as const).map((c) => (
+              <button
+                key={c}
+                type="button"
+                disabled={!loaded}
+                onClick={() => setNotif((n) => ({ ...n, channel: c }))}
+                style={{
+                  flex: 1,
+                  padding: "8px 12px",
+                  borderRadius: "var(--radius-sm)",
+                  border: `1px solid ${notif.channel === c ? "var(--brand)" : "var(--line-2)"}`,
+                  background:
+                    notif.channel === c ? "var(--brand-soft)" : "transparent",
+                  color:
+                    notif.channel === c ? "var(--brand-ink)" : "var(--ink-2)",
+                  cursor: loaded ? "pointer" : "default",
+                  fontSize: "var(--text-body)",
+                  fontWeight:
+                    notif.channel === c
+                      ? "var(--weight-semibold)"
+                      : "var(--weight-regular)",
+                }}
+              >
+                {c === "slack" ? "Slack" : "Microsoft Teams"}
+              </button>
+            ))}
+          </div>
+        </Field>
+        {notif.channel === "teams" && (
+          <div
+            style={{
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-3)",
+              margin: "-4px 0 12px",
+              lineHeight: "var(--leading-snug)",
+            }}
+          >
+            Paste a Teams <strong>Workflows</strong> (Power Automate) webhook
+            URL — “When a Teams webhook request is received”. We send an
+            Adaptive Card; the legacy Office 365 connector format isn’t
+            supported.
+          </div>
+        )}
         <Field label="Webhook URL">
           <input
             value={notif.webhookUrl ?? ""}
             onChange={(e) =>
               setNotif((n) => ({ ...n, webhookUrl: e.target.value }))
             }
-            placeholder="https://hooks.slack.com/services/…"
+            placeholder={
+              notif.channel === "teams"
+                ? "https://prod-00.westus.logic.azure.com/workflows/…"
+                : "https://hooks.slack.com/services/…"
+            }
             style={inputStyle}
             disabled={!loaded}
           />

@@ -926,6 +926,8 @@ export interface AuditEvent {
 
 export interface NotificationSettings {
   webhookUrl: string | null;
+  /** Payload format posted to the webhook: Slack Block Kit or a Teams Adaptive Card. */
+  channel: "slack" | "teams";
   onApprovalPending: boolean;
   onRunFailed: boolean;
 }
