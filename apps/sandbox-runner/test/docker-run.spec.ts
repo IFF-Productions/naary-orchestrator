@@ -24,7 +24,9 @@ describe("buildSandboxDockerArgs", () => {
     // internal no-gateway network is the egress boundary
     expect(args[args.indexOf("--network") + 1]).toBe("naary-sandbox-internal");
     expect(args).toContain("--read-only");
-    expect(args).toContain("no-new-privileges");
+    expect(args[args.indexOf("--security-opt") + 1]).toBe(
+      "no-new-privileges:true",
+    );
     expect(args[args.indexOf("--cap-drop") + 1]).toBe("ALL");
     expect(args[args.indexOf("--pids-limit") + 1]).toBe("256");
     expect(args[args.indexOf("--memory") + 1]).toBe("2048m");
@@ -60,5 +62,18 @@ describe("buildSandboxDockerArgs", () => {
     expect(() =>
       buildSandboxDockerArgs({ ...SPEC, network: "bad net" }),
     ).toThrow(/invalid network/);
+  });
+
+  it("rejects a workdir with a colon/whitespace/relative path (mount-spec injection)", () => {
+    for (const workdir of [
+      "/runs/a:b",
+      "/runs/a b",
+      "relative/x",
+      "/runs/x\t",
+    ]) {
+      expect(() => buildSandboxDockerArgs({ ...SPEC, workdir })).toThrow(
+        /workdir must be an absolute path/,
+      );
+    }
   });
 });

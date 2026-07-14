@@ -60,6 +60,14 @@ export function buildSandboxDockerArgs(spec: SandboxRunSpec): string[] {
   if (!spec.network || /\s/.test(spec.network)) {
     throw new Error("sandbox-runner: invalid network name");
   }
+  // The workdir is interpolated into a `-v host:container` spec — a `:` or whitespace would
+  // change how Docker parses the mount (a different host path, extra options). Require a clean
+  // absolute POSIX path so a misconfig/attacker string can't rewrite the mount.
+  if (!/^\/[^\s:]*$/.test(spec.workdir)) {
+    throw new Error(
+      "sandbox-runner: workdir must be an absolute path with no ':' or whitespace",
+    );
+  }
   const { cpus, memoryMb, pids } = spec.limits;
   return [
     "run",
@@ -75,9 +83,10 @@ export function buildSandboxDockerArgs(spec: SandboxRunSpec): string[] {
     `${spec.workdir}:/work`,
     "-w",
     "/work",
-    // Privilege containment.
+    // Privilege containment. Explicit `:true` to match the compose config + avoid ambiguity
+    // across Docker/Compose versions.
     "--security-opt",
-    "no-new-privileges",
+    "no-new-privileges:true",
     "--cap-drop",
     "ALL",
     // Resource caps — bound a runaway/adversarial run.

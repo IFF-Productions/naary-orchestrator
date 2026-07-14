@@ -24,10 +24,20 @@ in_sandbox() { docker run --rm --network "$NET" "$CURL" "$@"; }
 pass() { echo "  ✅ $1"; }
 fail() { echo "  ❌ $1"; FAILED=1; }
 
+# Always tear down — even on Ctrl-C / CI cancellation after `compose up` — so a leftover proxy
+# + networks can't make the next run (or operator debugging) unreliable. Runs once.
+cleanup() { SANDBOX_RUNNER_TOKEN=x compose down >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+
 echo "▸ bringing up the allowlist proxy + internal network…"
 # Only the proxy — the egress boundary is what we're testing (not the runner, which needs a
 # build + token). A throwaway token satisfies the runner service's `:?` guard during parsing.
-SANDBOX_RUNNER_TOKEN=egress-test compose up -d sandbox-proxy >/dev/null 2>&1
+# Fail FAST if it can't start (no Docker, image pull, bad config) — otherwise the downstream
+# curl failures would misreport the real cause.
+if ! SANDBOX_RUNNER_TOKEN=egress-test compose up -d sandbox-proxy; then
+  echo "❌ could not start the sandbox proxy — is Docker running?"
+  exit 1
+fi
 # Give squid a moment to bind.
 sleep 3
 docker pull -q "$CURL" >/dev/null 2>&1 || true
@@ -66,8 +76,7 @@ else
   pass "169.254.169.254 (cloud metadata) unreachable"
 fi
 
-echo "▸ tearing down…"
-compose down >/dev/null 2>&1
+echo "▸ tearing down…" # (the EXIT trap runs cleanup)
 
 if [ "$FAILED" -eq 0 ]; then
   echo "✅ EGRESS ISOLATION PROVEN — sandbox reaches Anthropic only."
