@@ -25,7 +25,9 @@ pass() { echo "  ✅ $1"; }
 fail() { echo "  ❌ $1"; FAILED=1; }
 
 echo "▸ bringing up the allowlist proxy + internal network…"
-compose up -d >/dev/null 2>&1
+# Only the proxy — the egress boundary is what we're testing (not the runner, which needs a
+# build + token). A throwaway token satisfies the runner service's `:?` guard during parsing.
+SANDBOX_RUNNER_TOKEN=egress-test compose up -d sandbox-proxy >/dev/null 2>&1
 # Give squid a moment to bind.
 sleep 3
 docker pull -q "$CURL" >/dev/null 2>&1 || true
