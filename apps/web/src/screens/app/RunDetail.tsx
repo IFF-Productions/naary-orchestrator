@@ -9,11 +9,12 @@ import type {
 import {
   Button,
   Card,
+  type Column,
   CodeBlock,
   Icon,
+  LoadingBlock,
   StatusPill,
   Table,
-  type Column,
 } from "../../components";
 import { RunDiagram } from "../../components/RunDiagram";
 import {
@@ -752,9 +753,7 @@ function RunView({ id }: { id: string }) {
 
       {!error && loading && !state && (
         <Card>
-          <div style={{ color: "var(--ink-3)", fontSize: "var(--text-body)" }}>
-            Loading…
-          </div>
+          <LoadingBlock label="Loading run…" />
         </Card>
       )}
 
@@ -967,9 +966,7 @@ function RunLog({ id }: { id: string }) {
     <Card style={{ padding: "18px 20px", marginTop: 16 }}>
       <SectionTitle>Execution log</SectionTitle>
       {!events ? (
-        <div style={{ color: "var(--ink-3)", fontSize: "var(--text-body)" }}>
-          Loading…
-        </div>
+        <LoadingBlock label="Loading log…" />
       ) : events.length === 0 ? (
         <div style={{ color: "var(--ink-3)", fontSize: "var(--text-body)" }}>
           No events yet.

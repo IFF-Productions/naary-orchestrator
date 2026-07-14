@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, Icon, StatusPill, type RunState } from "../../components";
+import {
+  Button,
+  Icon,
+  LoadingBlock,
+  type RunState,
+  StatusPill,
+} from "../../components";
 import {
   api,
   type ApiTokenRow,
@@ -521,17 +527,7 @@ export function Integrations() {
           marginBottom: 24,
         }}
       >
-        {loading && (
-          <div
-            style={{
-              padding: 16,
-              fontSize: "var(--text-body)",
-              color: "var(--ink-3)",
-            }}
-          >
-            Loading…
-          </div>
-        )}
+        {loading && <LoadingBlock />}
         {!loading && connections?.length === 0 && (
           <div
             style={{
@@ -661,17 +657,7 @@ export function Integrations() {
           overflow: "hidden",
         }}
       >
-        {loading && (
-          <div
-            style={{
-              padding: 16,
-              fontSize: "var(--text-body)",
-              color: "var(--ink-3)",
-            }}
-          >
-            Loading…
-          </div>
-        )}
+        {loading && <LoadingBlock />}
         {!loading && webhooks?.length === 0 && (
           <div
             style={{
@@ -707,17 +693,7 @@ export function Integrations() {
           overflow: "hidden",
         }}
       >
-        {loading && (
-          <div
-            style={{
-              padding: 16,
-              fontSize: "var(--text-body)",
-              color: "var(--ink-3)",
-            }}
-          >
-            Loading…
-          </div>
-        )}
+        {loading && <LoadingBlock />}
         {!loading && forms?.length === 0 && (
           <div
             style={{

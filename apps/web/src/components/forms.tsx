@@ -4,6 +4,7 @@ import type {
   ReactNode,
 } from "react";
 import { Icon, type IconName } from "./Icon";
+import { Spinner } from "./Spinner";
 
 /* ---------------- Button ---------------- */
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "positive";
@@ -15,6 +16,8 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   iconRight?: IconName;
   block?: boolean;
   iconOnly?: boolean;
+  /** Show an inline spinner in place of the leading icon and disable the button. */
+  loading?: boolean;
 }
 
 export function Button({
@@ -24,8 +27,10 @@ export function Button({
   iconRight,
   block,
   iconOnly,
+  loading,
   children,
   className,
+  disabled,
   ...rest
 }: ButtonProps) {
   const cls = [
@@ -39,11 +44,30 @@ export function Button({
     .filter(Boolean)
     .join(" ");
   const isz = size === "sm" ? 14 : size === "lg" ? 16 : 15;
+  // Filled variants sit on the brand/state fill, so the spinner needs a light arc/track
+  // to read; outline variants use the brand arc on a faint track.
+  const filled =
+    variant === "primary" || variant === "danger" || variant === "positive";
   return (
-    <button className={cls} {...rest}>
-      {icon && <Icon name={icon} size={isz} strokeWidth={2} />}
+    <button
+      className={cls}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
+      {...rest}
+    >
+      {loading ? (
+        <Spinner
+          size={isz}
+          color={filled ? "rgba(255,255,255,0.95)" : "var(--brand)"}
+          track={filled ? "rgba(255,255,255,0.35)" : "var(--line-2)"}
+        />
+      ) : (
+        icon && <Icon name={icon} size={isz} strokeWidth={2} />
+      )}
       {children}
-      {iconRight && <Icon name={iconRight} size={isz} strokeWidth={2} />}
+      {iconRight && !loading && (
+        <Icon name={iconRight} size={isz} strokeWidth={2} />
+      )}
     </button>
   );
 }

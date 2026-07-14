@@ -38,3 +38,4 @@ export {
   Toast,
 } from "./feedback";
 export { Card, SectionLabel, Logo } from "./layout";
+export { Spinner, LoadingBlock } from "./Spinner";

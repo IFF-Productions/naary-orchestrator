@@ -5,7 +5,7 @@ import {
   useState,
 } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Icon, StatusPill } from "../../components";
+import { Button, Icon, Skeleton, StatusPill } from "../../components";
 import { api, type RunSummary, UnauthorizedError } from "../../lib/api";
 import { isFailure, isTerminal, runStatusUi } from "../../lib/run-status";
 import { useMode } from "../../mode";
@@ -271,7 +271,7 @@ export function Runs() {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           {!simple && !showArchived && (
-            <Button icon="play" onClick={startRun} disabled={starting}>
+            <Button icon="play" onClick={startRun} loading={starting}>
               {starting ? "Starting…" : "Start test run"}
             </Button>
           )}
@@ -490,17 +490,31 @@ export function Runs() {
           <span />
         </div>
 
-        {runs === null && !error && (
-          <div
-            style={{
-              padding: 18,
-              fontSize: "var(--text-body)",
-              color: "var(--ink-3)",
-            }}
-          >
-            Loading…
-          </div>
-        )}
+        {runs === null &&
+          !error &&
+          Array.from({ length: 6 }).map((_, i) => (
+            <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length skeleton placeholder
+              key={i}
+              style={{
+                display: "grid",
+                gridTemplateColumns: COLS,
+                gap: 10,
+                padding: "12px 18px",
+                borderBottom: "1px solid var(--line)",
+                alignItems: "center",
+              }}
+            >
+              <Skeleton width={16} height={16} radius={4} />
+              <Skeleton width="72%" />
+              <Skeleton width="55%" />
+              <Skeleton width={26} />
+              <Skeleton width={64} height={20} radius={10} />
+              <Skeleton width="50%" />
+              <Skeleton width="60%" />
+              <span />
+            </div>
+          ))}
         {runs?.length === 0 && (
           <div
             style={{

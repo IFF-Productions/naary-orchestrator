@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Icon,
+  LoadingBlock,
   SearchInput,
   StatusPill,
   Switch,
@@ -220,17 +221,7 @@ export function Workflows() {
             Sign in to see your saved workflows.
           </div>
         )}
-        {!err && graphs === null && (
-          <div
-            style={{
-              padding: 18,
-              fontSize: "var(--text-body)",
-              color: "var(--ink-3)",
-            }}
-          >
-            Loading…
-          </div>
-        )}
+        {!err && graphs === null && <LoadingBlock label="Loading workflows…" />}
         {!err && graphs?.length === 0 && (
           <div
             style={{
