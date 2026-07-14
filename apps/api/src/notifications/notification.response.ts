@@ -25,3 +25,13 @@ export class NotificationSettingsResponse {
   @ApiProperty({ example: true, description: "Notify when a run fails." })
   onRunFailed!: boolean;
 }
+
+/** Result of a successful test send (a failure surfaces as a 400 with a message). */
+export class TestNotificationResponse {
+  @ApiProperty({ example: true }) ok!: boolean;
+  @ApiProperty({
+    example: 200,
+    description: "HTTP status the webhook returned.",
+  })
+  status!: number;
+}

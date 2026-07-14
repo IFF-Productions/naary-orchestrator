@@ -30,6 +30,11 @@ export function Settings() {
   });
   const [notifBusy, setNotifBusy] = useState(false);
   const [notifStatus, setNotifStatus] = useState<string | null>(null);
+  const [notifTestBusy, setNotifTestBusy] = useState(false);
+  const [notifTest, setNotifTest] = useState<{
+    ok: boolean;
+    message?: string;
+  } | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -110,6 +115,20 @@ export function Settings() {
       );
     } finally {
       setNotifBusy(false);
+    }
+  }
+
+  async function sendTest() {
+    if (!tenant) return;
+    setNotifTestBusy(true);
+    setNotifTest(null);
+    try {
+      // Tests the SAVED webhook — remind the user to save an edited URL first.
+      setNotifTest(await api.testNotification(tenant));
+    } catch {
+      setNotifTest({ ok: false, message: "Could not send the test." });
+    } finally {
+      setNotifTestBusy(false);
     }
   }
 
@@ -417,11 +436,38 @@ export function Settings() {
           >
             {notifBusy ? "Saving…" : "Save notifications"}
           </Button>
+          <Button
+            variant="secondary"
+            icon="bell"
+            disabled={notifTestBusy || !loaded || !notif.webhookUrl?.trim()}
+            onClick={() => void sendTest()}
+            title={
+              notif.webhookUrl?.trim()
+                ? "POST a sample message to your webhook"
+                : "Add a webhook URL first"
+            }
+          >
+            {notifTestBusy ? "Sending…" : "Send test"}
+          </Button>
           {notifStatus && (
             <span
               style={{ fontSize: "var(--text-sm)", color: "var(--state-done)" }}
             >
               {notifStatus}
+            </span>
+          )}
+          {notifTest && (
+            <span
+              style={{
+                fontSize: "var(--text-sm)",
+                color: notifTest.ok
+                  ? "var(--state-done)"
+                  : "var(--state-error)",
+              }}
+            >
+              {notifTest.ok
+                ? "✓ Test sent — check your channel."
+                : notifTest.message}
             </span>
           )}
         </div>
