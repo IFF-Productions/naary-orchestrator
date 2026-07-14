@@ -974,16 +974,37 @@ function slackEscape(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+type NotificationAction = {
+  label: string;
+  url: string;
+  /** Slack button colour: primary (green) for approve, danger (red) for reject. */
+  style?: "primary" | "danger";
+};
+
 function notificationBlocks(
   input: NotificationInput,
   _text: string,
-): { blocks: unknown[]; actions: { label: string; url: string }[] } {
+): { blocks: unknown[]; actions: NotificationAction[] } {
   const isApproval = input.kind === "approval_pending";
 
-  const actions: { label: string; url: string }[] = [];
+  const actions: NotificationAction[] = [];
   if (isApproval) {
     const approve = approvalUrl(input.workflowId);
-    if (approve) actions.push({ label: "Approve / Reject", url: approve });
+    if (approve) {
+      // Two one-click buttons instead of one "Approve / Reject": each deep-links to the
+      // signed decision page with the choice pre-selected (?…&decision=approve|reject).
+      // The page still requires an explicit confirm click, so a link-prefetch can't decide.
+      actions.push({
+        label: "✅ Approve",
+        url: `${approve}&decision=approve`,
+        style: "primary",
+      });
+      actions.push({
+        label: "❌ Reject",
+        url: `${approve}&decision=reject`,
+        style: "danger",
+      });
+    }
   }
   const run = runUrl(input.workflowId);
   if (run) actions.push({ label: "View run", url: run });
@@ -1031,8 +1052,10 @@ function notificationBlocks(
         // Slack rejects an actions block whose buttons lack an action_id (invalid_blocks),
         // even for url-only buttons — derive a stable one from the label.
         action_id: `${a.label.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_${i}`,
-        text: { type: "plain_text", text: a.label },
+        // emoji:true so the ✅/❌ in the label render as icons on the buttons.
+        text: { type: "plain_text", text: a.label, emoji: true },
         url: a.url,
+        ...(a.style ? { style: a.style } : {}),
       })),
     });
   return { blocks, actions };

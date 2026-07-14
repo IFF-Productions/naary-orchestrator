@@ -13,6 +13,14 @@ export function ApprovePage() {
   const { workflowId } = useParams<{ workflowId: string }>();
   const [params] = useSearchParams();
   const token = params.get("token") ?? "";
+  // A Slack/Teams Approve or Reject button deep-links here with the choice pre-selected.
+  // We DON'T auto-submit (a link-prefetch must not be able to decide) — instead we
+  // emphasize + focus that action so the recipient confirms in one click.
+  const decisionParam = params.get("decision");
+  const intended: "approve" | "reject" | null =
+    decisionParam === "approve" || decisionParam === "reject"
+      ? decisionParam
+      : null;
   const [state, setState] = useState<
     "loading" | "ready" | "closed" | "invalid"
   >("loading");
@@ -169,6 +177,21 @@ export function ApprovePage() {
           resize: "vertical",
         }}
       />
+      {intended && (
+        <div
+          style={{
+            fontSize: "var(--text-sm)",
+            color: "var(--ink-2)",
+            marginTop: 14,
+          }}
+        >
+          You chose to{" "}
+          <strong style={{ color: "var(--ink)" }}>
+            {intended === "approve" ? "approve" : "reject"}
+          </strong>{" "}
+          this run — add an optional reason and confirm below.
+        </div>
+      )}
       {error && (
         <div
           style={{
@@ -184,16 +207,18 @@ export function ApprovePage() {
         <Button
           variant="positive"
           disabled={busy}
+          autoFocus={intended === "approve"}
           onClick={() => void decide("approve")}
-          style={{ flex: 1 }}
+          style={{ flex: 1, opacity: intended === "reject" ? 0.6 : 1 }}
         >
           {busy ? "…" : "Approve"}
         </Button>
         <Button
           variant="danger"
           disabled={busy}
+          autoFocus={intended === "reject"}
           onClick={() => void decide("reject")}
-          style={{ flex: 1 }}
+          style={{ flex: 1, opacity: intended === "approve" ? 0.6 : 1 }}
         >
           {busy ? "…" : "Reject"}
         </Button>
