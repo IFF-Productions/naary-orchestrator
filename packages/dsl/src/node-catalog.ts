@@ -85,6 +85,12 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
     config:
       '{ provider:"anthropic", model:"claude-opus-4-8", systemPrompt, outputSchema? }',
   },
+  codeAgent: {
+    group: "ai",
+    summary:
+      "Runs an agentic coding CLI (Claude Code/Cursor/Copilot); output at <id>.output.",
+    config: '{ tool?:"claude", prompt, maxTurns?, maxBudgetUsd? }',
+  },
   mcpTool: {
     group: "ai",
     summary: "Calls a remote tool over MCP via a connection.",

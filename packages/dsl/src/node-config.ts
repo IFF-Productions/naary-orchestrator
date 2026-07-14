@@ -18,6 +18,7 @@ import type { NodeType } from "./types";
 import type {
   AgentConfig,
   AggregateConfig,
+  CodeAgentConfig,
   CodeConfig,
   CompareDatasetsConfig,
   CsvConfig,
@@ -76,6 +77,7 @@ export interface NodeConfigMap {
   formTrigger: FormTriggerConfig;
   chatTrigger: ChatTriggerConfig;
   agent: AgentConfig;
+  codeAgent: CodeAgentConfig;
   mcpTool: McpToolConfig;
   integration: IntegrationConfig;
   httpRequest: HttpRequestConfig;

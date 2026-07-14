@@ -128,6 +128,42 @@ describe("validateGraphConfigs (save gate — lenient on missing, strict on pres
     expect(errs).toEqual([]);
   });
 
+  it("validates a codeAgent node: saves a draft, accepts a valid config, rejects bad types", () => {
+    // Draft (prompt not yet filled) must still save.
+    expect(
+      validateGraphConfigs(graph([{ id: "c", type: "codeAgent", config: {} }])),
+    ).toEqual([]);
+    // A valid config passes.
+    expect(
+      validateGraphConfigs(
+        graph([
+          {
+            id: "c",
+            type: "codeAgent",
+            config: { tool: "claude", prompt: "review", maxTurns: 5 },
+          },
+        ]),
+      ),
+    ).toEqual([]);
+    // A bad tool enum + wrong-typed maxTurns is caught.
+    const errs = validateGraphConfigs(
+      graph([
+        {
+          id: "c",
+          type: "codeAgent",
+          config: { tool: "vim", prompt: 42, maxTurns: "lots" },
+        },
+      ]),
+    );
+    expect(errs).toHaveLength(1);
+    expect(errs[0].nodeId).toBe("c");
+    expect(errs[0].issues.map((i) => i.path).sort()).toEqual([
+      "maxTurns",
+      "prompt",
+      "tool",
+    ]);
+  });
+
   it("skips config-less nodes and reports nodeId/type on failure", () => {
     const errs = validateGraphConfigs(
       graph([

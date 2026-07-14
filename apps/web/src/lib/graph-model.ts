@@ -115,6 +115,9 @@ export const NODE_KINDS: NodeKind[] = [
   { type: "agent", label: "Agent", group: "AI & Tools", accent: "var(--node-agent)",
     description: "Ask an AI model to work with the data — summarize, classify, or draft.",
     defaultConfig: { provider: "anthropic", model: "claude-opus-4-8", systemPrompt: "You are a helpful assistant. Summarize the input in one paragraph." } },
+  { type: "codeAgent", label: "Code Agent", group: "AI & Tools", accent: "var(--node-agent)",
+    description: "Run an agentic coding CLI (Claude Code) on a task — reads code and returns a plan (read-only).",
+    defaultConfig: { tool: "claude", prompt: "" } },
   { type: "mcpTool", label: "MCP Tool", group: "AI & Tools", accent: "var(--node-mcp)",
     description: "Call a tool on a connected service (e.g. GitHub, Jira) via MCP.",
     defaultConfig: { connectionId: "", tool: "" } },
@@ -308,6 +311,10 @@ export function nodeSubtitle(
   if (kind === "agent") {
     const model = config.model as string | undefined;
     return model ? model.replace("claude-", "") : undefined;
+  }
+  if (kind === "codeAgent") {
+    const tool = (config.tool as string | undefined) ?? "claude";
+    return `${tool} · read-only`;
   }
   if (kind === "mcpTool") {
     const tool = config.tool as string | undefined;
