@@ -9,6 +9,7 @@
  * completes (pauses at approval, no BYOK LLM key needed).
  */
 import "@xyflow/react/dist/style.css";
+import "./canvas.css";
 import {
   addEdge,
   applyEdgeChanges,
@@ -40,7 +41,7 @@ import {
   type GraphDef,
   type NodeType,
 } from "@naary/dsl";
-import { Button } from "../components";
+import { Button, StatusPill } from "../components";
 import { ExpressionField } from "../components/ExpressionField";
 import {
   api,
@@ -903,34 +904,17 @@ export function CanvasPage() {
           key: {activeKey}
         </span>
 
-        <span
-          style={{
-            fontSize: "var(--text-sm)",
-            padding: "3px 10px",
-            borderRadius: "var(--radius-full)",
-            background: graph ? "var(--state-done)" : "var(--state-error)",
-            color: "#fff",
-          }}
-        >
-          {graph ? "valid" : (error ?? "invalid")}
-        </span>
+        <StatusPill
+          state={graph ? "done" : "error"}
+          label={graph ? "valid" : (error ?? "invalid")}
+        />
         {allIssues.length > 0 && (
           <button
             type="button"
             onClick={() => setShowIssues((s) => !s)}
             title="Show details of every issue"
-            style={{
-              fontSize: "var(--text-sm)",
-              padding: "3px 10px",
-              border: "none",
-              borderRadius: "var(--radius-full)",
-              background:
-                resourceWarnings.length > 0
-                  ? "var(--state-error)"
-                  : "var(--state-paused)",
-              color: "#fff",
-              cursor: "pointer",
-            }}
+            className={`pill ${resourceWarnings.length > 0 ? "pill-error" : "pill-paused"}`}
+            style={{ border: "none", cursor: "pointer" }}
           >
             ⚠ {allIssues.length} issue{allIssues.length > 1 ? "s" : ""}{" "}
             {showIssues ? "▲" : "▼"}
