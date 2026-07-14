@@ -2213,16 +2213,15 @@ function ConfigPanel({
                 min={0.5}
                 step={0.5}
                 value={num("maxBudgetUsd") ?? ""}
-                onChange={(e) =>
+                onChange={(e) => {
+                  // Schema requires > 0 — use valueAsNumber (a partial/empty number input is
+                  // NaN) and coerce anything non-positive/non-finite to undefined so the node
+                  // stays saveable (rather than persisting an invalid 0).
+                  const v = e.target.valueAsNumber;
                   onChange({
-                    // Schema requires > 0 — coerce a blank/zero/negative to undefined so the
-                    // node stays saveable (rather than persisting an invalid 0).
-                    maxBudgetUsd:
-                      Number(e.target.value) > 0
-                        ? Number(e.target.value)
-                        : undefined,
-                  })
-                }
+                    maxBudgetUsd: Number.isFinite(v) && v > 0 ? v : undefined,
+                  });
+                }}
                 style={inputStyle}
                 placeholder="hard stop"
               />
