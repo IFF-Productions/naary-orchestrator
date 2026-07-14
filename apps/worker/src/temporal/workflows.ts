@@ -180,6 +180,15 @@ const { mapNode } = wf.proxyActivities<typeof activities>({
   retry: { maximumAttempts: 1 },
 });
 
+// codeAgent runs an agentic coding CLI subprocess — minutes-long, and AT-MOST-ONCE
+// (maximumAttempts: 1): later slices commit/push/PR, so a partial write must never be
+// auto-retried. Its own block (like mapNode) keeps that long timeout off the shared 1-min
+// activities. The subprocess timeout (cfg.timeoutMs) is the real deadline within this.
+const { callCodeAgent } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "40 minutes",
+  retry: { maximumAttempts: 1 },
+});
+
 // Same reasoning as callHttpRequest: the per-query timeout (≤ MAX_SQL_TIMEOUT_MS,
 // clamped in the activity) is the real deadline; the start-to-close sits above it so
 // Temporal doesn't kill + retry a slow-but-running query. (Reads are idempotent, but
@@ -545,6 +554,34 @@ export async function runGraph(
         // even under parallel fan-out, where Temporal replays activity completion
         // order deterministically anyway).
         costUsd += result.costUsd;
+        ctx.__costUsd = costUsd;
+        return null;
+      }
+      case "codeAgent": {
+        // The prompt's {{…}} is already resolved in `cfg`. No retryOverride: this node is
+        // AT-MOST-ONCE (its proxy block pins maximumAttempts:1) — later slices commit/PR,
+        // so a partial write must never auto-retry. The activity fetches the BYOK key.
+        const caCfg = asNodeConfig(cfg, "codeAgent");
+        const caResult = await callCodeAgent(
+          {
+            tool: caCfg.tool,
+            prompt: caCfg.prompt,
+            systemPrompt: caCfg.systemPrompt,
+            model: caCfg.model,
+            maxTurns: caCfg.maxTurns,
+            maxBudgetUsd: caCfg.maxBudgetUsd,
+            timeoutMs: caCfg.timeoutMs,
+            costUsd: caCfg.costUsd,
+          },
+          ctx.__input,
+          {
+            tenantId: runCtx.tenantId,
+            executionId: wf.workflowInfo().workflowId,
+            nodeId: node.id,
+          },
+        );
+        ctx[node.id] = caResult;
+        costUsd += caResult.costUsd;
         ctx.__costUsd = costUsd;
         return null;
       }

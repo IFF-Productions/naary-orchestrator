@@ -12,6 +12,7 @@ export type NodeType =
   | "formTrigger" // entry node: started by a hosted public form; output is the submitted fields
   | "chatTrigger" // entry node: started by a hosted chat message; output is { message, sessionId }
   | "agent"
+  | "codeAgent" // runs an agentic coding CLI (Claude Code/Cursor/Copilot) as a BYOK activity
   | "mcpTool" // Slice #4: calls a remote MCP server tool via a connection
   | "integration" // native provider action (GitHub/Jira/…) via a catalog + connection
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}
@@ -186,6 +187,32 @@ export interface McpToolNodeConfig {
   /** argName → upstream output binding; overrides a static key of the same name. */
   argumentBindings?: Record<string, ArgBinding>;
   /** Flat per-call cost metered into the run budget (Slice #6 / Arch§4.6). */
+  costUsd?: number;
+}
+
+/**
+ * codeAgent node (design docs/design/CLAUDE-CODE-NODE.md). Runs an agentic coding CLI
+ * (Claude Code / Cursor / Copilot) as a BYOK Temporal activity. Slice 1 is READ-ONLY —
+ * `claude -p` in plan mode with tools clamped to Read/Grep/Glob (no Bash/write/clone/PR;
+ * those land in later slices behind the sandbox). `tool` selects the driver (default
+ * "claude"); the credential is the tenant's key for that tool's provider.
+ */
+export interface CodeAgentNodeConfig {
+  /** Which coding-CLI driver to run. Defaults to "claude". */
+  tool?: "claude" | "cursor" | "copilot";
+  /** The task prompt. `{{ nodeId.path }}` upstream templating is resolved before the activity. */
+  prompt: string;
+  /** Appended to the CLI's system prompt (e.g. house rules). */
+  systemPrompt?: string;
+  /** Model override; defaults to the tenant's provider default. */
+  model?: string;
+  /** Hard turn cap for the agentic loop. */
+  maxTurns?: number;
+  /** Hard cost stop (USD) passed to the CLI. */
+  maxBudgetUsd?: number;
+  /** Overall wall-clock budget for the run (ms). */
+  timeoutMs?: number;
+  /** Flat fallback cost metered if the CLI reports no usage (fail-safe, never zero). */
   costUsd?: number;
 }
 

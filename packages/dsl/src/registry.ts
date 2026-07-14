@@ -41,6 +41,7 @@ import type {
   VectorQueryNodeConfig,
   SplitOutNodeConfig,
   LoopEndNodeConfig,
+  CodeAgentNodeConfig,
   HttpRequestNodeConfig,
   IfNodeConfig,
   JsonNodeConfig,
@@ -182,6 +183,16 @@ const CONFIG_SCHEMAS = {
      *  it. Enable only for a hot, large-prompt agent. Anthropic no-ops caching below its minimum
      *  cacheable block size, so a short prompt with this on is simply unaffected. */
     cacheSystemPrompt: z.boolean().optional(),
+  }),
+  codeAgent: z.object({
+    tool: z.enum(["claude", "cursor", "copilot"]).optional(),
+    prompt: z.string(),
+    systemPrompt: z.string().optional(),
+    model: z.string().optional(),
+    maxTurns: z.number().int().positive().optional(),
+    maxBudgetUsd: z.number().positive().optional(),
+    timeoutMs: z.number().int().positive().optional(),
+    costUsd: z.number().optional(),
   }),
   mcpTool: z.object({
     connectionId: z.string(),
@@ -612,6 +623,7 @@ export type ScheduleTriggerConfig = z.infer<
 >;
 export type PollTriggerConfig = z.infer<typeof CONFIG_SCHEMAS.pollTrigger>;
 export type AgentConfig = z.infer<typeof CONFIG_SCHEMAS.agent>;
+export type CodeAgentConfig = z.infer<typeof CONFIG_SCHEMAS.codeAgent>;
 export type McpToolConfig = z.infer<typeof CONFIG_SCHEMAS.mcpTool>;
 export type IntegrationConfig = z.infer<typeof CONFIG_SCHEMAS.integration>;
 export type HttpRequestConfig = z.infer<typeof CONFIG_SCHEMAS.httpRequest>;
@@ -673,6 +685,7 @@ const _configParity: {
   formTrigger: Exact<FormTriggerConfig, FormTriggerNodeConfig>;
   chatTrigger: Exact<ChatTriggerConfig, ChatTriggerNodeConfig>;
   pollTrigger: Exact<PollTriggerConfig, PollTriggerNodeConfig>;
+  codeAgent: Exact<CodeAgentConfig, CodeAgentNodeConfig>;
   mcpTool: Exact<McpToolConfig, McpToolNodeConfig>;
   integration: Exact<IntegrationConfig, IntegrationNodeConfig>;
   httpRequest: Exact<HttpRequestConfig, HttpRequestNodeConfig>;
@@ -723,6 +736,7 @@ const _configParity: {
   formTrigger: true,
   chatTrigger: true,
   pollTrigger: true,
+  codeAgent: true,
   mcpTool: true,
   integration: true,
   httpRequest: true,

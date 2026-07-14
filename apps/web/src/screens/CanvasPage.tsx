@@ -2128,6 +2128,106 @@ function ConfigPanel({
         </>
       )}
 
+      {kind === "codeAgent" && (
+        <>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              lineHeight: "var(--leading-snug)",
+              marginBottom: 4,
+            }}
+          >
+            Runs an agentic coding CLI on your task. Today it's{" "}
+            <strong>read-only</strong> (reads code, returns a plan) — cloning,
+            edits, and PRs land in later slices.
+          </div>
+
+          <Labeled label="Tool">
+            <select
+              value={str("tool") || "claude"}
+              onChange={(e) => onChange({ tool: e.target.value })}
+              style={inputStyle}
+            >
+              <option value="claude">Claude Code</option>
+              <option value="cursor" disabled>
+                Cursor (coming soon)
+              </option>
+              <option value="copilot" disabled>
+                Copilot (coming soon)
+              </option>
+            </select>
+          </Labeled>
+
+          <div>
+            <RowHead
+              label="Prompt"
+              value={`~${Math.ceil(str("prompt").length / 4)} tok`}
+            />
+            {exprText("prompt", {
+              multiline: true,
+              minHeight: "7em",
+              placeholder:
+                "Review the auth module and summarize any security issues…",
+            })}
+          </div>
+
+          <div>
+            <RowHead label="System prompt" value="optional" />
+            {exprText("systemPrompt", {
+              multiline: true,
+              minHeight: "4em",
+              placeholder: "House rules for the agent…",
+            })}
+          </div>
+
+          <Labeled label="Model">
+            <input
+              value={str("model")}
+              onChange={(e) => onChange({ model: e.target.value || undefined })}
+              style={inputStyle}
+              placeholder="default (tenant's Anthropic default)"
+            />
+          </Labeled>
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <Labeled label="Max turns">
+              <input
+                type="number"
+                min={1}
+                value={num("maxTurns") ?? ""}
+                onChange={(e) =>
+                  onChange({
+                    maxTurns: e.target.value
+                      ? Number(e.target.value)
+                      : undefined,
+                  })
+                }
+                style={inputStyle}
+                placeholder="default"
+              />
+            </Labeled>
+            <Labeled label="Max budget (USD)">
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={num("maxBudgetUsd") ?? ""}
+                onChange={(e) =>
+                  onChange({
+                    maxBudgetUsd: e.target.value
+                      ? Number(e.target.value)
+                      : undefined,
+                  })
+                }
+                style={inputStyle}
+                placeholder="hard stop"
+              />
+            </Labeled>
+          </div>
+        </>
+      )}
+
       {kind === "mcpTool" && (
         <>
           <Labeled label="Connection">
@@ -5713,6 +5813,7 @@ const STRING_OPS = [
 /** Node kinds that call activities / can genuinely fail — the ones "On error" applies to. */
 const ERRORABLE_KINDS = new Set<NodeType>([
   "agent",
+  "codeAgent",
   "mcpTool",
   "httpRequest",
   "sqlQuery",
