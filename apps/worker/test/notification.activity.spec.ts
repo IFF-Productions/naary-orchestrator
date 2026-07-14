@@ -4,6 +4,7 @@ import { __notifyDeps, sendNotification } from "../src/temporal/activities";
 const fetch = vi.fn();
 let settings: {
   webhookUrl: string | null;
+  channel?: string;
   onApprovalPending: boolean;
   onRunFailed: boolean;
 } | null;
@@ -253,5 +254,131 @@ describe("sendNotification", () => {
     settings = null;
     await sendNotification({ ...BASE, kind: "run_failed" });
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("sendNotification — Microsoft Teams channel", () => {
+  /** The Adaptive Card content object out of the Teams envelope. */
+  function teamsCard(body: {
+    type: string;
+    attachments: {
+      contentType: string;
+      content: {
+        type: string;
+        version: string;
+        body: { type: string; text?: string; facts?: unknown }[];
+        actions?: {
+          type: string;
+          title: string;
+          url: string;
+          style?: string;
+        }[];
+      };
+    }[];
+  }) {
+    return body.attachments[0].content;
+  }
+
+  it("sends the Adaptive Card envelope (not Slack blocks) when channel is teams", async () => {
+    settings = {
+      webhookUrl: "https://prod-1.westus.logic.azure.com/workflows/x",
+      channel: "teams",
+      onApprovalPending: true,
+      onRunFailed: true,
+    };
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      title: "Ship?",
+    });
+
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    // The Teams message envelope — NOT the Slack { text, blocks } shape.
+    expect(body.type).toBe("message");
+    expect(body.blocks).toBeUndefined();
+    expect(body.attachments[0].contentType).toBe(
+      "application/vnd.microsoft.card.adaptive",
+    );
+    const card = teamsCard(body);
+    expect(card.type).toBe("AdaptiveCard");
+    expect(card.version).toBe("1.2");
+  });
+
+  it("carries the header, a FactSet, and Approve/Reject/View-run OpenUrl actions", async () => {
+    settings = {
+      webhookUrl: "https://teams.example/x",
+      channel: "teams",
+      onApprovalPending: true,
+      onRunFailed: true,
+    };
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      title: "Ship?",
+    });
+    const card = teamsCard(JSON.parse(fetch.mock.calls[0][1].body as string));
+
+    const header = card.body.find((b) => b.type === "TextBlock");
+    expect(header?.text).toContain("Approval needed");
+    const factSet = card.body.find((b) => b.type === "FactSet") as {
+      facts: { title: string; value: string }[];
+    };
+    // Run id is a PLAIN fact value — not a mrkdwn link, not escaped.
+    const runFact = factSet.facts.find((f) => f.title === "Run");
+    expect(runFact?.value).toBe("wf-1");
+
+    // Approve/Reject deep-link (decision pre-filled) + View run, all Action.OpenUrl.
+    expect(card.actions?.map((a) => a.type)).toEqual([
+      "Action.OpenUrl",
+      "Action.OpenUrl",
+      "Action.OpenUrl",
+    ]);
+    expect(card.actions?.[0].title).toBe("✅ Approve");
+    expect(card.actions?.[0].url).toContain("&decision=approve");
+    expect(card.actions?.[0].style).toBe("positive");
+    expect(card.actions?.[1].style).toBe("destructive");
+    expect(card.actions?.[2].title).toBe("View run");
+    expect(card.actions?.[2].style).toBeUndefined();
+  });
+
+  it("does NOT Slack-escape Teams fact values (plain JSON, no &amp; double-encoding)", async () => {
+    settings = {
+      webhookUrl: "https://teams.example/x",
+      channel: "teams",
+      onApprovalPending: true,
+      onRunFailed: true,
+    };
+    await sendNotification({
+      tenantId: "t1",
+      workflowId: "wf-1",
+      workflowKey: "orders & returns",
+      kind: "run_failed",
+      detail: "timeout <reset>",
+    });
+    const card = teamsCard(JSON.parse(fetch.mock.calls[0][1].body as string));
+    const facts = (
+      card.body.find((b) => b.type === "FactSet") as {
+        facts: { title: string; value: string }[];
+      }
+    ).facts;
+    // Plain strings — the raw chars, NOT &amp;/&lt; (Adaptive Card isn't mrkdwn).
+    expect(facts.find((f) => f.title === "Workflow")?.value).toBe(
+      "orders & returns",
+    );
+    expect(facts.find((f) => f.title === "Reason")?.value).toBe(
+      "timeout <reset>",
+    );
+  });
+
+  it("still sends Slack blocks when channel is unset (back-compat default)", async () => {
+    settings = {
+      webhookUrl: "https://hooks.slack.com/x",
+      onApprovalPending: true,
+      onRunFailed: true,
+    };
+    await sendNotification({ ...BASE, kind: "run_failed", detail: "boom" });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    expect(body.type).toBeUndefined(); // not the Teams envelope
+    expect(Array.isArray(body.blocks)).toBe(true);
   });
 });

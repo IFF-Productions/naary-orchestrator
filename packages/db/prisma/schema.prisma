@@ -341,6 +341,10 @@ model TenantSettings {
 model NotificationSettings {
   tenantId          String   @id
   webhookUrl        String? // POST target (Slack/Teams/generic incoming webhook)
+  // Which payload format to send to webhookUrl. "slack" = Block Kit (default, back-compat);
+  // "teams" = an Adaptive Card in the {type:"message",attachments:[…]} envelope that a Teams
+  // Workflows/Incoming-Webhook renders. The worker branches on this.
+  channel           String   @default("slack")
   onApprovalPending Boolean  @default(true)
   onRunFailed       Boolean  @default(true)
   updatedAt         DateTime @default(now()) @updatedAt

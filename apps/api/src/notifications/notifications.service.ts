@@ -1,8 +1,17 @@
 import { Injectable } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
 
+export type NotificationChannel = "slack" | "teams";
+
+/** Any unknown/legacy value falls back to "slack" (the default format). */
+function normalizeChannel(v: string | null | undefined): NotificationChannel {
+  return v === "teams" ? "teams" : "slack";
+}
+
 export interface NotificationSettingsView {
   webhookUrl: string | null;
+  /** Payload format posted to webhookUrl: Slack Block Kit or a Teams Adaptive Card. */
+  channel: NotificationChannel;
   onApprovalPending: boolean;
   onRunFailed: boolean;
 }
@@ -17,6 +26,7 @@ export class NotificationsService {
     });
     return {
       webhookUrl: row?.webhookUrl ?? null,
+      channel: normalizeChannel(row?.channel),
       onApprovalPending: row?.onApprovalPending ?? true,
       onRunFailed: row?.onRunFailed ?? true,
     };
@@ -26,6 +36,7 @@ export class NotificationsService {
     tenantId: string,
     patch: {
       webhookUrl?: string | null;
+      channel?: NotificationChannel;
       onApprovalPending?: boolean;
       onRunFailed?: boolean;
     },
@@ -40,17 +51,20 @@ export class NotificationsService {
       create: {
         tenantId,
         webhookUrl: webhookUrl ?? null,
+        channel: patch.channel ?? "slack",
         onApprovalPending: patch.onApprovalPending ?? true,
         onRunFailed: patch.onRunFailed ?? true,
       },
       update: {
         webhookUrl,
+        channel: patch.channel,
         onApprovalPending: patch.onApprovalPending,
         onRunFailed: patch.onRunFailed,
       },
     });
     return {
       webhookUrl: row.webhookUrl,
+      channel: normalizeChannel(row.channel),
       onApprovalPending: row.onApprovalPending,
       onRunFailed: row.onRunFailed,
     };

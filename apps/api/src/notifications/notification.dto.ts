@@ -1,5 +1,11 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
-import { IsBoolean, IsOptional, IsString, MaxLength } from "class-validator";
+import {
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from "class-validator";
 
 export class SaveNotificationsDto {
   /** Outbound webhook URL (Slack/Teams/generic). Blank/omitted turns it off. */
@@ -13,6 +19,17 @@ export class SaveNotificationsDto {
   @IsString()
   @MaxLength(2000)
   webhookUrl?: string;
+
+  /** Payload format for the webhook: "slack" (Block Kit) or "teams" (Adaptive Card). */
+  @ApiPropertyOptional({
+    enum: ["slack", "teams"],
+    example: "slack",
+    description:
+      "Payload format posted to the webhook. 'teams' expects a Microsoft Teams Workflows webhook URL.",
+  })
+  @IsOptional()
+  @IsIn(["slack", "teams"])
+  channel?: "slack" | "teams";
 
   @ApiPropertyOptional({
     example: true,

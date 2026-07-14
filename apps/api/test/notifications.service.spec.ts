@@ -16,26 +16,55 @@ beforeEach(() => {
 });
 
 describe("NotificationsService", () => {
-  it("returns safe defaults (no webhook, both events on) when unset", async () => {
+  it("returns safe defaults (no webhook, slack, both events on) when unset", async () => {
     findUnique.mockResolvedValue(null);
     expect(await svc.get("t-1")).toEqual({
       webhookUrl: null,
+      channel: "slack",
       onApprovalPending: true,
       onRunFailed: true,
     });
   });
 
-  it("returns the stored settings", async () => {
+  it("returns the stored settings, including the teams channel", async () => {
     findUnique.mockResolvedValue({
       webhookUrl: "https://h/x",
+      channel: "teams",
       onApprovalPending: false,
       onRunFailed: true,
     });
     expect(await svc.get("t-1")).toEqual({
       webhookUrl: "https://h/x",
+      channel: "teams",
       onApprovalPending: false,
       onRunFailed: true,
     });
+  });
+
+  it("normalizes an unknown/legacy channel value to slack", async () => {
+    findUnique.mockResolvedValue({
+      webhookUrl: "https://h/x",
+      channel: "discord",
+      onApprovalPending: true,
+      onRunFailed: true,
+    });
+    expect((await svc.get("t-1")).channel).toBe("slack");
+  });
+
+  it("persists the chosen channel on save", async () => {
+    upsert.mockResolvedValue({
+      webhookUrl: "https://h/x",
+      channel: "teams",
+      onApprovalPending: true,
+      onRunFailed: true,
+    });
+    const out = await svc.save("t-1", {
+      webhookUrl: "https://h/x",
+      channel: "teams",
+    });
+    expect(upsert.mock.calls[0][0].update.channel).toBe("teams");
+    expect(upsert.mock.calls[0][0].create.channel).toBe("teams");
+    expect(out.channel).toBe("teams");
   });
 
   it("upserts and NORMALIZES a blank webhook URL to null (turns it off)", async () => {
