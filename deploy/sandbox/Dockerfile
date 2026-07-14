@@ -10,9 +10,10 @@
 
 FROM node:22-bookworm-slim
 
-# Pin the CLI for reproducible, security-sensitive builds. Override per deploy to a known-good
-# version:  docker build --build-arg CLAUDE_CODE_VERSION=1.2.3 …  (default `latest` for dev).
-ARG CLAUDE_CODE_VERSION=latest
+# Pin the CLI for reproducible, security-sensitive builds — a VERSIONED default (not `latest`)
+# so a rebuild can't silently pull a new/breaking/vulnerable release. Bump deliberately; or
+# override per deploy:  docker build --build-arg CLAUDE_CODE_VERSION=2.1.210 …
+ARG CLAUDE_CODE_VERSION=2.1.210
 
 # `git` for in-tree diffs (no network — the remote/token never enter here); `ca-certificates`
 # for TLS to the proxy. curl kept out of the shipped image (it's only for the egress test).

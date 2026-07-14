@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { stat } from "node:fs/promises";
 import path from "node:path";
 import type { RunnerConfig } from "./config";
 import { SANDBOX_KEY_ENV, buildSandboxDockerArgs } from "./docker-run";
@@ -25,7 +26,8 @@ export interface RunResult {
 }
 
 /** execFile seam — swapped in tests so no real docker/git is needed. Resolves {stdout,
- *  exitCode} even on a non-zero exit; rejects only on spawn failure. */
+ *  exitCode} even on a NON-ZERO exit; rejects on spawn failure (binary missing) OR when the
+ *  child is killed (e.g. the timeout fires). */
 export type Exec = (
   file: string,
   args: string[],
@@ -90,6 +92,13 @@ export async function runSandbox(
   const workdir = path.resolve(base, req.runId);
   if (workdir === base || !workdir.startsWith(base + path.sep)) {
     throw new BadRequestError("runId escapes the runs directory");
+  }
+  // The run dir MUST already exist (the worker writes the working tree there first). Docker
+  // would otherwise auto-create a missing bind-mount source as root — letting an authed caller
+  // force unbounded host writes under runsDir (DoS). Reject early if it's absent / not a dir.
+  const info = await stat(workdir).catch(() => null);
+  if (!info || !info.isDirectory()) {
+    throw new BadRequestError("run working directory does not exist");
   }
 
   const dockerArgs = buildSandboxDockerArgs({

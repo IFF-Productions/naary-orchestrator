@@ -3,6 +3,11 @@ import type { RunnerConfig } from "../src/config";
 import { SANDBOX_KEY_ENV } from "../src/docker-run";
 import { BadRequestError, type Exec, runSandbox } from "../src/run-sandbox";
 
+// runSandbox stats the run dir before touching docker. Mock it so no real FS is needed;
+// default = a directory that exists.
+const { statMock } = vi.hoisted(() => ({ statMock: vi.fn() }));
+vi.mock("node:fs/promises", () => ({ stat: statMock }));
+
 const CFG: RunnerConfig = {
   token: "t",
   runsDir: "/runs",
@@ -22,6 +27,7 @@ const REQ = {
 
 let exec: ReturnType<typeof vi.fn>;
 beforeEach(() => {
+  statMock.mockReset().mockResolvedValue({ isDirectory: () => true });
   exec = vi.fn(async (file: string) =>
     file === "git"
       ? { stdout: "diff --git a/x b/x\n+edited", exitCode: 0 }
@@ -78,6 +84,14 @@ describe("runSandbox", () => {
     expect(out.stdout).not.toContain("sk-ant-secret");
     expect(out.diff).not.toContain("sk-ant-secret");
     expect(out.diff).toContain("[REDACTED]");
+  });
+
+  it("rejects when the run dir is missing (Docker must not auto-create it as root)", async () => {
+    statMock.mockRejectedValue(new Error("ENOENT"));
+    await expect(
+      runSandbox(REQ, CFG, exec as unknown as Exec),
+    ).rejects.toBeInstanceOf(BadRequestError);
+    expect(exec).not.toHaveBeenCalled();
   });
 
   it("throws when git diff fails (workdir isn't a git repo) — no misleading diff", async () => {

@@ -62,8 +62,10 @@ else
   pass "example.com blocked by the proxy allowlist"
 fi
 
-# 2) Direct to a public IP, bypassing the proxy → no default gateway → no route.
-if in_sandbox -sS --max-time 8 --noproxy '*' -o /dev/null https://1.1.1.1 >/dev/null 2>&1; then
+# 2) Direct to a public IP, bypassing the proxy → no default gateway → no route. Use plain
+#    HTTP (port 80) so a working ROUTE is a clean success exit — an HTTPS/TLS failure could
+#    otherwise mask a route that actually exists (false pass = isolation silently broken).
+if in_sandbox -sS --max-time 8 --noproxy '*' -o /dev/null http://1.1.1.1 >/dev/null 2>&1; then
   fail "1.1.1.1 reachable DIRECTLY (the network has a gateway — not isolated!)"
 else
   pass "1.1.1.1 unreachable directly (no default gateway)"

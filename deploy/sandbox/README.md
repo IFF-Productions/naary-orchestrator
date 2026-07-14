@@ -32,10 +32,14 @@ ships and **proves the network isolation** before any credentialed clone/PR flow
 ./deploy/sandbox/egress-test.sh
 ```
 
-Brings the proxy up on a throwaway compose project, runs a plain `curl` container **inside**
-`naary-sandbox-internal`, and asserts: Anthropic reachable via the proxy; `example.com` (via
-proxy), a public IP (direct), and the metadata endpoint all **blocked**. Prints
-`✅ EGRESS ISOLATION PROVEN` or fails non-zero.
+Brings the proxy up (a separate compose project, torn down via an `EXIT` trap) and runs a
+plain `curl` container **inside** `naary-sandbox-internal`, asserting: Anthropic reachable via
+the proxy (an upstream 4xx); `example.com` (via proxy), a public IP (direct), and the metadata
+endpoint all **blocked**. Prints `✅ EGRESS OK …` or fails non-zero.
+
+> Note: the sandbox network/proxy use **fixed names** (`naary-sandbox-*`) because the runner
+> dials them by name — so run the test when the sandbox stack is **not** already up, or it
+> will reuse/conflict on those names.
 
 **codeAgent write/Bash mode stays disabled until this passes on the deploy host.** Slice 1's
 read-only path (in-worker, capability-clamped) is unaffected.

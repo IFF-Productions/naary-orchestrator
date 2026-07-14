@@ -20,18 +20,34 @@ function authorized(req: IncomingMessage, token: string): boolean {
 function readBody(req: IncomingMessage, limitBytes: number): Promise<string> {
   return new Promise((resolve, reject) => {
     let size = 0;
+    let settled = false;
     const chunks: Buffer[] = [];
+    // Single-shot: a client disconnect mid-upload emits 'aborted'/'close' WITHOUT 'error',
+    // so without these the promise would hang forever and leak the handler.
+    const done = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
     req.on("data", (c: Buffer) => {
       size += c.length;
       if (size > limitBytes) {
-        reject(new BadRequestError("request body too large"));
         req.destroy();
+        done(() => reject(new BadRequestError("request body too large")));
         return;
       }
       chunks.push(c);
     });
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    req.on("error", reject);
+    req.on("end", () =>
+      done(() => resolve(Buffer.concat(chunks).toString("utf8"))),
+    );
+    req.on("error", (e) => done(() => reject(e)));
+    req.on("aborted", () =>
+      done(() => reject(new BadRequestError("request aborted"))),
+    );
+    req.on("close", () =>
+      done(() => reject(new BadRequestError("connection closed"))),
+    );
   });
 }
 

@@ -4,6 +4,11 @@ import type { RunnerConfig } from "../src/config";
 import type { Exec } from "../src/run-sandbox";
 import { createRunnerServer } from "../src/server";
 
+// The run dir stat check → pretend it exists (the happy-path test isn't about the FS).
+vi.mock("node:fs/promises", () => ({
+  stat: vi.fn(async () => ({ isDirectory: () => true })),
+}));
+
 const CFG: RunnerConfig = {
   token: "secret-token",
   runsDir: "/runs",

@@ -34,10 +34,19 @@ export function loadConfig(env: NodeJS.ProcessEnv): RunnerConfig {
     image: env.SANDBOX_IMAGE || "naary-claude-sandbox:latest",
     limits: {
       cpus: env.SANDBOX_CPUS || "1.0",
-      memoryMb: Number(env.SANDBOX_MEMORY_MB) || 2048,
-      pids: Number(env.SANDBOX_PIDS) || 256,
+      memoryMb: posInt(env.SANDBOX_MEMORY_MB, 2048),
+      pids: posInt(env.SANDBOX_PIDS, 256),
     },
-    defaultTimeoutMs: Number(env.SANDBOX_TIMEOUT_MS) || 15 * 60 * 1000,
-    port: Number(env.PORT) || 8099,
+    defaultTimeoutMs: posInt(env.SANDBOX_TIMEOUT_MS, 15 * 60 * 1000),
+    port: posInt(env.PORT, 8099),
   };
+}
+
+/** Parse a positive integer env var, falling back to `fallback` for absent/blank/invalid
+ *  (non-finite, ≤ 0, non-integer) values — so a stray `-1` or `NaN` can't silently degrade
+ *  the runner's limits (unlike `Number(x) || default`, which accepts negatives + eats 0). */
+function posInt(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
 }

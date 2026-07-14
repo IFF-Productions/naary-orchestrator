@@ -36,7 +36,9 @@ export interface SandboxRunSpec {
   limits: SandboxLimits;
 }
 
-/** Images the runner is willing to launch. The workflow can NEVER choose the image. */
+/** Images the runner is willing to launch. The workflow can NEVER choose the image. The
+ *  `:latest` entry is for dev; a production deploy should build + tag the sandbox image with a
+ *  version/digest and list THAT here (and in SANDBOX_IMAGE) so the launched code is immutable. */
 export const ALLOWED_SANDBOX_IMAGES = ["naary-claude-sandbox:latest"] as const;
 
 /** The env var name the sandbox reads its key from (forwarded by name, value from exec env). */
