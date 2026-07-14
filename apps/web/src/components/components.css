@@ -545,6 +545,21 @@
   border-radius: var(--radius-xs);
 }
 
+.spinner {
+  display: inline-block;
+  box-sizing: border-box;
+  border: 2px solid var(--line-2);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: naarySpin 0.7s linear infinite;
+  flex: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 1.6s;
+  }
+}
+
 /* ---------- Tooltip ---------- */
 .tooltip-wrap {
   position: relative;

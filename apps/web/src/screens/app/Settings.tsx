@@ -263,7 +263,8 @@ export function Settings() {
         >
           <Button
             variant="primary"
-            disabled={busy || !loaded}
+            loading={busy}
+            disabled={!loaded}
             onClick={() => void save()}
           >
             {busy ? "Saving…" : "Save settings"}
@@ -359,7 +360,8 @@ export function Settings() {
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <Button
             variant="primary"
-            disabled={notifBusy || !loaded}
+            loading={notifBusy}
+            disabled={!loaded}
             onClick={() => void saveNotif()}
           >
             {notifBusy ? "Saving…" : "Save notifications"}
