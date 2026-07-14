@@ -2239,7 +2239,13 @@ export async function callCodeAgent(
             inputTokens: envlp.usage.inputTokens ?? 0,
             outputTokens: envlp.usage.outputTokens ?? 0,
           }
-        : estimateTokens(cfg.systemPrompt ?? "", input, envlp.result);
+        : // Count the whole prompt too (system + task prompt), not just system+input —
+          // the task prompt is the bulk of the tokens, so omitting it would under-bill.
+          estimateTokens(
+            `${cfg.systemPrompt ?? ""}\n${cfg.prompt}`,
+            input,
+            envlp.result,
+          );
     // Price against a REAL Claude model (the CLI runs Claude) so the ledger can bill from
     // tokens — a placeholder like "cli" has no pricing row and would throw.
     const model = cfg.model || "claude-opus-4-8";
@@ -2320,9 +2326,22 @@ export async function callCodeAgent(
         { tenantId: meta.tenantId },
       );
     }
-    // A subprocess/parse error can carry env/argv material — sanitize before it reaches
-    // Temporal history/logs. maximumAttempts:1 means this won't actually be retried.
-    throw toSanitizedRetryable(e, "CODE_AGENT_TRANSIENT");
+    // A subprocess/parse error's message can carry argv/prompt/env material (execFile echoes
+    // the command; a parse error the output). Unlike the AI-SDK path, there's no structured
+    // error to sanitize — so throw a FULLY GENERIC message (the raw error stays in the worker
+    // log via the metric/log below, never in Temporal history). maximumAttempts:1 → no retry.
+    log.warn(
+      {
+        activity: "callCodeAgent",
+        nodeId: meta.nodeId,
+        tenantId: meta.tenantId,
+      },
+      "codeAgent subprocess failed (details suppressed from workflow history)",
+    );
+    throw ApplicationFailure.retryable(
+      "The coding CLI run failed (transient).",
+      "CODE_AGENT_TRANSIENT",
+    );
   }
 }
 
