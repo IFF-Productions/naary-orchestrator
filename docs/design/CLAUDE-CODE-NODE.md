@@ -254,6 +254,167 @@ for free; a dedicated binding resolver is only needed if we add `promptBindings`
 
 ---
 
+## 8b. Addendum — requirements update (ephemeral container-per-run + interactive Q&A)
+
+Two requirements were added after the original design; they refine, not replace, §3–§7.
+
+### 8b.1 Sandbox = ephemeral container **per run** (chosen: Option C, realized)
+
+The user chose the full-feature sandbox and framed it concretely: **spin up N Claude Code
+containers, one per workflow run, each independent** ("like an interactive session, but
+boxed"). Temporal already gives the independence — each run is its own workflow execution,
+so N concurrent runs = N concurrent `callClaudeCode` activities. Each activity launches its
+**own throwaway container**; there is no shared long-lived sandbox to multiplex.
+
+**Realization on the current single-Docker-host deploy — a dedicated sandbox-runner
+service (NOT the worker):**
+
+```
+worker (callClaudeCode activity)              sandbox-runner service (has Docker access)
+  ─ POST {workingTree ref, prompt, key,  ───▶   docker run --rm \
+     sessionId?, limits}                          --network naary-sandbox-egress \   (allowlist: api.anthropic.com)
+                                                   --cpus … --memory … --pids-limit … \
+                                                   --read-only + tmpfs workdir \
+  ◀─ {diff|result, questions?, sessionId, ───     naary-claude-sandbox   (claude -p)
+     usage}
+  ─ (outside the sandbox) clone/commit/push/PR with the App token
+```
+
+- **Why a separate runner, not the worker:** mounting the Docker socket into the worker is
+  host-root escalation (§3 Option B, rejected). Confining Docker access to one small runner
+  service keeps that blast radius off the worker (which holds every tenant key in flight)
+  and preserves the §2.2 two-box credential split — the **git token never enters any
+  sandbox container**; the runner only ever receives the Anthropic key + working tree.
+- **Egress:** the sandbox container joins an **internal Docker network with no default
+  route**, plus an allowlist proxy to `api.anthropic.com` (Vector B, §2.3). Even a hijacked
+  run can't POST the key out or reach internal services.
+- **Ephemeral + bounded:** `--rm`, `--read-only` root + a `tmpfs`/volume for the working
+  tree, cpu/memory/`--pids-limit`, and a wall-clock timeout ≤ the activity
+  `startToCloseTimeout`. Nothing persists between runs.
+- **This is still Open Decision #1's answer**: own-Docker-host via a runner service. A
+  sandbox-as-a-service (e2b/Modal/Fly Machines/k8s Jobs) is a drop-in alternative behind the
+  same `POST → {diff}` contract if the host approach is later outgrown — the worker activity
+  is unchanged.
+
+### 8b.2 Interactive Q&A — pause for user input, with a notification (built into the node)
+
+`claude -p` is one-shot, but supports session resume (`claude -p --resume <session_id>
+"<answers>"`). The node runs an **ask → pause → answer → resume** loop, using the SAME
+durable pause the `humanApproval` / `wait(webhook)` nodes already use (Signal +
+`wf.condition()` — survives crashes/days, no polling; `resumeSignal` already carries a
+payload):
+
+```
+loop:
+  { result, questions?, session_id, usage } = callClaudeCode({ …, sessionId })   // activity
+  recordUsage(...)                                                                // every turn, fail-safe
+  if !questions: break                        // model produced the diff/PR-ready result
+  status = "awaiting_input"
+  emit sendNotification({ kind: "input_needed", questions, answerUrl })  // Slack/Teams (§ shipped)
+  await wf.condition(() => answers !== undefined)   // durable pause (humanInput signal)
+  sessionId := session_id                     // resume the SAME claude session with the answers
+```
+
+- **Getting questions OUT of a headless run:** the system prompt instructs the model, when
+  it lacks information it can't safely assume, to end its turn by emitting a structured
+  `{ "needs_input": true, "questions": [...] }` instead of guessing. The activity parses that
+  from the `--output-format json` envelope (alongside `is_error`, `total_usage`).
+- **Answer surface — two ways (both):** (a) **in-app** on the run detail screen (the run is
+  `awaiting_input`, like an approval), and (b) a **signed public answer link** in a
+  **Slack/Teams notification** — reusing the notification system + the signed-link pattern
+  from the `/approve` page (a new `input_needed` notification kind with an "Answer" button).
+  This is why the user asked for "the option of posting a notification": the pause pings the
+  reviewer wherever they are.
+- **Determinism:** `session_id` + subprocess are non-deterministic → they live in the
+  activity's input/output; the loop + pause live in the deterministic workflow, driven by
+  activity results + the `humanInput` signal. New signal `humanInputSignal` (payload =
+  answers), mirroring `approvalSignal`/`resumeSignal`.
+- **New status `awaiting_input`** joins `awaiting_approval` / `awaiting_webhook` in the
+  read-model + UI (`RunSummary` status union, `runStatusUi`).
+
+### 8b.3 Revised slices (fold the two additions in)
+
+- **Slice 1** — unchanged (read-only, no sandbox, proves plumbing). Buildable **now**.
+- **Slice 2** — **sandbox-runner service** + ephemeral container-per-run; clone (read) into
+  the sandbox with the git remote/token stripped; capture the diff. (Was "Option-C sandbox".)
+- **Slice 3** — commit → push → **open/reuse PR, return the PR number** (idempotent).
+- **Slice 3b (new)** — the **interactive Q&A loop**: `needs_input` parsing, `awaiting_input`
+  status + `humanInputSignal`, the in-app answer UI, and the `input_needed` Slack/Teams
+  notification with a signed answer link.
+- **Slice 4 / 5** — canvas UX / egress+isolation hardening, unchanged.
+
+### 8b.4 Auth note
+
+The node authenticates `claude -p` with the **tenant's Anthropic API key (BYOK)**, exactly
+like the `agent` node — separate from any personal Claude *subscription*. A subscription
+`CLAUDE_CODE_OAUTH_TOKEN` could back it later, but BYOK is the multi-tenant default. (Auth is
+**per-driver** — see §8c; Cursor/Copilot bring their own credential.)
+
+### 8b.5 Not Claude-only — a multi-CLI **driver** abstraction (see §8c)
+
+The node is **tool-agnostic**: the destination is to run *any* agentic coding CLI (Claude
+Code, Cursor CLI, GitHub Copilot CLI) via a pluggable driver. Everything above (ephemeral
+container-per-run, the two-box git-token split, the ask→pause→resume loop, PR idempotency)
+is **driver-independent** — only the in-container command, auth env, output parsing, and
+resume mechanism vary. Claude Code is driver #1; the seam is built from the start so adding
+Cursor/Copilot is a new adapter, not a new node.
+
+---
+
+## 8c. CLI-driver abstraction (multi-tool: claude · cursor · copilot)
+
+The node type carries a `tool` selector; a **driver registry** maps it to an adapter. This
+mirrors the codebase's integration-catalog philosophy (adding a tool = a catalog entry +
+image + auth mapping, not a new node type). The sandbox-runner stays CLI-agnostic — it's
+handed an image + command + env and returns the diff/output; the **driver** owns what's
+CLI-specific.
+
+### Driver interface (what each adapter provides)
+
+```ts
+interface CliAgentDriver {
+  tool: "claude" | "cursor" | "copilot";
+  image: string;                 // container image with the CLI installed (per-tool or shared)
+  // Build the argv for a headless, non-interactive run (+ a resume variant if supported).
+  invoke(opts: { prompt: string; workdir: string; sessionId?: string; limits: Limits }): string[];
+  // Auth env injected into the container (per-tool secret; git token NEVER included).
+  authEnv(cred: TenantCredential): Record<string, string>;
+  // Parse the CLI's output → a normalized envelope the workflow understands.
+  parse(stdout: string, exitCode: number): {
+    result?: string; diff?: string;
+    questions?: string[];        // structured "needs input" (drives the Q&A pause)
+    sessionId?: string;          // for --resume, if the CLI supports it
+    usage?: { costUsd?: number; tokens?: number };
+    isError: boolean;
+  };
+  capabilities: { headless: boolean; resume: boolean; structuredQuestions: boolean };
+}
+```
+
+### Capability reality per CLI (honest, drives what each supports)
+
+| Driver | Headless | Resume (Q&A loop) | Structured output | Auth | Notes |
+|---|---|---|---|---|---|
+| **claude** (Claude Code) | ✅ `claude -p` | ✅ `--resume <id>` | ✅ `--output-format json` (`is_error`, `total_usage`) | Anthropic BYOK key (or `CLAUDE_CODE_OAUTH_TOKEN`) | Reference driver — full ask→pause→resume + fail-safe usage. Driver #1. |
+| **cursor** (Cursor CLI / `cursor-agent`) | ✅ headless/print mode | ⚠️ session model differs — verify at build | partial (text/JSON varies) | Cursor account/key | Close to Claude Code; confirm resume + question emission before wiring the Q&A loop. |
+| **copilot** (GitHub Copilot CLI) | ⚠️ evolving toward agentic | ⚠️ limited/none today | limited | GitHub / `gh` auth | Most limited for the edit→PR→resume loop; may land as a plan/suggest-only driver first. |
+
+Drivers **advertise capabilities**; the workflow degrades gracefully — a driver without
+`resume`/`structuredQuestions` simply doesn't offer the Q&A pause (it runs once and returns
+its result), so the node works for every tool at the level that tool supports. The CLI
+details for Cursor/Copilot must be **verified against their live docs at build time** (like
+we did for the Teams envelope) — not wired from memory.
+
+### Build implication
+
+- **Slice 1** builds the node + the **driver seam** with the **claude** driver only. `tool`
+  defaults to `claude`; the registry + interface exist so a Cursor/Copilot adapter is
+  additive.
+- Config gains `tool: "claude" | "cursor" | "copilot"` (§7); the runner image is selected by
+  the driver; per-tool auth comes from the tenant's connection/credential for that tool.
+
+---
+
 ## 9. Tier-1 compliance checklist
 
 - Interpreter, not codegen — one activity, config-driven. ✓
