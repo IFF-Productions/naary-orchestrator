@@ -1,16 +1,24 @@
-import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
+import {
+  type CSSProperties,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
+  Button,
   Card,
+  type Column,
   Icon,
   ProgressBar,
   StatusPill,
   Table,
-  type Column,
 } from "../../components";
 import {
   api,
   type BudgetView,
+  type DashboardItem,
   type RunSummary,
   type UsageReport,
   UnauthorizedError,
@@ -20,12 +28,15 @@ import {
   RunVolumeChart as RealRunVolumeChart,
   SpendChart as RealSpendChart,
 } from "./charts";
+import { DashboardGrid, type WidgetMeta } from "./DashboardGrid";
 
 /* ------------------------------------------------------------------
  * Overview — the operator dashboard. Every number here comes from a
  * real control-plane call (runs / budget / usage); there is no mock
- * data. Sections degrade in place (showing "—" or an empty state) when
- * a dependency is missing or the request fails, mirroring LiveStrip.
+ * data. It's a CUSTOMIZABLE grid: the user can reorder, resize, and
+ * hide widgets, persisted per-user via /me/preferences (mirrored to
+ * localStorage for an instant paint). Sections degrade in place
+ * (showing "—" or an empty state) when a dependency is missing.
  * ---------------------------------------------------------------- */
 
 const cardStyle: CSSProperties = {
@@ -43,6 +54,46 @@ const MODEL_COLORS = [
   "var(--state-done)",
   "var(--state-paused)",
 ];
+
+/* --- Customizable dashboard: the widget registry + default arrangement --- */
+const WIDGETS: WidgetMeta[] = [
+  { id: "metrics", title: "Live metrics" },
+  { id: "charts", title: "Run volume & spend" },
+  { id: "stats", title: "Key stats" },
+  { id: "recent-runs", title: "Recent runs" },
+  { id: "approvals", title: "Approval queue" },
+  { id: "spend", title: "Spend by model" },
+];
+const DEFAULT_LAYOUT: DashboardItem[] = [
+  { id: "metrics", hidden: false, span: 12 },
+  { id: "charts", hidden: false, span: 12 },
+  { id: "stats", hidden: false, span: 12 },
+  { id: "recent-runs", hidden: false, span: 8 },
+  { id: "approvals", hidden: false, span: 4 },
+  { id: "spend", hidden: false, span: 12 },
+];
+const DASH_STORAGE_KEY = "naary.dashboard";
+
+/** Reconcile a saved layout with the current registry: keep the user's order/size/
+ *  visibility for widgets that still exist, drop unknown ids, and append any NEW widgets
+ *  (so a shipped widget shows up instead of silently missing). */
+function mergeLayout(saved: DashboardItem[] | null): DashboardItem[] {
+  if (!saved || saved.length === 0) return DEFAULT_LAYOUT;
+  const known = new Set(WIDGETS.map((w) => w.id));
+  const kept = saved.filter((i) => known.has(i.id));
+  const present = new Set(kept.map((i) => i.id));
+  const missing = DEFAULT_LAYOUT.filter((d) => !present.has(d.id));
+  return [...kept, ...missing];
+}
+
+function readStoredLayout(): DashboardItem[] | null {
+  try {
+    const raw = localStorage.getItem(DASH_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as DashboardItem[]) : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Compact relative time from an ISO timestamp (no date lib). */
 function ago(iso: string): string {
@@ -72,6 +123,13 @@ export function Overview() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<"unauth" | "error" | null>(null);
 
+  // Customizable layout: seed from localStorage for an instant paint, reconcile with the
+  // server copy on mount, and persist every change (localStorage + fire-and-forget PUT).
+  const [layout, setLayout] = useState<DashboardItem[]>(() =>
+    mergeLayout(readStoredLayout()),
+  );
+  const [customizing, setCustomizing] = useState(false);
+
   useEffect(() => {
     let live = true;
     (async () => {
@@ -97,6 +155,29 @@ export function Overview() {
     return () => {
       live = false;
     };
+  }, []);
+
+  useEffect(() => {
+    let live = true;
+    api
+      .getPreferences()
+      .then((p) => {
+        if (live && p.dashboard) setLayout(mergeLayout(p.dashboard));
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const applyLayout = useCallback((next: DashboardItem[]) => {
+    setLayout(next);
+    try {
+      localStorage.setItem(DASH_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore quota / private-mode */
+    }
+    void api.saveDashboard(next).catch(() => undefined);
   }, []);
 
   const runList = runs ?? [];
@@ -160,6 +241,457 @@ export function Overview() {
           awaiting.length
         } awaiting approval`;
 
+  /** One widget's content, by id — drawn by the DashboardGrid in the user's order. */
+  const renderWidget = (id: string): ReactNode => {
+    switch (id) {
+      case "metrics":
+        return <LiveStrip />;
+
+      case "charts":
+        return (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 14,
+            }}
+          >
+            <RealRunVolumeChart days={14} />
+            <RealSpendChart days={14} />
+          </div>
+        );
+
+      case "stats":
+        return (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: 14,
+            }}
+          >
+            {/* Recent runs */}
+            <div style={{ ...cardStyle, padding: "15px 16px" }}>
+              <StatHead label="Recent runs" />
+              <StatValue>
+                {loading ? "…" : err ? "—" : runList.length.toLocaleString()}
+              </StatValue>
+            </div>
+
+            {/* Success rate */}
+            <div style={{ ...cardStyle, padding: "15px 16px" }}>
+              <StatHead label="Success rate" />
+              <StatValue>
+                {rate === null ? (
+                  "—"
+                ) : (
+                  <>
+                    {rate.toFixed(1)}
+                    <span
+                      style={{
+                        fontSize: "var(--text-lg)",
+                        color: "var(--ink-2)",
+                      }}
+                    >
+                      %
+                    </span>
+                  </>
+                )}
+              </StatValue>
+              {rate !== null && (
+                <div style={{ marginTop: 13 }}>
+                  <ProgressBar value={rate} color="var(--state-done)" />
+                </div>
+              )}
+            </div>
+
+            {/* Spend (MTD) */}
+            <div style={{ ...cardStyle, padding: "15px 16px" }}>
+              <StatHead label="Spend (MTD)">
+                {budget && (
+                  <span
+                    className="mono"
+                    style={{
+                      fontSize: "var(--text-2xs)",
+                      color: "var(--ink-2)",
+                      background: "var(--card-2)",
+                      padding: "2px 6px",
+                      borderRadius: "var(--radius-xs)",
+                    }}
+                  >
+                    ${Math.round(budget.monthlyCapUsd).toLocaleString()} cap
+                  </span>
+                )}
+              </StatHead>
+              <StatValue>{budget ? usd(budget.mtdSpendUsd) : "—"}</StatValue>
+              {budget && budget.monthlyCapUsd > 0 && (
+                <div style={{ marginTop: 13 }}>
+                  <ProgressBar
+                    value={Math.min(
+                      100,
+                      (budget.mtdSpendUsd / budget.monthlyCapUsd) * 100,
+                    )}
+                    color="var(--state-info)"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Awaiting approval */}
+            <div
+              style={{
+                ...cardStyle,
+                border:
+                  "1px solid color-mix(in srgb, var(--state-paused) 40%, var(--line))",
+                padding: "15px 16px",
+                position: "relative",
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background: "var(--paused-soft)",
+                  pointerEvents: "none",
+                }}
+              />
+              <div style={{ position: "relative" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <span
+                    className="mono"
+                    style={{
+                      fontSize: "var(--text-2xs)",
+                      fontWeight: "var(--weight-semibold)",
+                      letterSpacing: "var(--tracking-label)",
+                      textTransform: "uppercase",
+                      color: "var(--ink-3)",
+                    }}
+                  >
+                    Awaiting approval
+                  </span>
+                  {awaiting.length > 0 && (
+                    <span
+                      style={{
+                        width: 7,
+                        height: 7,
+                        borderRadius: "50%",
+                        background: "var(--state-paused)",
+                        animation: "naaryBlink 1.5s infinite",
+                      }}
+                    />
+                  )}
+                </div>
+                <StatValue>
+                  {loading ? "…" : err ? "—" : awaiting.length}
+                </StatValue>
+                {awaiting.length > 0 && (
+                  <Link
+                    to="/app/runs"
+                    style={{
+                      marginTop: 12,
+                      fontSize: "var(--text-xs)",
+                      fontWeight: "var(--weight-semibold)",
+                      color: "var(--state-paused)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                      textDecoration: "none",
+                    }}
+                  >
+                    Review queue
+                    <Icon name="chevron-right" size={12} strokeWidth={2} />
+                  </Link>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+
+      case "recent-runs":
+        return (
+          <Card pad={false} style={{ overflow: "hidden" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "16px 18px 12px",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "var(--text-md)",
+                  fontWeight: "var(--weight-semibold)",
+                  color: "var(--ink)",
+                }}
+              >
+                Recent runs
+              </div>
+              <Link
+                to="/app/runs"
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--ink-2)",
+                  textDecoration: "none",
+                }}
+              >
+                View all runs
+              </Link>
+            </div>
+            {runList.length === 0 ? (
+              <EmptyRow>
+                {loading ? "Loading…" : err ? "—" : "No runs yet."}
+              </EmptyRow>
+            ) : (
+              <Table
+                rowKey={(r) => r.workflowId}
+                columns={runColumns}
+                rows={runList.slice(0, 6)}
+                onRowClick={(r) => navigate(`/app/runs/${r.workflowId}`)}
+              />
+            )}
+          </Card>
+        );
+
+      case "approvals":
+        return (
+          <div
+            style={{
+              ...cardStyle,
+              padding: 18,
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 14,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "var(--text-md)",
+                  fontWeight: "var(--weight-semibold)",
+                  color: "var(--ink)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                Approval queue
+                {awaiting.length > 0 && (
+                  <span
+                    className="mono"
+                    style={{
+                      fontSize: "var(--text-2xs)",
+                      fontWeight: "var(--weight-semibold)",
+                      color: "var(--state-paused)",
+                      background: "var(--paused-soft)",
+                      padding: "2px 7px",
+                      borderRadius: "var(--radius-xs)",
+                    }}
+                  >
+                    {awaiting.length}
+                  </span>
+                )}
+              </div>
+              <Link
+                to="/app/runs"
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--ink-2)",
+                  textDecoration: "none",
+                }}
+              >
+                View all
+              </Link>
+            </div>
+            {awaiting.length === 0 ? (
+              <div
+                style={{
+                  fontSize: "var(--text-body)",
+                  color: "var(--ink-3)",
+                  padding: "20px 0",
+                  textAlign: "center",
+                }}
+              >
+                {loading ? "Loading…" : "Nothing awaiting approval."}
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+                {awaiting.map((item) => (
+                  <Link
+                    key={item.workflowId}
+                    to={`/app/runs/${item.workflowId}`}
+                    className="run-row"
+                    style={{
+                      border: "1px solid var(--line)",
+                      borderRadius: "var(--radius-md)",
+                      padding: 12,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      textDecoration: "none",
+                    }}
+                  >
+                    <ApprovalIcon />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: "var(--text-body)",
+                          fontWeight: "var(--weight-semibold)",
+                          color: "var(--ink)",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {item.workflowKey ?? item.workflowId}
+                      </div>
+                      <div
+                        className="mono"
+                        style={{
+                          fontSize: "var(--text-2xs)",
+                          color: "var(--ink-3)",
+                        }}
+                      >
+                        waiting {ago(item.startedAt)}
+                      </div>
+                    </div>
+                    <Icon
+                      name="chevron-right"
+                      size={14}
+                      strokeWidth={1.9}
+                      style={{ color: "var(--ink-3)" }}
+                    />
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+
+      case "spend":
+        return (
+          <div style={{ ...cardStyle, padding: 18 }}>
+            <div
+              style={{
+                fontSize: "var(--text-md)",
+                fontWeight: "var(--weight-semibold)",
+                color: "var(--ink)",
+                marginBottom: 4,
+              }}
+            >
+              Spend by model
+            </div>
+            <div
+              style={{
+                fontSize: "var(--text-xs)",
+                color: "var(--ink-3)",
+                marginBottom: 16,
+              }}
+            >
+              {usage ? `This month · ${usd(usage.totalCostUsd)} total` : "—"}
+            </div>
+            {!usage || usage.byModel.length === 0 ? (
+              <div
+                style={{
+                  fontSize: "var(--text-body)",
+                  color: "var(--ink-3)",
+                  padding: "12px 0",
+                }}
+              >
+                {loading ? "Loading…" : "No usage recorded yet."}
+              </div>
+            ) : (
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 14 }}
+              >
+                {usage.byModel.map((m, i) => {
+                  const pct =
+                    usage.totalCostUsd > 0
+                      ? (m.costUsd / usage.totalCostUsd) * 100
+                      : 0;
+                  return (
+                    <div key={`${m.provider}:${m.model}`}>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          fontSize: "var(--text-sm)",
+                          marginBottom: 6,
+                        }}
+                      >
+                        <span
+                          style={{
+                            color: "var(--ink)",
+                            fontWeight: "var(--weight-medium)",
+                          }}
+                        >
+                          {m.model}
+                        </span>
+                        <span
+                          className="mono"
+                          style={{ color: "var(--ink-2)" }}
+                        >
+                          {usd(m.costUsd)}
+                        </span>
+                      </div>
+                      <ProgressBar
+                        value={pct}
+                        color={MODEL_COLORS[i % MODEL_COLORS.length]}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {budget && (
+              <div
+                style={{
+                  marginTop: 20,
+                  paddingTop: 16,
+                  borderTop: "1px solid var(--line)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <span
+                  style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}
+                >
+                  Remaining this month
+                </span>
+                <span
+                  className="mono"
+                  style={{
+                    fontSize: "var(--text-body)",
+                    fontWeight: "var(--weight-semibold)",
+                    color: "var(--ink)",
+                  }}
+                >
+                  {usd(budget.remainingUsd)}
+                </span>
+              </div>
+            )}
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
   return (
     <div style={{ padding: "24px 28px 40px", maxWidth: 1400 }}>
       {/* ---- header ---- */}
@@ -168,6 +700,7 @@ export function Overview() {
           display: "flex",
           alignItems: "flex-end",
           justifyContent: "space-between",
+          gap: 12,
           marginBottom: 20,
         }}
       >
@@ -189,443 +722,38 @@ export function Overview() {
               marginTop: 4,
             }}
           >
-            {subline}
+            {customizing
+              ? "Drag to reorder · width button to resize · eye to hide"
+              : subline}
           </div>
         </div>
-      </div>
-
-      {/* ---- live metrics (real, from the control plane) ---- */}
-      <LiveStrip />
-
-      {/* ---- real charts (bucketed from runs + usage) ---- */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 14,
-          marginBottom: 16,
-        }}
-      >
-        <RealRunVolumeChart days={14} />
-        <RealSpendChart days={14} />
-      </div>
-
-      {/* ---- stat cards (all real) ---- */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: 14,
-          marginBottom: 16,
-        }}
-      >
-        {/* Recent runs */}
-        <div style={{ ...cardStyle, padding: "15px 16px" }}>
-          <StatHead label="Recent runs" />
-          <StatValue>
-            {loading ? "…" : err ? "—" : runList.length.toLocaleString()}
-          </StatValue>
-        </div>
-
-        {/* Success rate */}
-        <div style={{ ...cardStyle, padding: "15px 16px" }}>
-          <StatHead label="Success rate" />
-          <StatValue>
-            {rate === null ? (
-              "—"
-            ) : (
-              <>
-                {rate.toFixed(1)}
-                <span
-                  style={{ fontSize: "var(--text-lg)", color: "var(--ink-2)" }}
-                >
-                  %
-                </span>
-              </>
-            )}
-          </StatValue>
-          {rate !== null && (
-            <div style={{ marginTop: 13 }}>
-              <ProgressBar value={rate} color="var(--state-done)" />
-            </div>
+        <div style={{ display: "flex", gap: 8, flex: "none" }}>
+          {customizing && (
+            <Button
+              variant="ghost"
+              icon="refresh"
+              onClick={() => applyLayout(DEFAULT_LAYOUT)}
+            >
+              Reset
+            </Button>
           )}
-        </div>
-
-        {/* Spend (MTD) */}
-        <div style={{ ...cardStyle, padding: "15px 16px" }}>
-          <StatHead label="Spend (MTD)">
-            {budget && (
-              <span
-                className="mono"
-                style={{
-                  fontSize: "var(--text-2xs)",
-                  color: "var(--ink-2)",
-                  background: "var(--card-2)",
-                  padding: "2px 6px",
-                  borderRadius: "var(--radius-xs)",
-                }}
-              >
-                ${Math.round(budget.monthlyCapUsd).toLocaleString()} cap
-              </span>
-            )}
-          </StatHead>
-          <StatValue>{budget ? usd(budget.mtdSpendUsd) : "—"}</StatValue>
-          {budget && budget.monthlyCapUsd > 0 && (
-            <div style={{ marginTop: 13 }}>
-              <ProgressBar
-                value={Math.min(
-                  100,
-                  (budget.mtdSpendUsd / budget.monthlyCapUsd) * 100,
-                )}
-                color="var(--state-info)"
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Awaiting approval */}
-        <div
-          style={{
-            ...cardStyle,
-            border:
-              "1px solid color-mix(in srgb, var(--state-paused) 40%, var(--line))",
-            padding: "15px 16px",
-            position: "relative",
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              background: "var(--paused-soft)",
-              pointerEvents: "none",
-            }}
-          />
-          <div style={{ position: "relative" }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
-              <span
-                className="mono"
-                style={{
-                  fontSize: "var(--text-2xs)",
-                  fontWeight: "var(--weight-semibold)",
-                  letterSpacing: "var(--tracking-label)",
-                  textTransform: "uppercase",
-                  color: "var(--ink-3)",
-                }}
-              >
-                Awaiting approval
-              </span>
-              {awaiting.length > 0 && (
-                <span
-                  style={{
-                    width: 7,
-                    height: 7,
-                    borderRadius: "50%",
-                    background: "var(--state-paused)",
-                    animation: "naaryBlink 1.5s infinite",
-                  }}
-                />
-              )}
-            </div>
-            <StatValue>{loading ? "…" : err ? "—" : awaiting.length}</StatValue>
-            {awaiting.length > 0 && (
-              <Link
-                to="/app/runs"
-                style={{
-                  marginTop: 12,
-                  fontSize: "var(--text-xs)",
-                  fontWeight: "var(--weight-semibold)",
-                  color: "var(--state-paused)",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  textDecoration: "none",
-                }}
-              >
-                Review queue
-                <Icon name="chevron-right" size={12} strokeWidth={2} />
-              </Link>
-            )}
-          </div>
+          <Button
+            variant={customizing ? "primary" : "secondary"}
+            icon={customizing ? "check" : "settings"}
+            onClick={() => setCustomizing((v) => !v)}
+          >
+            {customizing ? "Done" : "Customize"}
+          </Button>
         </div>
       </div>
 
-      {/* ---- recent runs + approval queue ---- */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1.7fr 1fr",
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
-        {/* Recent runs */}
-        <Card pad={false} style={{ overflow: "hidden" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "16px 18px 12px",
-            }}
-          >
-            <div
-              style={{
-                fontSize: "var(--text-md)",
-                fontWeight: "var(--weight-semibold)",
-                color: "var(--ink)",
-              }}
-            >
-              Recent runs
-            </div>
-            <Link
-              to="/app/runs"
-              style={{
-                fontSize: "var(--text-xs)",
-                color: "var(--ink-2)",
-                textDecoration: "none",
-              }}
-            >
-              View all runs
-            </Link>
-          </div>
-          {runList.length === 0 ? (
-            <EmptyRow>
-              {loading ? "Loading…" : err ? "—" : "No runs yet."}
-            </EmptyRow>
-          ) : (
-            <Table
-              rowKey={(r) => r.workflowId}
-              columns={runColumns}
-              rows={runList.slice(0, 6)}
-              onRowClick={(r) => navigate(`/app/runs/${r.workflowId}`)}
-            />
-          )}
-        </Card>
-
-        {/* Approval queue */}
-        <div
-          style={{
-            ...cardStyle,
-            padding: 18,
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginBottom: 14,
-            }}
-          >
-            <div
-              style={{
-                fontSize: "var(--text-md)",
-                fontWeight: "var(--weight-semibold)",
-                color: "var(--ink)",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
-              Approval queue
-              {awaiting.length > 0 && (
-                <span
-                  className="mono"
-                  style={{
-                    fontSize: "var(--text-2xs)",
-                    fontWeight: "var(--weight-semibold)",
-                    color: "var(--state-paused)",
-                    background: "var(--paused-soft)",
-                    padding: "2px 7px",
-                    borderRadius: "var(--radius-xs)",
-                  }}
-                >
-                  {awaiting.length}
-                </span>
-              )}
-            </div>
-            <Link
-              to="/app/runs"
-              style={{
-                fontSize: "var(--text-xs)",
-                color: "var(--ink-2)",
-                textDecoration: "none",
-              }}
-            >
-              View all
-            </Link>
-          </div>
-          {awaiting.length === 0 ? (
-            <div
-              style={{
-                fontSize: "var(--text-body)",
-                color: "var(--ink-3)",
-                padding: "20px 0",
-                textAlign: "center",
-              }}
-            >
-              {loading ? "Loading…" : "Nothing awaiting approval."}
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-              {awaiting.map((item) => (
-                <Link
-                  key={item.workflowId}
-                  to={`/app/runs/${item.workflowId}`}
-                  className="run-row"
-                  style={{
-                    border: "1px solid var(--line)",
-                    borderRadius: "var(--radius-md)",
-                    padding: 12,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    textDecoration: "none",
-                  }}
-                >
-                  <ApprovalIcon />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: "var(--text-body)",
-                        fontWeight: "var(--weight-semibold)",
-                        color: "var(--ink)",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {item.workflowKey ?? item.workflowId}
-                    </div>
-                    <div
-                      className="mono"
-                      style={{
-                        fontSize: "var(--text-2xs)",
-                        color: "var(--ink-3)",
-                      }}
-                    >
-                      waiting {ago(item.startedAt)}
-                    </div>
-                  </div>
-                  <Icon
-                    name="chevron-right"
-                    size={14}
-                    strokeWidth={1.9}
-                    style={{ color: "var(--ink-3)" }}
-                  />
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ---- spend by model ---- */}
-      <div style={{ ...cardStyle, padding: 18 }}>
-        <div
-          style={{
-            fontSize: "var(--text-md)",
-            fontWeight: "var(--weight-semibold)",
-            color: "var(--ink)",
-            marginBottom: 4,
-          }}
-        >
-          Spend by model
-        </div>
-        <div
-          style={{
-            fontSize: "var(--text-xs)",
-            color: "var(--ink-3)",
-            marginBottom: 16,
-          }}
-        >
-          {usage ? `This month · ${usd(usage.totalCostUsd)} total` : "—"}
-        </div>
-        {!usage || usage.byModel.length === 0 ? (
-          <div
-            style={{
-              fontSize: "var(--text-body)",
-              color: "var(--ink-3)",
-              padding: "12px 0",
-            }}
-          >
-            {loading ? "Loading…" : "No usage recorded yet."}
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {usage.byModel.map((m, i) => {
-              const pct =
-                usage.totalCostUsd > 0
-                  ? (m.costUsd / usage.totalCostUsd) * 100
-                  : 0;
-              return (
-                <div key={`${m.provider}:${m.model}`}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      fontSize: "var(--text-sm)",
-                      marginBottom: 6,
-                    }}
-                  >
-                    <span
-                      style={{
-                        color: "var(--ink)",
-                        fontWeight: "var(--weight-medium)",
-                      }}
-                    >
-                      {m.model}
-                    </span>
-                    <span className="mono" style={{ color: "var(--ink-2)" }}>
-                      {usd(m.costUsd)}
-                    </span>
-                  </div>
-                  <ProgressBar
-                    value={pct}
-                    color={MODEL_COLORS[i % MODEL_COLORS.length]}
-                  />
-                </div>
-              );
-            })}
-          </div>
-        )}
-        {budget && (
-          <div
-            style={{
-              marginTop: 20,
-              paddingTop: 16,
-              borderTop: "1px solid var(--line)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <span style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
-              Remaining this month
-            </span>
-            <span
-              className="mono"
-              style={{
-                fontSize: "var(--text-body)",
-                fontWeight: "var(--weight-semibold)",
-                color: "var(--ink)",
-              }}
-            >
-              {usd(budget.remainingUsd)}
-            </span>
-          </div>
-        )}
-      </div>
+      <DashboardGrid
+        layout={layout}
+        widgets={WIDGETS}
+        customizing={customizing}
+        render={renderWidget}
+        onChange={applyLayout}
+      />
     </div>
   );
 }
@@ -673,7 +801,6 @@ function LiveStrip() {
         display: "grid",
         gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
         gap: 14,
-        marginBottom: 16,
       }}
     >
       <LiveCard label="Tenant" value={err ? "—" : (tenant ?? "…")} mono />

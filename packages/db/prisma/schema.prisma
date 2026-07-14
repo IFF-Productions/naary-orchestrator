@@ -353,6 +353,9 @@ model NotificationSettings {
 model UserPreference {
   userId    String   @id // Firebase uid
   mode      String? // 'builder' | 'simple' — the experience variant
+  // Customizable Overview layout: an ordered array of { id, hidden, span } widget
+  // entries. Null = never customized → the client uses the default layout.
+  dashboard Json?
   updatedAt DateTime @default(now()) @updatedAt
 }
 
