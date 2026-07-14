@@ -62,7 +62,7 @@ describe("sendNotification", () => {
     expect(body.workflowId).toBe("wf-1");
   });
 
-  it("carries MULTIPLE deep-linked entries (Approve/Reject + View run) for an approval", async () => {
+  it("carries separate one-click Approve + Reject entries (+ View run) for an approval", async () => {
     await sendNotification({
       ...BASE,
       kind: "approval_pending",
@@ -70,22 +70,34 @@ describe("sendNotification", () => {
     });
     const body = JSON.parse(fetch.mock.calls[0][1].body as string);
 
-    // Structured `actions` = the multiple entries a recipient acts on.
+    // Structured `actions` = the multiple entries a recipient acts on — now TWO decision
+    // buttons (each with the choice pre-selected) plus View run.
     expect(body.actions.map((a: { label: string }) => a.label)).toEqual([
-      "Approve / Reject",
+      "✅ Approve",
+      "❌ Reject",
       "View run",
     ]);
-    // Deep link to the resource to act on.
+    // Each decision button deep-links to the signed page with the choice pre-filled.
+    const approve = body.actions[0];
+    const reject = body.actions[1];
+    expect(approve.url).toContain("https://app.naary.test/approve/wf-1?token=");
+    expect(approve.url).toContain("&decision=approve");
+    expect(reject.url).toContain("&decision=reject");
     expect(body.runUrl).toBe("https://app.naary.test/app/runs/wf-1");
     expect(body.approvalUrl).toContain(
       "https://app.naary.test/approve/wf-1?token=",
     );
-    // Slack Block Kit: a section + an actions block with two url-buttons.
+
+    // Slack Block Kit: an actions block with three url-buttons, coloured primary/danger.
     const actionsBlock = body.blocks.find(
       (b: { type: string }) => b.type === "actions",
     );
-    expect(actionsBlock.elements).toHaveLength(2);
-    expect(actionsBlock.elements[1].url).toBe(body.runUrl);
+    expect(actionsBlock.elements).toHaveLength(3);
+    expect(actionsBlock.elements[0].style).toBe("primary");
+    expect(actionsBlock.elements[1].style).toBe("danger");
+    // The plain "View run" button carries no style.
+    expect(actionsBlock.elements[2].style).toBeUndefined();
+    expect(actionsBlock.elements[2].url).toBe(body.runUrl);
     // Slack requires an action_id on every button (else invalid_blocks).
     expect(
       actionsBlock.elements.every(
