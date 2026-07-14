@@ -36,3 +36,30 @@ services:
       - /var/run
     security_opt:
       - no-new-privileges:true
+
+  # The runner: the ONLY container with Docker access (host-root-adjacent). It launches the
+  # ephemeral sandboxes. Kept off the worker on purpose. The worker→runner wiring (shared
+  # network + the runs bind mount on the worker side) is finalized with the dispatch slice (2c).
+  sandbox-runner:
+    build:
+      context: ../..
+      dockerfile: deploy/sandbox/runner.Dockerfile
+    image: naary-sandbox-runner
+    container_name: naary-sandbox-runner
+    restart: unless-stopped
+    networks:
+      - sandbox-egress # reachable by the worker (finalized in 2c) + can reach the docker socket
+    environment:
+      SANDBOX_RUNNER_TOKEN: ${SANDBOX_RUNNER_TOKEN:?set a shared runner token}
+      SANDBOX_RUNS_DIR: /var/lib/naary/sandbox-runs
+      SANDBOX_NETWORK: naary-sandbox-internal
+      SANDBOX_PROXY_URL: http://naary-sandbox-proxy:3128
+      SANDBOX_IMAGE: naary-claude-sandbox:latest
+    volumes:
+      # Docker socket — this container's (contained) privilege.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Working trees: a HOST bind mount at the SAME path in the runner, so the sibling
+      # `docker run -v <path>` (resolved on the host) points at the right dir.
+      - /var/lib/naary/sandbox-runs:/var/lib/naary/sandbox-runs
+    security_opt:
+      - no-new-privileges:true
