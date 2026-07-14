@@ -192,7 +192,9 @@ const CONFIG_SCHEMAS = {
     maxTurns: z.number().int().positive().optional(),
     maxBudgetUsd: z.number().positive().optional(),
     timeoutMs: z.number().int().positive().optional(),
-    costUsd: z.number().optional(),
+    // Positive: a manual fallback cost only makes sense > 0 (a negative would REDUCE the
+    // run's accumulated __costUsd; a 0 defeats the never-zero fallback intent).
+    costUsd: z.number().positive().optional(),
   }),
   mcpTool: z.object({
     connectionId: z.string(),

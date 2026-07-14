@@ -2210,14 +2210,17 @@ function ConfigPanel({
             <Labeled label="Max budget (USD)">
               <input
                 type="number"
-                min={0}
+                min={0.5}
                 step={0.5}
                 value={num("maxBudgetUsd") ?? ""}
                 onChange={(e) =>
                   onChange({
-                    maxBudgetUsd: e.target.value
-                      ? Number(e.target.value)
-                      : undefined,
+                    // Schema requires > 0 — coerce a blank/zero/negative to undefined so the
+                    // node stays saveable (rather than persisting an invalid 0).
+                    maxBudgetUsd:
+                      Number(e.target.value) > 0
+                        ? Number(e.target.value)
+                        : undefined,
                   })
                 }
                 style={inputStyle}

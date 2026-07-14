@@ -91,15 +91,20 @@ describe("callCodeAgent activity", () => {
     expect(out.output.tool).toBe("claude");
   });
 
-  it("fail-safe usage: estimates tokens (never zero) when the CLI omits usage", async () => {
+  it("fail-safe usage: estimates tokens (incl. the prompt, never zero) when the CLI omits usage", async () => {
     exec.mockResolvedValue({
       stdout: envelope({ total_usage: undefined, total_cost_usd: undefined }),
       exitCode: 0,
     });
-    await callCodeAgent(CFG, { some: "input" }, META);
+    // A long prompt so the estimate MUST reflect it (regression: prompt was omitted).
+    const bigPrompt = "audit the payment flow. ".repeat(40);
+    await callCodeAgent({ ...CFG, prompt: bigPrompt }, {}, META);
     const usageArg = recordUsage.mock.calls[0][0];
-    expect(usageArg.usage.inputTokens).toBeGreaterThan(0);
     expect(usageArg.usage.outputTokens).toBeGreaterThan(0);
+    // The prompt (~char/4) must be counted — else usage-less runs under-bill.
+    expect(usageArg.usage.inputTokens).toBeGreaterThanOrEqual(
+      Math.floor(bigPrompt.length / 4),
+    );
   });
 
   it("a CLI-reported failure (is_error) bills the attempt, then throws CODE_AGENT_FAILED", async () => {
@@ -125,12 +130,18 @@ describe("callCodeAgent activity", () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
-  it("sanitizes a transient subprocess error into a retryable failure", async () => {
-    exec.mockRejectedValue(new Error("spawn boom (ANTHROPIC_API_KEY=sk-leak)"));
+  it("throws a GENERIC retryable failure — the raw subprocess error never leaks", async () => {
+    exec.mockRejectedValue(
+      new Error(`spawn boom key=sk-leak prompt=${CFG.prompt}`),
+    );
     const err = await callCodeAgent(CFG, {}, META).catch((e) => e);
     expect(err).toBeInstanceOf(ApplicationFailure);
     expect(err.nonRetryable).toBe(false);
-    // the raw message (which could carry env material) must not leak through
+    // Assert on `err.message` DIRECTLY (it's non-enumerable, so JSON.stringify alone would
+    // miss it) — Temporal history serializes the message, so it must carry no raw material.
+    expect(err.message).toBe("The coding CLI run failed (transient).");
+    expect(err.message).not.toContain("sk-leak");
+    expect(err.message).not.toContain(CFG.prompt);
     expect(JSON.stringify(err)).not.toContain("sk-leak");
   });
 });
