@@ -6,7 +6,10 @@ its own workflows, runs, credentials, connections, triggers), and a workflow mov
 **copy-on-promote with lineage** (build in sandbox → promote a copy to UAT → prod; each env's copy
 binds to *that* env's credentials/connections).
 
-Related: [[RBAC]] (env-scoped permissions — "who can promote to prod"); this doc calls out the seam.
+Related: **RBAC** — a companion design (to land at `docs/design/RBAC.md`); today's workspace roles
+live in [`docs/design/PROVISIONING-MULTIUSER.md`](./PROVISIONING-MULTIUSER.md). Environments make
+several actions env-scoped permissions ("who can promote to prod"); the two are designed together and
+this doc calls out the seam (§9).
 
 ---
 
@@ -37,8 +40,18 @@ model Environment {
 ```
 
 Invariant: **exactly one `isDefault` per tenant.** It is the migration target and the compatibility
-fallback (§5). Deleting an environment is refused if it is the default or still holds workflows/runs
-(a later slice may offer archive).
+fallback (§5).
+
+*Enforcement (application-level, not a DB constraint):* a naive `@@unique([tenantId, isDefault])`
+can't express it (it would also forbid multiple non-defaults). Instead the default is **the row with
+the reserved `prod` slug**, and `@@unique([tenantId, slug])` guarantees at most one of those; the
+service only ever *creates* a default via an idempotent upsert on `(tenantId, "prod")` and never
+sets `isDefault=true` on any other row. So "one default per tenant" follows from the slug unique +
+the service being the sole writer — no partial-unique-index needed. (A later hardening slice may add
+a partial unique index `WHERE isDefault` as defense in depth.)
+
+Deleting an environment is refused if it is the default or still holds workflows/runs (a later slice
+may offer archive).
 
 ## 3. Scope boundary — what is env-scoped vs tenant-level
 
@@ -79,15 +92,18 @@ non-endpoint route it uses its bound env, else the tenant default.
 **Consistency rule:** when a token triggers an endpoint, the run's env = **the endpoint's env**
 (the resource being invoked wins). If the token is env-bound and disagrees with the endpoint's env,
 reject (a sandbox-scoped token may not fire a prod endpoint). This keeps a scoped token from
-reaching across environments. *Open for confirmation — see §8.*
+reaching across environments. **Confirmed (§8): the endpoint's env wins.**
 
 ## 4. Env resolution (request → environment)
 
 Mirrors the existing workspace resolution (`X-Workspace-Id` → `Principal.tenantId`, membership-
 checked in `AuthGuard`):
 
-- New header `X-Environment-Id` (env **slug** or id), resolved in `AuthGuard` against the tenant's
-  environments → `Principal.environmentId`. Absent → the tenant's `isDefault` env.
+- New header `X-Environment-Id`. **Resolution contract:** the value is matched against the tenant's
+  environments by **`id` OR `slug`** (a single `findFirst({ where: { tenantId, OR: [{id}, {slug}] } })`);
+  ids are uuids and slugs are `[a-z0-9-]`, so the namespaces don't overlap in practice. A value that
+  matches neither is an **error** (never a silent fallback — that would cross envs). **Absent** → the
+  tenant's default (`prod`-slug) env. Resolved in `AuthGuard` → `Principal.environmentId`.
 - The SPA gains an **environment switcher** (next to the workspace switcher) that sets the header,
   like `activeWorkspaceId` today.
 - API-token principals resolve to the token's bound env (§3) or the default.
@@ -103,10 +119,14 @@ Instead:
 1. **Backfill:** for each tenant, create a default `Production` environment; assign every existing
    env-scoped row to it. `environmentId` is added as **nullable first**, backfilled, then the
    composite keys are migrated — additive, reversible per step.
-2. **Compatibility shim:** a resolver `envId ?? tenant.defaultEnvironmentId`. A query that hasn't yet
-   been env-migrated (or a caller that sends no env) resolves to the default env — so existing
-   behavior is byte-identical until a call site opts in. This lets the 29 sites migrate
-   **incrementally, per slice**, each independently shippable + verifiable, instead of atomically.
+2. **Compatibility shim:** a resolver `resolveEnvId(tenantId, selected?)` that returns the selected
+   env's id when given (validated to belong to the tenant), else **the tenant's default (`prod`-slug)
+   environment id** — there is no `Tenant.defaultEnvironmentId` column; "default" is the `isDefault`
+   row resolved for the tenant (lazily created if absent). A query that hasn't yet been env-migrated
+   (or a caller that sends no env) resolves to the default env — so existing behavior is byte-identical
+   until a call site opts in. This lets the 29 sites migrate **incrementally, per slice**, each
+   independently shippable + verifiable, instead of atomically. (Implemented in Slice 1,
+   `EnvironmentsService.resolveEnvId`.)
 3. Only once every call site is env-aware do we drop the nullable/default fallback (a late slice).
 
 This shim is the single most important mechanic in the program: it converts a mega-PR into a
@@ -125,7 +145,7 @@ Promote copies a workflow **definition** from a source env to a target env:
    configured (surface missing ones as a pre-promote checklist).
 
 **Lineage — a dedicated `Promotion` audit row** (not just `sourceEnvironmentId` columns on
-`GraphDefinition`), because [[RBAC]] wants "who promoted what, when" for enforcement + audit:
+`GraphDefinition`), because RBAC wants "who promoted what, when" for enforcement + audit:
 
 ```prisma
 model Promotion {
@@ -169,7 +189,7 @@ Each slice is independently shippable behind the §5 shim.
 
 ## 9. RBAC seam
 
-Environments make several actions env-scoped permissions (owned by [[RBAC]], designed together):
+Environments make several actions env-scoped permissions (owned by RBAC, designed together):
 - `promote:prod` — only certain roles may promote *to* the production env.
 - `env:create` / `env:delete`.
 - run/edit within an env may itself be role-gated per env (e.g. read-only in prod).
