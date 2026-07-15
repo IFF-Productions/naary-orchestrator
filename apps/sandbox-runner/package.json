@@ -1,0 +1,14 @@
+{
+  "name": "@naary/sandbox-runner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "codeAgent sandbox runner: launches ephemeral, egress-isolated `claude` containers (one per run) and returns the diff. Holds Docker access — kept OFF the worker so host-root stays contained (design CLAUDE-CODE-NODE.md §8b.1).",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1"
+  }
+}

@@ -1,0 +1,70 @@
+# codeAgent sandbox isolation (design CLAUDE-CODE-NODE.md §8b.1). Two networks realize the
+# containment; the sandbox-runner service (a later slice) launches ephemeral `claude` containers
+# onto `sandbox-internal` only.
+#
+#   sandbox-internal   — internal:true → NO default gateway. A container here cannot route to
+#                        the internet, the host, cloud metadata (169.254.169.254), or other
+#                        stacks. The ONLY thing it can reach is the proxy (same network).
+#   sandbox-egress     — an ordinary bridge; ONLY the proxy sits on it, giving the proxy (and
+#                        nothing else) a path to the internet.
+#
+# The proxy straddles both and allowlists exactly api.anthropic.com:443 (squid-allowlist.conf).
+# Net effect: a fully-hijacked sandbox can reach Anthropic (to function) and nothing else —
+# structurally, not by politely honoring an env var.
+
+networks:
+  sandbox-internal:
+    name: naary-sandbox-internal
+    internal: true
+  sandbox-egress:
+    name: naary-sandbox-egress
+
+services:
+  sandbox-proxy:
+    # Pinned by DIGEST for reproducibility — this proxy IS the security boundary, so it must
+    # not drift (ubuntu/squid only ships _beta/edge tags; the digest is the stable anchor).
+    image: ubuntu/squid:6.6-24.04_beta@sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029
+    # No fixed container_name (it's global → collides across stacks / the egress test). The
+    # stable hostname the sandbox + runner dial (`naary-sandbox-proxy`) is a NETWORK ALIAS.
+    restart: unless-stopped
+    networks:
+      sandbox-internal: # the sandbox reaches the proxy here…
+        aliases:
+          - naary-sandbox-proxy
+      sandbox-egress: {} # …and the proxy reaches Anthropic out here
+    volumes:
+      - ./squid-allowlist.conf:/etc/squid/squid.conf:ro
+    # Belt-and-braces hardening on the proxy container itself.
+    read_only: true
+    tmpfs:
+      - /var/spool/squid
+      - /var/run
+    security_opt:
+      - no-new-privileges:true
+
+  # The runner: the ONLY container with Docker access (host-root-adjacent). It launches the
+  # ephemeral sandboxes. Kept off the worker on purpose. The worker→runner wiring (shared
+  # network + the runs bind mount on the worker side) is finalized with the dispatch slice (2c).
+  sandbox-runner:
+    build:
+      context: ../..
+      dockerfile: deploy/sandbox/runner.Dockerfile
+    image: naary-sandbox-runner
+    container_name: naary-sandbox-runner
+    restart: unless-stopped
+    networks:
+      - sandbox-egress # reachable by the worker (finalized in 2c) + can reach the docker socket
+    environment:
+      SANDBOX_RUNNER_TOKEN: ${SANDBOX_RUNNER_TOKEN:?set a shared runner token}
+      SANDBOX_RUNS_DIR: /var/lib/naary/sandbox-runs
+      SANDBOX_NETWORK: naary-sandbox-internal
+      SANDBOX_PROXY_URL: http://naary-sandbox-proxy:3128
+      SANDBOX_IMAGE: naary-claude-sandbox:latest
+    volumes:
+      # Docker socket — this container's (contained) privilege.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Working trees: a HOST bind mount at the SAME path in the runner, so the sibling
+      # `docker run -v <path>` (resolved on the host) points at the right dir.
+      - /var/lib/naary/sandbox-runs:/var/lib/naary/sandbox-runs
+    security_opt:
+      - no-new-privileges:true
