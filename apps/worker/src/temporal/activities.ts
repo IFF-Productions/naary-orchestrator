@@ -922,6 +922,9 @@ export const __notifyDeps = {
   readChannels: (tenantId: string): Promise<NotificationChannelRow[]> =>
     getPrisma().notificationChannel.findMany({
       where: { tenantId, enabled: true },
+      // Deterministic order (findMany has no default order — Postgres would return physical
+      // row order), so the fan-out is stable and testable.
+      orderBy: { type: "asc" },
       select: {
         type: true,
         webhookUrl: true,
