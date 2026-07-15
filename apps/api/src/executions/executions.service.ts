@@ -466,8 +466,10 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     await this.assertActive(tenantId, environmentId, workflowKey);
     // Stable, deterministic session id — the SAME id for every message of this conversation, so
     // signalWithStart routes them to one workflow. sessionId is sanitized (opaque, ≤200 chars).
+    // environmentId is part of the key: the SAME tenant/workflowKey/sessionId used in two envs must
+    // route to DIFFERENT durable sessions, or their conversation state would mix across envs.
     const safeSession = input.sessionId.replace(/[^A-Za-z0-9_-]/g, "_");
-    const sessionWorkflowId = `chatsession-${tenantId}-${workflowKey}-${safeSession}`;
+    const sessionWorkflowId = `chatsession-${tenantId}-${environmentId}-${workflowKey}-${safeSession}`;
     const turnId = randomUUID(); // minted here, never in workflow code (determinism)
     const budget = await getBudget(tenantId);
     // Same fast-fail gate as startGraph — a chat turn is a run start too.
