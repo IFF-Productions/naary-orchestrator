@@ -22,7 +22,7 @@ const CFG: RunnerConfig = {
 const REQ = {
   runId: "exec-abc_123",
   agentArgs: ["-p", "fix the bug", "--permission-mode", "acceptEdits"],
-  anthropicKey: "sk-ant-secret",
+  authKey: "sk-ant-secret",
 };
 
 let exec: ReturnType<typeof vi.fn>;
@@ -114,7 +114,7 @@ describe("runSandbox", () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestError);
     await expect(
-      runSandbox({ ...REQ, anthropicKey: "" }, CFG, exec as unknown as Exec),
+      runSandbox({ ...REQ, authKey: "" }, CFG, exec as unknown as Exec),
     ).rejects.toBeInstanceOf(BadRequestError);
   });
 });

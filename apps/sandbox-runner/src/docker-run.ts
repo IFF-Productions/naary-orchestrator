@@ -33,6 +33,11 @@ export interface SandboxRunSpec {
   workdir: string;
   /** The coding-CLI argv (e.g. claude -p …). Data only — never shell-interpreted. */
   agentArgs: string[];
+  /** The env var NAME the sandbox reads its credential from — must be in ALLOWED_KEY_ENV_VARS.
+   *  Forwarded by name (value from the runner's exec env). Lets the caller pick the right var
+   *  for the credential kind: an API key → ANTHROPIC_API_KEY, a subscription setup-token →
+   *  CLAUDE_CODE_OAUTH_TOKEN (Claude Code reads different vars for each). */
+  keyEnvVar: string;
   limits: SandboxLimits;
 }
 
@@ -41,13 +46,29 @@ export interface SandboxRunSpec {
  *  version/digest and list THAT here (and in SANDBOX_IMAGE) so the launched code is immutable. */
 export const ALLOWED_SANDBOX_IMAGES = ["naary-claude-sandbox:latest"] as const;
 
-/** The env var name the sandbox reads its key from (forwarded by name, value from exec env). */
+/** The env var names the sandbox may read its credential from. An allowlist (not a free string)
+ *  so a caller can never inject an arbitrary env var into the container. `claude` reads an API key
+ *  from ANTHROPIC_API_KEY and a subscription setup-token from CLAUDE_CODE_OAUTH_TOKEN. */
+export const ALLOWED_KEY_ENV_VARS = [
+  "ANTHROPIC_API_KEY",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+] as const;
+
+/** Back-compat default when a request omits the var name (an API key). */
 export const SANDBOX_KEY_ENV = "ANTHROPIC_API_KEY";
 
 export function assertPinnedImage(image: string): void {
   if (!(ALLOWED_SANDBOX_IMAGES as readonly string[]).includes(image)) {
     throw new Error(
       `sandbox-runner: refusing to launch un-pinned image "${image}"`,
+    );
+  }
+}
+
+export function assertAllowedKeyEnvVar(name: string): void {
+  if (!(ALLOWED_KEY_ENV_VARS as readonly string[]).includes(name)) {
+    throw new Error(
+      `sandbox-runner: refusing to forward un-allowlisted key env var "${name}"`,
     );
   }
 }
@@ -59,6 +80,7 @@ export function assertPinnedImage(image: string): void {
  */
 export function buildSandboxDockerArgs(spec: SandboxRunSpec): string[] {
   assertPinnedImage(spec.image);
+  assertAllowedKeyEnvVar(spec.keyEnvVar);
   if (!spec.network || /\s/.test(spec.network)) {
     throw new Error("sandbox-runner: invalid network name");
   }
@@ -103,9 +125,9 @@ export function buildSandboxDockerArgs(spec: SandboxRunSpec): string[] {
     `HTTPS_PROXY=${spec.proxyUrl}`,
     "-e",
     `HTTP_PROXY=${spec.proxyUrl}`,
-    // Forward the key BY NAME — value comes from the runner's exec env, never the argv.
+    // Forward the credential BY NAME — value comes from the runner's exec env, never the argv.
     "-e",
-    SANDBOX_KEY_ENV,
+    spec.keyEnvVar,
     spec.image,
     ...spec.agentArgs,
   ];
