@@ -110,6 +110,7 @@ export function NewAutomation() {
         <Button
           variant="primary"
           icon="bolt"
+          loading={busy}
           disabled={busy || prompt.trim().length < 3}
           onClick={generate}
         >

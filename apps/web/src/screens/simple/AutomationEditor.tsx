@@ -139,10 +139,21 @@ export function AutomationEditor({
       </div>
 
       <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
-        <Button variant="primary" icon="bolt" disabled={!!busy} onClick={onRun}>
+        <Button
+          variant="primary"
+          icon="bolt"
+          loading={busy === "run"}
+          disabled={!!busy}
+          onClick={onRun}
+        >
           {busy === "run" ? "Starting…" : "Run now"}
         </Button>
-        <Button variant="secondary" disabled={!!busy} onClick={onSave}>
+        <Button
+          variant="secondary"
+          loading={busy === "save"}
+          disabled={!!busy}
+          onClick={onSave}
+        >
           {busy === "save" ? "Saving…" : "Save"}
         </Button>
         {status && (

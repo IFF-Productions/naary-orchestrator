@@ -137,6 +137,7 @@ export function ConnectAi() {
         >
           <Button
             variant="primary"
+            loading={busy}
             disabled={busy || !key.trim()}
             onClick={save}
           >
