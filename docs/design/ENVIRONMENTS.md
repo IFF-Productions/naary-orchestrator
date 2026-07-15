@@ -1,0 +1,174 @@
+# Environments (per-tenant sandbox / UAT / prod)
+
+**Status:** design (doc-first). No schema/code changes land with this doc.
+**Decisions taken (via product Q&A):** environments are **fully separate spaces** (each env owns
+its own workflows, runs, credentials, connections, triggers), and a workflow moves between them by
+**copy-on-promote with lineage** (build in sandbox → promote a copy to UAT → prod; each env's copy
+binds to *that* env's credentials/connections).
+
+Related: [[RBAC]] (env-scoped permissions — "who can promote to prod"); this doc calls out the seam.
+
+---
+
+## 1. Goal
+
+A tenant can create N named environments (e.g. **Sandbox**, **UAT**, **Production**). Each is an
+isolated space: its own workflow definitions, runs, schedules, trigger endpoints, credentials, and
+connections. You build/test a workflow in one env and **promote** a copy forward. Editing sandbox
+never affects prod until the next promote.
+
+Non-goals (v1): per-env *billing caps* (billing rolls up per tenant — see §4), cross-env data
+sharing, environment-level network policy.
+
+## 2. The `Environment` entity
+
+```prisma
+model Environment {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String   // display: "Sandbox", "UAT", "Production"
+  slug      String   // stable, header/URL-safe: "sandbox", "uat", "prod"
+  isDefault Boolean  @default(false) // exactly ONE per tenant — where legacy + un-scoped data lands
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+}
+```
+
+Invariant: **exactly one `isDefault` per tenant.** It is the migration target and the compatibility
+fallback (§5). Deleting an environment is refused if it is the default or still holds workflows/runs
+(a later slice may offer archive).
+
+## 3. Scope boundary — what is env-scoped vs tenant-level
+
+This is the crux. Getting it wrong is expensive to unwind after the schema lands.
+
+### Env-scoped (gain `environmentId`)
+Definitions, execution state, triggers, and the secrets a run uses:
+
+- `GraphDefinition` (the workflow definition — the thing promoted)
+- `Execution`, `Schedule`, `PollState`, `PinnedData`, `ErrorHandler`, `WorkflowActivation`
+- `WebhookEndpoint`, `FormEndpoint`, `ChatEndpoint`, `ChatMessage`, `VectorChunk`, `WebhookDelivery`
+- `Connection`, `TenantCredential` — **separate creds/connections per env** (a sandbox run uses test
+  keys; prod uses live keys). This is what makes environments *meaningfully* separate; it's also why
+  promote does **not** copy them (§6).
+- `NotificationChannel` / `NotificationSettings` — a sandbox failure must not page prod's Slack.
+
+All composite keys/uniques gain `environmentId`, e.g.
+`@@unique([tenantId, workflowKey, version])` → `@@unique([tenantId, environmentId, workflowKey, version])`.
+
+### Tenant-level (unchanged — workspace scope, not env scope)
+- `Member`, `Membership`, `TenantSettings`, `UserPreference`, `AuditEvent` — who's in the workspace
+  and their settings; roles are workspace-wide (RBAC layers env-scoped *permissions* on top).
+- Billing: `TenantBudget`, `UsageEvent`, `UsageReservation` — **one bill per tenant**. `UsageEvent`
+  gains an `environmentId` **tag** (for per-env cost visibility) but budget caps stay tenant-level.
+
+### The load-bearing exception: `ApiToken` (and trigger endpoints) MUST bind to an env
+An external caller hitting `POST /hooks/:id` (or a form/chat surface) authenticates with an
+`nry_` token and **starts a run** — which must land in exactly one environment. The external caller
+cannot send `X-Environment-Id`. If the token/endpoint were env-agnostic, every triggered run would
+silently land in the default env (prod) — the "sandbox test fires prod" footgun.
+
+Design: **the trigger endpoint carries the `environmentId`** (a webhook registered in sandbox fires
+sandbox runs; the prod webhook fires prod runs). The endpoint is created within an env context, so
+its `environmentId` is intrinsic. `ApiToken` also gains an **optional** `environmentId` (a token's
+*default* target env — e.g. a CI token scoped to sandbox); when a token starts a run via a
+non-endpoint route it uses its bound env, else the tenant default.
+
+**Consistency rule:** when a token triggers an endpoint, the run's env = **the endpoint's env**
+(the resource being invoked wins). If the token is env-bound and disagrees with the endpoint's env,
+reject (a sandbox-scoped token may not fire a prod endpoint). This keeps a scoped token from
+reaching across environments. *Open for confirmation — see §8.*
+
+## 4. Env resolution (request → environment)
+
+Mirrors the existing workspace resolution (`X-Workspace-Id` → `Principal.tenantId`, membership-
+checked in `AuthGuard`):
+
+- New header `X-Environment-Id` (env **slug** or id), resolved in `AuthGuard` against the tenant's
+  environments → `Principal.environmentId`. Absent → the tenant's `isDefault` env.
+- The SPA gains an **environment switcher** (next to the workspace switcher) that sets the header,
+  like `activeWorkspaceId` today.
+- API-token principals resolve to the token's bound env (§3) or the default.
+
+## 5. Migration strategy — compatibility shim, NOT an atomic mega-PR
+
+**Evidence:** env-scoping touches ~15 models and **29 `workflowKey`-keyed query sites across 13
+files** (api + worker; 91 `getPrisma()` call sites total). Converting every
+`(tenantId, workflowKey)` query to `(tenantId, environmentId, workflowKey)` in one PR is a
+high-risk, unreviewable change.
+
+Instead:
+1. **Backfill:** for each tenant, create a default `Production` environment; assign every existing
+   env-scoped row to it. `environmentId` is added as **nullable first**, backfilled, then the
+   composite keys are migrated — additive, reversible per step.
+2. **Compatibility shim:** a resolver `envId ?? tenant.defaultEnvironmentId`. A query that hasn't yet
+   been env-migrated (or a caller that sends no env) resolves to the default env — so existing
+   behavior is byte-identical until a call site opts in. This lets the 29 sites migrate
+   **incrementally, per slice**, each independently shippable + verifiable, instead of atomically.
+3. Only once every call site is env-aware do we drop the nullable/default fallback (a late slice).
+
+This shim is the single most important mechanic in the program: it converts a mega-PR into a
+sequence of small, safe ones.
+
+## 6. Promote (copy-on-promote + lineage)
+
+Promote copies a workflow **definition** from a source env to a target env:
+
+1. Read the source env's `GraphDefinition` (chosen version, default = latest).
+2. Write it into the target env as a **new version** (content-hashed like a normal save; a no-op if
+   the target already has that exact graph).
+3. Optionally carry the workflow's pins / error-handler binding (config, not secrets).
+4. **Do NOT copy** `TenantCredential` / `Connection` — the target env binds to its own. A promoted
+   graph references connections *by role/key*; the target env must have matching connections
+   configured (surface missing ones as a pre-promote checklist).
+
+**Lineage — a dedicated `Promotion` audit row** (not just `sourceEnvironmentId` columns on
+`GraphDefinition`), because [[RBAC]] wants "who promoted what, when" for enforcement + audit:
+
+```prisma
+model Promotion {
+  id             String   @id @default(uuid())
+  tenantId       String
+  workflowKey    String
+  fromEnvId      String
+  toEnvId        String
+  fromVersion    Int
+  toVersion      Int      // the version created in the target env
+  actor          String   // OIDC subject / api-token
+  createdAt      DateTime @default(now())
+  @@index([tenantId, workflowKey])
+}
+```
+
+## 7. Slice plan
+
+Each slice is independently shippable behind the §5 shim.
+
+1. **Foundation** — `Environment` model + management API (list/create/rename/delete) + default-env
+   backfill + `Principal.environmentId` resolution (`X-Environment-Id`) + the `envId ?? default`
+   shim. **No data env-scoped yet** — purely additive; existing behavior unchanged.
+2. **Workflows** — env-scope `GraphDefinition` (+ pins/error-handler/activation); the SPA env
+   switcher; the graphs/executions read paths become env-aware.
+3. **Promote** — the copy-on-promote flow + `Promotion` lineage + the missing-connections checklist.
+4. **Triggers + tokens** — env-bind `Webhook/Form/Chat` endpoints + `ApiToken`; enforce the §3
+   consistency rule so a triggered run lands in the endpoint's env.
+5. **Credentials + connections** — env-scope `TenantCredential` / `Connection`.
+6. **Notifications + usage** — env-scope `NotificationChannel`; tag `UsageEvent` with `environmentId`.
+7. **Cleanup** — drop the nullable/default fallback once all call sites are env-aware.
+
+## 8. Open decisions (confirm before Slice 1)
+
+- **Token ↔ endpoint env consistency (§3):** confirm "endpoint's env wins; an env-bound token may
+  not fire a different env's endpoint." Alternative: token env is advisory only.
+- **Default env name:** "Production" for the backfilled default (existing data is live/prod), OK?
+- **Env switcher granularity:** per-user active env (like workspace) vs a per-tab selection.
+
+## 9. RBAC seam
+
+Environments make several actions env-scoped permissions (owned by [[RBAC]], designed together):
+- `promote:prod` — only certain roles may promote *to* the production env.
+- `env:create` / `env:delete`.
+- run/edit within an env may itself be role-gated per env (e.g. read-only in prod).
+The `Promotion` audit row (§6) is the enforcement + audit substrate.
