@@ -85,6 +85,28 @@ export function getActiveWorkspace(): string | null {
   return activeWorkspaceId;
 }
 
+// The active ENVIRONMENT (sandbox/UAT/prod), sent as `X-Environment-Id` so the server scopes a
+// request within the active workspace (design docs/design/ENVIRONMENTS.md). Env is per-workspace,
+// so switching workspaces clears it (the provider re-resolves). Unset → the server's default env.
+const ENVIRONMENT_KEY = "naary.environment";
+let activeEnvironmentId: string | null =
+  typeof localStorage !== "undefined"
+    ? localStorage.getItem(ENVIRONMENT_KEY)
+    : null;
+
+/** Set (or clear) the active environment slug/id sent on every subsequent request. */
+export function setActiveEnvironment(idOrSlug: string | null): void {
+  activeEnvironmentId = idOrSlug;
+  if (typeof localStorage === "undefined") return;
+  if (idOrSlug) localStorage.setItem(ENVIRONMENT_KEY, idOrSlug);
+  else localStorage.removeItem(ENVIRONMENT_KEY);
+}
+
+/** The active environment id/slug, or null if none selected yet. */
+export function getActiveEnvironment(): string | null {
+  return activeEnvironmentId;
+}
+
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await getBearerToken();
   const res = await fetch(`${BASE}${path}`, {
@@ -93,6 +115,9 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
       "content-type": "application/json",
       ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...(activeWorkspaceId ? { "x-workspace-id": activeWorkspaceId } : {}),
+      ...(activeEnvironmentId
+        ? { "x-environment-id": activeEnvironmentId }
+        : {}),
       ...init?.headers,
     },
   });
@@ -160,6 +185,14 @@ export interface TemplateDetail extends TemplateSummary {
 export interface ProviderCredential {
   provider: string;
   isValid: boolean;
+}
+
+/** A per-workspace environment (sandbox/UAT/prod). */
+export interface Environment {
+  id: string;
+  name: string;
+  slug: string;
+  isDefault: boolean;
 }
 
 /** Result of a single-node test run. */
@@ -475,6 +508,39 @@ export const api = {
   getAuditLog(tenantId: string): Promise<AuditEvent[]> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/audit`);
   },
+  // --- Environments (per-workspace sandbox/UAT/prod) ---
+  listEnvironments(tenantId: string): Promise<Environment[]> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/environments`);
+  },
+  createEnvironment(
+    tenantId: string,
+    body: { name: string; slug: string },
+  ): Promise<Environment> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/environments`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+  renameEnvironment(
+    tenantId: string,
+    envId: string,
+    name: string,
+  ): Promise<Environment> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/environments/${encodeURIComponent(envId)}`,
+      { method: "PATCH", body: JSON.stringify({ name }) },
+    );
+  },
+  deleteEnvironment(
+    tenantId: string,
+    envId: string,
+  ): Promise<{ deleted: true }> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/environments/${encodeURIComponent(envId)}`,
+      { method: "DELETE" },
+    );
+  },
+
   // --- Notifications (per-channel: Slack, Teams, … each configured independently) ---
   listNotificationChannels(tenantId: string): Promise<NotificationChannel[]> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/notifications`);
@@ -505,6 +571,9 @@ export const api = {
           "content-type": "application/json",
           ...(token ? { authorization: `Bearer ${token}` } : {}),
           ...(activeWorkspaceId ? { "x-workspace-id": activeWorkspaceId } : {}),
+          ...(activeEnvironmentId
+            ? { "x-environment-id": activeEnvironmentId }
+            : {}),
         },
       },
     );

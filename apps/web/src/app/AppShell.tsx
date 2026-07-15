@@ -20,6 +20,7 @@ import { PAGE_META } from "../lib/mock";
 import { useMode } from "../mode";
 import { useTheme } from "../theme";
 import { useWorkspace } from "../workspace/WorkspaceProvider";
+import { EnvironmentSwitcher } from "../workspace/EnvironmentSwitcher";
 import { NotificationsBell } from "./NotificationsBell";
 import {
   WorkspaceSwitcher,
@@ -243,6 +244,19 @@ export function AppShell() {
           <BrandTile />
           <WorkspaceSwitcher labelOp={labelOp} />
         </div>
+
+        {/* environment switcher (per-workspace sandbox/UAT/prod) — hidden when the rail collapses */}
+        {!rail && (
+          <div
+            style={{
+              flex: "none",
+              padding: "8px 14px 0",
+              display: "flex",
+            }}
+          >
+            <EnvironmentSwitcher />
+          </div>
+        )}
 
         {/* nav */}
         <nav
