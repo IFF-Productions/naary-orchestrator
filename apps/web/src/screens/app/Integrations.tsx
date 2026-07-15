@@ -2435,25 +2435,33 @@ function CodeAgentCard({
         const s = await api.getState(workflowId).catch(() => null);
         if (!s || !isTerminal(s.status)) continue;
         if (s.status === "completed") {
-          const out = (s.ctx?.codeAgent as { result?: string } | undefined)
-            ?.result;
+          // The interpreter stores the codeAgent result at <nodeId>.output
+          // (ctx.codeAgent = { status, output: { result, tool }, costUsd }).
+          const out = (
+            s.ctx?.codeAgent as { output?: { result?: string } } | undefined
+          )?.output?.result;
           setPhase("ok");
           setDetail(
             out ? `Claude replied: “${out.trim().slice(0, 80)}”` : "Completed.",
           );
         } else {
+          // The run can end in several terminal states (failed, budget_exceeded,
+          // circuit_open, invalid_graph, …); don't guess the cause — point at the run.
           setPhase("fail");
-          setDetail(
-            `Run ${s.status}. Common causes: the ‘claude’ CLI isn’t in the worker image, or the Anthropic key is invalid.`,
-          );
+          setDetail(`Test run ${s.status}. Open the run for details.`);
         }
         return;
       }
       setPhase("fail");
       setDetail("Timed out waiting for the test run.");
-    } catch {
+    } catch (err) {
+      // Surface the real start error (budget cap, auth, …) instead of a generic string.
       setPhase("fail");
-      setDetail("Could not start the test run.");
+      setDetail(
+        err instanceof Error
+          ? `Could not start the test run: ${err.message}`
+          : "Could not start the test run.",
+      );
     }
   }
 
