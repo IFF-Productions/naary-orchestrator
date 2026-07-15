@@ -39,16 +39,16 @@ model Environment {
 }
 ```
 
-Invariant: **exactly one `isDefault` per tenant.** It is the migration target and the compatibility
-fallback (§5).
-
-*Enforcement (application-level, not a DB constraint):* a naive `@@unique([tenantId, isDefault])`
-can't express it (it would also forbid multiple non-defaults). Instead the default is **the row with
-the reserved `prod` slug**, and `@@unique([tenantId, slug])` guarantees at most one of those; the
-service only ever *creates* a default via an idempotent upsert on `(tenantId, "prod")` and never
-sets `isDefault=true` on any other row. So "one default per tenant" follows from the slug unique +
-the service being the sole writer — no partial-unique-index needed. (A later hardening slice may add
-a partial unique index `WHERE isDefault` as defense in depth.)
+**Default identity (single source of truth):** the default env is **the row with the reserved `prod`
+slug**. `isDefault` is a **convenience flag kept in sync with that** (true iff `slug = "prod"`) — it
+exists so a query/UI can filter on a boolean, but the `prod` slug is canonical. Both §4 (resolution)
+and §5 (the shim) look the default up the same way: *the tenant's `prod`-slug row* (equivalently, its
+`isDefault` row). There is exactly one, guaranteed three ways:
+- `@@unique([tenantId, slug])` — at most one `prod` row per tenant;
+- the service is the **sole writer** — it only ever creates a default via an idempotent upsert on
+  `(tenantId, "prod")`, and never sets `isDefault=true` on any other row;
+- a **partial unique index** `("tenantId") WHERE isDefault` (in the migration; not expressible in
+  Prisma's DSL) enforces one default at the DB level as defense in depth.
 
 Deleting an environment is refused if it is the default or still holds workflows/runs (a later slice
 may offer archive).
@@ -99,11 +99,13 @@ reaching across environments. **Confirmed (§8): the endpoint's env wins.**
 Mirrors the existing workspace resolution (`X-Workspace-Id` → `Principal.tenantId`, membership-
 checked in `AuthGuard`):
 
-- New header `X-Environment-Id`. **Resolution contract:** the value is matched against the tenant's
-  environments by **`id` OR `slug`** (a single `findFirst({ where: { tenantId, OR: [{id}, {slug}] } })`);
-  ids are uuids and slugs are `[a-z0-9-]`, so the namespaces don't overlap in practice. A value that
-  matches neither is an **error** (never a silent fallback — that would cross envs). **Absent** → the
-  tenant's default (`prod`-slug) env. Resolved in `AuthGuard` → `Principal.environmentId`.
+- New header `X-Environment-Id`. **Resolution contract (deterministic):** trim the value, then try an
+  exact **`id`** match first; only if that misses, try the (lowercased) **`slug`** — two ordered
+  lookups, never an ambiguous `OR`. (A uuid *is* `[a-z0-9-]`, but a slug is capped at 32 chars while a
+  uuid is 36, so a slug can never equal an id; the id-first order removes any doubt regardless.) A
+  value that matches neither is an **error** (never a silent fallback — that would cross envs).
+  **Absent** → the tenant's default (`prod`-slug) env. Resolved in `AuthGuard` → `Principal.environmentId`.
+  (Implemented in `EnvironmentsService.resolveEnvId`, Slice 1.)
 - The SPA gains an **environment switcher** (next to the workspace switcher) that sets the header,
   like `activeWorkspaceId` today.
 - API-token principals resolve to the token's bound env (§3) or the default.
@@ -120,9 +122,9 @@ Instead:
    env-scoped row to it. `environmentId` is added as **nullable first**, backfilled, then the
    composite keys are migrated — additive, reversible per step.
 2. **Compatibility shim:** a resolver `resolveEnvId(tenantId, selected?)` that returns the selected
-   env's id when given (validated to belong to the tenant), else **the tenant's default (`prod`-slug)
-   environment id** — there is no `Tenant.defaultEnvironmentId` column; "default" is the `isDefault`
-   row resolved for the tenant (lazily created if absent). A query that hasn't yet been env-migrated
+   env's id when given (validated to belong to the tenant), else **the tenant's default env id** —
+   the `prod`-slug row per §2 (there is no `Tenant.defaultEnvironmentId` column), lazily created if
+   absent. A query that hasn't yet been env-migrated
    (or a caller that sends no env) resolves to the default env — so existing behavior is byte-identical
    until a call site opts in. This lets the 29 sites migrate **incrementally, per slice**, each
    independently shippable + verifiable, instead of atomically. (Implemented in Slice 1,
