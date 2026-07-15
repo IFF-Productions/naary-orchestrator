@@ -17,6 +17,13 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
+# The `claude` CLI for the codeAgent node's read-only (Slice 1) path, which runs `claude -p`
+# IN the worker (capability-clamped: plan mode, Read/Grep/Glob — no Bash/write). Write mode
+# runs in the isolated sandbox image instead (deploy/sandbox). Pinned for reproducibility.
+ARG CLAUDE_CODE_VERSION=2.1.210
+RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+  && npm cache clean --force
+
 # pnpm via corepack, pinned to the version in package.json's packageManager.
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable

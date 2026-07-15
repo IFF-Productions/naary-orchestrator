@@ -21,6 +21,7 @@ import {
   type WebhookRow,
   UnauthorizedError,
 } from "../../lib/api";
+import { isTerminal } from "../../lib/run-status";
 
 /** Model providers — defined locally; the DC hard-codes these three + an "add" tile.
  *  `supported` gates BYOK: only providers the backend can validate + run today
@@ -473,6 +474,17 @@ export function Integrations() {
             onSaved={load}
           />
         ))}
+      </div>
+
+      {/* ===== Code Agent (Claude Code) ===== */}
+      <div style={{ ...monoLabel, marginBottom: 12 }}>Code Agent</div>
+      <div style={{ marginBottom: 24 }}>
+        <CodeAgentCard
+          hasKey={credentials.some((c) => c.provider === "anthropic")}
+          keyValid={credentials.some(
+            (c) => c.provider === "anthropic" && c.isValid,
+          )}
+        />
       </div>
 
       {/* ===== MCP servers (connections) ===== */}
@@ -2387,6 +2399,173 @@ function WebhookHowTo({
         Replace <code>&lt;YOUR_API_URL&gt;</code> with your API host. Sign the
         exact bytes you send. A repeat with the same <code>x-delivery-id</code>{" "}
         is ignored.
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Code Agent (Claude Code) card. Runs a MINIMAL read-only codeAgent run and reports whether
+ * the `claude` CLI + the tenant's Anthropic key work end-to-end — a different path than the
+ * agent node's API-key validation (this exercises the actual CLI subprocess in the worker).
+ */
+function CodeAgentCard({
+  hasKey,
+  keyValid,
+}: {
+  hasKey: boolean;
+  keyValid: boolean;
+}) {
+  const [phase, setPhase] = useState<"idle" | "running" | "ok" | "fail">(
+    "idle",
+  );
+  const [detail, setDetail] = useState<string | null>(null);
+  const [runId, setRunId] = useState<string | null>(null);
+
+  async function runTest() {
+    setPhase("running");
+    setDetail(null);
+    setRunId(null);
+    try {
+      const { workflowId } = await api.testCodeAgent();
+      setRunId(workflowId);
+      // Poll until the run reaches a terminal state (or time out).
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const s = await api.getState(workflowId).catch(() => null);
+        if (!s || !isTerminal(s.status)) continue;
+        if (s.status === "completed") {
+          // The interpreter stores the codeAgent result at <nodeId>.output
+          // (ctx.codeAgent = { status, output: { result, tool }, costUsd }).
+          const out = (
+            s.ctx?.codeAgent as { output?: { result?: string } } | undefined
+          )?.output?.result;
+          setPhase("ok");
+          setDetail(
+            out ? `Claude replied: “${out.trim().slice(0, 80)}”` : "Completed.",
+          );
+        } else {
+          // The run can end in several terminal states (failed, budget_exceeded,
+          // circuit_open, invalid_graph, …); don't guess the cause — point at the run.
+          setPhase("fail");
+          setDetail(`Test run ${s.status}. Open the run for details.`);
+        }
+        return;
+      }
+      setPhase("fail");
+      setDetail("Timed out waiting for the test run.");
+    } catch (err) {
+      // Surface the real start error (budget cap, auth, …) instead of a generic string.
+      setPhase("fail");
+      setDetail(
+        err instanceof Error
+          ? `Could not start the test run: ${err.message}`
+          : "Could not start the test run.",
+      );
+    }
+  }
+
+  const resultColor =
+    phase === "ok" ? "var(--state-done)" : "var(--state-error)";
+
+  return (
+    <div
+      style={{
+        background: "var(--card)",
+        border: "1px solid var(--line)",
+        borderRadius: "var(--radius-lg)",
+        boxShadow: "var(--shadow-card)",
+        padding: 16,
+        maxWidth: 560,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 8,
+            background: "var(--node-agent)",
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontWeight: "var(--weight-bold)",
+            flex: "none",
+          }}
+        >
+          ⌘
+        </span>
+        <div style={{ flex: 1 }}>
+          <div
+            style={{
+              fontSize: "var(--text-body)",
+              fontWeight: "var(--weight-semibold)",
+              color: "var(--ink)",
+            }}
+          >
+            Claude Code
+          </div>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
+            The Code Agent node — runs the <code>claude</code> CLI. Uses your
+            Anthropic key above.
+          </div>
+        </div>
+        {keyValid ? (
+          <StatusPill state="done" label="Key set" />
+        ) : hasKey ? (
+          <StatusPill state="error" label="Key invalid" />
+        ) : (
+          <StatusPill state="idle" label="No key" />
+        )}
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          marginTop: 14,
+        }}
+      >
+        <Button
+          variant="primary"
+          icon="play"
+          loading={phase === "running"}
+          disabled={phase === "running" || !hasKey}
+          title={
+            hasKey
+              ? keyValid
+                ? "Run a read-only test"
+                : "Run the test to surface the invalid key"
+              : "Add an Anthropic key first"
+          }
+          onClick={() => void runTest()}
+        >
+          {phase === "running" ? "Testing…" : "Run test"}
+        </Button>
+        {detail && (
+          <span
+            style={{
+              fontSize: "var(--text-sm)",
+              color: phase === "running" ? "var(--ink-3)" : resultColor,
+            }}
+          >
+            {phase === "ok" ? "✓ " : phase === "fail" ? "✗ " : ""}
+            {detail}
+            {runId && (phase === "ok" || phase === "fail") && (
+              <>
+                {" "}
+                <a
+                  href={`/app/runs/${runId}`}
+                  style={{ color: "var(--brand)" }}
+                >
+                  view run
+                </a>
+              </>
+            )}
+          </span>
+        )}
       </div>
     </div>
   );

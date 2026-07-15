@@ -54,6 +54,19 @@ export class ExecutionsController {
     return this.executions.start(tenantId, body.input, body.workflowKey);
   }
 
+  /** Run a minimal read-only codeAgent (Claude Code) run to verify the CLI + BYOK key work
+   *  end-to-end. Returns the run id; poll GET /executions/:id for the outcome. */
+  @ApiEndpoint({
+    summary: "Test the Code Agent (Claude Code) connectivity",
+    description:
+      "Starts a minimal read-only codeAgent run (asks the CLI to reply OK). Poll the returned run for success/failure.",
+    created: StartExecutionResponse,
+  })
+  @Post("code-agent-test")
+  codeAgentTest(@TenantId() tenantId: string): Promise<{ workflowId: string }> {
+    return this.executions.startCodeAgentTest(tenantId);
+  }
+
   /** Recent runs for the authenticated tenant (newest first). `?archived=true`
    *  returns the soft-archived runs instead of the active (default) list. */
   @ApiEndpoint({

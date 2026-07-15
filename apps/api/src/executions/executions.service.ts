@@ -35,7 +35,11 @@ import { TracedClass } from "@naary/observability";
 import { getBudget } from "@naary/usage";
 import { assertWithinMonthlyBudget } from "../budget/budget-guard";
 import { executionsStarted } from "../common/metrics";
-import { type GraphSnapshot, GraphsService } from "../graphs/graphs.service";
+import {
+  type GraphSnapshot,
+  GraphsService,
+  hashGraph,
+} from "../graphs/graphs.service";
 import { connectTemporal } from "../temporal/client";
 import { resumePath } from "./resume-token";
 
@@ -293,6 +297,49 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         },
       tenantId,
       workflowKey,
+    );
+  }
+
+  /**
+   * Connectivity test for the codeAgent node's Claude Code path (the Integrations "Run test"
+   * button). Starts a MINIMAL read-only run — an in-memory graph {start → codeAgent → end}
+   * that asks the CLI to reply "OK" — so the user can confirm end-to-end that the `claude`
+   * binary is present in the worker AND their Anthropic key works through the CLI (a different
+   * path than the agent node's direct API validation). Not saved as a workflow; it's a normal
+   * run the UI polls via getState. maxTurns:1 keeps it cheap.
+   */
+  async startCodeAgentTest(tenantId: string): Promise<{ workflowId: string }> {
+    const graph: GraphDef = {
+      startNodeId: "start",
+      nodes: [
+        { id: "start", type: "start" },
+        {
+          id: "codeAgent",
+          type: "codeAgent",
+          config: {
+            tool: "claude",
+            prompt: "Reply with the single word: OK.",
+            maxTurns: 1,
+          },
+        },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "start", to: "codeAgent" },
+        { from: "codeAgent", to: "end" },
+      ],
+    };
+    const snapshot: GraphSnapshot = {
+      graph,
+      contentHash: hashGraph(graph),
+      version: 0,
+    };
+    return this.startGraph(
+      `catest-${tenantId}`,
+      snapshot,
+      {},
+      tenantId,
+      "__codeagent_test",
     );
   }
 
