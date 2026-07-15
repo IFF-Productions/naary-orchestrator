@@ -20,3 +20,9 @@ CREATE UNIQUE INDEX "Environment_tenantId_slug_key" ON "Environment"("tenantId",
 
 -- CreateIndex
 CREATE INDEX "Environment_tenantId_idx" ON "Environment"("tenantId");
+
+-- Enforce "exactly one default env per tenant" at the DB level (defense in depth beyond the
+-- service being the sole writer). A PARTIAL unique index — unique on tenantId only among rows
+-- where isDefault — which a plain @@unique([tenantId, isDefault]) can't express (that would also
+-- forbid multiple non-defaults). Hand-written because Prisma's schema DSL has no partial-unique.
+CREATE UNIQUE INDEX "Environment_one_default_per_tenant" ON "Environment"("tenantId") WHERE "isDefault";

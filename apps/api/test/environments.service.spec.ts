@@ -5,8 +5,8 @@ const findMany = vi.fn();
 const findUnique = vi.fn();
 const findFirst = vi.fn();
 const create = vi.fn();
-const update = vi.fn();
-const del = vi.fn();
+const updateMany = vi.fn();
+const deleteMany = vi.fn();
 vi.mock("@naary/db", () => ({
   getPrisma: () => ({
     environment: {
@@ -15,8 +15,8 @@ vi.mock("@naary/db", () => ({
       findUnique,
       findFirst,
       create,
-      update,
-      delete: del,
+      updateMany,
+      deleteMany,
     },
   }),
 }));
@@ -38,8 +38,8 @@ beforeEach(() => {
     findUnique,
     findFirst,
     create,
-    update,
-    del,
+    updateMany,
+    deleteMany,
   ])
     m.mockReset();
   upsert.mockResolvedValue(DEFAULT); // ensureDefault
@@ -101,19 +101,47 @@ describe("create", () => {
   });
 });
 
+describe("rename", () => {
+  it("renames via a TENANT-SCOPED updateMany, then re-reads the row", async () => {
+    updateMany.mockResolvedValue({ count: 1 });
+    findFirst.mockResolvedValue({ ...DEFAULT, name: "Prod (renamed)" });
+    const out = await svc.rename("t1", "env-prod", "  Prod (renamed) ");
+    expect(updateMany.mock.calls[0][0]).toEqual({
+      where: { id: "env-prod", tenantId: "t1" },
+      data: { name: "Prod (renamed)" }, // trimmed
+    });
+    expect(out.name).toBe("Prod (renamed)");
+  });
+
+  it("404s when the env isn't the tenant's (updateMany count 0)", async () => {
+    updateMany.mockResolvedValue({ count: 0 });
+    await expect(svc.rename("t1", "nope", "X")).rejects.toThrow(/not found/);
+  });
+
+  it("rejects an empty name", async () => {
+    await expect(svc.rename("t1", "env-prod", "   ")).rejects.toThrow(
+      /name is required/,
+    );
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+});
+
 describe("remove", () => {
   it("refuses to delete the default env", async () => {
     findFirst.mockResolvedValue(DEFAULT);
     await expect(svc.remove("t1", "env-prod")).rejects.toThrow(
       /default environment can't be deleted/,
     );
-    expect(del).not.toHaveBeenCalled();
+    expect(deleteMany).not.toHaveBeenCalled();
   });
 
-  it("deletes a non-default env", async () => {
+  it("deletes a non-default env with a TENANT-SCOPED deleteMany", async () => {
     findFirst.mockResolvedValue({ ...DEFAULT, id: "env-sb", isDefault: false });
+    deleteMany.mockResolvedValue({ count: 1 });
     await svc.remove("t1", "env-sb");
-    expect(del).toHaveBeenCalledWith({ where: { id: "env-sb" } });
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { id: "env-sb", tenantId: "t1" },
+    });
   });
 
   it("404s an unknown env", async () => {
@@ -128,17 +156,38 @@ describe("resolveEnvId (the compatibility shim)", () => {
     expect(upsert).toHaveBeenCalledOnce();
   });
 
-  it("resolves a selected env by id or slug", async () => {
-    findFirst.mockResolvedValue({ ...DEFAULT, id: "env-sb", slug: "sandbox" });
+  it("resolves by id FIRST (deterministic), then falls back to slug", async () => {
+    // id lookup hits.
+    findFirst.mockResolvedValueOnce({ ...DEFAULT, id: "env-sb" });
+    expect(await svc.resolveEnvId("t1", "env-sb")).toBe("env-sb");
+    expect(findFirst.mock.calls[0][0].where).toEqual({
+      tenantId: "t1",
+      id: "env-sb",
+    });
+  });
+
+  it("resolves a selected env by slug when the id lookup misses", async () => {
+    findFirst
+      .mockResolvedValueOnce(null) // id miss
+      .mockResolvedValueOnce({ ...DEFAULT, id: "env-sb", slug: "sandbox" }); // slug hit
     expect(await svc.resolveEnvId("t1", "sandbox")).toBe("env-sb");
-    expect(findFirst.mock.calls[0][0].where.OR).toEqual([
-      { id: "sandbox" },
-      { slug: "sandbox" },
-    ]);
+    expect(findFirst.mock.calls[1][0].where).toEqual({
+      tenantId: "t1",
+      slug: "sandbox",
+    });
+  });
+
+  it("TRIMS + lowercases the selection (copy/pasted header whitespace)", async () => {
+    findFirst
+      .mockResolvedValueOnce(null) // id miss (trimmed "SANDBOX")
+      .mockResolvedValueOnce({ ...DEFAULT, id: "env-sb", slug: "sandbox" });
+    expect(await svc.resolveEnvId("t1", "  SANDBOX  ")).toBe("env-sb");
+    expect(findFirst.mock.calls[0][0].where.id).toBe("SANDBOX"); // trimmed (id match is case-exact)
+    expect(findFirst.mock.calls[1][0].where.slug).toBe("sandbox"); // trimmed + lowercased
   });
 
   it("throws for an env that isn't the tenant's (never silently crosses envs)", async () => {
-    findFirst.mockResolvedValue(null);
+    findFirst.mockResolvedValue(null); // both id + slug miss
     await expect(svc.resolveEnvId("t1", "someone-elses")).rejects.toThrow(
       /Unknown environment/,
     );

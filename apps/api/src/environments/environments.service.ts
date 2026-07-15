@@ -119,15 +119,17 @@ export class EnvironmentsService {
     const trimmed = name?.trim();
     if (!trimmed)
       throw new BadRequestException("Environment name is required.");
-    const row = await getPrisma().environment.findFirst({
+    // Tenant-SCOPED write (updateMany with {id, tenantId}, not update by id) so the write itself
+    // can't touch another tenant's row — no read-then-write TOCTOU. count 0 ⇒ not ours / gone.
+    const { count } = await getPrisma().environment.updateMany({
       where: { id, tenantId },
-    });
-    if (!row) throw new NotFoundException("Environment not found.");
-    const updated = await getPrisma().environment.update({
-      where: { id },
       data: { name: trimmed },
     });
-    return view(updated);
+    if (count === 0) throw new NotFoundException("Environment not found.");
+    const updated = await getPrisma().environment.findFirst({
+      where: { id, tenantId },
+    });
+    return view(updated!);
   }
 
   /** Delete an environment. Refused for the default env (it's the migration + shim target). */
@@ -143,7 +145,9 @@ export class EnvironmentsService {
     }
     // NOTE (Slice 1): once workflows/runs are env-scoped, also refuse (or cascade) when the env
     // still holds data. Today nothing is env-scoped, so a plain delete is safe.
-    await getPrisma().environment.delete({ where: { id } });
+    // Tenant-SCOPED delete (deleteMany with {id, tenantId}) so the write can't reach another
+    // tenant's row even if the id check above raced.
+    await getPrisma().environment.deleteMany({ where: { id, tenantId } });
   }
 
   /**
@@ -154,16 +158,26 @@ export class EnvironmentsService {
    * SPECIFIED env doesn't belong to the tenant (never silently falls back — that would cross envs).
    */
   async resolveEnvId(tenantId: string, sel?: string | null): Promise<string> {
-    if (!sel) return (await this.ensureDefault(tenantId)).id;
-    const row = await getPrisma().environment.findFirst({
-      where: { tenantId, OR: [{ id: sel }, { slug: sel.toLowerCase() }] },
+    // Normalize first — a copy/pasted X-Environment-Id often carries surrounding whitespace.
+    const raw = sel?.trim();
+    if (!raw) return (await this.ensureDefault(tenantId)).id;
+    // DETERMINISTIC: try an exact id match FIRST, then the (lowercased) slug — never an ambiguous
+    // OR. Slugs can't collide with ids anyway (a uuid is 36 chars, past the 32-char slug cap), but
+    // resolving id-then-slug removes any doubt about which wins.
+    const byId = await getPrisma().environment.findFirst({
+      where: { tenantId, id: raw },
     });
-    if (row) return row.id;
+    if (byId) return byId.id;
+    const slug = raw.toLowerCase();
+    const bySlug = await getPrisma().environment.findFirst({
+      where: { tenantId, slug },
+    });
+    if (bySlug) return bySlug.id;
     // A caller can select the default env by slug (e.g. `X-Environment-Id: prod`) BEFORE any call
     // has lazily created it — resolve that to the (now-created) default instead of 404ing.
-    if (sel.toLowerCase() === DEFAULT_SLUG) {
+    if (slug === DEFAULT_SLUG) {
       return (await this.ensureDefault(tenantId)).id;
     }
-    throw new NotFoundException(`Unknown environment '${sel}'.`);
+    throw new NotFoundException(`Unknown environment '${raw}'.`);
   }
 }

@@ -311,6 +311,8 @@ model Environment {
 
   @@unique([tenantId, slug])
   @@index([tenantId])
+  // NB: a PARTIAL unique index `("tenantId") WHERE "isDefault"` (in the migration, not expressible
+  // in Prisma's DSL) enforces exactly one default env per tenant at the DB level.
 }
 
 // Workspace members (Team screen). Lightweight directory keyed by tenant; auth
