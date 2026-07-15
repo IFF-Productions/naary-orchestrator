@@ -286,6 +286,11 @@ export const api = {
       body: JSON.stringify(body),
     });
   },
+  // Start a minimal read-only Code Agent (Claude Code) run to verify the CLI + key work.
+  // Returns the run id — poll getState until it's terminal.
+  testCodeAgent(): Promise<{ workflowId: string }> {
+    return http("/executions/code-agent-test", { method: "POST" });
+  },
   approve(
     id: string,
     approved: boolean,
