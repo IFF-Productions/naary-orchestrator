@@ -296,6 +296,23 @@ model UsageReservation {
   @@index([tenantId, createdAt])
 }
 
+// Per-tenant ENVIRONMENT (design docs/design/ENVIRONMENTS.md) — sandbox / UAT / prod as fully
+// separate spaces. Slice 1 is the entity + management only; env-SCOPING of workflows/runs/creds
+// lands in later slices behind a `envId ?? default` compatibility shim. Exactly one `isDefault`
+// per tenant (the "Production" env holding all pre-environments data); created lazily on first
+// access (upsert on the unique slug — race-safe), so no backfill across implicit tenants is needed.
+model Environment {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String // display: "Sandbox", "UAT", "Production"
+  slug      String // stable, header/URL-safe: "sandbox", "uat", "prod"
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+}
+
 // Workspace members (Team screen). Lightweight directory keyed by tenant; auth
 // itself is Keycloak/API-token (this is not the identity source of truth).
 model Member {
