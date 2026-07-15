@@ -47,7 +47,11 @@ ALTER TABLE "ApiToken"
   ADD CONSTRAINT "ApiToken_environmentId_fkey"
   FOREIGN KEY ("environmentId") REFERENCES "Environment"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
--- 6) Index the endpoints' env for env-scoped listing.
+-- 6) Index (tenantId, environmentId) for env-scoped listing. The composite is tenantId-leading, so it
+--    also serves the existing list-by-tenant query — making the standalone tenantId indexes on
+--    FormEndpoint/ChatEndpoint redundant. Drop those so each table keeps exactly one covering index.
+DROP INDEX IF EXISTS "FormEndpoint_tenantId_idx";
+DROP INDEX IF EXISTS "ChatEndpoint_tenantId_idx";
 CREATE INDEX "WebhookEndpoint_tenantId_environmentId_idx" ON "WebhookEndpoint"("tenantId", "environmentId");
 CREATE INDEX "FormEndpoint_tenantId_environmentId_idx" ON "FormEndpoint"("tenantId", "environmentId");
 CREATE INDEX "ChatEndpoint_tenantId_environmentId_idx" ON "ChatEndpoint"("tenantId", "environmentId");

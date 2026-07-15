@@ -187,6 +187,8 @@ model WebhookEndpoint {
   provider      String // 'github' | 'atlassian' | 'generic'
   signingSecret String // plain column per plan §4 (HMAC secret; never logged)
   createdAt     DateTime @default(now())
+
+  @@index([tenantId, environmentId])
 }
 
 // A hosted public form that starts a workflow (formTrigger). Unlike a webhook there is
@@ -203,7 +205,7 @@ model FormEndpoint {
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
   createdAt  DateTime @default(now())
 
-  @@index([tenantId])
+  @@index([tenantId, environmentId])
 }
 
 // A hosted public chat (chatTrigger) that starts a workflow per message. Like FormEndpoint there is
@@ -218,7 +220,7 @@ model ChatEndpoint {
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
   createdAt  DateTime @default(now())
 
-  @@index([tenantId])
+  @@index([tenantId, environmentId])
 }
 
 // Cross-message chat memory (design CHAT-TRIGGER-RAG.md §2.1b, option B): TWO rows per turn (a user
