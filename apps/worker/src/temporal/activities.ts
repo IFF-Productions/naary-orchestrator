@@ -2333,8 +2333,12 @@ export async function callCodeAgent(
     log.warn(
       {
         activity: "callCodeAgent",
+        executionId: meta.executionId,
         nodeId: meta.nodeId,
         tenantId: meta.tenantId,
+        // A SAFE classifier for correlation — the error's class, never its message/stack
+        // (which can carry argv/prompt/env). Diagnostics without leaking secrets.
+        errorName: e instanceof Error ? e.name : "unknown",
       },
       "codeAgent subprocess failed (details suppressed from workflow history)",
     );
