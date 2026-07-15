@@ -54,7 +54,12 @@ import {
   type RegionTrace,
   type UnresolvedRef,
 } from "@naary/dsl";
-import type { GraphDef, NodeDef, NodeRetryPolicy } from "@naary/dsl";
+import type {
+  GraphDef,
+  NodeDef,
+  NodeRetryPolicy,
+  NodeOutputMap,
+} from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
 // Do NOT drop `type` — that would pull I/O code into the sandbox.
 import type * as activities from "./activities";
@@ -533,7 +538,10 @@ export async function runGraph(
           workflowKey: runCtx.workflowKey ?? "",
           nodeId: node.id,
         });
-        ctx[node.id] = { changed: r.changed, body: r.body };
+        ctx[node.id] = {
+          changed: r.changed,
+          body: r.body,
+        } satisfies NodeOutputMap["pollTrigger"];
         return null;
       }
       case "agent": {
@@ -549,7 +557,7 @@ export async function runGraph(
             nodeId: node.id,
           },
         );
-        ctx[node.id] = result;
+        ctx[node.id] = result satisfies NodeOutputMap["agent"];
         // Cost is a commutative SUM — accumulating it is order-independent (safe
         // even under parallel fan-out, where Temporal replays activity completion
         // order deterministically anyway).
@@ -580,7 +588,7 @@ export async function runGraph(
             nodeId: node.id,
           },
         );
-        ctx[node.id] = caResult;
+        ctx[node.id] = caResult satisfies NodeOutputMap["codeAgent"];
         costUsd += caResult.costUsd;
         ctx.__costUsd = costUsd;
         return null;
@@ -604,7 +612,7 @@ export async function runGraph(
             nodeId: node.id,
           },
         );
-        ctx[node.id] = toolResult;
+        ctx[node.id] = toolResult satisfies NodeOutputMap["mcpTool"];
         // Meter tool spend into the run budget so the per-execution cap sees it
         // (Arch§4.6) — commutative accumulation, same as the agent node.
         costUsd += toolResult.costUsd;
@@ -622,7 +630,7 @@ export async function runGraph(
         const runIntegration = action?.write
           ? callIntegrationWrite
           : callIntegrationRead;
-        ctx[node.id] = await runIntegration(
+        ctx[node.id] = (await runIntegration(
           iCfg,
           resolveIntegrationFields(iCfg, ctx),
           {
@@ -630,7 +638,7 @@ export async function runGraph(
             executionId: wf.workflowInfo().workflowId,
             nodeId: node.id,
           },
-        );
+        )) satisfies NodeOutputMap["integration"];
         return null;
       }
       case "httpRequest": {
@@ -653,7 +661,7 @@ export async function runGraph(
           status: result.httpStatus,
           headers: result.headers,
           body: result.body,
-        };
+        } satisfies NodeOutputMap["httpRequest"];
         costUsd += result.costUsd;
         ctx.__costUsd = costUsd;
         return null;
@@ -674,7 +682,10 @@ export async function runGraph(
           },
         );
         // Expose {rows, rowCount} so edges branch on `<nodeId>.rowCount`.
-        ctx[node.id] = { rows: result.rows, rowCount: result.rowCount };
+        ctx[node.id] = {
+          rows: result.rows,
+          rowCount: result.rowCount,
+        } satisfies NodeOutputMap["sqlQuery"];
         costUsd += result.costUsd;
         ctx.__costUsd = costUsd;
         return null;
@@ -694,7 +705,9 @@ export async function runGraph(
           },
         );
         // Expose {rowsAffected} so edges branch on `<nodeId>.rowsAffected`.
-        ctx[node.id] = { rowsAffected: result.rowsAffected };
+        ctx[node.id] = {
+          rowsAffected: result.rowsAffected,
+        } satisfies NodeOutputMap["sqlExec"];
         costUsd += result.costUsd;
         ctx.__costUsd = costUsd;
         return null;
@@ -934,7 +947,7 @@ export async function runGraph(
             nodeId: node.id,
           },
         );
-        ctx[node.id] = { value: res.value };
+        ctx[node.id] = { value: res.value } satisfies NodeOutputMap["random"];
         return null;
       }
       case "encode": {
@@ -959,7 +972,9 @@ export async function runGraph(
           executionId: wf.workflowInfo().workflowId,
           nodeId: node.id,
         });
-        ctx[node.id] = { digest: result.digest };
+        ctx[node.id] = {
+          digest: result.digest,
+        } satisfies NodeOutputMap["hmac"];
         return null;
       }
       case "hash": {
@@ -971,7 +986,9 @@ export async function runGraph(
           executionId: wf.workflowInfo().workflowId,
           nodeId: node.id,
         });
-        ctx[node.id] = { digest: result.digest };
+        ctx[node.id] = {
+          digest: result.digest,
+        } satisfies NodeOutputMap["hash"];
         return null;
       }
       case "jwt": {
@@ -981,7 +998,7 @@ export async function runGraph(
           executionId: wf.workflowInfo().workflowId,
           nodeId: node.id,
         });
-        ctx[node.id] = { token: result.token };
+        ctx[node.id] = { token: result.token } satisfies NodeOutputMap["jwt"];
         return null;
       }
       case "totp": {
@@ -993,7 +1010,7 @@ export async function runGraph(
           executionId: wf.workflowInfo().workflowId,
           nodeId: node.id,
         });
-        ctx[node.id] = { code: result.code };
+        ctx[node.id] = { code: result.code } satisfies NodeOutputMap["totp"];
         return null;
       }
       case "sendEmail": {
@@ -1009,7 +1026,9 @@ export async function runGraph(
             nodeId: node.id,
           },
         );
-        ctx[node.id] = { messageId: result.messageId };
+        ctx[node.id] = {
+          messageId: result.messageId,
+        } satisfies NodeOutputMap["sendEmail"];
         costUsd += result.costUsd;
         ctx.__costUsd = costUsd;
         return null;
@@ -1029,7 +1048,10 @@ export async function runGraph(
             nodeId: node.id,
           },
         );
-        ctx[node.id] = { items: result.items, count: result.count };
+        ctx[node.id] = {
+          items: result.items,
+          count: result.count,
+        } satisfies NodeOutputMap["rssRead"];
         return null;
       }
       case "executeSubWorkflow": {
@@ -1096,7 +1118,10 @@ export async function runGraph(
         for (const [k, v] of Object.entries(result.ctx)) {
           if (!k.startsWith("__")) output[k] = v;
         }
-        ctx[node.id] = { status: result.status, output };
+        ctx[node.id] = {
+          status: result.status,
+          output,
+        } satisfies NodeOutputMap["executeSubWorkflow"];
         return null;
       }
       case "forEach": {
@@ -1300,7 +1325,9 @@ export async function runGraph(
         // webhookResponseQuery, which the ingress polls.
         const rwCfg = asNodeConfig(cfg, "respondToWebhook");
         webhookResponse = resolveWebhookResponse(rwCfg, ctx);
-        ctx[node.id] = { statusCode: webhookResponse.statusCode };
+        ctx[node.id] = {
+          statusCode: webhookResponse.statusCode,
+        } satisfies NodeOutputMap["respondToWebhook"];
         return null;
       }
       case "code": {

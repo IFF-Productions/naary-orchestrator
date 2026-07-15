@@ -22,6 +22,7 @@ import {
   UnauthorizedError,
 } from "../../lib/api";
 import { isTerminal } from "../../lib/run-status";
+import { getNodeOutput } from "@naary/dsl";
 
 /** Model providers — defined locally; the DC hard-codes these three + an "add" tile.
  *  `supported` gates BYOK: only providers the backend can validate + run today
@@ -2435,11 +2436,11 @@ function CodeAgentCard({
         const s = await api.getState(workflowId).catch(() => null);
         if (!s || !isTerminal(s.status)) continue;
         if (s.status === "completed") {
-          // The interpreter stores the codeAgent result at <nodeId>.output
-          // (ctx.codeAgent = { status, output: { result, tool }, costUsd }).
-          const out = (
-            s.ctx?.codeAgent as { output?: { result?: string } } | undefined
-          )?.output?.result;
+          // Typed read: getNodeOutput narrows ctx.codeAgent to its map shape
+          // ({ status, output: { result, tool }, costUsd }) — the ".result vs
+          // .output.result" bug is now a compile error, not a silent undefined.
+          const out = getNodeOutput(s.ctx, "codeAgent", "codeAgent")?.output
+            .result;
           setPhase("ok");
           setDetail(
             out ? `Claude replied: “${out.trim().slice(0, 80)}”` : "Completed.",
