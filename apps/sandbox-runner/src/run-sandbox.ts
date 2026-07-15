@@ -136,10 +136,23 @@ export async function runSandbox(
     timeoutMs: req.timeoutMs ?? cfg.defaultTimeoutMs,
   });
 
-  // Capture the sandbox's edits as a diff. A non-zero git exit means we can't trust the
-  // output as a diff (e.g. not a git repo) — surface it rather than returning a misleading
-  // "diff" alongside the docker exit code.
-  const git = await exec("git", ["-C", workdir, "diff"], { timeoutMs: 30_000 });
+  // Capture the sandbox's edits as a diff. STAGE everything first (`git add -A`) so files the CLI
+  // CREATED (untracked) are included — plain `git diff` shows tracked changes only and would
+  // silently drop new files, which are a huge share of a coding agent's output. `add -A` still
+  // honors .gitignore, so build artifacts don't leak into the diff. A non-zero git exit means we
+  // can't trust the output as a diff (e.g. not a git repo) — surface it rather than return a
+  // misleading "diff" alongside the docker exit code.
+  const add = await exec("git", ["-C", workdir, "add", "-A"], {
+    timeoutMs: 30_000,
+  });
+  if (add.exitCode !== 0) {
+    throw new Error(
+      "sandbox-runner: could not stage the edits (git add failed)",
+    );
+  }
+  const git = await exec("git", ["-C", workdir, "diff", "--cached"], {
+    timeoutMs: 30_000,
+  });
   if (git.exitCode !== 0) {
     throw new Error("sandbox-runner: could not compute the diff (git failed)");
   }

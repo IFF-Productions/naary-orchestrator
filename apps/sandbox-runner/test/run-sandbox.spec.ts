@@ -41,7 +41,7 @@ describe("runSandbox", () => {
     expect(out.exitCode).toBe(0);
     expect(out.diff).toContain("+edited");
 
-    const [dockerCall, gitCall] = exec.mock.calls;
+    const [dockerCall, addCall, diffCall] = exec.mock.calls;
     expect(dockerCall[0]).toBe("docker");
     const dargs: string[] = dockerCall[1];
     expect(dargs).toContain("naary-claude-sandbox:latest"); // pinned image
@@ -51,8 +51,14 @@ describe("runSandbox", () => {
     expect(dargs).toContain("--rm");
     // the working tree is mounted under runsDir
     expect(dargs[dargs.indexOf("-v") + 1]).toBe("/runs/exec-abc_123:/work");
-    // git diff runs against the same workdir
-    expect(gitCall[1]).toEqual(["-C", "/runs/exec-abc_123", "diff"]);
+    // Stage ALL edits (so created/untracked files are included) then diff the index.
+    expect(addCall[1]).toEqual(["-C", "/runs/exec-abc_123", "add", "-A"]);
+    expect(diffCall[1]).toEqual([
+      "-C",
+      "/runs/exec-abc_123",
+      "diff",
+      "--cached",
+    ]);
   });
 
   it("forwards the key via the exec ENV (by name), never on the argv", async () => {
@@ -95,11 +101,13 @@ describe("runSandbox", () => {
   });
 
   it("throws when git diff fails (workdir isn't a git repo) — no misleading diff", async () => {
-    exec = vi.fn(async (file: string) =>
-      file === "git"
+    // add succeeds, the diff (--cached) fails → the compute-diff error, not the stage error.
+    exec = vi.fn(async (file: string, args: string[]) => {
+      if (file !== "git") return { stdout: "{}", exitCode: 0 };
+      return args.includes("--cached")
         ? { stdout: "fatal: not a git repository", exitCode: 128 }
-        : { stdout: "{}", exitCode: 0 },
-    );
+        : { stdout: "", exitCode: 0 };
+    });
     await expect(runSandbox(REQ, CFG, exec as unknown as Exec)).rejects.toThrow(
       /could not compute the diff/,
     );
