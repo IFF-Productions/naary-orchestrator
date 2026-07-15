@@ -18,6 +18,7 @@ const schedulesStub = {
 const envStub = {
   resolveEnvId: async () => "e1",
   defaultEnvId: async () => "e1",
+  isDefaultEnv: async () => true,
 } as never;
 
 const validGraph: GraphDef = {

@@ -184,15 +184,17 @@ export class GraphsController {
       body.name,
       graph,
     );
-    // If this graph is a pollTrigger / scheduleTrigger flow, (re)create its Temporal
-    // schedule so it "runs on its own timer". Best-effort — a scheduling hiccup (e.g. an
-    // invalid cron) must not fail a save.
-    await this.schedules
-      .syncPollSchedule(tenantId, body.workflowKey, graph)
-      .catch(() => undefined);
-    await this.schedules
-      .syncCronSchedule(tenantId, body.workflowKey, graph)
-      .catch(() => undefined);
+    // Temporal schedules aren't env-scoped yet (deferred), so ONLY (re)sync them when saving in
+    // the DEFAULT env — else a non-default (sandbox) save would reconfigure the default/prod env's
+    // cron/interval from the sandbox graph. Best-effort — a scheduling hiccup must not fail a save.
+    if (await this.environments.isDefaultEnv(tenantId, envId)) {
+      await this.schedules
+        .syncPollSchedule(tenantId, body.workflowKey, graph)
+        .catch(() => undefined);
+      await this.schedules
+        .syncCronSchedule(tenantId, body.workflowKey, graph)
+        .catch(() => undefined);
+    }
     return {
       workflowKey: body.workflowKey,
       version: snap.version,
@@ -215,14 +217,20 @@ export class GraphsController {
     @EnvironmentSel() envSel?: string,
   ): Promise<{ deleted: true }> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    // Tear down Temporal schedules first (external resource), then the DB rows.
-    await this.schedules
-      .teardownForWorkflow(tenantId, workflowKey)
-      .catch(() => undefined);
+    const isDefault = await this.environments.isDefaultEnv(tenantId, envId);
+    // Schedules + the shared (not-yet-env-scoped) rows/triggers only belong to the default env's
+    // copy — tearing them down from a NON-default env would kill the default/prod copy's schedules
+    // and webhooks for the same workflowKey. So only do the tenant-wide teardown in the default env.
+    if (isDefault) {
+      await this.schedules
+        .teardownForWorkflow(tenantId, workflowKey)
+        .catch(() => undefined);
+    }
     const deleted = await this.graphs.deleteWorkflow(
       tenantId,
       envId,
       workflowKey,
+      isDefault,
     );
     if (!deleted) {
       throw new NotFoundException(`No workflow '${workflowKey}'`);

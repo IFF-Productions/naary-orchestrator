@@ -33,7 +33,11 @@ function makeService(
       isActive,
       setActive: setActiveFlag,
     } as never,
-    { defaultEnvId: async () => "e1", resolveEnvId: async () => "e1" } as never,
+    {
+      defaultEnvId: async () => "e1",
+      resolveEnvId: async () => "e1",
+      isDefaultEnv: async () => true,
+    } as never,
   );
   (service as unknown as { client: unknown }).client = {
     schedule: {
@@ -221,6 +225,25 @@ describe("setActive (workflow activation ↔ its schedules)", () => {
 
     await service.setActive("t-1", "e1", "w", false); // does not throw
     expect(setActiveFlag).toHaveBeenCalledWith("t-1", "e1", "w", false);
+  });
+
+  it("NON-default env: flips ONLY the env-scoped flag, never touches Temporal schedules", async () => {
+    findMany.mockResolvedValue([{ id: "poll-t-1-w" }, { id: "cron-t-1-w" }]);
+    // A service whose active env is NOT the default → the schedule pause/resume must be skipped
+    // (else a sandbox toggle would pause prod's schedules for the same key).
+    const service = new SchedulesService(
+      { getLatest: async () => null, setActive: setActiveFlag } as never,
+      { isDefaultEnv: async () => false } as never,
+    );
+    (service as unknown as { client: unknown }).client = {
+      schedule: { getHandle: () => ({ pause, unpause }) },
+    };
+
+    await service.setActive("t-1", "e-sandbox", "w", false);
+
+    expect(setActiveFlag).toHaveBeenCalledWith("t-1", "e-sandbox", "w", false);
+    expect(pause).not.toHaveBeenCalled(); // prod's schedules untouched
+    expect(updateMany).not.toHaveBeenCalled();
   });
 });
 

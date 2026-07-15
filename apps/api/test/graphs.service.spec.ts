@@ -267,17 +267,28 @@ describe("GraphsService.deleteWorkflow", () => {
   it("returns false (→ controller 404) and touches nothing when no graph exists", async () => {
     findFirst.mockResolvedValue(null);
 
-    const ok = await new GraphsService().deleteWorkflow("t1", "e1", "ghost");
+    const ok = await new GraphsService().deleteWorkflow(
+      "t1",
+      "e1",
+      "ghost",
+      true,
+    );
 
     expect(ok).toBe(false);
     expect($transaction).not.toHaveBeenCalled();
     expect(del.graphDefinition).not.toHaveBeenCalled();
   });
 
-  it("removes the graph + every dependent row in ONE transaction, keeping run history", async () => {
+  it("removes the graph + every dependent row in ONE transaction (default env), keeping run history", async () => {
     findFirst.mockResolvedValue({ workflowKey: "wf-1" });
 
-    const ok = await new GraphsService().deleteWorkflow("t1", "e1", "wf-1");
+    // deleteShared=true → the default env's copy: also removes the tenant-wide shared rows.
+    const ok = await new GraphsService().deleteWorkflow(
+      "t1",
+      "e1",
+      "wf-1",
+      true,
+    );
 
     expect(ok).toBe(true);
     // A single atomic transaction — not a series of loose deletes.
@@ -314,5 +325,34 @@ describe("GraphsService.deleteWorkflow", () => {
         where: { tenantId: "t1", workflowId: "wf-1" },
       });
     }
+  });
+
+  it("NON-default env (deleteShared=false): removes ONLY the env-scoped copy, not shared rows", async () => {
+    findFirst.mockResolvedValue({ workflowKey: "wf-1" });
+
+    const ok = await new GraphsService().deleteWorkflow(
+      "t1",
+      "e-sandbox",
+      "wf-1",
+      false,
+    );
+
+    expect(ok).toBe(true);
+    // The env's definition + activation are removed…
+    expect(del.graphDefinition).toHaveBeenCalledWith({
+      where: {
+        tenantId: "t1",
+        environmentId: "e-sandbox",
+        workflowKey: "wf-1",
+      },
+    });
+    expect(del.workflowActivation).toHaveBeenCalledOnce();
+    // …but the SHARED (tenant-wide) rows/triggers are left intact (prod's copy uses them).
+    expect(del.pinnedData).not.toHaveBeenCalled();
+    expect(del.pollState).not.toHaveBeenCalled();
+    expect(del.errorHandler).not.toHaveBeenCalled();
+    expect(del.webhookEndpoint).not.toHaveBeenCalled();
+    expect(del.formEndpoint).not.toHaveBeenCalled();
+    expect(del.chatEndpoint).not.toHaveBeenCalled();
   });
 });

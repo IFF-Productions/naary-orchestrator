@@ -45,3 +45,13 @@ CREATE INDEX "GraphDefinition_tenantId_environmentId_workflowKey_idx"
 ALTER TABLE "WorkflowActivation" DROP CONSTRAINT "WorkflowActivation_pkey";
 ALTER TABLE "WorkflowActivation"
   ADD CONSTRAINT "WorkflowActivation_pkey" PRIMARY KEY ("tenantId", "environmentId", "workflowKey");
+
+-- 7) Referential integrity: environmentId must point at a real Environment. ON DELETE RESTRICT so
+-- an environment holding workflows/activation can't be deleted out from under them (matches the
+-- "can't delete an env that still holds data" rule). Rows are backfilled above, so this is safe.
+ALTER TABLE "GraphDefinition"
+  ADD CONSTRAINT "GraphDefinition_environmentId_fkey"
+  FOREIGN KEY ("environmentId") REFERENCES "Environment"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "WorkflowActivation"
+  ADD CONSTRAINT "WorkflowActivation_environmentId_fkey"
+  FOREIGN KEY ("environmentId") REFERENCES "Environment"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

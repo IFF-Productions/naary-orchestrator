@@ -5,6 +5,7 @@ const findMany = vi.fn();
 const findUnique = vi.fn();
 const findFirst = vi.fn();
 const create = vi.fn();
+const update = vi.fn();
 const updateMany = vi.fn();
 const deleteMany = vi.fn();
 vi.mock("@naary/db", () => ({
@@ -15,6 +16,7 @@ vi.mock("@naary/db", () => ({
       findUnique,
       findFirst,
       create,
+      update,
       updateMany,
       deleteMany,
     },
@@ -38,6 +40,7 @@ beforeEach(() => {
     findUnique,
     findFirst,
     create,
+    update,
     updateMany,
     deleteMany,
   ])
@@ -63,6 +66,18 @@ describe("ensureDefault", () => {
     expect(upsert.mock.calls[0][0].create.isDefault).toBe(true);
     // A concurrent create is absorbed by the unique (empty update → no clobber).
     expect(upsert.mock.calls[0][0].update).toEqual({});
+  });
+
+  it("REPAIRS an existing prod-slug row that lost isDefault (never leaves it deletable)", async () => {
+    findUnique.mockResolvedValue({ ...DEFAULT, isDefault: false });
+    update.mockResolvedValue({ ...DEFAULT, isDefault: true });
+    const out = await svc.ensureDefault("t1");
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "env-prod" },
+      data: { isDefault: true },
+    });
+    expect(out.isDefault).toBe(true);
+    expect(upsert).not.toHaveBeenCalled(); // repaired via a targeted update, not a full upsert
   });
 });
 
