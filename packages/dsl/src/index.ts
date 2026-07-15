@@ -112,3 +112,10 @@ export {
   type NodeConfigMap,
   type ConfigForType,
 } from "./node-config";
+// Runtime-free typed OUTPUT accessor (mirror of node-config). `import type` only → no zod in the
+// worker bundle. Anchored to reality by `satisfies NodeOutputMap[<kind>]` at each interpreter write.
+export {
+  getNodeOutput,
+  type NodeOutputMap,
+  type NodeOutput,
+} from "./node-output";
