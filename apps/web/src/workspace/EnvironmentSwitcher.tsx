@@ -42,6 +42,9 @@ export function EnvironmentSwitcher() {
   useEffect(() => {
     if (!tenantId) return;
     let cancelled = false;
+    // Clear the previous workspace's list so the switcher doesn't render stale envs while the new
+    // workspace's list resolves (or if it fails).
+    setEnvs([]);
     (async () => {
       try {
         const list = await api.listEnvironments(tenantId);
@@ -57,9 +60,10 @@ export function EnvironmentSwitcher() {
         setActiveEnvironment(slug); // publish before the app's screens fetch
         setActiveSlug(slug);
       } catch {
+        if (cancelled) return; // unmounted / workspace changed — don't setState after
         // Resolve failed — CLEAR the active env so we don't keep sending a stale X-Environment-Id
         // (which would wrongly scope requests once the backend enforces it). The server then falls
-        // back to the workspace's default env.
+        // back to the workspace's default env. `envs` was already cleared at the effect's start.
         setActiveEnvironment(null);
         setActiveSlug(null);
       }
@@ -131,6 +135,8 @@ export function EnvironmentSwitcher() {
           borderRadius: 6,
           border: "1px solid var(--line)",
           background: "var(--bg-2)",
+          maxWidth: "100%",
+          minWidth: 0,
         }}
       >
         <span
@@ -140,6 +146,7 @@ export function EnvironmentSwitcher() {
             letterSpacing: 0.5,
             textTransform: "uppercase",
             color: "var(--ink-3)",
+            flex: "none",
           }}
         >
           env
@@ -149,6 +156,11 @@ export function EnvironmentSwitcher() {
             fontSize: 11.5,
             fontWeight: 600,
             color: "var(--ink)",
+            // Ellipsize a long env name so it can't push the chevron out of view (mirrors
+            // WorkspaceSwitcher's active label).
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
             whiteSpace: "nowrap",
           }}
         >
