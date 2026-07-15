@@ -71,6 +71,23 @@ export async function validateOpenAiKey(apiKey: string): Promise<boolean> {
 }
 
 /**
+ * Validate a Claude Code CLI credential. Unlike the model-provider keys above, this is a
+ * FORMAT CHECK only (not a live probe): the credential is either an API key (`sk-ant-api…`) OR
+ * a subscription OAuth token from `claude setup-token` (`sk-ant-oat…`). An OAuth token authenticates
+ * with `Authorization: Bearer`, NOT the `x-api-key` path the AI-SDK probe uses — so probing it
+ * would 4xx a perfectly good token and mark it permanently unusable (getDecryptedKey refuses an
+ * invalid row). The REAL end-to-end verification is the Integrations "Run test" button, which runs
+ * the actual `claude` CLI with the credential. So we accept any `sk-ant-` token here and let Run
+ * test be the truth. Returns false for an obviously-wrong value (empty / wrong prefix) so a paste
+ * error still surfaces on save.
+ */
+export function validateClaudeCodeKey(token: string): Promise<boolean> {
+  const t = token.trim();
+  // Both API keys (sk-ant-api…) and setup-token OAuth tokens (sk-ant-oat…) share this prefix.
+  return Promise.resolve(t.length > 0 && t.startsWith("sk-ant-"));
+}
+
+/**
  * Validate a tenant's Google (Gemini) key with a cheap 1-token call — mirrors the others
  * (4xx bad/exhausted key ⇒ invalid; 5xx/network ⇒ sanitized transient). gemini-2.5-flash is
  * the cheapest model to probe with.

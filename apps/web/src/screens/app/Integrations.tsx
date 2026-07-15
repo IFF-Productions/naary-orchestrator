@@ -481,10 +481,12 @@ export function Integrations() {
       <div style={{ ...monoLabel, marginBottom: 12 }}>Code Agent</div>
       <div style={{ marginBottom: 24 }}>
         <CodeAgentCard
-          hasKey={credentials.some((c) => c.provider === "anthropic")}
+          tenant={tenant}
+          hasKey={credentials.some((c) => c.provider === "claude-code")}
           keyValid={credentials.some(
-            (c) => c.provider === "anthropic" && c.isValid,
+            (c) => c.provider === "claude-code" && c.isValid,
           )}
+          onSaved={load}
         />
       </div>
 
@@ -2406,22 +2408,50 @@ function WebhookHowTo({
 }
 
 /**
- * Code Agent (Claude Code) card. Runs a MINIMAL read-only codeAgent run and reports whether
- * the `claude` CLI + the tenant's Anthropic key work end-to-end — a different path than the
- * agent node's API-key validation (this exercises the actual CLI subprocess in the worker).
+ * Code Agent (Claude Code) card. Holds a DEDICATED `claude-code` credential — separate from the
+ * Anthropic model-provider key — because Claude Code can auth with a subscription setup-token
+ * (`claude setup-token`), not just an API key. Also runs a MINIMAL read-only codeAgent run to
+ * verify the `claude` CLI + this credential work end-to-end (the real CLI subprocess in the worker).
  */
 function CodeAgentCard({
+  tenant,
   hasKey,
   keyValid,
+  onSaved,
 }: {
+  tenant: string | null;
   hasKey: boolean;
   keyValid: boolean;
+  onSaved: () => void;
 }) {
   const [phase, setPhase] = useState<"idle" | "running" | "ok" | "fail">(
     "idle",
   );
   const [detail, setDetail] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
+  // Credential entry (the dedicated claude-code slot).
+  const [open, setOpen] = useState(false);
+  const [token, setToken] = useState("");
+  const [savingKey, setSavingKey] = useState(false);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+
+  async function saveKey() {
+    if (!tenant || !token.trim()) return;
+    setSavingKey(true);
+    setSaveErr(null);
+    try {
+      await api.saveCredential(tenant, "claude-code", token.trim());
+      setToken("");
+      setOpen(false);
+      onSaved();
+    } catch {
+      setSaveErr(
+        "Token rejected — paste an API key (sk-ant-api…) or a setup-token (sk-ant-oat…).",
+      );
+    } finally {
+      setSavingKey(false);
+    }
+  }
 
   async function runTest() {
     setPhase("running");
@@ -2508,8 +2538,9 @@ function CodeAgentCard({
             Claude Code
           </div>
           <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
-            The Code Agent node — runs the <code>claude</code> CLI. Uses your
-            Anthropic key above.
+            The Code Agent node — runs the <code>claude</code> CLI. Uses a{" "}
+            <strong>dedicated</strong> Claude Code credential (separate from
+            your Anthropic key).
           </div>
         </div>
         {keyValid ? (
@@ -2521,16 +2552,87 @@ function CodeAgentCard({
         )}
       </div>
 
+      {open ? (
+        <div style={{ marginTop: 12 }}>
+          <input
+            type="password"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            placeholder="sk-ant-api… (API key) or sk-ant-oat… (setup-token)"
+            style={{
+              width: "100%",
+              padding: "8px 10px",
+              borderRadius: "var(--radius-sm)",
+              border: "1px solid var(--line-2)",
+              background: "var(--card)",
+              color: "var(--ink)",
+              fontSize: "var(--text-body)",
+            }}
+          />
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: 6,
+            }}
+          >
+            Run <code>claude setup-token</code> for a subscription token, or
+            paste an Anthropic API key. Stored encrypted; never echoed back.
+          </div>
+          {saveErr && (
+            <div
+              style={{
+                fontSize: "var(--text-sm)",
+                color: "var(--state-error)",
+                marginTop: 6,
+              }}
+            >
+              {saveErr}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <Button
+              variant="primary"
+              loading={savingKey}
+              disabled={savingKey || !token.trim()}
+              onClick={() => void saveKey()}
+            >
+              {savingKey ? "Saving…" : "Save credential"}
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={savingKey}
+              onClick={() => {
+                setOpen(false);
+                setToken("");
+                setSaveErr(null);
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <div
         style={{
           display: "flex",
           alignItems: "center",
           gap: 12,
           marginTop: 14,
+          flexWrap: "wrap",
         }}
       >
         <Button
-          variant="primary"
+          variant={hasKey ? "secondary" : "primary"}
+          icon="key"
+          disabled={!tenant}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {hasKey ? "Update credential" : "Set credential"}
+        </Button>
+        <Button
+          variant={hasKey ? "primary" : "secondary"}
           icon="play"
           loading={phase === "running"}
           disabled={phase === "running" || !hasKey}
@@ -2538,8 +2640,8 @@ function CodeAgentCard({
             hasKey
               ? keyValid
                 ? "Run a read-only test"
-                : "Run the test to surface the invalid key"
-              : "Add an Anthropic key first"
+                : "Run the test to surface the invalid credential"
+              : "Set a Claude Code credential first"
           }
           onClick={() => void runTest()}
         >
