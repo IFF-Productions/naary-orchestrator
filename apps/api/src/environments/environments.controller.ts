@@ -9,10 +9,12 @@ import {
   Post,
 } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
-import { TenantId } from "../auth/tenant.decorator";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { CreateEnvironmentDto, RenameEnvironmentDto } from "./environment.dto";
-import { EnvironmentResponse } from "./environment.response";
+import {
+  EnvironmentDeletedResponse,
+  EnvironmentResponse,
+} from "./environment.response";
 import {
   type EnvironmentView,
   EnvironmentsService,
@@ -65,7 +67,7 @@ export class EnvironmentsController {
   @ApiEndpoint({
     summary: "Delete an environment",
     description: "Refused for the default environment.",
-    ok: EnvironmentResponse,
+    ok: EnvironmentDeletedResponse,
     notFound: true,
   })
   @Delete(":envId")
@@ -73,8 +75,8 @@ export class EnvironmentsController {
   async remove(
     @Param("id") tenantId: string,
     @Param("envId") envId: string,
-  ): Promise<{ ok: true }> {
+  ): Promise<{ deleted: true }> {
     await this.environments.remove(tenantId, envId);
-    return { ok: true };
+    return { deleted: true };
   }
 }

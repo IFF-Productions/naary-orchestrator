@@ -53,7 +53,9 @@ describe("ensureDefault", () => {
       tenantId_slug: { tenantId: "t1", slug: "prod" },
     });
     expect(upsert.mock.calls[0][0].create.isDefault).toBe(true);
-    expect(upsert.mock.calls[0][0].update).toEqual({}); // exists → untouched
+    // Re-asserts default on an existing prod-slug row (defends a manual/partial edit), but doesn't
+    // override a user-renamed name.
+    expect(upsert.mock.calls[0][0].update).toEqual({ isDefault: true });
   });
 });
 
@@ -140,5 +142,22 @@ describe("resolveEnvId (the compatibility shim)", () => {
     await expect(svc.resolveEnvId("t1", "someone-elses")).rejects.toThrow(
       /Unknown environment/,
     );
+  });
+
+  it("resolves the DEFAULT slug even before the default row exists (lazy-create)", async () => {
+    // No row yet for 'prod' → falls back to ensureDefault instead of 404.
+    findFirst.mockResolvedValue(null);
+    expect(await svc.resolveEnvId("t1", "prod")).toBe("env-prod");
+    expect(upsert).toHaveBeenCalledOnce(); // ensureDefault ran
+  });
+});
+
+describe("create — concurrency", () => {
+  it("maps a P2002 unique race to a 400 (not a generic 500)", async () => {
+    findUnique.mockResolvedValue(null); // pre-check passes...
+    create.mockRejectedValue({ code: "P2002" }); // ...but the insert loses the race
+    await expect(
+      svc.create("t1", { name: "Sandbox", slug: "sandbox" }),
+    ).rejects.toThrow(/already exists/);
   });
 });

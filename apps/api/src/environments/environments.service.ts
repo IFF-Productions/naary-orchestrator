@@ -51,7 +51,9 @@ export class EnvironmentsService {
         slug: DEFAULT_SLUG,
         isDefault: true,
       },
-      update: {}, // exists → leave as-is
+      // Re-assert isDefault (defends against a manual edit / partial write that left the prod-slug
+      // row non-default → it must never become deletable), but DON'T override a user-renamed name.
+      update: { isDefault: true },
     });
     return view(row);
   }
@@ -86,10 +88,26 @@ export class EnvironmentsService {
     if (existing) {
       throw new BadRequestException(`An environment '${slug}' already exists.`);
     }
-    const row = await getPrisma().environment.create({
-      data: { tenantId, name, slug, isDefault: false },
-    });
-    return view(row);
+    try {
+      const row = await getPrisma().environment.create({
+        data: { tenantId, name, slug, isDefault: false },
+      });
+      return view(row);
+    } catch (e) {
+      // The pre-check has a TOCTOU race — two concurrent creates can both pass it, then one hits
+      // the (tenantId, slug) unique (Prisma P2002). Surface a clean 400, not the generic 500 the
+      // global filter turns a non-HttpException into.
+      if (
+        e &&
+        typeof e === "object" &&
+        (e as { code?: string }).code === "P2002"
+      ) {
+        throw new BadRequestException(
+          `An environment '${slug}' already exists.`,
+        );
+      }
+      throw e;
+    }
   }
 
   /** Rename an environment (display name only — the slug is stable). */
@@ -140,9 +158,12 @@ export class EnvironmentsService {
     const row = await getPrisma().environment.findFirst({
       where: { tenantId, OR: [{ id: sel }, { slug: sel.toLowerCase() }] },
     });
-    if (!row) {
-      throw new NotFoundException(`Unknown environment '${sel}'.`);
+    if (row) return row.id;
+    // A caller can select the default env by slug (e.g. `X-Environment-Id: prod`) BEFORE any call
+    // has lazily created it — resolve that to the (now-created) default instead of 404ing.
+    if (sel.toLowerCase() === DEFAULT_SLUG) {
+      return (await this.ensureDefault(tenantId)).id;
     }
-    return row.id;
+    throw new NotFoundException(`Unknown environment '${sel}'.`);
   }
 }

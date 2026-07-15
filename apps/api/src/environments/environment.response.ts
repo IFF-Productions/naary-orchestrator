@@ -16,3 +16,8 @@ export class EnvironmentResponse {
   })
   isDefault!: boolean;
 }
+
+/** Acknowledgement that an environment was deleted (repo convention: `{ deleted: true }`). */
+export class EnvironmentDeletedResponse {
+  @ApiProperty({ example: true }) deleted!: boolean;
+}
