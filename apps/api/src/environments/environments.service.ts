@@ -129,7 +129,10 @@ export class EnvironmentsService {
     const updated = await getPrisma().environment.findFirst({
       where: { id, tenantId },
     });
-    return view(updated!);
+    // Deleted between the updateMany and the re-read (or otherwise gone) — 404, not a 500 from a
+    // non-null assertion.
+    if (!updated) throw new NotFoundException("Environment not found.");
+    return view(updated);
   }
 
   /** Delete an environment. Refused for the default env (it's the migration + shim target). */
@@ -146,8 +149,12 @@ export class EnvironmentsService {
     // NOTE (Slice 1): once workflows/runs are env-scoped, also refuse (or cascade) when the env
     // still holds data. Today nothing is env-scoped, so a plain delete is safe.
     // Tenant-SCOPED delete (deleteMany with {id, tenantId}) so the write can't reach another
-    // tenant's row even if the id check above raced.
-    await getPrisma().environment.deleteMany({ where: { id, tenantId } });
+    // tenant's row even if the id check above raced. count 0 ⇒ deleted concurrently after the read
+    // → 404, consistent with treating an unknown env as not-found (not a silent success).
+    const { count } = await getPrisma().environment.deleteMany({
+      where: { id, tenantId },
+    });
+    if (count === 0) throw new NotFoundException("Environment not found.");
   }
 
   /**
