@@ -48,7 +48,13 @@ export interface NodeOutputMap {
   };
   codeAgent: {
     status: "ok";
-    output: { result: string; tool: string; sessionId?: string };
+    output: {
+      result: string;
+      tool: string;
+      sessionId?: string;
+      /** Write-mode diff (Slice 2c); a claim-check reference when large. Absent in read mode. */
+      diff?: unknown;
+    };
     costUsd: number;
   };
   mcpTool: { status: "ok"; content: unknown; costUsd: number };

@@ -580,6 +580,12 @@ export async function runGraph(
             maxBudgetUsd: caCfg.maxBudgetUsd,
             timeoutMs: caCfg.timeoutMs,
             costUsd: caCfg.costUsd,
+            // Write mode (Slice 2c): the activity clones `repo` (via the App `connectionId`) and
+            // dispatches to the sandbox-runner; default/read runs in-worker with no repo.
+            mode: caCfg.mode,
+            repo: caCfg.repo,
+            branch: caCfg.branch,
+            connectionId: caCfg.connectionId,
           },
           ctx.__input,
           {

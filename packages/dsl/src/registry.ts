@@ -192,6 +192,17 @@ const CONFIG_SCHEMAS = {
     maxTurns: z.number().int().positive().optional(),
     maxBudgetUsd: z.number().positive().optional(),
     timeoutMs: z.number().int().positive().optional(),
+    // "read" (default) = in-worker plan-mode run, no repo. "write" = clone `repo` and let the
+    // CLI edit it in the isolated sandbox, returning a diff (Slice 2c). Write is gated OFF at the
+    // worker (CODE_AGENT_WRITE_ENABLED) until the runner is wired on the deploy host.
+    mode: z.enum(["read", "write"]).optional(),
+    /** "owner/name" of the repo to clone (write mode). */
+    repo: z.string().optional(),
+    /** Base branch to clone (write mode); defaults to the repo's default branch. */
+    branch: z.string().optional(),
+    /** The GitHub App connection that authorizes the clone (write mode). The install token is
+     *  resolved in-activity and used to clone OUTSIDE the sandbox — it never enters the sandbox. */
+    connectionId: z.string().optional(),
     // Positive: a manual fallback cost only makes sense > 0 (a negative would REDUCE the
     // run's accumulated __costUsd; a 0 defeats the never-zero fallback intent).
     costUsd: z.number().positive().optional(),
