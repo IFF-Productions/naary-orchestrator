@@ -480,7 +480,8 @@ export function Integrations() {
       <div style={{ ...monoLabel, marginBottom: 12 }}>Code Agent</div>
       <div style={{ marginBottom: 24 }}>
         <CodeAgentCard
-          hasKey={credentials.some(
+          hasKey={credentials.some((c) => c.provider === "anthropic")}
+          keyValid={credentials.some(
             (c) => c.provider === "anthropic" && c.isValid,
           )}
         />
@@ -2408,7 +2409,13 @@ function WebhookHowTo({
  * the `claude` CLI + the tenant's Anthropic key work end-to-end — a different path than the
  * agent node's API-key validation (this exercises the actual CLI subprocess in the worker).
  */
-function CodeAgentCard({ hasKey }: { hasKey: boolean }) {
+function CodeAgentCard({
+  hasKey,
+  keyValid,
+}: {
+  hasKey: boolean;
+  keyValid: boolean;
+}) {
   const [phase, setPhase] = useState<"idle" | "running" | "ok" | "fail">(
     "idle",
   );
@@ -2496,8 +2503,10 @@ function CodeAgentCard({ hasKey }: { hasKey: boolean }) {
             Anthropic key above.
           </div>
         </div>
-        {hasKey ? (
+        {keyValid ? (
           <StatusPill state="done" label="Key set" />
+        ) : hasKey ? (
+          <StatusPill state="error" label="Key invalid" />
         ) : (
           <StatusPill state="idle" label="No key" />
         )}
@@ -2516,7 +2525,13 @@ function CodeAgentCard({ hasKey }: { hasKey: boolean }) {
           icon="play"
           loading={phase === "running"}
           disabled={phase === "running" || !hasKey}
-          title={hasKey ? "Run a read-only test" : "Add an Anthropic key first"}
+          title={
+            hasKey
+              ? keyValid
+                ? "Run a read-only test"
+                : "Run the test to surface the invalid key"
+              : "Add an Anthropic key first"
+          }
           onClick={() => void runTest()}
         >
           {phase === "running" ? "Testing…" : "Run test"}
@@ -2530,7 +2545,7 @@ function CodeAgentCard({ hasKey }: { hasKey: boolean }) {
           >
             {phase === "ok" ? "✓ " : phase === "fail" ? "✗ " : ""}
             {detail}
-            {runId && phase === "fail" && (
+            {runId && (phase === "ok" || phase === "fail") && (
               <>
                 {" "}
                 <a
