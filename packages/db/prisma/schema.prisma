@@ -119,7 +119,9 @@ model Promotion {
   actor       String // OIDC subject, or "api-token"
   createdAt   DateTime @default(now())
 
-  @@index([tenantId, workflowKey])
+  // Includes createdAt so the lineage read (`where {tenantId, workflowKey} order by createdAt desc`)
+  // is served by the index without a separate sort (mirrors AuditEvent).
+  @@index([tenantId, workflowKey, createdAt])
 }
 
 /** Pinned node output — AUTHORING-ONLY sample data (design SINGLE-NODE-EXECUTION.md §4). Lets you

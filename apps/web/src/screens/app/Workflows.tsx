@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Button,
   Card,
+  Dialog,
   Icon,
   LoadingBlock,
   SearchInput,
@@ -51,10 +52,22 @@ export function Workflows() {
     setPromoteFor(workflowKey);
     setPromoteMsg(null);
     setPromoteEnvs([]);
+    let envs: Environment[];
+    try {
+      envs = await api.listEnvironments(tenant);
+    } catch {
+      // Distinguish a load failure from "no other environments".
+      setPromoteMsg("Couldn't load environments — try again.");
+      return;
+    }
     const active = getActiveEnvironment();
-    const envs = await api.listEnvironments(tenant).catch(() => []);
-    // Targets = every env except the source (the active one).
-    setPromoteEnvs(envs.filter((e) => e.slug !== active && e.id !== active));
+    // Exclude the SOURCE env from the targets. When no env is selected (header omitted), the
+    // server uses the DEFAULT env as the source — so filter THAT out, not just a matching slug.
+    setPromoteEnvs(
+      envs.filter((e) =>
+        active ? e.slug !== active && e.id !== active : !e.isDefault,
+      ),
+    );
   }
 
   async function doPromote(
@@ -407,98 +420,63 @@ export function Workflows() {
         Run stats are computed from the {runs.length} most recent runs.
       </div>
 
-      {/* Promote picker — copy the workflow from the active env into a target env. */}
-      {promoteFor && (
-        <>
+      {/* Promote picker — copy the workflow from the active env into a target env. Uses the shared
+          Dialog (consistent overlay/close behaviour + styling). */}
+      <Dialog
+        open={!!promoteFor}
+        onClose={() => setPromoteFor(null)}
+        title={`Promote “${promoteFor ?? ""}”`}
+        footer={
+          <Button variant="ghost" onClick={() => setPromoteFor(null)}>
+            Close
+          </Button>
+        }
+      >
+        <div
+          style={{
+            fontSize: "var(--text-sm)",
+            color: "var(--ink-3)",
+            marginBottom: 14,
+            lineHeight: "var(--leading-snug)",
+          }}
+        >
+          Copies this workflow’s current graph from the <strong>active</strong>{" "}
+          environment into the target as a new version. Credentials &
+          connections are not copied — the target env uses its own.
+        </div>
+        {promoteEnvs.length === 0 ? (
+          <div style={{ fontSize: "var(--text-sm)", color: "var(--ink-3)" }}>
+            {promoteMsg ??
+              "No other environments to promote to. Create one from the sidebar switcher."}
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {promoteEnvs.map((e) => (
+              <Button
+                key={e.id}
+                variant="secondary"
+                loading={promoteBusy === e.id}
+                disabled={!!promoteBusy}
+                onClick={() => promoteFor && void doPromote(promoteFor, e)}
+              >
+                Promote to {e.name}
+                {e.isDefault ? " (default)" : ""}
+              </Button>
+            ))}
+          </div>
+        )}
+        {promoteEnvs.length > 0 && promoteMsg && (
           <div
-            onClick={() => setPromoteFor(null)}
             style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(4,6,10,.5)",
-              zIndex: 60,
-            }}
-          />
-          <div
-            style={{
-              position: "fixed",
-              top: "50%",
-              left: "50%",
-              transform: "translate(-50%,-50%)",
-              zIndex: 61,
-              width: 380,
-              maxWidth: "92vw",
-              background: "var(--bg-2)",
-              border: "1px solid var(--line)",
-              borderRadius: 12,
-              boxShadow: "0 24px 70px -12px rgba(0,0,0,.6)",
-              padding: 18,
+              marginTop: 12,
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-2)",
             }}
           >
-            <div
-              style={{
-                fontSize: "var(--text-md)",
-                fontWeight: "var(--weight-semibold)",
-                color: "var(--ink)",
-              }}
-            >
-              Promote “{promoteFor}”
-            </div>
-            <div
-              style={{
-                fontSize: "var(--text-sm)",
-                color: "var(--ink-3)",
-                margin: "4px 0 14px",
-                lineHeight: "var(--leading-snug)",
-              }}
-            >
-              Copies this workflow’s current graph from the{" "}
-              <strong>active</strong> environment into the target as a new
-              version. Credentials & connections are not copied — the target env
-              uses its own.
-            </div>
-            {promoteEnvs.length === 0 ? (
-              <div
-                style={{ fontSize: "var(--text-sm)", color: "var(--ink-3)" }}
-              >
-                No other environments to promote to. Create one from the sidebar
-                switcher.
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {promoteEnvs.map((e) => (
-                  <Button
-                    key={e.id}
-                    variant="secondary"
-                    loading={promoteBusy === e.id}
-                    disabled={!!promoteBusy}
-                    onClick={() => void doPromote(promoteFor, e)}
-                  >
-                    Promote to {e.name}
-                    {e.isDefault ? " (default)" : ""}
-                  </Button>
-                ))}
-              </div>
-            )}
-            {promoteMsg && (
-              <div
-                style={{
-                  marginTop: 12,
-                  fontSize: "var(--text-sm)",
-                  color: "var(--ink-2)",
-                }}
-              >
-                {promoteMsg}
-              </div>
-            )}
-            <div style={{ marginTop: 14, textAlign: "right" }}>
-              <Button variant="ghost" onClick={() => setPromoteFor(null)}>
-                Close
-              </Button>
-            </div>
+            {promoteMsg}
           </div>
-        </>
-      )}
+        )}
+      </Dialog>
     </div>
   );
 }

@@ -16,5 +16,5 @@ CREATE TABLE "Promotion" (
     CONSTRAINT "Promotion_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex
-CREATE INDEX "Promotion_tenantId_workflowKey_idx" ON "Promotion"("tenantId", "workflowKey");
+-- CreateIndex — includes createdAt so the lineage read (order by createdAt desc) needs no sort.
+CREATE INDEX "Promotion_tenantId_workflowKey_createdAt_idx" ON "Promotion"("tenantId", "workflowKey", "createdAt");
