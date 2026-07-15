@@ -88,15 +88,19 @@ model PollState {
 model GraphDefinition {
   id          String   @id @default(uuid())
   tenantId    String
+  // Env-scoped (design ENVIRONMENTS.md Slice 2b): a workflow definition lives in ONE environment.
+  // The same workflowKey can exist independently per env (copy-on-promote). Backfilled to each
+  // tenant's default "prod" env.
+  environmentId String
   workflowKey String // stable key the trigger/registry referenced, e.g. "github-review"
   name        String
   graph       Json // the GraphDef
   contentHash String // sha256 of canonical(graph)
-  version     Int // monotonically increasing per (tenantId, workflowKey)
+  version     Int // monotonically increasing per (tenantId, environmentId, workflowKey)
   createdAt   DateTime @default(now())
 
-  @@unique([tenantId, workflowKey, version])
-  @@index([tenantId, workflowKey])
+  @@unique([tenantId, environmentId, workflowKey, version])
+  @@index([tenantId, environmentId, workflowKey])
 }
 
 /** Pinned node output — AUTHORING-ONLY sample data (design SINGLE-NODE-EXECUTION.md §4). Lets you
@@ -132,11 +136,14 @@ model ErrorHandler {
  *  (the toggle's value is the pause capability). Don't "fix" this default to inactive. */
 model WorkflowActivation {
   tenantId    String
+  // Env-scoped (design ENVIRONMENTS.md Slice 2b): the active flag is per-env, so toggling a
+  // workflow in sandbox doesn't (de)activate the same key in prod. Backfilled to the default env.
+  environmentId String
   workflowKey String
   active      Boolean  @default(true)
   updatedAt   DateTime @default(now()) @updatedAt
 
-  @@id([tenantId, workflowKey])
+  @@id([tenantId, environmentId, workflowKey])
 }
 
 // Slice #4 — external integrations.

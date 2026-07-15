@@ -22,31 +22,31 @@ beforeEach(() => {
 describe("GraphsService activation", () => {
   it("isActive defaults to TRUE when there is no row (existing workflows keep firing)", async () => {
     findUnique.mockResolvedValue(null);
-    expect(await svc().isActive("t-1", "w")).toBe(true);
+    expect(await svc().isActive("t-1", "e1", "w")).toBe(true);
   });
 
   it("isActive reflects an explicit deactivation row", async () => {
     findUnique.mockResolvedValue({ active: false });
-    expect(await svc().isActive("t-1", "w")).toBe(false);
+    expect(await svc().isActive("t-1", "e1", "w")).toBe(false);
   });
 
   it("inactiveKeys returns only the explicitly-deactivated keys", async () => {
     findMany.mockResolvedValue([{ workflowKey: "a" }, { workflowKey: "b" }]);
-    const set = await svc().inactiveKeys("t-1");
+    const set = await svc().inactiveKeys("t-1", "e1");
     expect(set.has("a")).toBe(true);
     expect(set.has("b")).toBe(true);
     expect(set.has("c")).toBe(false);
     expect(findMany).toHaveBeenCalledWith({
-      where: { tenantId: "t-1", active: false },
+      where: { tenantId: "t-1", environmentId: "e1", active: false },
       select: { workflowKey: true },
     });
   });
 
   it("setActive upserts the flag", async () => {
-    await svc().setActive("t-1", "w", false);
+    await svc().setActive("t-1", "e1", "w", false);
     expect(upsert).toHaveBeenCalledWith({
-      where: { tenantId_workflowKey: { tenantId: "t-1", workflowKey: "w" } },
-      create: { tenantId: "t-1", workflowKey: "w", active: false },
+      where: { tenantId_environmentId_workflowKey: { tenantId: "t-1", environmentId: "e1", workflowKey: "w" } },
+      create: { tenantId: "t-1", environmentId: "e1", workflowKey: "w", active: false },
       update: { active: false },
     });
   });

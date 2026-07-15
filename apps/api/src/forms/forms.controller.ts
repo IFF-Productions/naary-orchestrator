@@ -11,6 +11,7 @@ import {
 import { Throttle } from "@nestjs/throttler";
 import { Public } from "../auth/public.decorator";
 import { ExecutionsService } from "../executions/executions.service";
+import { EnvironmentsService } from "../environments/environments.service";
 import { GraphsService } from "../graphs/graphs.service";
 import { extractFormDefinition, validateSubmission } from "./form-definition";
 import { FormService } from "./form.service";
@@ -36,6 +37,7 @@ export class FormsController {
     private readonly forms: FormService,
     private readonly graphs: GraphsService,
     private readonly executions: ExecutionsService,
+    private readonly environments: EnvironmentsService,
   ) {}
 
   /** Serve the public form definition (title/description/fields). 404 if the endpoint is unknown
@@ -72,8 +74,11 @@ export class FormsController {
   private async resolve(formId: string) {
     const endpoint = await this.forms.getEndpoint(formId);
     if (!endpoint) throw new NotFoundException("Unknown form");
+    // Public trigger → the default env until triggers are env-scoped (design §Slice 4).
+    const envId = await this.environments.defaultEnvId(endpoint.tenantId);
     const snapshot = await this.graphs.getLatest(
       endpoint.tenantId,
+      envId,
       endpoint.workflowId,
     );
     if (!snapshot) throw new NotFoundException("Unknown form");

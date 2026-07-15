@@ -13,7 +13,7 @@ type GraphArg = {
 };
 
 function makeService() {
-  const service = new ExecutionsService({} as never);
+  const service = new ExecutionsService({} as never, { defaultEnvId: async () => "env-test", resolveEnvId: async () => "env-test" } as never);
   // Capture the args startGraph is handed so we can assert the synthetic graph
   // shape + the system workflowKey without running the real start path.
   const startGraph = vi

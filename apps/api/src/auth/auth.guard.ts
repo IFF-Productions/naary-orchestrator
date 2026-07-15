@@ -22,6 +22,9 @@ interface GuardRequest extends RequestWithPrincipal {
 
 /** SPA sends the selected workspace here; the guard membership-checks it. */
 const WORKSPACE_HEADER = "x-workspace-id";
+/** SPA sends the selected environment here. The guard only STASHES it (no DB work — design
+ *  ENVIRONMENTS.md §4); env-scoped controllers resolve it via EnvironmentsService.resolveEnvId. */
+const ENVIRONMENT_HEADER = "x-environment-id";
 
 /**
  * Optional single-/few-user allowlist (early-access lockdown). `ACCESS_ALLOWED_EMAILS` is a
@@ -111,6 +114,12 @@ export class AuthGuard implements CanActivate {
     // the X-Workspace-Id header. If both are present they must agree.
     const pathTenant = /(?:^|\/)tenants\/([^/]+)/.exec(req.path ?? "")?.[1];
     const headerTenant = req.headers?.[WORKSPACE_HEADER]?.trim() || undefined;
+    // The selected environment — STASHED only (no membership/DB check here; a controller resolves +
+    // tenant-validates it via resolveEnvId). A header can be a string[] if duplicated; take the first.
+    const envHeader = req.headers?.[ENVIRONMENT_HEADER];
+    const environmentSel =
+      (Array.isArray(envHeader) ? envHeader[0] : envHeader)?.trim() ||
+      undefined;
     if (pathTenant && headerTenant && pathTenant !== headerTenant) {
       throw new ForbiddenException("Workspace mismatch");
     }
@@ -124,7 +133,7 @@ export class AuthGuard implements CanActivate {
       if (target && target !== tenantId) {
         throw new ForbiddenException("Tenant mismatch");
       }
-      req.principal = { tenantId, role: "owner" };
+      req.principal = { tenantId, role: "owner", environmentSel };
       return true;
     }
 
@@ -222,6 +231,7 @@ export class AuthGuard implements CanActivate {
       email: user.email,
       emailVerified: user.emailVerified,
       role: roleOf(active),
+      environmentSel,
     };
     return true;
   }

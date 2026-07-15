@@ -13,6 +13,7 @@ import { RUN_GRAPH_WORKFLOW, TASK_QUEUE } from "@naary/contracts";
 import { getPrisma } from "@naary/db";
 import type { GraphDef } from "@naary/dsl";
 import { getBudget } from "@naary/usage";
+import { EnvironmentsService } from "../environments/environments.service";
 import { GraphsService } from "../graphs/graphs.service";
 import { connectTemporal } from "../temporal/client";
 
@@ -42,7 +43,10 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
   private client!: Client;
   private connection!: Connection;
 
-  constructor(private readonly graphs: GraphsService) {}
+  constructor(
+    private readonly graphs: GraphsService,
+    private readonly environments: EnvironmentsService,
+  ) {}
 
   async onModuleInit(): Promise<void> {
     const { client, connection } = await connectTemporal();
@@ -62,7 +66,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     const cronExpr = cron?.trim();
     if (!cronExpr) throw new BadRequestException("cron is required");
 
-    const snapshot = await this.graphs.getLatest(tenantId, workflowKey);
+    const snapshot = await this.graphs.getLatest(tenantId, await this.environments.defaultEnvId(tenantId), workflowKey);
     if (!snapshot) {
       throw new NotFoundException(
         `No '${workflowKey}' graph for this tenant — save one first`,
@@ -109,7 +113,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
 
     // Invariant: never leave a schedule running while the workflow is deactivated. If the workflow
     // is inactive, create the schedule PAUSED (a fresh Temporal schedule is unpaused by default).
-    const paused = !(await this.graphs.isActive(tenantId, workflowKey));
+    const paused = !(await this.graphs.isActive(tenantId, await this.environments.defaultEnvId(tenantId), workflowKey));
     if (paused) await this.pauseHandle(id, true);
 
     await getPrisma().schedule.create({
@@ -144,7 +148,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
       30,
       Math.floor(Number(cfg.intervalSeconds) || 300),
     );
-    const snapshot = await this.graphs.getLatest(tenantId, workflowKey);
+    const snapshot = await this.graphs.getLatest(tenantId, await this.environments.defaultEnvId(tenantId), workflowKey);
     if (!snapshot) return;
     const budget = await getBudget(tenantId);
     const id = `poll-${tenantId}-${workflowKey}`;
@@ -185,7 +189,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     // Invariant: a deactivated workflow's schedule must not fire. The delete-then-create above
     // makes a fresh (unpaused) schedule on every save — re-pause it if the workflow is inactive,
     // else a normal edit silently re-arms a deactivated poll trigger.
-    const paused = !(await this.graphs.isActive(tenantId, workflowKey));
+    const paused = !(await this.graphs.isActive(tenantId, await this.environments.defaultEnvId(tenantId), workflowKey));
     if (paused) await this.pauseHandle(id, true);
     await getPrisma().schedule.upsert({
       where: { id },
@@ -216,7 +220,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     if (!start || start.type !== "scheduleTrigger") return;
     const cron = String((start.config as { cron?: string })?.cron ?? "").trim();
     if (!cron) return;
-    const snapshot = await this.graphs.getLatest(tenantId, workflowKey);
+    const snapshot = await this.graphs.getLatest(tenantId, await this.environments.defaultEnvId(tenantId), workflowKey);
     if (!snapshot) return;
     const budget = await getBudget(tenantId);
     const id = `cron-${tenantId}-${workflowKey}`;
@@ -254,7 +258,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     });
     // Invariant (see syncPollSchedule): re-pause the freshly-created cron schedule if the workflow
     // is deactivated, so editing an inactive workflow doesn't re-arm its scheduleTrigger.
-    const paused = !(await this.graphs.isActive(tenantId, workflowKey));
+    const paused = !(await this.graphs.isActive(tenantId, await this.environments.defaultEnvId(tenantId), workflowKey));
     if (paused) await this.pauseHandle(id, true);
     await getPrisma().schedule.upsert({
       where: { id },
@@ -358,9 +362,12 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
    */
   async setActive(
     tenantId: string,
+    environmentId: string,
     workflowKey: string,
     active: boolean,
   ): Promise<void> {
+    // The activation FLAG is env-scoped (per the active env from the caller); the Temporal
+    // schedule pause/resume is not yet (deferred — schedules run in the default env until Slice 4).
     const rows = await getPrisma().schedule.findMany({
       where: { tenantId, workflowKey },
       select: { id: true },
@@ -371,9 +378,9 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         where: { tenantId, workflowKey },
         data: { paused: true },
       });
-      await this.graphs.setActive(tenantId, workflowKey, false);
+      await this.graphs.setActive(tenantId, environmentId, workflowKey, false);
     } else {
-      await this.graphs.setActive(tenantId, workflowKey, true);
+      await this.graphs.setActive(tenantId, environmentId, workflowKey, true);
       for (const r of rows) await this.pauseHandle(r.id, false);
       await getPrisma().schedule.updateMany({
         where: { tenantId, workflowKey },
@@ -413,7 +420,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     // Don't let the per-schedule RESUME route re-arm a workflow that's been DEACTIVATED — that
     // would restart an automatic recurring trigger while the activation flag still says inactive
     // (schedules fire straight to the worker with no gate). Reactivate the workflow instead.
-    if (!paused && !(await this.graphs.isActive(tenantId, row.workflowKey))) {
+    if (!paused && !(await this.graphs.isActive(tenantId, await this.environments.defaultEnvId(tenantId), row.workflowKey))) {
       throw new ConflictException(
         "Workflow is inactive — reactivate it to resume its schedules",
       );
@@ -428,7 +435,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
    *  is deactivated (this is the schedule's automatic action — use a manual run to test instead). */
   async trigger(tenantId: string, id: string): Promise<void> {
     const row = await this.assertOwner(tenantId, id);
-    if (!(await this.graphs.isActive(tenantId, row.workflowKey))) {
+    if (!(await this.graphs.isActive(tenantId, await this.environments.defaultEnvId(tenantId), row.workflowKey))) {
       throw new ConflictException(
         "Workflow is inactive — reactivate it to trigger its schedule",
       );

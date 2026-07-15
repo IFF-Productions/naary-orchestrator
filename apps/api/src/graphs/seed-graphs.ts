@@ -1,6 +1,7 @@
 import "../env"; // load DATABASE_URL before @naary/db evaluates
 import { disconnectPrisma } from "@naary/db";
 import { githubReviewGraph, sampleGraph, webhookSampleGraph } from "@naary/dsl";
+import { EnvironmentsService } from "../environments/environments.service";
 import { GraphsService } from "./graphs.service";
 
 /**
@@ -19,13 +20,14 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   const graphs = new GraphsService();
+  const envId = await new EnvironmentsService().defaultEnvId(tenantId);
   const seeds: [string, string, typeof sampleGraph][] = [
     ["default", "Support triage (demo)", sampleGraph],
     ["wf-default", "Webhook sample", webhookSampleGraph],
     ["github-review", "GitHub PR review", githubReviewGraph],
   ];
   for (const [key, name, graph] of seeds) {
-    const snap = await graphs.upsert(tenantId, key, name, graph);
+    const snap = await graphs.upsert(tenantId, envId, key, name, graph);
     // eslint-disable-next-line no-console
     console.log(
       `seeded ${key} v${snap.version} (${snap.contentHash.slice(0, 12)}…)`,

@@ -69,6 +69,7 @@ describe("GraphsService.upsert", () => {
 
     const snap = await new GraphsService().upsert(
       "t1",
+      "e1",
       "default",
       "Demo",
       graph,
@@ -92,6 +93,7 @@ describe("GraphsService.upsert", () => {
 
     const snap = await new GraphsService().upsert(
       "t1",
+      "e1",
       "default",
       "Demo",
       graph,
@@ -115,6 +117,7 @@ describe("GraphsService.upsert", () => {
     };
     const snap = await new GraphsService().upsert(
       "t1",
+      "e1",
       "default",
       "Demo",
       changed,
@@ -142,7 +145,7 @@ describe("GraphsService.upsert", () => {
         edges: [{ from: "a", to: "h" }],
       };
       await expect(
-        new GraphsService().upsert("t1", "default", "Demo", bad),
+        new GraphsService().upsert("t1", "e1", "default", "Demo", bad),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(create).not.toHaveBeenCalled();
     });
@@ -160,6 +163,7 @@ describe("GraphsService.upsert", () => {
       };
       const snap = await new GraphsService().upsert(
         "t1",
+        "e1",
         "default",
         "D",
         draft,
@@ -182,7 +186,7 @@ describe("GraphsService.upsert", () => {
         ],
         edges: [{ from: "a", to: "h" }],
       };
-      await new GraphsService().upsert("t1", "default", "D", withExtra);
+      await new GraphsService().upsert("t1", "e1", "default", "D", withExtra);
       const persisted = create.mock.calls[0][0].data.graph as GraphDef;
       expect(persisted.nodes[1].config).toEqual({
         method: "GET",
@@ -201,15 +205,16 @@ describe("GraphsService.getVersion", () => {
       version: 2,
     });
 
-    const snap = await new GraphsService().getVersion("t1", "refunds", 2);
+    const snap = await new GraphsService().getVersion("t1", "e1", "refunds", 2);
 
     expect(snap?.version).toBe(2);
     expect(snap?.contentHash).toBe(hashGraph(graph));
     // Composite-unique lookup — never resolves another tenant's or key's row.
     expect(findUnique).toHaveBeenCalledWith({
       where: {
-        tenantId_workflowKey_version: {
+        tenantId_environmentId_workflowKey_version: {
           tenantId: "t1",
+          environmentId: "e1",
           workflowKey: "refunds",
           version: 2,
         },
@@ -219,7 +224,12 @@ describe("GraphsService.getVersion", () => {
 
   it("returns null when that (key, version) doesn't exist (→ 404 at the caller)", async () => {
     findUnique.mockResolvedValue(null);
-    const snap = await new GraphsService().getVersion("t1", "refunds", 99);
+    const snap = await new GraphsService().getVersion(
+      "t1",
+      "e1",
+      "refunds",
+      99,
+    );
     expect(snap).toBeNull();
   });
 });
@@ -233,7 +243,7 @@ describe("GraphsService.listVersions", () => {
       { version: 1, contentHash: "h1", createdAt: now },
     ]);
 
-    const out = await new GraphsService().listVersions("t1", "refunds");
+    const out = await new GraphsService().listVersions("t1", "e1", "refunds");
 
     expect(out.map((v) => v.version)).toEqual([3, 2, 1]);
     expect(out[0]).toEqual({
@@ -242,7 +252,11 @@ describe("GraphsService.listVersions", () => {
       createdAt: now.toISOString(),
     });
     const arg = findMany.mock.calls[0][0];
-    expect(arg.where).toEqual({ tenantId: "t1", workflowKey: "refunds" });
+    expect(arg.where).toEqual({
+      tenantId: "t1",
+      environmentId: "e1",
+      workflowKey: "refunds",
+    });
     expect(arg.orderBy).toEqual({ version: "desc" });
     // No graph body selected — the picker only needs identity.
     expect(arg.select).not.toHaveProperty("graph");
@@ -253,7 +267,7 @@ describe("GraphsService.deleteWorkflow", () => {
   it("returns false (→ controller 404) and touches nothing when no graph exists", async () => {
     findFirst.mockResolvedValue(null);
 
-    const ok = await new GraphsService().deleteWorkflow("t1", "ghost");
+    const ok = await new GraphsService().deleteWorkflow("t1", "e1", "ghost");
 
     expect(ok).toBe(false);
     expect($transaction).not.toHaveBeenCalled();
@@ -263,18 +277,19 @@ describe("GraphsService.deleteWorkflow", () => {
   it("removes the graph + every dependent row in ONE transaction, keeping run history", async () => {
     findFirst.mockResolvedValue({ workflowKey: "wf-1" });
 
-    const ok = await new GraphsService().deleteWorkflow("t1", "wf-1");
+    const ok = await new GraphsService().deleteWorkflow("t1", "e1", "wf-1");
 
     expect(ok).toBe(true);
     // A single atomic transaction — not a series of loose deletes.
     expect($transaction).toHaveBeenCalledOnce();
 
-    // Every table keyed by the workflow key is purged, scoped to the tenant.
+    // The env-scoped tables (graph + activation) are purged for THIS env; the rest (not yet
+    // env-scoped — deferred) stay keyed by (tenant, workflowKey).
     expect(del.graphDefinition).toHaveBeenCalledWith({
-      where: { tenantId: "t1", workflowKey: "wf-1" },
+      where: { tenantId: "t1", environmentId: "e1", workflowKey: "wf-1" },
     });
     expect(del.workflowActivation).toHaveBeenCalledWith({
-      where: { tenantId: "t1", workflowKey: "wf-1" },
+      where: { tenantId: "t1", environmentId: "e1", workflowKey: "wf-1" },
     });
     expect(del.pinnedData).toHaveBeenCalledWith({
       where: { tenantId: "t1", workflowKey: "wf-1" },

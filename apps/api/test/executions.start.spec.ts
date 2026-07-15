@@ -15,7 +15,13 @@ const SNAP_LATEST = { graph: GRAPH, contentHash: "h-latest", version: 5 };
 const SNAP_V2 = { graph: GRAPH, contentHash: "h-v2", version: 2 };
 
 function makeService() {
-  const service = new ExecutionsService({} as never);
+  const service = new ExecutionsService(
+    {} as never,
+    {
+      defaultEnvId: async () => "env-test",
+      resolveEnvId: async () => "env-test",
+    } as never,
+  );
   const getLatest = vi.fn();
   const getVersion = vi.fn();
   (service as unknown as { graphs: unknown }).graphs = {
@@ -47,11 +53,16 @@ describe("start (version resolution)", () => {
     const { service, getLatest, getVersion } = makeService();
     getLatest.mockResolvedValue(SNAP_LATEST);
 
-    const out = (await service.start("t1", { x: 1 }, "refunds")) as unknown as {
+    const out = (await service.start(
+      "t1",
+      "e1",
+      { x: 1 },
+      "refunds",
+    )) as unknown as {
       version: number;
     };
 
-    expect(getLatest).toHaveBeenCalledWith("t1", "refunds");
+    expect(getLatest).toHaveBeenCalledWith("t1", "e1", "refunds");
     expect(getVersion).not.toHaveBeenCalled();
     expect(out.version).toBe(5); // startGraph got the latest snapshot
   });
@@ -62,12 +73,13 @@ describe("start (version resolution)", () => {
 
     const out = (await service.start(
       "t1",
+      "e1",
       { x: 1 },
       "refunds",
       2,
     )) as unknown as { version: number };
 
-    expect(getVersion).toHaveBeenCalledWith("t1", "refunds", 2);
+    expect(getVersion).toHaveBeenCalledWith("t1", "e1", "refunds", 2);
     expect(getLatest).not.toHaveBeenCalled();
     expect(out.version).toBe(2); // startGraph got version 2's snapshot, not latest
   });
@@ -76,17 +88,17 @@ describe("start (version resolution)", () => {
     const { service, getVersion } = makeService();
     getVersion.mockResolvedValue(null);
 
-    await expect(service.start("t1", undefined, "refunds", 99)).rejects.toThrow(
-      /version 99 of 'refunds'/,
-    );
+    await expect(
+      service.start("t1", "e1", undefined, "refunds", 99),
+    ).rejects.toThrow(/version 99 of 'refunds'/);
   });
 
   it("404s with the save-one-first message when no latest graph exists", async () => {
     const { service, getLatest } = makeService();
     getLatest.mockResolvedValue(null);
 
-    await expect(service.start("t1", undefined, "refunds")).rejects.toThrow(
-      /save one first/,
-    );
+    await expect(
+      service.start("t1", "e1", undefined, "refunds"),
+    ).rejects.toThrow(/save one first/);
   });
 });

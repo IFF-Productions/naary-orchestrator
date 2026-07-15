@@ -11,7 +11,7 @@ vi.mock("@naary/db", () => ({
 import { ExecutionsService } from "../src/executions/executions.service";
 
 function makeService(fetchHistory: unknown): ExecutionsService {
-  const service = new ExecutionsService({} as never);
+  const service = new ExecutionsService({} as never, { defaultEnvId: async () => "env-test", resolveEnvId: async () => "env-test" } as never);
   (service as unknown as { client: unknown }).client = {
     workflow: { getHandle: () => ({ fetchHistory }) },
   };
@@ -66,6 +66,7 @@ describe("rerun", () => {
     // No graphVersion → undefined 4th arg (re-run against the latest graph).
     expect(start).toHaveBeenCalledWith(
       "t-1",
+      "env-test",
       { orderId: 42 },
       "refunds",
       undefined,
@@ -88,7 +89,7 @@ describe("rerun", () => {
     await service.rerun("wf-old", "t-1", 2);
 
     // The version is resolved against the run's OWN workflowKey inside start().
-    expect(start).toHaveBeenCalledWith("t-1", { orderId: 7 }, "refunds", 2);
+    expect(start).toHaveBeenCalledWith("t-1", "env-test", { orderId: 7 }, "refunds", 2);
   });
 
   it("falls back to default input when the start payload is missing/undecodable", async () => {
@@ -114,7 +115,7 @@ describe("rerun", () => {
 
     await service.rerun("wf-old", "t-1");
 
-    expect(start).toHaveBeenCalledWith("t-1", undefined, "wk", undefined);
+    expect(start).toHaveBeenCalledWith("t-1", "env-test", undefined, "wk", undefined);
   });
 
   it("rejects a run that predates workflow-key tracking (400, no start)", async () => {

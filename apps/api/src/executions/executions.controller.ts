@@ -8,7 +8,8 @@ import {
   Query,
 } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
-import { TenantId } from "../auth/tenant.decorator";
+import { EnvironmentSel, TenantId } from "../auth/tenant.decorator";
+import { EnvironmentsService } from "../environments/environments.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import {
   ApproveBatchDto,
@@ -39,7 +40,10 @@ import {
 @ApiBearerAuth("bearer")
 @Controller("executions")
 export class ExecutionsController {
-  constructor(private readonly executions: ExecutionsService) {}
+  constructor(
+    private readonly executions: ExecutionsService,
+    private readonly environments: EnvironmentsService,
+  ) {}
 
   @ApiEndpoint({
     summary: "Start a run",
@@ -47,11 +51,14 @@ export class ExecutionsController {
     created: StartExecutionResponse,
   })
   @Post()
-  start(
+  async start(
     @TenantId() tenantId: string,
     @Body() body: StartExecutionDto,
+    @EnvironmentSel() envSel?: string,
   ): Promise<{ workflowId: string }> {
-    return this.executions.start(tenantId, body.input, body.workflowKey);
+    // Manual run → the ACTIVE environment (from X-Environment-Id).
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    return this.executions.start(tenantId, envId, body.input, body.workflowKey);
   }
 
   /** Run a minimal read-only codeAgent (Claude Code) run to verify the CLI + BYOK key work

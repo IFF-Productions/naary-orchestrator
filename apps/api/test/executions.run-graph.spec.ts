@@ -11,7 +11,7 @@ vi.mock("@naary/db", () => ({
 import { ExecutionsService } from "../src/executions/executions.service";
 
 function makeService(fetchHistory: unknown): ExecutionsService {
-  const service = new ExecutionsService({} as never);
+  const service = new ExecutionsService({} as never, { defaultEnvId: async () => "env-test", resolveEnvId: async () => "env-test" } as never);
   (service as unknown as { client: unknown }).client = {
     workflow: { getHandle: () => ({ fetchHistory }) },
   };

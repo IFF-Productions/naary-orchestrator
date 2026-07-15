@@ -11,7 +11,8 @@ import {
 } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
 import type { GraphDef } from "@naary/dsl";
-import { TenantId } from "../auth/tenant.decorator";
+import { EnvironmentSel, TenantId } from "../auth/tenant.decorator";
+import { EnvironmentsService } from "../environments/environments.service";
 import { SchedulesService } from "../schedules/schedules.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { GenerateGraphDto, SaveGraphDto } from "./graph.dto";
@@ -38,17 +39,23 @@ export class GraphsController {
     private readonly graphs: GraphsService,
     private readonly generator: GraphGeneratorService,
     private readonly schedules: SchedulesService,
+    private readonly environments: EnvironmentsService,
   ) {}
 
-  /** List the tenant's workflows (one row per workflowKey, latest version). */
+  /** List the workflows in the ACTIVE environment (one row per workflowKey, latest version). */
   @ApiEndpoint({
     summary: "List workflows",
-    description: "One row per workflowKey (its latest version).",
+    description:
+      "One row per workflowKey (its latest version), in the active environment.",
     ok: [GraphSummaryResponse],
   })
   @Get()
-  list(@TenantId() tenantId: string): Promise<GraphSummary[]> {
-    return this.graphs.list(tenantId);
+  async list(
+    @TenantId() tenantId: string,
+    @EnvironmentSel() envSel?: string,
+  ): Promise<GraphSummary[]> {
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    return this.graphs.list(tenantId, envId);
   }
 
   /**
@@ -79,11 +86,13 @@ export class GraphsController {
     ok: [GraphVersionResponse],
   })
   @Get(":workflowKey/versions")
-  listVersions(
+  async listVersions(
     @TenantId() tenantId: string,
     @Param("workflowKey") workflowKey: string,
+    @EnvironmentSel() envSel?: string,
   ): Promise<{ version: number; contentHash: string; createdAt: string }[]> {
-    return this.graphs.listVersions(tenantId, workflowKey);
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    return this.graphs.listVersions(tenantId, envId, workflowKey);
   }
 
   /** The latest graph for a workflowKey — used to open it in the canvas. */
@@ -96,13 +105,19 @@ export class GraphsController {
   async get(
     @TenantId() tenantId: string,
     @Param("workflowKey") workflowKey: string,
+    @EnvironmentSel() envSel?: string,
   ): Promise<{
     workflowKey: string;
     name: string;
     version: number;
     graph: GraphDef;
   }> {
-    const found = await this.graphs.getLatestNamed(tenantId, workflowKey);
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    const found = await this.graphs.getLatestNamed(
+      tenantId,
+      envId,
+      workflowKey,
+    );
     if (!found) {
       throw new NotFoundException(`No graph for workflowKey '${workflowKey}'`);
     }
@@ -158,10 +173,13 @@ export class GraphsController {
   async save(
     @TenantId() tenantId: string,
     @Body() body: SaveGraphDto,
+    @EnvironmentSel() envSel?: string,
   ): Promise<{ workflowKey: string; version: number; contentHash: string }> {
     const graph = toGraphDef(body.graph);
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
     const snap = await this.graphs.upsert(
       tenantId,
+      envId,
       body.workflowKey,
       body.name,
       graph,
@@ -194,12 +212,18 @@ export class GraphsController {
   async remove(
     @TenantId() tenantId: string,
     @Param("workflowKey") workflowKey: string,
+    @EnvironmentSel() envSel?: string,
   ): Promise<{ deleted: true }> {
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
     // Tear down Temporal schedules first (external resource), then the DB rows.
     await this.schedules
       .teardownForWorkflow(tenantId, workflowKey)
       .catch(() => undefined);
-    const deleted = await this.graphs.deleteWorkflow(tenantId, workflowKey);
+    const deleted = await this.graphs.deleteWorkflow(
+      tenantId,
+      envId,
+      workflowKey,
+    );
     if (!deleted) {
       throw new NotFoundException(`No workflow '${workflowKey}'`);
     }

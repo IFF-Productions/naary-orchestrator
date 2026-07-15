@@ -12,8 +12,9 @@ import {
 import { ApiBearerAuth } from "@nestjs/swagger";
 import type { GraphDef, NodeDef } from "@naary/dsl";
 import { isPureNode, runPureNode } from "@naary/dsl";
-import { TenantId } from "../auth/tenant.decorator";
+import { EnvironmentSel, TenantId } from "../auth/tenant.decorator";
 import { ExecutionsService } from "../executions/executions.service";
+import { EnvironmentsService } from "../environments/environments.service";
 import { GraphsService } from "../graphs/graphs.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { PinsService } from "./pins.service";
@@ -48,6 +49,7 @@ export class PinsController {
     private readonly pins: PinsService,
     private readonly graphs: GraphsService,
     private readonly executions: ExecutionsService,
+    private readonly environments: EnvironmentsService,
   ) {}
 
   /**
@@ -73,10 +75,16 @@ export class PinsController {
        *  (ancestor) nodes so a deep node is testable without pinning each one by hand. */
       autofillUpstream?: boolean;
     },
+    @EnvironmentSel() envSel?: string,
   ): Promise<
     { pure: true; output: unknown } | { pure: false; message: string }
   > {
-    const found = await this.graphs.getLatestNamed(tenantId, workflowKey);
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    const found = await this.graphs.getLatestNamed(
+      tenantId,
+      envId,
+      workflowKey,
+    );
     if (!found) {
       throw new NotFoundException(`No graph saved for '${workflowKey}'`);
     }

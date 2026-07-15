@@ -21,7 +21,7 @@ function makeService(isActive: boolean) {
     isActive: vi.fn().mockResolvedValue(isActive),
     getErrorHandler: vi.fn().mockResolvedValue(null),
   };
-  const service = new ExecutionsService(graphs as never);
+  const service = new ExecutionsService(graphs as never, { defaultEnvId: async () => "env-test", resolveEnvId: async () => "env-test" } as never);
   const start = vi.fn().mockResolvedValue(undefined);
   (service as unknown as { client: unknown }).client = {
     workflow: { start },

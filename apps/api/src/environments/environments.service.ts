@@ -43,6 +43,16 @@ export class EnvironmentsService {
   /** Ensure the tenant has its default env; return it. Idempotent + concurrency-safe (upsert on
    *  the (tenantId, slug) unique). */
   async ensureDefault(tenantId: string): Promise<EnvironmentView> {
+    // READ-FIRST: in steady state the default already exists, so this is a single indexed read
+    // (the (tenantId, slug) unique). Only the first-ever access for a tenant writes — so this is
+    // cheap enough to sit on a per-request resolution path. (The old unconditional upsert wrote
+    // on EVERY call via `update`.)
+    const existing = await getPrisma().environment.findUnique({
+      where: { tenantId_slug: { tenantId, slug: DEFAULT_SLUG } },
+    });
+    if (existing) return view(existing);
+    // Create-if-missing, race-safe: a concurrent create is absorbed by the unique (upsert with an
+    // empty update → no write when it already exists).
     const row = await getPrisma().environment.upsert({
       where: { tenantId_slug: { tenantId, slug: DEFAULT_SLUG } },
       create: {
@@ -51,11 +61,15 @@ export class EnvironmentsService {
         slug: DEFAULT_SLUG,
         isDefault: true,
       },
-      // Re-assert isDefault (defends against a manual edit / partial write that left the prod-slug
-      // row non-default → it must never become deletable), but DON'T override a user-renamed name.
-      update: { isDefault: true },
+      update: {},
     });
     return view(row);
+  }
+
+  /** The tenant's default environment id (lazily created). Used by env-scoped call sites that
+   *  don't yet resolve a selected env — the compatibility shim's default target (design §5). */
+  async defaultEnvId(tenantId: string): Promise<string> {
+    return (await this.ensureDefault(tenantId)).id;
   }
 
   /** All environments for the tenant (default guaranteed present), default first then by name. */

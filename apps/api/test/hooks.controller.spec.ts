@@ -29,6 +29,7 @@ function makeDeps(graphNodes: { type: string }[]) {
     webhooks as never,
     executions as never,
     graphs as never,
+    { defaultEnvId: async () => "e1", resolveEnvId: async () => "e1" } as never,
   );
   return { controller, webhooks, executions, graphs, res, req, headers };
 }

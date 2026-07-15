@@ -19,6 +19,10 @@ export interface Principal {
   emailVerified?: boolean;
   /** Role in the active workspace ('owner' | 'admin' | 'member'); 'owner' for API tokens. */
   role?: string;
+  /** RAW `X-Environment-Id` header (env id or slug), stashed by the guard WITHOUT a DB lookup
+   *  (design ENVIRONMENTS.md §4). Env-scoped controllers resolve it to a concrete env id via
+   *  `EnvironmentsService.resolveEnvId` at the query boundary (undefined → the tenant's default). */
+  environmentSel?: string;
 }
 
 export interface RequestWithPrincipal {
@@ -39,5 +43,14 @@ export const CurrentPrincipal = createParamDecorator(
   (_data: unknown, ctx: ExecutionContext): Principal => {
     const req = ctx.switchToHttp().getRequest<RequestWithPrincipal>();
     return req.principal ?? { tenantId: "" };
+  },
+);
+
+/** Injects the RAW environment selection (X-Environment-Id header), or undefined. Env-scoped
+ *  controllers pass it to `EnvironmentsService.resolveEnvId(tenantId, sel)`. */
+export const EnvironmentSel = createParamDecorator(
+  (_data: unknown, ctx: ExecutionContext): string | undefined => {
+    const req = ctx.switchToHttp().getRequest<RequestWithPrincipal>();
+    return req.principal?.environmentSel;
   },
 );

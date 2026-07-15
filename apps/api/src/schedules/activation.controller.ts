@@ -1,6 +1,8 @@
 import { Body, Controller, Param, Put } from "@nestjs/common";
 import { ApiProperty, ApiBearerAuth } from "@nestjs/swagger";
 import { IsBoolean } from "class-validator";
+import { EnvironmentSel } from "../auth/tenant.decorator";
+import { EnvironmentsService } from "../environments/environments.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { SchedulesService } from "./schedules.service";
 
@@ -28,7 +30,10 @@ export class WorkflowActiveResponse {
 @ApiBearerAuth("bearer")
 @Controller("tenants/:id/workflows")
 export class WorkflowActivationController {
-  constructor(private readonly schedules: SchedulesService) {}
+  constructor(
+    private readonly schedules: SchedulesService,
+    private readonly environments: EnvironmentsService,
+  ) {}
 
   @ApiEndpoint({
     summary: "Activate or deactivate a workflow",
@@ -41,8 +46,11 @@ export class WorkflowActivationController {
     @Param("id") tenantId: string,
     @Param("workflowKey") workflowKey: string,
     @Body() body: SetActiveDto,
+    @EnvironmentSel() envSel?: string,
   ): Promise<WorkflowActiveResponse> {
-    await this.schedules.setActive(tenantId, workflowKey, body.active);
+    // The active toggle is env-scoped — resolve the ACTIVE env (the flag write lands there).
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    await this.schedules.setActive(tenantId, envId, workflowKey, body.active);
     return { workflowKey, active: body.active };
   }
 }

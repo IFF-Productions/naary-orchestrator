@@ -42,6 +42,7 @@ function makeController(opts: {
     forms as never,
     graphs as never,
     executions as never,
+    { defaultEnvId: async () => "e1", resolveEnvId: async () => "e1" } as never,
   );
   return { controller, forms, graphs, executions };
 }

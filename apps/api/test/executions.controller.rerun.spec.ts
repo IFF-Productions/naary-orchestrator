@@ -9,7 +9,7 @@ function makeController(
   const service = { rerun } as unknown as ConstructorParameters<
     typeof ExecutionsController
   >[0];
-  return { controller: new ExecutionsController(service), rerun };
+  return { controller: new ExecutionsController(service, { defaultEnvId: async () => "e1", resolveEnvId: async () => "e1" } as never), rerun };
 }
 
 describe("ExecutionsController.rerun (body optional)", () => {

@@ -12,7 +12,7 @@ vi.mock("@naary/db", () => ({
 import { ExecutionsService } from "../src/executions/executions.service";
 
 function makeService(): ExecutionsService {
-  const service = new ExecutionsService({} as never);
+  const service = new ExecutionsService({} as never, { defaultEnvId: async () => "env-test", resolveEnvId: async () => "env-test" } as never);
   // No Temporal calls are made for terminal rows / archive writes; a bare client is fine.
   (service as unknown as { client: unknown }).client = { workflow: {} };
   return service;
