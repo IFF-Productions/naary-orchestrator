@@ -358,11 +358,12 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
    *  INACTIVE (n8n parity) — an automatic trigger, unlike a manual `start()`. */
   async startWebhook(
     tenantId: string,
+    environmentId: string,
     snapshot: GraphSnapshot,
     event: unknown,
     workflowKey: string,
   ): Promise<{ workflowId: string }> {
-    await this.assertActive(tenantId, workflowKey);
+    await this.assertActive(tenantId, environmentId, workflowKey);
     return this.startGraph(
       `wh-${tenantId}`,
       snapshot,
@@ -377,11 +378,12 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
    *  Refused when the workflow is INACTIVE (n8n parity) — automatic, unlike a manual `start()`. */
   async startForm(
     tenantId: string,
+    environmentId: string,
     snapshot: GraphSnapshot,
     submission: Record<string, unknown>,
     workflowKey: string,
   ): Promise<{ workflowId: string }> {
-    await this.assertActive(tenantId, workflowKey);
+    await this.assertActive(tenantId, environmentId, workflowKey);
     return this.startGraph(
       `form-${tenantId}`,
       snapshot,
@@ -400,6 +402,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
    */
   async startWebhookAwaitResponse(
     tenantId: string,
+    environmentId: string,
     snapshot: GraphSnapshot,
     event: unknown,
     workflowKey: string,
@@ -407,6 +410,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   ): Promise<{ workflowId: string; response?: WebhookResponse }> {
     const { workflowId } = await this.startWebhook(
       tenantId,
+      environmentId,
       snapshot,
       event,
       workflowKey,
@@ -423,6 +427,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
    */
   async startChatAwaitResponse(
     tenantId: string,
+    environmentId: string,
     snapshot: GraphSnapshot,
     input: {
       message: string;
@@ -432,7 +437,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     workflowKey: string,
     opts: { timeoutMs?: number; pollMs?: number } = {},
   ): Promise<{ workflowId: string; response?: WebhookResponse }> {
-    await this.assertActive(tenantId, workflowKey);
+    await this.assertActive(tenantId, environmentId, workflowKey);
     const { workflowId } = await this.startGraph(
       `chat-${tenantId}`,
       snapshot,
@@ -452,12 +457,13 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
    */
   async sendChatSessionMessage(
     tenantId: string,
+    environmentId: string,
     snapshot: GraphSnapshot,
     input: { message: string; sessionId: string; chatId: string },
     workflowKey: string,
     opts: { timeoutMs?: number; pollMs?: number } = {},
   ): Promise<{ replied: boolean; reply?: unknown }> {
-    await this.assertActive(tenantId, workflowKey);
+    await this.assertActive(tenantId, environmentId, workflowKey);
     // Stable, deterministic session id — the SAME id for every message of this conversation, so
     // signalWithStart routes them to one workflow. sessionId is sanitized (opaque, ≤200 chars).
     const safeSession = input.sessionId.replace(/[^A-Za-z0-9_-]/g, "_");
@@ -558,12 +564,12 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
    *  manual `start()` and schedule/poll (paused in Temporal when inactive) don't call this. */
   private async assertActive(
     tenantId: string,
+    environmentId: string,
     workflowKey: string,
   ): Promise<void> {
-    // Automatic triggers (webhook/form/chat/schedule) run in the DEFAULT env until they're
-    // env-scoped (design ENVIRONMENTS.md Slice 4); activation is checked there.
-    const envId = await this.environments.defaultEnvId(tenantId);
-    if (!(await this.graphs.isActive(tenantId, envId, workflowKey))) {
+    // Activation is env-scoped: an automatic trigger fires in the endpoint's OWN environment
+    // (design ENVIRONMENTS.md Slice 4), so its activation flag is checked there.
+    if (!(await this.graphs.isActive(tenantId, environmentId, workflowKey))) {
       throw new ConflictException("Workflow is inactive");
     }
   }

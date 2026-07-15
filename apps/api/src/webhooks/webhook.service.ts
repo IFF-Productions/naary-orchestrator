@@ -47,6 +47,7 @@ export class WebhookService {
    */
   async createEndpoint(
     tenantId: string,
+    environmentId: string,
     workflowId: string,
     provider: WebhookProvider,
   ): Promise<RegisteredWebhook> {
@@ -54,6 +55,7 @@ export class WebhookService {
     const row = await getPrisma().webhookEndpoint.create({
       data: {
         tenantId,
+        environmentId,
         workflowId,
         provider,
         // store the encrypted payload as a JSON blob in the existing column;

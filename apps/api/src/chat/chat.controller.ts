@@ -10,7 +10,6 @@ import {
 import { Throttle } from "@nestjs/throttler";
 import { Public } from "../auth/public.decorator";
 import { ExecutionsService } from "../executions/executions.service";
-import { EnvironmentsService } from "../environments/environments.service";
 import { GraphsService } from "../graphs/graphs.service";
 import {
   extractChatDefinition,
@@ -33,7 +32,6 @@ export class ChatController {
     private readonly chats: ChatService,
     private readonly graphs: GraphsService,
     private readonly executions: ExecutionsService,
-    private readonly environments: EnvironmentsService,
   ) {}
 
   /** Serve the public chat definition (title/greeting/…). 404 if unknown or the graph's entry
@@ -60,6 +58,7 @@ export class ChatController {
     if (result.sessionId && isDurableSession(snapshot.graph)) {
       const { replied, reply } = await this.executions.sendChatSessionMessage(
         endpoint.tenantId,
+        endpoint.environmentId,
         snapshot,
         {
           message: result.message,
@@ -80,6 +79,7 @@ export class ChatController {
     );
     const { response } = await this.executions.startChatAwaitResponse(
       endpoint.tenantId,
+      endpoint.environmentId,
       snapshot,
       { message: result.message, sessionId: result.sessionId, history },
       endpoint.workflowId,
@@ -108,11 +108,10 @@ export class ChatController {
   private async resolve(chatId: string) {
     const endpoint = await this.chats.getEndpoint(chatId);
     if (!endpoint) throw new NotFoundException("Unknown chat");
-    // Public trigger → the default env until triggers are env-scoped (design §Slice 4).
-    const envId = await this.environments.defaultEnvId(endpoint.tenantId);
+    // Public trigger fires in the endpoint's OWN environment (design §Slice 4).
     const snapshot = await this.graphs.getLatest(
       endpoint.tenantId,
-      envId,
+      endpoint.environmentId,
       endpoint.workflowId,
     );
     if (!snapshot) throw new NotFoundException("Unknown chat");

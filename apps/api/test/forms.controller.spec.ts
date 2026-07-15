@@ -42,12 +42,16 @@ function makeController(opts: {
     forms as never,
     graphs as never,
     executions as never,
-    { defaultEnvId: async () => "e1", resolveEnvId: async () => "e1" } as never,
   );
   return { controller, forms, graphs, executions };
 }
 
-const ENDPOINT = { id: "f-1", tenantId: "t-1", workflowId: "contact-form" };
+const ENDPOINT = {
+  id: "f-1",
+  tenantId: "t-1",
+  environmentId: "e-1",
+  workflowId: "contact-form",
+};
 
 describe("FormsController (public)", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -105,6 +109,7 @@ describe("FormsController (public)", () => {
       // started with the RESOLVED snapshot, tenant + workflowKey, and SANITIZED data (junk stripped)
       expect(startForm).toHaveBeenCalledWith(
         "t-1",
+        "e-1",
         { graph: FORM_GRAPH },
         { email: "a@b.com" },
         "contact-form",

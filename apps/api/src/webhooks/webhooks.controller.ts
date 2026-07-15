@@ -10,6 +10,8 @@ import {
   Post,
 } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
+import { EnvironmentSel } from "../auth/tenant.decorator";
+import { EnvironmentsService } from "../environments/environments.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import {
   DeletedResponse,
@@ -28,7 +30,10 @@ import { UpdateWebhookDto } from "./update-webhook.dto";
 @ApiBearerAuth("bearer")
 @Controller("tenants/:id/webhooks")
 export class WebhooksController {
-  constructor(private readonly webhooks: WebhookService) {}
+  constructor(
+    private readonly webhooks: WebhookService,
+    private readonly environments: EnvironmentsService,
+  ) {}
 
   /** Register a webhook trigger; returns the ingress path + signing secret (once). */
   @ApiEndpoint({
@@ -37,12 +42,16 @@ export class WebhooksController {
     created: RegisteredWebhookResponse,
   })
   @Post()
-  register(
+  async register(
     @Param("id") tenantId: string,
     @Body() body: RegisterWebhookDto,
+    @EnvironmentSel() envSel?: string,
   ): Promise<RegisteredWebhook> {
+    // Bind the webhook to the registering user's ACTIVE env — it fires runs there.
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
     return this.webhooks.createEndpoint(
       tenantId,
+      envId,
       body.workflowId,
       body.provider,
     );

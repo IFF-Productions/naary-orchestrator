@@ -46,8 +46,11 @@ export const CurrentPrincipal = createParamDecorator(
   },
 );
 
-/** Injects the RAW environment selection (X-Environment-Id header), or undefined. Env-scoped
- *  controllers pass it to `EnvironmentsService.resolveEnvId(tenantId, sel)`. */
+/** Injects the resolved environment SELECTOR the guard stashed on the principal, or undefined.
+ *  For a Firebase user / unbound token this is the raw `X-Environment-Id` header; for an
+ *  env-BOUND API token it is the token's own env (the binding wins over the header — the guard
+ *  403s a bound token that also sends the header). Env-scoped controllers pass it to
+ *  `EnvironmentsService.resolveEnvId(tenantId, sel)` (undefined → the tenant's default env). */
 export const EnvironmentSel = createParamDecorator(
   (_data: unknown, ctx: ExecutionContext): string | undefined => {
     const req = ctx.switchToHttp().getRequest<RequestWithPrincipal>();

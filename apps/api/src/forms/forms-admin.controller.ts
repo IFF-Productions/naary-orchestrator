@@ -8,6 +8,8 @@ import {
   Post,
 } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
+import { EnvironmentSel } from "../auth/tenant.decorator";
+import { EnvironmentsService } from "../environments/environments.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import {
   FormDeletedResponse,
@@ -25,7 +27,10 @@ import { RegisterFormDto } from "./register-form.dto";
 @ApiBearerAuth("bearer")
 @Controller("tenants/:id/forms")
 export class FormsAdminController {
-  constructor(private readonly forms: FormService) {}
+  constructor(
+    private readonly forms: FormService,
+    private readonly environments: EnvironmentsService,
+  ) {}
 
   /** Register a form endpoint; returns the public path. 400 if the tenant has no budget cap. */
   @ApiEndpoint({
@@ -35,11 +40,14 @@ export class FormsAdminController {
     created: RegisteredFormResponse,
   })
   @Post()
-  register(
+  async register(
     @Param("id") tenantId: string,
     @Body() body: RegisterFormDto,
+    @EnvironmentSel() envSel?: string,
   ): Promise<RegisteredForm> {
-    return this.forms.createEndpoint(tenantId, body.workflowId);
+    // Bind the endpoint to the registering user's ACTIVE env — the form fires runs there.
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    return this.forms.createEndpoint(tenantId, envId, body.workflowId);
   }
 
   /** List the tenant's form endpoints. */

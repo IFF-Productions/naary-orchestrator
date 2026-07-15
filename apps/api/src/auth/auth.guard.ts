@@ -128,12 +128,26 @@ export class AuthGuard implements CanActivate {
     // `nry_…` → API token: full access to its ONE tenant, no membership model. Unchanged
     // from the claim era — this keeps the cross-tenant isolation tests green.
     if (token.startsWith("nry_")) {
-      const tenantId = await this.tokens.verify(token);
-      if (!tenantId) throw new UnauthorizedException("Invalid credentials");
+      const verified = await this.tokens.verify(token);
+      if (!verified) throw new UnauthorizedException("Invalid credentials");
+      const { tenantId, environmentId: tokenEnvId } = verified;
       if (target && target !== tenantId) {
         throw new ForbiddenException("Tenant mismatch");
       }
-      req.principal = { tenantId, role: "owner", environmentSel };
+      // Token env precedence (design ENVIRONMENTS.md §3, Slice 4): an env-BOUND token's env is
+      // authoritative — its runs can't cross to another env. A bound token combined with an
+      // explicit X-Environment-Id is a conflict (the two disagree on intent) → reject. An UNBOUND
+      // token uses the header (or the default) like any caller.
+      if (tokenEnvId && environmentSel) {
+        throw new ForbiddenException(
+          "This API token is scoped to a fixed environment; do not send X-Environment-Id.",
+        );
+      }
+      req.principal = {
+        tenantId,
+        role: "owner",
+        environmentSel: tokenEnvId ?? environmentSel,
+      };
       return true;
     }
 

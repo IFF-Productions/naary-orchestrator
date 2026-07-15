@@ -47,8 +47,12 @@ export class ApiTokenService {
     return res.count > 0;
   }
 
-  /** Resolve a bearer token to its tenantId, or null if unknown. */
-  async verify(token: string): Promise<string | null> {
+  /** Resolve a bearer token to its tenant + optional env binding, or null if unknown. The env id
+   *  is free (same row we already read for the tenant) — the token's bound env is authoritative for
+   *  runs it starts (design ENVIRONMENTS.md §3, Slice 4). Null environmentId = unbound. */
+  async verify(
+    token: string,
+  ): Promise<{ tenantId: string; environmentId: string | null } | null> {
     const row = await getPrisma().apiToken.findUnique({
       where: { tokenHash: hashToken(token) },
     });
@@ -60,6 +64,6 @@ export class ApiTokenService {
         data: { lastUsedAt: new Date() },
       })
       .catch(() => undefined);
-    return row.tenantId;
+    return { tenantId: row.tenantId, environmentId: row.environmentId };
   }
 }

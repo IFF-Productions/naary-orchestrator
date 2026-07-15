@@ -21,6 +21,12 @@ model ApiToken {
   tenantId   String
   tokenHash  String    @unique // sha256 hex of the bearer token; plaintext never stored
   label      String
+  // Optional env binding (design ENVIRONMENTS.md §3, Slice 4): a token scoped to ONE env (e.g. a
+  // CI token → sandbox). Null = unbound (uses the request's X-Environment-Id, else the default).
+  // A bound token's env is authoritative — a conflicting header is rejected. SetNull on env delete
+  // so a deleted env just unbinds the token (falls back to default) rather than blocking the delete.
+  environmentId String?
+  environment   Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
   createdAt  DateTime  @default(now())
   lastUsedAt DateTime?
 
@@ -174,6 +180,10 @@ model WebhookEndpoint {
   id            String   @id @default(uuid())
   workflowId    String // which graph to start (graphs are hardcoded for now)
   tenantId      String
+  // Env-bound (design ENVIRONMENTS.md §3, Slice 4): a webhook fires runs in ITS env — the endpoint's
+  // env wins. Set at registration from the registering user's active env; backfilled to default.
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
   provider      String // 'github' | 'atlassian' | 'generic'
   signingSecret String // plain column per plan §4 (HMAC secret; never logged)
   createdAt     DateTime @default(now())
@@ -188,6 +198,9 @@ model FormEndpoint {
   id         String   @id @default(uuid())
   workflowId String // which graph (workflowKey) this form starts
   tenantId   String
+  // Env-bound (Slice 4): the form fires runs in its env. Backfilled to the default env.
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
   createdAt  DateTime @default(now())
 
   @@index([tenantId])
@@ -200,6 +213,9 @@ model ChatEndpoint {
   id         String   @id @default(uuid())
   workflowId String // which graph (workflowKey) this chat starts
   tenantId   String
+  // Env-bound (Slice 4): the chat fires runs in its env. Backfilled to the default env.
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
   createdAt  DateTime @default(now())
 
   @@index([tenantId])
@@ -340,6 +356,10 @@ model Environment {
 
   graphDefinitions    GraphDefinition[]
   workflowActivations WorkflowActivation[]
+  apiTokens           ApiToken[]
+  webhookEndpoints    WebhookEndpoint[]
+  formEndpoints       FormEndpoint[]
+  chatEndpoints       ChatEndpoint[]
 
   @@unique([tenantId, slug])
   @@index([tenantId])

@@ -15,7 +15,6 @@ import { createLogger } from "@naary/logging";
 import { Public } from "../auth/public.decorator";
 import { verifyResumeToken } from "../executions/resume-token";
 import { ExecutionsService } from "../executions/executions.service";
-import { EnvironmentsService } from "../environments/environments.service";
 import { GraphsService } from "../graphs/graphs.service";
 import { type WebhookProvider, WebhookService } from "./webhook.service";
 
@@ -39,7 +38,6 @@ export class HooksController {
     private readonly webhooks: WebhookService,
     private readonly executions: ExecutionsService,
     private readonly graphs: GraphsService,
-    private readonly environments: EnvironmentsService,
   ) {}
 
   /**
@@ -128,11 +126,10 @@ export class HooksController {
     // doesn't burn the delivery so the provider's retry works once the graph exists.
     // The snapshot is version-pinned (so a github-review endpoint reaches the reference
     // flow, not the default).
-    // Public trigger → the default env until triggers are env-scoped (design §Slice 4).
-    const hookEnvId = await this.environments.defaultEnvId(endpoint.tenantId);
+    // Public trigger fires in the endpoint's OWN environment (design §Slice 4).
     const snapshot = await this.graphs.getLatest(
       endpoint.tenantId,
-      hookEnvId,
+      endpoint.environmentId,
       endpoint.workflowId,
     );
     if (!snapshot) {
@@ -191,6 +188,7 @@ export class HooksController {
         const { workflowId, response } =
           await this.executions.startWebhookAwaitResponse(
             endpoint.tenantId,
+            endpoint.environmentId,
             snapshot,
             event,
             endpoint.workflowId,
@@ -216,6 +214,7 @@ export class HooksController {
 
       const { workflowId } = await this.executions.startWebhook(
         endpoint.tenantId,
+        endpoint.environmentId,
         snapshot,
         event,
         endpoint.workflowId, // the registry workflowKey this endpoint triggers

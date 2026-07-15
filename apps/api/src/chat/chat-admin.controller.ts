@@ -8,6 +8,8 @@ import {
   Post,
 } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
+import { EnvironmentSel } from "../auth/tenant.decorator";
+import { EnvironmentsService } from "../environments/environments.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import {
   ChatDeletedResponse,
@@ -25,7 +27,10 @@ import { RegisterChatDto } from "./register-chat.dto";
 @ApiBearerAuth("bearer")
 @Controller("tenants/:id/chats")
 export class ChatAdminController {
-  constructor(private readonly chats: ChatService) {}
+  constructor(
+    private readonly chats: ChatService,
+    private readonly environments: EnvironmentsService,
+  ) {}
 
   @ApiEndpoint({
     summary: "Register a hosted chat",
@@ -34,11 +39,13 @@ export class ChatAdminController {
     created: RegisteredChatResponse,
   })
   @Post()
-  register(
+  async register(
     @Param("id") tenantId: string,
     @Body() body: RegisterChatDto,
+    @EnvironmentSel() envSel?: string,
   ): Promise<RegisteredChat> {
-    return this.chats.createEndpoint(tenantId, body.workflowId);
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    return this.chats.createEndpoint(tenantId, envId, body.workflowId);
   }
 
   @ApiEndpoint({ summary: "List chat endpoints", ok: [ChatEndpointResponse] })
