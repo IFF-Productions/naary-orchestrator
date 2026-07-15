@@ -23,6 +23,7 @@ vi.mock("@ai-sdk/google", () => ({
 import { APICallError } from "ai";
 import {
   validateAnthropicKey,
+  validateClaudeCodeKey,
   validateGoogleKey,
   validateOpenAiKey,
 } from "../src/provider-validate";
@@ -97,6 +98,26 @@ describe("validateOpenAiKey", () => {
     await expect(
       validateOpenAiKey("sk-openai-good"),
     ).rejects.not.toBeInstanceOf(APICallError);
+  });
+});
+
+describe("validateClaudeCodeKey (format-only — no network probe)", () => {
+  it("accepts an API key AND a subscription setup-token (both sk-ant-)", async () => {
+    expect(await validateClaudeCodeKey("sk-ant-api03-abc")).toBe(true);
+    expect(await validateClaudeCodeKey("sk-ant-oat-abc")).toBe(true);
+    expect(await validateClaudeCodeKey("  sk-ant-api03-abc  ")).toBe(true); // trims
+  });
+
+  it("rejects an empty or wrong-prefix value (surfaces a paste error on save)", async () => {
+    expect(await validateClaudeCodeKey("")).toBe(false);
+    expect(await validateClaudeCodeKey("   ")).toBe(false);
+    expect(await validateClaudeCodeKey("not-a-key")).toBe(false);
+  });
+
+  it("never calls the model (an OAuth token can't be probed via x-api-key)", async () => {
+    generateTextMock.mockClear();
+    await validateClaudeCodeKey("sk-ant-oat-abc");
+    expect(generateTextMock).not.toHaveBeenCalled();
   });
 });
 

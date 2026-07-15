@@ -2246,10 +2246,13 @@ export async function callCodeAgent(
       driver.binary,
       args,
       {
+        // MINIMAL env — PATH/HOME to run the binary + the driver's chosen auth var (exactly one,
+        // API key vs subscription OAuth token). Not the worker's whole env (other tenants' material),
+        // and never the git token.
         env: {
           PATH: process.env.PATH,
           HOME: process.env.HOME,
-          [driver.keyEnvVar]: apiKey,
+          ...driver.authEnv(apiKey),
         },
         timeoutMs: cfg.timeoutMs,
       },

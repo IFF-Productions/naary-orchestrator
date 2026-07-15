@@ -41,10 +41,13 @@ export interface CliAgentDriver {
   binary: string;
   /** Container image with the CLI installed — used once the sandbox lands (Slice 2). */
   image: string;
-  /** Env var carrying the tenant credential; the git token NEVER goes here. */
-  keyEnvVar: string;
-  /** The BYOK credential provider to fetch for this tool (e.g. claude → "anthropic"). */
+  /** The BYOK credential provider to fetch for this tool (e.g. claude → "claude-code"). This is a
+   *  DEDICATED slot, separate from the `anthropic` model-provider API key. */
   credentialProvider: string;
+  /** The auth env var(s) to inject into the CLI subprocess for a given credential value. Returns a
+   *  map (not a fixed name) because the same credential slot may hold different token kinds that the
+   *  CLI reads from different vars. The git token NEVER goes here. */
+  authEnv(key: string): Record<string, string>;
   capabilities: {
     headless: boolean;
     resume: boolean;
@@ -61,8 +64,17 @@ const claudeDriver: CliAgentDriver = {
   tool: "claude",
   binary: "claude",
   image: "naary-claude-sandbox",
-  keyEnvVar: "ANTHROPIC_API_KEY",
-  credentialProvider: "anthropic",
+  credentialProvider: "claude-code",
+  // A `claude setup-token` OAuth token (sk-ant-oat…) authenticates the CLI via
+  // CLAUDE_CODE_OAUTH_TOKEN (subscription billing); a plain API key (sk-ant-api…) via
+  // ANTHROPIC_API_KEY. Return exactly ONE var so the CLI's precedence isn't ambiguous.
+  authEnv(key) {
+    const k = key.trim();
+    const varName = k.startsWith("sk-ant-oat")
+      ? "CLAUDE_CODE_OAUTH_TOKEN"
+      : "ANTHROPIC_API_KEY";
+    return { [varName]: k };
+  },
   capabilities: { headless: true, resume: true, structuredQuestions: true },
   buildArgs(opts) {
     const args = [

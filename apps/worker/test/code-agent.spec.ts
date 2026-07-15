@@ -70,15 +70,28 @@ describe("claude driver (pure)", () => {
 });
 
 describe("callCodeAgent activity", () => {
-  it("fetches the BYOK anthropic key in-activity + passes it as the subprocess env var", async () => {
+  it("fetches the DEDICATED claude-code credential (not the anthropic key) + passes an API key as ANTHROPIC_API_KEY", async () => {
     await callCodeAgent(CFG, {}, META);
-    expect(getDecryptedKey).toHaveBeenCalledWith("t1", "anthropic");
+    // Separate credential slot from the model-provider `anthropic` key.
+    expect(getDecryptedKey).toHaveBeenCalledWith("t1", "claude-code");
     const [binary, , opts] = exec.mock.calls[0];
     expect(binary).toBe("claude");
+    // sk-ant-xxx is an API-key-shaped token → ANTHROPIC_API_KEY (not the OAuth var).
     expect(opts.env.ANTHROPIC_API_KEY).toBe("sk-ant-xxx");
+    expect(opts.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     // the key is NOT in the returned output
     const out = await callCodeAgent(CFG, {}, META);
     expect(JSON.stringify(out)).not.toContain("sk-ant-xxx");
+  });
+
+  it("routes a subscription setup-token (sk-ant-oat…) to CLAUDE_CODE_OAUTH_TOKEN, not ANTHROPIC_API_KEY", async () => {
+    const oatToken = "sk-ant-oat-fake"; // obviously-fake; only the sk-ant-oat prefix matters here
+    getDecryptedKey.mockResolvedValue(oatToken);
+    await callCodeAgent(CFG, {}, META);
+    const [, , opts] = exec.mock.calls[0];
+    expect(opts.env.CLAUDE_CODE_OAUTH_TOKEN).toBe(oatToken);
+    // Exactly one auth var — the API-key var must NOT also be set (avoids CLI precedence ambiguity).
+    expect(opts.env.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
   it("records usage from the CLI envelope + returns its cost (never zero)", async () => {
@@ -121,7 +134,7 @@ describe("callCodeAgent activity", () => {
 
   it("maps a missing credential to a non-retryable AUTH failure", async () => {
     getDecryptedKey.mockRejectedValue(
-      new MissingCredentialError("t1", "anthropic"),
+      new MissingCredentialError("t1", "claude-code"),
     );
     await expect(callCodeAgent(CFG, {}, META)).rejects.toMatchObject({
       type: "AUTH",

@@ -2,6 +2,7 @@ import { getPrisma } from "@naary/db";
 import { type KeyEncryptor, createKeyEncryptor } from "./crypto";
 import {
   validateAnthropicKey,
+  validateClaudeCodeKey,
   validateGoogleKey,
   validateOpenAiKey,
 } from "./provider-validate";
@@ -27,6 +28,9 @@ const defaultValidator: ProviderValidator = (provider, apiKey) => {
   if (provider === "anthropic") return validateAnthropicKey(apiKey);
   if (provider === "openai") return validateOpenAiKey(apiKey);
   if (provider === "google") return validateGoogleKey(apiKey);
+  // The Claude Code CLI credential (API key OR subscription setup-token) — format check only;
+  // the Integrations "Run test" is its real verification. Distinct slot from `anthropic`.
+  if (provider === "claude-code") return validateClaudeCodeKey(apiKey);
   throw new Error(`Unsupported provider: ${provider}`);
 };
 
