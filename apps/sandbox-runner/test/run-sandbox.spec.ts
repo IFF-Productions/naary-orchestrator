@@ -71,6 +71,41 @@ describe("runSandbox", () => {
     );
   });
 
+  it("forwards a setup-token under CLAUDE_CODE_OAUTH_TOKEN when keyEnvVar overrides the default", async () => {
+    await runSandbox(
+      { ...REQ, keyEnvVar: "CLAUDE_CODE_OAUTH_TOKEN" },
+      CFG,
+      exec as unknown as Exec,
+    );
+    const dockerCall = exec.mock.calls[0];
+    // The value goes under the CHOSEN var; the API-key var doesn't carry the secret.
+    expect(dockerCall[2].env.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-secret");
+    expect(dockerCall[2].env.ANTHROPIC_API_KEY).not.toBe("sk-ant-secret");
+    // and it's on the argv by name (never the value).
+    expect(dockerCall[1] as string[]).toContain("CLAUDE_CODE_OAUTH_TOKEN");
+  });
+
+  it("rejects an un-allowlisted keyEnvVar before touching docker (no env injection)", async () => {
+    await expect(
+      runSandbox(
+        { ...REQ, keyEnvVar: "AWS_SECRET_ACCESS_KEY" },
+        CFG,
+        exec as unknown as Exec,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestError);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-string keyEnvVar with a clear (not 'un-allowlisted') error", async () => {
+    await expect(
+      runSandbox(
+        { ...REQ, keyEnvVar: 123 as unknown as string },
+        CFG,
+        exec as unknown as Exec,
+      ),
+    ).rejects.toThrow(/must be a string/);
+  });
+
   it("rejects a traversal / bad runId before touching docker", async () => {
     for (const runId of ["../etc", "a/b", "..", "with space", ""]) {
       await expect(

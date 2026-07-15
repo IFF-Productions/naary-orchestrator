@@ -52,8 +52,10 @@ export interface NodeOutputMap {
       result: string;
       tool: string;
       sessionId?: string;
-      /** Write-mode diff (Slice 2c); a claim-check reference when large. Absent in read mode. */
-      diff?: unknown;
+      /** Write-mode diff (Slice 2c): the inline unified-diff string, or a claim-check reference
+       *  `{ __claimCheck, bytes }` when large (shape mirrors @naary/storage's ClaimCheck; inlined
+       *  so the DSL stays dependency-free). Absent in read mode. */
+      diff?: string | { __claimCheck: string; bytes: number };
     };
     costUsd: number;
   };

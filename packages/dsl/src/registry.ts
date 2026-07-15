@@ -581,6 +581,25 @@ export function validateGraphConfigs(graph: {
         })),
       });
     }
+    // Conditional-required check (zod `.partial()` can't express cross-field rules, and a
+    // `.superRefine` would defeat the lenient .partial() above): a codeAgent in WRITE mode needs
+    // a repo + a GitHub App connection, else the run only fails at execution. `mode:"write"` is a
+    // present value (not a missing draft field), so enforcing it at save is consistent with the
+    // gate. Mirrors the integration node's separate catalog validation.
+    const cfg = node.config ?? {};
+    if (node.type === "codeAgent" && cfg.mode === "write") {
+      const missing = ["repo", "connectionId"].filter((k) => !cfg[k]);
+      if (missing.length) {
+        errors.push({
+          nodeId: node.id,
+          nodeType: node.type,
+          issues: missing.map((k) => ({
+            path: k,
+            message: `codeAgent write mode requires \`${k}\`.`,
+          })),
+        });
+      }
+    }
   }
   return errors;
 }

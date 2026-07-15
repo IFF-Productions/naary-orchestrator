@@ -93,6 +93,11 @@ export async function runSandbox(
   if (typeof req.authKey !== "string" || req.authKey.length === 0) {
     throw new BadRequestError("authKey is required");
   }
+  // A wrong-typed keyEnvVar (number/object) would otherwise fall through to a misleading
+  // "un-allowlisted" error — reject it explicitly with a clear message.
+  if (req.keyEnvVar !== undefined && typeof req.keyEnvVar !== "string") {
+    throw new BadRequestError("keyEnvVar must be a string");
+  }
   // Default to the API-key var; validate any explicit choice against the allowlist so a caller
   // can't inject an arbitrary env var into the container.
   const keyEnvVar = req.keyEnvVar ?? SANDBOX_KEY_ENV;

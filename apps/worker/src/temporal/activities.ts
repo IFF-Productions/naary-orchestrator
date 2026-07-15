@@ -79,6 +79,7 @@ import {
 } from "../metrics";
 import { CredentialsService, MissingCredentialError } from "@naary/secrets";
 import {
+  type ClaimCheck,
   getObjectStore,
   maybeOffload,
   resolveClaimChecks,
@@ -2170,12 +2171,13 @@ export interface CodeAgentActivityConfig {
 export interface CodeAgentResult {
   status: "ok";
   /** The CLI's final text (a plan/summary in read-only mode) + trace metadata. In write mode,
-   *  `diff` carries the sandbox's edits (claim-checked if large). */
+   *  `diff` carries the sandbox's edits: the inline unified-diff string, or a `ClaimCheck`
+   *  reference (`{ __claimCheck, bytes }`) when large (resolved at the activity boundary). */
   output: {
     result: string;
     tool: string;
     sessionId?: string;
-    diff?: unknown;
+    diff?: string | ClaimCheck;
   };
   costUsd: number;
 }
@@ -2271,8 +2273,17 @@ export async function callCodeAgent(
           "CODE_AGENT_WRITE_CONFIG",
         );
       }
-      // authEnv gives { [varName]: value } — split it into the name + value the runner needs.
-      const [keyEnvVar, authKey] = Object.entries(driver.authEnv(apiKey))[0];
+      // authEnv gives { [varName]: value } — the contract is EXACTLY one entry (the CLI reads a
+      // single auth var). Assert it rather than blindly destructure `[0]` (a future driver
+      // returning 0 or >1 entries would otherwise crash or forward an ambiguous credential).
+      const authEntries = Object.entries(driver.authEnv(apiKey));
+      if (authEntries.length !== 1) {
+        throw ApplicationFailure.nonRetryable(
+          `codeAgent: driver "${driver.tool}" must resolve exactly one auth env var.`,
+          "CODE_AGENT_BAD_AUTH_ENV",
+        );
+      }
+      const [keyEnvVar, authKey] = authEntries[0];
       const w = await __codeAgentDeps.runWrite(
         {
           tenantId: meta.tenantId,
@@ -2383,9 +2394,9 @@ export async function callCodeAgent(
     // bloat workflow history (CLAUDE.md: pass refs, not blobs). Small diffs stay inline.
     const diffOut =
       diff !== undefined
-        ? await maybeOffload(diff, getObjectStore(), {
+        ? ((await maybeOffload(diff, getObjectStore(), {
             keyPrefix: `codeagent-diff/${meta.tenantId}`,
-          })
+          })) as string | ClaimCheck)
         : undefined;
 
     return {

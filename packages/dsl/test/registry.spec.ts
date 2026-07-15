@@ -164,6 +164,47 @@ describe("validateGraphConfigs (save gate — lenient on missing, strict on pres
     ]);
   });
 
+  it("requires repo + connectionId when a codeAgent is in WRITE mode (else runtime-only failure)", () => {
+    // Write mode with neither → two conditional-required errors at SAVE time.
+    const errs = validateGraphConfigs(
+      graph([
+        {
+          id: "c",
+          type: "codeAgent",
+          config: { prompt: "fix it", mode: "write" },
+        },
+      ]),
+    );
+    expect(errs).toHaveLength(1);
+    expect(errs[0].issues.map((i) => i.path).sort()).toEqual([
+      "connectionId",
+      "repo",
+    ]);
+    // A complete write config passes.
+    expect(
+      validateGraphConfigs(
+        graph([
+          {
+            id: "c",
+            type: "codeAgent",
+            config: {
+              prompt: "fix it",
+              mode: "write",
+              repo: "acme/widgets",
+              connectionId: "conn-gh",
+            },
+          },
+        ]),
+      ),
+    ).toEqual([]);
+    // Read mode (default) is unaffected — no repo needed.
+    expect(
+      validateGraphConfigs(
+        graph([{ id: "c", type: "codeAgent", config: { prompt: "review" } }]),
+      ),
+    ).toEqual([]);
+  });
+
   it("skips config-less nodes and reports nodeId/type on failure", () => {
     const errs = validateGraphConfigs(
       graph([

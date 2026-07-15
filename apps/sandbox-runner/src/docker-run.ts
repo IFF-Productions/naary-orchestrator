@@ -8,8 +8,9 @@
  * Guarantees encoded here:
  *  - image + network + limits are RUNNER config, never workflow-controlled (§ runner as a
  *    root-privileged injection surface).
- *  - the Anthropic key is forwarded by NAME (`-e ANTHROPIC_API_KEY`), never inline on the argv
- *    (which would show in `ps`/`docker inspect`); the runner sets it in the exec env.
+ *  - the credential is forwarded by NAME (`-e <keyEnvVar>`, an allowlisted var — ANTHROPIC_API_KEY
+ *    or CLAUDE_CODE_OAUTH_TOKEN), never inline on the argv (which would show in `ps`/`docker
+ *    inspect`); the runner sets its value in the exec env.
  *  - the git token is NEVER passed to the sandbox (the two-box split, §2.2).
  *  - egress is the internal no-gateway network + the allowlist proxy (§2.3); HTTPS_PROXY is
  *    how the LEGITIMATE Anthropic call routes, NOT the security boundary (that's the network).
@@ -75,8 +76,8 @@ export function assertAllowedKeyEnvVar(name: string): void {
 
 /**
  * Build the `docker run …` argv. The returned array is passed to execFile("docker", args)
- * — no shell. The Anthropic key is forwarded by name only; the caller must set it in the
- * exec environment (`{ ANTHROPIC_API_KEY: key }`), never inline it here.
+ * — no shell. The credential is forwarded by name only (`spec.keyEnvVar`); the caller must set
+ * its value in the exec environment (`{ [spec.keyEnvVar]: key }`), never inline it here.
  */
 export function buildSandboxDockerArgs(spec: SandboxRunSpec): string[] {
   assertPinnedImage(spec.image);
