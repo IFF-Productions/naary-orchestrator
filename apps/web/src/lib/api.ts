@@ -66,23 +66,59 @@ const BASE = "/api";
 // resolved the caller's workspaces; it's persisted so a reload keeps the selection. When
 // unset (fresh signup, or an nry_ token with a single workspace) the server falls back to
 // the caller's sole/claim workspace.
-const WORKSPACE_KEY = "naary.workspace";
-let activeWorkspaceId: string | null =
-  typeof localStorage !== "undefined"
-    ? localStorage.getItem(WORKSPACE_KEY)
-    : null;
+// localStorage can THROW (disabled, sandboxed iframe, private mode) — and this runs at module
+// init + on every workspace/env change, so a throw would break the whole API client. Wrap it.
+function lsGet(key: string): string | null {
+  try {
+    return typeof localStorage !== "undefined"
+      ? localStorage.getItem(key)
+      : null;
+  } catch {
+    return null;
+  }
+}
+function lsSet(key: string, value: string | null): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch {
+    /* storage unavailable — in-memory state still works for the session */
+  }
+}
 
-/** Set (or clear) the active workspace id sent on every subsequent request. */
+const WORKSPACE_KEY = "naary.workspace";
+let activeWorkspaceId: string | null = lsGet(WORKSPACE_KEY);
+
+/** Set (or clear) the active workspace id sent on every subsequent request. Switching to a
+ *  DIFFERENT workspace clears the active environment (environments are per-workspace — a stale
+ *  X-Environment-Id from the previous workspace must not leak into the new one). */
 export function setActiveWorkspace(id: string | null): void {
+  if (id !== activeWorkspaceId) setActiveEnvironment(null);
   activeWorkspaceId = id;
-  if (typeof localStorage === "undefined") return;
-  if (id) localStorage.setItem(WORKSPACE_KEY, id);
-  else localStorage.removeItem(WORKSPACE_KEY);
+  lsSet(WORKSPACE_KEY, id);
 }
 
 /** The active workspace id, or null if none selected yet. */
 export function getActiveWorkspace(): string | null {
   return activeWorkspaceId;
+}
+
+// The active ENVIRONMENT (sandbox/UAT/prod), sent as `X-Environment-Id` so the server scopes a
+// request within the active workspace (design docs/design/ENVIRONMENTS.md). Env is per-workspace,
+// so switching workspaces clears it (the provider re-resolves). Unset → the server's default env.
+const ENVIRONMENT_KEY = "naary.environment";
+let activeEnvironmentId: string | null = lsGet(ENVIRONMENT_KEY);
+
+/** Set (or clear) the active environment slug/id sent on every subsequent request. */
+export function setActiveEnvironment(idOrSlug: string | null): void {
+  activeEnvironmentId = idOrSlug;
+  lsSet(ENVIRONMENT_KEY, idOrSlug);
+}
+
+/** The active environment id/slug, or null if none selected yet. */
+export function getActiveEnvironment(): string | null {
+  return activeEnvironmentId;
 }
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
@@ -93,6 +129,9 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
       "content-type": "application/json",
       ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...(activeWorkspaceId ? { "x-workspace-id": activeWorkspaceId } : {}),
+      ...(activeEnvironmentId
+        ? { "x-environment-id": activeEnvironmentId }
+        : {}),
       ...init?.headers,
     },
   });
@@ -160,6 +199,14 @@ export interface TemplateDetail extends TemplateSummary {
 export interface ProviderCredential {
   provider: string;
   isValid: boolean;
+}
+
+/** A per-workspace environment (sandbox/UAT/prod). */
+export interface Environment {
+  id: string;
+  name: string;
+  slug: string;
+  isDefault: boolean;
 }
 
 /** Result of a single-node test run. */
@@ -475,6 +522,39 @@ export const api = {
   getAuditLog(tenantId: string): Promise<AuditEvent[]> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/audit`);
   },
+  // --- Environments (per-workspace sandbox/UAT/prod) ---
+  listEnvironments(tenantId: string): Promise<Environment[]> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/environments`);
+  },
+  createEnvironment(
+    tenantId: string,
+    body: { name: string; slug: string },
+  ): Promise<Environment> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/environments`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+  renameEnvironment(
+    tenantId: string,
+    envId: string,
+    name: string,
+  ): Promise<Environment> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/environments/${encodeURIComponent(envId)}`,
+      { method: "PATCH", body: JSON.stringify({ name }) },
+    );
+  },
+  deleteEnvironment(
+    tenantId: string,
+    envId: string,
+  ): Promise<{ deleted: true }> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/environments/${encodeURIComponent(envId)}`,
+      { method: "DELETE" },
+    );
+  },
+
   // --- Notifications (per-channel: Slack, Teams, … each configured independently) ---
   listNotificationChannels(tenantId: string): Promise<NotificationChannel[]> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/notifications`);
@@ -505,6 +585,9 @@ export const api = {
           "content-type": "application/json",
           ...(token ? { authorization: `Bearer ${token}` } : {}),
           ...(activeWorkspaceId ? { "x-workspace-id": activeWorkspaceId } : {}),
+          ...(activeEnvironmentId
+            ? { "x-environment-id": activeEnvironmentId }
+            : {}),
         },
       },
     );
