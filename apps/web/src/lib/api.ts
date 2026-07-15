@@ -209,6 +209,16 @@ export interface Environment {
   isDefault: boolean;
 }
 
+/** One entry in a workflow's promotion lineage. */
+export interface Promotion {
+  fromEnvId: string;
+  toEnvId: string;
+  fromVersion: number;
+  toVersion: number;
+  actor: string;
+  createdAt: string;
+}
+
 /** Result of a single-node test run. */
 export type TestNodeResult =
   { pure: true; output: unknown } | { pure: false; message: string };
@@ -235,6 +245,20 @@ export const api = {
     return http(`/graphs/${encodeURIComponent(workflowKey)}`, {
       method: "DELETE",
     });
+  },
+  // Promote a workflow from the ACTIVE env (X-Environment-Id) into `toEnv` (copy-on-promote).
+  promoteWorkflow(
+    workflowKey: string,
+    toEnv: string,
+    fromVersion?: number,
+  ): Promise<{ fromVersion: number; toVersion: number; contentHash: string }> {
+    return http(`/graphs/${encodeURIComponent(workflowKey)}/promote`, {
+      method: "POST",
+      body: JSON.stringify({ toEnv, ...(fromVersion ? { fromVersion } : {}) }),
+    });
+  },
+  listPromotions(workflowKey: string): Promise<Promotion[]> {
+    return http(`/graphs/${encodeURIComponent(workflowKey)}/promotions`);
   },
   // --- Pinned node outputs (authoring-only samples; the interpreter never reads them) ---
   listPins(workflowKey: string): Promise<Record<string, unknown>> {

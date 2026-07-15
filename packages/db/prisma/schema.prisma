@@ -104,6 +104,24 @@ model GraphDefinition {
   @@index([tenantId, environmentId, workflowKey])
 }
 
+/** Copy-on-promote lineage (design ENVIRONMENTS.md §6, Slice 3): one audit row per promote of a
+ *  workflow definition from one env to another. Records WHO promoted WHAT, WHEN, and the source→
+ *  target versions — the substrate RBAC's "who can promote to prod" enforcement + audit builds on.
+ *  Creds/connections are NOT copied on promote; only the graph definition is. */
+model Promotion {
+  id          String   @id @default(uuid())
+  tenantId    String
+  workflowKey String
+  fromEnvId   String
+  toEnvId     String
+  fromVersion Int
+  toVersion   Int // the version created (or reused, if identical) in the target env
+  actor       String // OIDC subject, or "api-token"
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, workflowKey])
+}
+
 /** Pinned node output — AUTHORING-ONLY sample data (design SINGLE-NODE-EXECUTION.md §4). Lets you
  *  build downstream nodes against a saved output without re-running upstream. The interpreter NEVER
  *  reads this (a real run always executes upstream) — it's a dev aid, invisible to production. */

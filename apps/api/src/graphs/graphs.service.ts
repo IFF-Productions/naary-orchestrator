@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import { BadRequestException, Injectable } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { getPrisma } from "@naary/db";
 import { canonicalize, type GraphDef, validateGraph } from "@naary/dsl";
 import { TracedClass } from "@naary/observability";
@@ -216,6 +220,101 @@ export class GraphsService {
       where: { tenantId, environmentId, workflowKey },
       orderBy: { version: "desc" },
     });
+  }
+
+  /**
+   * PROMOTE a workflow definition from one env to another (design ENVIRONMENTS.md §6, Slice 3):
+   * copy the source env's graph (a chosen version, default = latest) into the target env as a NEW
+   * version (content-hashed like a save — a no-op version if the target already has that exact
+   * graph), and record a `Promotion` audit row. Creds/connections are NOT copied — the target env
+   * binds to its own. Returns the source + target versions.
+   */
+  async promote(
+    tenantId: string,
+    workflowKey: string,
+    fromEnvId: string,
+    toEnvId: string,
+    actor: string,
+    fromVersion?: number,
+  ): Promise<{ fromVersion: number; toVersion: number; contentHash: string }> {
+    if (fromEnvId === toEnvId) {
+      throw new BadRequestException(
+        "Source and target environments must differ.",
+      );
+    }
+    const source =
+      fromVersion === undefined
+        ? await this.latestRow(tenantId, fromEnvId, workflowKey)
+        : await getPrisma().graphDefinition.findUnique({
+            where: {
+              tenantId_environmentId_workflowKey_version: {
+                tenantId,
+                environmentId: fromEnvId,
+                workflowKey,
+                version: fromVersion,
+              },
+            },
+          });
+    if (!source) {
+      throw new NotFoundException(
+        fromVersion === undefined
+          ? `No '${workflowKey}' graph in the source environment.`
+          : `No version ${fromVersion} of '${workflowKey}' in the source environment.`,
+      );
+    }
+    // Write into the target env (re-validated + content-hashed; identical graph → reuses version).
+    const snap = await this.upsert(
+      tenantId,
+      toEnvId,
+      workflowKey,
+      source.name,
+      source.graph as unknown as GraphDef,
+    );
+    await getPrisma().promotion.create({
+      data: {
+        tenantId,
+        workflowKey,
+        fromEnvId,
+        toEnvId,
+        fromVersion: source.version,
+        toVersion: snap.version,
+        actor,
+      },
+    });
+    return {
+      fromVersion: source.version,
+      toVersion: snap.version,
+      contentHash: snap.contentHash,
+    };
+  }
+
+  /** Promotion history for a workflow (newest first) — the lineage/audit list. */
+  async listPromotions(
+    tenantId: string,
+    workflowKey: string,
+  ): Promise<
+    {
+      fromEnvId: string;
+      toEnvId: string;
+      fromVersion: number;
+      toVersion: number;
+      actor: string;
+      createdAt: string;
+    }[]
+  > {
+    const rows = await getPrisma().promotion.findMany({
+      where: { tenantId, workflowKey },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
+    return rows.map((r) => ({
+      fromEnvId: r.fromEnvId,
+      toEnvId: r.toEnvId,
+      fromVersion: r.fromVersion,
+      toVersion: r.toVersion,
+      actor: r.actor,
+      createdAt: r.createdAt.toISOString(),
+    }));
   }
 
   /** The workflowKey of this workflow's error handler, or null if none is bound. */

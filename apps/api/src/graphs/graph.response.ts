@@ -54,3 +54,28 @@ export class ErrorHandlerResponse {
   @ApiProperty({ nullable: true, example: "on-failure-alert" })
   errorWorkflowKey!: string | null;
 }
+
+/** Result of promoting a workflow definition into a target env. */
+export class PromoteGraphResponse {
+  @ApiProperty({ example: 5, description: "Source version promoted." })
+  fromVersion!: number;
+  @ApiProperty({
+    example: 3,
+    description:
+      "Version in the target env (a new version, or an existing one if the graph was identical).",
+  })
+  toVersion!: number;
+  @ApiProperty({ description: "sha256 of the promoted graph." })
+  contentHash!: string;
+}
+
+/** One promotion in a workflow's lineage/audit history. */
+export class PromotionResponse {
+  @ApiProperty() fromEnvId!: string;
+  @ApiProperty() toEnvId!: string;
+  @ApiProperty({ example: 5 }) fromVersion!: number;
+  @ApiProperty({ example: 3 }) toVersion!: number;
+  @ApiProperty({ example: "auth0|abc", description: "OIDC subject or 'api-token'." })
+  actor!: string;
+  @ApiProperty({ format: "date-time" }) createdAt!: string;
+}
