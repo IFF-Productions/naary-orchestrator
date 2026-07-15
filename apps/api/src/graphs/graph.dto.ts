@@ -1,7 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import {
+  IsInt,
   IsObject,
   IsOptional,
+  IsPositive,
   IsString,
   MaxLength,
   MinLength,
@@ -54,4 +56,24 @@ export class SaveGraphDto {
   })
   @IsObject()
   graph!: Record<string, unknown>;
+}
+
+/** Promote a workflow's definition from the ACTIVE env (X-Environment-Id) to a target env. */
+export class PromoteGraphDto {
+  @ApiProperty({
+    example: "prod",
+    description: "Target environment id or slug to promote INTO.",
+  })
+  @IsString()
+  toEnv!: string;
+
+  @ApiPropertyOptional({
+    example: 3,
+    description:
+      "Source version to promote (default: the source env's latest version).",
+  })
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  fromVersion?: number;
 }

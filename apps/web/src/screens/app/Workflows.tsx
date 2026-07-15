@@ -3,13 +3,20 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Button,
   Card,
+  Dialog,
   Icon,
   LoadingBlock,
   SearchInput,
   StatusPill,
   Switch,
 } from "../../components";
-import { api, type GraphSummary, type RunSummary } from "../../lib/api";
+import {
+  api,
+  type Environment,
+  getActiveEnvironment,
+  type GraphSummary,
+  type RunSummary,
+} from "../../lib/api";
 import { runStatusUi, successRate } from "../../lib/run-status";
 
 /**
@@ -33,6 +40,51 @@ export function Workflows() {
   const [tenant, setTenant] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  // Promote flow: the workflow being promoted (source = the ACTIVE env, via the header), the
+  // candidate target envs (all but the active one), and progress/result.
+  const [promoteFor, setPromoteFor] = useState<string | null>(null);
+  const [promoteEnvs, setPromoteEnvs] = useState<Environment[]>([]);
+  const [promoteBusy, setPromoteBusy] = useState<string | null>(null);
+  const [promoteMsg, setPromoteMsg] = useState<string | null>(null);
+
+  async function openPromote(workflowKey: string): Promise<void> {
+    if (!tenant) return;
+    setPromoteFor(workflowKey);
+    setPromoteMsg(null);
+    setPromoteEnvs([]);
+    let envs: Environment[];
+    try {
+      envs = await api.listEnvironments(tenant);
+    } catch {
+      // Distinguish a load failure from "no other environments".
+      setPromoteMsg("Couldn't load environments — try again.");
+      return;
+    }
+    const active = getActiveEnvironment();
+    // Exclude the SOURCE env from the targets. When no env is selected (header omitted), the
+    // server uses the DEFAULT env as the source — so filter THAT out, not just a matching slug.
+    setPromoteEnvs(
+      envs.filter((e) =>
+        active ? e.slug !== active && e.id !== active : !e.isDefault,
+      ),
+    );
+  }
+
+  async function doPromote(
+    workflowKey: string,
+    target: Environment,
+  ): Promise<void> {
+    setPromoteBusy(target.id);
+    setPromoteMsg(null);
+    try {
+      const res = await api.promoteWorkflow(workflowKey, target.slug);
+      setPromoteMsg(`Promoted to ${target.name} (v${res.toVersion}).`);
+    } catch {
+      setPromoteMsg(`Could not promote to ${target.name}.`);
+    } finally {
+      setPromoteBusy(null);
+    }
+  }
   // Seed the filter from ?q= so the global topbar search lands here pre-filtered.
   const [searchParams] = useSearchParams();
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
@@ -330,6 +382,16 @@ export function Workflows() {
               </Button>
               <Button
                 variant="secondary"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void openPromote(r.graph.workflowKey);
+                }}
+                title="Copy this workflow into another environment"
+              >
+                Promote
+              </Button>
+              <Button
+                variant="secondary"
                 disabled={deleting === r.graph.workflowKey}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -357,6 +419,64 @@ export function Workflows() {
         />
         Run stats are computed from the {runs.length} most recent runs.
       </div>
+
+      {/* Promote picker — copy the workflow from the active env into a target env. Uses the shared
+          Dialog (consistent overlay/close behaviour + styling). */}
+      <Dialog
+        open={!!promoteFor}
+        onClose={() => setPromoteFor(null)}
+        title={`Promote “${promoteFor ?? ""}”`}
+        footer={
+          <Button variant="ghost" onClick={() => setPromoteFor(null)}>
+            Close
+          </Button>
+        }
+      >
+        <div
+          style={{
+            fontSize: "var(--text-sm)",
+            color: "var(--ink-3)",
+            marginBottom: 14,
+            lineHeight: "var(--leading-snug)",
+          }}
+        >
+          Copies this workflow’s current graph from the <strong>active</strong>{" "}
+          environment into the target as a new version. Credentials &
+          connections are not copied — the target env uses its own.
+        </div>
+        {promoteEnvs.length === 0 ? (
+          <div style={{ fontSize: "var(--text-sm)", color: "var(--ink-3)" }}>
+            {promoteMsg ??
+              "No other environments to promote to. Create one from the sidebar switcher."}
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {promoteEnvs.map((e) => (
+              <Button
+                key={e.id}
+                variant="secondary"
+                loading={promoteBusy === e.id}
+                disabled={!!promoteBusy}
+                onClick={() => promoteFor && void doPromote(promoteFor, e)}
+              >
+                Promote to {e.name}
+                {e.isDefault ? " (default)" : ""}
+              </Button>
+            ))}
+          </div>
+        )}
+        {promoteEnvs.length > 0 && promoteMsg && (
+          <div
+            style={{
+              marginTop: 12,
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-2)",
+            }}
+          >
+            {promoteMsg}
+          </div>
+        )}
+      </Dialog>
     </div>
   );
 }

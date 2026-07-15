@@ -11,11 +11,16 @@ import {
 } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
 import type { GraphDef } from "@naary/dsl";
-import { EnvironmentSel, TenantId } from "../auth/tenant.decorator";
+import {
+  CurrentPrincipal,
+  EnvironmentSel,
+  type Principal,
+  TenantId,
+} from "../auth/tenant.decorator";
 import { EnvironmentsService } from "../environments/environments.service";
 import { SchedulesService } from "../schedules/schedules.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
-import { GenerateGraphDto, SaveGraphDto } from "./graph.dto";
+import { GenerateGraphDto, PromoteGraphDto, SaveGraphDto } from "./graph.dto";
 import { GraphGeneratorService } from "./graph-generator.service";
 import {
   ErrorHandlerResponse,
@@ -23,6 +28,8 @@ import {
   GraphDetailResponse,
   GraphSummaryResponse,
   GraphVersionResponse,
+  PromoteGraphResponse,
+  PromotionResponse,
   SaveGraphResponse,
 } from "./graph.response";
 import { type GraphSummary, GraphsService } from "./graphs.service";
@@ -200,6 +207,51 @@ export class GraphsController {
       version: snap.version,
       contentHash: snap.contentHash,
     };
+  }
+
+  /** Promote a workflow's definition from the ACTIVE env (X-Environment-Id) into a target env
+   *  (copy-on-promote). Creds/connections are NOT copied — the target binds to its own. */
+  @ApiEndpoint({
+    summary: "Promote a workflow to another environment",
+    description:
+      "Copies the active env's graph (a chosen version, default latest) into the target env as a new version, and records lineage. Credentials/connections are not copied.",
+    created: PromoteGraphResponse,
+    notFound: true,
+  })
+  @Post(":workflowKey/promote")
+  async promote(
+    @TenantId() tenantId: string,
+    @Param("workflowKey") workflowKey: string,
+    @Body() body: PromoteGraphDto,
+    @CurrentPrincipal() principal: Principal,
+    @EnvironmentSel() envSel?: string,
+  ): Promise<{ fromVersion: number; toVersion: number; contentHash: string }> {
+    const fromEnvId = await this.environments.resolveEnvId(tenantId, envSel);
+    const toEnvId = await this.environments.resolveEnvId(tenantId, body.toEnv);
+    const actor = principal.subject ?? principal.userId ?? "api-token";
+    return this.graphs.promote(
+      tenantId,
+      workflowKey,
+      fromEnvId,
+      toEnvId,
+      actor,
+      body.fromVersion,
+    );
+  }
+
+  /** A workflow's promotion history (lineage/audit) — newest first. */
+  @ApiEndpoint({
+    summary: "List a workflow's promotions",
+    description:
+      "Who promoted this workflow between envs, when, and the source→target versions.",
+    ok: [PromotionResponse],
+  })
+  @Get(":workflowKey/promotions")
+  promotions(
+    @TenantId() tenantId: string,
+    @Param("workflowKey") workflowKey: string,
+  ): Promise<PromotionResponse[]> {
+    return this.graphs.listPromotions(tenantId, workflowKey);
   }
 
   /** Delete a workflow and everything bound to it (graph versions, activation, pins, error-handler
