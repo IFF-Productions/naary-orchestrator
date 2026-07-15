@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const findMany = vi.fn();
 const findUnique = vi.fn();
 const upsert = vi.fn();
+const deleteMany = vi.fn();
 vi.mock("@naary/db", () => ({
-  getPrisma: () => ({ notificationSettings: { findUnique, upsert } }),
+  getPrisma: () => ({
+    notificationChannel: { findMany, findUnique, upsert, deleteMany },
+  }),
 }));
 
 // Mock the shared egress guard + transport so sendTest needs no real network. Defined via
@@ -29,101 +33,120 @@ import { NotificationsService } from "../src/notifications/notifications.service
 const svc = new NotificationsService();
 
 beforeEach(() => {
+  findMany.mockReset();
   findUnique.mockReset();
   upsert.mockReset();
+  deleteMany.mockReset();
   assertEgressAllowed.mockReset().mockResolvedValue(undefined);
   safeFetch.mockReset().mockResolvedValue({ ok: true, status: 200 });
 });
 
-describe("NotificationsService", () => {
-  it("returns safe defaults (no webhook, slack, both events on) when unset", async () => {
-    findUnique.mockResolvedValue(null);
-    expect(await svc.get("t-1")).toEqual({
-      webhookUrl: null,
-      channel: "slack",
-      onApprovalPending: true,
-      onRunFailed: true,
-    });
+describe("NotificationsService.list", () => {
+  it("returns EVERY known channel, defaulting unconfigured ones to disabled/no-URL", async () => {
+    findMany.mockResolvedValue([]);
+    const out = await svc.list("t-1");
+    expect(out.map((c) => c.type)).toEqual(["slack", "teams"]);
+    // An unsaved channel is disabled (never sends) with events defaulting on.
+    for (const c of out) {
+      expect(c).toMatchObject({
+        enabled: false,
+        webhookUrl: null,
+        onApprovalPending: true,
+        onRunFailed: true,
+      });
+    }
   });
 
-  it("returns the stored settings, including the teams channel", async () => {
-    findUnique.mockResolvedValue({
-      webhookUrl: "https://h/x",
-      channel: "teams",
-      onApprovalPending: false,
-      onRunFailed: true,
+  it("merges saved rows over defaults, keeping channels independent", async () => {
+    findMany.mockResolvedValue([
+      {
+        type: "slack",
+        enabled: true,
+        webhookUrl: "https://h/slack",
+        onApprovalPending: true,
+        onRunFailed: false,
+      },
+    ]);
+    const out = await svc.list("t-1");
+    const slack = out.find((c) => c.type === "slack")!;
+    const teams = out.find((c) => c.type === "teams")!;
+    expect(slack).toMatchObject({
+      enabled: true,
+      webhookUrl: "https://h/slack",
+      onRunFailed: false,
     });
-    expect(await svc.get("t-1")).toEqual({
-      webhookUrl: "https://h/x",
-      channel: "teams",
-      onApprovalPending: false,
-      onRunFailed: true,
-    });
+    // Teams unconfigured → still disabled, independent of Slack.
+    expect(teams).toMatchObject({ enabled: false, webhookUrl: null });
   });
+});
 
-  it("normalizes an unknown/legacy channel value to slack", async () => {
-    findUnique.mockResolvedValue({
-      webhookUrl: "https://h/x",
-      channel: "discord",
-      onApprovalPending: true,
-      onRunFailed: true,
-    });
-    expect((await svc.get("t-1")).channel).toBe("slack");
-  });
-
-  it("persists the chosen channel on save", async () => {
+describe("NotificationsService.saveChannel", () => {
+  it("upserts ONE channel by (tenant,type) and normalizes a blank URL to null", async () => {
     upsert.mockResolvedValue({
-      webhookUrl: "https://h/x",
-      channel: "teams",
-      onApprovalPending: true,
-      onRunFailed: true,
-    });
-    const out = await svc.save("t-1", {
-      webhookUrl: "https://h/x",
-      channel: "teams",
-    });
-    expect(upsert.mock.calls[0][0].update.channel).toBe("teams");
-    expect(upsert.mock.calls[0][0].create.channel).toBe("teams");
-    expect(out.channel).toBe("teams");
-  });
-
-  it("upserts and NORMALIZES a blank webhook URL to null (turns it off)", async () => {
-    upsert.mockResolvedValue({
+      type: "teams",
+      enabled: true,
       webhookUrl: null,
       onApprovalPending: true,
       onRunFailed: true,
     });
-    await svc.save("t-1", { webhookUrl: "   ", onRunFailed: true });
-    // the update path received null, not the blank string
+    await svc.saveChannel("t-1", "teams", { enabled: true, webhookUrl: "  " });
+    expect(upsert.mock.calls[0][0].where).toEqual({
+      tenantId_type: { tenantId: "t-1", type: "teams" },
+    });
     expect(upsert.mock.calls[0][0].update.webhookUrl).toBeNull();
   });
 
-  it("passes a real URL through on save", async () => {
+  it("passes a real URL through and reports the saved view", async () => {
     upsert.mockResolvedValue({
+      type: "slack",
+      enabled: true,
       webhookUrl: "https://h/x",
       onApprovalPending: true,
       onRunFailed: true,
     });
-    await svc.save("t-1", { webhookUrl: "https://h/x" });
+    const out = await svc.saveChannel("t-1", "slack", {
+      webhookUrl: "https://h/x",
+    });
     expect(upsert.mock.calls[0][0].update.webhookUrl).toBe("https://h/x");
+    expect(out.type).toBe("slack");
+  });
+
+  it("rejects an unknown channel type", async () => {
+    await expect(
+      svc.saveChannel("t-1", "discord", { enabled: true }),
+    ).rejects.toThrow(/Unknown notification channel/);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("NotificationsService.deleteChannel", () => {
+  it("deletes the channel's config by (tenant,type)", async () => {
+    deleteMany.mockResolvedValue({ count: 1 });
+    await svc.deleteChannel("t-1", "teams");
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { tenantId: "t-1", type: "teams" },
+    });
   });
 });
 
 describe("NotificationsService.sendTest", () => {
-  it("400s (and never fetches) when no webhook is configured", async () => {
+  it("400s (and never fetches) when the channel has no webhook", async () => {
     findUnique.mockResolvedValue(null);
-    await expect(svc.sendTest("t-1")).rejects.toThrow(/No webhook URL/);
+    await expect(svc.sendTest("t-1", "slack")).rejects.toThrow(
+      /No webhook URL/,
+    );
     expect(safeFetch).not.toHaveBeenCalled();
   });
 
-  it("POSTs Slack blocks (default channel) and reports ok on 2xx", async () => {
+  it("POSTs Slack blocks for the slack channel and reports ok on 2xx", async () => {
     findUnique.mockResolvedValue({
+      type: "slack",
+      enabled: true,
       webhookUrl: "https://hooks.slack.com/x",
-      channel: "slack",
       onApprovalPending: true,
       onRunFailed: true,
     });
-    const out = await svc.sendTest("t-1");
+    const out = await svc.sendTest("t-1", "slack");
     expect(out).toEqual({ ok: true, status: 200 });
     expect(assertEgressAllowed).toHaveBeenCalledWith(
       "https://hooks.slack.com/x",
@@ -133,14 +156,15 @@ describe("NotificationsService.sendTest", () => {
     expect(body.type).toBeUndefined();
   });
 
-  it("POSTs a Teams Adaptive Card envelope when channel is teams", async () => {
+  it("POSTs a Teams Adaptive Card envelope for the teams channel", async () => {
     findUnique.mockResolvedValue({
+      type: "teams",
+      enabled: true,
       webhookUrl: "https://teams.example/x",
-      channel: "teams",
       onApprovalPending: true,
       onRunFailed: true,
     });
-    await svc.sendTest("t-1");
+    await svc.sendTest("t-1", "teams");
     const body = JSON.parse(safeFetch.mock.calls[0][1].body);
     expect(body.type).toBe("message");
     expect(body.attachments[0].contentType).toBe(
@@ -150,26 +174,28 @@ describe("NotificationsService.sendTest", () => {
 
   it("maps a blocked (SSRF) URL to a 400 without fetching", async () => {
     findUnique.mockResolvedValue({
+      type: "slack",
+      enabled: true,
       webhookUrl: "https://169.254.169.254/x",
-      channel: "slack",
       onApprovalPending: true,
       onRunFailed: true,
     });
     assertEgressAllowed.mockRejectedValue(
       new BlockedEgressError("host resolves to a private/reserved address"),
     );
-    await expect(svc.sendTest("t-1")).rejects.toThrow(/isn't allowed/);
+    await expect(svc.sendTest("t-1", "slack")).rejects.toThrow(/isn't allowed/);
     expect(safeFetch).not.toHaveBeenCalled();
   });
 
   it("surfaces a non-2xx webhook response as a 400", async () => {
     findUnique.mockResolvedValue({
+      type: "teams",
+      enabled: true,
       webhookUrl: "https://teams.example/x",
-      channel: "teams",
       onApprovalPending: true,
       onRunFailed: true,
     });
     safeFetch.mockResolvedValue({ ok: false, status: 404 });
-    await expect(svc.sendTest("t-1")).rejects.toThrow(/responded 404/);
+    await expect(svc.sendTest("t-1", "teams")).rejects.toThrow(/responded 404/);
   });
 });

@@ -470,27 +470,30 @@ export const api = {
   getAuditLog(tenantId: string): Promise<AuditEvent[]> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/audit`);
   },
-  // --- Notifications ---
-  getNotifications(tenantId: string): Promise<NotificationSettings> {
+  // --- Notifications (per-channel: Slack, Teams, … each configured independently) ---
+  listNotificationChannels(tenantId: string): Promise<NotificationChannel[]> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/notifications`);
   },
-  saveNotifications(
+  // Upsert ONE channel's config (identified by type); other channels are untouched.
+  saveNotificationChannel(
     tenantId: string,
-    patch: Partial<NotificationSettings>,
-  ): Promise<NotificationSettings> {
-    return http(`/tenants/${encodeURIComponent(tenantId)}/notifications`, {
-      method: "PUT",
-      body: JSON.stringify(patch),
-    });
+    type: NotificationChannelType,
+    patch: Partial<Omit<NotificationChannel, "type">>,
+  ): Promise<NotificationChannel> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/notifications/${encodeURIComponent(type)}`,
+      { method: "PUT", body: JSON.stringify(patch) },
+    );
   },
-  // Send a test message to the configured webhook. Returns a result (not a throw) so the
+  // Send a test message to ONE channel's webhook. Returns a result (not a throw) so the
   // UI can show the server's specific failure reason (bad URL, non-2xx, unreachable).
-  async testNotification(
+  async testNotificationChannel(
     tenantId: string,
+    type: NotificationChannelType,
   ): Promise<{ ok: boolean; message?: string }> {
     const token = await getBearerToken();
     const res = await fetch(
-      `${BASE}/tenants/${encodeURIComponent(tenantId)}/notifications/test`,
+      `${BASE}/tenants/${encodeURIComponent(tenantId)}/notifications/${encodeURIComponent(type)}/test`,
       {
         method: "POST",
         headers: {
@@ -972,10 +975,15 @@ export interface AuditEvent {
   createdAt: string;
 }
 
-export interface NotificationSettings {
+export type NotificationChannelType = "slack" | "teams";
+
+/** One independently-configurable notification channel. The server returns every known
+ *  channel (saved or default), so the UI renders them uniformly. */
+export interface NotificationChannel {
+  type: NotificationChannelType;
+  /** Off = the worker skips this channel entirely, even with a URL set. */
+  enabled: boolean;
   webhookUrl: string | null;
-  /** Payload format posted to the webhook: Slack Block Kit or a Teams Adaptive Card. */
-  channel: "slack" | "teams";
   onApprovalPending: boolean;
   onRunFailed: boolean;
 }
