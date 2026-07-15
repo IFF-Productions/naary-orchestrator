@@ -84,7 +84,8 @@ describe("create", () => {
     expect(out).toMatchObject({ slug: "sandbox", isDefault: false });
   });
 
-  it("rejects a bad slug (uppercase/space/leading hyphen)", async () => {
+  it("rejects a malformed slug (leading hyphen / space / special char)", async () => {
+    // NB: uppercase is NOT rejected — create() lowercases the slug first (see the create test).
     for (const slug of ["-bad", "with space", "!nope"]) {
       await expect(svc.create("t1", { name: "X", slug })).rejects.toThrow(
         /Slug must be/,
@@ -118,6 +119,12 @@ describe("rename", () => {
     await expect(svc.rename("t1", "nope", "X")).rejects.toThrow(/not found/);
   });
 
+  it("404s (not 500) when the row vanishes between the update and the re-read", async () => {
+    updateMany.mockResolvedValue({ count: 1 }); // update succeeded...
+    findFirst.mockResolvedValue(null); // ...but a concurrent delete removed it
+    await expect(svc.rename("t1", "env-x", "X")).rejects.toThrow(/not found/);
+  });
+
   it("rejects an empty name", async () => {
     await expect(svc.rename("t1", "env-prod", "   ")).rejects.toThrow(
       /name is required/,
@@ -142,6 +149,12 @@ describe("remove", () => {
     expect(deleteMany).toHaveBeenCalledWith({
       where: { id: "env-sb", tenantId: "t1" },
     });
+  });
+
+  it("404s when the env was deleted concurrently (deleteMany count 0)", async () => {
+    findFirst.mockResolvedValue({ ...DEFAULT, id: "env-sb", isDefault: false });
+    deleteMany.mockResolvedValue({ count: 0 }); // gone by the time we delete
+    await expect(svc.remove("t1", "env-sb")).rejects.toThrow(/not found/);
   });
 
   it("404s an unknown env", async () => {

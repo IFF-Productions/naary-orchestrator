@@ -30,7 +30,10 @@ model Environment {
   id        String   @id @default(uuid())
   tenantId  String
   name      String   // display: "Sandbox", "UAT", "Production"
-  slug      String   // stable, header/URL-safe: "sandbox", "uat", "prod"
+  slug      String   // stable, header/URL-safe: "sandbox", "uat", "prod".
+                     // CONSTRAINT: lowercase, `^[a-z0-9][a-z0-9-]{0,31}$` (≤32 chars) — enforced
+                     // in the API (SLUG_RE + DTO MaxLength(32)), not the DB. The header-resolution
+                     // contract (§4) depends on this lowercase + length bound.
   isDefault Boolean  @default(false) // exactly ONE per tenant — where legacy + un-scoped data lands
   createdAt DateTime @default(now())
 
@@ -101,8 +104,9 @@ checked in `AuthGuard`):
 
 - New header `X-Environment-Id`. **Resolution contract (deterministic):** trim the value, then try an
   exact **`id`** match first; only if that misses, try the (lowercased) **`slug`** — two ordered
-  lookups, never an ambiguous `OR`. (A uuid *is* `[a-z0-9-]`, but a slug is capped at 32 chars while a
-  uuid is 36, so a slug can never equal an id; the id-first order removes any doubt regardless.) A
+  lookups, never an ambiguous `OR`. (A uuid *is* `[a-z0-9-]`, but a slug is capped at 32 chars — see the
+  §2 slug constraint, enforced by the API's `SLUG_RE` + DTO `MaxLength(32)` — while a uuid is 36, so a
+  slug can never equal an id; the id-first order removes any doubt regardless.) A
   value that matches neither is an **error** (never a silent fallback — that would cross envs).
   **Absent** → the tenant's default (`prod`-slug) env. Resolved in `AuthGuard` → `Principal.environmentId`.
   (Implemented in `EnvironmentsService.resolveEnvId`, Slice 1.)
