@@ -11,7 +11,7 @@ import { ExecutionsService } from "../src/executions/executions.service";
  * one run to fail (closed → WorkflowNotFoundError) while the rest succeed.
  */
 function makeService(signalFor: (id: string) => () => Promise<void>) {
-  const service = new ExecutionsService({} as never);
+  const service = new ExecutionsService({} as never, { defaultEnvId: async () => "env-test", resolveEnvId: async () => "env-test" } as never);
   (service as unknown as { client: unknown }).client = {
     workflow: {
       getHandle: (id: string) => ({ signal: signalFor(id) }),

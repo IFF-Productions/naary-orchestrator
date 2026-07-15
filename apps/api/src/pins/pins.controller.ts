@@ -14,6 +14,7 @@ import type { GraphDef, NodeDef } from "@naary/dsl";
 import { isPureNode, runPureNode } from "@naary/dsl";
 import { TenantId } from "../auth/tenant.decorator";
 import { ExecutionsService } from "../executions/executions.service";
+import { EnvironmentsService } from "../environments/environments.service";
 import { GraphsService } from "../graphs/graphs.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { PinsService } from "./pins.service";
@@ -48,6 +49,7 @@ export class PinsController {
     private readonly pins: PinsService,
     private readonly graphs: GraphsService,
     private readonly executions: ExecutionsService,
+    private readonly environments: EnvironmentsService,
   ) {}
 
   /**
@@ -76,7 +78,16 @@ export class PinsController {
   ): Promise<
     { pure: true; output: unknown } | { pure: false; message: string }
   > {
-    const found = await this.graphs.getLatestNamed(tenantId, workflowKey);
+    // Pins (PinnedData) aren't env-scoped yet — they're stored/read by (tenant, workflowKey). To
+    // avoid cross-env contamination (sandbox pins affecting a prod node test), the node-test reads
+    // the graph from the DEFAULT env too, so the read + the pins it uses are in the same space.
+    // Env-scope PinnedData in a later slice to make this the active env.
+    const envId = await this.environments.defaultEnvId(tenantId);
+    const found = await this.graphs.getLatestNamed(
+      tenantId,
+      envId,
+      workflowKey,
+    );
     if (!found) {
       throw new NotFoundException(`No graph saved for '${workflowKey}'`);
     }

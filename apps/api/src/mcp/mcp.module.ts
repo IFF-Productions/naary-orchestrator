@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { EnvironmentsModule } from "../environments/environments.module";
 import { ExecutionsModule } from "../executions/executions.module";
 import { GraphsModule } from "../graphs/graphs.module";
 import { McpController } from "./mcp.controller";
@@ -9,7 +10,7 @@ import { McpController } from "./mcp.controller";
  * modules (both already export the service) to back list_workflows / get_run.
  */
 @Module({
-  imports: [GraphsModule, ExecutionsModule],
+  imports: [EnvironmentsModule, GraphsModule, ExecutionsModule],
   controllers: [McpController],
 })
 export class McpModule {}

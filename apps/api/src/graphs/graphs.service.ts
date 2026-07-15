@@ -42,6 +42,7 @@ export interface GraphSummary {
 export class GraphsService {
   async upsert(
     tenantId: string,
+    environmentId: string,
     workflowKey: string,
     name: string,
     graph: GraphDef,
@@ -69,7 +70,9 @@ export class GraphsService {
       throw new BadRequestException(`Invalid node config — ${summary}`);
     }
     const contentHash = hashGraph(graph);
-    const latest = await this.latestRow(tenantId, workflowKey);
+    // Version is per (tenant, ENVIRONMENT, workflowKey) — a save in sandbox and prod for the same
+    // key version independently (else they'd collide on the new composite unique).
+    const latest = await this.latestRow(tenantId, environmentId, workflowKey);
     if (latest && latest.contentHash === contentHash) {
       return {
         graph: latest.graph as unknown as GraphDef,
@@ -81,6 +84,7 @@ export class GraphsService {
     const row = await getPrisma().graphDefinition.create({
       data: {
         tenantId,
+        environmentId,
         workflowKey,
         name,
         graph: graph as object,
@@ -97,9 +101,10 @@ export class GraphsService {
 
   async getLatest(
     tenantId: string,
+    environmentId: string,
     workflowKey: string,
   ): Promise<GraphSnapshot | null> {
-    const row = await this.latestRow(tenantId, workflowKey);
+    const row = await this.latestRow(tenantId, environmentId, workflowKey);
     return row
       ? {
           graph: row.graph as unknown as GraphDef,
@@ -110,14 +115,14 @@ export class GraphsService {
   }
 
   /** One entry per workflowKey (its latest version), newest first — for the
-   *  Workflows list. Names/keys only; no graph bodies. */
-  async list(tenantId: string): Promise<GraphSummary[]> {
+   *  Workflows list. Names/keys only; no graph bodies. Scoped to the active environment. */
+  async list(tenantId: string, environmentId: string): Promise<GraphSummary[]> {
     const [rows, inactive] = await Promise.all([
       getPrisma().graphDefinition.findMany({
-        where: { tenantId },
+        where: { tenantId, environmentId },
         orderBy: { version: "desc" },
       }),
-      this.inactiveKeys(tenantId), // one query; everything else is active by default
+      this.inactiveKeys(tenantId, environmentId), // active-by-default within the env
     ]);
     const latest = new Map<string, GraphSummary>();
     for (const r of rows) {
@@ -137,6 +142,7 @@ export class GraphsService {
   /** Latest graph for a key, WITH its name + version — for opening into the canvas. */
   async getLatestNamed(
     tenantId: string,
+    environmentId: string,
     workflowKey: string,
   ): Promise<{
     workflowKey: string;
@@ -144,7 +150,7 @@ export class GraphsService {
     version: number;
     graph: GraphDef;
   } | null> {
-    const row = await this.latestRow(tenantId, workflowKey);
+    const row = await this.latestRow(tenantId, environmentId, workflowKey);
     return row
       ? {
           workflowKey,
@@ -159,12 +165,18 @@ export class GraphsService {
    *  Tenant- + key-scoped; null if that (key, version) doesn't exist for the tenant. */
   async getVersion(
     tenantId: string,
+    environmentId: string,
     workflowKey: string,
     version: number,
   ): Promise<GraphSnapshot | null> {
     const row = await getPrisma().graphDefinition.findUnique({
       where: {
-        tenantId_workflowKey_version: { tenantId, workflowKey, version },
+        tenantId_environmentId_workflowKey_version: {
+          tenantId,
+          environmentId,
+          workflowKey,
+          version,
+        },
       },
     });
     return row
@@ -180,10 +192,11 @@ export class GraphsService {
    *  bodies (cheap; powers the "re-run at version" picker). */
   async listVersions(
     tenantId: string,
+    environmentId: string,
     workflowKey: string,
   ): Promise<{ version: number; contentHash: string; createdAt: string }[]> {
     const rows = await getPrisma().graphDefinition.findMany({
-      where: { tenantId, workflowKey },
+      where: { tenantId, environmentId, workflowKey },
       orderBy: { version: "desc" },
       select: { version: true, contentHash: true, createdAt: true },
     });
@@ -194,9 +207,13 @@ export class GraphsService {
     }));
   }
 
-  private latestRow(tenantId: string, workflowKey: string) {
+  private latestRow(
+    tenantId: string,
+    environmentId: string,
+    workflowKey: string,
+  ) {
     return getPrisma().graphDefinition.findFirst({
-      where: { tenantId, workflowKey },
+      where: { tenantId, environmentId, workflowKey },
       orderBy: { version: "desc" },
     });
   }
@@ -233,18 +250,31 @@ export class GraphsService {
 
   /** Whether this workflow's automatic triggers may fire. ABSENCE ⇒ ACTIVE (see the
    *  WorkflowActivation model note): existing workflows have no row and must keep working. */
-  async isActive(tenantId: string, workflowKey: string): Promise<boolean> {
+  async isActive(
+    tenantId: string,
+    environmentId: string,
+    workflowKey: string,
+  ): Promise<boolean> {
     const row = await getPrisma().workflowActivation.findUnique({
-      where: { tenantId_workflowKey: { tenantId, workflowKey } },
+      where: {
+        tenantId_environmentId_workflowKey: {
+          tenantId,
+          environmentId,
+          workflowKey,
+        },
+      },
     });
     return row?.active ?? true;
   }
 
-  /** The set of workflowKeys this tenant has explicitly DEACTIVATED (rows with active=false).
+  /** The set of workflowKeys DEACTIVATED in this environment (rows with active=false).
    *  Used to annotate the workflow list without an N+1 (everything else is active by default). */
-  async inactiveKeys(tenantId: string): Promise<Set<string>> {
+  async inactiveKeys(
+    tenantId: string,
+    environmentId: string,
+  ): Promise<Set<string>> {
     const rows = await getPrisma().workflowActivation.findMany({
-      where: { tenantId, active: false },
+      where: { tenantId, environmentId, active: false },
       select: { workflowKey: true },
     });
     return new Set(rows.map((r) => r.workflowKey));
@@ -254,12 +284,19 @@ export class GraphsService {
    *  Temporal schedules must sequence those around this write (see SchedulesService.setActive). */
   async setActive(
     tenantId: string,
+    environmentId: string,
     workflowKey: string,
     active: boolean,
   ): Promise<void> {
     await getPrisma().workflowActivation.upsert({
-      where: { tenantId_workflowKey: { tenantId, workflowKey } },
-      create: { tenantId, workflowKey, active },
+      where: {
+        tenantId_environmentId_workflowKey: {
+          tenantId,
+          environmentId,
+          workflowKey,
+        },
+      },
+      create: { tenantId, environmentId, workflowKey, active },
       update: { active },
     });
   }
@@ -275,38 +312,56 @@ export class GraphsService {
    */
   async deleteWorkflow(
     tenantId: string,
+    environmentId: string,
     workflowKey: string,
+    /** True only when deleting the DEFAULT env's copy. The shared (not-yet-env-scoped) rows —
+     *  pins/poll/error-handler/triggers, keyed by (tenant, workflowKey) — are removed ONLY then,
+     *  so deleting a non-default (sandbox) copy of a key can't wipe the default/prod copy's
+     *  webhooks/pins. Those tables env-scope in later slices; this gate goes away with them. */
+    deleteShared: boolean,
   ): Promise<boolean> {
     const existed = await getPrisma().graphDefinition.findFirst({
-      where: { tenantId, workflowKey },
+      where: { tenantId, environmentId, workflowKey },
       select: { workflowKey: true },
     });
     if (!existed) return false;
 
     const p = getPrisma();
-    await p.$transaction([
-      p.graphDefinition.deleteMany({ where: { tenantId, workflowKey } }),
-      p.workflowActivation.deleteMany({ where: { tenantId, workflowKey } }),
-      p.pinnedData.deleteMany({ where: { tenantId, workflowKey } }),
-      p.pollState.deleteMany({ where: { tenantId, workflowKey } }),
-      // Error-handler bindings where this key is EITHER the failing workflow or the handler.
-      p.errorHandler.deleteMany({
-        where: {
-          tenantId,
-          OR: [{ workflowKey }, { errorWorkflowKey: workflowKey }],
-        },
+    // Always delete THIS env's GraphDefinition + WorkflowActivation.
+    const ops = [
+      p.graphDefinition.deleteMany({
+        where: { tenantId, environmentId, workflowKey },
       }),
-      // Triggers reference the graph key as `workflowId`.
-      p.webhookEndpoint.deleteMany({
-        where: { tenantId, workflowId: workflowKey },
+      p.workflowActivation.deleteMany({
+        where: { tenantId, environmentId, workflowKey },
       }),
-      p.formEndpoint.deleteMany({
-        where: { tenantId, workflowId: workflowKey },
-      }),
-      p.chatEndpoint.deleteMany({
-        where: { tenantId, workflowId: workflowKey },
-      }),
-    ]);
+    ];
+    // The shared, tenant-wide rows/triggers belong to the default env's copy — only remove them
+    // when deleting THAT copy (else a sandbox delete kills prod's webhooks/pins for the same key).
+    if (deleteShared) {
+      ops.push(
+        p.pinnedData.deleteMany({ where: { tenantId, workflowKey } }),
+        p.pollState.deleteMany({ where: { tenantId, workflowKey } }),
+        // Error-handler bindings where this key is EITHER the failing workflow or the handler.
+        p.errorHandler.deleteMany({
+          where: {
+            tenantId,
+            OR: [{ workflowKey }, { errorWorkflowKey: workflowKey }],
+          },
+        }),
+        // Triggers reference the graph key as `workflowId`.
+        p.webhookEndpoint.deleteMany({
+          where: { tenantId, workflowId: workflowKey },
+        }),
+        p.formEndpoint.deleteMany({
+          where: { tenantId, workflowId: workflowKey },
+        }),
+        p.chatEndpoint.deleteMany({
+          where: { tenantId, workflowId: workflowKey },
+        }),
+      );
+    }
+    await p.$transaction(ops);
     return true;
   }
 }

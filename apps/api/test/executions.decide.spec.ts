@@ -10,7 +10,7 @@ function makeService(status: string) {
     .fn()
     .mockResolvedValue({ status, currentNodeId: "n", ctx: {} });
   const signal = vi.fn().mockResolvedValue(undefined);
-  const service = new ExecutionsService({} as never);
+  const service = new ExecutionsService({} as never, { defaultEnvId: async () => "env-test", resolveEnvId: async () => "env-test" } as never);
   (service as unknown as { client: unknown }).client = {
     workflow: { getHandle: () => ({ query, signal }) },
   };

@@ -27,11 +27,18 @@ function makeService(
   getLatest: () => Promise<unknown>,
   isActive: () => Promise<boolean> = async () => true,
 ): SchedulesService {
-  const service = new SchedulesService({
-    getLatest,
-    isActive,
-    setActive: setActiveFlag,
-  } as never);
+  const service = new SchedulesService(
+    {
+      getLatest,
+      isActive,
+      setActive: setActiveFlag,
+    } as never,
+    {
+      defaultEnvId: async () => "e1",
+      resolveEnvId: async () => "e1",
+      isDefaultEnv: async () => true,
+    } as never,
+  );
   (service as unknown as { client: unknown }).client = {
     schedule: {
       create,
@@ -169,14 +176,14 @@ describe("setActive (workflow activation ↔ its schedules)", () => {
     findMany.mockResolvedValue([{ id: "poll-t-1-w" }, { id: "cron-t-1-w" }]);
     const service = makeService(async () => null);
 
-    await service.setActive("t-1", "w", false);
+    await service.setActive("t-1", "e1", "w", false);
 
     expect(pause).toHaveBeenCalledTimes(2); // both schedules paused
     expect(updateMany).toHaveBeenCalledWith({
       where: { tenantId: "t-1", workflowKey: "w" },
       data: { paused: true },
     });
-    expect(setActiveFlag).toHaveBeenCalledWith("t-1", "w", false);
+    expect(setActiveFlag).toHaveBeenCalledWith("t-1", "e1", "w", false);
     // ordering: schedules paused before the flag flips (nothing fires against intent)
     expect(pause.mock.invocationCallOrder[0]).toBeLessThan(
       setActiveFlag.mock.invocationCallOrder[0],
@@ -187,9 +194,9 @@ describe("setActive (workflow activation ↔ its schedules)", () => {
     findMany.mockResolvedValue([{ id: "poll-t-1-w" }]);
     const service = makeService(async () => null);
 
-    await service.setActive("t-1", "w", true);
+    await service.setActive("t-1", "e1", "w", true);
 
-    expect(setActiveFlag).toHaveBeenCalledWith("t-1", "w", true);
+    expect(setActiveFlag).toHaveBeenCalledWith("t-1", "e1", "w", true);
     expect(unpause).toHaveBeenCalledOnce();
     expect(setActiveFlag.mock.invocationCallOrder[0]).toBeLessThan(
       unpause.mock.invocationCallOrder[0],
@@ -204,7 +211,7 @@ describe("setActive (workflow activation ↔ its schedules)", () => {
     describeHandle.mockResolvedValue({ state: { paused: false } }); // schedule still exists → real error
     const service = makeService(async () => null);
 
-    await expect(service.setActive("t-1", "w", false)).rejects.toThrow(
+    await expect(service.setActive("t-1", "e1", "w", false)).rejects.toThrow(
       /temporal unavailable/,
     );
     expect(setActiveFlag).not.toHaveBeenCalled(); // flag stays active — fail-closed
@@ -216,8 +223,27 @@ describe("setActive (workflow activation ↔ its schedules)", () => {
     describeHandle.mockRejectedValue(new Error("not found")); // schedule is gone → nothing to pause
     const service = makeService(async () => null);
 
-    await service.setActive("t-1", "w", false); // does not throw
-    expect(setActiveFlag).toHaveBeenCalledWith("t-1", "w", false);
+    await service.setActive("t-1", "e1", "w", false); // does not throw
+    expect(setActiveFlag).toHaveBeenCalledWith("t-1", "e1", "w", false);
+  });
+
+  it("NON-default env: flips ONLY the env-scoped flag, never touches Temporal schedules", async () => {
+    findMany.mockResolvedValue([{ id: "poll-t-1-w" }, { id: "cron-t-1-w" }]);
+    // A service whose active env is NOT the default → the schedule pause/resume must be skipped
+    // (else a sandbox toggle would pause prod's schedules for the same key).
+    const service = new SchedulesService(
+      { getLatest: async () => null, setActive: setActiveFlag } as never,
+      { isDefaultEnv: async () => false } as never,
+    );
+    (service as unknown as { client: unknown }).client = {
+      schedule: { getHandle: () => ({ pause, unpause }) },
+    };
+
+    await service.setActive("t-1", "e-sandbox", "w", false);
+
+    expect(setActiveFlag).toHaveBeenCalledWith("t-1", "e-sandbox", "w", false);
+    expect(pause).not.toHaveBeenCalled(); // prod's schedules untouched
+    expect(updateMany).not.toHaveBeenCalled();
   });
 });
 

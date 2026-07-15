@@ -15,7 +15,7 @@ function makeService(opts: {
   const graphs = {
     getLatest: opts.getLatest ?? (async () => null),
   } as never;
-  const service = new ExecutionsService(graphs);
+  const service = new ExecutionsService(graphs, { defaultEnvId: async () => "env-test", resolveEnvId: async () => "env-test" } as never);
   (service as unknown as { client: unknown }).client = {
     workflow: { getHandle: opts.getHandle ?? (() => ({})) },
   };

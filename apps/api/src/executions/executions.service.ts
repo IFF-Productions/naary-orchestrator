@@ -35,6 +35,7 @@ import { TracedClass } from "@naary/observability";
 import { getBudget } from "@naary/usage";
 import { assertWithinMonthlyBudget } from "../budget/budget-guard";
 import { executionsStarted } from "../common/metrics";
+import { EnvironmentsService } from "../environments/environments.service";
 import {
   type GraphSnapshot,
   GraphsService,
@@ -252,7 +253,10 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   private client!: Client;
   private connection!: Connection;
 
-  constructor(private readonly graphs: GraphsService) {}
+  constructor(
+    private readonly graphs: GraphsService,
+    private readonly environments: EnvironmentsService,
+  ) {}
 
   async onModuleInit(): Promise<void> {
     const { client, connection } = await connectTemporal();
@@ -271,14 +275,20 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
    *  version); omit for the latest. */
   async start(
     tenantId: string,
+    environmentId: string,
     input?: Record<string, unknown>,
     workflowKey: string = DEFAULT_WORKFLOW_KEY,
     graphVersion?: number,
   ): Promise<{ workflowId: string }> {
     const snapshot =
       graphVersion === undefined
-        ? await this.graphs.getLatest(tenantId, workflowKey)
-        : await this.graphs.getVersion(tenantId, workflowKey, graphVersion);
+        ? await this.graphs.getLatest(tenantId, environmentId, workflowKey)
+        : await this.graphs.getVersion(
+            tenantId,
+            environmentId,
+            workflowKey,
+            graphVersion,
+          );
     if (!snapshot) {
       throw new NotFoundException(
         graphVersion === undefined
@@ -550,7 +560,10 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
     workflowKey: string,
   ): Promise<void> {
-    if (!(await this.graphs.isActive(tenantId, workflowKey))) {
+    // Automatic triggers (webhook/form/chat/schedule) run in the DEFAULT env until they're
+    // env-scoped (design ENVIRONMENTS.md Slice 4); activation is checked there.
+    const envId = await this.environments.defaultEnvId(tenantId);
+    if (!(await this.graphs.isActive(tenantId, envId, workflowKey))) {
       throw new ConflictException("Workflow is inactive");
     }
   }
@@ -924,8 +937,11 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     nodeId: string,
   ): Promise<{ title: string; instructions: string | null }> {
     if (!workflowKey) return { title: "Approval required", instructions: null };
+    // Best-effort read of the graph for the node's title. Runs aren't env-tagged yet (deferred),
+    // so read from the default env.
+    const envId = await this.environments.defaultEnvId(tenantId);
     const snap = await this.graphs
-      .getLatest(tenantId, workflowKey)
+      .getLatest(tenantId, envId, workflowKey)
       .catch(() => null);
     const node = snap?.graph.nodes.find((n) => n.id === nodeId);
     const cfg = (node?.config ?? {}) as {
@@ -1227,9 +1243,11 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       );
     }
     const input = await this.originalTriggerInput(id);
+    // Runs aren't env-tagged yet (deferred), so re-run against the default env's graph.
+    const envId = await this.environments.defaultEnvId(tenantId);
     // workflowKey is the run's OWN key; graphVersion (if given) is resolved against
     // that key inside start() — the caller can't target another workflow's version.
-    return this.start(tenantId, input, row.workflowKey, graphVersion);
+    return this.start(tenantId, envId, input, row.workflowKey, graphVersion);
   }
 
   /** 404 if the execution is unknown, 403 if it belongs to another tenant. */

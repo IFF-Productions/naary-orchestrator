@@ -15,6 +15,12 @@ const schedulesStub = {
   syncCronSchedule: vi.fn().mockResolvedValue(undefined),
 } as unknown as SchedulesService;
 
+const envStub = {
+  resolveEnvId: async () => "e1",
+  defaultEnvId: async () => "e1",
+  isDefaultEnv: async () => true,
+} as never;
+
 const validGraph: GraphDef = {
   startNodeId: "start",
   nodes: [
@@ -49,6 +55,7 @@ describe("GraphsController", () => {
       } as unknown as GraphsService,
       {} as unknown as GraphGeneratorService,
       schedulesStub,
+      envStub,
     );
 
     const res = await controller.save("t-1", dto(validGraph));
@@ -61,6 +68,7 @@ describe("GraphsController", () => {
     // tenantId comes from the principal (arg 0), never the body.
     expect(upsert).toHaveBeenCalledWith(
       "t-1",
+      "e1",
       "canvas",
       "Canvas draft",
       validGraph,
@@ -75,6 +83,7 @@ describe("GraphsController", () => {
       } as unknown as GraphsService,
       {} as unknown as GraphGeneratorService,
       schedulesStub,
+      envStub,
     );
 
     await expect(
@@ -99,10 +108,11 @@ describe("GraphsController", () => {
       } as unknown as GraphsService,
       {} as unknown as GraphGeneratorService,
       schedulesStub,
+      envStub,
     );
 
     expect(await controller.list("t-1")).toBe(summaries);
-    expect(list).toHaveBeenCalledWith("t-1");
+    expect(list).toHaveBeenCalledWith("t-1", "e1");
   });
 
   it("gets a single workflow's latest graph", async () => {
@@ -119,10 +129,11 @@ describe("GraphsController", () => {
       } as unknown as GraphsService,
       {} as unknown as GraphGeneratorService,
       schedulesStub,
+      envStub,
     );
 
     expect(await controller.get("t-1", "canvas")).toBe(named);
-    expect(getLatestNamed).toHaveBeenCalledWith("t-1", "canvas");
+    expect(getLatestNamed).toHaveBeenCalledWith("t-1", "e1", "canvas");
   });
 
   it("404s when the workflowKey is unknown", async () => {
@@ -133,6 +144,7 @@ describe("GraphsController", () => {
       } as unknown as GraphsService,
       {} as unknown as GraphGeneratorService,
       schedulesStub,
+      envStub,
     );
 
     await expect(controller.get("t-1", "nope")).rejects.toBeInstanceOf(

@@ -5,6 +5,7 @@ const findMany = vi.fn();
 const findUnique = vi.fn();
 const findFirst = vi.fn();
 const create = vi.fn();
+const update = vi.fn();
 const updateMany = vi.fn();
 const deleteMany = vi.fn();
 vi.mock("@naary/db", () => ({
@@ -15,6 +16,7 @@ vi.mock("@naary/db", () => ({
       findUnique,
       findFirst,
       create,
+      update,
       updateMany,
       deleteMany,
     },
@@ -38,6 +40,7 @@ beforeEach(() => {
     findUnique,
     findFirst,
     create,
+    update,
     updateMany,
     deleteMany,
   ])
@@ -46,16 +49,35 @@ beforeEach(() => {
 });
 
 describe("ensureDefault", () => {
-  it("upserts the Production default on the (tenantId, slug) unique (race-safe)", async () => {
+  it("READ-FIRST: returns an existing default without writing", async () => {
+    findUnique.mockResolvedValue(DEFAULT);
     const out = await svc.ensureDefault("t1");
     expect(out).toMatchObject({ slug: "prod", isDefault: true });
-    expect(upsert.mock.calls[0][0].where).toEqual({
+    expect(findUnique.mock.calls[0][0].where).toEqual({
       tenantId_slug: { tenantId: "t1", slug: "prod" },
     });
+    expect(upsert).not.toHaveBeenCalled(); // steady state = a single indexed read, no write
+  });
+
+  it("creates the Production default (race-safe upsert) when absent", async () => {
+    findUnique.mockResolvedValue(null);
+    const out = await svc.ensureDefault("t1");
+    expect(out).toMatchObject({ slug: "prod", isDefault: true });
     expect(upsert.mock.calls[0][0].create.isDefault).toBe(true);
-    // Re-asserts default on an existing prod-slug row (defends a manual/partial edit), but doesn't
-    // override a user-renamed name.
-    expect(upsert.mock.calls[0][0].update).toEqual({ isDefault: true });
+    // A concurrent create is absorbed by the unique (empty update → no clobber).
+    expect(upsert.mock.calls[0][0].update).toEqual({});
+  });
+
+  it("REPAIRS an existing prod-slug row that lost isDefault (never leaves it deletable)", async () => {
+    findUnique.mockResolvedValue({ ...DEFAULT, isDefault: false });
+    update.mockResolvedValue({ ...DEFAULT, isDefault: true });
+    const out = await svc.ensureDefault("t1");
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "env-prod" },
+      data: { isDefault: true },
+    });
+    expect(out.isDefault).toBe(true);
+    expect(upsert).not.toHaveBeenCalled(); // repaired via a targeted update, not a full upsert
   });
 });
 

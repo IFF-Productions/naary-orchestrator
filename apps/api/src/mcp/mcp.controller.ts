@@ -8,6 +8,7 @@ import { ApiTokenService } from "../auth/api-token.service";
 import { Public } from "../auth/public.decorator";
 import { ExecutionsService } from "../executions/executions.service";
 import { GraphGeneratorService } from "../graphs/graph-generator.service";
+import { EnvironmentsService } from "../environments/environments.service";
 import { GraphsService } from "../graphs/graphs.service";
 import type { McpCreateWorkflowArgs } from "./mcp.server";
 import { buildMcpServer } from "./mcp.server";
@@ -79,6 +80,7 @@ export class McpController {
     private readonly graphs: GraphsService,
     private readonly executions: ExecutionsService,
     private readonly generator: GraphGeneratorService,
+    private readonly environments: EnvironmentsService,
   ) {}
 
   @Public()
@@ -108,20 +110,25 @@ export class McpController {
       return;
     }
 
+    // MCP token isn't env-bound yet → operate in the tenant's default env (design §Slice 4).
+    const envId = await this.environments.defaultEnvId(tenantId);
+
     // Fetch the tenant's workflows up front so each can be exposed as its own tool (flavor B).
     // Best-effort — a listing hiccup just means no per-workflow tools this session.
-    const exposedWorkflows = await this.graphs.list(tenantId).catch(() => []);
+    const exposedWorkflows = await this.graphs
+      .list(tenantId, envId)
+      .catch(() => []);
 
     // Deps are pre-scoped to the token's tenantId — a tool can't reach another tenant.
     const server = buildMcpServer({
       tenantId,
-      listWorkflows: () => this.graphs.list(tenantId),
+      listWorkflows: () => this.graphs.list(tenantId, envId),
       getRun: (runId) => this.executions.getState(runId, tenantId),
       runWorkflow: (workflowKey, input) =>
         this.executions
-          .start(tenantId, input, workflowKey)
+          .start(tenantId, envId, input, workflowKey)
           .then((r) => ({ runId: r.workflowId })),
-      createWorkflow: (args) => this.createWorkflow(tenantId, args),
+      createWorkflow: (args) => this.createWorkflow(tenantId, envId, args),
       approve: (runId, approved, note) =>
         this.executions.approve(runId, approved, tenantId, note),
       exposedWorkflows,
@@ -145,6 +152,7 @@ export class McpController {
    */
   private async createWorkflow(
     tenantId: string,
+    environmentId: string,
     { prompt, name, graph, save, workflowKey }: McpCreateWorkflowArgs,
   ) {
     let draftName: string;
@@ -163,7 +171,13 @@ export class McpController {
     if (!save) return { name: draftName, graph: draftGraph, saved: false };
 
     const key = workflowKey?.trim() || deriveWorkflowKey(draftName);
-    const snap = await this.graphs.upsert(tenantId, key, draftName, draftGraph);
+    const snap = await this.graphs.upsert(
+      tenantId,
+      environmentId,
+      key,
+      draftName,
+      draftGraph,
+    );
     return {
       name: draftName,
       graph: draftGraph,
