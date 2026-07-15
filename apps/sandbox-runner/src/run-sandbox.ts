@@ -2,7 +2,11 @@ import { execFile } from "node:child_process";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import type { RunnerConfig } from "./config";
-import { SANDBOX_KEY_ENV, buildSandboxDockerArgs } from "./docker-run";
+import {
+  SANDBOX_KEY_ENV,
+  assertAllowedKeyEnvVar,
+  buildSandboxDockerArgs,
+} from "./docker-run";
 
 /** A safe run id — only these chars can appear in the mount path (blocks `..`/traversal
  *  that would let a caller mount an arbitrary host path into the sandbox). */
@@ -12,8 +16,12 @@ export interface RunRequest {
   runId: string;
   /** The coding-CLI argv (e.g. claude -p …). Data only — never shell-interpreted. */
   agentArgs: string[];
-  /** The tenant's Anthropic key — forwarded into the sandbox env, used, discarded. */
-  anthropicKey: string;
+  /** The tenant's Claude Code credential — forwarded into the sandbox env under `keyEnvVar`,
+   *  used, discarded. May be an API key OR a subscription setup-token. */
+  authKey: string;
+  /** Which env var to forward `authKey` under (allowlisted): ANTHROPIC_API_KEY for an API key,
+   *  CLAUDE_CODE_OAUTH_TOKEN for a setup-token. Defaults to ANTHROPIC_API_KEY. */
+  keyEnvVar?: string;
   timeoutMs?: number;
 }
 
@@ -82,8 +90,23 @@ export async function runSandbox(
   ) {
     throw new BadRequestError("agentArgs must be a string[]");
   }
-  if (typeof req.anthropicKey !== "string" || req.anthropicKey.length === 0) {
-    throw new BadRequestError("anthropicKey is required");
+  if (typeof req.authKey !== "string" || req.authKey.length === 0) {
+    throw new BadRequestError("authKey is required");
+  }
+  // A wrong-typed keyEnvVar (number/object) would otherwise fall through to a misleading
+  // "un-allowlisted" error — reject it explicitly with a clear message.
+  if (req.keyEnvVar !== undefined && typeof req.keyEnvVar !== "string") {
+    throw new BadRequestError("keyEnvVar must be a string");
+  }
+  // Default to the API-key var; validate any explicit choice against the allowlist so a caller
+  // can't inject an arbitrary env var into the container.
+  const keyEnvVar = req.keyEnvVar ?? SANDBOX_KEY_ENV;
+  try {
+    assertAllowedKeyEnvVar(keyEnvVar);
+  } catch (e) {
+    throw new BadRequestError(
+      e instanceof Error ? e.message : "invalid keyEnvVar",
+    );
   }
   // Resolve + confine the working dir to runsDir (defense in depth beyond the id regex —
   // e.g. ".." matches the regex but must not escape). The resolved path must be a strict
@@ -107,20 +130,34 @@ export async function runSandbox(
     proxyUrl: cfg.proxyUrl,
     workdir,
     agentArgs: req.agentArgs,
+    keyEnvVar,
     limits: cfg.limits,
   });
 
   const { stdout, exitCode } = await exec("docker", dockerArgs, {
-    // The key reaches the sandbox via `-e ANTHROPIC_API_KEY` (name-only in the argv) →
+    // The credential reaches the sandbox via `-e <keyEnvVar>` (name-only in the argv) →
     // its value is read from THIS exec's env. Never inline, never logged.
-    env: { ...process.env, [SANDBOX_KEY_ENV]: req.anthropicKey },
+    env: { ...process.env, [keyEnvVar]: req.authKey },
     timeoutMs: req.timeoutMs ?? cfg.defaultTimeoutMs,
   });
 
-  // Capture the sandbox's edits as a diff. A non-zero git exit means we can't trust the
-  // output as a diff (e.g. not a git repo) — surface it rather than returning a misleading
-  // "diff" alongside the docker exit code.
-  const git = await exec("git", ["-C", workdir, "diff"], { timeoutMs: 30_000 });
+  // Capture the sandbox's edits as a diff. STAGE everything first (`git add -A`) so files the CLI
+  // CREATED (untracked) are included — plain `git diff` shows tracked changes only and would
+  // silently drop new files, which are a huge share of a coding agent's output. `add -A` still
+  // honors .gitignore, so build artifacts don't leak into the diff. A non-zero git exit means we
+  // can't trust the output as a diff (e.g. not a git repo) — surface it rather than return a
+  // misleading "diff" alongside the docker exit code.
+  const add = await exec("git", ["-C", workdir, "add", "-A"], {
+    timeoutMs: 30_000,
+  });
+  if (add.exitCode !== 0) {
+    throw new Error(
+      "sandbox-runner: could not stage the edits (git add failed)",
+    );
+  }
+  const git = await exec("git", ["-C", workdir, "diff", "--cached"], {
+    timeoutMs: 30_000,
+  });
   if (git.exitCode !== 0) {
     throw new Error("sandbox-runner: could not compute the diff (git failed)");
   }
@@ -128,6 +165,6 @@ export async function runSandbox(
   // Defense in depth: even though the key is forwarded by env (not argv), redact it from the
   // returned text in case the CLI echoed its env or the model wrote it into a file (→ diff).
   const redact = (s: string) =>
-    req.anthropicKey ? s.split(req.anthropicKey).join("[REDACTED]") : s;
+    req.authKey ? s.split(req.authKey).join("[REDACTED]") : s;
   return { exitCode, stdout: redact(stdout), diff: redact(git.stdout) };
 }

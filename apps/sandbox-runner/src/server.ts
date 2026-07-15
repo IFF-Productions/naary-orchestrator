@@ -80,7 +80,8 @@ export function createRunnerServer(cfg: RunnerConfig, exec?: Exec): Server {
         let parsed: {
           runId?: string;
           agentArgs?: string[];
-          anthropicKey?: string;
+          authKey?: string;
+          keyEnvVar?: string;
           timeoutMs?: number;
         };
         try {
@@ -92,7 +93,8 @@ export function createRunnerServer(cfg: RunnerConfig, exec?: Exec): Server {
           {
             runId: parsed.runId ?? "",
             agentArgs: parsed.agentArgs ?? [],
-            anthropicKey: parsed.anthropicKey ?? "",
+            authKey: parsed.authKey ?? "",
+            keyEnvVar: parsed.keyEnvVar,
             timeoutMs: parsed.timeoutMs,
           },
           cfg,

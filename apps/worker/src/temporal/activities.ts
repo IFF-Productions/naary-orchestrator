@@ -79,6 +79,7 @@ import {
 } from "../metrics";
 import { CredentialsService, MissingCredentialError } from "@naary/secrets";
 import {
+  type ClaimCheck,
   getObjectStore,
   maybeOffload,
   resolveClaimChecks,
@@ -101,6 +102,7 @@ import {
   jsonSchema,
 } from "ai";
 import { type CodeAgentTool, resolveDriver } from "./code-agent-drivers";
+import { codeAgentWriteEnv, runCodeAgentWrite } from "./code-agent-write";
 
 const MAX_OUTPUT_TOKENS = 1024;
 
@@ -2160,11 +2162,23 @@ export interface CodeAgentActivityConfig {
   maxBudgetUsd?: number;
   timeoutMs?: number;
   costUsd?: number;
+  /** "write" clones `repo` and edits it in the sandbox (Slice 2c); default/"read" runs in-worker. */
+  mode?: "read" | "write";
+  repo?: string;
+  branch?: string;
+  connectionId?: string;
 }
 export interface CodeAgentResult {
   status: "ok";
-  /** The CLI's final text (a plan/summary in read-only mode) + trace metadata. */
-  output: { result: string; tool: string; sessionId?: string };
+  /** The CLI's final text (a plan/summary in read-only mode) + trace metadata. In write mode,
+   *  `diff` carries the sandbox's edits: the inline unified-diff string, or a `ClaimCheck`
+   *  reference (`{ __claimCheck, bytes }`) when large (resolved at the activity boundary). */
+  output: {
+    result: string;
+    tool: string;
+    sessionId?: string;
+    diff?: string | ClaimCheck;
+  };
   costUsd: number;
 }
 
@@ -2211,6 +2225,9 @@ export const __codeAgentDeps = {
         },
       );
     }),
+  /** Write-mode dispatch: clone (outside the sandbox) → sandbox-runner → diff. Seam so the
+   *  activity's orchestration is tested without a real runner/git. */
+  runWrite: runCodeAgentWrite,
 };
 
 /**
@@ -2233,30 +2250,72 @@ export async function callCodeAgent(
       .getCredentials()
       .getDecryptedKey(meta.tenantId, driver.credentialProvider);
 
+    const write = cfg.mode === "write";
     const args = driver.buildArgs({
       prompt: cfg.prompt,
       systemPrompt: cfg.systemPrompt,
       model: cfg.model,
       maxTurns: cfg.maxTurns,
       maxBudgetUsd: cfg.maxBudgetUsd,
+      write,
     });
-    // MINIMAL env: the key + just enough to run the binary — not the worker's whole env
-    // (which holds other tenants' material). The git token is never placed here.
-    const { stdout, exitCode } = await __codeAgentDeps.exec(
-      driver.binary,
-      args,
-      {
-        // MINIMAL env — PATH/HOME to run the binary + the driver's chosen auth var (exactly one,
-        // API key vs subscription OAuth token). Not the worker's whole env (other tenants' material),
-        // and never the git token.
+
+    let stdout: string;
+    let exitCode: number;
+    let diff: string | undefined;
+    if (write) {
+      // WRITE (Slice 2c): dispatch to the isolated sandbox-runner. The activity (here) clones the
+      // repo with the git token OUTSIDE the sandbox; the runner only ever gets the Claude Code
+      // credential (via the driver's chosen env var) — never the git token. The runner returns a diff.
+      if (!cfg.repo || !cfg.connectionId) {
+        throw ApplicationFailure.nonRetryable(
+          "codeAgent write mode requires `repo` and a GitHub App `connectionId`.",
+          "CODE_AGENT_WRITE_CONFIG",
+        );
+      }
+      // authEnv gives { [varName]: value } — the contract is EXACTLY one entry (the CLI reads a
+      // single auth var). Assert it rather than blindly destructure `[0]` (a future driver
+      // returning 0 or >1 entries would otherwise crash or forward an ambiguous credential).
+      const authEntries = Object.entries(driver.authEnv(apiKey));
+      if (authEntries.length !== 1) {
+        throw ApplicationFailure.nonRetryable(
+          `codeAgent: driver "${driver.tool}" must resolve exactly one auth env var.`,
+          "CODE_AGENT_BAD_AUTH_ENV",
+        );
+      }
+      const [keyEnvVar, authKey] = authEntries[0];
+      const w = await __codeAgentDeps.runWrite(
+        {
+          tenantId: meta.tenantId,
+          executionId: meta.executionId,
+          nodeId: meta.nodeId,
+          repo: cfg.repo,
+          branch: cfg.branch,
+          connectionId: cfg.connectionId,
+          agentArgs: args,
+          authKey,
+          keyEnvVar,
+          timeoutMs: cfg.timeoutMs,
+        },
+        codeAgentWriteEnv(),
+      );
+      stdout = w.stdout;
+      exitCode = w.exitCode;
+      diff = w.diff;
+    } else {
+      // READ (default): run the CLI IN the worker (plan mode, no repo). MINIMAL env — PATH/HOME +
+      // the driver's chosen auth var (exactly one, API key vs OAuth token). Never the git token.
+      const r = await __codeAgentDeps.exec(driver.binary, args, {
         env: {
           PATH: process.env.PATH,
           HOME: process.env.HOME,
           ...driver.authEnv(apiKey),
         },
         timeoutMs: cfg.timeoutMs,
-      },
-    );
+      });
+      stdout = r.stdout;
+      exitCode = r.exitCode;
+    }
     const envlp = driver.parse(stdout, exitCode);
 
     // BILLING (Tier-1 rule 6): prefer the CLI's own token counts; else a char/4 estimate —
@@ -2331,12 +2390,22 @@ export async function callCodeAgent(
     );
     if (costUsd > 0) runCostUsd.inc(costUsd);
 
+    // A write-mode diff can be large — offload past the 1MB claim-check threshold so it doesn't
+    // bloat workflow history (CLAUDE.md: pass refs, not blobs). Small diffs stay inline.
+    const diffOut =
+      diff !== undefined
+        ? ((await maybeOffload(diff, getObjectStore(), {
+            keyPrefix: `codeagent-diff/${meta.tenantId}`,
+          })) as string | ClaimCheck)
+        : undefined;
+
     return {
       status: "ok",
       output: {
         result: envlp.result,
         tool: driver.tool,
         sessionId: envlp.sessionId,
+        ...(diffOut !== undefined ? { diff: diffOut } : {}),
       },
       costUsd,
     };

@@ -49,6 +49,15 @@ describe("claude driver (pure)", () => {
     expect(args).toEqual(expect.arrayContaining(["--max-budget-usd", "2"]));
   });
 
+  it("builds a WRITE argv: acceptEdits + Edit/Write added, still no Bash", () => {
+    const args = d.buildArgs({ prompt: "fix it", write: true });
+    expect(args[args.indexOf("--permission-mode") + 1]).toBe("acceptEdits");
+    expect(args[args.indexOf("--allowedTools") + 1]).toBe(
+      "Read,Grep,Glob,Edit,Write",
+    );
+    expect(args.join(" ")).not.toContain("Bash");
+  });
+
   it("parses the JSON envelope → normalized result/usage/session", () => {
     const env = d.parse(envelope(), 0);
     expect(env.isError).toBe(false);
@@ -156,5 +165,43 @@ describe("callCodeAgent activity", () => {
     expect(err.message).not.toContain("sk-leak");
     expect(err.message).not.toContain(CFG.prompt);
     expect(JSON.stringify(err)).not.toContain("sk-leak");
+  });
+
+  it("WRITE mode dispatches to the sandbox-runner (runWrite) and surfaces the diff", async () => {
+    const runWrite = vi.fn().mockResolvedValue({
+      exitCode: 0,
+      stdout: envelope(),
+      diff: "diff --git a/x b/x",
+    });
+    __codeAgentDeps.runWrite = runWrite as never;
+    const out = await callCodeAgent(
+      {
+        ...CFG,
+        mode: "write",
+        repo: "acme/widgets",
+        connectionId: "conn-gh",
+      },
+      {},
+      META,
+    );
+    // Dispatched to the runner with the WRITE argv + the resolved credential, NOT the in-worker exec.
+    expect(runWrite).toHaveBeenCalledOnce();
+    expect(exec).not.toHaveBeenCalled();
+    const wp = runWrite.mock.calls[0][0];
+    expect(wp.repo).toBe("acme/widgets");
+    expect(wp.keyEnvVar).toBe("ANTHROPIC_API_KEY");
+    expect(wp.agentArgs).toContain("acceptEdits");
+    // The (small) diff is surfaced inline on the node output.
+    expect(out.output.diff).toBe("diff --git a/x b/x");
+    expect(out.output.result).toContain("no issues");
+  });
+
+  it("WRITE mode without repo/connectionId is a non-retryable config failure", async () => {
+    await expect(
+      callCodeAgent({ ...CFG, mode: "write" }, {}, META),
+    ).rejects.toMatchObject({
+      type: "CODE_AGENT_WRITE_CONFIG",
+      nonRetryable: true,
+    });
   });
 });

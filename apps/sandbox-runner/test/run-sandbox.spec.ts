@@ -22,7 +22,7 @@ const CFG: RunnerConfig = {
 const REQ = {
   runId: "exec-abc_123",
   agentArgs: ["-p", "fix the bug", "--permission-mode", "acceptEdits"],
-  anthropicKey: "sk-ant-secret",
+  authKey: "sk-ant-secret",
 };
 
 let exec: ReturnType<typeof vi.fn>;
@@ -41,7 +41,7 @@ describe("runSandbox", () => {
     expect(out.exitCode).toBe(0);
     expect(out.diff).toContain("+edited");
 
-    const [dockerCall, gitCall] = exec.mock.calls;
+    const [dockerCall, addCall, diffCall] = exec.mock.calls;
     expect(dockerCall[0]).toBe("docker");
     const dargs: string[] = dockerCall[1];
     expect(dargs).toContain("naary-claude-sandbox:latest"); // pinned image
@@ -51,8 +51,14 @@ describe("runSandbox", () => {
     expect(dargs).toContain("--rm");
     // the working tree is mounted under runsDir
     expect(dargs[dargs.indexOf("-v") + 1]).toBe("/runs/exec-abc_123:/work");
-    // git diff runs against the same workdir
-    expect(gitCall[1]).toEqual(["-C", "/runs/exec-abc_123", "diff"]);
+    // Stage ALL edits (so created/untracked files are included) then diff the index.
+    expect(addCall[1]).toEqual(["-C", "/runs/exec-abc_123", "add", "-A"]);
+    expect(diffCall[1]).toEqual([
+      "-C",
+      "/runs/exec-abc_123",
+      "diff",
+      "--cached",
+    ]);
   });
 
   it("forwards the key via the exec ENV (by name), never on the argv", async () => {
@@ -63,6 +69,41 @@ describe("runSandbox", () => {
     expect((dockerCall[1] as string[]).join(" ")).not.toContain(
       "sk-ant-secret",
     );
+  });
+
+  it("forwards a setup-token under CLAUDE_CODE_OAUTH_TOKEN when keyEnvVar overrides the default", async () => {
+    await runSandbox(
+      { ...REQ, keyEnvVar: "CLAUDE_CODE_OAUTH_TOKEN" },
+      CFG,
+      exec as unknown as Exec,
+    );
+    const dockerCall = exec.mock.calls[0];
+    // The value goes under the CHOSEN var; the API-key var doesn't carry the secret.
+    expect(dockerCall[2].env.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-secret");
+    expect(dockerCall[2].env.ANTHROPIC_API_KEY).not.toBe("sk-ant-secret");
+    // and it's on the argv by name (never the value).
+    expect(dockerCall[1] as string[]).toContain("CLAUDE_CODE_OAUTH_TOKEN");
+  });
+
+  it("rejects an un-allowlisted keyEnvVar before touching docker (no env injection)", async () => {
+    await expect(
+      runSandbox(
+        { ...REQ, keyEnvVar: "AWS_SECRET_ACCESS_KEY" },
+        CFG,
+        exec as unknown as Exec,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestError);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-string keyEnvVar with a clear (not 'un-allowlisted') error", async () => {
+    await expect(
+      runSandbox(
+        { ...REQ, keyEnvVar: 123 as unknown as string },
+        CFG,
+        exec as unknown as Exec,
+      ),
+    ).rejects.toThrow(/must be a string/);
   });
 
   it("rejects a traversal / bad runId before touching docker", async () => {
@@ -95,11 +136,13 @@ describe("runSandbox", () => {
   });
 
   it("throws when git diff fails (workdir isn't a git repo) — no misleading diff", async () => {
-    exec = vi.fn(async (file: string) =>
-      file === "git"
+    // add succeeds, the diff (--cached) fails → the compute-diff error, not the stage error.
+    exec = vi.fn(async (file: string, args: string[]) => {
+      if (file !== "git") return { stdout: "{}", exitCode: 0 };
+      return args.includes("--cached")
         ? { stdout: "fatal: not a git repository", exitCode: 128 }
-        : { stdout: "{}", exitCode: 0 },
-    );
+        : { stdout: "", exitCode: 0 };
+    });
     await expect(runSandbox(REQ, CFG, exec as unknown as Exec)).rejects.toThrow(
       /could not compute the diff/,
     );
@@ -114,7 +157,7 @@ describe("runSandbox", () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestError);
     await expect(
-      runSandbox({ ...REQ, anthropicKey: "" }, CFG, exec as unknown as Exec),
+      runSandbox({ ...REQ, authKey: "" }, CFG, exec as unknown as Exec),
     ).rejects.toBeInstanceOf(BadRequestError);
   });
 });

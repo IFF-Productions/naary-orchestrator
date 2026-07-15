@@ -20,6 +20,9 @@ export interface CodeAgentRunOpts {
   model?: string;
   maxTurns?: number;
   maxBudgetUsd?: number;
+  /** Write mode (Slice 2c): the CLI may EDIT files in the sandbox (acceptEdits + Edit/Write),
+   *  vs the read-only default (plan mode, Read/Grep/Glob). Still no Bash in either mode. */
+  write?: boolean;
 }
 
 /** Normalized result the activity + workflow understand, regardless of which CLI ran. */
@@ -82,11 +85,12 @@ const claudeDriver: CliAgentDriver = {
       opts.prompt,
       "--output-format",
       "json",
-      // Slice 1: read-only. Plan mode + a clamped, read-only toolset — no Bash, no writes.
+      // Read (default): plan mode + a clamped read-only toolset. Write (Slice 2c, sandbox only):
+      // acceptEdits + Edit/Write so the model can change files; still NO Bash in either mode.
       "--permission-mode",
-      "plan",
+      opts.write ? "acceptEdits" : "plan",
       "--allowedTools",
-      "Read,Grep,Glob",
+      opts.write ? "Read,Grep,Glob,Edit,Write" : "Read,Grep,Glob",
     ];
     if (opts.systemPrompt)
       args.push("--append-system-prompt", opts.systemPrompt);

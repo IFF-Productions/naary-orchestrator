@@ -192,6 +192,17 @@ const CONFIG_SCHEMAS = {
     maxTurns: z.number().int().positive().optional(),
     maxBudgetUsd: z.number().positive().optional(),
     timeoutMs: z.number().int().positive().optional(),
+    // "read" (default) = in-worker plan-mode run, no repo. "write" = clone `repo` and let the
+    // CLI edit it in the isolated sandbox, returning a diff (Slice 2c). Write is gated OFF at the
+    // worker (CODE_AGENT_WRITE_ENABLED) until the runner is wired on the deploy host.
+    mode: z.enum(["read", "write"]).optional(),
+    /** "owner/name" of the repo to clone (write mode). */
+    repo: z.string().optional(),
+    /** Base branch to clone (write mode); defaults to the repo's default branch. */
+    branch: z.string().optional(),
+    /** The GitHub App connection that authorizes the clone (write mode). The install token is
+     *  resolved in-activity and used to clone OUTSIDE the sandbox — it never enters the sandbox. */
+    connectionId: z.string().optional(),
     // Positive: a manual fallback cost only makes sense > 0 (a negative would REDUCE the
     // run's accumulated __costUsd; a 0 defeats the never-zero fallback intent).
     costUsd: z.number().positive().optional(),
@@ -569,6 +580,25 @@ export function validateGraphConfigs(graph: {
           message: i.message,
         })),
       });
+    }
+    // Conditional-required check (zod `.partial()` can't express cross-field rules, and a
+    // `.superRefine` would defeat the lenient .partial() above): a codeAgent in WRITE mode needs
+    // a repo + a GitHub App connection, else the run only fails at execution. `mode:"write"` is a
+    // present value (not a missing draft field), so enforcing it at save is consistent with the
+    // gate. Mirrors the integration node's separate catalog validation.
+    const cfg = node.config ?? {};
+    if (node.type === "codeAgent" && cfg.mode === "write") {
+      const missing = ["repo", "connectionId"].filter((k) => !cfg[k]);
+      if (missing.length) {
+        errors.push({
+          nodeId: node.id,
+          nodeType: node.type,
+          issues: missing.map((k) => ({
+            path: k,
+            message: `codeAgent write mode requires \`${k}\`.`,
+          })),
+        });
+      }
     }
   }
   return errors;

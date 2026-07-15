@@ -53,7 +53,7 @@ const post = (body: unknown, token = "secret-token") =>
 const REQ = {
   runId: "run-1",
   agentArgs: ["-p", "go"],
-  anthropicKey: "sk-ant-xyz",
+  authKey: "sk-ant-xyz",
 };
 
 describe("runner server", () => {

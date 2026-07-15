@@ -212,6 +212,15 @@ export interface CodeAgentNodeConfig {
   maxBudgetUsd?: number;
   /** Overall wall-clock budget for the run (ms). */
   timeoutMs?: number;
+  /** "read" (default) = in-worker plan-mode run. "write" = clone `repo` + edit it in the sandbox,
+   *  returning a diff (Slice 2c; gated by CODE_AGENT_WRITE_ENABLED on the worker). */
+  mode?: "read" | "write";
+  /** "owner/name" of the repo to clone (write mode). */
+  repo?: string;
+  /** Base branch to clone (write mode); defaults to the repo's default branch. */
+  branch?: string;
+  /** GitHub App connection authorizing the clone (write mode). Token used OUTSIDE the sandbox. */
+  connectionId?: string;
   /** Flat fallback cost metered if the CLI reports no usage (fail-safe, never zero). */
   costUsd?: number;
 }
