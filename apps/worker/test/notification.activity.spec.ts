@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { __notifyDeps, sendNotification } from "../src/temporal/activities";
+import {
+  __notifyDeps,
+  type NotificationChannelRow,
+  sendNotification,
+} from "../src/temporal/activities";
 
 const fetch = vi.fn();
-let settings: {
-  webhookUrl: string | null;
-  channel?: string;
-  onApprovalPending: boolean;
-  onRunFailed: boolean;
-} | null;
+// The tenant's ENABLED channels the worker fans out to (readChannels returns only enabled rows).
+let channels: NotificationChannelRow[];
 
 // Capture the env we mutate so it can't leak into other test files (Vitest reuses workers).
 const savedEnv = {
@@ -26,17 +26,20 @@ beforeEach(() => {
   // Deep-link URLs are built from these; without them the links are omitted.
   process.env.APP_BASE_URL = "https://app.naary.test";
   process.env.ENCRYPTION_KEY = "test-encryption-key";
-  settings = {
-    webhookUrl: "https://hooks.example.com/x",
-    onApprovalPending: true,
-    onRunFailed: true,
-  };
+  channels = [
+    {
+      type: "slack",
+      webhookUrl: "https://hooks.example.com/x",
+      onApprovalPending: true,
+      onRunFailed: true,
+    },
+  ];
   __notifyDeps.assertEgressAllowed = vi
     .fn()
     .mockResolvedValue(undefined) as never;
   __notifyDeps.fetch = ((url: string, init?: RequestInit) =>
     fetch(url, init)) as never;
-  __notifyDeps.readSettings = (async () => settings) as never;
+  __notifyDeps.readChannels = (async () => channels) as never;
 });
 
 const BASE = {
@@ -228,17 +231,27 @@ describe("sendNotification", () => {
   });
 
   it("is a NO-OP when no webhook URL is configured", async () => {
-    settings = { webhookUrl: null, onApprovalPending: true, onRunFailed: true };
+    channels = [
+      {
+        type: "slack",
+        webhookUrl: null,
+        onApprovalPending: true,
+        onRunFailed: true,
+      },
+    ];
     await sendNotification({ ...BASE, kind: "run_failed" });
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it("respects the per-event toggle (approval off → no POST)", async () => {
-    settings = {
-      webhookUrl: "https://hooks.example.com/x",
-      onApprovalPending: false,
-      onRunFailed: true,
-    };
+    channels = [
+      {
+        type: "slack",
+        webhookUrl: "https://hooks.example.com/x",
+        onApprovalPending: false,
+        onRunFailed: true,
+      },
+    ];
     await sendNotification({ ...BASE, kind: "approval_pending" });
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -250,10 +263,83 @@ describe("sendNotification", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("is a no-op when there are no settings at all", async () => {
-    settings = null;
+  it("is a no-op when there are no enabled channels at all", async () => {
+    channels = [];
     await sendNotification({ ...BASE, kind: "run_failed" });
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("FANS OUT to every enabled channel (Slack + Teams both get POSTed)", async () => {
+    channels = [
+      {
+        type: "slack",
+        webhookUrl: "https://hooks.slack.com/x",
+        onApprovalPending: true,
+        onRunFailed: true,
+      },
+      {
+        type: "teams",
+        webhookUrl: "https://teams.example/x",
+        onApprovalPending: true,
+        onRunFailed: true,
+      },
+    ];
+    await sendNotification({ ...BASE, kind: "run_failed", detail: "boom" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const urls = fetch.mock.calls.map((c) => c[0]);
+    expect(urls).toEqual([
+      "https://hooks.slack.com/x",
+      "https://teams.example/x",
+    ]);
+    // Each got its OWN format: Slack blocks vs the Teams envelope.
+    const slackBody = JSON.parse(fetch.mock.calls[0][1].body as string);
+    const teamsBody = JSON.parse(fetch.mock.calls[1][1].body as string);
+    expect(Array.isArray(slackBody.blocks)).toBe(true);
+    expect(teamsBody.type).toBe("message");
+  });
+
+  it("routes per-channel: a failure goes to the channel with onRunFailed, not the other", async () => {
+    channels = [
+      {
+        type: "slack",
+        webhookUrl: "https://hooks.slack.com/x",
+        onApprovalPending: true,
+        onRunFailed: false, // Slack: approvals only
+      },
+      {
+        type: "teams",
+        webhookUrl: "https://teams.example/x",
+        onApprovalPending: false,
+        onRunFailed: true, // Teams: failures only
+      },
+    ];
+    await sendNotification({ ...BASE, kind: "run_failed", detail: "boom" });
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch.mock.calls[0][0]).toBe("https://teams.example/x");
+  });
+
+  it("ISOLATES channels: one bad webhook does not stop the next channel's POST", async () => {
+    channels = [
+      {
+        type: "slack",
+        webhookUrl: "https://hooks.slack.com/x",
+        onApprovalPending: true,
+        onRunFailed: true,
+      },
+      {
+        type: "teams",
+        webhookUrl: "https://teams.example/x",
+        onApprovalPending: true,
+        onRunFailed: true,
+      },
+    ];
+    // First POST (Slack) throws; Teams must still be attempted.
+    fetch
+      .mockRejectedValueOnce(new Error("503"))
+      .mockResolvedValueOnce({ ok: true });
+    await sendNotification({ ...BASE, kind: "run_failed", detail: "boom" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls[1][0]).toBe("https://teams.example/x");
   });
 });
 
@@ -280,12 +366,14 @@ describe("sendNotification — Microsoft Teams channel", () => {
   }
 
   it("sends the Adaptive Card envelope (not Slack blocks) when channel is teams", async () => {
-    settings = {
-      webhookUrl: "https://prod-1.westus.logic.azure.com/workflows/x",
-      channel: "teams",
-      onApprovalPending: true,
-      onRunFailed: true,
-    };
+    channels = [
+      {
+        type: "teams",
+        webhookUrl: "https://prod-1.westus.logic.azure.com/workflows/x",
+        onApprovalPending: true,
+        onRunFailed: true,
+      },
+    ];
     await sendNotification({
       ...BASE,
       kind: "approval_pending",
@@ -305,12 +393,14 @@ describe("sendNotification — Microsoft Teams channel", () => {
   });
 
   it("carries the header, a FactSet, and Approve/Reject/View-run OpenUrl actions", async () => {
-    settings = {
-      webhookUrl: "https://teams.example/x",
-      channel: "teams",
-      onApprovalPending: true,
-      onRunFailed: true,
-    };
+    channels = [
+      {
+        type: "teams",
+        webhookUrl: "https://teams.example/x",
+        onApprovalPending: true,
+        onRunFailed: true,
+      },
+    ];
     await sendNotification({
       ...BASE,
       kind: "approval_pending",
@@ -342,12 +432,14 @@ describe("sendNotification — Microsoft Teams channel", () => {
   });
 
   it("does NOT Slack-escape Teams fact values (plain JSON, no &amp; double-encoding)", async () => {
-    settings = {
-      webhookUrl: "https://teams.example/x",
-      channel: "teams",
-      onApprovalPending: true,
-      onRunFailed: true,
-    };
+    channels = [
+      {
+        type: "teams",
+        webhookUrl: "https://teams.example/x",
+        onApprovalPending: true,
+        onRunFailed: true,
+      },
+    ];
     await sendNotification({
       tenantId: "t1",
       workflowId: "wf-1",
@@ -370,12 +462,15 @@ describe("sendNotification — Microsoft Teams channel", () => {
     );
   });
 
-  it("still sends Slack blocks when channel is unset (back-compat default)", async () => {
-    settings = {
-      webhookUrl: "https://hooks.slack.com/x",
-      onApprovalPending: true,
-      onRunFailed: true,
-    };
+  it("uses the Slack shape for an unknown/legacy channel type (fallback)", async () => {
+    channels = [
+      {
+        type: "discord", // unknown type → Slack/generic payload, not the Teams envelope
+        webhookUrl: "https://hooks.slack.com/x",
+        onApprovalPending: true,
+        onRunFailed: true,
+      },
+    ];
     await sendNotification({ ...BASE, kind: "run_failed", detail: "boom" });
     const body = JSON.parse(fetch.mock.calls[0][1].body as string);
     expect(body.type).toBeUndefined(); // not the Teams envelope

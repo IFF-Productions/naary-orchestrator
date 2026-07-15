@@ -1,28 +1,39 @@
 import { ApiProperty } from "@nestjs/swagger";
 
-/** Per-tenant notification settings (webhook + which events fire it). */
-export class NotificationSettingsResponse {
+/** One independently-configurable notification channel for a tenant. */
+export class NotificationChannelResponse {
+  @ApiProperty({
+    enum: ["slack", "teams"],
+    example: "slack",
+    description:
+      "Channel type — determines the payload format + which webhook to use.",
+  })
+  type!: "slack" | "teams";
+
+  @ApiProperty({
+    example: true,
+    description:
+      "Whether this channel sends. Off = skipped even with a URL set.",
+  })
+  enabled!: boolean;
+
   @ApiProperty({
     nullable: true,
     example: "https://hooks.slack.com/services/T000/B000/xxxx",
-    description: "Outbound webhook URL. Null = notifications off.",
+    description: "Outbound webhook URL for this channel. Null = none set.",
   })
   webhookUrl!: string | null;
 
   @ApiProperty({
-    enum: ["slack", "teams"],
-    example: "slack",
-    description: "Payload format posted to the webhook.",
-  })
-  channel!: "slack" | "teams";
-
-  @ApiProperty({
     example: true,
-    description: "Notify when a run pauses for approval.",
+    description: "Notify this channel when a run pauses for approval.",
   })
   onApprovalPending!: boolean;
 
-  @ApiProperty({ example: true, description: "Notify when a run fails." })
+  @ApiProperty({
+    example: true,
+    description: "Notify this channel when a run fails.",
+  })
   onRunFailed!: boolean;
 }
 

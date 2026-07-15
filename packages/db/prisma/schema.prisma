@@ -338,6 +338,10 @@ model TenantSettings {
 // Per-tenant notification settings. A run notifies (best-effort) via an outbound
 // webhook POST when an approval is pending or a run fails — so a HITL flow that can
 // pause for days actually reaches a human. One row per tenant; absence = off.
+// DORMANT — superseded by NotificationChannel (per-channel, independently configurable). Kept
+// (not dropped) for one release so an old worker mid-rolling-deploy can still read it; the
+// notification_channels migration BACKFILLS its rows into NotificationChannel. Drop in a later
+// migration once every worker/api replica reads NotificationChannel.
 model NotificationSettings {
   tenantId          String   @id
   webhookUrl        String? // POST target (Slack/Teams/generic incoming webhook)
@@ -348,6 +352,29 @@ model NotificationSettings {
   onApprovalPending Boolean  @default(true)
   onRunFailed       Boolean  @default(true)
   updatedAt         DateTime @default(now()) @updatedAt
+}
+
+// One row per (tenant, channel type) — Slack, Teams, and (later) email each configured and
+// toggled INDEPENDENTLY, so a run-failed alert can fan out to several at once rather than the
+// old either/or `NotificationSettings.channel`. The worker reads all `enabled` rows and POSTs
+// each, formatting per `type`. Event routing is per-channel (send failures to Slack, approvals
+// to Teams, …). `@@unique([tenantId, type])` = one config per type for now; `id` is a standalone
+// uuid so that can be relaxed later without a data migration.
+model NotificationChannel {
+  id                String   @id @default(uuid())
+  tenantId          String
+  type              String // "slack" | "teams" | (future: "email")
+  enabled           Boolean  @default(true)
+  webhookUrl        String? // POST target for slack/teams; null for channels that don't use one
+  // Channel-specific settings a URL can't hold (e.g. email recipients). Null + unused for
+  // slack/teams — reserved for the coming email/other channels, not invented structure now.
+  config            Json?
+  onApprovalPending Boolean  @default(true)
+  onRunFailed       Boolean  @default(true)
+  updatedAt         DateTime @default(now()) @updatedAt
+
+  @@unique([tenantId, type])
+  @@index([tenantId])
 }
 
 // Per-USER preferences — personal + cross-workspace, so they follow a user across

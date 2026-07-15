@@ -908,17 +908,30 @@ export interface NotificationInput {
   detail?: string;
 }
 
-// Test seam: settings read + egress fetch, swappable so tests need no DB/network.
+/** One enabled channel the worker will POST to (subset of the NotificationChannel row). */
+export interface NotificationChannelRow {
+  type: string; // "slack" | "teams" | (future) — worker formats per type; unknown → slack shape
+  webhookUrl: string | null;
+  onApprovalPending: boolean;
+  onRunFailed: boolean;
+}
+
+// Test seam: channel read + egress fetch, swappable so tests need no DB/network. Reads only the
+// ENABLED channels — a disabled channel never sends, regardless of its saved URL/flags.
 export const __notifyDeps = {
-  readSettings: (
-    tenantId: string,
-  ): Promise<{
-    webhookUrl: string | null;
-    channel: string | null;
-    onApprovalPending: boolean;
-    onRunFailed: boolean;
-  } | null> =>
-    getPrisma().notificationSettings.findUnique({ where: { tenantId } }),
+  readChannels: (tenantId: string): Promise<NotificationChannelRow[]> =>
+    getPrisma().notificationChannel.findMany({
+      where: { tenantId, enabled: true },
+      // Deterministic order (findMany has no default order — Postgres would return physical
+      // row order), so the fan-out is stable and testable.
+      orderBy: { type: "asc" },
+      select: {
+        type: true,
+        webhookUrl: true,
+        onApprovalPending: true,
+        onRunFailed: true,
+      },
+    }),
   fetch: (url: string, init?: RequestInit) =>
     safeFetch(url, init as never) as unknown as Promise<Response>,
   assertEgressAllowed,
@@ -1141,64 +1154,76 @@ function notificationTeamsCard(input: NotificationInput): unknown {
   };
 }
 
+/** Build the JSON body for one channel. Teams needs its own Adaptive Card envelope; anything
+ *  else (default) gets the Slack/generic payload. Unknown/legacy types fall back to Slack. */
+function notificationPayload(input: NotificationInput, type: string): unknown {
+  if (type === "teams") return notificationTeamsCard(input);
+  const text = notificationText(input);
+  const { blocks, actions } = notificationBlocks(input, text);
+  // `text` is the Slack/generic fallback line; `blocks` render the action buttons in Slack;
+  // the flat fields + `actions`/`runUrl` serve generic hooks.
+  return {
+    text,
+    blocks,
+    kind: input.kind,
+    workflowId: input.workflowId,
+    workflowKey: input.workflowKey,
+    title: input.title,
+    runUrl: runUrl(input.workflowId),
+    actions,
+    ...(input.kind === "approval_pending"
+      ? { approvalUrl: approvalUrl(input.workflowId) }
+      : {}),
+  };
+}
+
 /**
- * Fire a tenant notification for an approval-pending or failed run. BEST-EFFORT: reads
- * the tenant's NotificationSettings, and — only if a webhook is set and the event is
- * enabled — POSTs an egress-guarded JSON payload (Slack/Teams/generic compatible). A
- * no-op when unconfigured or disabled. This activity NEVER throws (a notification
- * problem must not affect the run); the caller also wraps it defensively.
+ * Fire a tenant notification for an approval-pending or failed run. BEST-EFFORT: reads the
+ * tenant's ENABLED notification channels and POSTs an egress-guarded payload to EACH one whose
+ * URL is set and whose event toggle is on — so an alert fans out to Slack AND Teams (and later
+ * email) independently. Each channel is isolated (its own egress guard, timeout, and try/catch)
+ * so a bad/slow webhook on one channel never blocks the others. This activity NEVER throws (a
+ * notification problem must not affect the run); the caller also wraps it defensively.
  */
 export async function sendNotification(
   input: NotificationInput,
 ): Promise<void> {
+  let channels: NotificationChannelRow[];
   try {
-    const settings = await __notifyDeps.readSettings(input.tenantId);
-    if (!settings?.webhookUrl) return;
-    if (input.kind === "approval_pending" && !settings.onApprovalPending)
-      return;
-    if (input.kind === "run_failed" && !settings.onRunFailed) return;
-
-    await __notifyDeps.assertEgressAllowed(settings.webhookUrl); // https + public
-    const text = notificationText(input);
-    // Teams needs its own Adaptive Card envelope; anything else (default) gets the
-    // Slack/generic payload. Unknown/legacy channel values fall back to Slack.
-    const payload =
-      settings.channel === "teams"
-        ? notificationTeamsCard(input)
-        : (() => {
-            const { blocks, actions } = notificationBlocks(input, text);
-            // `text` is the Slack/generic fallback line; `blocks` render the action
-            // buttons in Slack; the flat fields + `actions`/`runUrl` serve generic hooks.
-            return {
-              text,
-              blocks,
-              kind: input.kind,
-              workflowId: input.workflowId,
-              workflowKey: input.workflowKey,
-              title: input.title,
-              runUrl: runUrl(input.workflowId),
-              actions,
-              ...(input.kind === "approval_pending"
-                ? { approvalUrl: approvalUrl(input.workflowId) }
-                : {}),
-            };
-          })();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10_000);
-    try {
-      await __notifyDeps.fetch(settings.webhookUrl, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timer);
-    }
-    activityRuns.inc({ activity: "sendNotification", outcome: "ok" });
+    channels = await __notifyDeps.readChannels(input.tenantId);
   } catch {
-    // Best-effort: swallow everything (bad URL, blocked egress, timeout, 5xx).
+    // Couldn't read settings — nothing we can do; a notification failure must not affect the run.
     activityRuns.inc({ activity: "sendNotification", outcome: "error" });
+    return;
+  }
+
+  for (const ch of channels) {
+    // Per-channel gating: skip channels with no URL or with this event toggled off.
+    if (!ch.webhookUrl) continue;
+    if (input.kind === "approval_pending" && !ch.onApprovalPending) continue;
+    if (input.kind === "run_failed" && !ch.onRunFailed) continue;
+
+    // Isolate each channel: one bad URL / blocked egress / timeout / 5xx must not prevent the
+    // remaining channels from being notified.
+    try {
+      await __notifyDeps.assertEgressAllowed(ch.webhookUrl); // https + public
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10_000);
+      try {
+        await __notifyDeps.fetch(ch.webhookUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(notificationPayload(input, ch.type)),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+      activityRuns.inc({ activity: "sendNotification", outcome: "ok" });
+    } catch {
+      // Best-effort per channel: swallow and continue to the next.
+      activityRuns.inc({ activity: "sendNotification", outcome: "error" });
+    }
   }
 }
 

@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Button, Card } from "../../components";
 import {
   api,
-  type NotificationSettings,
+  type NotificationChannel,
+  type NotificationChannelType,
   type TenantSettings,
   UnauthorizedError,
 } from "../../lib/api";
@@ -10,6 +11,42 @@ import { type Mode, useMode } from "../../mode";
 import { useWorkspace } from "../../workspace/WorkspaceProvider";
 
 const MODELS = ["", "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"];
+
+/** The notification channels the UI renders — each configured + toggled INDEPENDENTLY.
+ *  Adding email later = one more entry here + the server-side type. */
+const NOTIFICATION_CHANNELS: {
+  type: NotificationChannelType;
+  label: string;
+  placeholder: string;
+  hint?: string;
+}[] = [
+  {
+    type: "slack",
+    label: "Slack",
+    placeholder: "https://hooks.slack.com/services/…",
+  },
+  {
+    type: "teams",
+    label: "Microsoft Teams",
+    placeholder: "https://prod-00.westus.logic.azure.com/workflows/…",
+    hint: "Paste a Teams Workflows (Power Automate) webhook URL — “When a Teams webhook request is received”. We send an Adaptive Card; the legacy Office 365 connector format isn’t supported.",
+  },
+];
+
+/** Channel config as held in edit state — webhookUrl is a string ("" not null) for the input. */
+type EditableChannel = Omit<NotificationChannel, "webhookUrl"> & {
+  webhookUrl: string;
+};
+
+function defaultChannel(type: NotificationChannelType): EditableChannel {
+  return {
+    type,
+    enabled: false,
+    webhookUrl: "",
+    onApprovalPending: true,
+    onRunFailed: true,
+  };
+}
 
 export function Settings() {
   const { refresh: refreshWorkspaces } = useWorkspace();
@@ -21,20 +58,22 @@ export function Settings() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Notifications
-  const [notif, setNotif] = useState<NotificationSettings>({
-    webhookUrl: "",
-    channel: "slack",
-    onApprovalPending: true,
-    onRunFailed: true,
-  });
-  const [notifBusy, setNotifBusy] = useState(false);
-  const [notifStatus, setNotifStatus] = useState<string | null>(null);
-  const [notifTestBusy, setNotifTestBusy] = useState(false);
-  const [notifTest, setNotifTest] = useState<{
-    ok: boolean;
-    message?: string;
-  } | null>(null);
+  // Notifications — one editable config per channel, keyed by type, each saved/tested on its own.
+  const [channels, setChannels] = useState<Record<string, EditableChannel>>(
+    () =>
+      Object.fromEntries(
+        NOTIFICATION_CHANNELS.map((c) => [c.type, defaultChannel(c.type)]),
+      ),
+  );
+  // Per-channel transient UI state (keyed by channel type).
+  const [notifBusy, setNotifBusy] = useState<Record<string, boolean>>({});
+  const [notifStatus, setNotifStatus] = useState<Record<string, string>>({});
+  const [notifTestBusy, setNotifTestBusy] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [notifTest, setNotifTest] = useState<
+    Record<string, { ok: boolean; message?: string }>
+  >({});
 
   useEffect(() => {
     let live = true;
@@ -47,9 +86,14 @@ export function Settings() {
         if (!live) return;
         setDisplayName(s.displayName ?? "");
         setDefaultModel(s.defaultModel ?? "");
-        const n = await api.getNotifications(me.tenantId);
+        const list = await api.listNotificationChannels(me.tenantId);
         if (!live) return;
-        setNotif({ ...n, webhookUrl: n.webhookUrl ?? "" });
+        setChannels((prev) => {
+          const next = { ...prev };
+          for (const c of list)
+            next[c.type] = { ...c, webhookUrl: c.webhookUrl ?? "" };
+          return next;
+        });
         setLoaded(true);
       } catch (e) {
         if (live)
@@ -93,20 +137,29 @@ export function Settings() {
     }
   }
 
-  async function saveNotif() {
+  /** Update one channel's edit state without touching the others. */
+  function patchChannel(
+    type: NotificationChannelType,
+    patch: Partial<EditableChannel>,
+  ) {
+    setChannels((prev) => ({ ...prev, [type]: { ...prev[type], ...patch } }));
+  }
+
+  async function saveChannel(type: NotificationChannelType) {
     if (!tenant) return;
-    setNotifBusy(true);
-    setNotifStatus(null);
+    setNotifBusy((b) => ({ ...b, [type]: true }));
+    setNotifStatus((s) => ({ ...s, [type]: "" }));
     setError(null);
     try {
-      const saved = await api.saveNotifications(tenant, {
-        webhookUrl: notif.webhookUrl?.trim() || null,
-        channel: notif.channel,
-        onApprovalPending: notif.onApprovalPending,
-        onRunFailed: notif.onRunFailed,
+      const ch = channels[type];
+      const saved = await api.saveNotificationChannel(tenant, type, {
+        enabled: ch.enabled,
+        webhookUrl: ch.webhookUrl.trim() || null,
+        onApprovalPending: ch.onApprovalPending,
+        onRunFailed: ch.onRunFailed,
       });
-      setNotif({ ...saved, webhookUrl: saved.webhookUrl ?? "" });
-      setNotifStatus("Saved.");
+      patchChannel(type, { ...saved, webhookUrl: saved.webhookUrl ?? "" });
+      setNotifStatus((s) => ({ ...s, [type]: "Saved." }));
     } catch (e) {
       setError(
         e instanceof UnauthorizedError
@@ -114,21 +167,29 @@ export function Settings() {
           : "Could not save notifications.",
       );
     } finally {
-      setNotifBusy(false);
+      setNotifBusy((b) => ({ ...b, [type]: false }));
     }
   }
 
-  async function sendTest() {
+  async function testChannel(type: NotificationChannelType) {
     if (!tenant) return;
-    setNotifTestBusy(true);
-    setNotifTest(null);
+    setNotifTestBusy((b) => ({ ...b, [type]: true }));
+    setNotifTest((t) => {
+      const next = { ...t };
+      delete next[type];
+      return next;
+    });
     try {
-      // Tests the SAVED webhook — remind the user to save an edited URL first.
-      setNotifTest(await api.testNotification(tenant));
+      // Tests the SAVED webhook for this channel — remind the user to save an edited URL first.
+      const res = await api.testNotificationChannel(tenant, type);
+      setNotifTest((t) => ({ ...t, [type]: res }));
     } catch {
-      setNotifTest({ ok: false, message: "Could not send the test." });
+      setNotifTest((t) => ({
+        ...t,
+        [type]: { ok: false, message: "Could not send the test." },
+      }));
     } finally {
-      setNotifTestBusy(false);
+      setNotifTestBusy((b) => ({ ...b, [type]: false }));
     }
   }
 
@@ -313,165 +374,195 @@ export function Settings() {
       >
         Notifications
       </div>
-      <Card style={{ padding: 18 }}>
-        <div
-          style={{
-            fontSize: "var(--text-body)",
-            lineHeight: "var(--leading-snug)",
-            color: "var(--ink-2)",
-            marginBottom: 12,
-          }}
-        >
-          Get pinged when a run needs a human — an approval can wait for days,
-          so it shouldn't rely on someone watching the inbox. We POST a
-          formatted message (with Approve / Reject / View-run buttons) on each
-          event.
-        </div>
-        <Field label="Format">
-          <div style={{ display: "flex", gap: 8 }}>
-            {(["slack", "teams"] as const).map((c) => (
-              <button
-                key={c}
-                type="button"
-                disabled={!loaded}
-                onClick={() => setNotif((n) => ({ ...n, channel: c }))}
-                style={{
-                  flex: 1,
-                  padding: "8px 12px",
-                  borderRadius: "var(--radius-sm)",
-                  border: `1px solid ${notif.channel === c ? "var(--brand)" : "var(--line-2)"}`,
-                  background:
-                    notif.channel === c ? "var(--brand-soft)" : "transparent",
-                  color:
-                    notif.channel === c ? "var(--brand-ink)" : "var(--ink-2)",
-                  cursor: loaded ? "pointer" : "default",
-                  fontSize: "var(--text-body)",
-                  fontWeight:
-                    notif.channel === c
-                      ? "var(--weight-semibold)"
-                      : "var(--weight-regular)",
-                }}
-              >
-                {c === "slack" ? "Slack" : "Microsoft Teams"}
-              </button>
-            ))}
-          </div>
-        </Field>
-        {notif.channel === "teams" && (
-          <div
+      <div
+        style={{
+          fontSize: "var(--text-body)",
+          lineHeight: "var(--leading-snug)",
+          color: "var(--ink-2)",
+          marginBottom: 12,
+        }}
+      >
+        Get pinged when a run needs a human — an approval can wait for days, so
+        it shouldn't rely on someone watching the inbox. We POST a formatted
+        message (with Approve / Reject / View-run buttons) on each event.
+        Configure each channel independently — enable the ones you use; alerts
+        go to every enabled channel.
+      </div>
+      {NOTIFICATION_CHANNELS.map((meta) => {
+        const ch = channels[meta.type];
+        const busy = !!notifBusy[meta.type];
+        const testBusy = !!notifTestBusy[meta.type];
+        const chStatus = notifStatus[meta.type];
+        const chTest = notifTest[meta.type];
+        return (
+          <Card
+            key={meta.type}
             style={{
-              fontSize: "var(--text-sm)",
-              color: "var(--ink-3)",
-              margin: "-4px 0 12px",
-              lineHeight: "var(--leading-snug)",
+              padding: 18,
+              marginBottom: 12,
+              opacity: ch.enabled ? 1 : 0.72,
             }}
           >
-            Paste a Teams <strong>Workflows</strong> (Power Automate) webhook
-            URL — “When a Teams webhook request is received”. We send an
-            Adaptive Card; the legacy Office 365 connector format isn’t
-            supported.
-          </div>
-        )}
-        <Field label="Webhook URL">
-          <input
-            value={notif.webhookUrl ?? ""}
-            onChange={(e) =>
-              setNotif((n) => ({ ...n, webhookUrl: e.target.value }))
-            }
-            placeholder={
-              notif.channel === "teams"
-                ? "https://prod-00.westus.logic.azure.com/workflows/…"
-                : "https://hooks.slack.com/services/…"
-            }
-            style={inputStyle}
-            disabled={!loaded}
-          />
-        </Field>
-        <label
-          style={{
-            display: "flex",
-            gap: 8,
-            alignItems: "center",
-            marginBottom: 10,
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={notif.onApprovalPending}
-            onChange={(e) =>
-              setNotif((n) => ({ ...n, onApprovalPending: e.target.checked }))
-            }
-            disabled={!loaded}
-          />
-          <span style={{ fontSize: "var(--text-body)", color: "var(--ink)" }}>
-            When an approval is waiting
-          </span>
-        </label>
-        <label
-          style={{
-            display: "flex",
-            gap: 8,
-            alignItems: "center",
-            marginBottom: 14,
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={notif.onRunFailed}
-            onChange={(e) =>
-              setNotif((n) => ({ ...n, onRunFailed: e.target.checked }))
-            }
-            disabled={!loaded}
-          />
-          <span style={{ fontSize: "var(--text-body)", color: "var(--ink)" }}>
-            When a run fails
-          </span>
-        </label>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <Button
-            variant="primary"
-            loading={notifBusy}
-            disabled={!loaded}
-            onClick={() => void saveNotif()}
-          >
-            {notifBusy ? "Saving…" : "Save notifications"}
-          </Button>
-          <Button
-            variant="secondary"
-            icon="bell"
-            disabled={notifTestBusy || !loaded || !notif.webhookUrl?.trim()}
-            onClick={() => void sendTest()}
-            title={
-              notif.webhookUrl?.trim()
-                ? "POST a sample message to your webhook"
-                : "Add a webhook URL first"
-            }
-          >
-            {notifTestBusy ? "Sending…" : "Send test"}
-          </Button>
-          {notifStatus && (
-            <span
-              style={{ fontSize: "var(--text-sm)", color: "var(--state-done)" }}
-            >
-              {notifStatus}
-            </span>
-          )}
-          {notifTest && (
-            <span
+            <div
               style={{
-                fontSize: "var(--text-sm)",
-                color: notifTest.ok
-                  ? "var(--state-done)"
-                  : "var(--state-error)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 14,
               }}
             >
-              {notifTest.ok
-                ? "✓ Test sent — check your channel."
-                : notifTest.message}
-            </span>
-          )}
-        </div>
-      </Card>
+              <div
+                style={{
+                  fontSize: "var(--text-body)",
+                  fontWeight: "var(--weight-semibold)",
+                  color: "var(--ink)",
+                }}
+              >
+                {meta.label}
+              </div>
+              <label
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                  cursor: loaded ? "pointer" : "default",
+                }}
+                title={`Turn ${meta.label} notifications on or off`}
+              >
+                <input
+                  type="checkbox"
+                  checked={ch.enabled}
+                  onChange={(e) =>
+                    patchChannel(meta.type, { enabled: e.target.checked })
+                  }
+                  disabled={!loaded}
+                />
+                <span
+                  style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}
+                >
+                  {ch.enabled ? "Enabled" : "Disabled"}
+                </span>
+              </label>
+            </div>
+            {meta.hint && (
+              <div
+                style={{
+                  fontSize: "var(--text-sm)",
+                  color: "var(--ink-3)",
+                  margin: "0 0 12px",
+                  lineHeight: "var(--leading-snug)",
+                }}
+              >
+                {meta.hint}
+              </div>
+            )}
+            <Field label="Webhook URL">
+              <input
+                value={ch.webhookUrl}
+                onChange={(e) =>
+                  patchChannel(meta.type, { webhookUrl: e.target.value })
+                }
+                placeholder={meta.placeholder}
+                style={inputStyle}
+                disabled={!loaded}
+              />
+            </Field>
+            <label
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                marginBottom: 10,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={ch.onApprovalPending}
+                onChange={(e) =>
+                  patchChannel(meta.type, {
+                    onApprovalPending: e.target.checked,
+                  })
+                }
+                disabled={!loaded}
+              />
+              <span
+                style={{ fontSize: "var(--text-body)", color: "var(--ink)" }}
+              >
+                When an approval is waiting
+              </span>
+            </label>
+            <label
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                marginBottom: 14,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={ch.onRunFailed}
+                onChange={(e) =>
+                  patchChannel(meta.type, { onRunFailed: e.target.checked })
+                }
+                disabled={!loaded}
+              />
+              <span
+                style={{ fontSize: "var(--text-body)", color: "var(--ink)" }}
+              >
+                When a run fails
+              </span>
+            </label>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <Button
+                variant="primary"
+                loading={busy}
+                disabled={!loaded}
+                onClick={() => void saveChannel(meta.type)}
+              >
+                {busy ? "Saving…" : "Save"}
+              </Button>
+              <Button
+                variant="secondary"
+                icon="bell"
+                disabled={testBusy || !loaded || !ch.webhookUrl.trim()}
+                onClick={() => void testChannel(meta.type)}
+                title={
+                  ch.webhookUrl.trim()
+                    ? `POST a sample message to your ${meta.label} webhook`
+                    : "Add a webhook URL first"
+                }
+              >
+                {testBusy ? "Sending…" : "Send test"}
+              </Button>
+              {chStatus && (
+                <span
+                  style={{
+                    fontSize: "var(--text-sm)",
+                    color: "var(--state-done)",
+                  }}
+                >
+                  {chStatus}
+                </span>
+              )}
+              {chTest && (
+                <span
+                  style={{
+                    fontSize: "var(--text-sm)",
+                    color: chTest.ok
+                      ? "var(--state-done)"
+                      : "var(--state-error)",
+                  }}
+                >
+                  {chTest.ok
+                    ? "✓ Test sent — check your channel."
+                    : chTest.message}
+                </span>
+              )}
+            </div>
+          </Card>
+        );
+      })}
     </div>
   );
 }
