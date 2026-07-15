@@ -158,12 +158,14 @@ Each slice is independently shippable behind the §5 shim.
 6. **Notifications + usage** — env-scope `NotificationChannel`; tag `UsageEvent` with `environmentId`.
 7. **Cleanup** — drop the nullable/default fallback once all call sites are env-aware.
 
-## 8. Open decisions (confirm before Slice 1)
+## 8. Decisions (confirmed — was "open before Slice 1")
 
-- **Token ↔ endpoint env consistency (§3):** confirm "endpoint's env wins; an env-bound token may
-  not fire a different env's endpoint." Alternative: token env is advisory only.
-- **Default env name:** "Production" for the backfilled default (existing data is live/prod), OK?
-- **Env switcher granularity:** per-user active env (like workspace) vs a per-tab selection.
+- **Token ↔ endpoint env consistency (§3): ENDPOINT's env wins.** A triggered run lands in the
+  endpoint's environment; an env-bound token may only fire endpoints in its own env (else rejected),
+  so a sandbox-scoped token can never reach prod.
+- **Default env name: "Production"** (slug `prod`) — existing data is live/prod.
+- **Env switcher: per-user active env** (persists across the app, like the workspace switcher);
+  `Principal.environmentId` from `X-Environment-Id`, defaulting to the tenant's default env.
 
 ## 9. RBAC seam
 
