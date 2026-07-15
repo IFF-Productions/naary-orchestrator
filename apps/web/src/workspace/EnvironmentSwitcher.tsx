@@ -57,7 +57,11 @@ export function EnvironmentSwitcher() {
         setActiveEnvironment(slug); // publish before the app's screens fetch
         setActiveSlug(slug);
       } catch {
-        // Non-fatal: environments are additive; the server falls back to the default env.
+        // Resolve failed — CLEAR the active env so we don't keep sending a stale X-Environment-Id
+        // (which would wrongly scope requests once the backend enforces it). The server then falls
+        // back to the workspace's default env.
+        setActiveEnvironment(null);
+        setActiveSlug(null);
       }
     })();
     return () => {
@@ -78,8 +82,14 @@ export function EnvironmentSwitcher() {
   async function onCreate() {
     const name = newName.trim();
     const slug = toSlug(name);
-    if (!tenantId || !name || !slug) {
+    if (!tenantId) return;
+    if (!name) {
       setError("Enter a name.");
+      return;
+    }
+    if (!slug) {
+      // e.g. "!!!" — nothing survives slugification.
+      setError("Name must contain a letter or number.");
       return;
     }
     setBusy(true);
