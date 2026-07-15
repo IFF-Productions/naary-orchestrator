@@ -20,6 +20,7 @@ import { HealthModule } from "./health/health.module";
 import { McpModule } from "./mcp/mcp.module";
 import { MembersModule } from "./members/members.module";
 import { MembershipModule } from "./membership/membership.module";
+import { EnvironmentsModule } from "./environments/environments.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { PinsModule } from "./pins/pins.module";
 import { SchedulesModule } from "./schedules/schedules.module";
@@ -52,6 +53,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     MembershipModule,
     SettingsModule,
     PreferencesModule,
+    EnvironmentsModule,
     NotificationsModule,
     TemplatesModule,
     SchedulesModule,
