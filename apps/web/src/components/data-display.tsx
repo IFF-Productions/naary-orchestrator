@@ -3,12 +3,7 @@ import { Icon } from "./Icon";
 
 /* ---------------- StatusPill ---------------- */
 export type RunState =
-  | "idle"
-  | "running"
-  | "paused"
-  | "done"
-  | "error"
-  | "info";
+  "idle" | "running" | "paused" | "done" | "error" | "info";
 
 const PILL_LABEL: Record<RunState, string> = {
   idle: "Idle",
@@ -176,29 +171,32 @@ export function Table<T>({
   rowKey: (row: T) => string;
 }) {
   return (
-    <table className="tbl">
-      <thead>
-        <tr>
-          {columns.map((c) => (
-            <th key={c.key} style={{ width: c.width }}>
-              {c.header}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr
-            key={rowKey(row)}
-            onClick={onRowClick ? () => onRowClick(row) : undefined}
-            style={{ cursor: onRowClick ? "pointer" : "default" }}
-          >
+    // Scroll a wide table horizontally on narrow screens instead of overflowing the layout.
+    <div style={{ overflowX: "auto", maxWidth: "100%" }}>
+      <table className="tbl">
+        <thead>
+          <tr>
             {columns.map((c) => (
-              <td key={c.key}>{c.render(row)}</td>
+              <th key={c.key} style={{ width: c.width }}>
+                {c.header}
+              </th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr
+              key={rowKey(row)}
+              onClick={onRowClick ? () => onRowClick(row) : undefined}
+              style={{ cursor: onRowClick ? "pointer" : "default" }}
+            >
+              {columns.map((c) => (
+                <td key={c.key}>{c.render(row)}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

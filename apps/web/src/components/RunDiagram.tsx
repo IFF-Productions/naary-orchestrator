@@ -8,7 +8,10 @@ import {
   Position,
   ReactFlow,
 } from "@xyflow/react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
+
+/** fitView runs once on mount; keep the same options for the resize-driven refits below. */
+const FIT_VIEW_OPTIONS = { padding: 0.2 } as const;
 import type { GraphDef, NodeType } from "@naary/dsl";
 import { decompileGraph } from "../lib/decompile-graph";
 import { ACCENT, nodeDisplayLabel, nodeSubtitle } from "../lib/graph-model";
@@ -189,14 +192,41 @@ export function RunDiagram({
     return { nodes: flowNodes, edges: flowEdges };
   }, [layout, ctx, currentNodeId, status]);
 
+  // `fitView` only fits on mount, so the diagram would stay clipped after its container narrows
+  // (phone load, sidebar collapse, rotation). Re-fit whenever the wrapper resizes.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  // Minimal shape — we only ever call fitView (avoids threading ReactFlow's node/edge generics).
+  const rfRef = useRef<{
+    fitView: (o?: typeof FIT_VIEW_OPTIONS) => void;
+  } | null>(null);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let raf = 0;
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() =>
+        rfRef.current?.fitView(FIT_VIEW_OPTIONS),
+      );
+    });
+    ro.observe(el);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, []);
+
   return (
-    <div style={{ height, width: "100%" }}>
+    <div ref={wrapRef} style={{ height, width: "100%" }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.2 }}
+        fitViewOptions={FIT_VIEW_OPTIONS}
+        onInit={(inst) => {
+          rfRef.current = inst;
+        }}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
