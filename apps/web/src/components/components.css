@@ -448,6 +448,8 @@
   color: var(--ink-2);
   overflow: auto;
   white-space: pre;
+  /* Never exceed the container — a long unbroken line scrolls INSIDE the block, not the page. */
+  max-width: 100%;
 }
 
 /* ---------- NodeCard ---------- */

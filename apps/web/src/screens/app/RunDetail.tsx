@@ -24,12 +24,14 @@ import {
   UnauthorizedError,
 } from "../../lib/api";
 import { isTerminal, runStatusUi } from "../../lib/run-status";
+import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import { RerunMenu, VersionBadge } from "./RerunMenu";
 
 export function RunDetail() {
   const { id = "" } = useParams();
+  const phone = useMediaQuery(PHONE_QUERY);
   return (
-    <div style={{ padding: "20px 28px 40px" }}>
+    <div style={{ padding: phone ? "14px 14px 32px" : "20px 28px 40px" }}>
       <BackLink />
       <RunView id={id} />
     </div>
@@ -420,6 +422,7 @@ function UnresolvedInputsSection({ ctx }: { ctx: Record<string, unknown> }) {
 /* ------------- Real run: polls the control plane for live + closed runs ------------- */
 function RunView({ id }: { id: string }) {
   const navigate = useNavigate();
+  const phone = useMediaQuery(PHONE_QUERY);
   const [state, setState] = useState<ExecutionState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -565,8 +568,11 @@ function RunView({ id }: { id: string }) {
       <div
         style={{
           display: "flex",
-          alignItems: "flex-start",
+          // Phone: stack the run identity over its action buttons (they'd overflow side-by-side).
+          flexDirection: phone ? "column" : "row",
+          alignItems: phone ? "stretch" : "flex-start",
           justifyContent: "space-between",
+          gap: phone ? 12 : 0,
           marginBottom: 18,
         }}
       >
@@ -627,7 +633,7 @@ function RunView({ id }: { id: string }) {
           </div>
         </div>
         {(awaiting || running || awaitingWebhook) && (
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {awaiting && (
               <>
                 <Button
@@ -772,12 +778,15 @@ function RunView({ id }: { id: string }) {
             The graph this run executed — green nodes ran; the highlighted node
             is the current step; dimmed nodes weren't reached.
           </div>
-          <RunDiagram
-            graph={graph}
-            ctx={state.ctx}
-            currentNodeId={state.currentNodeId}
-            status={state.status}
-          />
+          {/* The diagram lays out horizontally; scroll it on a narrow screen rather than clip. */}
+          <div style={{ overflowX: "auto", maxWidth: "100%" }}>
+            <RunDiagram
+              graph={graph}
+              ctx={state.ctx}
+              currentNodeId={state.currentNodeId}
+              status={state.status}
+            />
+          </div>
         </Card>
       )}
 
@@ -803,7 +812,17 @@ function RunView({ id }: { id: string }) {
 
       {!error && state && (
         <div
-          style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16 }}
+          style={{
+            display: "grid",
+            // Phone: stack "Node outputs" over the details column instead of squeezing two.
+            // minmax(0, …) — NOT plain fr — so a track can shrink below its content's min-content.
+            // Without it, a very long unbroken JSON line in a node output's <pre> forces the track
+            // (and the page) wide instead of scrolling inside the code block.
+            gridTemplateColumns: phone
+              ? "minmax(0, 1fr)"
+              : "minmax(0, 1.6fr) minmax(0, 1fr)",
+            gap: 16,
+          }}
         >
           {/* Node outputs — the real "what each node produced" view. */}
           <Card style={{ padding: "18px 20px" }}>
