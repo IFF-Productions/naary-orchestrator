@@ -5,6 +5,9 @@ import { mergeConfig } from "vite";
 const config: StorybookConfig = {
   stories: ["../src/**/*.stories.@(ts|tsx)"],
   framework: { name: "@storybook/react-vite", options: {} },
+  // Serve public/ so MSW's generated service worker (mockServiceWorker.js) is reachable —
+  // it's what lets API-driven components/screens render against mock `/api` responses.
+  staticDirs: ["../public"],
   // Match the app's Vite resolution: our workspace packages ship CommonJS `dist`, which leaks
   // `exports is not defined` into the browser bundle. Both are pure/platform-agnostic, so bundle
   // them from TS SOURCE as ESM — the same trick vite.config.ts uses (keep the two in sync).

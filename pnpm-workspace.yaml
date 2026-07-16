@@ -12,6 +12,9 @@ allowBuilds:
   esbuild: true
   '@firebase/util': false
   '@scarf/scarf': false
+  # msw's postinstall keeps the generated service worker (apps/web/public/mockServiceWorker.js)
+  # in sync with the installed msw version — used by Storybook to mock /api.
+  msw: true
 
 minimumReleaseAgeExclude:
   - '@ai-sdk/anthropic@4.0.8 || 4.0.12'
