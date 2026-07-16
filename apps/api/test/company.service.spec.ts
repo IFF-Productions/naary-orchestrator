@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -9,7 +10,8 @@ const companyMembership = { findMany: vi.fn(), findUnique: vi.fn() };
 const company = { create: vi.fn() };
 const tenantSettings = {
   findUnique: vi.fn(),
-  upsert: vi.fn(),
+  updateMany: vi.fn(),
+  create: vi.fn(),
   update: vi.fn(),
 };
 const membership = { findUnique: vi.fn() };
@@ -30,7 +32,8 @@ beforeEach(() => {
     companyMembership.findUnique,
     company.create,
     tenantSettings.findUnique,
-    tenantSettings.upsert,
+    tenantSettings.updateMany,
+    tenantSettings.create,
     tenantSettings.update,
     membership.findUnique,
   ])
@@ -46,7 +49,7 @@ describe("attachWorkspace — the owner-authorized invariant (§4)", () => {
     await expect(
       svc.attachWorkspace("u1", "co1", "wsX", {}),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(tenantSettings.upsert).not.toHaveBeenCalled();
+    expect(tenantSettings.updateMany).not.toHaveBeenCalled();
   });
 
   it("REJECTS a workspace owner who is not a company member", async () => {
@@ -55,41 +58,57 @@ describe("attachWorkspace — the owner-authorized invariant (§4)", () => {
     await expect(
       svc.attachWorkspace("u1", "co1", "wsX", {}),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(tenantSettings.upsert).not.toHaveBeenCalled();
+    expect(tenantSettings.updateMany).not.toHaveBeenCalled();
   });
 
-  it("ALLOWS a company member who owns the workspace → sets companyId", async () => {
+  it("ALLOWS a company member who owns the workspace → atomically claims companyId", async () => {
     companyMembership.findUnique.mockResolvedValue({ role: "owner" });
     membership.findUnique.mockResolvedValue({ role: "owner" });
-    tenantSettings.findUnique.mockResolvedValue({ companyId: null });
-    tenantSettings.upsert.mockResolvedValue({});
+    tenantSettings.updateMany.mockResolvedValue({ count: 1 }); // claim succeeds
     await svc.attachWorkspace("u1", "co1", "wsX", {});
-    expect(tenantSettings.upsert).toHaveBeenCalledWith({
-      where: { tenantId: "wsX" },
-      create: { tenantId: "wsX", companyId: "co1" },
-      update: { companyId: "co1" },
+    // Atomic conditional update: only when unattached OR already ours (race-safe).
+    expect(tenantSettings.updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: "wsX",
+        OR: [{ companyId: null }, { companyId: "co1" }],
+      },
+      data: { companyId: "co1" },
+    });
+    expect(tenantSettings.create).not.toHaveBeenCalled();
+  });
+
+  it("creates the TenantSettings row when the workspace has none yet", async () => {
+    companyMembership.findUnique.mockResolvedValue({ role: "owner" });
+    membership.findUnique.mockResolvedValue({ role: "owner" });
+    tenantSettings.updateMany.mockResolvedValue({ count: 0 }); // no row to claim
+    tenantSettings.create.mockResolvedValue({});
+    await svc.attachWorkspace("u1", "co1", "wsX", {});
+    expect(tenantSettings.create).toHaveBeenCalledWith({
+      data: { tenantId: "wsX", companyId: "co1" },
     });
   });
 
   it("accepts the AuthGuard active-workspace role as owner-proof (Membership backfill gap)", async () => {
     companyMembership.findUnique.mockResolvedValue({ role: "owner" });
     membership.findUnique.mockResolvedValue(null); // no Membership row yet
-    tenantSettings.findUnique.mockResolvedValue({ companyId: null });
+    tenantSettings.updateMany.mockResolvedValue({ count: 1 });
     await svc.attachWorkspace("u1", "co1", "wsX", {
       activeTenantId: "wsX",
       activeRole: "owner",
     });
-    expect(tenantSettings.upsert).toHaveBeenCalled();
+    expect(tenantSettings.updateMany).toHaveBeenCalled();
   });
 
   it("REJECTS when the workspace is already attached to another company", async () => {
     companyMembership.findUnique.mockResolvedValue({ role: "owner" });
     membership.findUnique.mockResolvedValue({ role: "owner" });
-    tenantSettings.findUnique.mockResolvedValue({ companyId: "otherCo" });
+    // The row exists (attached to otherCo): claim matches nothing, create hits the PK → P2002,
+    // re-claim still matches nothing → 409.
+    tenantSettings.updateMany.mockResolvedValue({ count: 0 });
+    tenantSettings.create.mockRejectedValue({ code: "P2002" });
     await expect(
       svc.attachWorkspace("u1", "co1", "wsX", {}),
     ).rejects.toBeInstanceOf(ConflictException);
-    expect(tenantSettings.upsert).not.toHaveBeenCalled();
   });
 });
 
@@ -148,9 +167,9 @@ describe("create + list", () => {
     );
   });
 
-  it("rejects a blank name", async () => {
+  it("rejects a blank name with 400 (client input error, not a 409 conflict)", async () => {
     await expect(svc.create("u1", "   ")).rejects.toBeInstanceOf(
-      ConflictException,
+      BadRequestException,
     );
   });
 

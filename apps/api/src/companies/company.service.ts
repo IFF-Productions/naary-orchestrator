@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -52,7 +53,7 @@ export class CompanyService {
    */
   async create(userId: string, name?: string): Promise<CompanyView> {
     const clean = (name ?? "").trim();
-    if (!clean) throw new ConflictException("Company name is required.");
+    if (!clean) throw new BadRequestException("Company name is required.");
     const slug = `${slugify(clean)}-${randomUUID().slice(0, 6)}`;
     try {
       const company = await getPrisma().company.create({
@@ -65,8 +66,12 @@ export class CompanyService {
       });
       return { ...company, role: "owner" };
     } catch (e) {
+      // The only unique constraint is Company.slug (derived from the name + a random suffix), so a
+      // collision here is astronomically unlikely — but surface it as a 409 to retry, not a 500.
       if (isUniqueViolation(e)) {
-        throw new ConflictException("A company with that name already exists.");
+        throw new ConflictException(
+          "Could not create the company (slug collision) — please retry.",
+        );
       }
       throw e;
     }
@@ -75,6 +80,11 @@ export class CompanyService {
   /**
    * Attach a workspace to a company. Requires the caller to be a company member AND the workspace
    * owner (§4 two-sided consent). Rejects if the workspace is already attached elsewhere.
+   *
+   * Race-safe claim: the write is a single conditional UPDATE (`updateMany WHERE companyId IS NULL
+   * OR = companyId`) — atomic, so two concurrent attaches to DIFFERENT companies can't both win
+   * (the first sets companyId; the second's WHERE no longer matches → count 0 → 409). If no
+   * TenantSettings row exists yet, create it (a lost create race → P2002 → re-claim).
    */
   async attachWorkspace(
     userId: string,
@@ -88,20 +98,30 @@ export class CompanyService {
         "Only the workspace owner can attach it to a company.",
       );
     }
-    const current = await getPrisma().tenantSettings.findUnique({
-      where: { tenantId },
-      select: { companyId: true },
-    });
-    if (current?.companyId && current.companyId !== companyId) {
-      throw new ConflictException(
-        "That workspace is already attached to another company.",
-      );
+    if (await this.claim(tenantId, companyId)) return;
+    // count 0 → the row is missing, or it's attached to another company. Try to create it; if a
+    // concurrent create won the PK race, re-claim (it may now be ours or someone else's).
+    try {
+      await getPrisma().tenantSettings.create({
+        data: { tenantId, companyId },
+      });
+      return;
+    } catch (e) {
+      if (!isUniqueViolation(e)) throw e;
+      if (await this.claim(tenantId, companyId)) return;
     }
-    await getPrisma().tenantSettings.upsert({
-      where: { tenantId },
-      create: { tenantId, companyId },
-      update: { companyId },
+    throw new ConflictException(
+      "That workspace is already attached to another company.",
+    );
+  }
+
+  /** Atomically set companyId iff the workspace is unattached or already ours. Returns true on claim. */
+  private async claim(tenantId: string, companyId: string): Promise<boolean> {
+    const { count } = await getPrisma().tenantSettings.updateMany({
+      where: { tenantId, OR: [{ companyId: null }, { companyId }] },
+      data: { companyId },
     });
+    return count === 1;
   }
 
   /**
