@@ -19,6 +19,8 @@ commercial ops, not engineering.
 | **Environment Secrets** | S–M | User-facing named secrets scoped to an environment. The store already exists + is env-scoped (`SecretStore`, Slice 5). Mostly a UI + a `$secrets.x` expression binding + a management API over the existing store. |
 | **Global Secrets** | S–M | Same as above but tenant-wide (not env-scoped) — a secret shared across all envs. One flag on the secrets model / a null env. |
 | **Workflow Diff** | M | Compare two `GraphDefinition` versions (node/edge/config adds-removes-changes) — powers "what changed" + safer promote. We already version + content-hash graphs; this is a diff algorithm + a UI. Complements copy-on-promote ([ENVIRONMENTS.md](./design/ENVIRONMENTS.md)). |
+| **HTTP OpenAPI/Swagger introspection** | M–L | Point an `httpRequest` node at an OpenAPI/Swagger spec (URL or paste); parse it (server-side, cached) and drive **URL/path autocomplete** in the node editor — plus method, path/query params, and request-body shape from the spec. Authoring-only (no runtime change): the node still emits a plain HTTP call. Reuses the cURL-import parser's field-mapping plumbing. Server fetch of the spec goes through the egress allowlist (`@naary/connections` `safeFetch`). Pairs with the GraphQL node below (both are "describe the API, then autocomplete"). |
+| **GraphQL node** | M | First-class `graphQL` node — endpoint + query/mutation + variables (with `{{ }}` bindings), returning `data`/`errors`. Mechanically an extension of REST (`POST` + JSON `{query, variables}` + auth headers), so implement as a thin typed node over the existing `httpRequest` activity/machinery rather than a new I/O path. Add **schema-introspection autocomplete** (the GraphQL equivalent of the Swagger row: run the standard introspection query, cache it, suggest fields/args) as the authoring layer. A `$secrets`/connection-bound auth header covers private APIs. |
 
 ## C. Observability & Insights
 | Feature | Size | Notes |
@@ -60,6 +62,8 @@ _(proposal — confirm/reorder)_
 5. **Stream logs → Datadog** (M) — reuses observability egress.
 6. **Workflow Diff** (M) — leverages existing versioning; complements promote.
 7. **External storage S3** (M) — storage-driver swap.
+8. **GraphQL node** (M) — thin node over the existing `httpRequest` machinery (POST + `{query, variables}`); ship the node first, add introspection autocomplete after.
+9. **HTTP OpenAPI/Swagger introspection** (M–L) — authoring-only autocomplete over the HTTP node; do alongside/after the GraphQL introspection layer (shared "describe API → autocomplete" plumbing).
 
 **Design-first programs (each its own doc + slices, like Environments/Companies):**
 - Insights dashboards (L) — data substrate ready once Slice 6a's `UsageEvent` env-tagging (PR #308) merges.
