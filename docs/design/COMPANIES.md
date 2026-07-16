@@ -1,6 +1,6 @@
 # Companies — a cross-workspace org + admin layer
 
-> Status: **design / not yet built.** Confirmed direction; slice plan below.
+> Status: **Slice 1 (Foundation) shipped.** §8 decisions confirmed; remaining slices below.
 
 ## 0. Premise (state this first — if it's wrong, everything below is)
 
@@ -155,17 +155,25 @@ No `tenantId`-scoped query changes; the compatibility burden is far lower than E
 
 Slices 3–5 are opt-in, not a committed path — confirm which you actually want after the billing view.
 
-## 8. Open decisions (to confirm before Slice 1)
+## 8. Decisions (CONFIRMED)
 
-- **Naming:** surface "workspace" as **project** in the UI (workspace = project), with **company**
-  as the org above? Or keep "workspace" and add "company"? (Recommendation: rename workspace→project
-  in UI copy only — no data change — and introduce "company" as the org. Confirm.)
-- **Company admin data access:** read-only across all member workspaces by default (§4). Confirm the
-  privacy expectation (admin can see every workspace's flows/runs).
-- **Every workspace under a company, or standalone allowed?** Recommendation: nullable `companyId`
-  (standalone workspaces keep working; a company is opt-in). Confirm.
-- **Billing:** aggregate-only view now; per-company cap deferred. Confirm that per-workspace budgets
-  remain the enforcement point.
+- **Naming:** surface "workspace" as **Project** in the UI, with **Company** as the org above —
+  copy-only, no data-model change (isolation boundary stays `tenantId`). *(UI relabel: last slice.)*
+- **Company admin data access:** **billing + data (read)** across member workspaces. The §4
+  attach-consent invariant (a workspace only joins when its OWNER authorizes it) is what keeps this
+  safe.
+- **Membership is OPTIONAL:** `TenantSettings.companyId` is nullable; standalone workspaces keep
+  working, companies are opt-in.
+- **Per-company spend cap: YES** — a `CompanyBudget` enforces a company-wide monthly cap as an
+  OUTER gate above per-workspace budgets (both must pass), fail-safe. Ships as its own slice (§7.3),
+  after the read-only rollup.
+
+### Slice 1 (Foundation) — SHIPPED
+`Company` + uid-keyed `CompanyMembership` + nullable `TenantSettings.companyId`; `GET /me/companies`,
+`POST /companies` (creator = owner), and **owner-authorized** attach/detach
+(`POST|DELETE /companies/:id/workspaces/:tenantId`). Attach requires the caller to be BOTH a company
+member AND the workspace owner (§4); detach is allowed from either side. Additive + behavior-neutral
+— no cross-workspace reads yet. API-token principals (no uid) can't hold a company membership.
 
 ## 9. RBAC seam
 

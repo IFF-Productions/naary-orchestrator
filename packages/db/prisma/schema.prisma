@@ -426,7 +426,39 @@ model TenantSettings {
   tenantId     String   @id
   displayName  String?
   defaultModel String? // e.g. 'claude-opus-4-8'
+  // Nullable link to the org (Company) this workspace belongs to (COMPANIES.md). Additive:
+  // standalone workspaces leave it null. onDelete: SetNull — deleting a company detaches, not
+  // cascades. Company is NOT an isolation dimension; no tenantId-scoped query reads this.
+  companyId    String?
+  company      Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
   updatedAt    DateTime @default(now()) @updatedAt
+
+  @@index([companyId])
+}
+
+/// An org grouping workspaces for cross-workspace admin + billing/usage rollup (COMPANIES.md).
+/// NOT an isolation boundary — every tenantId-scoped query is unchanged; Company only adds a
+/// cross-workspace authorization + read-model path on top.
+model Company {
+  id          String              @id @default(uuid())
+  name        String
+  slug        String              @unique
+  createdAt   DateTime            @default(now())
+  memberships CompanyMembership[]
+  workspaces  TenantSettings[]
+}
+
+/// A user's role IN A COMPANY (distinct from the per-workspace Membership). Keyed by Firebase uid.
+/// Grants the cross-workspace admin path; grants NO implicit per-workspace membership.
+model CompanyMembership {
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String // Firebase uid
+  role      String   @default("admin") // 'owner' | 'admin'
+  createdAt DateTime @default(now())
+
+  @@id([companyId, userId])
+  @@index([userId])
 }
 
 // Per-tenant notification settings. A run notifies (best-effort) via an outbound
