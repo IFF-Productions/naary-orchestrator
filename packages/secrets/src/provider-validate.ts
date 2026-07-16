@@ -1,12 +1,16 @@
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { createOpenAI } from "@ai-sdk/openai";
-import { APICallError, generateText } from "ai";
+// The AI SDK (`ai`, `@ai-sdk/*`) is ESM-only; this file emits CommonJS (consumed via require), so
+// static imports trip TS7's ESM/CJS guard. Load them lazily via dynamic import() — the sanctioned
+// CJS→ESM path (validation is a rare, already-async operation, so the per-call import is fine).
+const ai = () => import("ai");
+const anthropicSdk = () => import("@ai-sdk/anthropic");
+const openaiSdk = () => import("@ai-sdk/openai");
+const googleSdk = () => import("@ai-sdk/google");
 
 /** Shared 4xx→invalid / 5xx→transient classification (see validateAnthropicKey). A raw
  *  APICallError can carry the request's Authorization header (the key), so a transient
  *  is rethrown SANITIZED — the original error object is never propagated or logged. */
-function classifyKeyError(e: unknown): boolean {
+async function classifyKeyError(e: unknown): Promise<boolean> {
+  const { APICallError } = await ai();
   if (
     APICallError.isInstance(e) &&
     typeof e.statusCode === "number" &&
@@ -38,6 +42,10 @@ function classifyKeyError(e: unknown): boolean {
  * so we never propagate or log the original error object.
  */
 export async function validateAnthropicKey(apiKey: string): Promise<boolean> {
+  const [{ createAnthropic }, { generateText }] = await Promise.all([
+    anthropicSdk(),
+    ai(),
+  ]);
   const anthropic = createAnthropic({ apiKey });
   try {
     await generateText({
@@ -57,6 +65,10 @@ export async function validateAnthropicKey(apiKey: string): Promise<boolean> {
  * is the cheapest model to probe with.
  */
 export async function validateOpenAiKey(apiKey: string): Promise<boolean> {
+  const [{ createOpenAI }, { generateText }] = await Promise.all([
+    openaiSdk(),
+    ai(),
+  ]);
   const openai = createOpenAI({ apiKey });
   try {
     await generateText({
@@ -93,6 +105,10 @@ export function validateClaudeCodeKey(token: string): Promise<boolean> {
  * the cheapest model to probe with.
  */
 export async function validateGoogleKey(apiKey: string): Promise<boolean> {
+  const [{ createGoogleGenerativeAI }, { generateText }] = await Promise.all([
+    googleSdk(),
+    ai(),
+  ]);
   const google = createGoogleGenerativeAI({ apiKey });
   try {
     await generateText({

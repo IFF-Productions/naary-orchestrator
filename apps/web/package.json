@@ -23,7 +23,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@naary/dsl": "workspace:*",
     "@naary/notifications": "workspace:*",
-    "@sentry/react": "^10.65.0",
+    "@sentry/react": "^10.66.0",
     "@uiw/react-codemirror": "^4.25.11",
     "@xyflow/react": "^12.11.2",
     "codemirror": "^6.0.2",
@@ -34,16 +34,16 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
-    "@storybook/react-vite": "^10.5.1",
-    "@types/node": "^26.0.0",
+    "@storybook/react-vite": "^10.5.2",
+    "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
     "msw": "^2.15.0",
     "msw-storybook-addon": "^2.0.7",
-    "storybook": "^10.5.1",
-    "typescript": "^6.0.3",
-    "vite": "^8.1.4"
+    "storybook": "^10.5.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5"
   },
   "msw": {
     "workerDirectory": [

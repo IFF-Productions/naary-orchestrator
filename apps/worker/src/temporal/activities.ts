@@ -12,11 +12,15 @@ import {
   randomInt,
   randomUUID,
 } from "node:crypto";
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { createOpenAI } from "@ai-sdk/openai";
+// The AI SDK (`ai`, `@ai-sdk/*`) and `jose` are ESM-only; this file emits CommonJS (activities run
+// under ts-node/require), so static imports trip TS7's ESM/CJS guard. Load them lazily via dynamic
+// import() — the sanctioned CJS→ESM path (already used for embeddings below). Activities aren't
+// deterministic workflow code, so a per-call async import is fine.
+const aiSdk = () => import("ai");
+const anthropicSdk = () => import("@ai-sdk/anthropic");
+const openaiSdk = () => import("@ai-sdk/openai");
+const googleSdk = () => import("@ai-sdk/google");
 import { ApplicationFailure } from "@temporalio/activity";
-import { SignJWT, importPKCS8 } from "jose";
 import nodemailer from "nodemailer";
 import { XMLBuilder, XMLParser } from "fast-xml-parser";
 import { parse as parseHtml } from "node-html-parser";
@@ -99,14 +103,6 @@ import {
   releaseReservation,
   reserveBudget,
 } from "@naary/usage";
-import {
-  APICallError,
-  Output,
-  embed,
-  embedMany,
-  generateText,
-  jsonSchema,
-} from "ai";
 import { type CodeAgentTool, resolveDriver } from "./code-agent-drivers";
 import { codeAgentWriteEnv, runCodeAgentWrite } from "./code-agent-write";
 
@@ -130,11 +126,20 @@ export function toSanitizedRetryable(
   e: unknown,
   type: string,
 ): ApplicationFailure {
-  if (APICallError.isInstance(e)) {
+  // Duck-type a provider error's status (avoids importing the ESM-only `ai` in this sync path).
+  // The status-specific 401/429 fast-fail happens upstream; here we only surface a code for the
+  // message, so a numeric `statusCode` is enough.
+  const statusCode =
+    typeof e === "object" &&
+    e !== null &&
+    typeof (e as { statusCode?: unknown }).statusCode === "number"
+      ? (e as { statusCode: number }).statusCode
+      : undefined;
+  if (statusCode !== undefined) {
     return ApplicationFailure.retryable(
-      `Provider request failed (status ${e.statusCode ?? "unknown"})`,
+      `Provider request failed (status ${statusCode})`,
       type,
-      { statusCode: e.statusCode },
+      { statusCode },
     );
   }
   // Non-provider transient (network blip, timeout): its message is safe, but wrap it
@@ -480,6 +485,7 @@ export async function callJwt(
     >;
     // HS256: the key is the shared secret. RS256: the key is a PEM PKCS#8 RSA
     // private key, imported into a CryptoKey.
+    const { SignJWT, importPKCS8 } = await import("jose");
     const signKey =
       cfg.algorithm === "RS256"
         ? await importPKCS8(key, "RS256")
@@ -1706,15 +1712,8 @@ const DEFAULT_OUTPUT_SCHEMA = {
   required: ["category", "urgency"],
   additionalProperties: false,
 } as const;
-// Typed as Record<string, unknown> (not AgentOutput) so it unifies with the
-// per-node schema branch below — `Output.object` needs one schema type, and the
-// result is returned as Record<string, unknown> anyway. The `as const` literal is
-// widened to the mutable JSONSchema7 the SDK expects (runtime schema unchanged).
-const defaultOutputSchema = jsonSchema<Record<string, unknown>>(
-  // `as const` (needed for the literal `type`/`additionalProperties` fields) makes
-  // this readonly; widen to the mutable JSONSchema7 the SDK wants via unknown.
-  DEFAULT_OUTPUT_SCHEMA as unknown as Parameters<typeof jsonSchema>[0],
-);
+// The AI SDK's `jsonSchema()` wrapper is applied lazily inside runAgent (the `ai` package is
+// ESM-only, loaded via dynamic import) — this stays a plain JSON-schema object with no SDK dep.
 
 // Constructed lazily so importing this module doesn't require ENCRYPTION_KEY
 // until an agent actually runs.
@@ -1724,15 +1723,15 @@ function getCredentials(): CredentialsService {
   return credentials;
 }
 
-function buildModel(provider: string, model: string, apiKey: string) {
+async function buildModel(provider: string, model: string, apiKey: string) {
   if (provider === "anthropic") {
-    return createAnthropic({ apiKey })(model);
+    return (await anthropicSdk()).createAnthropic({ apiKey })(model);
   }
   if (provider === "openai") {
-    return createOpenAI({ apiKey })(model);
+    return (await openaiSdk()).createOpenAI({ apiKey })(model);
   }
   if (provider === "google") {
-    return createGoogleGenerativeAI({ apiKey })(model);
+    return (await googleSdk()).createGoogleGenerativeAI({ apiKey })(model);
   }
   throw ApplicationFailure.nonRetryable(
     `Unsupported provider: ${provider}`,
@@ -1872,8 +1871,9 @@ export async function runAgent(
       provider === "anthropic" &&
       !!cfg.systemPrompt;
 
+    const { generateText, Output, jsonSchema } = await aiSdk();
     const result = await generateText({
-      model: buildModel(provider, model, apiKey),
+      model: await buildModel(provider, model, apiKey),
       ...(cachePrompt
         ? {
             messages: [
@@ -1889,12 +1889,13 @@ export async function runAgent(
           }
         : { system: cfg.systemPrompt, prompt: JSON.stringify(input) }),
       output: Output.object({
-        // Per-node schema when configured (QA#9), else the default shape.
-        schema: cfg.outputSchema
-          ? jsonSchema<Record<string, unknown>>(
-              cfg.outputSchema as Parameters<typeof jsonSchema>[0],
-            )
-          : defaultOutputSchema,
+        // Per-node schema when configured (QA#9), else the default shape. `as const` literals are
+        // widened to the mutable JSONSchema7 the SDK expects (runtime schema unchanged).
+        schema: jsonSchema<Record<string, unknown>>(
+          (cfg.outputSchema ?? DEFAULT_OUTPUT_SCHEMA) as unknown as Parameters<
+            typeof jsonSchema
+          >[0],
+        ),
       }),
       maxOutputTokens,
       ...(cfg.temperature !== undefined
@@ -1987,6 +1988,7 @@ export async function runAgent(
         { tenantId: meta.tenantId },
       );
     }
+    const { APICallError } = await aiSdk();
     if (APICallError.isInstance(e)) {
       if (e.statusCode === 401 || e.statusCode === 403) {
         throw ApplicationFailure.nonRetryable(
@@ -3460,7 +3462,10 @@ export const __ragDeps = {
     apiKey: string,
     value: string,
   ): Promise<{ embedding: number[]; tokens: number }> => {
-    const { createOpenAI } = await import("@ai-sdk/openai");
+    const [{ createOpenAI }, { embed }] = await Promise.all([
+      openaiSdk(),
+      aiSdk(),
+    ]);
     const r = await embed({
       model: createOpenAI({ apiKey }).embedding(EMBED_MODEL),
       value,
@@ -3471,7 +3476,10 @@ export const __ragDeps = {
     apiKey: string,
     values: string[],
   ): Promise<{ embeddings: number[][]; tokens: number }> => {
-    const { createOpenAI } = await import("@ai-sdk/openai");
+    const [{ createOpenAI }, { embedMany }] = await Promise.all([
+      openaiSdk(),
+      aiSdk(),
+    ]);
     const r = await embedMany({
       model: createOpenAI({ apiKey }).embedding(EMBED_MODEL),
       values,

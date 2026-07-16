@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "mssql": "^12.7.0",
-    "mysql2": "^3.22.6",
+    "mysql2": "^3.23.0",
     "pg": "^8.22.0"
   },
   "devDependencies": {
