@@ -37,6 +37,10 @@ export function EnvironmentSwitcher() {
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  // Inline rename: the env id being edited + its draft name. Delete: the id being removed.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
 
   // (Re)resolve environments whenever the active workspace changes.
   useEffect(() => {
@@ -113,6 +117,65 @@ export function EnvironmentSwitcher() {
     }
   }
 
+  async function onRename(env: Environment) {
+    const name = editName.trim();
+    if (!tenantId) return;
+    if (!name) {
+      setError("Enter a name.");
+      return;
+    }
+    if (name === env.name) {
+      setEditingId(null);
+      return;
+    }
+    setRowBusy(env.id);
+    setError(undefined);
+    try {
+      const updated = await api.renameEnvironment(tenantId, env.id, name);
+      // Rename is display-only (the slug/id are stable) — patch the list in place, no reload needed.
+      setEnvs((prev) => prev.map((e) => (e.id === env.id ? updated : e)));
+      setEditingId(null);
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Could not rename environment.",
+      );
+    } finally {
+      setRowBusy(null);
+    }
+  }
+
+  async function onDelete(env: Environment) {
+    if (!tenantId) return;
+    if (
+      !window.confirm(
+        `Delete environment "${env.name}"? This can't be undone. It must have no workflows, credentials, connections, or triggers.`,
+      )
+    ) {
+      return;
+    }
+    setRowBusy(env.id);
+    setError(undefined);
+    try {
+      await api.deleteEnvironment(tenantId, env.id);
+      // Functional update so a concurrent rename/create isn't clobbered by this render's stale list.
+      setEnvs((prev) => prev.filter((e) => e.id !== env.id));
+      // If we deleted the ACTIVE env, just CLEAR it and reload — the load effect re-resolves and
+      // picks the workspace default (`find(isDefault) ?? list[0]`). No fallback to compute here, so
+      // no stale-list pitfall.
+      if (env.slug === activeSlug) {
+        setActiveEnvironment(null);
+        window.location.reload();
+      }
+    } catch (e) {
+      // The server refuses to delete the default env or a non-empty one (409/400) — surface it.
+      setError(
+        e instanceof Error ? e.message : "Could not delete environment.",
+      );
+    } finally {
+      setRowBusy(null);
+    }
+  }
+
   // Nothing to show until the workspace's environments resolve.
   if (!tenantId || envs.length === 0) return null;
   const active = envs.find((e) => e.slug === activeSlug) ?? envs[0];
@@ -122,7 +185,7 @@ export function EnvironmentSwitcher() {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        aria-haspopup="listbox"
+        aria-haspopup="menu"
         aria-expanded={open}
         title="Switch environment"
         style={{
@@ -180,7 +243,9 @@ export function EnvironmentSwitcher() {
             style={{ position: "fixed", inset: 0, zIndex: 40 }}
           />
           <div
-            role="listbox"
+            // A menu (not a listbox) because each row holds multiple controls (switch + rename +
+            // delete); listbox options may not contain nested interactive elements.
+            role="menu"
             style={{
               position: "absolute",
               top: "calc(100% + 6px)",
@@ -196,51 +261,177 @@ export function EnvironmentSwitcher() {
           >
             {envs.map((e) => {
               const isActive = e.slug === active.slug;
+              // Inline-rename mode for this row: an editable name + save/cancel, no switching.
+              if (editingId === e.id) {
+                return (
+                  <div key={e.id} style={{ padding: "4px 6px" }}>
+                    <input
+                      autoFocus
+                      value={editName}
+                      onChange={(ev) => setEditName(ev.target.value)}
+                      onKeyDown={(ev) => {
+                        if (ev.key === "Enter") void onRename(e);
+                        if (ev.key === "Escape") {
+                          setEditingId(null);
+                          setError(undefined); // match the Cancel button
+                        }
+                      }}
+                      placeholder="Environment name"
+                      style={{
+                        width: "100%",
+                        boxSizing: "border-box",
+                        padding: "6px 8px",
+                        borderRadius: 6,
+                        border: "1px solid var(--line-2)",
+                        background: "var(--card)",
+                        color: "var(--ink)",
+                        fontSize: 12.5,
+                      }}
+                    />
+                    <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                      <button
+                        type="button"
+                        disabled={rowBusy === e.id}
+                        onClick={() => void onRename(e)}
+                        style={{
+                          all: "unset",
+                          cursor: rowBusy === e.id ? "default" : "pointer",
+                          padding: "5px 10px",
+                          borderRadius: 6,
+                          background: "var(--brand)",
+                          color: "var(--brand-ink, #fff)",
+                          fontSize: 12,
+                          opacity: rowBusy === e.id ? 0.6 : 1,
+                        }}
+                      >
+                        {rowBusy === e.id ? "Saving…" : "Save"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingId(null);
+                          setError(undefined);
+                        }}
+                        style={{
+                          all: "unset",
+                          cursor: "pointer",
+                          padding: "5px 10px",
+                          borderRadius: 6,
+                          color: "var(--ink-2)",
+                          fontSize: 12,
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
               return (
-                <button
+                <div
                   key={e.id}
-                  type="button"
-                  role="option"
-                  aria-selected={isActive}
-                  onClick={() => switchTo(e.slug)}
+                  role="none"
                   style={{
-                    all: "unset",
-                    cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
-                    gap: 8,
+                    gap: 4,
                     width: "100%",
                     boxSizing: "border-box",
-                    padding: "7px 9px",
+                    padding: "3px 5px 3px 9px",
                     borderRadius: 7,
                     background: isActive
                       ? "var(--bg-3, rgba(255,255,255,.05))"
                       : "transparent",
                   }}
                 >
-                  <span
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={isActive}
+                    onClick={() => switchTo(e.slug)}
+                    title={`Switch to ${e.name}`}
                     style={{
+                      all: "unset",
+                      cursor: "pointer",
                       flex: 1,
                       minWidth: 0,
-                      fontSize: 12.5,
-                      color: "var(--ink)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "4px 0",
                     }}
                   >
-                    {e.name}
-                  </span>
-                  {e.isDefault && (
-                    <span style={{ fontSize: 10, color: "var(--ink-3)" }}>
-                      default
+                    <span
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        fontSize: 12.5,
+                        color: "var(--ink)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {e.name}
                     </span>
+                    {e.isDefault && (
+                      <span style={{ fontSize: 10, color: "var(--ink-3)" }}>
+                        default
+                      </span>
+                    )}
+                    {isActive && (
+                      <Icon
+                        name="check"
+                        size={13}
+                        style={{ color: "var(--state-info)", flex: "none" }}
+                      />
+                    )}
+                  </button>
+                  {/* Rename any env (display name only). */}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    title="Rename"
+                    aria-label={`Rename ${e.name}`}
+                    onClick={() => {
+                      setEditingId(e.id);
+                      setEditName(e.name);
+                      setError(undefined);
+                    }}
+                    style={{
+                      all: "unset",
+                      cursor: "pointer",
+                      padding: 4,
+                      borderRadius: 5,
+                      color: "var(--ink-3)",
+                      flex: "none",
+                    }}
+                  >
+                    <Icon name="edit" size={12} />
+                  </button>
+                  {/* Delete only NON-default envs (the server refuses the default + non-empty). */}
+                  {!e.isDefault && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      title="Delete"
+                      aria-label={`Delete ${e.name}`}
+                      disabled={rowBusy === e.id}
+                      onClick={() => void onDelete(e)}
+                      style={{
+                        all: "unset",
+                        cursor: rowBusy === e.id ? "default" : "pointer",
+                        padding: 4,
+                        borderRadius: 5,
+                        color: "var(--ink-3)",
+                        flex: "none",
+                        opacity: rowBusy === e.id ? 0.5 : 1,
+                      }}
+                    >
+                      <Icon name="trash" size={12} />
+                    </button>
                   )}
-                  {isActive && (
-                    <Icon
-                      name="check"
-                      size={13}
-                      style={{ color: "var(--state-info)", flex: "none" }}
-                    />
-                  )}
-                </button>
+                </div>
               );
             })}
             <div
@@ -321,6 +512,7 @@ export function EnvironmentSwitcher() {
             ) : (
               <button
                 type="button"
+                role="menuitem"
                 onClick={() => setCreating(true)}
                 style={{
                   all: "unset",
