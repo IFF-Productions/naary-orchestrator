@@ -3,12 +3,15 @@
 # run the same monorepo and differ only by the `command` set in docker-compose.
 #
 # Dev-oriented (single-command local stack), not a tuned production image:
-# - runs the app's src via `@swc/register` (node's require hook + SWC transpile;
-#   parity with local dev), so dev dependencies are kept rather than pruned.
-#   NB the `typescript` v7 package is the native (Go) tsc — its classic JS
-#   compiler API is gone, so ts-node/@swc-node/register (which import it) break;
-#   @swc/register uses SWC's own parser and is version-agnostic. It also emits
-#   decorator metadata, which NestJS DI requires (tsx/esbuild does not);
+# - runs the app's src via a `.cjs` bootstrap (src/main.cjs / src/worker.cjs) that registers
+#   `@swc/register` with inline options and require()s the `.ts` entry — so dev dependencies
+#   are kept rather than pruned. The bootstrap (not `node -r @swc/register src/*.ts`) is REQUIRED:
+#   node >=22 routes a `.ts` ENTRY through the ESM loader, where extensionless relative imports
+#   (e.g. `import "./env"`) fail; require()ing from a `.cjs` file forces the CJS path. Inline swc
+#   options also avoid depending on `.swcrc` discovery inside the container.
+#   NB the `typescript` v7 package is the native (Go) tsc — its classic JS compiler API is gone,
+#   so ts-node/@swc-node/register (which import it) break; SWC uses its own parser and is
+#   version-agnostic. It also emits decorator metadata, which NestJS DI requires (tsx/esbuild does not);
 
 # - one image is built once and reused by api + worker.
 # Production-grade images (distroless, non-root, pruned, dist-only) are a later
