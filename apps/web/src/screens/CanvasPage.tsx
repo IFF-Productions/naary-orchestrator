@@ -54,6 +54,7 @@ import {
 } from "../lib/api";
 import { compileGraph } from "../lib/compile-graph";
 import { decompileGraph } from "../lib/decompile-graph";
+import { PHONE_QUERY, useMediaQuery } from "../lib/useMediaQuery";
 import type { JsonSchemaObject } from "../lib/schema-fields";
 import { SchemaEditor } from "./canvas/SchemaFieldEditor";
 import {
@@ -262,6 +263,10 @@ export function CanvasPage() {
   const [inspectorWidth, setInspectorWidth] = useState(
     () => Number(localStorage.getItem("naary.inspectorW")) || 440,
   );
+  // On phone the palette + a 440px inspector don't fit a ~375px viewport — clamp the palette and
+  // let the inspector take the full width (an overlay over the canvas) so node editing is usable.
+  const phone = useMediaQuery(PHONE_QUERY);
+  const effPaletteWidth = phone ? Math.min(paletteWidth, 132) : paletteWidth;
   useEffect(() => {
     localStorage.setItem("naary.paletteW", String(paletteWidth));
   }, [paletteWidth]);
@@ -868,7 +873,11 @@ export function CanvasPage() {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 14,
+          // Wrap on narrow screens so the toolbar can't force the page wider than the viewport
+          // (a non-wrapping row of buttons was overflowing horizontally on phone/tablet).
+          flexWrap: "wrap",
+          gap: 10,
+          rowGap: 8,
           padding: "12px 18px",
           borderBottom: "1px solid var(--line)",
           background: "var(--surface)",
@@ -921,7 +930,14 @@ export function CanvasPage() {
             {showIssues ? "▲" : "▼"}
           </button>
         )}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
+        <div
+          style={{
+            marginLeft: "auto",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 10,
+          }}
+        >
           {status && (
             <span
               style={{
@@ -1202,7 +1218,7 @@ export function CanvasPage() {
         {/* palette (drag its right edge to resize) */}
         <aside
           style={{
-            width: paletteWidth,
+            width: effPaletteWidth,
             flex: "none",
             padding: 14,
             background: "var(--surface)",
@@ -1350,15 +1366,18 @@ export function CanvasPage() {
         {/* node / edge editor — a docked, drag-resizable side panel (right) */}
         {(selected || selectedEdge) && (
           <>
-            <ResizeHandle
-              onResize={(clientX) => {
-                const r = panelsRowRef.current?.getBoundingClientRect();
-                if (r) setInspectorWidth(clampW(r.right - clientX, 320, 760));
-              }}
-            />
+            {!phone && (
+              <ResizeHandle
+                onResize={(clientX) => {
+                  const r = panelsRowRef.current?.getBoundingClientRect();
+                  if (r) setInspectorWidth(clampW(r.right - clientX, 320, 760));
+                }}
+              />
+            )}
             <InspectorPanel
               title={selected ? "Edit node" : "Edit branch condition"}
               width={inspectorWidth}
+              phone={phone}
               onClose={closeInspector}
               onDelete={
                 selected
@@ -1487,6 +1506,7 @@ function ResizeHandle({ onResize }: { onResize: (clientX: number) => void }) {
 function InspectorPanel({
   title,
   width,
+  phone,
   onClose,
   onDelete,
   deleteLabel,
@@ -1494,6 +1514,7 @@ function InspectorPanel({
 }: {
   title: string;
   width: number;
+  phone?: boolean;
   onClose: () => void;
   onDelete?: () => void;
   deleteLabel?: string;
@@ -1509,14 +1530,27 @@ function InspectorPanel({
 
   return (
     <div
-      style={{
-        width,
-        flex: "none",
-        display: "flex",
-        flexDirection: "column",
-        minHeight: 0,
-        background: "var(--surface)",
-      }}
+      style={
+        phone
+          ? {
+              // Phone: a full-screen overlay sheet over the canvas (a 440px docked column can't fit).
+              position: "fixed",
+              inset: 0,
+              zIndex: 50,
+              display: "flex",
+              flexDirection: "column",
+              minHeight: 0,
+              background: "var(--surface)",
+            }
+          : {
+              width,
+              flex: "none",
+              display: "flex",
+              flexDirection: "column",
+              minHeight: 0,
+              background: "var(--surface)",
+            }
+      }
     >
       <div
         style={{
