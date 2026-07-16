@@ -67,6 +67,7 @@ model Company {
 // A user's role IN A COMPANY (distinct from per-workspace Membership). Keyed by the auth uid.
 model CompanyMembership {
   companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   userId    String            // Firebase uid
   role      String @default("admin") // 'owner' | 'admin' (company-level roles; RBAC refines later)
   createdAt DateTime @default(now())
@@ -131,8 +132,9 @@ reads safe; it is not a "later RBAC" detail.
 ## 6. Migration strategy — additive, like Environments
 
 Everything is additive and nullable-first, so existing single-workspace users are unaffected:
-1. Add `Company` + `CompanyMembership` + the `Workspace` registry (backfill one row per existing
-   distinct `tenantId`) + nullable `companyId`. No behavior change.
+1. Add `Company` + `CompanyMembership` + a nullable `TenantSettings.companyId` (no new table — §3).
+   A workspace lacking a `TenantSettings` row simply gets one when it's first attached to a company;
+   no backfill is required until then. No behavior change.
 2. Company console reads (aggregate usage, list workspaces) — read-only.
 3. Cross-workspace data visibility + management actions.
 No `tenantId`-scoped query changes; the compatibility burden is far lower than Environments.
