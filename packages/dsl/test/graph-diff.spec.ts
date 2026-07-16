@@ -68,13 +68,34 @@ describe("diffGraphs", () => {
     expect(d.nodesChanged[0].fields.sort()).toEqual(["config", "retry"]);
   });
 
-  it("is order-independent for nodes and edges", () => {
-    const reordered: GraphDef = {
-      startNodeId: "start",
-      nodes: [...base.nodes].reverse(),
-      edges: [...base.edges].reverse(),
-    };
+  it("is NODE-order independent (nodes are matched by id)", () => {
+    const reordered: GraphDef = { ...base, nodes: [...base.nodes].reverse() };
     expect(graphsEqual(base, reordered)).toBe(true);
+  });
+
+  it("treats EDGE order as significant (traversal precedence) → flags a reorder", () => {
+    // Same edge SET, different order — a real behaviour-affecting change (first-match wins).
+    const branchy: GraphDef = {
+      startNodeId: "start",
+      nodes: [
+        { id: "start", type: "webhookTrigger" },
+        { id: "a", type: "end" },
+        { id: "b", type: "end" },
+      ],
+      edges: [
+        { from: "start", to: "a" },
+        { from: "start", to: "b" },
+      ],
+    };
+    const swapped: GraphDef = {
+      ...branchy,
+      edges: [...branchy.edges].reverse(),
+    };
+    const d = diffGraphs(branchy, swapped);
+    expect(d.edgesAdded).toEqual([]);
+    expect(d.edgesRemoved).toEqual([]);
+    expect(d.edgesReordered).toBe(true);
+    expect(graphsEqual(branchy, swapped)).toBe(false);
   });
 
   it("flags a changed start node", () => {
