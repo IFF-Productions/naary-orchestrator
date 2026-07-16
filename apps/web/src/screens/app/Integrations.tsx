@@ -22,6 +22,7 @@ import {
   UnauthorizedError,
 } from "../../lib/api";
 import { isTerminal } from "../../lib/run-status";
+import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import { getNodeOutput } from "@naary/dsl";
 
 /** Model providers — defined locally; the DC hard-codes these three + an "add" tile.
@@ -359,6 +360,7 @@ function McpAccess() {
 }
 
 export function Integrations() {
+  const phone = useMediaQuery(PHONE_QUERY);
   const [tenant, setTenant] = useState<string | null>(null);
   const [connections, setConnections] = useState<ConnectionRow[] | null>(null);
   const [webhooks, setWebhooks] = useState<WebhookRow[] | null>(null);
@@ -404,7 +406,12 @@ export function Integrations() {
   const loading = connections === null && webhooks === null && !error;
 
   return (
-    <div style={{ padding: "22px 28px 40px", maxWidth: 1100 }}>
+    <div
+      style={{
+        padding: phone ? "16px 14px 32px" : "22px 28px 40px",
+        maxWidth: 1100,
+      }}
+    >
       {/* heading */}
       <div style={{ marginBottom: 20 }}>
         <div
