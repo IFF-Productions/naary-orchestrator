@@ -2764,7 +2764,7 @@ describe("runGraph interpreter — environment secrets ($secrets, Tier-1 §4)", 
       expect((await handle.result()).status).toBe("completed");
 
       // The activity received the token VERBATIM — the workflow did not resolve or blank it.
-      expect(httpCalls.at(-1)?.headers?.Authorization).toBe(
+      expect(httpCalls[httpCalls.length - 1]?.headers?.Authorization).toBe(
         "Bearer {{ $secrets.GH_TOKEN }}",
       );
       const final = await handle.query(stateQuery);

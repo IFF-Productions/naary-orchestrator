@@ -62,3 +62,45 @@ export async function resolveSecretsInString(
     (_match, name: string) => values.get(name) ?? "",
   );
 }
+
+/** True if any string ANYWHERE in `value` (deep-walked object/array) holds a `{{ $secrets.X }}` token. */
+export function hasSecretRefDeep(value: unknown): boolean {
+  if (typeof value === "string") return hasSecretRef(value);
+  if (Array.isArray(value)) return value.some(hasSecretRefDeep);
+  if (value && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).some(
+      hasSecretRefDeep,
+    );
+  }
+  return false;
+}
+
+/**
+ * Deep-resolve `{{ $secrets.NAME }}` tokens in every string of an object/array/string, returning the
+ * same shape with secrets inlined. For an HTTP request body that embeds a token (e.g.
+ * `{ "api_key": "{{ $secrets.KEY }}" }`). Same sensitivity contract as `resolveSecretsInString`:
+ * in-memory only, never returned to the workflow or logged. Non-strings pass through unchanged.
+ */
+export async function resolveSecretsDeep<T>(
+  value: T,
+  resolveOne: (name: string) => Promise<string>,
+): Promise<T> {
+  if (typeof value === "string") {
+    return (await resolveSecretsInString(value, resolveOne)) as unknown as T;
+  }
+  if (Array.isArray(value)) {
+    return (await Promise.all(
+      value.map((v) => resolveSecretsDeep(v, resolveOne)),
+    )) as unknown as T;
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    await Promise.all(
+      Object.entries(value as Record<string, unknown>).map(async ([k, v]) => {
+        out[k] = await resolveSecretsDeep(v, resolveOne);
+      }),
+    );
+    return out as unknown as T;
+  }
+  return value;
+}
