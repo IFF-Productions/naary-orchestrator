@@ -49,6 +49,31 @@ describe("recordUsage", () => {
     expect(String(data.costUsd)).toBe("0.017500"); // 0.005 + 0.0125, Decimal(12,6)
   });
 
+  it("tags the ledger row with the run's environmentId when given (Slice 6 cost visibility)", async () => {
+    await recordUsage({
+      tenantId: "t1",
+      environmentId: "e-sandbox",
+      executionId: "exec-1",
+      nodeId: "agent",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      usage: { inputTokens: 10, outputTokens: 5 },
+    });
+    expect(upsert.mock.calls[0][0].create.environmentId).toBe("e-sandbox");
+  });
+
+  it("writes environmentId=null for a pre-Slice-6 run (no env) — never undefined", async () => {
+    await recordUsage({
+      tenantId: "t1",
+      executionId: "exec-1",
+      nodeId: "agent",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      usage: { inputTokens: 10, outputTokens: 5 },
+    });
+    expect(upsert.mock.calls[0][0].create.environmentId).toBeNull();
+  });
+
   it("persists the cache-read + reasoning buckets and bills cache reads at the reduced rate", async () => {
     await recordUsage({
       tenantId: "t1",

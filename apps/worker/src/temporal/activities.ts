@@ -173,6 +173,7 @@ export interface AgentMeta {
 export async function recordExecution(meta: {
   workflowId: string;
   tenantId: string;
+  environmentId?: string;
   workflowKey?: string;
   graphVersion?: number;
 }): Promise<void> {
@@ -181,6 +182,7 @@ export async function recordExecution(meta: {
     create: {
       workflowId: meta.workflowId,
       tenantId: meta.tenantId,
+      environmentId: meta.environmentId ?? null, // per-env Runs tag (Slice 6)
       workflowKey: meta.workflowKey ?? null,
       // Only scheduled runs create here (API runs are pre-created with the version);
       // record the snapshotted version so scheduled runs show it too.
@@ -2081,6 +2083,7 @@ export async function runAgent(
 
     await __agentDeps.recordUsage({
       tenantId: meta.tenantId,
+      environmentId: meta.environmentId, // per-env cost tag (Slice 6)
       executionId: meta.executionId,
       nodeId: meta.nodeId,
       provider,
@@ -2362,6 +2365,7 @@ export async function callCodeAgent(
     const model = cfg.model || "claude-opus-4-8";
     await __codeAgentDeps.recordUsage({
       tenantId: meta.tenantId,
+      environmentId: meta.environmentId, // per-env cost tag (Slice 6)
       executionId: meta.executionId,
       nodeId: meta.nodeId,
       provider: driver.credentialProvider,
@@ -3644,6 +3648,7 @@ async function recordEmbedUsage(
 ): Promise<number> {
   await __agentDeps.recordUsage({
     tenantId: meta.tenantId,
+    environmentId: meta.environmentId, // per-env cost tag (Slice 6)
     executionId: meta.executionId,
     nodeId: meta.nodeId,
     provider: "openai",

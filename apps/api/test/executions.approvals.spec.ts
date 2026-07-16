@@ -15,7 +15,10 @@ function makeService(opts: {
   const graphs = {
     getLatest: opts.getLatest ?? (async () => null),
   } as never;
-  const service = new ExecutionsService(graphs, { defaultEnvId: async () => "env-test", resolveEnvId: async () => "env-test" } as never);
+  const service = new ExecutionsService(graphs, {
+    defaultEnvId: async () => "env-test",
+    resolveEnvId: async () => "env-test",
+  } as never);
   (service as unknown as { client: unknown }).client = {
     workflow: { getHandle: opts.getHandle ?? (() => ({})) },
   };
@@ -71,6 +74,34 @@ describe("listAwaiting (approvals inbox)", () => {
       title: "Ship it?",
       instructions: "Check the diff first.",
     });
+  });
+
+  it("resolves the approval prompt graph in the RUN's own env when tagged (Slice 6)", async () => {
+    findMany.mockResolvedValue([
+      {
+        workflowId: "wf-1",
+        workflowKey: "ship",
+        environmentId: "env-sandbox", // the run executed in sandbox
+        status: "awaiting_approval",
+        createdAt: new Date("2026-07-04T00:00:00Z"),
+      },
+    ]);
+    const getLatest = vi.fn().mockResolvedValue(approvalGraph);
+    const service = makeService({
+      getLatest,
+      getHandle: () => ({
+        query: async () => ({
+          status: "awaiting_approval",
+          currentNodeId: "gate",
+          ctx: {},
+        }),
+      }),
+    });
+
+    await service.listAwaiting("t-1");
+
+    // the graph is read from the run's OWN env (2nd arg), NOT the tenant default ("env-test")
+    expect(getLatest).toHaveBeenCalledWith("t-1", "env-sandbox", "ship");
   });
 
   it("drops a run that was DECIDED since the read-model write (live status not awaiting)", async () => {

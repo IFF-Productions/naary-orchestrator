@@ -11,7 +11,13 @@ vi.mock("@naary/db", () => ({
 import { ExecutionsService } from "../src/executions/executions.service";
 
 function makeService(fetchHistory: unknown): ExecutionsService {
-  const service = new ExecutionsService({} as never, { defaultEnvId: async () => "env-test", resolveEnvId: async () => "env-test" } as never);
+  const service = new ExecutionsService(
+    {} as never,
+    {
+      defaultEnvId: async () => "env-test",
+      resolveEnvId: async () => "env-test",
+    } as never,
+  );
   (service as unknown as { client: unknown }).client = {
     workflow: { getHandle: () => ({ fetchHistory }) },
   };
@@ -73,6 +79,32 @@ describe("rerun", () => {
     );
   });
 
+  it("re-runs in the ORIGINAL run's env when the row is env-tagged (Slice 6)", async () => {
+    findUnique.mockResolvedValue({
+      workflowId: "wf-old",
+      tenantId: "t-1",
+      environmentId: "env-sandbox", // the original run executed in sandbox
+      workflowKey: "refunds",
+    });
+    const service = makeService(
+      vi.fn().mockResolvedValue(startedWith({ orderId: 1 })),
+    );
+    const start = vi
+      .spyOn(service, "start")
+      .mockResolvedValue({ workflowId: "wf-new" });
+
+    await service.rerun("wf-old", "t-1");
+
+    // the run's OWN env — NOT the tenant default ("env-test")
+    expect(start).toHaveBeenCalledWith(
+      "t-1",
+      "env-sandbox",
+      { orderId: 1 },
+      "refunds",
+      undefined,
+    );
+  });
+
   it("threads a chosen graphVersion through to start (re-run at a specific version)", async () => {
     findUnique.mockResolvedValue({
       workflowId: "wf-old",
@@ -89,7 +121,13 @@ describe("rerun", () => {
     await service.rerun("wf-old", "t-1", 2);
 
     // The version is resolved against the run's OWN workflowKey inside start().
-    expect(start).toHaveBeenCalledWith("t-1", "env-test", { orderId: 7 }, "refunds", 2);
+    expect(start).toHaveBeenCalledWith(
+      "t-1",
+      "env-test",
+      { orderId: 7 },
+      "refunds",
+      2,
+    );
   });
 
   it("falls back to default input when the start payload is missing/undecodable", async () => {
@@ -115,7 +153,13 @@ describe("rerun", () => {
 
     await service.rerun("wf-old", "t-1");
 
-    expect(start).toHaveBeenCalledWith("t-1", "env-test", undefined, "wk", undefined);
+    expect(start).toHaveBeenCalledWith(
+      "t-1",
+      "env-test",
+      undefined,
+      "wk",
+      undefined,
+    );
   });
 
   it("rejects a run that predates workflow-key tracking (400, no start)", async () => {

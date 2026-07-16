@@ -11,6 +11,9 @@ export interface UsageTokens {
 
 export interface RecordUsageInput {
   tenantId: string;
+  /** Per-env cost-visibility TAG (Slice 6) — the run's env. Optional: a pre-Slice-6 run has none.
+   *  Billing is one-bill-per-tenant, so this is NEVER read by the budget aggregate/gate. */
+  environmentId?: string;
   executionId: string;
   nodeId: string;
   provider: string;
@@ -39,6 +42,7 @@ export async function recordUsage(input: RecordUsageInput) {
 
   const data = {
     tenantId: input.tenantId,
+    environmentId: input.environmentId ?? null,
     executionId: input.executionId,
     nodeId: input.nodeId,
     provider: input.provider,
