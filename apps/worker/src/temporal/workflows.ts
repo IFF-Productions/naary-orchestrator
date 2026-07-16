@@ -476,6 +476,7 @@ export async function runGraph(
     await recordExecution({
       workflowId: wf.workflowInfo().workflowId,
       tenantId: runCtx.tenantId,
+      environmentId: runCtx.environmentId, // tag the run with its env (Slice 6)
       workflowKey: runCtx.workflowKey,
       graphVersion: runCtx.graphVersion,
     });

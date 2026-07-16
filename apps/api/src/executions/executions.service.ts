@@ -638,6 +638,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       data: {
         workflowId,
         tenantId,
+        environmentId, // tag the run with its env (Slice 6)
         workflowKey,
         graphVersion: snapshot.version,
       },
@@ -905,6 +906,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         }
         const prompt = await this.approvalPrompt(
           tenantId,
+          r.environmentId,
           r.workflowKey,
           currentNodeId,
         );
@@ -940,6 +942,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       if (s.status !== "awaiting_approval") return { awaiting: false };
       const prompt = await this.approvalPrompt(
         row.tenantId,
+        row.environmentId,
         row.workflowKey,
         s.currentNodeId,
       );
@@ -956,13 +959,16 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   /** Resolve a humanApproval node's title/instructions from the tenant's stored graph. */
   private async approvalPrompt(
     tenantId: string,
+    environmentId: string | null,
     workflowKey: string | null,
     nodeId: string,
   ): Promise<{ title: string; instructions: string | null }> {
     if (!workflowKey) return { title: "Approval required", instructions: null };
-    // Best-effort read of the graph for the node's title. Runs aren't env-tagged yet (deferred),
-    // so read from the default env.
-    const envId = await this.environments.defaultEnvId(tenantId);
+    // Best-effort read of the graph for the node's title, IN THE RUN'S OWN ENV (Slice 6) — the run
+    // is env-tagged now, so a sandbox run's prompt reads the sandbox graph. A pre-Slice-6 run has no
+    // env tag → fall back to the tenant default (where its graph lived).
+    const envId =
+      environmentId ?? (await this.environments.defaultEnvId(tenantId));
     const snap = await this.graphs
       .getLatest(tenantId, envId, workflowKey)
       .catch(() => null);
@@ -1266,8 +1272,10 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       );
     }
     const input = await this.originalTriggerInput(id);
-    // Runs aren't env-tagged yet (deferred), so re-run against the default env's graph.
-    const envId = await this.environments.defaultEnvId(tenantId);
+    // Re-run in the ORIGINAL run's env (Slice 6) — a sandbox run re-runs against the sandbox graph.
+    // A pre-Slice-6 run has no env tag → the tenant default (where its graph lived).
+    const envId =
+      row.environmentId ?? (await this.environments.defaultEnvId(tenantId));
     // workflowKey is the run's OWN key; graphVersion (if given) is resolved against
     // that key inside start() — the caller can't target another workflow's version.
     return this.start(tenantId, envId, input, row.workflowKey, graphVersion);

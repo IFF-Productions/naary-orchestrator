@@ -36,6 +36,11 @@ model ApiToken {
 model Execution {
   workflowId  String   @id // Temporal workflowId
   tenantId    String
+  // The env this run executed in (design ENVIRONMENTS.md Slice 6) — a read-model TAG for per-env
+  // Runs visibility + resolving a run's graph in its own env (approval-prompt/re-run). Nullable: a
+  // pre-Slice-6 run has none (falls back to the default env), and no FK — a historical record must
+  // not block env deletion, and a dangling id degrades gracefully (best-effort display reads).
+  environmentId String?
   workflowKey String? // the graph key this run started (null for pre-migration rows)
   // The GraphDefinition.version this run snapshotted at start — shown on the Runs list /
   // run detail, and the anchor for "re-run at a chosen version". NULL for pre-migration
@@ -323,6 +328,10 @@ model TenantCredential {
 model UsageEvent {
   id                String   @id @default(uuid())
   tenantId          String
+  // Per-env cost VISIBILITY tag (design ENVIRONMENTS.md Slice 6). Nullable + no FK — billing stays
+  // ONE bill per tenant: the budget aggregate/reservation/gate all sum across envs and never read
+  // this column. It exists only so spend can later be BROKEN DOWN by env, never enforced by it.
+  environmentId     String?
   executionId       String // Temporal workflowId
   nodeId            String
   provider          String
