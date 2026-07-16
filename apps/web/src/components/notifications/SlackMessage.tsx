@@ -2,9 +2,16 @@ import type { CSSProperties, ReactNode } from "react";
 
 /**
  * A visual approximation of how Slack renders a Block Kit `blocks` array — the exact payload the
- * worker POSTs (built by `@naary/notifications`). This is NOT Slack; it's a faithful-enough preview
- * so we can eyeball formatting (header, the 2-column section fields, action buttons) without a real
- * Slack workspace. Supported blocks: `header`, `section` (mrkdwn `fields`), `actions` (url buttons).
+ * worker POSTs (built by `@naary/notifications`). NOT Slack; a faithful-enough preview so we can
+ * eyeball formatting (header, the 2-column section fields, full-width sections, action buttons)
+ * without a real Slack workspace. Supported blocks: `header`, `section` (mrkdwn `fields`/`text`),
+ * `actions` (url buttons).
+ *
+ * Matched against a real Naary alert (Slack DARK theme): message sits inline with NO card border,
+ * inline `code` renders as warm-orange monospace in a thin box. `theme` defaults to "dark" — the
+ * theme most workspaces (and this user's) run — with a light variant for completeness. Slack's
+ * theme follows the VIEWER's Slack, not our app, so this is its own switch, independent of the
+ * Storybook toolbar.
  */
 
 type SlackText = {
@@ -23,34 +30,77 @@ type SlackBlock =
   | { type: "section"; text?: SlackText; fields?: SlackText[] }
   | { type: "actions"; elements: SlackButton[] };
 
-// Slack's real palette (Aubergine sidebar aside, the message surface is neutral). Fixed values —
-// a Slack message looks the same regardless of our app's dark/light theme.
-const SLACK = {
-  surface: "#ffffff",
-  border: "#e2e2e4",
-  text: "#1d1c1d",
-  muted: "#616061",
-  link: "#1264a3",
-  code: "#e01e5a",
-  codeBg: "rgba(29,28,29,0.04)",
-  btnBorder: "#d5d6d9",
-  primary: "#007a5a",
-  danger: "#e01e5a",
+type SlackTheme = "dark" | "light";
+
+// Real Slack surface colours per theme. Message background, text, the distinctive orange inline
+// `code`, and link blue — sampled from Slack itself so the preview reads as the real client.
+const THEMES: Record<
+  SlackTheme,
+  {
+    surface: string;
+    text: string;
+    strong: string;
+    muted: string;
+    link: string;
+    code: string;
+    codeBg: string;
+    codeBorder: string;
+    btnBg: string;
+    btnText: string;
+    btnBorder: string;
+    primary: string;
+    danger: string;
+  }
+> = {
+  dark: {
+    surface: "#1a1d21",
+    text: "#d1d2d3",
+    strong: "#f4f4f5",
+    muted: "#9a9b9e",
+    link: "#1d9bd1",
+    code: "#e0913a", // Slack dark inline-code orange
+    codeBg: "rgba(224,145,58,0.10)",
+    codeBorder: "rgba(224,145,58,0.32)",
+    btnBg: "transparent",
+    btnText: "#d1d2d3",
+    btnBorder: "#5c5f66",
+    primary: "#007a5a",
+    danger: "#e01e5a",
+  },
+  light: {
+    surface: "#ffffff",
+    text: "#1d1c1d",
+    strong: "#1d1c1d",
+    muted: "#616061",
+    link: "#1264a3",
+    code: "#c2410c",
+    codeBg: "rgba(29,28,29,0.04)",
+    codeBorder: "rgba(29,28,29,0.13)",
+    btnBg: "#ffffff",
+    btnText: "#1d1c1d",
+    btnBorder: "#d5d6d9",
+    primary: "#007a5a",
+    danger: "#e01e5a",
+  },
 };
 
+type Palette = (typeof THEMES)[SlackTheme];
+
+const MONO = "Monaco, Menlo, Consolas, 'Courier New', monospace";
+
 /** Render a tiny subset of Slack mrkdwn: `*bold*`, `` `code` ``, `<url|label>` links, and `\n`. */
-function Mrkdwn({ text }: { text: string }): ReactNode {
+function Mrkdwn({ text, c }: { text: string; c: Palette }): ReactNode {
   const lines = text.split("\n");
   return lines.map((line, li) => (
     // biome-ignore lint/suspicious/noArrayIndexKey: static, non-reordering mrkdwn lines
     <span key={li}>
       {li > 0 && <br />}
-      {renderInline(line)}
+      {renderInline(line, c)}
     </span>
   ));
 }
 
-function renderInline(line: string): ReactNode[] {
+function renderInline(line: string, c: Palette): ReactNode[] {
   const out: ReactNode[] = [];
   // Tokenize on <url|label> links, *bold*, and `code`, in one pass.
   const re = /<([^>|]+)\|([^>]+)>|\*([^*]+)\*|`([^`]+)`/g;
@@ -66,7 +116,7 @@ function renderInline(line: string): ReactNode[] {
           // biome-ignore lint/suspicious/noArrayIndexKey: stable within a single render
           key={k++}
           href={m[1]}
-          style={{ color: SLACK.link, textDecoration: "none" }}
+          style={{ color: c.link, textDecoration: "none" }}
         >
           {m[2]}
         </a>,
@@ -74,7 +124,7 @@ function renderInline(line: string): ReactNode[] {
     } else if (m[3]) {
       out.push(
         // biome-ignore lint/suspicious/noArrayIndexKey: stable within a single render
-        <strong key={k++} style={{ fontWeight: 700 }}>
+        <strong key={k++} style={{ fontWeight: 700, color: c.strong }}>
           {m[3]}
         </strong>,
       );
@@ -84,13 +134,14 @@ function renderInline(line: string): ReactNode[] {
           // biome-ignore lint/suspicious/noArrayIndexKey: stable within a single render
           key={k++}
           style={{
-            color: SLACK.code,
-            background: SLACK.codeBg,
-            border: `1px solid ${SLACK.border}`,
-            borderRadius: 3,
-            padding: "0 3px",
-            fontSize: "0.85em",
-            fontFamily: "Monaco, Menlo, Consolas, 'Courier New', monospace",
+            color: c.code,
+            background: c.codeBg,
+            border: `1px solid ${c.codeBorder}`,
+            borderRadius: 4,
+            padding: "1px 4px",
+            fontSize: "0.92em",
+            fontFamily: MONO,
+            wordBreak: "break-all",
           }}
         >
           {m[4]}
@@ -103,30 +154,30 @@ function renderInline(line: string): ReactNode[] {
   return out;
 }
 
-function Button({ btn }: { btn: SlackButton }) {
+function Button({ btn, c }: { btn: SlackButton; c: Palette }) {
   const style: CSSProperties = {
     display: "inline-flex",
     alignItems: "center",
     gap: 6,
-    padding: "8px 14px",
+    padding: "9px 14px",
     borderRadius: 4,
     fontSize: 14,
     fontWeight: 700,
     lineHeight: "16px",
     cursor: "pointer",
     textDecoration: "none",
-    border: `1px solid ${SLACK.btnBorder}`,
-    background: "#fff",
-    color: SLACK.text,
+    border: `1px solid ${c.btnBorder}`,
+    background: c.btnBg,
+    color: c.btnText,
   };
   if (btn.style === "primary") {
-    style.background = SLACK.primary;
+    style.background = c.primary;
     style.color = "#fff";
-    style.border = `1px solid ${SLACK.primary}`;
+    style.border = `1px solid ${c.primary}`;
   } else if (btn.style === "danger") {
-    style.background = "#fff";
-    style.color = SLACK.danger;
-    style.border = `1px solid ${SLACK.danger}`;
+    style.background = "transparent";
+    style.color = c.danger;
+    style.border = `1px solid ${c.danger}`;
   }
   return (
     <a href={btn.url} style={style}>
@@ -138,22 +189,26 @@ function Button({ btn }: { btn: SlackButton }) {
 export function SlackMessage({
   blocks,
   botName = "Naary",
+  time = "9:07 AM",
+  theme = "dark",
 }: {
   blocks: unknown[];
   botName?: string;
+  time?: string;
+  theme?: SlackTheme;
 }) {
+  const c = THEMES[theme];
   const list = blocks as SlackBlock[];
   return (
     <div
       style={{
-        maxWidth: 560,
-        background: SLACK.surface,
-        border: `1px solid ${SLACK.border}`,
-        borderRadius: 8,
-        padding: "12px 16px 16px",
+        maxWidth: 640,
+        background: c.surface,
+        // Real Slack messages have NO card border — they sit inline in the channel.
+        padding: "10px 16px 12px",
         fontFamily:
           "Lato, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-        color: SLACK.text,
+        color: c.text,
         display: "flex",
         gap: 10,
       }}
@@ -178,13 +233,15 @@ export function SlackMessage({
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <span style={{ fontWeight: 800, fontSize: 15 }}>{botName}</span>
+          <span style={{ fontWeight: 900, fontSize: 15, color: c.strong }}>
+            {botName}
+          </span>
           <span
             style={{
               fontSize: 10,
               fontWeight: 700,
-              color: SLACK.muted,
-              border: `1px solid ${SLACK.border}`,
+              color: c.muted,
+              border: `1px solid ${c.btnBorder}`,
               borderRadius: 3,
               padding: "1px 4px",
               textTransform: "uppercase",
@@ -193,19 +250,19 @@ export function SlackMessage({
           >
             App
           </span>
-          <span style={{ fontSize: 12, color: SLACK.muted }}>now</span>
+          <span style={{ fontSize: 12, color: c.muted }}>{time}</span>
         </div>
         <div
           style={{
             marginTop: 4,
             display: "flex",
             flexDirection: "column",
-            gap: 10,
+            gap: 8,
           }}
         >
           {list.map((b, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: blocks are a fixed, ordered payload
-            <SlackBlockView key={i} block={b} />
+            <SlackBlockView key={i} block={b} c={c} />
           ))}
         </div>
       </div>
@@ -213,10 +270,17 @@ export function SlackMessage({
   );
 }
 
-function SlackBlockView({ block }: { block: SlackBlock }) {
+function SlackBlockView({ block, c }: { block: SlackBlock; c: Palette }) {
   if (block.type === "header") {
     return (
-      <div style={{ fontSize: 18, fontWeight: 800, lineHeight: "24px" }}>
+      <div
+        style={{
+          fontSize: 18,
+          fontWeight: 800,
+          lineHeight: "24px",
+          color: c.strong,
+        }}
+      >
         {block.text.text}
       </div>
     );
@@ -227,7 +291,7 @@ function SlackBlockView({ block }: { block: SlackBlock }) {
       <div>
         {block.text && (
           <div style={{ fontSize: 15, lineHeight: "22px" }}>
-            <Mrkdwn text={block.text.text} />
+            <Mrkdwn text={block.text.text} c={c} />
           </div>
         )}
         {fields && (
@@ -236,7 +300,7 @@ function SlackBlockView({ block }: { block: SlackBlock }) {
             style={{
               display: "grid",
               gridTemplateColumns: "1fr 1fr",
-              gap: "8px 16px",
+              gap: "10px 16px",
               marginTop: 2,
             }}
           >
@@ -244,9 +308,9 @@ function SlackBlockView({ block }: { block: SlackBlock }) {
               <div
                 // biome-ignore lint/suspicious/noArrayIndexKey: fixed, ordered fields
                 key={i}
-                style={{ fontSize: 15, lineHeight: "20px", minWidth: 0 }}
+                style={{ fontSize: 15, lineHeight: "22px", minWidth: 0 }}
               >
-                <Mrkdwn text={f.text} />
+                <Mrkdwn text={f.text} c={c} />
               </div>
             ))}
           </div>
@@ -256,10 +320,10 @@ function SlackBlockView({ block }: { block: SlackBlock }) {
   }
   if (block.type === "actions") {
     return (
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 2 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
         {block.elements.map((el, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: fixed, ordered buttons
-          <Button key={i} btn={el} />
+          <Button key={i} btn={el} c={c} />
         ))}
       </div>
     );

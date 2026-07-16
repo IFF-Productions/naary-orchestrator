@@ -34,14 +34,18 @@ const FAILED: NotificationInput = {
 function Slack({
   input,
   links = LINKS,
+  theme = "dark",
 }: {
   input: NotificationInput;
   links?: NotificationLinks;
+  theme?: "dark" | "light";
 }) {
   const { blocks } = notificationBlocks(input, links);
+  // Match the real Slack surface so the message sits seamlessly (dark by default).
+  const bg = theme === "dark" ? "#1a1d21" : "#ffffff";
   return (
-    <div style={{ padding: 24, background: "#f8f8f8", minHeight: "100vh" }}>
-      <SlackMessage blocks={blocks} />
+    <div style={{ padding: 24, background: bg, minHeight: "100vh" }}>
+      <SlackMessage blocks={blocks} theme={theme} />
     </div>
   );
 }
@@ -72,6 +76,11 @@ export const SlackRunFailed: Story = {
 /** No APP_BASE_URL / signing key on the worker → no action buttons, run shown as a bare id. */
 export const SlackNoLinks: Story = {
   render: () => <Slack input={APPROVAL} links={{}} />,
+};
+
+/** Same payload rendered in Slack's light theme (some workspaces default to it). */
+export const SlackLightTheme: Story = {
+  render: () => <Slack input={FAILED} theme="light" />,
 };
 
 export const TeamsApprovalPending: Story = {
