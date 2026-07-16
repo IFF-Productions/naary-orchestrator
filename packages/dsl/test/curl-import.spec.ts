@@ -93,6 +93,14 @@ describe("parseCurl", () => {
     expect(warnings).toEqual([]);
   });
 
+  it("drops -b/--cookie with a warning (session material, not imported)", () => {
+    const { config, warnings } = parseCurl(
+      "curl https://h/x -b 'session=abc123'",
+    );
+    expect(JSON.stringify(config)).not.toContain("abc123");
+    expect(warnings.some((w) => /cookie/i.test(w))).toBe(true);
+  });
+
   it("throws when there is no URL", () => {
     expect(() =>
       parseCurl("curl -X POST -H 'Accept: application/json'"),

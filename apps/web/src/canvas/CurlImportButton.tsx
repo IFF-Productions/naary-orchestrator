@@ -26,6 +26,8 @@ export function CurlImportButton({
       setText("");
       setOpen(false);
     } catch (e) {
+      // Clear any prior successful import's warnings so they aren't misread as this failure's.
+      setWarnings([]);
       setError(e instanceof Error ? e.message : "Couldn't parse that cURL.");
     }
   }
@@ -138,8 +140,9 @@ export function CurlImportButton({
             color: "var(--state-warn, var(--ink-3))",
           }}
         >
-          {warnings.map((w) => (
-            <li key={w}>{w}</li>
+          {warnings.map((w, i) => (
+            // Warnings can repeat (e.g. two unrecognized flags) → index-composite key, not the string.
+            <li key={`${i}:${w}`}>{w}</li>
           ))}
         </ul>
       )}

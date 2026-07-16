@@ -132,8 +132,6 @@ const IGNORED_WITH_ARG: ReadonlySet<string> = new Set([
   "--write-out",
   "--connect-timeout",
   "--retry",
-  "-b",
-  "--cookie", // sending cookies is auth-ish; drop (warned separately if via -H)
 ]);
 
 /**
@@ -197,6 +195,13 @@ export function parseCurl(input: string): CurlImportResult {
         i++; // consume the credentials, never store them
         warnings.push(
           "Dropped `-u` basic-auth credentials — configure a connection for auth instead.",
+        );
+        break;
+      case "-b":
+      case "--cookie":
+        i++; // consume + drop — cookies are session/auth material, not for the graph
+        warnings.push(
+          "Dropped `-b`/`--cookie` — cookies are session material and aren't imported.",
         );
         break;
       case "-A":
