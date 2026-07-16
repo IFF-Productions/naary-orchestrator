@@ -967,20 +967,36 @@ export const __notifyDeps = {
  * opening the app.
  */
 /**
- * The SPA's public origin, for building absolute notification deep links. Prefers the explicit
- * `APP_BASE_URL`; falls back to the first absolute http(s) origin in `CORS_ORIGINS` — which prod
- * MUST already set for the browser to reach the API, so notifications get clickable links/buttons
- * without a separate var. Returns undefined only when neither yields a usable absolute URL (dev
- * with just localhost is still fine). Trailing slash trimmed.
+ * Normalize a candidate into a deep-link base: require an http(s) URL and keep only origin + path
+ * (drop any query/fragment — a base URL has none), trailing slash trimmed. So a stray
+ * `https://host/x?y#z` in CORS_ORIGINS can't produce a broken `https://host/x?y#z/approve/…` link,
+ * while a legitimately path-prefixed `APP_BASE_URL` (e.g. `https://host/app`) is preserved.
+ */
+export function normalizeBaseUrl(raw: string): string | undefined {
+  try {
+    const u = new URL(raw.trim());
+    if (u.protocol !== "http:" && u.protocol !== "https:") return undefined;
+    return `${u.origin}${u.pathname}`.replace(/\/+$/, "");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The SPA's public base URL, for building absolute notification deep links. Prefers the explicit
+ * `APP_BASE_URL`; falls back to the first http(s) origin in `CORS_ORIGINS` — which prod MUST already
+ * set for the browser to reach the API, so notifications get clickable links/buttons without a
+ * separate var. Returns undefined only when neither yields a usable absolute URL (dev with just
+ * localhost is still fine).
  */
 function resolveAppBaseUrl(): string | undefined {
-  const explicit = (process.env.APP_BASE_URL ?? "").trim();
   const candidates = [
-    explicit,
-    ...(process.env.CORS_ORIGINS ?? "").split(",").map((s) => s.trim()),
+    process.env.APP_BASE_URL ?? "",
+    ...(process.env.CORS_ORIGINS ?? "").split(","),
   ];
   for (const c of candidates) {
-    if (/^https?:\/\/[^\s]+$/.test(c)) return c.replace(/\/$/, "");
+    const base = normalizeBaseUrl(c);
+    if (base) return base;
   }
   return undefined;
 }

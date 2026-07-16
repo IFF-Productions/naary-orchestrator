@@ -299,6 +299,23 @@ describe("sendNotification", () => {
     ]);
   });
 
+  it("normalizes a base with a stray query/fragment to origin+path (no broken concat)", async () => {
+    process.env.APP_BASE_URL = "https://app.acme.io/console?tab=x#frag";
+    await sendNotification({ ...BASE, kind: "run_failed", detail: "boom" });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    // Query/fragment dropped, path kept — so the deep link is well-formed, not
+    // "…/console?tab=x#frag/app/runs/wf-1".
+    expect(body.runUrl).toBe("https://app.acme.io/console/app/runs/wf-1");
+  });
+
+  it("ignores a non-URL APP_BASE_URL (no scheme) → no link", async () => {
+    process.env.APP_BASE_URL = "app.acme.io"; // not an absolute http(s) URL
+    process.env.CORS_ORIGINS = "";
+    await sendNotification({ ...BASE, kind: "run_failed" });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    expect(body.runUrl).toBeUndefined();
+  });
+
   it("is a NO-OP when no webhook URL is configured", async () => {
     channels = [
       {

@@ -24,10 +24,20 @@ function requireEnv(): void {
 // It resolves from APP_BASE_URL, falling back to the first http(s) origin in CORS_ORIGINS. Warn
 // (don't fail) if neither is present — alerts still send, just with a bare run id and no buttons.
 function warnIfNoAppBaseUrl(): void {
+  // Mirror activities.ts resolveAppBaseUrl (kept inline — env.ts loads before the heavy activity
+  // module): an http(s) URL that `new URL()` accepts. Duplicated deliberately, not imported.
+  const isHttpUrl = (raw: string): boolean => {
+    try {
+      const u = new URL(raw.trim());
+      return u.protocol === "http:" || u.protocol === "https:";
+    } catch {
+      return false;
+    }
+  };
   const hasBase = [
     process.env.APP_BASE_URL ?? "",
     ...(process.env.CORS_ORIGINS ?? "").split(","),
-  ].some((c) => /^https?:\/\/[^\s]+$/.test(c.trim()));
+  ].some(isHttpUrl);
   if (!hasBase) {
     console.warn(
       "[worker] No valid absolute base URL (APP_BASE_URL, or an http(s) origin in CORS_ORIGINS) — Slack/Teams notifications will show a bare run id with no clickable link or Approve/Reject buttons. Set APP_BASE_URL to your SPA URL to enable them.",
