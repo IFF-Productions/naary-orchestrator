@@ -30,7 +30,7 @@ function warnIfNoAppBaseUrl(): void {
   ].some((c) => /^https?:\/\/[^\s]+$/.test(c.trim()));
   if (!hasBase) {
     console.warn(
-      "[worker] No APP_BASE_URL (or CORS_ORIGINS) set — Slack/Teams notifications will show a bare run id with no clickable link or Approve/Reject buttons. Set APP_BASE_URL to your SPA URL to enable them.",
+      "[worker] No valid absolute base URL (APP_BASE_URL, or an http(s) origin in CORS_ORIGINS) — Slack/Teams notifications will show a bare run id with no clickable link or Approve/Reject buttons. Set APP_BASE_URL to your SPA URL to enable them.",
     );
   }
 }
