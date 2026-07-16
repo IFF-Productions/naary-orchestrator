@@ -660,9 +660,10 @@ export function Settings() {
           marginBottom: 12,
         }}
       >
-        Encrypted, env-scoped secret values (API keys, tokens) — reference them
-        in a node's field as <code>{"{{ $secrets.NAME }}"}</code>. Resolved only
-        inside the activity that uses them, so a value never enters the flow,
+        Encrypted, env-scoped secret values (API keys, tokens). Reference one in
+        an <strong>HTTP Request node's headers</strong> as{" "}
+        <code>{"{{ $secrets.NAME }}"}</code> (more node types coming). Resolved
+        only inside the activity that uses it, so a value never enters the flow,
         run data, or logs. Values are <strong>write-only</strong>: you can set
         or replace a secret, but its value is never shown again.
       </div>
