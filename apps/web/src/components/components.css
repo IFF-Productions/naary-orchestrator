@@ -463,7 +463,12 @@
 }
 .node .accent {
   height: 2px;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  /* A 2px strip can't render the card's 12px corner, so a full-width bar fills the corner
+     squares the rounded border leaves empty — reading as a clipped/square top. Inset it to the
+     flat part of the top edge (past the corner radius) and round its ends. Can't use
+     overflow:hidden on .node — the connection ports overflow at left/right:-6px. */
+  margin: 0 var(--radius-lg);
+  border-radius: 0 0 2px 2px;
 }
 .node.selected {
   box-shadow: 0 0 0 var(--ring-width)
