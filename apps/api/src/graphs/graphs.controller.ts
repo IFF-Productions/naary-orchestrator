@@ -8,6 +8,7 @@ import {
   Param,
   Post,
   Put,
+  Query,
 } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
 import type { GraphDef } from "@naary/dsl";
@@ -103,6 +104,35 @@ export class GraphsController {
   ): Promise<{ version: number; contentHash: string; createdAt: string }[]> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
     return this.graphs.listVersions(tenantId, envId, workflowKey);
+  }
+
+  /** Structural diff between two versions of a workflow — review what changed before promoting. */
+  @ApiEndpoint({
+    summary: "Diff two versions of a workflow",
+    description:
+      "What changed between ?from=<v>&to=<v>: nodes added/removed/reconfigured + edges rewired.",
+  })
+  @Get(":workflowKey/diff")
+  async diff(
+    @TenantId() tenantId: string,
+    @Param("workflowKey") workflowKey: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+    @EnvironmentSel() envSel?: string,
+  ) {
+    // Digit-only guard: Number("") / Number("  ") coerce to 0, which would pass an integer
+    // check and then wrongly 404. Require an explicit positive integer string for each.
+    const isVersion = (v?: string): boolean =>
+      /^[1-9][0-9]*$/.test((v ?? "").trim());
+    if (!isVersion(from) || !isVersion(to)) {
+      throw new BadRequestException(
+        "`from` and `to` must be positive integer version numbers.",
+      );
+    }
+    const fromV = Number(from);
+    const toV = Number(to);
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    return this.graphs.diffVersions(tenantId, envId, workflowKey, fromV, toV);
   }
 
   /** The latest graph for a workflowKey — used to open it in the canvas. */

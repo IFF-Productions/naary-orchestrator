@@ -5,7 +5,13 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
-import { canonicalize, type GraphDef, validateGraph } from "@naary/dsl";
+import {
+  canonicalize,
+  diffGraphs,
+  type GraphDef,
+  type GraphDiff,
+  validateGraph,
+} from "@naary/dsl";
 import { TracedClass } from "@naary/observability";
 // Runtime config validation is imported from the registry module DIRECTLY (not via the package
 // index) so it never rides the worker's `@naary/dsl` import surface — that's what keeps zod out of
@@ -190,6 +196,35 @@ export class GraphsService {
           version: row.version,
         }
       : null;
+  }
+
+  /**
+   * Structural diff between two stored versions of a workflowKey (workflow diff). Loads both
+   * snapshots in the caller's env and returns what changed (nodes/edges added/removed/reconfigured).
+   * Throws NotFound if either version is missing.
+   */
+  async diffVersions(
+    tenantId: string,
+    environmentId: string,
+    workflowKey: string,
+    fromVersion: number,
+    toVersion: number,
+  ): Promise<GraphDiff & { fromVersion: number; toVersion: number }> {
+    const [from, to] = await Promise.all([
+      this.getVersion(tenantId, environmentId, workflowKey, fromVersion),
+      this.getVersion(tenantId, environmentId, workflowKey, toVersion),
+    ]);
+    if (!from) {
+      throw new NotFoundException(
+        `No version ${fromVersion} for workflow '${workflowKey}'`,
+      );
+    }
+    if (!to) {
+      throw new NotFoundException(
+        `No version ${toVersion} for workflow '${workflowKey}'`,
+      );
+    }
+    return { fromVersion, toVersion, ...diffGraphs(from.graph, to.graph) };
   }
 
   /** Every stored version of a workflowKey, newest first — identity only, no graph

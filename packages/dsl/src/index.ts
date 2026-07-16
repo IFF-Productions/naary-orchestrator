@@ -92,6 +92,12 @@ export {
 export { walk } from "./walk";
 export { canonicalize } from "./canonical";
 export {
+  diffGraphs,
+  graphsEqual,
+  type GraphDiff,
+  type NodeChange,
+} from "./graph-diff";
+export {
   NODE_CATALOG,
   NODE_TYPES,
   CONDITION_OPS,

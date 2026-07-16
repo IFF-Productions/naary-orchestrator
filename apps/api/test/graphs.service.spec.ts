@@ -1,4 +1,4 @@
-import { BadRequestException } from "@nestjs/common";
+import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GraphDef } from "@naary/dsl";
 
@@ -354,5 +354,50 @@ describe("GraphsService.deleteWorkflow", () => {
     expect(del.webhookEndpoint).not.toHaveBeenCalled();
     expect(del.formEndpoint).not.toHaveBeenCalled();
     expect(del.chatEndpoint).not.toHaveBeenCalled();
+  });
+});
+
+describe("diffVersions", () => {
+  const row = (v: number, g: GraphDef) => ({
+    graph: g,
+    contentHash: `h${v}`,
+    version: v,
+  });
+  const v1: GraphDef = {
+    startNodeId: "a",
+    nodes: [
+      { id: "a", type: "start" },
+      { id: "b", type: "agent", config: { model: "m1" } },
+    ],
+    edges: [{ from: "a", to: "b" }],
+  };
+  const v2: GraphDef = {
+    startNodeId: "a",
+    nodes: [
+      { id: "a", type: "start" },
+      { id: "b", type: "agent", config: { model: "m2" } },
+      { id: "c", type: "end" },
+    ],
+    edges: [
+      { from: "a", to: "b" },
+      { from: "b", to: "c" },
+    ],
+  };
+
+  it("returns the structural diff between two versions", async () => {
+    findUnique.mockResolvedValueOnce(row(1, v1)).mockResolvedValueOnce(row(2, v2));
+    const d = await new GraphsService().diffVersions("t1", "e1", "refunds", 1, 2);
+    expect(d.fromVersion).toBe(1);
+    expect(d.toVersion).toBe(2);
+    expect(d.nodesAdded.map((n) => n.id)).toEqual(["c"]);
+    expect(d.nodesChanged.map((n) => n.id)).toEqual(["b"]);
+    expect(d.nodesChanged[0].fields).toEqual(["config"]);
+  });
+
+  it("404s when a version is missing", async () => {
+    findUnique.mockResolvedValueOnce(row(1, v1)).mockResolvedValueOnce(null);
+    await expect(
+      new GraphsService().diffVersions("t1", "e1", "refunds", 1, 9),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
