@@ -73,15 +73,20 @@ afterEach(async () => {
   await rm(runsDir, { recursive: true, force: true }).catch(() => undefined);
 });
 
-describe("runSandbox diff capture (real git)", () => {
-  it("includes CREATED (untracked) files, not just tracked edits", async () => {
-    const out = await runSandbox(REQ, CFG(), routedExec);
-    expect(out.exitCode).toBe(0);
-    // The modification to the tracked file...
-    expect(out.diff).toContain("tracked.txt");
-    expect(out.diff).toContain("changed");
-    // ...AND the newly-created file — the whole point (plain `git diff` would omit this).
-    expect(out.diff).toContain("created.txt");
-    expect(out.diff).toContain("brand new file");
-  });
-});
+// Linux-only: runSandbox requires a POSIX absolute workdir (see run-sandbox.spec.ts), which a
+// Windows temp dir (`C:\…\Temp\…`) can't satisfy. The service only ever runs on Linux. Skip on win32.
+describe.skipIf(process.platform === "win32")(
+  "runSandbox diff capture (real git)",
+  () => {
+    it("includes CREATED (untracked) files, not just tracked edits", async () => {
+      const out = await runSandbox(REQ, CFG(), routedExec);
+      expect(out.exitCode).toBe(0);
+      // The modification to the tracked file...
+      expect(out.diff).toContain("tracked.txt");
+      expect(out.diff).toContain("changed");
+      // ...AND the newly-created file — the whole point (plain `git diff` would omit this).
+      expect(out.diff).toContain("created.txt");
+      expect(out.diff).toContain("brand new file");
+    });
+  },
+);
