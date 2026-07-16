@@ -7,6 +7,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { Button, Icon, Skeleton, StatusPill } from "../../components";
 import { api, type RunSummary, UnauthorizedError } from "../../lib/api";
+import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import { isFailure, isTerminal, runStatusUi } from "../../lib/run-status";
 import { useMode } from "../../mode";
 import { RerunMenu, VersionBadge } from "./RerunMenu";
@@ -42,6 +43,8 @@ export function Runs() {
   const navigate = useNavigate();
   const { mode } = useMode();
   const simple = mode === "simple";
+  // On phone the 8-column grid can't fit — each run renders as a stacked card instead.
+  const phone = useMediaQuery(PHONE_QUERY);
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
@@ -236,12 +239,15 @@ export function Runs() {
   }
 
   return (
-    <div style={{ padding: "24px 28px 40px" }}>
+    <div style={{ padding: phone ? "16px 14px 32px" : "24px 28px 40px" }}>
       <div
         style={{
           display: "flex",
-          alignItems: "center",
+          // Phone: stack the title over the (wrapping) action buttons so nothing runs off-screen.
+          flexDirection: phone ? "column" : "row",
+          alignItems: phone ? "stretch" : "center",
           justifyContent: "space-between",
+          gap: phone ? 12 : 0,
           marginBottom: 16,
         }}
       >
@@ -269,7 +275,7 @@ export function Runs() {
                 : `Durable execution log${runs ? ` · ${runs.length} recent` : ""}`}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {!simple && !showArchived && (
             <Button icon="play" onClick={startRun} loading={starting}>
               {starting ? "Starting…" : "Start test run"}
@@ -395,7 +401,9 @@ export function Runs() {
       <div
         style={{
           display: "flex",
-          alignItems: "center",
+          // Phone: stack the (scrollable) filter tabs over a full-width search box.
+          flexDirection: phone ? "column" : "row",
+          alignItems: phone ? "stretch" : "center",
           gap: 10,
           marginBottom: 14,
         }}
@@ -408,6 +416,8 @@ export function Runs() {
             borderRadius: "var(--radius-sm)",
             padding: 3,
             gap: 2,
+            // Tabs can outrun a narrow screen — let them scroll rather than clip/wrap.
+            overflowX: "auto",
           }}
         >
           {FILTERS.map((f) => {
@@ -430,6 +440,8 @@ export function Runs() {
                   padding: "5px 12px",
                   borderRadius: "var(--radius-xs)",
                   transition: "background 140ms ease, color 140ms ease",
+                  flex: "none",
+                  whiteSpace: "nowrap",
                 }}
               >
                 {f.label}
@@ -440,7 +452,11 @@ export function Runs() {
         </div>
         <div
           className="input-wrap"
-          style={{ width: 260, height: 34, padding: "0 11px" }}
+          style={{
+            width: phone ? "100%" : 260,
+            height: 34,
+            padding: "0 11px",
+          }}
         >
           <Icon name="search" size={14} style={{ color: "var(--ink-3)" }} />
           <input
@@ -456,65 +472,112 @@ export function Runs() {
       </div>
 
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        <div
-          className="mono"
-          style={{
-            display: "grid",
-            gridTemplateColumns: COLS,
-            gap: 10,
-            padding: "10px 18px",
-            borderBottom: "1px solid var(--line)",
-            fontSize: "var(--text-2xs)",
-            fontWeight: "var(--weight-semibold)",
-            letterSpacing: "0.08em",
-            color: "var(--ink-3)",
-            textTransform: "uppercase",
-          }}
-        >
-          <span style={{ display: "flex", alignItems: "center" }}>
+        {/* Column header — desktop/tablet only; on phone the cards are self-labelling. */}
+        {!phone && (
+          <div
+            className="mono"
+            style={{
+              display: "grid",
+              gridTemplateColumns: COLS,
+              gap: 10,
+              padding: "10px 18px",
+              borderBottom: "1px solid var(--line)",
+              fontSize: "var(--text-2xs)",
+              fontWeight: "var(--weight-semibold)",
+              letterSpacing: "0.08em",
+              color: "var(--ink-3)",
+              textTransform: "uppercase",
+            }}
+          >
+            <span style={{ display: "flex", alignItems: "center" }}>
+              <input
+                type="checkbox"
+                aria-label="Select all runs"
+                title="Select all"
+                checked={allVisibleSelected}
+                disabled={rows.length === 0 || bulkBusy}
+                onChange={toggleSelectAll}
+              />
+            </span>
+            <span>Run</span>
+            <span>{simple ? "Automation" : "Workflow"}</span>
+            <span>Version</span>
+            <span>Status</span>
+            <span>Cost</span>
+            <span>Started</span>
+            <span />
+          </div>
+        )}
+
+        {/* Phone: the column header (and its select-all) is hidden, so surface a select-all
+            control here — otherwise bulk actions would be unreachable on mobile. */}
+        {phone && rows.length > 0 && (
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "10px 16px",
+              borderBottom: "1px solid var(--line)",
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-2)",
+              cursor: "pointer",
+            }}
+          >
             <input
               type="checkbox"
               aria-label="Select all runs"
-              title="Select all"
               checked={allVisibleSelected}
-              disabled={rows.length === 0 || bulkBusy}
+              disabled={bulkBusy}
               onChange={toggleSelectAll}
             />
-          </span>
-          <span>Run</span>
-          <span>{simple ? "Automation" : "Workflow"}</span>
-          <span>Version</span>
-          <span>Status</span>
-          <span>Cost</span>
-          <span>Started</span>
-          <span />
-        </div>
+            {allVisibleSelected ? "Deselect all" : "Select all"}
+          </label>
+        )}
 
         {runs === null &&
           !error &&
-          Array.from({ length: 6 }).map((_, i) => (
-            <div
-              // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length skeleton placeholder
-              key={i}
-              style={{
-                display: "grid",
-                gridTemplateColumns: COLS,
-                gap: 10,
-                padding: "12px 18px",
-                borderBottom: "1px solid var(--line)",
-                alignItems: "center",
-              }}
-            >
-              <Skeleton width={16} height={16} radius={4} />
-              <Skeleton width="72%" />
-              <Skeleton width="55%" />
-              <Skeleton width={26} />
-              <Skeleton width={64} height={20} radius={10} />
-              <Skeleton width="50%" />
-              <Skeleton width="60%" />
-              <span />
-            </div>
-          ))}
+          Array.from({ length: 6 }).map((_, i) =>
+            phone ? (
+              <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length skeleton placeholder
+                key={i}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                  padding: "12px 16px",
+                  borderBottom: "1px solid var(--line)",
+                }}
+              >
+                <Skeleton width={72} height={20} radius={10} />
+                <Skeleton width="70%" />
+                <Skeleton width="45%" />
+              </div>
+            ) : (
+              <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length skeleton placeholder
+                key={i}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: COLS,
+                  gap: 10,
+                  padding: "12px 18px",
+                  borderBottom: "1px solid var(--line)",
+                  alignItems: "center",
+                }}
+              >
+                <Skeleton width={16} height={16} radius={4} />
+                <Skeleton width="72%" />
+                <Skeleton width="55%" />
+                <Skeleton width={26} />
+                <Skeleton width={64} height={20} radius={10} />
+                <Skeleton width="50%" />
+                <Skeleton width="60%" />
+                <span />
+              </div>
+            ),
+          )}
         {runs?.length === 0 && (
           <div
             style={{
@@ -531,79 +594,21 @@ export function Runs() {
           </div>
         )}
 
-        {rows.map((r) => (
-          <div
-            key={r.workflowId}
-            onClick={() =>
-              navigate(`/app/runs/${encodeURIComponent(r.workflowId)}`)
-            }
-            className="run-row"
-            style={{
-              display: "grid",
-              gridTemplateColumns: COLS,
-              gap: 10,
-              padding: "12px 18px",
-              borderBottom: "1px solid var(--line)",
-              alignItems: "center",
-              cursor: "pointer",
-              background: selected.has(r.workflowId)
-                ? "var(--brand-soft)"
-                : undefined,
-            }}
-          >
-            <span style={{ display: "flex", alignItems: "center" }}>
-              <input
-                type="checkbox"
-                aria-label={`Select run ${r.workflowId}`}
-                checked={selected.has(r.workflowId)}
-                disabled={bulkBusy}
-                onClick={(e) => toggleSelect(r.workflowId, e)}
-                onChange={() => {}}
-              />
-            </span>
-            <span
-              className="mono"
-              style={{
-                fontSize: "var(--text-xs)",
-                color: "var(--brand)",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {r.workflowId}
-            </span>
-            <span
-              className="mono"
-              style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
-            >
-              {r.workflowKey ?? "—"}
-            </span>
-            <span>
-              <VersionBadge version={r.graphVersion} />
-            </span>
-            <span>
-              <StatusPill {...runStatusUi(r.status)} />
-            </span>
-            <span
-              className="mono"
-              style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
-            >
-              {r.costUsd === null ? "—" : `$${r.costUsd.toFixed(4)}`}
-            </span>
-            <span
-              className="mono"
-              style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
-            >
-              {ago(r.startedAt)}
-            </span>
-            <span
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 6,
-              }}
-            >
+        {rows.map((r) => {
+          const go = () =>
+            navigate(`/app/runs/${encodeURIComponent(r.workflowId)}`);
+          const selectBox = (
+            <input
+              type="checkbox"
+              aria-label={`Select run ${r.workflowId}`}
+              checked={selected.has(r.workflowId)}
+              disabled={bulkBusy}
+              onClick={(e) => toggleSelect(r.workflowId, e)}
+              onChange={() => {}}
+            />
+          );
+          const actions = (
+            <>
               {isTerminal(r.status) && (
                 <RerunMenu
                   runId={r.workflowId}
@@ -633,9 +638,178 @@ export function Runs() {
                 disabled={archiving.has(r.workflowId)}
                 onClick={(e) => void toggleArchive(r.workflowId, r.archived, e)}
               />
-            </span>
-          </div>
-        ))}
+            </>
+          );
+
+          // Phone: a stacked, self-labelling card instead of an 8-column grid row.
+          if (phone) {
+            return (
+              <div
+                key={r.workflowId}
+                onClick={go}
+                className="run-row"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                  padding: "12px 16px",
+                  borderBottom: "1px solid var(--line)",
+                  cursor: "pointer",
+                  background: selected.has(r.workflowId)
+                    ? "var(--brand-soft)"
+                    : undefined,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      minWidth: 0,
+                    }}
+                  >
+                    {selectBox}
+                    <StatusPill {...runStatusUi(r.status)} />
+                  </div>
+                  <span
+                    className="mono"
+                    style={{
+                      fontSize: "var(--text-2xs)",
+                      color: "var(--ink-3)",
+                      flex: "none",
+                    }}
+                  >
+                    {ago(r.startedAt)}
+                  </span>
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    className="mono"
+                    style={{
+                      fontSize: "var(--text-xs)",
+                      color: "var(--ink-2)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {r.workflowKey ?? "—"}
+                  </div>
+                  <div
+                    className="mono"
+                    style={{
+                      fontSize: "var(--text-2xs)",
+                      color: "var(--brand)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {r.workflowId}
+                  </div>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                  }}
+                >
+                  <div
+                    className="mono"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      fontSize: "var(--text-2xs)",
+                      color: "var(--ink-3)",
+                    }}
+                  >
+                    <span>
+                      {r.costUsd === null ? "—" : `$${r.costUsd.toFixed(4)}`}
+                    </span>
+                    <VersionBadge version={r.graphVersion} />
+                  </div>
+                  <span style={{ display: "flex", gap: 6 }}>{actions}</span>
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div
+              key={r.workflowId}
+              onClick={go}
+              className="run-row"
+              style={{
+                display: "grid",
+                gridTemplateColumns: COLS,
+                gap: 10,
+                padding: "12px 18px",
+                borderBottom: "1px solid var(--line)",
+                alignItems: "center",
+                cursor: "pointer",
+                background: selected.has(r.workflowId)
+                  ? "var(--brand-soft)"
+                  : undefined,
+              }}
+            >
+              <span style={{ display: "flex", alignItems: "center" }}>
+                {selectBox}
+              </span>
+              <span
+                className="mono"
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--brand)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {r.workflowId}
+              </span>
+              <span
+                className="mono"
+                style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
+              >
+                {r.workflowKey ?? "—"}
+              </span>
+              <span>
+                <VersionBadge version={r.graphVersion} />
+              </span>
+              <span>
+                <StatusPill {...runStatusUi(r.status)} />
+              </span>
+              <span
+                className="mono"
+                style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
+              >
+                {r.costUsd === null ? "—" : `$${r.costUsd.toFixed(4)}`}
+              </span>
+              <span
+                className="mono"
+                style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
+              >
+                {ago(r.startedAt)}
+              </span>
+              <span
+                style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}
+              >
+                {actions}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

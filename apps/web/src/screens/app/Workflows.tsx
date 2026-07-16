@@ -18,13 +18,16 @@ import {
   type RunSummary,
 } from "../../lib/api";
 import { runStatusUi, successRate } from "../../lib/run-status";
+import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 
 /**
  * Workflows — the tenant's saved graphs (from POST /graphs via the canvas), each
  * with REAL recent-run stats derived from the runs list (run count, success rate,
  * last status). Open one to edit it on the canvas, or create a new one.
  */
-const GRID = "2.2fr 1fr 0.8fr 1fr 84px 90px";
+// Actions column is a FIXED width wide enough for Open/Promote/Delete (a too-narrow 90px overflowed
+// into the Active toggle; `auto` mis-aligns the header vs data since each row is its own grid).
+const GRID = "2.2fr 1fr 0.8fr 1fr 84px 230px";
 
 interface Row {
   graph: GraphSummary;
@@ -35,6 +38,7 @@ interface Row {
 
 export function Workflows() {
   const navigate = useNavigate();
+  const phone = useMediaQuery(PHONE_QUERY); // phone: rows render as stacked cards
   const [graphs, setGraphs] = useState<GraphSummary[] | null>(null);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [tenant, setTenant] = useState<string | null>(null);
@@ -244,23 +248,25 @@ export function Workflows() {
       </div>
 
       <Card pad={false} style={{ overflow: "hidden" }}>
-        <div
-          className="mono-label"
-          style={{
-            display: "grid",
-            gridTemplateColumns: GRID,
-            gap: 10,
-            padding: "10px 18px",
-            borderBottom: "1px solid var(--line)",
-          }}
-        >
-          <span>Workflow</span>
-          <span>Last run</span>
-          <span>Runs</span>
-          <span>Success</span>
-          <span>Active</span>
-          <span />
-        </div>
+        {!phone && (
+          <div
+            className="mono-label"
+            style={{
+              display: "grid",
+              gridTemplateColumns: GRID,
+              gap: 10,
+              padding: "10px 18px",
+              borderBottom: "1px solid var(--line)",
+            }}
+          >
+            <span>Workflow</span>
+            <span>Last run</span>
+            <span>Runs</span>
+            <span>Success</span>
+            <span>Active</span>
+            <span />
+          </div>
+        )}
 
         {err && (
           <div
@@ -286,65 +292,19 @@ export function Workflows() {
           </div>
         )}
 
-        {filtered.map((r) => (
-          <div
-            key={r.graph.workflowKey}
-            onClick={() =>
-              navigate(
-                `/app/workflows/${encodeURIComponent(r.graph.workflowKey)}`,
-              )
-            }
-            className="run-row"
-            style={{
-              display: "grid",
-              gridTemplateColumns: GRID,
-              gap: 10,
-              padding: "13px 18px",
-              borderBottom: "1px solid var(--line)",
-              alignItems: "center",
-              cursor: "pointer",
-            }}
-          >
-            <div style={{ minWidth: 0 }}>
-              <div
-                style={{
-                  fontSize: "var(--text-body)",
-                  fontWeight: "var(--weight-semibold)",
-                  color: "var(--ink)",
-                }}
-              >
-                {r.graph.name}
-              </div>
-              <div
-                className="mono"
-                style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
-              >
-                {r.graph.workflowKey} · v{r.graph.version}
-              </div>
-            </div>
-            <span>
-              {r.lastStatus ? (
-                <StatusPill {...runStatusUi(r.lastStatus)} />
-              ) : (
-                <span
-                  style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
-                >
-                  No runs
-                </span>
-              )}
+        {filtered.map((r) => {
+          const go = () =>
+            navigate(
+              `/app/workflows/${encodeURIComponent(r.graph.workflowKey)}`,
+            );
+          const lastRun = r.lastStatus ? (
+            <StatusPill {...runStatusUi(r.lastStatus)} />
+          ) : (
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
+              No runs
             </span>
-            <span
-              className="mono"
-              style={{ fontSize: "var(--text-sm)", color: "var(--ink)" }}
-            >
-              {r.runs}
-            </span>
-            <span
-              className="mono"
-              style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
-            >
-              {r.success === null ? "—" : `${Math.round(r.success)}%`}
-            </span>
+          );
+          const activeSwitch = (
             <span
               onClick={(e) => e.stopPropagation()}
               title={
@@ -361,14 +321,9 @@ export function Workflows() {
                 }
               />
             </span>
-            <span
-              style={{
-                textAlign: "right",
-                display: "inline-flex",
-                gap: 8,
-                justifyContent: "flex-end",
-              }}
-            >
+          );
+          const actions = (
+            <>
               <Button
                 variant="secondary"
                 onClick={(e) => {
@@ -400,9 +355,120 @@ export function Workflows() {
               >
                 {deleting === r.graph.workflowKey ? "Deleting…" : "Delete"}
               </Button>
-            </span>
-          </div>
-        ))}
+            </>
+          );
+          const title = (
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: "var(--text-body)",
+                  fontWeight: "var(--weight-semibold)",
+                  color: "var(--ink)",
+                }}
+              >
+                {r.graph.name}
+              </div>
+              <div
+                className="mono"
+                style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
+              >
+                {r.graph.workflowKey} · v{r.graph.version}
+              </div>
+            </div>
+          );
+
+          if (phone) {
+            return (
+              <div
+                key={r.graph.workflowKey}
+                onClick={go}
+                className="run-row"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                  padding: "13px 16px",
+                  borderBottom: "1px solid var(--line)",
+                  cursor: "pointer",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    justifyContent: "space-between",
+                    gap: 10,
+                  }}
+                >
+                  {title}
+                  {activeSwitch}
+                </div>
+                <div
+                  className="mono"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    fontSize: "var(--text-xs)",
+                    color: "var(--ink-2)",
+                  }}
+                >
+                  {lastRun}
+                  <span>{r.runs} runs</span>
+                  <span>
+                    {r.success === null ? "—" : `${Math.round(r.success)}% ok`}
+                  </span>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {actions}
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div
+              key={r.graph.workflowKey}
+              onClick={go}
+              className="run-row"
+              style={{
+                display: "grid",
+                gridTemplateColumns: GRID,
+                gap: 10,
+                padding: "13px 18px",
+                borderBottom: "1px solid var(--line)",
+                alignItems: "center",
+                cursor: "pointer",
+              }}
+            >
+              {title}
+              <span>{lastRun}</span>
+              <span
+                className="mono"
+                style={{ fontSize: "var(--text-sm)", color: "var(--ink)" }}
+              >
+                {r.runs}
+              </span>
+              <span
+                className="mono"
+                style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
+              >
+                {r.success === null ? "—" : `${Math.round(r.success)}%`}
+              </span>
+              {activeSwitch}
+              <span
+                style={{
+                  textAlign: "right",
+                  display: "inline-flex",
+                  gap: 8,
+                  justifyContent: "flex-end",
+                }}
+              >
+                {actions}
+              </span>
+            </div>
+          );
+        })}
       </Card>
 
       <div
