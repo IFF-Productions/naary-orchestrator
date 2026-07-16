@@ -9,13 +9,13 @@ import {
   ReactFlow,
 } from "@xyflow/react";
 import { useEffect, useMemo, useRef } from "react";
-
-/** fitView runs once on mount; keep the same options for the resize-driven refits below. */
-const FIT_VIEW_OPTIONS = { padding: 0.2 } as const;
 import type { GraphDef, NodeType } from "@naary/dsl";
 import { decompileGraph } from "../lib/decompile-graph";
 import { ACCENT, nodeDisplayLabel, nodeSubtitle } from "../lib/graph-model";
 import { isFailure, isTerminal } from "../lib/run-status";
+
+/** fitView runs once on mount; keep the same options for the resize-driven refits below. */
+const FIT_VIEW_OPTIONS = { padding: 0.2 } as const;
 
 /**
  * Read-only canvas of the graph a run EXECUTED, with the executed path highlighted — the
