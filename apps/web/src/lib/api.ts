@@ -643,6 +643,26 @@ export const api = {
   deleteVariable(key: string): Promise<void> {
     return http(`/variables/${encodeURIComponent(key)}`, { method: "DELETE" });
   },
+  // --- Environment Secrets ($secrets) ---
+  // Write-only, env-scoped named secrets referenced as `{{ $secrets.NAME }}`. Scoped to the ACTIVE
+  // environment (x-environment-id). The VALUE is never returned — list yields names only; the worker
+  // decrypts it in-activity (never reaches the graph/ctx/history). NOT the BYOK provider keys.
+  listEnvSecrets(): Promise<{ name: string }[]> {
+    return http(`/env-secrets`);
+  },
+  // Set (create or replace) a secret's value in the active environment (204).
+  setEnvSecret(name: string, value: string): Promise<void> {
+    return http(`/env-secrets/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    });
+  },
+  // Delete a secret from the active environment (204; no-op if absent).
+  deleteEnvSecret(name: string): Promise<void> {
+    return http(`/env-secrets/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+  },
   // --- Integrations ---
   // Provider API keys (BYOK). The key is NEVER returned — list yields names + validity.
   listCredentials(tenantId: string): Promise<ProviderCredential[]> {

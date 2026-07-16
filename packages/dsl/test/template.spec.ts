@@ -79,6 +79,20 @@ describe("resolveTemplateString", () => {
       "b",
     ]);
   });
+
+  it("leaves `{{ $secrets.NAME }}` LITERAL — the workflow must never resolve a secret", () => {
+    // Whole-string secret token: returned verbatim (the activity resolves it in-memory).
+    expect(resolveTemplateString("{{ $secrets.GH_TOKEN }}", ctx)).toBe(
+      "{{ $secrets.GH_TOKEN }}",
+    );
+    // Embedded secret token survives verbatim while a sibling non-secret token still resolves.
+    expect(resolveTemplateString("Bearer {{ $secrets.GH_TOKEN }}", ctx)).toBe(
+      "Bearer {{ $secrets.GH_TOKEN }}",
+    );
+    expect(
+      resolveTemplateString("{{ start.subject }} {{ $secrets.GH_TOKEN }}", ctx),
+    ).toBe("Invoice #42 {{ $secrets.GH_TOKEN }}");
+  });
 });
 
 describe("templateTokens (authoring: locate tokens for highlighting)", () => {
@@ -206,6 +220,22 @@ describe("lintTemplates", () => {
         id: "http",
         type: "httpRequest",
         config: { url: "https://x/{{ $vars.region }}", method: "GET" },
+      },
+    ]);
+    expect(lintTemplates(graph)).toEqual([]);
+  });
+
+  it("does NOT flag `{{ $secrets.NAME }}` — Environment Secrets, resolved in-activity", () => {
+    const graph = g([
+      { id: "start", type: "start" },
+      {
+        id: "http",
+        type: "httpRequest",
+        config: {
+          method: "GET",
+          url: "https://api.example.com",
+          headers: { Authorization: "Bearer {{ $secrets.API_TOKEN }}" },
+        },
       },
     ]);
     expect(lintTemplates(graph)).toEqual([]);
@@ -345,5 +375,18 @@ describe("collectUnresolved (runtime: which source produced no output)", () => {
     // Present-but-empty values are NOT missing — only strictly-undefined sources are flagged.
     const ctx = { diff: { body: "" }, review: { output: { review: null } } };
     expect(collectUnresolved(node, ctx, ids)).toEqual([]);
+  });
+
+  it("never flags a `{{ $secrets.NAME }}` token — the NAME must not leak into ctx.__unresolved", () => {
+    // $secrets is resolved in-activity, so getByPath(ctx, "$secrets.X") is ALWAYS undefined. It must
+    // be skipped here, else the secret NAME would ride into the diagnostic → state query + history.
+    const node = {
+      id: "comment",
+      config: {
+        headers: { Authorization: "Bearer {{ $secrets.GH_TOKEN }}" },
+        tokenBinding: { from: "$secrets", path: "GH_TOKEN" },
+      },
+    };
+    expect(collectUnresolved(node, {}, ids)).toEqual([]);
   });
 });

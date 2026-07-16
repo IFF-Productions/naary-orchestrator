@@ -38,6 +38,7 @@ export {
   lintTemplates,
   lintBindings,
   collectUnresolved,
+  isSecretRef,
   type TemplateToken,
   type TemplateWarning,
   type UnresolvedRef,

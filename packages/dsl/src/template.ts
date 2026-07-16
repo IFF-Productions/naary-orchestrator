@@ -13,6 +13,17 @@ const WHOLE_RE = /^\{\{\s*([^{}]+?)\s*\}\}$/;
 // An escaped literal `\{{` OR a `{{ path }}` token (path has no braces).
 const EMBED_RE = /\\\{\{|\{\{\s*([^{}]+?)\s*\}\}/g;
 
+/** A `{{ $secrets.NAME }}` reference. Secret VALUES must never enter the graph/ctx/Temporal history
+ *  (CLAUDE.md Tier-1 §4), so — unlike every other token — the workflow does NOT resolve these. They
+ *  are left LITERAL by `resolveTemplateString` and skipped by `collectUnresolved`, then resolved
+ *  in-memory INSIDE the activity that uses them (e.g. httpRequest headers). `ctx` never holds a
+ *  `$secrets` key, so `getByPath` would otherwise blank them (leak-free but non-functional) and the
+ *  unresolved-input diagnostic would spuriously flag every secret ref (leaking the NAME to history). */
+export function isSecretRef(ref: string): boolean {
+  const head = ref.split(".")[0]?.trim();
+  return head === "$secrets";
+}
+
 /** Coerce a resolved value for embedding inside surrounding text. */
 function embed(v: unknown): string {
   if (v == null) return "";
@@ -31,10 +42,17 @@ export function resolveTemplateString(
 ): unknown {
   if (!s.includes("{{")) return s; // fast path: no tokens
   const whole = WHOLE_RE.exec(s);
-  if (whole) return getByPath(ctx, whole[1].trim());
-  return s.replace(EMBED_RE, (match, path?: string) =>
-    match === "\\{{" ? "{{" : embed(getByPath(ctx, (path ?? "").trim())),
-  );
+  if (whole) {
+    const path = whole[1].trim();
+    // Leave a whole-string `{{ $secrets.NAME }}` LITERAL — the activity resolves it in-memory.
+    return isSecretRef(path) ? s : getByPath(ctx, path);
+  }
+  return s.replace(EMBED_RE, (match, path?: string) => {
+    if (match === "\\{{") return "{{";
+    const ref = (path ?? "").trim();
+    // Preserve embedded `{{ $secrets.NAME }}` verbatim (only the activity may resolve it).
+    return isSecretRef(ref) ? match : embed(getByPath(ctx, ref));
+  });
 }
 
 /** A located `{{ path }}` token — for AUTHORING tools (syntax highlighting / autocomplete). */
@@ -107,12 +125,13 @@ export interface TemplateWarning {
 // A `{{ path }}` token, not escaped. Mirrors resolveTemplateString.
 const LINT_RE = /\\\{\{|\{\{\s*([^{}]+?)\s*\}\}/g;
 
-/** A RESERVED runtime source is one the run context provides directly, not a graph node — so a
- *  reference to it is always valid and must never be linted as an "unknown node". Two kinds:
+/** A RESERVED runtime source is one the run context (or an activity) provides directly, not a graph
+ *  node — so a reference to it is always valid and must never be linted as an "unknown node". Kinds:
  *  `__`-prefixed sources (e.g. `__input`; splitOut/loopEnd bind `from: "__input"` for trigger input),
- *  and `$vars` (Global Variables — the interpreter seeds `ctx.$vars` at run start). */
+ *  `$vars` (Global Variables — the interpreter seeds `ctx.$vars` at run start), and `$secrets`
+ *  (Environment Secrets — resolved IN-ACTIVITY, never in ctx; see [[isSecretRef]]). */
 function isReservedSource(from: string): boolean {
-  return from.startsWith("__") || from === "$vars";
+  return from.startsWith("__") || from === "$vars" || from === "$secrets";
 }
 
 /**
@@ -207,12 +226,17 @@ export function collectUnresolved(
   };
   // `{{ source.path }}` tokens — unresolved when the whole dotted lookup yields undefined.
   walkForTokens(node.config, "", (field, ref) => {
+    // A `$secrets.NAME` token is resolved IN-ACTIVITY, never against ctx — so getByPath is always
+    // undefined for it. Skip it here, else the secret NAME would ride into ctx.__unresolved → the
+    // state query + Temporal history, and every secret-using node would show a false "unresolved".
+    if (isSecretRef(ref)) return;
     if (getByPath(ctx, ref) === undefined) {
       push(field, ref.split(".")[0]?.trim() ?? "", ref);
     }
   });
   // `{from, path?}` bindings — unresolved when getByPath(ctx[from], path) is undefined.
   walkForBindings(node.config, "", (field, from, path) => {
+    if (from === "$secrets") return; // resolved in-activity (see above)
     if (getByPath(ctx[from], path) === undefined) {
       push(field, from, path ? `${from}.${path}` : from);
     }

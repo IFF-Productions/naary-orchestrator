@@ -88,7 +88,13 @@ import {
   runCostUsd,
   secondsSince,
 } from "../metrics";
-import { CredentialsService, MissingCredentialError } from "@naary/secrets";
+import {
+  CredentialsService,
+  hasSecretRef,
+  MissingCredentialError,
+  resolveSecretsInString,
+  SecretStore,
+} from "@naary/secrets";
 import {
   type ClaimCheck,
   getObjectStore,
@@ -2540,7 +2546,73 @@ export const __httpDeps = {
     const conn = await new ConnectionService().getById(tenantId, connectionId);
     return conn ? { serverUrl: conn.serverUrl, authMode: conn.authMode } : null;
   },
+  // Environment Secrets ($secrets): decrypt one named secret for a run's env (in-memory only).
+  // Null = not configured. Swappable so tests never touch the encrypted store.
+  getSecret: (
+    tenantId: string,
+    environmentId: string,
+    name: string,
+  ): Promise<string | null> =>
+    getSecretStore().get(tenantId, environmentId, `secret:${name}`),
 };
+
+// Lazily built so merely importing this module doesn't require ENCRYPTION_KEY (the encryptor reads it
+// at construction). Real activities build it on first use; tests swap `__httpDeps.getSecret`, so the
+// store is never constructed under test.
+let __secretStore: SecretStore | undefined;
+function getSecretStore(): SecretStore {
+  __secretStore ??= new SecretStore();
+  return __secretStore;
+}
+
+/**
+ * Resolve `{{ $secrets.NAME }}` tokens in the HTTP node's STATIC headers, in-memory, right before the
+ * request (Tier-1 §4 — the value never crosses the workflow boundary; the workflow left these tokens
+ * literal). Slice 1 is headers-only (the common auth-token case); url/query/body are deferred because
+ * fetch/error messages can echo them into history. Returns the resolved headers plus the set of
+ * lower-cased header keys a secret was injected into — the caller drops those cross-origin, exactly
+ * like connection auth. A missing secret is a non-retryable failure naming only the NAME.
+ */
+async function resolveHeaderSecrets(
+  headers: Record<string, string>,
+  meta: AgentMeta,
+): Promise<{ headers: Record<string, string>; secretKeys: Set<string> }> {
+  const entries = Object.entries(headers);
+  if (!entries.some(([, v]) => typeof v === "string" && hasSecretRef(v))) {
+    return { headers, secretKeys: new Set() };
+  }
+  const environmentId =
+    meta.environmentId ?? (await getDefaultEnvironmentId(meta.tenantId));
+  const cache = new Map<string, string>();
+  const resolveOne = async (name: string): Promise<string> => {
+    const hit = cache.get(name);
+    if (hit !== undefined) return hit;
+    const value = await __httpDeps.getSecret(
+      meta.tenantId,
+      environmentId,
+      name,
+    );
+    if (value == null) {
+      throw ApplicationFailure.nonRetryable(
+        `Missing environment secret "${name}" — add it under Settings → Secrets for this environment.`,
+        "MISSING_SECRET",
+      );
+    }
+    cache.set(name, value);
+    return value;
+  };
+  const out: Record<string, string> = {};
+  const secretKeys = new Set<string>();
+  for (const [k, v] of entries) {
+    if (typeof v === "string" && hasSecretRef(v)) {
+      out[k] = await resolveSecretsInString(v, resolveOne);
+      secretKeys.add(k.toLowerCase());
+    } else {
+      out[k] = v;
+    }
+  }
+  return { headers: out, secretKeys };
+}
 
 /**
  * HTTP Request node: call a plain HTTP/REST endpoint and return the structured
@@ -2569,8 +2641,14 @@ export async function callHttpRequest(
     const authHeaders = cfg.connectionId
       ? await __httpDeps.resolveAuthHeader(meta.tenantId, cfg.connectionId)
       : {};
+    // Resolve `{{ $secrets.NAME }}` in the static headers in-memory (Tier-1 §4). `secretKeys` are the
+    // header keys a secret went into — dropped cross-origin below, like the connection auth header.
+    const { headers: staticHeaders, secretKeys } = await resolveHeaderSecrets(
+      cfg.headers ?? {},
+      meta,
+    );
     const headers: Record<string, string> = {
-      ...(cfg.headers ?? {}),
+      ...staticHeaders,
       ...authHeaders,
     };
 
@@ -2594,12 +2672,17 @@ export async function callHttpRequest(
     // paginated `url`-mode `next` URL comes from the (untrusted) response body, so a
     // cross-origin next page gets the static, non-secret headers only — mirroring how
     // browsers/curl drop `Authorization` across origins (Tier-1 rule 4).
-    const authKeys = new Set(
-      Object.keys(authHeaders).map((k) => k.toLowerCase()),
-    );
+    // Cross-origin drop set = connection auth keys ∪ the keys we injected a $secret into. A
+    // response-driven `url`-mode next page can point at an attacker host, so NEITHER a connection
+    // token NOR a $secret may ride to a different origin (Tier-1 §4; mirrors how browsers/curl drop
+    // Authorization cross-origin).
+    const sensitiveKeys = new Set([
+      ...Object.keys(authHeaders).map((k) => k.toLowerCase()),
+      ...secretKeys,
+    ]);
     const headersNoAuth: Record<string, string> = {};
     for (const [k, v] of Object.entries(headers)) {
-      if (!authKeys.has(k.toLowerCase())) headersNoAuth[k] = v;
+      if (!sensitiveKeys.has(k.toLowerCase())) headersNoAuth[k] = v;
     }
     const originOf = (u: string): string | null => {
       try {
