@@ -16,6 +16,12 @@ export default defineConfig({
   },
   plugins: [
     swc.vite({
+      // IGNORE the repo-root `.swcrc` — that file exists ONLY for `@swc/register`,
+      // which runs the apps and MUST emit CommonJS (`module.type: commonjs`) for
+      // node's require hook. Vitest needs ESM output; inheriting that .swcrc would
+      // force test files to `require()` and break vitest's ESM-only entry
+      // ("Vitest cannot be imported in a CommonJS module using require()").
+      swcrc: false,
       jsc: {
         transform: {
           legacyDecorator: true,
