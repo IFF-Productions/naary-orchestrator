@@ -815,7 +815,12 @@ function RunView({ id }: { id: string }) {
           style={{
             display: "grid",
             // Phone: stack "Node outputs" over the details column instead of squeezing two.
-            gridTemplateColumns: phone ? "1fr" : "1.6fr 1fr",
+            // minmax(0, …) — NOT plain fr — so a track can shrink below its content's min-content.
+            // Without it, a very long unbroken JSON line in a node output's <pre> forces the track
+            // (and the page) wide instead of scrolling inside the code block.
+            gridTemplateColumns: phone
+              ? "minmax(0, 1fr)"
+              : "minmax(0, 1.6fr) minmax(0, 1fr)",
             gap: 16,
           }}
         >
