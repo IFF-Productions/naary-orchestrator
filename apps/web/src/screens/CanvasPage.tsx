@@ -21,6 +21,7 @@ import {
   Handle,
   type Node,
   type NodeProps,
+  Panel,
   Position,
   ReactFlow,
 } from "@xyflow/react";
@@ -41,7 +42,7 @@ import {
   type GraphDef,
   type NodeType,
 } from "@naary/dsl";
-import { Button, StatusPill } from "../components";
+import { Button, Icon, StatusPill } from "../components";
 import { CurlImportButton } from "../canvas/CurlImportButton";
 import { ExpressionField } from "../components/ExpressionField";
 import {
@@ -267,6 +268,17 @@ export function CanvasPage() {
   // let the inspector take the full width (an overlay over the canvas) so node editing is usable.
   const phone = useMediaQuery(PHONE_QUERY);
   const effPaletteWidth = phone ? Math.min(paletteWidth, 132) : paletteWidth;
+  // Full-screen the graph (palette + inspector hidden) for a focused, roomy edit. CSS overlay,
+  // Esc to exit — same approach as RunDiagram.
+  const [canvasFullscreen, setCanvasFullscreen] = useState(false);
+  useEffect(() => {
+    if (!canvasFullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCanvasFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canvasFullscreen]);
   useEffect(() => {
     localStorage.setItem("naary.paletteW", String(paletteWidth));
   }, [paletteWidth]);
@@ -1348,7 +1360,18 @@ export function CanvasPage() {
         />
 
         {/* canvas */}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={
+            canvasFullscreen
+              ? {
+                  position: "fixed",
+                  inset: 0,
+                  zIndex: 1000,
+                  background: "var(--bg)",
+                }
+              : { flex: 1, minWidth: 0 }
+          }
+        >
           <ReactFlow
             nodes={flowNodes}
             edges={edges}
@@ -1360,6 +1383,21 @@ export function CanvasPage() {
           >
             <Background />
             <Controls />
+            <Panel position="top-right">
+              <button
+                type="button"
+                className="rf-fs-btn"
+                onClick={() => setCanvasFullscreen((v) => !v)}
+                aria-label={
+                  canvasFullscreen ? "Exit full screen" : "Full screen"
+                }
+                title={
+                  canvasFullscreen ? "Exit full screen (Esc)" : "Full screen"
+                }
+              >
+                <Icon name={canvasFullscreen ? "x" : "expand"} size={15} />
+              </button>
+            </Panel>
           </ReactFlow>
         </div>
 
