@@ -26,7 +26,7 @@ commercial ops, not engineering.
 | Audit logging | **S (mostly EXISTS)** | `AuditEvent` model + `apps/api/src/audit/*` (interceptor/service/controller) already ships. Gap analysis: coverage of sensitive actions + a UI/export. Likely "extend + surface," not build-from-zero. |
 | Search executions by contained data | L | Full-text / field search over run inputs/outputs. Today run I/O lives in Temporal history + object storage, NOT indexed in PG. Needs an indexed projection (opt-in, privacy-sensitive — ledger stores tokens only today). Design-first. |
 | Stream logs to external services (Datadog) | M | We already have pino→Sentry + metrics dual-emit (observability program). Add a log/metric egress sink (Datadog/OTLP) behind env config. Reuses the scrubber-on-egress work. |
-| Insights (dashboards) | L | Overview banner + workflow-metrics table (sortable) + evolution-over-time charts + filters (date range 7–365d, granularity hourly/daily/weekly). Data substrate is `UsageEvent` — **env-tagged by Slice 6a** ([PR #308](https://github.com/tarazena/naary-orchestrator/pull/308), pending merge) so per-env insights become possible once it lands. Big UI + aggregate query layer. Design-first. |
+| Insights (dashboards) | L | Overview banner + workflow-metrics table (sortable) + evolution-over-time charts + filters (date range 7–365d, granularity hourly/daily/weekly). Data substrate is `UsageEvent` — **env-tagged by Slice 6a** (PR #308, pending merge) so per-env insights become possible once it lands. Big UI + aggregate query layer. Design-first. |
 | Worker view | M | Live view of connected workers + their queues/load. Depends on **Queue mode** (a worker registry / heartbeat). |
 
 ## D. Scale & infra
@@ -53,7 +53,7 @@ These describe plan tiers + commercial terms, not features to build:
 _(proposal — confirm/reorder)_
 
 **Quick wins first (self-contained, high value, no design gate):**
-1. **Import cURL** (S) — starting now.
+1. **Import cURL** (S) — ✅ shipped (PR #312).
 2. **Environment Secrets + Global Secrets** (S–M) — the store is already env-scoped; mostly UI + `$secrets` binding.
 3. **Global Variables** (M) — sibling of secrets; `$vars` binding.
 4. **Audit logging** gap-fill (S) — surface/extend what exists.
