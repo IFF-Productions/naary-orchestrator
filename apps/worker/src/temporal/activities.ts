@@ -961,14 +961,50 @@ export const __notifyDeps = {
 /**
  * Signed approve/reject decision link for the pause notification (the notification-links gap). MUST
  * match the API's `mintApprovalToken` (apps/api/.../approval-token.ts): HMAC-SHA256(ENCRYPTION_KEY,
- * "approval:"+workflowId) — the API verifies it. `APP_BASE_URL` prepends the host; it returns
- * undefined when EITHER the encryption key OR APP_BASE_URL is missing (a relative /approve/… link
- * is useless as a Slack button). The recipient clicks it to Approve/Reject WITHOUT opening the app.
+ * "approval:"+workflowId) — the API verifies it. `resolveAppBaseUrl()` prepends the host; it
+ * returns undefined when EITHER the encryption key OR a resolvable base URL is missing (a relative
+ * /approve/… link is useless as a Slack button). The recipient clicks it to Approve/Reject WITHOUT
+ * opening the app.
  */
+/**
+ * Normalize a candidate into a deep-link base: require an http(s) URL and keep only origin + path
+ * (drop any query/fragment — a base URL has none), trailing slash trimmed. So a stray
+ * `https://host/x?y#z` in CORS_ORIGINS can't produce a broken `https://host/x?y#z/approve/…` link,
+ * while a legitimately path-prefixed `APP_BASE_URL` (e.g. `https://host/app`) is preserved.
+ */
+export function normalizeBaseUrl(raw: string): string | undefined {
+  try {
+    const u = new URL(raw.trim());
+    if (u.protocol !== "http:" && u.protocol !== "https:") return undefined;
+    return `${u.origin}${u.pathname}`.replace(/\/+$/, "");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The SPA's public base URL, for building absolute notification deep links. Prefers the explicit
+ * `APP_BASE_URL`; falls back to the first http(s) origin in `CORS_ORIGINS` — which prod MUST already
+ * set for the browser to reach the API, so notifications get clickable links/buttons without a
+ * separate var. Returns undefined only when neither yields a usable absolute URL (dev with just
+ * localhost is still fine).
+ */
+function resolveAppBaseUrl(): string | undefined {
+  const candidates = [
+    process.env.APP_BASE_URL ?? "",
+    ...(process.env.CORS_ORIGINS ?? "").split(","),
+  ];
+  for (const c of candidates) {
+    const base = normalizeBaseUrl(c);
+    if (base) return base;
+  }
+  return undefined;
+}
+
 function approvalUrl(workflowId: string): string | undefined {
   const key = process.env.ENCRYPTION_KEY;
-  const base = (process.env.APP_BASE_URL ?? "").replace(/\/$/, "");
-  // Both are required for an absolute, clickable link. Without APP_BASE_URL the URL would be
+  const base = resolveAppBaseUrl();
+  // Both are required for an absolute, clickable link. Without a base the URL would be
   // relative (`/approve/…`) — useless as a Slack url-button — so omit it (like runUrl).
   if (!key || !base) return undefined;
   const token = createHmac("sha256", key)
@@ -977,10 +1013,10 @@ function approvalUrl(workflowId: string): string | undefined {
   return `${base}/approve/${encodeURIComponent(workflowId)}?token=${token}`;
 }
 
-/** Deep link to the run detail page — the resource the recipient needs to act on. Needs
- *  APP_BASE_URL (the SPA host); without it there's no absolute URL to build, so undefined. */
+/** Deep link to the run detail page — the resource the recipient needs to act on. Needs a
+ *  resolvable SPA base URL; without one there's no absolute URL to build, so undefined. */
 function runUrl(workflowId: string): string | undefined {
-  const base = (process.env.APP_BASE_URL ?? "").replace(/\/$/, "");
+  const base = resolveAppBaseUrl();
   if (!base) return undefined;
   return `${base}/app/runs/${encodeURIComponent(workflowId)}`;
 }

@@ -13,9 +13,10 @@ let channels: NotificationChannelRow[];
 const savedEnv = {
   APP_BASE_URL: process.env.APP_BASE_URL,
   ENCRYPTION_KEY: process.env.ENCRYPTION_KEY,
+  CORS_ORIGINS: process.env.CORS_ORIGINS,
 };
 afterEach(() => {
-  for (const k of ["APP_BASE_URL", "ENCRYPTION_KEY"] as const) {
+  for (const k of ["APP_BASE_URL", "ENCRYPTION_KEY", "CORS_ORIGINS"] as const) {
     if (savedEnv[k] === undefined) delete process.env[k];
     else process.env[k] = savedEnv[k];
   }
@@ -26,6 +27,8 @@ beforeEach(() => {
   // Deep-link URLs are built from these; without them the links are omitted.
   process.env.APP_BASE_URL = "https://app.naary.test";
   process.env.ENCRYPTION_KEY = "test-encryption-key";
+  // Clear the CORS_ORIGINS fallback so the "APP_BASE_URL unset" cases truly resolve to no link.
+  process.env.CORS_ORIGINS = "";
   channels = [
     {
       type: "slack",
@@ -272,6 +275,45 @@ describe("sendNotification", () => {
     // Regression: approvalUrl must not fall back to a relative `/approve/…` (a broken Slack button).
     expect(body.approvalUrl).toBeUndefined();
     expect(body.actions).toEqual([]);
+  });
+
+  it("falls back to the CORS_ORIGINS SPA origin when APP_BASE_URL is unset", async () => {
+    process.env.APP_BASE_URL = "";
+    // Prod sets CORS_ORIGINS for the browser to reach the API; reuse its first https origin so
+    // alerts still get clickable links + Approve/Reject buttons without a separate var.
+    process.env.CORS_ORIGINS = "https://app.acme.io, https://staging.acme.io";
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      title: "Ship?",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    expect(body.runUrl).toBe("https://app.acme.io/app/runs/wf-1");
+    expect(body.approvalUrl).toContain(
+      "https://app.acme.io/approve/wf-1?token=",
+    );
+    expect(body.actions.map((a: { label: string }) => a.label)).toEqual([
+      "✅ Approve",
+      "❌ Reject",
+      "View run",
+    ]);
+  });
+
+  it("normalizes a base with a stray query/fragment to origin+path (no broken concat)", async () => {
+    process.env.APP_BASE_URL = "https://app.acme.io/console?tab=x#frag";
+    await sendNotification({ ...BASE, kind: "run_failed", detail: "boom" });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    // Query/fragment dropped, path kept — so the deep link is well-formed, not
+    // "…/console?tab=x#frag/app/runs/wf-1".
+    expect(body.runUrl).toBe("https://app.acme.io/console/app/runs/wf-1");
+  });
+
+  it("ignores a non-URL APP_BASE_URL (no scheme) → no link", async () => {
+    process.env.APP_BASE_URL = "app.acme.io"; // not an absolute http(s) URL
+    process.env.CORS_ORIGINS = "";
+    await sendNotification({ ...BASE, kind: "run_failed" });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    expect(body.runUrl).toBeUndefined();
   });
 
   it("is a NO-OP when no webhook URL is configured", async () => {
