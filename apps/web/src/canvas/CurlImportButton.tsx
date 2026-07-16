@@ -62,6 +62,7 @@ export function CurlImportButton({
         >
           <textarea
             autoFocus
+            aria-label="cURL command to import"
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder={

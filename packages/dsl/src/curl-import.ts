@@ -284,6 +284,15 @@ export function parseCurl(input: string): CurlImportResult {
     }
   }
 
+  // A GET can't carry a body — the httpRequest activity ignores it — so importing one would show a
+  // body in the UI that's never sent. Drop it with a warning (use -G to send data as query params).
+  if (method === "GET" && body !== undefined) {
+    warnings.push(
+      "GET requests don't send a body — dropped it. Use `-G` to send data as query params instead.",
+    );
+    body = undefined;
+  }
+
   const config: CurlImportResult["config"] = {
     method: method as HttpMethod,
     url: cleanUrl,

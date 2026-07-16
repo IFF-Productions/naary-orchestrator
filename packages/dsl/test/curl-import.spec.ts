@@ -93,6 +93,15 @@ describe("parseCurl", () => {
     expect(warnings).toEqual([]);
   });
 
+  it("drops a body on an explicit GET (-X GET -d) with a warning (GET has no body)", () => {
+    const { config, warnings } = parseCurl("curl -X GET https://h/x -d 'a=1'");
+    expect(config.method).toBe("GET");
+    expect(config.body).toBeUndefined();
+    expect(warnings.some((w) => /GET requests don't send a body/.test(w))).toBe(
+      true,
+    );
+  });
+
   it("drops -b/--cookie with a warning (session material, not imported)", () => {
     const { config, warnings } = parseCurl(
       "curl https://h/x -b 'session=abc123'",
