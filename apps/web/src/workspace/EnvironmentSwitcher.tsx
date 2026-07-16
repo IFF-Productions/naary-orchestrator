@@ -159,12 +159,11 @@ export function EnvironmentSwitcher() {
       await api.deleteEnvironment(tenantId, env.id);
       // Functional update so a concurrent rename/create isn't clobbered by this render's stale list.
       setEnvs((prev) => prev.filter((e) => e.id !== env.id));
-      // If we deleted the ACTIVE env, fall back to the default (reload so screens re-fetch). Derive
-      // the fallback from the freshest list, not this render's `envs`.
+      // If we deleted the ACTIVE env, just CLEAR it and reload — the load effect re-resolves and
+      // picks the workspace default (`find(isDefault) ?? list[0]`). No fallback to compute here, so
+      // no stale-list pitfall.
       if (env.slug === activeSlug) {
-        const remaining = envs.filter((e) => e.id !== env.id);
-        const fallback = remaining.find((e) => e.isDefault) ?? remaining[0];
-        setActiveEnvironment(fallback?.slug ?? null);
+        setActiveEnvironment(null);
         window.location.reload();
       }
     } catch (e) {
@@ -186,7 +185,7 @@ export function EnvironmentSwitcher() {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        aria-haspopup="listbox"
+        aria-haspopup="menu"
         aria-expanded={open}
         title="Switch environment"
         style={{
@@ -244,7 +243,9 @@ export function EnvironmentSwitcher() {
             style={{ position: "fixed", inset: 0, zIndex: 40 }}
           />
           <div
-            role="listbox"
+            // A menu (not a listbox) because each row holds multiple controls (switch + rename +
+            // delete); listbox options may not contain nested interactive elements.
+            role="menu"
             style={{
               position: "absolute",
               top: "calc(100% + 6px)",
@@ -345,8 +346,8 @@ export function EnvironmentSwitcher() {
                 >
                   <button
                     type="button"
-                    role="option"
-                    aria-selected={isActive}
+                    role="menuitemradio"
+                    aria-checked={isActive}
                     onClick={() => switchTo(e.slug)}
                     title={`Switch to ${e.name}`}
                     style={{
@@ -389,6 +390,7 @@ export function EnvironmentSwitcher() {
                   {/* Rename any env (display name only). */}
                   <button
                     type="button"
+                    role="menuitem"
                     title="Rename"
                     aria-label={`Rename ${e.name}`}
                     onClick={() => {
@@ -411,6 +413,7 @@ export function EnvironmentSwitcher() {
                   {!e.isDefault && (
                     <button
                       type="button"
+                      role="menuitem"
                       title="Delete"
                       aria-label={`Delete ${e.name}`}
                       disabled={rowBusy === e.id}
@@ -509,6 +512,7 @@ export function EnvironmentSwitcher() {
             ) : (
               <button
                 type="button"
+                role="menuitem"
                 onClick={() => setCreating(true)}
                 style={{
                   all: "unset",
