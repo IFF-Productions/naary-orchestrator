@@ -40,7 +40,7 @@ WORKDIR /app
 # a deps-only layer (the .dockerignore already strips node_modules/dist/.env).
 COPY . .
 
-# Install all deps (incl. dev: tsx/typescript power the start scripts), then
+# Install all deps (incl. dev: @swc/register + typescript power the start scripts), then
 # generate the Prisma client and compile every composite TS project to dist/.
 # @naary/* packages resolve through node_modules to their dist/index.js, so the
 # `tsc -b` build is REQUIRED — @swc/register transpiles the app's own src on load

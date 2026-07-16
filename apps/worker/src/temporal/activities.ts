@@ -12,10 +12,11 @@ import {
   randomInt,
   randomUUID,
 } from "node:crypto";
-// The AI SDK (`ai`, `@ai-sdk/*`) and `jose` are ESM-only; this file emits CommonJS (activities run
-// under ts-node/require), so static imports trip TS7's ESM/CJS guard. Load them lazily via dynamic
-// import() — the sanctioned CJS→ESM path (already used for embeddings below). Activities aren't
-// deterministic workflow code, so a per-call async import is fine.
+// The AI SDK (`ai`, `@ai-sdk/*`) and `jose` are ESM-only; this file is CommonJS (activities run
+// under `node -r @swc/register`, which emits CJS), so a static import of an ESM-only dep trips the
+// CJS→ESM boundary (and TS7's node16 guard). Load them lazily via dynamic import() — the sanctioned
+// CJS→ESM path (already used for embeddings below). Activities aren't deterministic workflow code,
+// so a per-call async import is fine.
 const aiSdk = () => import("ai");
 const anthropicSdk = () => import("@ai-sdk/anthropic");
 const openaiSdk = () => import("@ai-sdk/openai");
@@ -126,9 +127,11 @@ export function toSanitizedRetryable(
   e: unknown,
   type: string,
 ): ApplicationFailure {
-  // Duck-type a provider error's status (avoids importing the ESM-only `ai` in this sync path).
-  // The status-specific 401/429 fast-fail happens upstream; here we only surface a code for the
-  // message, so a numeric `statusCode` is enough.
+  // Duck-type a status code (avoids importing the ESM-only `ai` in this sync path). This helper is
+  // GENERIC — it wraps errors from every activity kind (agent, HTTP, MCP, integration, RSS, poll),
+  // and many non-provider libs also attach a numeric `statusCode`, so the message stays neutral
+  // ("Request failed") rather than claiming a provider fault. The status-specific 401/429 fast-fail
+  // happens upstream; here we only surface the code + the activity `type` for debugging.
   const statusCode =
     typeof e === "object" &&
     e !== null &&
@@ -137,7 +140,7 @@ export function toSanitizedRetryable(
       : undefined;
   if (statusCode !== undefined) {
     return ApplicationFailure.retryable(
-      `Provider request failed (status ${statusCode})`,
+      `Request failed (status ${statusCode})`,
       type,
       { statusCode },
     );
@@ -2011,8 +2014,11 @@ export async function runAgent(
         { tenantId: meta.tenantId },
       );
     }
-    const { APICallError } = await aiSdk();
-    if (APICallError.isInstance(e)) {
+    // Load APICallError defensively: `ai` is already cached here (the generateText call above
+    // resolved it), so this can't realistically fail — but if it ever did, don't let the import
+    // error mask the ORIGINAL provider error; fall through to the sanitized retryable below.
+    const aiMod = await aiSdk().catch(() => undefined);
+    if (aiMod?.APICallError.isInstance(e)) {
       if (e.statusCode === 401 || e.statusCode === 403) {
         throw ApplicationFailure.nonRetryable(
           "Invalid provider credentials",
