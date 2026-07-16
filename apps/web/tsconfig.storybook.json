@@ -1,0 +1,14 @@
+{
+  // Typecheck Storybook stories + config. Resolves @naary/* to SOURCE (same as the vite/
+  // .storybook aliases) so no package dist needs building first — self-contained on any checkout.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"],
+      "@naary/dsl": ["../../packages/dsl/src/index.ts"],
+      "@naary/notifications": ["../../packages/notifications/src/index.ts"]
+    }
+  },
+  "include": ["src", ".storybook"],
+  "exclude": []
+}
