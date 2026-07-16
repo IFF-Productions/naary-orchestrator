@@ -12,8 +12,14 @@ export class MissingCredentialError extends Error {
   constructor(
     public readonly tenantId: string,
     public readonly provider: string,
+    /** The env the lookup missed in (Slice 5) — a key may exist in another env; naming it here
+     *  makes "valid key, wrong env" debuggable. Optional so older call sites still compile. */
+    public readonly environmentId?: string,
   ) {
-    super(`No valid '${provider}' credential for tenant '${tenantId}'`);
+    super(
+      `No valid '${provider}' credential for tenant '${tenantId}'` +
+        (environmentId ? ` in environment '${environmentId}'` : ""),
+    );
     this.name = "MissingCredentialError";
   }
 }
@@ -129,7 +135,7 @@ export class CredentialsService {
       },
     });
     if (!row || !row.isValid) {
-      throw new MissingCredentialError(tenantId, provider);
+      throw new MissingCredentialError(tenantId, provider, environmentId);
     }
     return this.encryptor.decrypt(
       {

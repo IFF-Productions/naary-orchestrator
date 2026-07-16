@@ -59,6 +59,13 @@ const fakeStore = {
     secretMap.get(`${t}::${e}::${k}`) ?? null,
   remove: async (t: string, e: string, k: string) =>
     void secretMap.delete(`${t}::${e}::${k}`),
+  // Delete the `conn:<id>` secret across ALL envs (the key is globally unique).
+  removeAllEnvs: async (t: string, k: string) => {
+    for (const mapKey of [...secretMap.keys()]) {
+      const [mt, , ...rest] = mapKey.split("::");
+      if (mt === t && rest.join("::") === k) secretMap.delete(mapKey);
+    }
+  },
 } as unknown as SecretStore;
 
 const PAT = "glpat-secret-token-value-123";
@@ -127,5 +134,39 @@ describe("ConnectionService", () => {
     await expect(
       resolveAuthHeader("t1", view.id, { connections: svc, store: fakeStore }),
     ).rejects.toBeInstanceOf(MissingConnectionTokenError);
+  });
+
+  it("remove deletes the connection row AND its stored secret", async () => {
+    const svc = new ConnectionService(fakeStore);
+    const view = await svc.create("t1", "e1", {
+      type: "github",
+      label: "gh",
+      serverUrl: "u",
+      authMode: "pat",
+      token: PAT,
+    });
+    expect(secretMap.get(`t1::e1::conn:${view.id}`)).toBe(PAT);
+
+    await svc.remove("t1", view.id);
+    expect(await svc.list("t1", "e1")).toHaveLength(0);
+    expect(secretMap.get(`t1::e1::conn:${view.id}`)).toBeUndefined();
+  });
+
+  it("remove purges the secret even when the connection row is already gone (no orphan)", async () => {
+    const svc = new ConnectionService(fakeStore);
+    const view = await svc.create("t1", "e1", {
+      type: "github",
+      label: "gh",
+      serverUrl: "u",
+      authMode: "pat",
+      token: PAT,
+    });
+    // Simulate a prior partial failure: the row was deleted but the secret lingered.
+    conns.clear();
+    expect(secretMap.get(`t1::e1::conn:${view.id}`)).toBe(PAT); // orphaned secret
+
+    // remove must still purge it env-agnostically (not skip because the row is missing).
+    await svc.remove("t1", view.id);
+    expect(secretMap.get(`t1::e1::conn:${view.id}`)).toBeUndefined();
   });
 });

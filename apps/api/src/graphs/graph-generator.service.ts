@@ -97,7 +97,8 @@ export class GraphGeneratorService {
    * Ground the model in the tenant's ACTUAL resources so it doesn't invent connectionIds or
    * unsupported provider actions (the #1 causes of AI-generated workflows failing at run time):
    * the real connections (with their exact ids), and the integration catalog's provider→action
-   * list with required fields. Per-request (connections are tenant-specific).
+   * list with required fields. Per-request + env-scoped (connections belong to a specific env, so
+   * generation is grounded in the ACTIVE env's connections — Slice 5).
    */
   private async buildResourceContext(
     tenantId: string,

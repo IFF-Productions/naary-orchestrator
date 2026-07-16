@@ -112,19 +112,10 @@ export class ConnectionService {
   }
 
   async remove(tenantId: string, id: string): Promise<void> {
-    // The connection carries its own env; read it to target the right secret row (the id is unique,
-    // so this is a single lookup). Gone already → nothing to prune.
-    const conn = await getPrisma().connection.findFirst({
-      where: { id, tenantId },
-      select: { environmentId: true },
-    });
-    if (conn) {
-      await this.store.remove(
-        tenantId,
-        conn.environmentId,
-        connectionSecretKey(id),
-      );
-    }
+    // The secret key `conn:<id>` is globally unique (a connection id can't collide across envs), so
+    // purge it env-agnostically — no need to read the connection first, and it still cleans up even
+    // if the connection row is already gone (no orphaned `conn:<id>` secret rows).
+    await this.store.removeAllEnvs(tenantId, connectionSecretKey(id));
     await getPrisma().connection.deleteMany({ where: { id, tenantId } });
   }
 
