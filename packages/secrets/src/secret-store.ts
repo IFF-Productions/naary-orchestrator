@@ -108,6 +108,24 @@ export class SecretStore {
     return res.count;
   }
 
+  /**
+   * List the KEYS (not values) for a tenant+env whose key starts with `keyPrefix`, with the prefix
+   * stripped — e.g. `keyPrefix: "secret:"` yields the user-facing secret NAMES. Never decrypts: this
+   * is the read behind a write-only management UI, so the ciphertext never leaves the DB. Key-sorted.
+   */
+  async listKeys(
+    tenantId: string,
+    environmentId: string,
+    keyPrefix: string,
+  ): Promise<string[]> {
+    const rows = await getPrisma().tenantCredential.findMany({
+      where: { tenantId, environmentId, provider: { startsWith: keyPrefix } },
+      select: { provider: true },
+      orderBy: { provider: "asc" },
+    });
+    return rows.map((r) => r.provider.slice(keyPrefix.length));
+  }
+
   async remove(
     tenantId: string,
     environmentId: string,

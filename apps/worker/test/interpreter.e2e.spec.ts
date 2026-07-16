@@ -2727,3 +2727,49 @@ describe("runGraph interpreter — global variables ($vars)", () => {
     });
   });
 });
+
+describe("runGraph interpreter — environment secrets ($secrets, Tier-1 §4)", () => {
+  it("passes `{{ $secrets.X }}` to the activity LITERAL and never puts it in ctx/__unresolved", async () => {
+    httpCalls.length = 0;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      // webhook → httpRequest whose auth header references a secret → end. The workflow must NOT
+      // resolve the secret (that would put plaintext in ctx/history); it stays literal for the
+      // activity to resolve in-memory. And it must not spuriously flag the header as "unresolved".
+      const graph: GraphDef = {
+        startNodeId: "trigger",
+        nodes: [
+          { id: "trigger", type: "webhookTrigger" },
+          {
+            id: "call",
+            type: "httpRequest",
+            config: {
+              method: "GET",
+              url: "https://api.example.com/x",
+              headers: { Authorization: "Bearer {{ $secrets.GH_TOKEN }}" },
+            },
+          },
+          { id: "end", type: "end" },
+        ],
+        edges: [
+          { from: "trigger", to: "call" },
+          { from: "call", to: "end" },
+        ],
+      };
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [graph, { v: 1 }, { tenantId: "t-sec" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-secrets",
+      });
+      expect((await handle.result()).status).toBe("completed");
+
+      // The activity received the token VERBATIM — the workflow did not resolve or blank it.
+      expect(httpCalls[httpCalls.length - 1]?.headers?.Authorization).toBe(
+        "Bearer {{ $secrets.GH_TOKEN }}",
+      );
+      const final = await handle.query(stateQuery);
+      // The secret NAME must not leak into the unresolved-input diagnostic (rides history/CAN).
+      expect(final.ctx.__unresolved).toBeUndefined();
+    });
+  });
+});

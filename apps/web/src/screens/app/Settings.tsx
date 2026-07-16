@@ -85,6 +85,18 @@ export function Settings() {
   });
   const [varBusy, setVarBusy] = useState(false);
   const [varError, setVarError] = useState<string | null>(null);
+  // Environment Secrets ($secrets) — WRITE-ONLY: names are listed, values are set but never shown.
+  const [secretNames, setSecretNames] = useState<string[]>([]);
+  const [newSecret, setNewSecret] = useState<{ name: string; value: string }>({
+    name: "",
+    value: "",
+  });
+  // Per-name replacement value (password input); the stored value is never fetched.
+  const [secretReplace, setSecretReplace] = useState<Record<string, string>>(
+    {},
+  );
+  const [secretBusy, setSecretBusy] = useState(false);
+  const [secretError, setSecretError] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -108,6 +120,9 @@ export function Settings() {
         const vars = await api.listVariables();
         if (!live) return;
         setVariables(vars);
+        const secrets = await api.listEnvSecrets();
+        if (!live) return;
+        setSecretNames(secrets.map((s) => s.name));
         setLoaded(true);
       } catch (e) {
         if (live)
@@ -261,6 +276,59 @@ export function Settings() {
       );
     } finally {
       setVarBusy(false);
+    }
+  }
+
+  /** Set/replace a secret's value. Returns success so callers only clear inputs on a real save. */
+  async function saveSecret(name: string, value: string): Promise<boolean> {
+    setSecretBusy(true);
+    setSecretError(null);
+    try {
+      await api.setEnvSecret(name, value);
+      setSecretNames((prev) =>
+        prev.includes(name) ? prev : [...prev, name].sort(),
+      );
+      return true;
+    } catch (e) {
+      setSecretError(
+        e instanceof UnauthorizedError
+          ? "Sign in to edit secrets."
+          : "Could not save. Name must be a valid identifier and the value non-empty.",
+      );
+      return false;
+    } finally {
+      setSecretBusy(false);
+    }
+  }
+
+  async function addSecret() {
+    const name = newSecret.name.trim();
+    if (!name || !newSecret.value) return;
+    if (await saveSecret(name, newSecret.value))
+      setNewSecret({ name: "", value: "" });
+  }
+
+  async function replaceSecret(name: string) {
+    const value = secretReplace[name] ?? "";
+    if (!value) return;
+    if (await saveSecret(name, value))
+      setSecretReplace((prev) => ({ ...prev, [name]: "" }));
+  }
+
+  async function removeSecret(name: string) {
+    setSecretBusy(true);
+    setSecretError(null);
+    try {
+      await api.deleteEnvSecret(name);
+      setSecretNames((prev) => prev.filter((n) => n !== name));
+    } catch (e) {
+      setSecretError(
+        e instanceof UnauthorizedError
+          ? "Sign in to edit secrets."
+          : "Could not delete the secret.",
+      );
+    } finally {
+      setSecretBusy(false);
     }
   }
 
@@ -565,6 +633,153 @@ export function Settings() {
             loading={varBusy}
             disabled={!loaded || !newVar.key.trim()}
             onClick={() => void addVariable()}
+          >
+            Add
+          </Button>
+        </div>
+      </Card>
+
+      <div
+        className="mono"
+        style={{
+          fontSize: "var(--text-2xs)",
+          fontWeight: "var(--weight-semibold)",
+          letterSpacing: "var(--tracking-label)",
+          textTransform: "uppercase",
+          color: "var(--ink-3)",
+          margin: "24px 0 12px",
+        }}
+      >
+        Secrets
+      </div>
+      <div
+        style={{
+          fontSize: "var(--text-body)",
+          lineHeight: "var(--leading-snug)",
+          color: "var(--ink-2)",
+          marginBottom: 12,
+        }}
+      >
+        Encrypted, env-scoped secret values (API keys, tokens). Reference one in
+        an <strong>HTTP Request node's headers</strong> as{" "}
+        <code>{"{{ $secrets.NAME }}"}</code> (more node types coming). Resolved
+        only inside the activity that uses it, so a value never enters the flow,
+        run data, or logs. Values are <strong>write-only</strong>: you can set
+        or replace a secret, but its value is never shown again.
+      </div>
+      <Card style={{ padding: 18, marginBottom: 12 }}>
+        {secretError && (
+          <div
+            style={{
+              marginBottom: 12,
+              fontSize: "var(--text-sm)",
+              color: "var(--state-error)",
+            }}
+          >
+            {secretError}
+          </div>
+        )}
+        {secretNames.length === 0 && loaded && (
+          <div
+            style={{
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-3)",
+              marginBottom: 12,
+            }}
+          >
+            No secrets yet — add one below.
+          </div>
+        )}
+        {secretNames.map((name) => (
+          <div
+            key={name}
+            style={{
+              display: "flex",
+              gap: 8,
+              alignItems: "center",
+              marginBottom: 10,
+            }}
+          >
+            <code
+              style={{
+                flex: "0 0 34%",
+                fontSize: "var(--text-sm)",
+                color: "var(--ink)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+              title={name}
+            >
+              {name}
+            </code>
+            <input
+              type="password"
+              value={secretReplace[name] ?? ""}
+              onChange={(e) =>
+                setSecretReplace((prev) => ({
+                  ...prev,
+                  [name]: e.target.value,
+                }))
+              }
+              placeholder="Set new value"
+              autoComplete="new-password"
+              style={{ ...inputStyle, flex: 1 }}
+              disabled={!loaded || secretBusy}
+            />
+            <Button
+              variant="secondary"
+              disabled={!loaded || secretBusy || !(secretReplace[name] ?? "")}
+              onClick={() => void replaceSecret(name)}
+            >
+              Update
+            </Button>
+            <Button
+              variant="ghost"
+              icon="trash"
+              disabled={!loaded || secretBusy}
+              title={`Delete ${name}`}
+              onClick={() => void removeSecret(name)}
+            >
+              Delete
+            </Button>
+          </div>
+        ))}
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            marginTop: secretNames.length ? 14 : 0,
+            paddingTop: secretNames.length ? 14 : 0,
+            borderTop: secretNames.length ? "1px solid var(--line)" : "none",
+          }}
+        >
+          <input
+            value={newSecret.name}
+            onChange={(e) =>
+              setNewSecret((n) => ({ ...n, name: e.target.value }))
+            }
+            placeholder="NAME"
+            style={{ ...inputStyle, flex: "0 0 34%" }}
+            disabled={!loaded || secretBusy}
+          />
+          <input
+            type="password"
+            value={newSecret.value}
+            onChange={(e) =>
+              setNewSecret((n) => ({ ...n, value: e.target.value }))
+            }
+            placeholder="value"
+            autoComplete="new-password"
+            style={{ ...inputStyle, flex: 1 }}
+            disabled={!loaded || secretBusy}
+          />
+          <Button
+            variant="primary"
+            loading={secretBusy}
+            disabled={!loaded || !newSecret.name.trim() || !newSecret.value}
+            onClick={() => void addSecret()}
           >
             Add
           </Button>

@@ -104,8 +104,9 @@ export class CredentialsService {
     return { id: row.id, provider, isValid };
   }
 
-  /** The env's configured *model* providers — names + validity only, NEVER key material. Connection
-   *  secrets share this table under a `conn:` namespace; they are not model providers, so excluded. */
+  /** The env's configured *model* providers — names + validity only, NEVER key material. This table
+   *  is namespaced: connection tokens under `conn:` and user Environment Secrets under `secret:` are
+   *  NOT model providers, so both are excluded (a provider name never contains a `:`). */
   async listProviders(
     tenantId: string,
     environmentId: string,
@@ -114,7 +115,10 @@ export class CredentialsService {
       where: {
         tenantId,
         environmentId,
-        NOT: { provider: { startsWith: "conn:" } },
+        NOT: [
+          { provider: { startsWith: "conn:" } },
+          { provider: { startsWith: "secret:" } },
+        ],
       },
       select: { provider: true, isValid: true },
       orderBy: { provider: "asc" },

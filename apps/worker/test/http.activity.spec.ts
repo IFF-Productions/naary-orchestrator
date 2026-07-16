@@ -42,14 +42,19 @@ function res(
 
 const fetchMock = vi.fn();
 const authMock = vi.fn();
+const secretMock = vi.fn();
 let store: MemoryObjectStore;
 
 beforeEach(() => {
   fetchMock.mockReset();
   authMock.mockReset();
   authMock.mockResolvedValue({});
+  secretMock.mockReset();
+  // Default: no secret configured (tests that need one set their own resolution).
+  secretMock.mockResolvedValue(null);
   __httpDeps.fetch = fetchMock as never;
   __httpDeps.resolveAuthHeader = authMock as never;
+  __httpDeps.getSecret = secretMock as never;
   // Default: skip the real DNS-backed egress check; specific tests opt back in.
   __httpDeps.assertEgressAllowed = (async (u: string) => new URL(u)) as never;
   store = new MemoryObjectStore();
@@ -393,5 +398,138 @@ describe("callHttpRequest pagination", () => {
 
     expect(result.body).toEqual([1, 2]);
     expect(result.pages).toBe(2);
+  });
+});
+
+describe("callHttpRequest — $secrets (in-activity resolution, Tier-1 §4)", () => {
+  const SECRET = "ghp_supersecrettoken";
+
+  it("resolves {{ $secrets.NAME }} into the outgoing header, and the value appears NOWHERE in the result", async () => {
+    secretMock.mockResolvedValue(SECRET);
+    fetchMock.mockResolvedValue(res(200, { ok: true }));
+
+    const result = await callHttpRequest(
+      {
+        ...CFG,
+        headers: { Authorization: "Bearer {{ $secrets.GH_TOKEN }}" },
+      },
+      {},
+      { ...META, environmentId: "env-prod" },
+    );
+
+    // The secret was fetched by NAME for the run's env, and injected into the SENT request header…
+    expect(secretMock).toHaveBeenCalledWith("t1", "env-prod", "GH_TOKEN");
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe(
+      `Bearer ${SECRET}`,
+    );
+    // …but the plaintext must not leak into the returned result (which rides Temporal history).
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+    // The literal token must also NOT survive into the result (belt-and-suspenders).
+    expect(JSON.stringify(result)).not.toContain("$secrets");
+  });
+
+  it("STRIPS a $secrets header on a CROSS-origin next page (no secret leak to attacker host)", async () => {
+    secretMock.mockResolvedValue(SECRET);
+    fetchMock
+      .mockResolvedValueOnce(
+        res(200, { items: [1], links: { next: "https://evil.example.net/x" } }),
+      )
+      .mockResolvedValueOnce(res(200, { items: [2], links: { next: null } }));
+
+    await callHttpRequest(
+      {
+        ...CFG,
+        headers: { "X-Api-Key": "{{ $secrets.API_KEY }}" },
+        pagination: {
+          mode: "url",
+          itemsPath: "items",
+          nextUrlPath: "links.next",
+          maxPages: 2,
+        },
+      },
+      {},
+      { ...META, environmentId: "env-prod" },
+    );
+
+    // page 1 (same origin) carries the resolved secret; page 2 (cross origin) must NOT.
+    expect(fetchMock.mock.calls[0][1].headers["X-Api-Key"]).toBe(SECRET);
+    expect(fetchMock.mock.calls[1][0].toString()).toContain("evil.example.net");
+    expect(fetchMock.mock.calls[1][1].headers["X-Api-Key"]).toBeUndefined();
+  });
+
+  it("a missing secret is a NON-RETRYABLE failure naming the NAME, not a value", async () => {
+    secretMock.mockResolvedValue(null); // not configured
+    fetchMock.mockResolvedValue(res(200, { ok: true }));
+
+    await expect(
+      callHttpRequest(
+        { ...CFG, headers: { Authorization: "Bearer {{ $secrets.NOPE }}" } },
+        {},
+        { ...META, environmentId: "env-prod" },
+      ),
+    ).rejects.toMatchObject({
+      nonRetryable: true,
+      message: expect.stringContaining("NOPE"),
+    });
+    // The network call never happens when a referenced secret is missing.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("resolves a $secrets token nested in the JSON BODY, and the value appears NOWHERE in the result", async () => {
+    secretMock.mockResolvedValue(SECRET);
+    fetchMock.mockResolvedValue(res(200, { ok: true }));
+
+    const result = await callHttpRequest(
+      {
+        method: "POST",
+        url: "https://api.example.com/v1/things",
+        body: { auth: { token: "{{ $secrets.API_KEY }}" }, keep: "plain" },
+      },
+      {},
+      { ...META, environmentId: "env-prod" },
+    );
+
+    expect(secretMock).toHaveBeenCalledWith("t1", "env-prod", "API_KEY");
+    // The secret is inlined into the SENT body…
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      auth: { token: SECRET },
+      keep: "plain",
+    });
+    // …but never rides back in the result (which enters Temporal history).
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+    expect(JSON.stringify(result)).not.toContain("$secrets");
+  });
+
+  it("DROPS a secret-bearing body on a CROSS-origin next page (no body leak off-host)", async () => {
+    secretMock.mockResolvedValue(SECRET);
+    fetchMock
+      .mockResolvedValueOnce(
+        res(200, { items: [1], links: { next: "https://evil.example.net/x" } }),
+      )
+      .mockResolvedValueOnce(res(200, { items: [2], links: { next: null } }));
+
+    await callHttpRequest(
+      {
+        method: "POST",
+        url: "https://api.example.com/v1/things",
+        body: { token: "{{ $secrets.API_KEY }}" },
+        pagination: {
+          mode: "url",
+          itemsPath: "items",
+          nextUrlPath: "links.next",
+          maxPages: 2,
+        },
+      },
+      {},
+      { ...META, environmentId: "env-prod" },
+    );
+
+    // page 1 (same origin) carries the resolved secret body…
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      token: SECRET,
+    });
+    // …page 2 (cross origin) sends NO body — the secret never reaches the attacker host.
+    expect(fetchMock.mock.calls[1][0].toString()).toContain("evil.example.net");
+    expect(fetchMock.mock.calls[1][1].body ?? null).toBeNull();
   });
 });

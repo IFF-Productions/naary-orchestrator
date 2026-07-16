@@ -88,7 +88,15 @@ import {
   runCostUsd,
   secondsSince,
 } from "../metrics";
-import { CredentialsService, MissingCredentialError } from "@naary/secrets";
+import {
+  CredentialsService,
+  hasSecretRef,
+  hasSecretRefDeep,
+  MissingCredentialError,
+  resolveSecretsDeep,
+  resolveSecretsInString,
+  SecretStore,
+} from "@naary/secrets";
 import {
   type ClaimCheck,
   getObjectStore,
@@ -2540,7 +2548,93 @@ export const __httpDeps = {
     const conn = await new ConnectionService().getById(tenantId, connectionId);
     return conn ? { serverUrl: conn.serverUrl, authMode: conn.authMode } : null;
   },
+  // Environment Secrets ($secrets): decrypt one named secret for a run's env (in-memory only).
+  // Null = not configured. Swappable so tests never touch the encrypted store.
+  getSecret: (
+    tenantId: string,
+    environmentId: string,
+    name: string,
+  ): Promise<string | null> =>
+    getSecretStore().get(tenantId, environmentId, `secret:${name}`),
 };
+
+// Lazily built so merely importing this module doesn't require ENCRYPTION_KEY (the encryptor reads it
+// at construction). Real activities build it on first use; tests swap `__httpDeps.getSecret`, so the
+// store is never constructed under test.
+let __secretStore: SecretStore | undefined;
+function getSecretStore(): SecretStore {
+  __secretStore ??= new SecretStore();
+  return __secretStore;
+}
+
+/**
+ * Resolve `{{ $secrets.NAME }}` tokens in the HTTP node's static headers AND request body, in-memory,
+ * right before the request (Tier-1 §4 — the value never crosses the workflow boundary; the workflow
+ * left these tokens literal). Slice 2 covers headers + body (the two places auth material belongs);
+ * url/query stay unsupported (a secret in a URL leaks to server/proxy logs + can be echoed in an
+ * error body — bad practice regardless). Returns:
+ *  - `headers` / `body` with secrets inlined,
+ *  - `secretKeys`: lower-cased header keys a secret went into (dropped cross-origin, like conn auth),
+ *  - `bodyHasSecret`: whether the body carries a secret (dropped cross-origin too).
+ * One memoized resolver is shared across headers + body, so a secret used in both is fetched once.
+ * A missing secret is a non-retryable failure naming only the NAME.
+ */
+async function resolveHttpSecrets(
+  headers: Record<string, string>,
+  body: unknown,
+  meta: AgentMeta,
+): Promise<{
+  headers: Record<string, string>;
+  body: unknown;
+  secretKeys: Set<string>;
+  bodyHasSecret: boolean;
+}> {
+  const headerEntries = Object.entries(headers);
+  const headerNeeds = headerEntries.some(
+    ([, v]) => typeof v === "string" && hasSecretRef(v),
+  );
+  const bodyNeeds = hasSecretRefDeep(body);
+  if (!headerNeeds && !bodyNeeds) {
+    return { headers, body, secretKeys: new Set(), bodyHasSecret: false };
+  }
+  const environmentId =
+    meta.environmentId ?? (await getDefaultEnvironmentId(meta.tenantId));
+  const cache = new Map<string, string>();
+  const resolveOne = async (name: string): Promise<string> => {
+    const hit = cache.get(name);
+    if (hit !== undefined) return hit;
+    const value = await __httpDeps.getSecret(
+      meta.tenantId,
+      environmentId,
+      name,
+    );
+    if (value == null) {
+      throw ApplicationFailure.nonRetryable(
+        `Missing environment secret "${name}" — add it under Settings → Secrets for this environment.`,
+        "MISSING_SECRET",
+      );
+    }
+    cache.set(name, value);
+    return value;
+  };
+  const outHeaders: Record<string, string> = {};
+  const secretKeys = new Set<string>();
+  for (const [k, v] of headerEntries) {
+    if (typeof v === "string" && hasSecretRef(v)) {
+      outHeaders[k] = await resolveSecretsInString(v, resolveOne);
+      secretKeys.add(k.toLowerCase());
+    } else {
+      outHeaders[k] = v;
+    }
+  }
+  const outBody = bodyNeeds ? await resolveSecretsDeep(body, resolveOne) : body;
+  return {
+    headers: outHeaders,
+    body: outBody,
+    secretKeys,
+    bodyHasSecret: bodyNeeds,
+  };
+}
 
 /**
  * HTTP Request node: call a plain HTTP/REST endpoint and return the structured
@@ -2569,14 +2663,23 @@ export async function callHttpRequest(
     const authHeaders = cfg.connectionId
       ? await __httpDeps.resolveAuthHeader(meta.tenantId, cfg.connectionId)
       : {};
-    const headers: Record<string, string> = {
-      ...(cfg.headers ?? {}),
-      ...authHeaders,
-    };
-
     // A claim-checked upstream value (e.g. a large bound body) is resolved back to
     // its real value before the call — the workflow only carried the small reference.
-    const resolvedBody = await resolveClaimChecks(cfg.body, store);
+    const claimResolvedBody = await resolveClaimChecks(cfg.body, store);
+
+    // Resolve `{{ $secrets.NAME }}` in the static headers AND body in-memory (Tier-1 §4).
+    // `secretKeys` (header keys) + `bodyHasSecret` drive the cross-origin drop below, so a secret
+    // never rides to a response-driven next-URL host — same treatment as the connection auth header.
+    const {
+      headers: staticHeaders,
+      body: resolvedBody,
+      secretKeys,
+      bodyHasSecret,
+    } = await resolveHttpSecrets(cfg.headers ?? {}, claimResolvedBody, meta);
+    const headers: Record<string, string> = {
+      ...staticHeaders,
+      ...authHeaders,
+    };
 
     const init: RequestInit = { method: cfg.method, headers };
     if (cfg.method !== "GET" && resolvedBody !== undefined) {
@@ -2594,12 +2697,17 @@ export async function callHttpRequest(
     // paginated `url`-mode `next` URL comes from the (untrusted) response body, so a
     // cross-origin next page gets the static, non-secret headers only — mirroring how
     // browsers/curl drop `Authorization` across origins (Tier-1 rule 4).
-    const authKeys = new Set(
-      Object.keys(authHeaders).map((k) => k.toLowerCase()),
-    );
+    // Cross-origin drop set = connection auth keys ∪ the keys we injected a $secret into. A
+    // response-driven `url`-mode next page can point at an attacker host, so NEITHER a connection
+    // token NOR a $secret may ride to a different origin (Tier-1 §4; mirrors how browsers/curl drop
+    // Authorization cross-origin).
+    const sensitiveKeys = new Set([
+      ...Object.keys(authHeaders).map((k) => k.toLowerCase()),
+      ...secretKeys,
+    ]);
     const headersNoAuth: Record<string, string> = {};
     for (const [k, v] of Object.entries(headers)) {
-      if (!authKeys.has(k.toLowerCase())) headersNoAuth[k] = v;
+      if (!sensitiveKeys.has(k.toLowerCase())) headersNoAuth[k] = v;
     }
     const originOf = (u: string): string | null => {
       try {
@@ -2622,6 +2730,7 @@ export async function callHttpRequest(
       reqUrl: string,
       reqQuery: Record<string, string>,
       useHeaders: Record<string, string> = headers,
+      useBody: RequestInit["body"] = init.body,
     ): Promise<{
       res: Response;
       body: unknown;
@@ -2640,6 +2749,7 @@ export async function callHttpRequest(
         res = await __httpDeps.fetch(url, {
           ...init,
           headers: useHeaders,
+          body: useBody,
           signal: controller.signal,
         });
       } finally {
@@ -2743,15 +2853,21 @@ export async function callHttpRequest(
     while (pages < maxPages) {
       let reqUrl: string;
       let reqQuery: Record<string, string>;
-      // Same-origin pages carry the auth header; a cross-origin `url`-mode next page
-      // gets the non-secret headers only (never leak the connection token off-host).
+      // Same-origin pages carry the auth header + secret body; a cross-origin `url`-mode next page
+      // gets the non-secret headers only AND drops a secret-bearing body — never leak a connection
+      // token OR a $secret off-host (the body is re-sent every page since `init` is shared).
       let reqHeaders = headers;
+      let reqBody = init.body;
       if (pg.mode === "url" && pages > 0) {
         // A response-supplied next URL is already complete — don't re-append query.
         reqUrl = nextUrl as string;
         reqQuery = {};
-        if (baseOrigin === null || originOf(reqUrl) !== baseOrigin)
+        if (baseOrigin === null || originOf(reqUrl) !== baseOrigin) {
           reqHeaders = headersNoAuth;
+          // `null` (not `undefined`) — an explicit "no body"; passing undefined would trip
+          // fetchPage's `= init.body` default and re-send the secret body.
+          if (bodyHasSecret) reqBody = null;
+        }
       } else {
         reqUrl = cfg.url;
         reqQuery = { ...(cfg.query ?? {}) };
@@ -2764,6 +2880,7 @@ export async function callHttpRequest(
         reqUrl,
         reqQuery,
         reqHeaders,
+        reqBody,
       );
       pages++; // count every fetch performed (drives the page count + per-page cost)
       checkStatus(res.status);
