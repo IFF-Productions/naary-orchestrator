@@ -107,18 +107,22 @@ export function NotificationsBell() {
           <span
             style={{
               position: "absolute",
-              top: -4,
-              right: -4,
-              minWidth: 15,
-              height: 15,
+              top: -5,
+              right: -5,
+              minWidth: 16,
+              height: 16,
               padding: "0 3px",
-              borderRadius: 8,
+              // border-box + flex centering so the 1.5px ring is included in the box and the digit
+              // is centred on BOTH axes (lineHeight-based centring drifts once the border is added).
+              boxSizing: "border-box",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 999,
               background: "var(--state-error)",
               color: "#fff",
               fontSize: 9.5,
               fontWeight: 700,
-              lineHeight: "15px",
-              textAlign: "center",
               border: "1.5px solid var(--bg-2)",
             }}
           >
