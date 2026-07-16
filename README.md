@@ -189,7 +189,7 @@ the **immutable graph snapshot** to the workflow as an arg, with the content has
 recorded in a Temporal **memo**. Editing a flow creates a *new* version and cannot change
 an in-flight run (which carries its own snapshot). Re-saving an unchanged graph is a no-op
 (same hash → same version). Seed a tenant's graphs with
-`pnpm --filter @naary/api exec ts-node src/graphs/seed-graphs.ts <tenantId>`.
+`pnpm --filter @naary/api exec node -r @swc/register src/graphs/seed-graphs.ts <tenantId>`.
 
 - **Pass-by-value, not by-reference** — the full graph rides in the workflow arg (kept
   small; the ~2MB Temporal payload cap is the documented bound, not solved here).
@@ -239,8 +239,8 @@ Tear down with `docker compose down` (add `-v` to wipe Postgres + Temporal data)
 Seed a tenant's graphs + mint an API token (run inside the api container):
 
 ```bash
-docker compose exec api pnpm --filter @naary/api exec ts-node src/graphs/seed-graphs.ts t-demo
-docker compose exec api pnpm --filter @naary/api exec ts-node src/auth/mint-token.ts t-demo
+docker compose exec api pnpm --filter @naary/api exec node -r @swc/register src/graphs/seed-graphs.ts t-demo
+docker compose exec api pnpm --filter @naary/api exec node -r @swc/register src/auth/mint-token.ts t-demo
 # -> nry_…   then drive the API flow below with: -H "Authorization: Bearer nry_…"
 ```
 
@@ -339,7 +339,7 @@ Firebase verification needs a **service account** for the Firebase project
 Assign a user's tenant by setting the `tenant` custom claim on their Firebase UID:
 
 ```bash
-pnpm --filter @naary/api exec ts-node src/auth/set-tenant-claim.ts <firebaseUid> <tenantId>
+pnpm --filter @naary/api exec node -r @swc/register src/auth/set-tenant-claim.ts <firebaseUid> <tenantId>
 ```
 
 > ⚠️ **No service account ⇒ no human browser login.** With Firebase auth off, the
@@ -347,7 +347,7 @@ pnpm --filter @naary/api exec ts-node src/auth/set-tenant-claim.ts <firebaseUid>
 > one for CLI/CI use with `mint-token.ts` (see the Docker quick-start above):
 >
 > ```bash
-> docker compose exec api pnpm --filter @naary/api exec ts-node src/auth/mint-token.ts t-demo
+> docker compose exec api pnpm --filter @naary/api exec node -r @swc/register src/auth/mint-token.ts t-demo
 > # -> nry_…   then: curl localhost:3000/executions -H "Authorization: Bearer nry_…"
 > ```
 
