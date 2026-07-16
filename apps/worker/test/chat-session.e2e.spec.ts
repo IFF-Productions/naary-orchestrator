@@ -54,6 +54,7 @@ const appendCalls: {
 const mockActivities = {
   recordExecution: async (): Promise<void> => undefined,
   setExecutionStatus: async (): Promise<void> => undefined,
+  loadVariables: async (): Promise<Record<string, string>> => ({}), // $vars seed; empty here
   loadChatHistory: async (
     meta: unknown,
   ): Promise<{ role: string; text: string }[]> => {

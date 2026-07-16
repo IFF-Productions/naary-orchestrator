@@ -107,11 +107,12 @@ export interface TemplateWarning {
 // A `{{ path }}` token, not escaped. Mirrors resolveTemplateString.
 const LINT_RE = /\\\{\{|\{\{\s*([^{}]+?)\s*\}\}/g;
 
-/** A `__`-prefixed source (e.g. `__input`) is a RESERVED runtime source, not a node — the run
- *  context provides it, so a reference to it is always valid and must never be linted as unknown.
- *  splitOut/loopEnd commonly bind `from: "__input"` to read the trigger input directly. */
+/** A RESERVED runtime source is one the run context provides directly, not a graph node — so a
+ *  reference to it is always valid and must never be linted as an "unknown node". Two kinds:
+ *  `__`-prefixed sources (e.g. `__input`; splitOut/loopEnd bind `from: "__input"` for trigger input),
+ *  and `$vars` (Global Variables — the interpreter seeds `ctx.$vars` at run start). */
 function isReservedSource(from: string): boolean {
-  return from.startsWith("__");
+  return from.startsWith("__") || from === "$vars";
 }
 
 /**
