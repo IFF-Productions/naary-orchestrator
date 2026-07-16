@@ -509,6 +509,32 @@ export function Runs() {
           </div>
         )}
 
+        {/* Phone: the column header (and its select-all) is hidden, so surface a select-all
+            control here — otherwise bulk actions would be unreachable on mobile. */}
+        {phone && rows.length > 0 && (
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "10px 16px",
+              borderBottom: "1px solid var(--line)",
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-2)",
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              aria-label="Select all runs"
+              checked={allVisibleSelected}
+              disabled={bulkBusy}
+              onChange={toggleSelectAll}
+            />
+            {allVisibleSelected ? "Deselect all" : "Select all"}
+          </label>
+        )}
+
         {runs === null &&
           !error &&
           Array.from({ length: 6 }).map((_, i) =>
