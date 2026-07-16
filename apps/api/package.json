@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "start": "node -r @swc/register src/main.ts"
+    "start": "node src/main.cjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.12",

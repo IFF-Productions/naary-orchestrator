@@ -39,7 +39,7 @@ services:
     command:
       - sh
       - -c
-      - 'pnpm -w exec tsc -b --watch --preserveWatchOutput & exec node --watch-path=/app/apps/api/src --watch-path=/app/packages -r @swc/register src/main.ts'
+      - 'pnpm -w exec tsc -b --watch --preserveWatchOutput & exec node --watch-path=/app/apps/api/src --watch-path=/app/packages src/main.cjs'
     volumes:
       - ./apps/api/src:/app/apps/api/src
       - ./packages/connections/src:/app/packages/connections/src
@@ -59,7 +59,7 @@ services:
     command:
       - sh
       - -c
-      - 'pnpm -w exec tsc -b --watch --preserveWatchOutput & exec node --watch-path=/app/apps/worker/src --watch-path=/app/packages -r @swc/register src/worker.ts'
+      - 'pnpm -w exec tsc -b --watch --preserveWatchOutput & exec node --watch-path=/app/apps/worker/src --watch-path=/app/packages src/worker.cjs'
     volumes:
       - ./apps/worker/src:/app/apps/worker/src
       - ./packages/connections/src:/app/packages/connections/src
