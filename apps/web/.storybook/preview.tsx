@@ -1,6 +1,6 @@
 import type { Decorator, Preview } from "@storybook/react-vite";
 import { useEffect } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { initialize, mswLoader } from "msw-storybook-addon";
 // The real design tokens (--ink / --brand / --surface …) + resets the app renders with. Without
 // this the components paint against undefined CSS variables, which defeats the visualization.
@@ -11,13 +11,24 @@ import "../src/components/components.css";
 // so static assets / unmocked calls don't spam warnings; a story without handlers just no-ops.
 initialize({ onUnhandledRequest: "bypass" });
 
-// Router context for components that use react-router (useNavigate/useLocation) — harmless for
-// the rest. Stories that need a specific path can override with their own router.
-const withRouter: Decorator = (Story) => (
-  <MemoryRouter>
-    <Story />
-  </MemoryRouter>
-);
+// Router context for components that use react-router (useNavigate/useLocation/useParams).
+// One MemoryRouter for the whole app — nesting a second one errors in RR v7, so stories that need
+// route params declare them via `parameters.router` instead of adding their own router:
+//   parameters: { router: { path: "/app/runs/:id", initialEntries: ["/app/runs/wh-1"] } }
+// Default is a catch-all route, harmless for components that don't read params.
+const withRouter: Decorator = (Story, ctx) => {
+  const r = (ctx.parameters.router ?? {}) as {
+    path?: string;
+    initialEntries?: string[];
+  };
+  return (
+    <MemoryRouter initialEntries={r.initialEntries ?? ["/"]}>
+      <Routes>
+        <Route path={r.path ?? "*"} element={<Story />} />
+      </Routes>
+    </MemoryRouter>
+  );
+};
 
 // The app is dark-first; light theme via [data-theme="light"] (styles/tokens.css). Mirror that
 // here with a toolbar switch so stories can be inspected in both themes.
