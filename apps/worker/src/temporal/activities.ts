@@ -965,10 +965,29 @@ export const __notifyDeps = {
  * undefined when EITHER the encryption key OR APP_BASE_URL is missing (a relative /approve/… link
  * is useless as a Slack button). The recipient clicks it to Approve/Reject WITHOUT opening the app.
  */
+/**
+ * The SPA's public origin, for building absolute notification deep links. Prefers the explicit
+ * `APP_BASE_URL`; falls back to the first absolute http(s) origin in `CORS_ORIGINS` — which prod
+ * MUST already set for the browser to reach the API, so notifications get clickable links/buttons
+ * without a separate var. Returns undefined only when neither yields a usable absolute URL (dev
+ * with just localhost is still fine). Trailing slash trimmed.
+ */
+function resolveAppBaseUrl(): string | undefined {
+  const explicit = (process.env.APP_BASE_URL ?? "").trim();
+  const candidates = [
+    explicit,
+    ...(process.env.CORS_ORIGINS ?? "").split(",").map((s) => s.trim()),
+  ];
+  for (const c of candidates) {
+    if (/^https?:\/\/[^\s]+$/.test(c)) return c.replace(/\/$/, "");
+  }
+  return undefined;
+}
+
 function approvalUrl(workflowId: string): string | undefined {
   const key = process.env.ENCRYPTION_KEY;
-  const base = (process.env.APP_BASE_URL ?? "").replace(/\/$/, "");
-  // Both are required for an absolute, clickable link. Without APP_BASE_URL the URL would be
+  const base = resolveAppBaseUrl();
+  // Both are required for an absolute, clickable link. Without a base the URL would be
   // relative (`/approve/…`) — useless as a Slack url-button — so omit it (like runUrl).
   if (!key || !base) return undefined;
   const token = createHmac("sha256", key)
@@ -977,10 +996,10 @@ function approvalUrl(workflowId: string): string | undefined {
   return `${base}/approve/${encodeURIComponent(workflowId)}?token=${token}`;
 }
 
-/** Deep link to the run detail page — the resource the recipient needs to act on. Needs
- *  APP_BASE_URL (the SPA host); without it there's no absolute URL to build, so undefined. */
+/** Deep link to the run detail page — the resource the recipient needs to act on. Needs a
+ *  resolvable SPA base URL; without one there's no absolute URL to build, so undefined. */
 function runUrl(workflowId: string): string | undefined {
-  const base = (process.env.APP_BASE_URL ?? "").replace(/\/$/, "");
+  const base = resolveAppBaseUrl();
   if (!base) return undefined;
   return `${base}/app/runs/${encodeURIComponent(workflowId)}`;
 }

@@ -20,4 +20,20 @@ function requireEnv(): void {
   }
 }
 
+// Notifications need an absolute SPA URL to render clickable run links + Approve/Reject buttons.
+// It resolves from APP_BASE_URL, falling back to the first http(s) origin in CORS_ORIGINS. Warn
+// (don't fail) if neither is present — alerts still send, just with a bare run id and no buttons.
+function warnIfNoAppBaseUrl(): void {
+  const hasBase = [
+    process.env.APP_BASE_URL ?? "",
+    ...(process.env.CORS_ORIGINS ?? "").split(","),
+  ].some((c) => /^https?:\/\/[^\s]+$/.test(c.trim()));
+  if (!hasBase) {
+    console.warn(
+      "[worker] No APP_BASE_URL (or CORS_ORIGINS) set — Slack/Teams notifications will show a bare run id with no clickable link or Approve/Reject buttons. Set APP_BASE_URL to your SPA URL to enable them.",
+    );
+  }
+}
+
 requireEnv();
+warnIfNoAppBaseUrl();
