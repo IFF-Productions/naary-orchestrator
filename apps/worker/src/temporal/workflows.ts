@@ -298,8 +298,9 @@ export interface RunGraphCtx {
   tenantId: string;
   /** The environment this run executes in (Slice 5b). Set at start from the endpoint's env (triggers)
    *  or the caller's active env (manual/test); rides continueAsNew inside this ctx. Optional so a run
-   *  started before 5b (no env in its recorded ctx) resolves to the tenant default in-activity. Only
-   *  tenantId + this non-secret id flow through history (Tier-1 #4). */
+   *  started before 5b (no env in its recorded ctx) resolves to the tenant default in-activity. Like
+   *  the rest of this ctx it is a NON-SECRET id that rides workflow history — no keys/tokens ever do
+   *  (Tier-1 #4); the activity fetches the env's secrets by (tenantId, environmentId) in-activity. */
   environmentId?: string;
   /** The saved-graph key this run executes — recorded for the Runs list. */
   workflowKey?: string;
