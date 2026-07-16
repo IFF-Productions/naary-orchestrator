@@ -54,6 +54,7 @@ export {
   type RegionTrace,
 } from "./items-region";
 export { resolveHttpRequest, type ResolvedHttpRequest } from "./http-request";
+export { parseCurl, type CurlImportResult } from "./curl-import";
 export {
   resolveSqlQuery,
   type ResolvedSqlQuery,
