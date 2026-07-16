@@ -37,7 +37,7 @@ describe("ChatService.createEndpoint", () => {
   it("refuses to register a public chat when the tenant has NO budget cap", async () => {
     getBudget.mockResolvedValue(null);
     await expect(
-      new ChatService().createEndpoint("t-1", "support-chat"),
+      new ChatService().createEndpoint("t-1", "e-1", "support-chat"),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(create).not.toHaveBeenCalled();
   });
@@ -45,7 +45,7 @@ describe("ChatService.createEndpoint", () => {
   it("rejects a whitespace-only workflowId (would be an unusable endpoint)", async () => {
     getBudget.mockResolvedValue({ monthlyCapUsd: 50 });
     await expect(
-      new ChatService().createEndpoint("t-1", "   "),
+      new ChatService().createEndpoint("t-1", "e-1", "   "),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(create).not.toHaveBeenCalled();
   });
@@ -53,8 +53,19 @@ describe("ChatService.createEndpoint", () => {
   it("registers and returns the public path when a budget cap exists", async () => {
     getBudget.mockResolvedValue({ monthlyCapUsd: 50 });
     create.mockResolvedValue({ id: "c-1" });
-    const out = await new ChatService().createEndpoint("t-1", "support-chat");
+    const out = await new ChatService().createEndpoint(
+      "t-1",
+      "e-1",
+      "support-chat",
+    );
     expect(out).toEqual({ chatId: "c-1", chatPath: "/c/c-1" });
+    expect(create).toHaveBeenCalledWith({
+      data: {
+        tenantId: "t-1",
+        environmentId: "e-1",
+        workflowId: "support-chat",
+      },
+    });
   });
 });
 

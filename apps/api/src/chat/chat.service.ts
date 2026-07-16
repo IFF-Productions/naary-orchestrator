@@ -26,6 +26,7 @@ export class ChatService {
    */
   async createEndpoint(
     tenantId: string,
+    environmentId: string,
     workflowId: string,
   ): Promise<RegisteredChat> {
     // @IsNotEmpty() treats "   " as non-empty; trim + reject so we never register a chat whose
@@ -40,7 +41,7 @@ export class ChatService {
       );
     }
     const row = await getPrisma().chatEndpoint.create({
-      data: { tenantId, workflowId: key },
+      data: { tenantId, environmentId, workflowId: key },
     });
     return { chatId: row.id, chatPath: `/c/${row.id}` };
   }

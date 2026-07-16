@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HooksController } from "../src/webhooks/hooks.controller";
 
-const endpoint = { tenantId: "t-1", provider: "github", workflowId: "wk" };
+const endpoint = {
+  tenantId: "t-1",
+  environmentId: "e-1",
+  provider: "github",
+  workflowId: "wk",
+};
 
 function makeDeps(graphNodes: { type: string }[]) {
   const webhooks = {
@@ -29,7 +34,6 @@ function makeDeps(graphNodes: { type: string }[]) {
     webhooks as never,
     executions as never,
     graphs as never,
-    { defaultEnvId: async () => "e1", resolveEnvId: async () => "e1" } as never,
   );
   return { controller, webhooks, executions, graphs, res, req, headers };
 }

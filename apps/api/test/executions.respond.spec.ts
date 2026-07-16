@@ -4,7 +4,13 @@ import { ExecutionsService } from "../src/executions/executions.service";
 /** Build a service with `startWebhook` stubbed + a fake Temporal client handle, so
  *  only the response poll loop is exercised. */
 function makeService(handle: { query: unknown; describe: unknown }) {
-  const service = new ExecutionsService({} as never, { defaultEnvId: async () => "env-test", resolveEnvId: async () => "env-test" } as never);
+  const service = new ExecutionsService(
+    {} as never,
+    {
+      defaultEnvId: async () => "env-test",
+      resolveEnvId: async () => "env-test",
+    } as never,
+  );
   vi.spyOn(service, "startWebhook").mockResolvedValue({ workflowId: "wf-1" });
   (service as unknown as { client: unknown }).client = {
     workflow: { getHandle: () => handle },
@@ -25,6 +31,7 @@ describe("startWebhookAwaitResponse", () => {
 
     const out = await service.startWebhookAwaitResponse(
       "t-1",
+      "e-1",
       snapshot,
       {},
       "wk",
@@ -46,6 +53,7 @@ describe("startWebhookAwaitResponse", () => {
 
     const out = await service.startWebhookAwaitResponse(
       "t-1",
+      "e-1",
       snapshot,
       {},
       "wk",
@@ -68,6 +76,7 @@ describe("startWebhookAwaitResponse", () => {
 
     const out = await service.startWebhookAwaitResponse(
       "t-1",
+      "e-1",
       snapshot,
       {},
       "wk",
@@ -86,6 +95,7 @@ describe("startWebhookAwaitResponse", () => {
 
     const out = await service.startWebhookAwaitResponse(
       "t-1",
+      "e-1",
       snapshot,
       {},
       "wk",
@@ -104,6 +114,7 @@ describe("startWebhookAwaitResponse", () => {
 
     const out = await service.startWebhookAwaitResponse(
       "t-1",
+      "e-1",
       snapshot,
       {},
       "wk",

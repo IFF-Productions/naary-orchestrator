@@ -21,7 +21,13 @@ function makeService(isActive: boolean) {
     isActive: vi.fn().mockResolvedValue(isActive),
     getErrorHandler: vi.fn().mockResolvedValue(null),
   };
-  const service = new ExecutionsService(graphs as never, { defaultEnvId: async () => "env-test", resolveEnvId: async () => "env-test" } as never);
+  const service = new ExecutionsService(
+    graphs as never,
+    {
+      defaultEnvId: async () => "env-test",
+      resolveEnvId: async () => "env-test",
+    } as never,
+  );
   const start = vi.fn().mockResolvedValue(undefined);
   (service as unknown as { client: unknown }).client = {
     workflow: { start },
@@ -35,7 +41,7 @@ describe("automatic-trigger activation gate", () => {
   it("startWebhook is REFUSED (409) for a deactivated workflow — no run started", async () => {
     const { service, start } = makeService(false);
     await expect(
-      service.startWebhook("t-1", snapshot as never, {}, "w"),
+      service.startWebhook("t-1", "e-1", snapshot as never, {}, "w"),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(start).not.toHaveBeenCalled();
   });
@@ -43,14 +49,16 @@ describe("automatic-trigger activation gate", () => {
   it("startForm is REFUSED (409) for a deactivated workflow — no run started", async () => {
     const { service, start } = makeService(false);
     await expect(
-      service.startForm("t-1", snapshot as never, {}, "w"),
+      service.startForm("t-1", "e-1", snapshot as never, {}, "w"),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(start).not.toHaveBeenCalled();
   });
 
   it("an ACTIVE workflow is not blocked by the gate (it proceeds to start)", async () => {
-    const { service, start } = makeService(true);
-    await service.startWebhook("t-1", snapshot as never, {}, "w");
+    const { service, start, graphs } = makeService(true);
+    await service.startWebhook("t-1", "e-1", snapshot as never, {}, "w");
     expect(start).toHaveBeenCalledOnce();
+    // The activation gate is checked in the endpoint's OWN env, not the default.
+    expect(graphs.isActive).toHaveBeenCalledWith("t-1", "e-1", "w");
   });
 });

@@ -21,7 +21,7 @@ describe("FormService.createEndpoint", () => {
   it("refuses to register a public form when the tenant has NO budget cap", async () => {
     getBudget.mockResolvedValue(null);
     await expect(
-      new FormService().createEndpoint("t-1", "contact-form"),
+      new FormService().createEndpoint("t-1", "e-1", "contact-form"),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(create).not.toHaveBeenCalled(); // no endpoint row created
   });
@@ -29,10 +29,18 @@ describe("FormService.createEndpoint", () => {
   it("registers and returns the public path when a budget cap exists", async () => {
     getBudget.mockResolvedValue({ monthlyCapUsd: 50 });
     create.mockResolvedValue({ id: "f-1" });
-    const out = await new FormService().createEndpoint("t-1", "contact-form");
+    const out = await new FormService().createEndpoint(
+      "t-1",
+      "e-1",
+      "contact-form",
+    );
     expect(out).toEqual({ formId: "f-1", formPath: "/forms/f-1" });
     expect(create).toHaveBeenCalledWith({
-      data: { tenantId: "t-1", workflowId: "contact-form" },
+      data: {
+        tenantId: "t-1",
+        environmentId: "e-1",
+        workflowId: "contact-form",
+      },
     });
   });
 });

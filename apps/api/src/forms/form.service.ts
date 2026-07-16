@@ -27,6 +27,7 @@ export class FormService {
    */
   async createEndpoint(
     tenantId: string,
+    environmentId: string,
     workflowId: string,
   ): Promise<RegisteredForm> {
     // INVARIANT this gate leans on: budgets have no DELETE path (budget.controller exposes only
@@ -41,7 +42,7 @@ export class FormService {
       );
     }
     const row = await getPrisma().formEndpoint.create({
-      data: { tenantId, workflowId },
+      data: { tenantId, environmentId, workflowId },
     });
     return { formId: row.id, formPath: `/forms/${row.id}` };
   }

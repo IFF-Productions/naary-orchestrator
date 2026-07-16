@@ -155,7 +155,7 @@ describe("WebhookService.list", () => {
 describe("WebhookService.createEndpoint", () => {
   it("returns an ingress path + a generated signing secret", async () => {
     m.create.mockResolvedValue({ id: "ep_1" });
-    const reg = await svc.createEndpoint("t1", "wf-1", "github");
+    const reg = await svc.createEndpoint("t1", "e1", "wf-1", "github");
     expect(reg.endpointId).toBe("ep_1");
     expect(reg.ingressPath).toBe("/hooks/ep_1");
     expect(reg.signingSecret).toMatch(/^[0-9a-f]{64}$/); // 32 random bytes hex
@@ -163,7 +163,7 @@ describe("WebhookService.createEndpoint", () => {
 
   it("stores the signing secret ENCRYPTED at rest and round-trips it (Sec#8)", async () => {
     m.create.mockResolvedValue({ id: "ep_2" });
-    const reg = await svc.createEndpoint("t1", "wf-1", "github");
+    const reg = await svc.createEndpoint("t1", "e1", "wf-1", "github");
     const stored = m.create.mock.calls[0][0].data.signingSecret as string;
     // the persisted column is ciphertext, not the plaintext key
     expect(stored).not.toContain(reg.signingSecret);

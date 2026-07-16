@@ -42,7 +42,6 @@ function makeController(opts: {
     chats as never,
     graphs as never,
     executions as never,
-    { defaultEnvId: async () => "e1", resolveEnvId: async () => "e1" } as never,
   );
   return { controller, chats, graphs, executions };
 }
@@ -60,7 +59,12 @@ const DURABLE_GRAPH: GraphDef = {
   edges: [{ from: "chat", to: "end" }],
 };
 
-const ENDPOINT = { id: "c-1", tenantId: "t-1", workflowId: "support-chat" };
+const ENDPOINT = {
+  id: "c-1",
+  tenantId: "t-1",
+  environmentId: "e-1",
+  workflowId: "support-chat",
+};
 
 describe("ChatController (public)", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -102,6 +106,7 @@ describe("ChatController (public)", () => {
     expect(JSON.stringify(out)).not.toContain("t-1");
     expect(executions.startChatAwaitResponse).toHaveBeenCalledWith(
       "t-1",
+      "e-1",
       { graph: CHAT_GRAPH },
       { message: "hello", sessionId: "s-1", history: [] },
       "support-chat",
@@ -119,7 +124,7 @@ describe("ChatController (public)", () => {
 
     // history loaded for this session and threaded into the run input
     expect(chats.loadHistory).toHaveBeenCalledWith("t-1", "c-1", "s-1");
-    expect(executions.startChatAwaitResponse.mock.calls[0][2]).toEqual({
+    expect(executions.startChatAwaitResponse.mock.calls[0][3]).toEqual({
       message: "hello",
       sessionId: "s-1",
       history: [{ role: "user", text: "earlier" }],
@@ -191,6 +196,7 @@ describe("ChatController (public)", () => {
     expect(out).toEqual({ status: "replied", reply: "durable answer" });
     expect(executions.sendChatSessionMessage).toHaveBeenCalledWith(
       "t-1",
+      "e-1",
       { graph: DURABLE_GRAPH },
       { message: "hi", sessionId: "s-1", chatId: "c-1" },
       "support-chat",

@@ -94,7 +94,7 @@ describe("AuthGuard", () => {
   });
 
   it("attaches the resolved tenant (owner) on a valid API token", async () => {
-    verify.mockResolvedValue("t-1");
+    verify.mockResolvedValue({ tenantId: "t-1", environmentId: null });
     const req: FakeReq = {
       headers: { authorization: "Bearer nry_good" },
       path: "/executions",
@@ -129,7 +129,7 @@ describe("AuthGuard", () => {
   // --- API-token cross-tenant isolation (must stay green through the guard rewrite) ---
 
   it("403s when a /tenants/:id path tenant differs from the API token's tenant", async () => {
-    verify.mockResolvedValue("t-1");
+    verify.mockResolvedValue({ tenantId: "t-1", environmentId: null });
     const req: FakeReq = {
       headers: { authorization: "Bearer nry_good" },
       path: "/tenants/t-OTHER/credentials",
@@ -141,7 +141,7 @@ describe("AuthGuard", () => {
   });
 
   it("allows a /tenants/:id path that matches the API token's tenant", async () => {
-    verify.mockResolvedValue("t-1");
+    verify.mockResolvedValue({ tenantId: "t-1", environmentId: null });
     const req: FakeReq = {
       headers: { authorization: "Bearer nry_good" },
       path: "/tenants/t-1/credentials",
@@ -153,7 +153,7 @@ describe("AuthGuard", () => {
   it("still 403s a cross-tenant path UNDER A GLOBAL PREFIX (no silent bypass)", async () => {
     // A prefix must not disable tenant isolation. Enforcement keys off the /tenants/
     // segment by pattern, not a path prefix, and doesn't rely on req.params.
-    verify.mockResolvedValue("t-1");
+    verify.mockResolvedValue({ tenantId: "t-1", environmentId: null });
     const req: FakeReq = {
       headers: { authorization: "Bearer nry_good" },
       path: "/api/tenants/t-OTHER/credentials",
@@ -165,7 +165,7 @@ describe("AuthGuard", () => {
   });
 
   it("does NOT apply the tenant check to a non-tenant route (executions/:id is a workflowId)", async () => {
-    verify.mockResolvedValue("t-1");
+    verify.mockResolvedValue({ tenantId: "t-1", environmentId: null });
     const req: FakeReq = {
       headers: { authorization: "Bearer nry_good" },
       path: "/executions/wh-t-1-abc123",
@@ -175,7 +175,7 @@ describe("AuthGuard", () => {
   });
 
   it("403s an API token whose X-Workspace-Id names a different tenant", async () => {
-    verify.mockResolvedValue("t-1");
+    verify.mockResolvedValue({ tenantId: "t-1", environmentId: null });
     const req: FakeReq = {
       headers: {
         authorization: "Bearer nry_good",
@@ -186,6 +186,53 @@ describe("AuthGuard", () => {
     await expect(makeGuard().canActivate(ctx(req))).rejects.toBeInstanceOf(
       ForbiddenException,
     );
+  });
+
+  // --- API token ↔ environment binding (design ENVIRONMENTS.md §3, Slice 4) ---
+
+  it("an env-BOUND token stamps its own env as the principal's environmentSel", async () => {
+    verify.mockResolvedValue({ tenantId: "t-1", environmentId: "env-uat" });
+    const req: FakeReq = {
+      headers: { authorization: "Bearer nry_bound" },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(req.principal).toEqual({
+      tenantId: "t-1",
+      role: "owner",
+      environmentSel: "env-uat",
+    });
+  });
+
+  it("403s an env-BOUND token that ALSO sends X-Environment-Id (conflicting intent)", async () => {
+    verify.mockResolvedValue({ tenantId: "t-1", environmentId: "env-uat" });
+    const req: FakeReq = {
+      headers: {
+        authorization: "Bearer nry_bound",
+        "x-environment-id": "env-prod",
+      },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it("an UNBOUND token honours the caller's X-Environment-Id header", async () => {
+    verify.mockResolvedValue({ tenantId: "t-1", environmentId: null });
+    const req: FakeReq = {
+      headers: {
+        authorization: "Bearer nry_unbound",
+        "x-environment-id": "env-sandbox",
+      },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(req.principal).toEqual({
+      tenantId: "t-1",
+      role: "owner",
+      environmentSel: "env-sandbox",
+    });
   });
 
   // --- Firebase user → membership resolution ---
@@ -444,7 +491,7 @@ describe("AuthGuard — access allowlist (ACCESS_ALLOWED_EMAILS)", () => {
 
   it("does NOT gate `nry_` API tokens (owner capability) even when the list is set", async () => {
     process.env[KEY] = "me@acme.com";
-    verify.mockResolvedValue("t-1");
+    verify.mockResolvedValue({ tenantId: "t-1", environmentId: null });
     const req: FakeReq = {
       headers: { authorization: "Bearer nry_owner" },
       path: "/executions",

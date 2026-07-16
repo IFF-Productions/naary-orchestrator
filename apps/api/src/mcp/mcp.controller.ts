@@ -99,8 +99,8 @@ export class McpController {
       return;
     }
 
-    const tenantId = await this.authenticate(req);
-    if (!tenantId) {
+    const auth = await this.authenticate(req);
+    if (!auth) {
       rpcError(
         401,
         -32001,
@@ -109,9 +109,12 @@ export class McpController {
       );
       return;
     }
+    const { tenantId } = auth;
 
-    // MCP token isn't env-bound yet → operate in the tenant's default env (design §Slice 4).
-    const envId = await this.environments.defaultEnvId(tenantId);
+    // A token bound to an environment operates in it; an unbound token falls back to the
+    // tenant's default env (design §Slice 4 — endpoint/token's env wins).
+    const envId =
+      auth.environmentId ?? (await this.environments.defaultEnvId(tenantId));
 
     // Fetch the tenant's workflows up front so each can be exposed as its own tool (flavor B).
     // Best-effort — a listing hiccup just means no per-workflow tools this session.
@@ -188,8 +191,11 @@ export class McpController {
     };
   }
 
-  /** Resolve a `nry_` bearer token to its tenantId, or null if absent/invalid. */
-  private async authenticate(req: McpRequest): Promise<string | null> {
+  /** Resolve a `nry_` bearer token to its tenantId + bound env (env is null if the token isn't
+   *  pinned to one), or null if absent/invalid. */
+  private async authenticate(
+    req: McpRequest,
+  ): Promise<{ tenantId: string; environmentId: string | null } | null> {
     const header = req.headers.authorization;
     if (!header?.startsWith("Bearer ")) return null;
     return this.tokens.verify(header.slice("Bearer ".length).trim());
