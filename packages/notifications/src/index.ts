@@ -44,6 +44,13 @@ export function slackEscape(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/** Safe to embed inside a Slack inline-code span (`` `…` ``): slackEscape does NOT neutralize
+ *  backticks, so a value containing one would close the code span and mangle the message. Replace
+ *  backticks with a modifier-letter apostrophe (renders near-identically) after escaping. */
+export function codeText(s: string): string {
+  return slackEscape(s).replace(/`/g, "ʼ");
+}
+
 /** Short headline for the notification, shared by the Slack header + the Teams card. */
 export function notificationHeader(input: NotificationInput): string {
   return input.kind === "approval_pending"
@@ -85,11 +92,16 @@ export function notificationText(
   input: NotificationInput,
   links: NotificationLinks,
 ): string {
-  const wf = input.workflowKey ? `"${input.workflowKey}"` : "a workflow";
+  // Slack treats the top-level `text` as mrkdwn too (it's the fallback/notification line some
+  // clients show), so escape the interpolated user values — NOT the URLs, which must stay intact.
+  const wf = input.workflowKey
+    ? `"${slackEscape(input.workflowKey)}"`
+    : "a workflow";
+  const runId = slackEscape(input.workflowId);
   if (input.kind === "approval_pending") {
-    return `⏳ Approval needed on ${wf}${input.title ? `: ${input.title}` : ""} (run ${input.workflowId}).${links.approvalUrl ? ` Approve or reject: ${links.approvalUrl}` : ""}`;
+    return `⏳ Approval needed on ${wf}${input.title ? `: ${slackEscape(input.title)}` : ""} (run ${runId}).${links.approvalUrl ? ` Approve or reject: ${links.approvalUrl}` : ""}`;
   }
-  return `❌ ${wf} run failed${input.detail ? ` (${input.detail})` : ""} — run ${input.workflowId}.${links.runUrl ? ` View: ${links.runUrl}` : ""}`;
+  return `❌ ${wf} run failed${input.detail ? ` (${slackEscape(input.detail)})` : ""} — run ${runId}.${links.runUrl ? ` View: ${links.runUrl}` : ""}`;
 }
 
 /**
@@ -110,10 +122,11 @@ export function notificationBlocks(
   // The run as an ACTUAL clickable link when we have a URL, not a bare id reference. The
   // label is escaped so a workflowId with & < > can't break the `<url|label>` markup (the
   // URL itself is already encodeURIComponent'd by runUrl, so it needs no escaping).
-  const runId = slackEscape(input.workflowId);
+  // Link label: slackEscape (protects the `<url|label>` markup). Bare fallback: codeText, since
+  // it sits in a backtick code span where a stray backtick would break the span.
   const runField = links.runUrl
-    ? `<${links.runUrl}|run ${runId}>`
-    : `\`${runId}\``;
+    ? `<${links.runUrl}|run ${slackEscape(input.workflowId)}>`
+    : `\`${codeText(input.workflowId)}\``;
   // Only the SHORT key-values go in the 2-column `fields` grid — a workflow key and the run link
   // are half-width-friendly. The free-text Awaiting/Reason (which can be a full sentence) gets its
   // own full-width `section` below instead of being crammed into a half-width grid column (which
@@ -121,7 +134,7 @@ export function notificationBlocks(
   const fields: { type: "mrkdwn"; text: string }[] = [
     {
       type: "mrkdwn",
-      text: `*Workflow*\n${input.workflowKey ? `\`${slackEscape(input.workflowKey)}\`` : "_unnamed_"}`,
+      text: `*Workflow*\n${input.workflowKey ? `\`${codeText(input.workflowKey)}\`` : "_unnamed_"}`,
     },
     { type: "mrkdwn", text: `*Run*\n${runField}` },
   ];
@@ -148,7 +161,7 @@ export function notificationBlocks(
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*Reason*\n\`${slackEscape(input.detail)}\``,
+        text: `*Reason*\n\`${codeText(input.detail)}\``,
       },
     });
   if (actions.length)

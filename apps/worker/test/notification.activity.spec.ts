@@ -175,6 +175,34 @@ describe("sendNotification", () => {
         b.type === "section" && b.text && !b.fields,
     );
     expect(reasonSection?.text.text).toContain("timeout &amp; &lt;reset&gt;");
+    // The top-level `text` fallback (Slack renders it as mrkdwn too) is ALSO escaped, so control
+    // chars can't break/inject in clients that show the fallback line.
+    expect(body.text).toContain("orders&lt;x&gt;");
+    expect(body.text).toContain("wf-&lt;a&amp;b&gt;");
+    expect(body.text).not.toMatch(/orders<x>/);
+  });
+
+  it("neutralizes backticks so a value can't break a Slack inline-code span", async () => {
+    await sendNotification({
+      ...BASE,
+      workflowKey: "orders`rm -rf`",
+      kind: "run_failed",
+      detail: "boom`code`",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    const codeSpans = body.blocks
+      .flatMap(
+        (b: { fields?: { text: string }[]; text?: { text: string } }) => [
+          ...(b.fields?.map((f) => f.text) ?? []),
+          b.text?.text ?? "",
+        ],
+      )
+      .join("\n");
+    // No raw backtick survives inside the rendered code spans (workflowKey + Reason).
+    expect(codeSpans).not.toContain("`rm -rf`");
+    expect(codeSpans).not.toContain("boom`code`");
+    expect(codeSpans).toContain("ordersʼrm -rf");
+    expect(codeSpans).toContain("boomʼcode");
   });
 
   it("renders the run id (no link) in the fields section when APP_BASE_URL is unset", async () => {

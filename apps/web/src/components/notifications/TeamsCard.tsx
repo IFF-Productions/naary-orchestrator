@@ -106,7 +106,8 @@ export function TeamsCard({ payload }: { payload: unknown }) {
                 <a
                   // biome-ignore lint/suspicious/noArrayIndexKey: fixed, ordered actions
                   key={i}
-                  href={a.url}
+                  // Untyped card input: omit href rather than emit href="undefined".
+                  href={a.url || undefined}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",

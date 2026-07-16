@@ -100,6 +100,13 @@ function Mrkdwn({ text, c }: { text: string; c: Palette }): ReactNode {
   ));
 }
 
+// The formatter (@naary/notifications.slackEscape) emits &amp;/&lt;/&gt; so Slack mrkdwn treats
+// them as literal chars — Slack then DECODES the entities for display. Do the same here, else the
+// preview shows literal "&lt;" where Slack shows "<". Decode &amp; LAST so "&amp;lt;" → "&lt;".
+function decode(s: string): string {
+  return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+}
+
 function renderInline(line: string, c: Palette): ReactNode[] {
   const out: ReactNode[] = [];
   // Tokenize on <url|label> links, *bold*, and `code`, in one pass.
@@ -109,7 +116,7 @@ function renderInline(line: string, c: Palette): ReactNode[] {
   let k = 0;
   // biome-ignore lint/suspicious/noAssignInExpressions: standard regex exec loop
   while ((m = re.exec(line)) !== null) {
-    if (m.index > last) out.push(line.slice(last, m.index));
+    if (m.index > last) out.push(decode(line.slice(last, m.index)));
     if (m[1]) {
       out.push(
         <a
@@ -118,14 +125,14 @@ function renderInline(line: string, c: Palette): ReactNode[] {
           href={m[1]}
           style={{ color: c.link, textDecoration: "none" }}
         >
-          {m[2]}
+          {decode(m[2])}
         </a>,
       );
     } else if (m[3]) {
       out.push(
         // biome-ignore lint/suspicious/noArrayIndexKey: stable within a single render
         <strong key={k++} style={{ fontWeight: 700, color: c.strong }}>
-          {m[3]}
+          {decode(m[3])}
         </strong>,
       );
     } else if (m[4]) {
@@ -144,13 +151,13 @@ function renderInline(line: string, c: Palette): ReactNode[] {
             wordBreak: "break-all",
           }}
         >
-          {m[4]}
+          {decode(m[4])}
         </code>,
       );
     }
     last = m.index + m[0].length;
   }
-  if (last < line.length) out.push(line.slice(last));
+  if (last < line.length) out.push(decode(line.slice(last)));
   return out;
 }
 
@@ -179,10 +186,14 @@ function Button({ btn, c }: { btn: SlackButton; c: Palette }) {
     style.color = c.danger;
     style.border = `1px solid ${c.danger}`;
   }
-  return (
+  // A url-less button (shouldn't happen from the real formatter, but blocks are untyped input)
+  // renders as a non-navigable span rather than an <a> with an undefined href.
+  return btn.url ? (
     <a href={btn.url} style={style}>
       {btn.text.text}
     </a>
+  ) : (
+    <span style={style}>{btn.text.text}</span>
   );
 }
 

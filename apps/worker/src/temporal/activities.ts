@@ -71,6 +71,8 @@ import { getAdapter } from "@naary/sql";
 import { getDefaultEnvironmentId, getPrisma } from "@naary/db";
 import { createLogger } from "@naary/logging";
 import {
+  type NotificationInput as FormatterNotificationInput,
+  type NotificationKind,
   type NotificationLinks,
   notificationPayload,
 } from "@naary/notifications";
@@ -918,16 +920,13 @@ export async function callPoll(
   }
 }
 
-export type NotificationKind = "approval_pending" | "run_failed";
-export interface NotificationInput {
+// The formatting shape (kind/workflowId/workflowKey/title/detail) is owned by @naary/notifications
+// — extend it with the worker-only `tenantId` rather than re-declaring the fields, so the two can't
+// drift. `notificationPayload()` is typed against the formatter's input; the extra `tenantId` is
+// structurally compatible.
+export type { NotificationKind };
+export interface NotificationInput extends FormatterNotificationInput {
   tenantId: string;
-  kind: NotificationKind;
-  workflowId: string;
-  workflowKey?: string;
-  /** For approval_pending: the approval node's title (from the graph). */
-  title?: string;
-  /** For run_failed: the terminal status / error type. */
-  detail?: string;
 }
 
 /** One enabled channel the worker will POST to (subset of the NotificationChannel row). */

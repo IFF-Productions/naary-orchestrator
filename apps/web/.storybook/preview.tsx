@@ -1,5 +1,5 @@
 import type { Decorator, Preview } from "@storybook/react-vite";
-import { useEffect } from "react";
+import { type ReactNode, useEffect } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { initialize, mswLoader } from "msw-storybook-addon";
 // The real design tokens (--ink / --brand / --surface …) + resets the app renders with. Without
@@ -32,8 +32,15 @@ const withRouter: Decorator = (Story, ctx) => {
 
 // The app is dark-first; light theme via [data-theme="light"] (styles/tokens.css). Mirror that
 // here with a toolbar switch so stories can be inspected in both themes.
-const withTheme: Decorator = (Story, ctx) => {
-  const theme = ctx.globals.theme ?? "dark";
+// A real component (not the decorator fn) owns the hook, so react-hooks/rules-of-hooks is satisfied
+// — a lower-cased decorator calling useEffect isn't recognized as a component/custom hook.
+function ThemeStage({
+  theme,
+  children,
+}: {
+  theme: string;
+  children: ReactNode;
+}) {
   useEffect(() => {
     const el = document.documentElement;
     if (theme === "light") el.setAttribute("data-theme", "light");
@@ -41,8 +48,14 @@ const withTheme: Decorator = (Story, ctx) => {
     document.body.style.background = "var(--bg, var(--surface))";
     document.body.style.color = "var(--ink)";
   }, [theme]);
-  return <Story />;
-};
+  return <>{children}</>;
+}
+
+const withTheme: Decorator = (Story, ctx) => (
+  <ThemeStage theme={(ctx.globals.theme as string) ?? "dark"}>
+    <Story />
+  </ThemeStage>
+);
 
 const preview: Preview = {
   parameters: {
