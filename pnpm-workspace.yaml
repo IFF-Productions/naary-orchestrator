@@ -22,6 +22,12 @@ minimumReleaseAgeExclude:
   - '@aws-sdk/client-s3@3.1085.0'
   - fast-xml-parser@5.10.0
   - is-unsafe@2.0.0
+  - '@storybook/builder-vite@10.5.1'
+  - '@storybook/csf-plugin@10.5.1'
+  - '@storybook/react-dom-shim@10.5.1'
+  - '@storybook/react-vite@10.5.1'
+  - '@storybook/react@10.5.1'
+  - storybook@10.5.1
 
 # Force patched versions of transitive deps flagged by Dependabot (pnpm 11 reads
 # overrides from here, not package.json). All are minor/patch bumps:
