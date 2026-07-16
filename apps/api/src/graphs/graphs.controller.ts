@@ -78,11 +78,14 @@ export class GraphsController {
     ok: GenerateGraphResponse,
   })
   @Post("generate")
-  generate(
+  async generate(
     @TenantId() tenantId: string,
     @Body() body: GenerateGraphDto,
+    @EnvironmentSel() envSel?: string,
   ): Promise<{ name: string; graph: GraphDef }> {
-    return this.generator.generate(tenantId, body.prompt, body.provider);
+    // Generate against the ACTIVE env's provider key + connections (Slice 5).
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    return this.generator.generate(tenantId, envId, body.prompt, body.provider);
   }
 
   /** Every stored version of a workflowKey (newest first) — powers the "re-run at

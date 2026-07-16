@@ -161,7 +161,11 @@ export class McpController {
     let draftName: string;
     let draftGraph: GraphDef;
     if (prompt?.trim()) {
-      const gen = await this.generator.generate(tenantId, prompt);
+      const gen = await this.generator.generate(
+        tenantId,
+        environmentId,
+        prompt,
+      );
       draftName = name?.trim() || gen.name;
       draftGraph = gen.graph;
     } else if (graph) {

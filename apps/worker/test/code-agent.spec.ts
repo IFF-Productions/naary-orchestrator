@@ -27,6 +27,7 @@ beforeEach(() => {
   recordUsage.mockReset().mockResolvedValue(undefined);
   exec.mockReset().mockResolvedValue({ stdout: envelope(), exitCode: 0 });
   __codeAgentDeps.getCredentials = (() => ({ getDecryptedKey })) as never;
+  __codeAgentDeps.getDefaultEnvId = (() => Promise.resolve("e1")) as never;
   __codeAgentDeps.recordUsage = recordUsage as never;
   __codeAgentDeps.exec = exec as never;
 });
@@ -82,7 +83,7 @@ describe("callCodeAgent activity", () => {
   it("fetches the DEDICATED claude-code credential (not the anthropic key) + passes an API key as ANTHROPIC_API_KEY", async () => {
     await callCodeAgent(CFG, {}, META);
     // Separate credential slot from the model-provider `anthropic` key.
-    expect(getDecryptedKey).toHaveBeenCalledWith("t1", "claude-code");
+    expect(getDecryptedKey).toHaveBeenCalledWith("t1", "e1", "claude-code");
     const [binary, , opts] = exec.mock.calls[0];
     expect(binary).toBe("claude");
     // sk-ant-xxx is an API-key-shaped token → ANTHROPIC_API_KEY (not the OAuth var).

@@ -4,6 +4,7 @@ const executeRaw = vi.fn();
 const queryRaw = vi.fn();
 vi.mock("@naary/db", () => ({
   getPrisma: () => ({ $executeRaw: executeRaw, $queryRaw: queryRaw }),
+  getDefaultEnvironmentId: () => Promise.resolve("e1"),
 }));
 
 import { __setObjectStore, MemoryObjectStore } from "@naary/storage";

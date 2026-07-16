@@ -34,9 +34,15 @@ export async function resolveAuthHeader(
   if (!conn) {
     throw new Error(`Unknown connection '${connectionId}'`);
   }
+  // The connection's secrets live in the connection's OWN env (§Slice 5) — read them there.
+  const envId = conn.environmentId;
 
   if (conn.authMode === "api_token" || conn.authMode === "pat") {
-    const token = await store.get(tenantId, connectionSecretKey(connectionId));
+    const token = await store.get(
+      tenantId,
+      envId,
+      connectionSecretKey(connectionId),
+    );
     if (!token) {
       throw new MissingConnectionTokenError(connectionId);
     }
@@ -46,10 +52,15 @@ export async function resolveAuthHeader(
   if (conn.authMode === "oauth") {
     // B4: non-interactive refresh (cached + per-connection lock) from the stored
     // refresh token. invalid_grant flips the connection to needs_reauth.
-    const accessToken = await getOAuthAccessToken(tenantId, connectionId, {
-      store,
-      connections,
-    });
+    const accessToken = await getOAuthAccessToken(
+      tenantId,
+      envId,
+      connectionId,
+      {
+        store,
+        connections,
+      },
+    );
     return { Authorization: `Bearer ${accessToken}` };
   }
 
@@ -58,6 +69,7 @@ export async function resolveAuthHeader(
     // access token from the platform app credentials (cached + single-flight in github-app.ts).
     const grantJson = await store.get(
       tenantId,
+      envId,
       connectionSecretKey(connectionId),
     );
     return resolveGithubAppHeader(tenantId, connectionId, {

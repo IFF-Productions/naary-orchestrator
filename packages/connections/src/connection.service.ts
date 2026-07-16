@@ -73,11 +73,13 @@ export class ConnectionService {
 
   async create(
     tenantId: string,
+    environmentId: string,
     input: CreateConnectionInput,
   ): Promise<ConnectionView> {
     const row = await getPrisma().connection.create({
       data: {
         tenantId,
+        environmentId,
         type: input.type,
         label: input.label,
         serverUrl: input.serverUrl,
@@ -86,21 +88,34 @@ export class ConnectionService {
       },
     });
     if (input.token) {
-      await this.store.put(tenantId, connectionSecretKey(row.id), input.token);
+      // The secret lives in the SAME env as the connection, so resolvers can read it back off the
+      // connection row's own environmentId without the run needing to thread its env.
+      await this.store.put(
+        tenantId,
+        environmentId,
+        connectionSecretKey(row.id),
+        input.token,
+      );
     }
     return toView(row);
   }
 
-  async list(tenantId: string): Promise<ConnectionView[]> {
+  async list(
+    tenantId: string,
+    environmentId: string,
+  ): Promise<ConnectionView[]> {
     const rows = await getPrisma().connection.findMany({
-      where: { tenantId },
+      where: { tenantId, environmentId },
       orderBy: { createdAt: "desc" },
     });
     return rows.map(toView);
   }
 
   async remove(tenantId: string, id: string): Promise<void> {
-    await this.store.remove(tenantId, connectionSecretKey(id));
+    // The secret key `conn:<id>` is globally unique (a connection id can't collide across envs), so
+    // purge it env-agnostically — no need to read the connection first, and it still cleans up even
+    // if the connection row is already gone (no orphaned `conn:<id>` secret rows).
+    await this.store.removeAllEnvs(tenantId, connectionSecretKey(id));
     await getPrisma().connection.deleteMany({ where: { id, tenantId } });
   }
 
@@ -135,7 +150,7 @@ export async function resolveDbConnection(
 ): Promise<{ engine: DbEngine; dsn: string }> {
   const conn = await getPrisma().connection.findFirst({
     where: { id: connectionId, tenantId },
-    select: { type: true },
+    select: { type: true, environmentId: true },
   });
   if (!conn) throw new Error(`Unknown connection '${connectionId}'`);
   if (!DB_ENGINES.has(conn.type)) {
@@ -143,7 +158,12 @@ export async function resolveDbConnection(
       `Connection '${connectionId}' is not a SQL database connection`,
     );
   }
-  const dsn = await store.get(tenantId, connectionSecretKey(connectionId));
+  // The secret is stored in the connection's OWN env — read it there (§Slice 5).
+  const dsn = await store.get(
+    tenantId,
+    conn.environmentId,
+    connectionSecretKey(connectionId),
+  );
   if (!dsn) throw new MissingConnectionTokenError(connectionId);
   return { engine: conn.type as DbEngine, dsn };
 }
@@ -162,13 +182,17 @@ export async function resolveSigningKey(
 ): Promise<string> {
   const conn = await getPrisma().connection.findFirst({
     where: { id: connectionId, tenantId },
-    select: { type: true },
+    select: { type: true, environmentId: true },
   });
   if (!conn) throw new Error(`Unknown connection '${connectionId}'`);
   if (conn.type !== "signing") {
     throw new Error(`Connection '${connectionId}' is not a signing connection`);
   }
-  const key = await store.get(tenantId, connectionSecretKey(connectionId));
+  const key = await store.get(
+    tenantId,
+    conn.environmentId,
+    connectionSecretKey(connectionId),
+  );
   if (!key) throw new MissingConnectionTokenError(connectionId);
   return key;
 }
@@ -186,13 +210,17 @@ export async function resolveSmtpUri(
 ): Promise<string> {
   const conn = await getPrisma().connection.findFirst({
     where: { id: connectionId, tenantId },
-    select: { type: true },
+    select: { type: true, environmentId: true },
   });
   if (!conn) throw new Error(`Unknown connection '${connectionId}'`);
   if (conn.type !== "smtp") {
     throw new Error(`Connection '${connectionId}' is not an smtp connection`);
   }
-  const uri = await store.get(tenantId, connectionSecretKey(connectionId));
+  const uri = await store.get(
+    tenantId,
+    conn.environmentId,
+    connectionSecretKey(connectionId),
+  );
   if (!uri) throw new MissingConnectionTokenError(connectionId);
   return uri;
 }

@@ -47,8 +47,11 @@ export class OAuthController {
     const redirectUri =
       process.env.OAUTH_REDIRECT_URI ??
       `http://localhost:${process.env.PORT ?? 3000}/oauth/callback`;
+    // Consent stores the refresh token in the connection's OWN env (Slice 5) — the callback is
+    // @Public and can't send X-Environment-Id, so the env rides in the (encoded) state.
     return startConsent({
       tenantId,
+      environmentId: conn.environmentId,
       connectionId,
       serverUrl: conn.serverUrl,
       redirectUri,

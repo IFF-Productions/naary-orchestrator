@@ -68,7 +68,7 @@ import {
   safeFetch,
 } from "@naary/connections";
 import { getAdapter } from "@naary/sql";
-import { getPrisma } from "@naary/db";
+import { getDefaultEnvironmentId, getPrisma } from "@naary/db";
 import { createLogger } from "@naary/logging";
 import {
   activityDuration,
@@ -1887,6 +1887,7 @@ function buildModel(provider: string, model: string, apiKey: string) {
  */
 export const __agentDeps = {
   getCredentials,
+  getDefaultEnvId: getDefaultEnvironmentId,
   recordUsage,
   getBudget,
   monthToDateSpend,
@@ -1928,10 +1929,14 @@ export async function runAgent(
     // anthropic is the only supported provider today; opus is a safe default model.
     const provider = cfg.provider?.trim() || "anthropic";
 
-    // In memory only — never returned from the activity, never logged.
+    // In memory only — never returned from the activity, never logged. Slice 5a shim: creds are
+    // env-scoped, but the run's env isn't threaded through the workflow ctx yet (that's 5b), so
+    // resolve the tenant's DEFAULT env here — byte-identical to pre-Slice-5 behavior. In 5b this
+    // becomes `meta.environmentId`.
+    const envId = await __agentDeps.getDefaultEnvId(meta.tenantId);
     const apiKey = await __agentDeps
       .getCredentials()
-      .getDecryptedKey(meta.tenantId, provider);
+      .getDecryptedKey(meta.tenantId, envId, provider);
 
     // Pre-flight budget enforcement via an atomic RESERVATION (Arch§4.3): reserve
     // this call's estimated cost against the monthly cap BEFORE the LLM call, so
@@ -2189,6 +2194,7 @@ export interface CodeAgentResult {
  */
 export const __codeAgentDeps = {
   getCredentials,
+  getDefaultEnvId: getDefaultEnvironmentId,
   recordUsage,
   /** Run the CLI; resolve {stdout, exitCode} even on a non-zero exit (the CLI may still
    *  emit its JSON envelope), reject only on spawn failure (binary missing) / timeout. */
@@ -2245,10 +2251,12 @@ export async function callCodeAgent(
   const startedAt = process.hrtime.bigint();
   try {
     const driver = resolveDriver(cfg.tool);
-    // In memory only — injected as the subprocess env var, never returned/logged.
+    // In memory only — injected as the subprocess env var, never returned/logged. Slice 5a shim:
+    // default env until the run's env threads through ctx (5b). See runAgent for the rationale.
+    const envId = await __codeAgentDeps.getDefaultEnvId(meta.tenantId);
     const apiKey = await __codeAgentDeps
       .getCredentials()
-      .getDecryptedKey(meta.tenantId, driver.credentialProvider);
+      .getDecryptedKey(meta.tenantId, envId, driver.credentialProvider);
 
     const write = cfg.mode === "write";
     const args = driver.buildArgs({
@@ -3575,8 +3583,14 @@ const EMBED_DIM = 1536;
 
 /** Swappable seam for tests (embed + DB writes) — mirrors __agentDeps/__mapDeps. */
 export const __ragDeps = {
-  getKey: (tenantId: string): Promise<string> =>
-    getCredentials().getDecryptedKey(tenantId, "openai"),
+  // Slice 5a shim: env-scoped creds, but the run's env isn't in ctx yet (5b) → default env, so
+  // behavior is byte-identical to pre-Slice-5. The two callers pass meta.tenantId.
+  getKey: async (tenantId: string): Promise<string> =>
+    getCredentials().getDecryptedKey(
+      tenantId,
+      await getDefaultEnvironmentId(tenantId),
+      "openai",
+    ),
   embedOne: async (
     apiKey: string,
     value: string,

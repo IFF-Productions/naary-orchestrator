@@ -273,6 +273,10 @@ model WebhookDelivery {
 model Connection {
   id        String   @id @default(uuid())
   tenantId  String
+  // Env-scoped (design ENVIRONMENTS.md §3, Slice 5): a sandbox run binds to sandbox connections,
+  // prod to prod — separate live/test integrations. Backfilled to the tenant's default env.
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
   type      String // 'atlassian' | 'github' | 'custom'
   label     String
   serverUrl String // e.g. https://mcp.atlassian.com/v1/mcp
@@ -282,7 +286,7 @@ model Connection {
   // secret/refresh token stored via the Slice #2 encrypted credential store, keyed by this id
   createdAt DateTime @default(now())
 
-  @@unique([tenantId, type, label])
+  @@unique([tenantId, environmentId, type, label])
 }
 
 model TenantBudget {
@@ -298,6 +302,12 @@ model TenantBudget {
 model TenantCredential {
   id              String    @id @default(uuid())
   tenantId        String
+  // Env-scoped (design ENVIRONMENTS.md §3, Slice 5): separate BYOK/provider keys per env — a sandbox
+  // run uses test keys, prod live keys. Backfilled to the tenant's default env. NB the at-rest AAD
+  // stays bound to `${tenantId}:${provider}` (NOT env) — env is a row-lookup concern, not a crypto
+  // one, so backfilled rows still decrypt.
+  environmentId   String
+  environment     Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
   provider        String // 'anthropic' | 'openai' | 'google' | 'ollama'
   ciphertext      String // base64 AES-256-GCM ciphertext
   iv              String // base64 nonce
@@ -307,7 +317,7 @@ model TenantCredential {
   lastValidatedAt DateTime?
   createdAt       DateTime  @default(now())
 
-  @@unique([tenantId, provider])
+  @@unique([tenantId, environmentId, provider])
 }
 
 model UsageEvent {
@@ -362,6 +372,8 @@ model Environment {
   webhookEndpoints    WebhookEndpoint[]
   formEndpoints       FormEndpoint[]
   chatEndpoints       ChatEndpoint[]
+  connections         Connection[]
+  tenantCredentials   TenantCredential[]
 
   @@unique([tenantId, slug])
   @@index([tenantId])

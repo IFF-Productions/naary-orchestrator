@@ -5,6 +5,8 @@ import {
   startGithubAppInstall,
 } from "@naary/connections";
 import { Public } from "../auth/public.decorator";
+import { EnvironmentSel } from "../auth/tenant.decorator";
+import { EnvironmentsService } from "../environments/environments.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import {
   GithubAppInstallStartResponse,
@@ -23,6 +25,8 @@ import { GithubAppInstallStartDto } from "./github-app-install.dto";
  */
 @Controller()
 export class GithubAppController {
+  constructor(private readonly environments: EnvironmentsService) {}
+
   @ApiBearerAuth("bearer")
   @ApiEndpoint({
     summary: "Start GitHub App install",
@@ -34,12 +38,21 @@ export class GithubAppController {
   async start(
     @Param("id") tenantId: string,
     @Body() body: GithubAppInstallStartDto,
+    @EnvironmentSel() envSel?: string,
   ): Promise<{ installUrl: string }> {
+    // The connection is created in the callback (GitHub gives no install id until after consent),
+    // so bind it to the caller's ACTIVE env now — the env rides in the (encoded) state to the
+    // @Public callback, which can't send X-Environment-Id.
+    const environmentId = await this.environments.resolveEnvId(
+      tenantId,
+      envSel,
+    );
     // Return ONLY installUrl — the `state` is a single-use CSRF credential already embedded in
     // installUrl; surfacing it as a separate field would leak it out-of-band and diverge from
     // the Swagger contract (GithubAppInstallStartResponse has just installUrl).
     const { installUrl } = await startGithubAppInstall({
       tenantId,
+      environmentId,
       label: body.label?.trim() || "GitHub",
     });
     return { installUrl };

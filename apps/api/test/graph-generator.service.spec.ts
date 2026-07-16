@@ -58,12 +58,12 @@ describe("GraphGeneratorService", () => {
   it("returns a validated draft graph on the first attempt", async () => {
     generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
 
-    const res = await makeService().generate("t-1", "email me a daily digest");
+    const res = await makeService().generate("t-1", "e-1", "email me a daily digest");
 
     expect(res.name).toBe("Feed to email");
     expect(res.graph.startNodeId).toBe("start");
     expect(res.graph.nodes).toHaveLength(2);
-    expect(getDecryptedKey).toHaveBeenCalledWith("t-1", "anthropic");
+    expect(getDecryptedKey).toHaveBeenCalledWith("t-1", "e-1", "anthropic");
     expect(generateText).toHaveBeenCalledOnce();
   });
 
@@ -78,7 +78,7 @@ describe("GraphGeneratorService", () => {
     ]);
     generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
 
-    await makeService().generate("t-1", "comment on a github issue");
+    await makeService().generate("t-1", "e-1", "comment on a github issue");
 
     const prompt = generateText.mock.calls[0][0].prompt as string;
     // The model is told the EXACT connection id (so it never invents "github").
@@ -91,7 +91,7 @@ describe("GraphGeneratorService", () => {
   it("tells the model NOT to use connection-bound nodes when the tenant has none", async () => {
     listConnections.mockResolvedValue([]);
     generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
-    await makeService().generate("t-1", "do a thing");
+    await makeService().generate("t-1", "e-1", "do a thing");
     const prompt = generateText.mock.calls[0][0].prompt as string;
     expect(prompt).toContain("NO CONNECTIONS are configured");
   });
@@ -101,7 +101,7 @@ describe("GraphGeneratorService", () => {
       .mockResolvedValueOnce({ text: JSON.stringify(invalidOut) })
       .mockResolvedValueOnce({ text: JSON.stringify(validOut) });
 
-    const res = await makeService().generate("t-1", "do a thing");
+    const res = await makeService().generate("t-1", "e-1", "do a thing");
 
     expect(res.graph.nodes).toHaveLength(2);
     expect(generateText).toHaveBeenCalledTimes(2);
@@ -113,7 +113,7 @@ describe("GraphGeneratorService", () => {
   it("gives up with 422 when the repair is still invalid (no infinite loop)", async () => {
     generateText.mockResolvedValue({ text: JSON.stringify(invalidOut) });
 
-    await expect(makeService().generate("t-1", "x")).rejects.toBeInstanceOf(
+    await expect(makeService().generate("t-1", "e-1", "x")).rejects.toBeInstanceOf(
       UnprocessableEntityException,
     );
     expect(generateText).toHaveBeenCalledTimes(2); // one attempt + one repair, then stop
@@ -124,7 +124,7 @@ describe("GraphGeneratorService", () => {
       new MissingCredentialError("t-1", "anthropic"),
     );
 
-    await expect(makeService().generate("t-1", "x")).rejects.toBeInstanceOf(
+    await expect(makeService().generate("t-1", "e-1", "x")).rejects.toBeInstanceOf(
       BadRequestException,
     );
     expect(generateText).not.toHaveBeenCalled();
@@ -140,7 +140,7 @@ describe("GraphGeneratorService", () => {
       }),
     );
 
-    await expect(makeService().generate("t-1", "x")).rejects.toBeInstanceOf(
+    await expect(makeService().generate("t-1", "e-1", "x")).rejects.toBeInstanceOf(
       BadRequestException,
     );
   });
@@ -148,9 +148,9 @@ describe("GraphGeneratorService", () => {
   it("uses an explicitly requested provider (openai) and its key", async () => {
     generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
 
-    await makeService().generate("t-1", "make a flow", "openai");
+    await makeService().generate("t-1", "e-1", "make a flow", "openai");
 
-    expect(getDecryptedKey).toHaveBeenCalledWith("t-1", "openai");
+    expect(getDecryptedKey).toHaveBeenCalledWith("t-1", "e-1", "openai");
     // no auto-select needed when the caller names a provider
     expect(listProviders).not.toHaveBeenCalled();
   });
@@ -163,15 +163,15 @@ describe("GraphGeneratorService", () => {
     ]);
     generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
 
-    await makeService().generate("t-1", "make a flow");
+    await makeService().generate("t-1", "e-1", "make a flow");
 
-    expect(getDecryptedKey).toHaveBeenCalledWith("t-1", "openai");
+    expect(getDecryptedKey).toHaveBeenCalledWith("t-1", "e-1", "openai");
   });
 
   it("400s when the tenant has no valid provider key at all", async () => {
     listProviders.mockResolvedValue([]);
 
-    await expect(makeService().generate("t-1", "x")).rejects.toBeInstanceOf(
+    await expect(makeService().generate("t-1", "e-1", "x")).rejects.toBeInstanceOf(
       BadRequestException,
     );
     expect(generateText).not.toHaveBeenCalled();
@@ -179,13 +179,13 @@ describe("GraphGeneratorService", () => {
 
   it("400s on an unsupported provider name", async () => {
     await expect(
-      makeService().generate("t-1", "x", "cohere"),
+      makeService().generate("t-1", "e-1", "x", "cohere"),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(generateText).not.toHaveBeenCalled();
   });
 
   it("rejects an empty prompt with 400 before any key/model work", async () => {
-    await expect(makeService().generate("t-1", "   ")).rejects.toBeInstanceOf(
+    await expect(makeService().generate("t-1", "e-1", "   ")).rejects.toBeInstanceOf(
       BadRequestException,
     );
     expect(getDecryptedKey).not.toHaveBeenCalled();

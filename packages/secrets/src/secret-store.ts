@@ -2,11 +2,12 @@ import { getPrisma } from "@naary/db";
 import { type KeyEncryptor, createKeyEncryptor } from "./crypto";
 
 /**
- * Generic encrypted secret store, keyed by (tenantId, key). Reuses the same
- * AES-256-GCM encryptor + the TenantCredential table as the BYOK store, but
- * without the Anthropic-specific validation in CredentialsService — for storing
- * connection PATs and OAuth refresh tokens (Slice #4), keyed e.g. `conn:<id>`.
- * Plaintext is returned in memory only; never logged.
+ * Generic encrypted secret store, keyed by (tenantId, environmentId, key) since Slice 5 — secrets
+ * are env-scoped (a sandbox connection's PAT ≠ prod's). Reuses the same AES-256-GCM encryptor + the
+ * TenantCredential table as the BYOK store, but without the Anthropic-specific validation in
+ * CredentialsService — for storing connection PATs and OAuth refresh tokens (Slice #4), keyed e.g.
+ * `conn:<id>`. NB the at-rest AAD stays bound to (tenantId, key), NOT env — env is a row-lookup
+ * dimension only, so a backfilled row still decrypts. Plaintext is returned in memory only; never logged.
  */
 export class SecretStore {
   private readonly encryptor: KeyEncryptor;
@@ -21,12 +22,24 @@ export class SecretStore {
     return `${tenantId}:${key}`;
   }
 
-  async put(tenantId: string, key: string, plaintext: string): Promise<void> {
+  async put(
+    tenantId: string,
+    environmentId: string,
+    key: string,
+    plaintext: string,
+  ): Promise<void> {
     const enc = this.encryptor.encrypt(plaintext, this.aad(tenantId, key));
     await getPrisma().tenantCredential.upsert({
-      where: { tenantId_provider: { tenantId, provider: key } },
+      where: {
+        tenantId_environmentId_provider: {
+          tenantId,
+          environmentId,
+          provider: key,
+        },
+      },
       create: {
         tenantId,
+        environmentId,
         provider: key,
         ciphertext: enc.ciphertext,
         iv: enc.iv,
@@ -46,9 +59,19 @@ export class SecretStore {
     });
   }
 
-  async get(tenantId: string, key: string): Promise<string | null> {
+  async get(
+    tenantId: string,
+    environmentId: string,
+    key: string,
+  ): Promise<string | null> {
     const row = await getPrisma().tenantCredential.findUnique({
-      where: { tenantId_provider: { tenantId, provider: key } },
+      where: {
+        tenantId_environmentId_provider: {
+          tenantId,
+          environmentId,
+          provider: key,
+        },
+      },
     });
     if (!row) return null;
     return this.encryptor.decrypt(
@@ -70,12 +93,14 @@ export class SecretStore {
    */
   async prunePrefixOlderThan(
     tenantId: string,
+    environmentId: string,
     keyPrefix: string,
     olderThanMs: number,
   ): Promise<number> {
     const res = await getPrisma().tenantCredential.deleteMany({
       where: {
         tenantId,
+        environmentId,
         provider: { startsWith: keyPrefix },
         createdAt: { lt: new Date(Date.now() - olderThanMs) },
       },
@@ -83,7 +108,21 @@ export class SecretStore {
     return res.count;
   }
 
-  async remove(tenantId: string, key: string): Promise<void> {
+  async remove(
+    tenantId: string,
+    environmentId: string,
+    key: string,
+  ): Promise<void> {
+    await getPrisma().tenantCredential.deleteMany({
+      where: { tenantId, environmentId, provider: key },
+    });
+  }
+
+  /** Remove a tenant's secret for `key` across ALL environments. For GLOBALLY-UNIQUE keys only
+   *  (e.g. `conn:<connectionId>` — a connection id can't collide across envs), so this deletes the
+   *  single matching row without needing to know its env. Lets a caller purge a connection's secret
+   *  even when the connection row is already gone (avoids orphaned `conn:<id>` rows). */
+  async removeAllEnvs(tenantId: string, key: string): Promise<void> {
     await getPrisma().tenantCredential.deleteMany({
       where: { tenantId, provider: key },
     });

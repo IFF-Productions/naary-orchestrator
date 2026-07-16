@@ -169,6 +169,7 @@ export function __resetOAuthCaches(): void {
  */
 export async function getOAuthAccessToken(
   tenantId: string,
+  environmentId: string,
   connectionId: string,
   deps: OAuthDeps = {},
 ): Promise<string> {
@@ -209,7 +210,11 @@ export async function getOAuthAccessToken(
     const connections = deps.connections ?? new ConnectionService();
     const fetchFn = deps.fetchFn ?? fetch;
 
-    const raw = await store.get(tenantId, connectionSecretKey(connectionId));
+    const raw = await store.get(
+      tenantId,
+      environmentId,
+      connectionSecretKey(connectionId),
+    );
     if (!raw) throw new NeedsReauthError(connectionId);
     const cfg = JSON.parse(raw) as OAuthConfig;
 
@@ -227,6 +232,7 @@ export async function getOAuthAccessToken(
     if (tokens.refresh_token && tokens.refresh_token !== cfg.refreshToken) {
       await store.put(
         tenantId,
+        environmentId,
         connectionSecretKey(connectionId),
         JSON.stringify({ ...cfg, refreshToken: tokens.refresh_token }),
       );
@@ -313,10 +319,13 @@ export async function registerClient(
   return { clientId: j.client_id, clientSecret: j.client_secret };
 }
 
-/** State carries the (non-secret) tenantId so the redirect callback can find it. */
-const encodeState = (tenantId: string) =>
-  `${tenantId}.${b64url(randomBytes(16))}`;
+/** State carries the (non-secret) tenantId + environmentId so the redirect callback — which can't
+ *  send X-Environment-Id — can find the right env-scoped state row + store the token in that env.
+ *  tenantId/environmentId are uuids (no dots), so a `.`-split is unambiguous. */
+const encodeState = (tenantId: string, environmentId: string) =>
+  `${tenantId}.${environmentId}.${b64url(randomBytes(16))}`;
 const tenantFromState = (state: string) => state.split(".")[0] ?? "";
+const envFromState = (state: string) => state.split(".")[1] ?? "";
 const stateKey = (state: string) => `oauth-state:${state}`;
 
 /** Consent must complete within this window; a leaked state expires (Sec#3). */
@@ -325,6 +334,7 @@ const OAUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 /** Begin consent: discover → DCR → PKCE → persist state → return the authorize URL. */
 export async function startConsent(opts: {
   tenantId: string;
+  environmentId: string;
   connectionId: string;
   serverUrl: string;
   redirectUri: string;
@@ -332,12 +342,13 @@ export async function startConsent(opts: {
   fetchFn?: FetchFn;
 }): Promise<{ authorizeUrl: string }> {
   const store = opts.store ?? new SecretStore();
-  // Audit S-5: opportunistically sweep this tenant's abandoned (never-completed)
+  // Audit S-5: opportunistically sweep this env's abandoned (never-completed)
   // consent states — their row is older than the consent TTL. Decryption-free,
   // best-effort (never block starting a new consent on a sweep hiccup).
   try {
     await store.prunePrefixOlderThan?.(
       opts.tenantId,
+      opts.environmentId,
       "oauth-state:",
       OAUTH_STATE_TTL_MS,
     );
@@ -353,9 +364,10 @@ export async function startConsent(opts: {
       )
     : { clientId: "naary-orchestrator", clientSecret: undefined };
   const { verifier, challenge } = generatePkce();
-  const state = encodeState(opts.tenantId);
+  const state = encodeState(opts.tenantId, opts.environmentId);
   await store.put(
     opts.tenantId,
+    opts.environmentId,
     stateKey(state),
     JSON.stringify({
       connectionId: opts.connectionId,
@@ -394,9 +406,12 @@ export async function completeConsent(opts: {
 }): Promise<{ connectionId: string }> {
   const store = opts.store ?? new SecretStore();
   const connections = opts.connections ?? new ConnectionService();
+  // The callback can't send X-Environment-Id — recover both from the state string (set at consent
+  // start). The connection token is then stored in the SAME env the consent began in.
   const tenantId = tenantFromState(opts.state);
+  const environmentId = envFromState(opts.state);
 
-  const raw = await store.get(tenantId, stateKey(opts.state));
+  const raw = await store.get(tenantId, environmentId, stateKey(opts.state));
   if (!raw) throw new Error("Unknown or expired OAuth state");
   const s = JSON.parse(raw) as {
     connectionId: string;
@@ -413,7 +428,7 @@ export async function completeConsent(opts: {
   // Reject a leaked/abandoned state past its TTL, and consume it so it can't be
   // replayed (Sec#3). Remove before any token exchange.
   if (typeof s.expiresAt === "number" && s.expiresAt < Date.now()) {
-    await store.remove(tenantId, stateKey(opts.state));
+    await store.remove(tenantId, environmentId, stateKey(opts.state));
     throw new Error("OAuth state expired");
   }
   if (opts.iss && s.issuer && opts.iss !== s.issuer) {
@@ -447,10 +462,11 @@ export async function completeConsent(opts: {
   };
   await store.put(
     tenantId,
+    environmentId,
     connectionSecretKey(s.connectionId),
     JSON.stringify(cfg),
   );
-  await store.remove(tenantId, stateKey(opts.state));
+  await store.remove(tenantId, environmentId, stateKey(opts.state));
   await connections.setStatus(tenantId, s.connectionId, "connected");
   return { connectionId: s.connectionId };
 }

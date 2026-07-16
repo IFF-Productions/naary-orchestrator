@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -179,14 +180,31 @@ export class EnvironmentsService {
         "The default environment can't be deleted.",
       );
     }
-    // NOTE (Slice 1): once workflows/runs are env-scoped, also refuse (or cascade) when the env
-    // still holds data. Today nothing is env-scoped, so a plain delete is safe.
+    // Since Slice 4/5 several env-scoped tables (graphs, activations, webhook/form/chat endpoints,
+    // credentials, connections) hold ON DELETE RESTRICT FKs to Environment, so deleting a non-empty
+    // env raises a Prisma P2003 at the DB. Catch it and surface a clean 409 instead of the global
+    // filter's generic 500 — the RESTRICT is the real backstop; this is the friendly message.
     // Tenant-SCOPED delete (deleteMany with {id, tenantId}) so the write can't reach another
     // tenant's row even if the id check above raced. count 0 ⇒ deleted concurrently after the read
     // → 404, consistent with treating an unknown env as not-found (not a silent success).
-    const { count } = await getPrisma().environment.deleteMany({
-      where: { id, tenantId },
-    });
+    let count: number;
+    try {
+      ({ count } = await getPrisma().environment.deleteMany({
+        where: { id, tenantId },
+      }));
+    } catch (e) {
+      if (
+        e &&
+        typeof e === "object" &&
+        (e as { code?: string }).code === "P2003"
+      ) {
+        throw new ConflictException(
+          "This environment still holds workflows, credentials, connections, or trigger " +
+            "endpoints. Remove them (or promote/migrate elsewhere) before deleting it.",
+        );
+      }
+      throw e;
+    }
     if (count === 0) throw new NotFoundException("Environment not found.");
   }
 

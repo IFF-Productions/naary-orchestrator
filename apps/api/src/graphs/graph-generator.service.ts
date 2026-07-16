@@ -97,10 +97,16 @@ export class GraphGeneratorService {
    * Ground the model in the tenant's ACTUAL resources so it doesn't invent connectionIds or
    * unsupported provider actions (the #1 causes of AI-generated workflows failing at run time):
    * the real connections (with their exact ids), and the integration catalog's provider→action
-   * list with required fields. Per-request (connections are tenant-specific).
+   * list with required fields. Per-request + env-scoped (connections belong to a specific env, so
+   * generation is grounded in the ACTIVE env's connections — Slice 5).
    */
-  private async buildResourceContext(tenantId: string): Promise<string> {
-    const conns = await this.connections.list(tenantId).catch(() => []);
+  private async buildResourceContext(
+    tenantId: string,
+    environmentId: string,
+  ): Promise<string> {
+    const conns = await this.connections
+      .list(tenantId, environmentId)
+      .catch(() => []);
     const lines: string[] = [];
     if (conns.length > 0) {
       lines.push(
@@ -141,6 +147,7 @@ export class GraphGeneratorService {
    */
   async generate(
     tenantId: string,
+    environmentId: string,
     prompt: string,
     provider?: string,
   ): Promise<{ name: string; graph: GraphDef }> {
@@ -148,13 +155,15 @@ export class GraphGeneratorService {
     if (!description)
       throw new BadRequestException("A description is required");
 
+    // Env-scoped (Slice 5): use THIS env's provider key + connections to ground generation.
     const { provider: chosen, apiKey } = await this.resolveProvider(
       tenantId,
+      environmentId,
       provider,
     );
 
-    // Ground the model in this tenant's real connections + the integration action catalog.
-    const resources = await this.buildResourceContext(tenantId);
+    // Ground the model in this env's real connections + the integration action catalog.
+    const resources = await this.buildResourceContext(tenantId, environmentId);
 
     // First attempt.
     let out = await this.callModel(
@@ -243,6 +252,7 @@ export class GraphGeneratorService {
    */
   private async resolveProvider(
     tenantId: string,
+    environmentId: string,
     requested?: string,
   ): Promise<{ provider: GenProvider; apiKey: string }> {
     let provider = requested?.trim() as GenProvider | undefined;
@@ -250,7 +260,10 @@ export class GraphGeneratorService {
       throw new BadRequestException(`Unsupported provider: ${requested}`);
     }
     if (!provider) {
-      const configured = await this.credentials.listProviders(tenantId);
+      const configured = await this.credentials.listProviders(
+        tenantId,
+        environmentId,
+      );
       const valid = new Set(
         configured.filter((c) => c.isValid).map((c) => c.provider),
       );
@@ -262,7 +275,11 @@ export class GraphGeneratorService {
       }
     }
     try {
-      const apiKey = await this.credentials.getDecryptedKey(tenantId, provider);
+      const apiKey = await this.credentials.getDecryptedKey(
+        tenantId,
+        environmentId,
+        provider,
+      );
       return { provider, apiKey };
     } catch (e) {
       if (e instanceof MissingCredentialError) {

@@ -19,7 +19,11 @@ vi.mock("@naary/db", () => ({
         return row;
       },
       findMany: async ({ where }: any) =>
-        [...conns.values()].filter((r) => r.tenantId === where.tenantId),
+        [...conns.values()].filter(
+          (r) =>
+            r.tenantId === where.tenantId &&
+            r.environmentId === where.environmentId,
+        ),
       findFirst: async ({ where }: any) =>
         [...conns.values()].find(
           (r) => r.id === where.id && r.tenantId === where.tenantId,
@@ -49,10 +53,19 @@ import {
 // @naary/secrets). Injected so this test doesn't reach the real @naary/db.
 const secretMap = new Map<string, string>();
 const fakeStore = {
-  put: async (t: string, k: string, v: string) =>
-    void secretMap.set(`${t}::${k}`, v),
-  get: async (t: string, k: string) => secretMap.get(`${t}::${k}`) ?? null,
-  remove: async (t: string, k: string) => void secretMap.delete(`${t}::${k}`),
+  put: async (t: string, e: string, k: string, v: string) =>
+    void secretMap.set(`${t}::${e}::${k}`, v),
+  get: async (t: string, e: string, k: string) =>
+    secretMap.get(`${t}::${e}::${k}`) ?? null,
+  remove: async (t: string, e: string, k: string) =>
+    void secretMap.delete(`${t}::${e}::${k}`),
+  // Delete the `conn:<id>` secret across ALL envs (the key is globally unique).
+  removeAllEnvs: async (t: string, k: string) => {
+    for (const mapKey of [...secretMap.keys()]) {
+      const [mt, , ...rest] = mapKey.split("::");
+      if (mt === t && rest.join("::") === k) secretMap.delete(mapKey);
+    }
+  },
 } as unknown as SecretStore;
 
 const PAT = "glpat-secret-token-value-123";
@@ -66,7 +79,7 @@ beforeEach(() => {
 describe("ConnectionService", () => {
   it("persists the token via the secret store and never exposes it in the view", async () => {
     const svc = new ConnectionService(fakeStore);
-    const view = await svc.create("t1", {
+    const view = await svc.create("t1", "e1", {
       type: "atlassian",
       label: "jira",
       serverUrl: "https://mcp.atlassian.com/v1/mcp",
@@ -76,12 +89,12 @@ describe("ConnectionService", () => {
 
     expect(view.authMode).toBe("api_token");
     expect(JSON.stringify(view)).not.toContain(PAT); // view carries no token
-    expect(secretMap.get(`t1::conn:${view.id}`)).toBe(PAT); // stored via the store
+    expect(secretMap.get(`t1::e1::conn:${view.id}`)).toBe(PAT); // stored via the store
   });
 
   it("resolves a PAT connection to a Bearer header (B1)", async () => {
     const svc = new ConnectionService(fakeStore);
-    const view = await svc.create("t1", {
+    const view = await svc.create("t1", "e1", {
       type: "github",
       label: "gh",
       serverUrl: "https://api.githubcopilot.com/mcp/",
@@ -98,21 +111,21 @@ describe("ConnectionService", () => {
 
   it("list omits tokens", async () => {
     const svc = new ConnectionService(fakeStore);
-    await svc.create("t1", {
+    await svc.create("t1", "e1", {
       type: "github",
       label: "gh",
       serverUrl: "u",
       authMode: "pat",
       token: PAT,
     });
-    const list = await svc.list("t1");
+    const list = await svc.list("t1", "e1");
     expect(list).toHaveLength(1);
     expect(JSON.stringify(list)).not.toContain(PAT);
   });
 
   it("throws MissingConnectionTokenError when a PAT connection has no token", async () => {
     const svc = new ConnectionService(fakeStore);
-    const view = await svc.create("t1", {
+    const view = await svc.create("t1", "e1", {
       type: "custom",
       label: "x",
       serverUrl: "u",
@@ -121,5 +134,39 @@ describe("ConnectionService", () => {
     await expect(
       resolveAuthHeader("t1", view.id, { connections: svc, store: fakeStore }),
     ).rejects.toBeInstanceOf(MissingConnectionTokenError);
+  });
+
+  it("remove deletes the connection row AND its stored secret", async () => {
+    const svc = new ConnectionService(fakeStore);
+    const view = await svc.create("t1", "e1", {
+      type: "github",
+      label: "gh",
+      serverUrl: "u",
+      authMode: "pat",
+      token: PAT,
+    });
+    expect(secretMap.get(`t1::e1::conn:${view.id}`)).toBe(PAT);
+
+    await svc.remove("t1", view.id);
+    expect(await svc.list("t1", "e1")).toHaveLength(0);
+    expect(secretMap.get(`t1::e1::conn:${view.id}`)).toBeUndefined();
+  });
+
+  it("remove purges the secret even when the connection row is already gone (no orphan)", async () => {
+    const svc = new ConnectionService(fakeStore);
+    const view = await svc.create("t1", "e1", {
+      type: "github",
+      label: "gh",
+      serverUrl: "u",
+      authMode: "pat",
+      token: PAT,
+    });
+    // Simulate a prior partial failure: the row was deleted but the secret lingered.
+    conns.clear();
+    expect(secretMap.get(`t1::e1::conn:${view.id}`)).toBe(PAT); // orphaned secret
+
+    // remove must still purge it env-agnostically (not skip because the row is missing).
+    await svc.remove("t1", view.id);
+    expect(secretMap.get(`t1::e1::conn:${view.id}`)).toBeUndefined();
   });
 });
