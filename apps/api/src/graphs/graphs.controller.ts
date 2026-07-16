@@ -8,6 +8,7 @@ import {
   Param,
   Post,
   Put,
+  Query,
 } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
 import type { GraphDef } from "@naary/dsl";
@@ -103,6 +104,31 @@ export class GraphsController {
   ): Promise<{ version: number; contentHash: string; createdAt: string }[]> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
     return this.graphs.listVersions(tenantId, envId, workflowKey);
+  }
+
+  /** Structural diff between two versions of a workflow — review what changed before promoting. */
+  @ApiEndpoint({
+    summary: "Diff two versions of a workflow",
+    description:
+      "What changed between ?from=<v>&to=<v>: nodes added/removed/reconfigured + edges rewired.",
+  })
+  @Get(":workflowKey/diff")
+  async diff(
+    @TenantId() tenantId: string,
+    @Param("workflowKey") workflowKey: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+    @EnvironmentSel() envSel?: string,
+  ) {
+    const fromV = Number(from);
+    const toV = Number(to);
+    if (!Number.isInteger(fromV) || !Number.isInteger(toV)) {
+      throw new BadRequestException(
+        "`from` and `to` must be integer version numbers.",
+      );
+    }
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    return this.graphs.diffVersions(tenantId, envId, workflowKey, fromV, toV);
   }
 
   /** The latest graph for a workflowKey — used to open it in the canvas. */
