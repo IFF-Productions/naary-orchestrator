@@ -64,7 +64,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     const fetchFn = vi
       .fn()
       .mockResolvedValue(okJson({ access_token: "AT1", expires_in: 3600 }));
-    const token = await getOAuthAccessToken("t1", CONN, {
+    const token = await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
       connections: {} as never,
@@ -82,15 +82,17 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
         expires_in: 3600,
       }),
     );
-    await getOAuthAccessToken("t1", CONN, {
+    await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
       connections: {} as never,
     });
     expect(put).toHaveBeenCalledOnce();
-    const stored = JSON.parse(put.mock.calls[0][2]);
+    // put(tenantId, environmentId, key, value) — key is arg 2, JSON payload arg 3.
+    const stored = JSON.parse(put.mock.calls[0][3]);
     expect(stored.refreshToken).toBe("RT-rotated");
-    expect(put.mock.calls[0][1]).toBe(connectionSecretKey(CONN));
+    expect(put.mock.calls[0][1]).toBe("e1");
+    expect(put.mock.calls[0][2]).toBe(connectionSecretKey(CONN));
   });
 
   it("flips to needs_reauth and throws on invalid_grant (400)", async () => {
@@ -102,7 +104,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
       json: async () => ({}),
     } as Response);
     await expect(
-      getOAuthAccessToken("t1", CONN, {
+      getOAuthAccessToken("t1", "e1", CONN, {
         store,
         fetchFn,
         connections: { setStatus } as never,
@@ -116,12 +118,12 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     const fetchFn = vi
       .fn()
       .mockResolvedValue(okJson({ access_token: "AT1", expires_in: 3600 }));
-    await getOAuthAccessToken("t1", CONN, {
+    await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
       connections: {} as never,
     });
-    await getOAuthAccessToken("t1", CONN, {
+    await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
       connections: {} as never,
@@ -143,7 +145,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
       .mockResolvedValue(null);
 
     // 1) mint + cache the token
-    const t1 = await getOAuthAccessToken("t1", CONN, {
+    const t1 = await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
       connections: { getById } as never,
@@ -153,7 +155,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
 
     // 2) within REVALIDATE_MS → served straight from cache, no status read
     clock += 30_000;
-    await getOAuthAccessToken("t1", CONN, {
+    await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
       connections: { getById } as never,
@@ -164,7 +166,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
 
     // 3) past REVALIDATE_MS, connection still live → revalidated, still cached
     clock += 61_000;
-    await getOAuthAccessToken("t1", CONN, {
+    await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
       connections: { getById } as never,
@@ -180,7 +182,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
       get: async () => null, // secret removed by revoke
     } as never;
     await expect(
-      getOAuthAccessToken("t1", CONN, {
+      getOAuthAccessToken("t1", "e1", CONN, {
         store: revokedStore,
         fetchFn,
         connections: { getById } as never,
@@ -205,7 +207,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
       .mockResolvedValueOnce({ status: "connected" })
       .mockResolvedValue({ status: "needs_reauth" });
 
-    await getOAuthAccessToken("t1", CONN, {
+    await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
       connections: { getById } as never,
@@ -213,7 +215,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     });
     // live revalidation keeps serving
     clock += 61_000;
-    const stillOk = await getOAuthAccessToken("t1", CONN, {
+    const stillOk = await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
       connections: { getById } as never,
@@ -222,7 +224,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     expect(stillOk).toBe("AT1");
     // now needs_reauth → evict; refresh re-mints (secret still present here)
     clock += 61_000;
-    await getOAuthAccessToken("t1", CONN, {
+    await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
       connections: { getById } as never,
@@ -246,7 +248,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
       );
 
     // mint + cache (no getById on the initial refresh path)
-    await getOAuthAccessToken("t1", CONN, {
+    await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
       connections: { getById } as never,
@@ -255,19 +257,19 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     // three concurrent calls all past REVALIDATE_MS → must share one getById
     clock += 61_000;
     const calls = Promise.all([
-      getOAuthAccessToken("t1", CONN, {
+      getOAuthAccessToken("t1", "e1", CONN, {
         store,
         fetchFn,
         connections: { getById } as never,
         now,
       }),
-      getOAuthAccessToken("t1", CONN, {
+      getOAuthAccessToken("t1", "e1", CONN, {
         store,
         fetchFn,
         connections: { getById } as never,
         now,
       }),
-      getOAuthAccessToken("t1", CONN, {
+      getOAuthAccessToken("t1", "e1", CONN, {
         store,
         fetchFn,
         connections: { getById } as never,
@@ -287,17 +289,17 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
       .fn()
       .mockResolvedValue(okJson({ access_token: "AT1", expires_in: 3600 }));
     await Promise.all([
-      getOAuthAccessToken("t1", CONN, {
+      getOAuthAccessToken("t1", "e1", CONN, {
         store,
         fetchFn,
         connections: {} as never,
       }),
-      getOAuthAccessToken("t1", CONN, {
+      getOAuthAccessToken("t1", "e1", CONN, {
         store,
         fetchFn,
         connections: {} as never,
       }),
-      getOAuthAccessToken("t1", CONN, {
+      getOAuthAccessToken("t1", "e1", CONN, {
         store,
         fetchFn,
         connections: {} as never,

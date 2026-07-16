@@ -6,18 +6,25 @@ vi.mock("@naary/db", () => ({
   getPrisma: () => ({
     tenantCredential: {
       upsert: async ({ where, create, update }: any) => {
-        const k = `${where.tenantId_provider.tenantId}::${where.tenantId_provider.provider}`;
+        const w = where.tenantId_environmentId_provider;
+        const k = `${w.tenantId}::${w.environmentId}::${w.provider}`;
         const row = { ...(creds.get(k) ?? create), ...update };
         creds.set(k, row);
         return row;
       },
-      findUnique: async ({ where }: any) =>
-        creds.get(
-          `${where.tenantId_provider.tenantId}::${where.tenantId_provider.provider}`,
-        ) ?? null,
+      findUnique: async ({ where }: any) => {
+        const w = where.tenantId_environmentId_provider;
+        return (
+          creds.get(`${w.tenantId}::${w.environmentId}::${w.provider}`) ?? null
+        );
+      },
       deleteMany: async ({ where }: any) => {
         for (const [k, r] of creds)
-          if (r.tenantId === where.tenantId && r.provider === where.provider)
+          if (
+            r.tenantId === where.tenantId &&
+            r.environmentId === where.environmentId &&
+            r.provider === where.provider
+          )
             creds.delete(k);
         return { count: 1 };
       },
@@ -37,20 +44,20 @@ beforeEach(() => creds.clear());
 describe("SecretStore", () => {
   it("stores ciphertext (not plaintext) and round-trips via get", async () => {
     const store = new SecretStore();
-    await store.put("t1", "conn:c1", SECRET);
+    await store.put("t1", "e1", "conn:c1", SECRET);
 
-    const row = creds.get("t1::conn:c1");
+    const row = creds.get("t1::e1::conn:c1");
     expect(row.ciphertext).toBeTypeOf("string");
     expect(JSON.stringify(row)).not.toContain(SECRET); // encrypted at rest
 
-    expect(await store.get("t1", "conn:c1")).toBe(SECRET);
+    expect(await store.get("t1", "e1", "conn:c1")).toBe(SECRET);
   });
 
   it("returns null for an unknown key, and remove deletes", async () => {
     const store = new SecretStore();
-    expect(await store.get("t1", "conn:missing")).toBeNull();
-    await store.put("t1", "conn:c1", SECRET);
-    await store.remove("t1", "conn:c1");
-    expect(await store.get("t1", "conn:c1")).toBeNull();
+    expect(await store.get("t1", "e1", "conn:missing")).toBeNull();
+    await store.put("t1", "e1", "conn:c1", SECRET);
+    await store.remove("t1", "e1", "conn:c1");
+    expect(await store.get("t1", "e1", "conn:c1")).toBeNull();
   });
 });

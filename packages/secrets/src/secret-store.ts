@@ -21,12 +21,24 @@ export class SecretStore {
     return `${tenantId}:${key}`;
   }
 
-  async put(tenantId: string, key: string, plaintext: string): Promise<void> {
+  async put(
+    tenantId: string,
+    environmentId: string,
+    key: string,
+    plaintext: string,
+  ): Promise<void> {
     const enc = this.encryptor.encrypt(plaintext, this.aad(tenantId, key));
     await getPrisma().tenantCredential.upsert({
-      where: { tenantId_provider: { tenantId, provider: key } },
+      where: {
+        tenantId_environmentId_provider: {
+          tenantId,
+          environmentId,
+          provider: key,
+        },
+      },
       create: {
         tenantId,
+        environmentId,
         provider: key,
         ciphertext: enc.ciphertext,
         iv: enc.iv,
@@ -46,9 +58,19 @@ export class SecretStore {
     });
   }
 
-  async get(tenantId: string, key: string): Promise<string | null> {
+  async get(
+    tenantId: string,
+    environmentId: string,
+    key: string,
+  ): Promise<string | null> {
     const row = await getPrisma().tenantCredential.findUnique({
-      where: { tenantId_provider: { tenantId, provider: key } },
+      where: {
+        tenantId_environmentId_provider: {
+          tenantId,
+          environmentId,
+          provider: key,
+        },
+      },
     });
     if (!row) return null;
     return this.encryptor.decrypt(
@@ -70,12 +92,14 @@ export class SecretStore {
    */
   async prunePrefixOlderThan(
     tenantId: string,
+    environmentId: string,
     keyPrefix: string,
     olderThanMs: number,
   ): Promise<number> {
     const res = await getPrisma().tenantCredential.deleteMany({
       where: {
         tenantId,
+        environmentId,
         provider: { startsWith: keyPrefix },
         createdAt: { lt: new Date(Date.now() - olderThanMs) },
       },
@@ -83,9 +107,13 @@ export class SecretStore {
     return res.count;
   }
 
-  async remove(tenantId: string, key: string): Promise<void> {
+  async remove(
+    tenantId: string,
+    environmentId: string,
+    key: string,
+  ): Promise<void> {
     await getPrisma().tenantCredential.deleteMany({
-      where: { tenantId, provider: key },
+      where: { tenantId, environmentId, provider: key },
     });
   }
 }

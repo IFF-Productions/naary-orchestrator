@@ -26,6 +26,33 @@ export function getPrisma(): PrismaClient {
   return client;
 }
 
+/**
+ * The tenant's DEFAULT environment id — the `prod`-slug row that holds all pre-environments data
+ * (design ENVIRONMENTS.md §2/§5), created lazily if absent (race-safe upsert on the (tenantId, slug)
+ * unique). This is the compatibility-shim default target, shared by env-scoped READS that can't reach
+ * the API's Nest `EnvironmentsService` — e.g. worker activities and the secrets/connections packages.
+ * Read-first so steady state is a single indexed lookup. NEVER call from workflow code (Prisma is
+ * non-deterministic; @naary/db is activity/API-only).
+ */
+export async function getDefaultEnvironmentId(
+  tenantId: string,
+): Promise<string> {
+  const prisma = getPrisma();
+  const existing = await prisma.environment.findUnique({
+    where: { tenantId_slug: { tenantId, slug: "prod" } },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+  // Create-if-missing, race-safe: a concurrent create is absorbed by the unique (empty update).
+  const row = await prisma.environment.upsert({
+    where: { tenantId_slug: { tenantId, slug: "prod" } },
+    create: { tenantId, name: "Production", slug: "prod", isDefault: true },
+    update: {},
+    select: { id: true },
+  });
+  return row.id;
+}
+
 /** Close the pg pool on shutdown (Arch§4.9). Safe to call when never connected. */
 export async function disconnectPrisma(): Promise<void> {
   if (client) {

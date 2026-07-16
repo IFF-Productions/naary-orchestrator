@@ -57,20 +57,26 @@ export class CredentialsService {
     this.validate = opts?.validate ?? defaultValidator;
   }
 
-  /** Validate, encrypt, and upsert. Returns metadata only — never the key. */
+  /** Validate, encrypt, and upsert. Returns metadata only — never the key. Env-scoped (Slice 5):
+   *  the credential lives in `environmentId`, so a sandbox key and a prod key are separate rows. */
   async saveCredential(
     tenantId: string,
+    environmentId: string,
     provider: string,
     apiKey: string,
   ): Promise<SaveCredentialResult> {
     const isValid = await this.validate(provider, apiKey);
-    // AAD binds the ciphertext to this tenant+provider slot (Sec#7).
+    // AAD binds the ciphertext to this tenant+provider slot (Sec#7). It stays (tenant, provider) —
+    // NOT env-bound — so env is purely a row-lookup dimension and backfilled rows keep decrypting.
     const enc = this.encryptor.encrypt(apiKey, `${tenantId}:${provider}`);
 
     const row = await getPrisma().tenantCredential.upsert({
-      where: { tenantId_provider: { tenantId, provider } },
+      where: {
+        tenantId_environmentId_provider: { tenantId, environmentId, provider },
+      },
       create: {
         tenantId,
+        environmentId,
         provider,
         ciphertext: enc.ciphertext,
         iv: enc.iv,
@@ -92,24 +98,35 @@ export class CredentialsService {
     return { id: row.id, provider, isValid };
   }
 
-  /** The tenant's configured *model* providers — names + validity only, NEVER key
-   *  material. Connection secrets share this table under a `conn:` namespace; they
-   *  are not model providers, so they're excluded. */
+  /** The env's configured *model* providers — names + validity only, NEVER key material. Connection
+   *  secrets share this table under a `conn:` namespace; they are not model providers, so excluded. */
   async listProviders(
     tenantId: string,
+    environmentId: string,
   ): Promise<{ provider: string; isValid: boolean }[]> {
     const rows = await getPrisma().tenantCredential.findMany({
-      where: { tenantId, NOT: { provider: { startsWith: "conn:" } } },
+      where: {
+        tenantId,
+        environmentId,
+        NOT: { provider: { startsWith: "conn:" } },
+      },
       select: { provider: true, isValid: true },
       orderBy: { provider: "asc" },
     });
     return rows.map((r) => ({ provider: r.provider, isValid: r.isValid }));
   }
 
-  /** Decrypt and return the plaintext key (in memory only). Throws if absent/invalid. */
-  async getDecryptedKey(tenantId: string, provider: string): Promise<string> {
+  /** Decrypt and return the plaintext key (in memory only). Throws if absent/invalid. Env-scoped:
+   *  the run's environment selects which key (sandbox test key vs prod live key). */
+  async getDecryptedKey(
+    tenantId: string,
+    environmentId: string,
+    provider: string,
+  ): Promise<string> {
     const row = await getPrisma().tenantCredential.findUnique({
-      where: { tenantId_provider: { tenantId, provider } },
+      where: {
+        tenantId_environmentId_provider: { tenantId, environmentId, provider },
+      },
     });
     if (!row || !row.isValid) {
       throw new MissingCredentialError(tenantId, provider);

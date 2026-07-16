@@ -211,11 +211,13 @@ export async function resolveGithubAppHeader(
 /** Install-consent must complete within this window; a leaked state expires (mirrors OAuth). */
 const INSTALL_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const installStateKey = (state: string) => `gh-install-state:${state}`;
-// state = "<tenantId>.<random>" so the @Public callback can recover the tenant without auth,
-// exactly like oauth.ts tenantFromState. tenantId has no "." (cuid), so split[0] is safe.
-const encodeInstallState = (tenantId: string) =>
-  `${tenantId}.${randomBytes(16).toString("base64url")}`;
+// state = "<tenantId>.<environmentId>.<random>" so the @Public callback (no auth, no
+// X-Environment-Id) can recover BOTH the tenant and the env the install began in — the new
+// connection lands in that env. tenantId/environmentId are uuids (no "."), so the split is safe.
+const encodeInstallState = (tenantId: string, environmentId: string) =>
+  `${tenantId}.${environmentId}.${randomBytes(16).toString("base64url")}`;
 const tenantFromInstallState = (state: string) => state.split(".")[0] ?? "";
+const envFromInstallState = (state: string) => state.split(".")[1] ?? "";
 
 interface InstallStateBlob {
   tenantId: string;
@@ -230,6 +232,7 @@ interface InstallStateBlob {
  */
 export async function startGithubAppInstall(opts: {
   tenantId: string;
+  environmentId: string;
   label: string;
   store?: SecretStore;
   now?: () => number;
@@ -242,23 +245,29 @@ export async function startGithubAppInstall(opts: {
   }
   const store = opts.store ?? new SecretStore();
   const now = opts.now ?? (() => Date.now());
-  // Best-effort hygiene: sweep this tenant's abandoned install states (mirrors startConsent S-5).
+  // Best-effort hygiene: sweep this env's abandoned install states (mirrors startConsent S-5).
   try {
     await store.prunePrefixOlderThan?.(
       opts.tenantId,
+      opts.environmentId,
       "gh-install-state:",
       INSTALL_STATE_TTL_MS,
     );
   } catch {
     /* best-effort */
   }
-  const state = encodeInstallState(opts.tenantId);
+  const state = encodeInstallState(opts.tenantId, opts.environmentId);
   const blob: InstallStateBlob = {
     tenantId: opts.tenantId,
     label: opts.label,
     expiresAt: now() + INSTALL_STATE_TTL_MS,
   };
-  await store.put(opts.tenantId, installStateKey(state), JSON.stringify(blob));
+  await store.put(
+    opts.tenantId,
+    opts.environmentId,
+    installStateKey(state),
+    JSON.stringify(blob),
+  );
   const installUrl = `https://github.com/apps/${encodeURIComponent(
     cfg.slug,
   )}/installations/new?state=${encodeURIComponent(state)}`;
@@ -289,12 +298,19 @@ export async function completeGithubAppInstall(opts: {
   const store = opts.store ?? new SecretStore();
   const connections = opts.connections ?? new ConnectionService();
   const now = opts.now ?? (() => Date.now());
+  // Recover tenant + env from the state (the @Public callback can't send X-Environment-Id) — the
+  // new connection + its grant land in the env the install began in.
   const tenantId = tenantFromInstallState(opts.state);
+  const environmentId = envFromInstallState(opts.state);
 
-  const raw = await store.get(tenantId, installStateKey(opts.state));
+  const raw = await store.get(
+    tenantId,
+    environmentId,
+    installStateKey(opts.state),
+  );
   if (!raw) throw new Error("Unknown or expired GitHub install state");
   // Consume immediately (single-use, before any create) so a leaked state can't be replayed.
-  await store.remove(tenantId, installStateKey(opts.state));
+  await store.remove(tenantId, environmentId, installStateKey(opts.state));
   const s = JSON.parse(raw) as InstallStateBlob;
   // Defence-in-depth: the tenant baked into the state blob must match the one derived from the
   // state prefix. A mismatch means a tampered state or corrupted storage — refuse it.
@@ -307,7 +323,7 @@ export async function completeGithubAppInstall(opts: {
 
   let conn: ConnectionView | undefined;
   try {
-    conn = await connections.create(tenantId, {
+    conn = await connections.create(tenantId, environmentId, {
       type: "github",
       label: s.label,
       serverUrl: GITHUB_API,
@@ -316,6 +332,7 @@ export async function completeGithubAppInstall(opts: {
     const grant: GithubAppGrant = { installationId: opts.installationId };
     await store.put(
       tenantId,
+      environmentId,
       connectionSecretKey(conn.id),
       JSON.stringify(grant),
     );

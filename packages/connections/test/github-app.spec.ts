@@ -179,17 +179,17 @@ describe("resolveGithubAppHeader", () => {
 // without a DB. The tenant is scoped by prefixing keys with tenantId.
 function fakeStore() {
   const m = new Map<string, string>();
-  const k = (t: string, key: string) => `${t}::${key}`;
+  const k = (t: string, e: string, key: string) => `${t}::${e}::${key}`;
   return {
     m,
-    async put(t: string, key: string, v: string) {
-      m.set(k(t, key), v);
+    async put(t: string, e: string, key: string, v: string) {
+      m.set(k(t, e, key), v);
     },
-    async get(t: string, key: string) {
-      return m.get(k(t, key)) ?? null;
+    async get(t: string, e: string, key: string) {
+      return m.get(k(t, e, key)) ?? null;
     },
-    async remove(t: string, key: string) {
-      m.delete(k(t, key));
+    async remove(t: string, e: string, key: string) {
+      m.delete(k(t, e, key));
     },
     async prunePrefixOlderThan() {
       /* no-op in tests */
@@ -219,6 +219,7 @@ describe("startGithubAppInstall / completeGithubAppInstall", () => {
 
     const { installUrl, state } = await startGithubAppInstall({
       tenantId: "t1",
+      environmentId: "e1",
       label: "Prod GitHub",
       store,
       now: () => FIXED_NOW,
@@ -226,7 +227,8 @@ describe("startGithubAppInstall / completeGithubAppInstall", () => {
     expect(installUrl).toContain(
       "https://github.com/apps/naary/installations/new?state=",
     );
-    expect(state.startsWith("t1.")).toBe(true);
+    // state = "<tenantId>.<environmentId>.<random>"
+    expect(state.startsWith("t1.e1.")).toBe(true);
 
     const { connectionId } = await completeGithubAppInstall({
       state,
@@ -240,6 +242,7 @@ describe("startGithubAppInstall / completeGithubAppInstall", () => {
     expect(connectionId).toBe("conn-new");
     expect(create).toHaveBeenCalledWith(
       "t1",
+      "e1",
       expect.objectContaining({
         type: "github",
         authMode: "github_app",
@@ -247,7 +250,7 @@ describe("startGithubAppInstall / completeGithubAppInstall", () => {
       }),
     );
     // The grant stored under conn:<id> is the installation id — NOT a token.
-    expect(store.m.get(`t1::${connectionSecretKey("conn-new")}`)).toBe(
+    expect(store.m.get(`t1::e1::${connectionSecretKey("conn-new")}`)).toBe(
       JSON.stringify({ installationId: "99" }),
     );
     expect(setStatusFn).toHaveBeenCalledWith("t1", "conn-new", "connected");
@@ -256,7 +259,12 @@ describe("startGithubAppInstall / completeGithubAppInstall", () => {
   it("start throws when the app slug isn't configured", async () => {
     __ghAppDeps.config = () => ({ appId: "123456", privateKey: pkcs1 });
     await expect(
-      startGithubAppInstall({ tenantId: "t1", label: "x", store: fakeStore() }),
+      startGithubAppInstall({
+        tenantId: "t1",
+        environmentId: "e1",
+        label: "x",
+        store: fakeStore(),
+      }),
     ).rejects.toThrow(/not configured/);
   });
 
@@ -265,7 +273,7 @@ describe("startGithubAppInstall / completeGithubAppInstall", () => {
       completeGithubAppInstall({ state: "", installationId: "99" }),
     ).rejects.toThrow(/Missing/);
     await expect(
-      completeGithubAppInstall({ state: "t1.abc", installationId: "" }),
+      completeGithubAppInstall({ state: "t1.e1.abc", installationId: "" }),
     ).rejects.toThrow(/Missing/);
   });
 
@@ -277,7 +285,7 @@ describe("startGithubAppInstall / completeGithubAppInstall", () => {
     } as unknown as import("../src/connection.service").ConnectionService;
     await expect(
       completeGithubAppInstall({
-        state: "t1.neverissued",
+        state: "t1.e1.neverissued",
         installationId: "99",
         store,
         connections: conns,
@@ -295,6 +303,7 @@ describe("startGithubAppInstall / completeGithubAppInstall", () => {
     } as unknown as import("../src/connection.service").ConnectionService;
     const { state } = await startGithubAppInstall({
       tenantId: "t1",
+      environmentId: "e1",
       label: "x",
       store,
       now: () => FIXED_NOW,
@@ -314,7 +323,7 @@ describe("startGithubAppInstall / completeGithubAppInstall", () => {
   it("rolls back the connection if storing the grant fails (no orphan)", async () => {
     const store = fakeStore();
     // Make the grant write throw AFTER the connection is created.
-    store.put = (async (_t: string, key: string) => {
+    store.put = (async (_t: string, _e: string, key: string) => {
       if (key.startsWith("conn:")) throw new Error("store down");
     }) as never;
     const remove = vi.fn().mockResolvedValue(undefined);
@@ -324,9 +333,9 @@ describe("startGithubAppInstall / completeGithubAppInstall", () => {
       remove,
     } as unknown as import("../src/connection.service").ConnectionService;
     // Seed a valid state directly (start would use the throwing put), then complete.
-    const state = "t1.seed";
+    const state = "t1.e1.seed";
     store.m.set(
-      `t1::gh-install-state:${state}`,
+      `t1::e1::gh-install-state:${state}`,
       JSON.stringify({
         tenantId: "t1",
         label: "x",

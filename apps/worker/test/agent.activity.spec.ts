@@ -39,6 +39,7 @@ beforeEach(() => {
   releaseReservation.mockReset().mockResolvedValue(undefined);
   __agentDeps.getCredentials = () =>
     ({ getDecryptedKey: () => getKey() }) as never;
+  __agentDeps.getDefaultEnvId = (() => Promise.resolve("e1")) as never;
   __agentDeps.recordUsage = recordUsage as never;
   __agentDeps.getBudget = (() => getBudget()) as never;
   __agentDeps.monthToDateSpend = (() => Promise.resolve(mtdSpend)) as never;
