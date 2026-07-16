@@ -16,6 +16,11 @@ export default defineConfig({
       "@naary/dsl": fileURLToPath(
         new URL("../../packages/dsl/src/index.ts", import.meta.url),
       ),
+      // Same reason as @naary/dsl — pure/platform-agnostic, bundled from source as ESM.
+      // (Keep in sync with .storybook/main.ts.)
+      "@naary/notifications": fileURLToPath(
+        new URL("../../packages/notifications/src/index.ts", import.meta.url),
+      ),
     },
   },
   server: {

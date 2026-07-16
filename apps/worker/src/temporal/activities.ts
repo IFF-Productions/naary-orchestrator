@@ -71,6 +71,10 @@ import { getAdapter } from "@naary/sql";
 import { getDefaultEnvironmentId, getPrisma } from "@naary/db";
 import { createLogger } from "@naary/logging";
 import {
+  type NotificationLinks,
+  notificationPayload,
+} from "@naary/notifications";
+import {
   activityDuration,
   activityRuns,
   agentTokens,
@@ -982,216 +986,19 @@ function runUrl(workflowId: string): string | undefined {
   return `${base}/app/runs/${encodeURIComponent(workflowId)}`;
 }
 
-/** Human-readable line for the notification (what a Slack/Teams webhook shows). Includes a
- *  deep link to the resource to act on: the signed approve/reject link for a pause, otherwise
- *  the run detail page. */
-function notificationText(input: NotificationInput): string {
-  const wf = input.workflowKey ? `"${input.workflowKey}"` : "a workflow";
-  const run = runUrl(input.workflowId);
-  if (input.kind === "approval_pending") {
-    const url = approvalUrl(input.workflowId);
-    return `⏳ Approval needed on ${wf}${input.title ? `: ${input.title}` : ""} (run ${input.workflowId}).${url ? ` Approve or reject: ${url}` : ""}`;
-  }
-  return `❌ ${wf} run failed${input.detail ? ` (${input.detail})` : ""} — run ${input.workflowId}.${run ? ` View: ${run}` : ""}`;
-}
-
 /**
- * Slack Block Kit blocks: a header + a fields section (where the run is an actual inline
- * `<url|…>` link, not a bare id reference) + an `actions` row of link-buttons — the
- * "multiple entries" a recipient can act on (Approve/Reject, View run). Slack renders
- * `blocks` when present; generic/Teams hooks fall back to top-level `text` + the flat
- * fields. Buttons carry absolute `url`s, so no Slack interactivity wiring is needed.
+ * Resolve the absolute links for a notification. This is the ONLY place env + the signed HMAC
+ * token are read; the pure `@naary/notifications` formatters take these as data, so token/URL
+ * minting never leaves the worker (CLAUDE.md §4). Undefined when APP_BASE_URL (or, for approval,
+ * ENCRYPTION_KEY) is missing — the formatter then omits that link/button.
  */
-/** Escape the three characters Slack treats as mrkdwn control chars (& < >) so an id/label
- *  containing them can't break a `<url|label>` link or inject markup. `&` first, always. */
-function slackEscape(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-type NotificationAction = {
-  label: string;
-  url: string;
-  /** Slack button colour: primary (green) for approve, danger (red) for reject. */
-  style?: "primary" | "danger";
-};
-
-/** Short headline for the notification, shared by the Slack header + the Teams card. */
-function notificationHeader(input: NotificationInput): string {
-  return input.kind === "approval_pending"
-    ? "⏳ Approval needed"
-    : "❌ Run failed";
-}
-
-/** The action links a recipient can act on — Approve/Reject for a pause (each with the
- *  choice pre-selected on the signed page) plus View run. Shared by the Slack blocks and
- *  the Teams card so both stay in step. */
-function notificationActions(input: NotificationInput): NotificationAction[] {
-  const actions: NotificationAction[] = [];
-  if (input.kind === "approval_pending") {
-    const approve = approvalUrl(input.workflowId);
-    if (approve) {
-      // Two one-click buttons instead of one "Approve / Reject": each deep-links to the
-      // signed decision page with the choice pre-selected (?…&decision=approve|reject).
-      // The page still requires an explicit confirm click, so a link-prefetch can't decide.
-      actions.push({
-        label: "✅ Approve",
-        url: `${approve}&decision=approve`,
-        style: "primary",
-      });
-      actions.push({
-        label: "❌ Reject",
-        url: `${approve}&decision=reject`,
-        style: "danger",
-      });
-    }
-  }
-  const run = runUrl(input.workflowId);
-  if (run) actions.push({ label: "View run", url: run });
-  return actions;
-}
-
-function notificationBlocks(
-  input: NotificationInput,
-  _text: string,
-): { blocks: unknown[]; actions: NotificationAction[] } {
-  const isApproval = input.kind === "approval_pending";
-
-  const actions = notificationActions(input);
-  const run = runUrl(input.workflowId);
-
-  // The run as an ACTUAL clickable link when we have a URL, not a bare id reference. The
-  // label is escaped so a workflowId with & < > can't break the `<url|label>` markup (the
-  // URL itself is already encodeURIComponent'd by runUrl, so it needs no escaping).
-  const runId = slackEscape(input.workflowId);
-  const runField = run ? `<${run}|run ${runId}>` : `\`${runId}\``;
-  const fields: { type: "mrkdwn"; text: string }[] = [
-    {
-      type: "mrkdwn",
-      text: `*Workflow*\n${input.workflowKey ? `\`${slackEscape(input.workflowKey)}\`` : "_unnamed_"}`,
-    },
-    { type: "mrkdwn", text: `*Run*\n${runField}` },
-  ];
-  if (isApproval && input.title)
-    fields.push({
-      type: "mrkdwn",
-      text: `*Awaiting*\n${slackEscape(input.title)}`,
-    });
-  if (!isApproval && input.detail)
-    fields.push({
-      type: "mrkdwn",
-      text: `*Reason*\n\`${slackEscape(input.detail)}\``,
-    });
-
-  const blocks: unknown[] = [
-    {
-      type: "header",
-      // header is plain_text only; unicode emoji render with emoji:true.
-      text: {
-        type: "plain_text",
-        text: notificationHeader(input),
-        emoji: true,
-      },
-    },
-    { type: "section", fields },
-  ];
-  if (actions.length)
-    blocks.push({
-      type: "actions",
-      elements: actions.map((a, i) => ({
-        type: "button",
-        // Slack rejects an actions block whose buttons lack an action_id (invalid_blocks),
-        // even for url-only buttons — derive a stable one from the label.
-        action_id: `${a.label.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_${i}`,
-        // emoji:true so the ✅/❌ in the label render as icons on the buttons.
-        text: { type: "plain_text", text: a.label, emoji: true },
-        url: a.url,
-        ...(a.style ? { style: a.style } : {}),
-      })),
-    });
-  return { blocks, actions };
-}
-
-/**
- * Microsoft Teams payload: an Adaptive Card wrapped in the {type:"message",attachments:[…]}
- * envelope a Teams Workflows / Incoming-Webhook renders (the legacy MessageCard connector is
- * retiring). Same header + facts + Approve/Reject/View-run buttons as Slack, but as an
- * Adaptive Card — FactSet facts are PLAIN JSON strings (NOT mrkdwn, so no slackEscape — that
- * would double-encode into visible `&amp;`), and links are `Action.OpenUrl` (Teams supports
- * OpenUrl/ShowCard/ToggleVisibility, NOT Action.Submit). Shape verified against Microsoft's
- * docs; not yet verified against a live Teams tenant (use the settings "send test" path).
- */
-function notificationTeamsCard(input: NotificationInput): unknown {
-  const isApproval = input.kind === "approval_pending";
-  const facts: { title: string; value: string }[] = [
-    { title: "Workflow", value: input.workflowKey ?? "(unnamed)" },
-    { title: "Run", value: input.workflowId },
-  ];
-  if (isApproval && input.title)
-    facts.push({ title: "Awaiting", value: input.title });
-  if (!isApproval && input.detail)
-    facts.push({ title: "Reason", value: input.detail });
-
-  const body: unknown[] = [
-    {
-      type: "TextBlock",
-      text: notificationHeader(input),
-      weight: "Bolder",
-      size: "Large",
-      wrap: true,
-    },
-    { type: "FactSet", facts },
-  ];
-
-  const actions = notificationActions(input).map((a) => ({
-    type: "Action.OpenUrl",
-    title: a.label,
-    url: a.url,
-    // Adaptive Card action styles — Teams renders positive (green) / destructive (red).
-    ...(a.style === "primary"
-      ? { style: "positive" }
-      : a.style === "danger"
-        ? { style: "destructive" }
-        : {}),
-  }));
-
+function notificationLinks(input: NotificationInput): NotificationLinks {
   return {
-    type: "message",
-    attachments: [
-      {
-        contentType: "application/vnd.microsoft.card.adaptive",
-        contentUrl: null,
-        content: {
-          $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-          type: "AdaptiveCard",
-          version: "1.2",
-          body,
-          ...(actions.length ? { actions } : {}),
-        },
-      },
-    ],
-  };
-}
-
-/** Build the JSON body for one channel. Teams needs its own Adaptive Card envelope; anything
- *  else (default) gets the Slack/generic payload. Unknown/legacy types fall back to Slack. */
-function notificationPayload(input: NotificationInput, type: string): unknown {
-  if (type === "teams") return notificationTeamsCard(input);
-  const text = notificationText(input);
-  const { blocks, actions } = notificationBlocks(input, text);
-  // `text` is the Slack/generic fallback line; `blocks` render the action buttons in Slack;
-  // the flat fields + `actions`/`runUrl` serve generic hooks.
-  return {
-    text,
-    blocks,
-    kind: input.kind,
-    workflowId: input.workflowId,
-    workflowKey: input.workflowKey,
-    title: input.title,
+    approvalUrl:
+      input.kind === "approval_pending"
+        ? approvalUrl(input.workflowId)
+        : undefined,
     runUrl: runUrl(input.workflowId),
-    actions,
-    ...(input.kind === "approval_pending"
-      ? { approvalUrl: approvalUrl(input.workflowId) }
-      : {}),
   };
 }
 
@@ -1215,6 +1022,9 @@ export async function sendNotification(
     return;
   }
 
+  // Links are channel-independent — resolve them once (reads env + mints the signed token here).
+  const links = notificationLinks(input);
+
   for (const ch of channels) {
     // Per-channel gating: skip channels with no URL or with this event toggled off.
     if (!ch.webhookUrl) continue;
@@ -1231,7 +1041,7 @@ export async function sendNotification(
         await __notifyDeps.fetch(ch.webhookUrl, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(notificationPayload(input, ch.type)),
+          body: JSON.stringify(notificationPayload(input, ch.type, links)),
           signal: controller.signal,
         });
       } finally {

@@ -17,6 +17,7 @@
     "@naary/db": "workspace:*",
     "@naary/dsl": "workspace:*",
     "@naary/logging": "workspace:*",
+    "@naary/notifications": "workspace:*",
     "@naary/metrics": "workspace:*",
     "@naary/observability": "workspace:*",
     "@naary/secrets": "workspace:*",

@@ -138,7 +138,13 @@ describe("sendNotification", () => {
       .join("\n");
     expect(joined).toContain("<https://app.naary.test/app/runs/wf-1|run wf-1>");
     expect(joined).toContain("*Workflow*");
-    expect(joined).toContain("Ship it?"); // the approval title, as a field
+    // The approval title is its own FULL-WIDTH section (a section with `text`, not `fields`) —
+    // free text doesn't belong in the cramped 2-column fields grid.
+    const titleSection = body.blocks.find(
+      (b: { type: string; text?: { text?: string }; fields?: unknown }) =>
+        b.type === "section" && b.text && !b.fields,
+    );
+    expect(titleSection?.text.text).toContain("Ship it?");
   });
 
   it("escapes Slack mrkdwn control chars (& < >) in interpolated ids/labels", async () => {
@@ -162,8 +168,13 @@ describe("sendNotification", () => {
     // so they can't break the <url|label> markup.
     expect(joined).toContain("run wf-&lt;a&amp;b&gt;");
     expect(joined).toContain("orders&lt;x&gt;");
-    expect(joined).toContain("timeout &amp; &lt;reset&gt;");
     expect(joined).not.toMatch(/run wf-<a&b>/);
+    // The failure reason is its own full-width section — also escaped.
+    const reasonSection = body.blocks.find(
+      (b: { type: string; text?: { text?: string }; fields?: unknown }) =>
+        b.type === "section" && b.text && !b.fields,
+    );
+    expect(reasonSection?.text.text).toContain("timeout &amp; &lt;reset&gt;");
   });
 
   it("renders the run id (no link) in the fields section when APP_BASE_URL is unset", async () => {
@@ -185,7 +196,12 @@ describe("sendNotification", () => {
     // No URL to link to → the bare id in backticks, and no <…|…> link markup.
     expect(joined).toContain("`wf-1`");
     expect(joined).not.toContain("|run wf-1>");
-    expect(joined).toContain("timed_out"); // the failure reason, as a field
+    // The failure reason is its own full-width section (not a fields entry).
+    const reasonSection = body.blocks.find(
+      (b: { type: string; text?: { text?: string }; fields?: unknown }) =>
+        b.type === "section" && b.text && !b.fields,
+    );
+    expect(reasonSection?.text.text).toContain("timed_out");
   });
 
   it("includes a View-run deep link on a failed-run notification (the prior gap)", async () => {
