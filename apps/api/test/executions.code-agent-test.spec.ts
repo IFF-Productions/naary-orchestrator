@@ -13,7 +13,13 @@ type GraphArg = {
 };
 
 function makeService() {
-  const service = new ExecutionsService({} as never, { defaultEnvId: async () => "env-test", resolveEnvId: async () => "env-test" } as never);
+  const service = new ExecutionsService(
+    {} as never,
+    {
+      defaultEnvId: async () => "env-test",
+      resolveEnvId: async () => "env-test",
+    } as never,
+  );
   // Capture the args startGraph is handed so we can assert the synthetic graph
   // shape + the system workflowKey without running the real start path.
   const startGraph = vi
@@ -31,23 +37,25 @@ describe("startCodeAgentTest", () => {
   it("starts a read-only {start → codeAgent → end} run under the system workflowKey", async () => {
     const { service, startGraph } = makeService();
 
-    const out = await service.startCodeAgentTest("t1");
+    const out = await service.startCodeAgentTest("t1", "e1");
 
     expect(out).toEqual({ workflowId: "catest-wf" });
     expect(startGraph).toHaveBeenCalledTimes(1);
 
-    const [prefix, snapshot, input, tenantId, workflowKey] = startGraph.mock
-      .calls[0] as [
-      string,
-      { graph: GraphArg; contentHash: string; version: number },
-      unknown,
-      string,
-      string,
-    ];
+    const [prefix, snapshot, input, tenantId, environmentId, workflowKey] =
+      startGraph.mock.calls[0] as [
+        string,
+        { graph: GraphArg; contentHash: string; version: number },
+        unknown,
+        string,
+        string,
+        string,
+      ];
 
     expect(prefix).toBe("catest-t1");
     expect(input).toEqual({});
     expect(tenantId).toBe("t1");
+    expect(environmentId).toBe("e1"); // run executes in the caller's active env (Slice 5b)
     // System key — lets the Runs list / any filter recognise these test runs.
     expect(workflowKey).toBe("__codeagent_test");
 

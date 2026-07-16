@@ -70,8 +70,13 @@ export class ExecutionsController {
     created: StartExecutionResponse,
   })
   @Post("code-agent-test")
-  codeAgentTest(@TenantId() tenantId: string): Promise<{ workflowId: string }> {
-    return this.executions.startCodeAgentTest(tenantId);
+  async codeAgentTest(
+    @TenantId() tenantId: string,
+    @EnvironmentSel() envSel?: string,
+  ): Promise<{ workflowId: string }> {
+    // Test against the ACTIVE env's Claude Code key (Slice 5b).
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    return this.executions.startCodeAgentTest(tenantId, envId);
   }
 
   /** Recent runs for the authenticated tenant (newest first). `?archived=true`

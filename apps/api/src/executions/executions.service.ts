@@ -306,6 +306,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           message: "I was charged twice this month",
         },
       tenantId,
+      environmentId,
       workflowKey,
     );
   }
@@ -318,7 +319,10 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
    * path than the agent node's direct API validation). Not saved as a workflow; it's a normal
    * run the UI polls via getState. maxTurns:1 keeps it cheap.
    */
-  async startCodeAgentTest(tenantId: string): Promise<{ workflowId: string }> {
+  async startCodeAgentTest(
+    tenantId: string,
+    environmentId: string,
+  ): Promise<{ workflowId: string }> {
     const graph: GraphDef = {
       startNodeId: "start",
       nodes: [
@@ -349,6 +353,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       snapshot,
       {},
       tenantId,
+      environmentId,
       "__codeagent_test",
     );
   }
@@ -369,6 +374,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       snapshot,
       event,
       tenantId,
+      environmentId,
       workflowKey,
     );
   }
@@ -389,6 +395,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       snapshot,
       submission,
       tenantId,
+      environmentId,
       workflowKey,
     );
   }
@@ -443,6 +450,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       snapshot,
       input,
       tenantId,
+      environmentId,
       workflowKey,
     );
     const response = await this.pollForResponse(workflowId, opts);
@@ -485,6 +493,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           graph: snapshot.graph,
           ctx: {
             tenantId,
+            environmentId,
             workflowKey,
             perExecutionCapUsd: budget?.perExecutionCapUsd,
             maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
@@ -581,6 +590,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     snapshot: GraphSnapshot,
     input: unknown,
     tenantId: string,
+    environmentId: string,
     workflowKey: string,
   ): Promise<{ workflowId: string }> {
     const workflowId = `${prefix}-${randomUUID()}`;
@@ -605,6 +615,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         input,
         {
           tenantId,
+          environmentId,
           workflowKey,
           perExecutionCapUsd: budget?.perExecutionCapUsd,
           maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
@@ -644,6 +655,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
    */
   async testNode(
     tenantId: string,
+    environmentId: string,
     workflowKey: string,
     node: NodeDef,
     seededCtx: Record<string, unknown>,
@@ -660,6 +672,9 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         (seededCtx.__input as unknown) ?? {},
         {
           tenantId,
+          // A single-node test runs the REAL activity + in-activity secret fetch, so it must read
+          // THIS env's creds/connections (Slice 5b) — a sandbox test uses sandbox keys.
+          environmentId,
           workflowKey,
           test: true,
           seededCtx,

@@ -294,4 +294,45 @@ describe("runAgent", () => {
     const arg = generateText.mock.calls[0][0] as { messages?: unknown };
     expect(arg.messages).toBeUndefined(); // flat form — caching is anthropic-only
   });
+
+  // --- Env-scoped credential read (Slice 5b) ---
+
+  it("reads the credential from the RUN's environment (meta.environmentId) when present", async () => {
+    generateText.mockResolvedValue(OK);
+    const seen: unknown[][] = [];
+    __agentDeps.getCredentials = () =>
+      ({
+        getDecryptedKey: (...a: unknown[]) => {
+          seen.push(a);
+          return getKey();
+        },
+      }) as never;
+    const getDefaultEnvId = vi.fn(() => Promise.resolve("e-default"));
+    __agentDeps.getDefaultEnvId = getDefaultEnvId as never;
+
+    await runAgent(CFG, { msg: "x" }, { ...META, environmentId: "e-sandbox" });
+
+    // the run's env selects the key — NOT the default-env shim
+    expect(seen[0]).toEqual(["t1", "e-sandbox", "anthropic"]);
+    expect(getDefaultEnvId).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the tenant DEFAULT env when meta has no environmentId (pre-5b run)", async () => {
+    generateText.mockResolvedValue(OK);
+    const seen: unknown[][] = [];
+    __agentDeps.getCredentials = () =>
+      ({
+        getDecryptedKey: (...a: unknown[]) => {
+          seen.push(a);
+          return getKey();
+        },
+      }) as never;
+    const getDefaultEnvId = vi.fn(() => Promise.resolve("e-default"));
+    __agentDeps.getDefaultEnvId = getDefaultEnvId as never;
+
+    await runAgent(CFG, { msg: "x" }, META); // META has no environmentId
+
+    expect(getDefaultEnvId).toHaveBeenCalledWith("t1");
+    expect(seen[0]).toEqual(["t1", "e-default", "anthropic"]);
+  });
 });
