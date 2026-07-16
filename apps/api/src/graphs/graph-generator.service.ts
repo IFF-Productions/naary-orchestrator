@@ -384,8 +384,10 @@ function parseGraphJson(text: string): GraphDraft | null {
 
 /** Safe, key-free one-line summary of a provider error for logs. */
 async function describeProviderError(e: unknown): Promise<string> {
-  const { APICallError } = await aiSdk();
-  if (APICallError.isInstance(e)) {
+  // Defensive import: `ai` is already cached (the generate call resolved it), but never let a
+  // failed import in this error-describing helper mask the error we're trying to describe.
+  const aiMod = await aiSdk().catch(() => undefined);
+  if (aiMod?.APICallError.isInstance(e)) {
     const body =
       typeof e.responseBody === "string" ? e.responseBody.slice(0, 300) : "";
     return `APICallError status=${e.statusCode ?? "?"} url=${e.url ?? "?"} retryable=${e.isRetryable} msg=${e.message} body=${body}`;
@@ -416,8 +418,10 @@ async function mapProviderError(
   e: unknown,
   provider: string,
 ): Promise<HttpException> {
-  const { APICallError } = await aiSdk();
-  if (APICallError.isInstance(e)) {
+  // Defensive import: if `ai` can't load here (it's already cached from the generate call), don't
+  // let that mask the provider error — fall through to the generic 503 below.
+  const aiMod = await aiSdk().catch(() => undefined);
+  if (aiMod?.APICallError.isInstance(e)) {
     const status = e.statusCode;
     if (status === 401 || status === 403) {
       return new BadRequestException(

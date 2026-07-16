@@ -13,7 +13,7 @@ import { getAuth } from "firebase-admin/auth";
  * GOOGLE_APPLICATION_CREDENTIALS pointing at the key file) — the same credential
  * the API uses to verify ID tokens.
  *
- *   ts-node src/auth/set-tenant-claim.ts <firebaseUid> <tenantId>
+ *   node -r @swc/register src/auth/set-tenant-claim.ts <firebaseUid> <tenantId>
  *
  * The user must obtain a fresh ID token after this (sign out/in or force-refresh)
  * for the new claim to appear in the token.
@@ -22,7 +22,7 @@ async function main(): Promise<void> {
   const [uid, tenantId] = process.argv.slice(2);
   if (!uid || !tenantId) {
     console.error(
-      "usage: ts-node src/auth/set-tenant-claim.ts <uid> <tenantId>",
+      "usage: node -r @swc/register src/auth/set-tenant-claim.ts <uid> <tenantId>",
     );
     process.exit(1);
   }
