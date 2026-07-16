@@ -11,6 +11,7 @@
     { "path": "./packages/sql" },
     { "path": "./packages/observability" },
     { "path": "./packages/logging" },
+    { "path": "./packages/notifications" },
     { "path": "./packages/temporal-config" },
     { "path": "./packages/metrics" },
     { "path": "./packages/flags" }

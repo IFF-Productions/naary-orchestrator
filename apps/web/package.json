@@ -8,8 +8,11 @@
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test:e2e": "playwright test"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.storybook.json",
+    "typecheck:stories": "tsc --noEmit -p tsconfig.storybook.json",
+    "test:e2e": "playwright test",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
@@ -19,6 +22,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@naary/dsl": "workspace:*",
+    "@naary/notifications": "workspace:*",
     "@sentry/react": "^10.65.0",
     "@uiw/react-codemirror": "^4.25.11",
     "@xyflow/react": "^12.11.2",
@@ -30,11 +34,20 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
+    "@storybook/react-vite": "^10.5.1",
     "@types/node": "^26.0.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "msw": "^2.15.0",
+    "msw-storybook-addon": "^2.0.7",
+    "storybook": "^10.5.1",
     "typescript": "^6.0.3",
     "vite": "^8.1.4"
+  },
+  "msw": {
+    "workerDirectory": [
+      "public"
+    ]
   }
 }

@@ -463,7 +463,12 @@
 }
 .node .accent {
   height: 2px;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  /* A 2px strip can't render the card's 12px corner, so a full-width bar fills the corner
+     squares the rounded border leaves empty — reading as a clipped/square top. Inset it to the
+     flat part of the top edge (past the corner radius) and round its ends. Can't use
+     overflow:hidden on .node — the connection ports overflow at left/right:-6px. */
+  margin: 0 var(--radius-lg);
+  border-radius: 0 0 2px 2px;
 }
 .node.selected {
   box-shadow: 0 0 0 var(--ring-width)
@@ -483,6 +488,49 @@
 }
 .node .port.out {
   right: -6px;
+}
+
+/* ---------- ReactFlow controls (zoom / fit) + fullscreen toggle ----------
+   ReactFlow's default control buttons are white — theme them to the app's
+   surface so they read on the dark canvas (used by RunDiagram + the editor). */
+.react-flow__controls {
+  box-shadow: var(--shadow-card);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+/* Parent-scoped for specificity — ReactFlow's own dist stylesheet targets the bare class
+   and can load after ours, so an equal-specificity rule wouldn't reliably win. */
+.react-flow__controls .react-flow__controls-button {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+  width: 26px;
+  height: 26px;
+}
+.react-flow__controls .react-flow__controls-button:hover {
+  background: var(--card-2);
+}
+.react-flow__controls .react-flow__controls-button svg {
+  fill: currentColor;
+}
+/* Full-screen toggle (a ReactFlow Panel button, top-right of the canvas). */
+.rf-fs-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  color: var(--ink-2);
+  cursor: pointer;
+  box-shadow: var(--shadow-card);
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.rf-fs-btn:hover {
+  background: var(--card-2);
+  color: var(--ink);
 }
 
 /* ---------- Tabs ---------- */

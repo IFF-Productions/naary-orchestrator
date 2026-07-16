@@ -1,18 +1,21 @@
 import "@xyflow/react/dist/style.css";
 import {
   Background,
+  Controls,
   type Edge,
   Handle,
   type Node,
   type NodeProps,
+  Panel,
   Position,
   ReactFlow,
 } from "@xyflow/react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { GraphDef, NodeType } from "@naary/dsl";
 import { decompileGraph } from "../lib/decompile-graph";
 import { ACCENT, nodeDisplayLabel, nodeSubtitle } from "../lib/graph-model";
 import { isFailure, isTerminal } from "../lib/run-status";
+import { Icon } from "./Icon";
 
 /** fitView runs once on mount; keep the same options for the resize-driven refits below. */
 const FIT_VIEW_OPTIONS = { padding: 0.2 } as const;
@@ -192,8 +195,21 @@ export function RunDiagram({
     return { nodes: flowNodes, edges: flowEdges };
   }, [layout, ctx, currentNodeId, status]);
 
+  // Expand the canvas to a full-screen overlay (a big graph is unreadable in a short card).
+  // A CSS overlay (not the native Fullscreen API) so it works everywhere, including a sandboxed
+  // Storybook iframe; the ResizeObserver below refits when the size flips. Esc exits.
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullscreen]);
+
   // `fitView` only fits on mount, so the diagram would stay clipped after its container narrows
-  // (phone load, sidebar collapse, rotation). Re-fit whenever the wrapper resizes.
+  // (phone load, sidebar collapse, rotation) or when toggling full-screen. Re-fit on any resize.
   const wrapRef = useRef<HTMLDivElement>(null);
   // Minimal shape — we only ever call fitView (avoids threading ReactFlow's node/edge generics).
   const rfRef = useRef<{
@@ -217,7 +233,21 @@ export function RunDiagram({
   }, []);
 
   return (
-    <div ref={wrapRef} style={{ height, width: "100%" }}>
+    <div
+      ref={wrapRef}
+      style={
+        fullscreen
+          ? {
+              position: "fixed",
+              inset: 0,
+              zIndex: 1000,
+              height: "100vh",
+              width: "100vw",
+              background: "var(--bg)",
+            }
+          : { height, width: "100%" }
+      }
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -230,11 +260,25 @@ export function RunDiagram({
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
-        zoomOnScroll={false}
+        // Scroll-to-zoom only in full-screen (avoids hijacking page scroll in the run card).
+        zoomOnScroll={fullscreen}
         panOnScroll={false}
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={22} size={1} color="var(--line)" />
+        {/* Zoom in / out / fit-to-view. showInteractive hidden — this canvas is read-only. */}
+        <Controls showInteractive={false} />
+        <Panel position="top-right">
+          <button
+            type="button"
+            className="rf-fs-btn"
+            onClick={() => setFullscreen((v) => !v)}
+            aria-label={fullscreen ? "Exit full screen" : "Full screen"}
+            title={fullscreen ? "Exit full screen (Esc)" : "Full screen"}
+          >
+            <Icon name={fullscreen ? "x" : "expand"} size={15} />
+          </button>
+        </Panel>
       </ReactFlow>
     </div>
   );

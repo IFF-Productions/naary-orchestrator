@@ -19,5 +19,10 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "vite.config.ts"],
+  // Storybook stories are a DEV concern — they import dev-only workspace packages
+  // (@naary/notifications) + Storybook/MSW devDeps. Keep them out of the production build
+  // (the web Docker image only prebuilds @naary/dsl, so a story's tsc would fail there).
+  // Stories are typechecked separately via tsconfig.storybook.json (`typecheck:stories`).
+  "exclude": ["src/**/*.stories.tsx"]
 }
