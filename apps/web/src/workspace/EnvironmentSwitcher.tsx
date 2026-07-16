@@ -157,10 +157,12 @@ export function EnvironmentSwitcher() {
     setError(undefined);
     try {
       await api.deleteEnvironment(tenantId, env.id);
-      const remaining = envs.filter((e) => e.id !== env.id);
-      setEnvs(remaining);
-      // If we deleted the ACTIVE env, fall back to the default (reload so screens re-fetch).
+      // Functional update so a concurrent rename/create isn't clobbered by this render's stale list.
+      setEnvs((prev) => prev.filter((e) => e.id !== env.id));
+      // If we deleted the ACTIVE env, fall back to the default (reload so screens re-fetch). Derive
+      // the fallback from the freshest list, not this render's `envs`.
       if (env.slug === activeSlug) {
+        const remaining = envs.filter((e) => e.id !== env.id);
         const fallback = remaining.find((e) => e.isDefault) ?? remaining[0];
         setActiveEnvironment(fallback?.slug ?? null);
         window.location.reload();
@@ -268,7 +270,10 @@ export function EnvironmentSwitcher() {
                       onChange={(ev) => setEditName(ev.target.value)}
                       onKeyDown={(ev) => {
                         if (ev.key === "Enter") void onRename(e);
-                        if (ev.key === "Escape") setEditingId(null);
+                        if (ev.key === "Escape") {
+                          setEditingId(null);
+                          setError(undefined); // match the Cancel button
+                        }
                       }}
                       placeholder="Environment name"
                       style={{
@@ -324,8 +329,7 @@ export function EnvironmentSwitcher() {
               return (
                 <div
                   key={e.id}
-                  role="option"
-                  aria-selected={isActive}
+                  role="none"
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -341,6 +345,8 @@ export function EnvironmentSwitcher() {
                 >
                   <button
                     type="button"
+                    role="option"
+                    aria-selected={isActive}
                     onClick={() => switchTo(e.slug)}
                     title={`Switch to ${e.name}`}
                     style={{
