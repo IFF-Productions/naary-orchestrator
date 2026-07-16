@@ -35,7 +35,12 @@ beforeEach(() => {
   );
 });
 
-describe("runSandbox", () => {
+// The sandbox-runner is a Linux-only service: it bind-mounts the working tree into Docker and
+// buildSandboxDockerArgs enforces a POSIX absolute workdir (leading '/', no ':') to block
+// mount-spec injection. On Windows `path.resolve('/runs')` yields `C:\runs\…`, which correctly
+// fails that guard — so these tests can't run there (the runtime never does either). Skip on win32;
+// full coverage runs on macOS/Linux dev machines + any Linux CI.
+describe.skipIf(process.platform === "win32")("runSandbox", () => {
   it("runs docker (pinned + isolated) then captures the git diff", async () => {
     const out = await runSandbox(REQ, CFG, exec as unknown as Exec);
     expect(out.exitCode).toBe(0);

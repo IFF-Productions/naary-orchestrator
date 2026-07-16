@@ -68,13 +68,19 @@ describe("runner server", () => {
     expect((await post(REQ, "nope")).status).toBe(401);
   });
 
-  it("runs and returns the diff — but NEVER the key", async () => {
-    const res = await post(REQ);
-    expect(res.status).toBe(200);
-    const text = await res.text();
-    expect(text).toContain("+edited");
-    expect(text).not.toContain("sk-ant-xyz");
-  });
+  // Reaches runSandbox → buildSandboxDockerArgs' POSIX-workdir guard, which a Windows path can't
+  // satisfy (see run-sandbox.spec.ts). Linux-only service; skip on win32. The auth/routing tests
+  // above still run everywhere.
+  it.skipIf(process.platform === "win32")(
+    "runs and returns the diff — but NEVER the key",
+    async () => {
+      const res = await post(REQ);
+      expect(res.status).toBe(200);
+      const text = await res.text();
+      expect(text).toContain("+edited");
+      expect(text).not.toContain("sk-ant-xyz");
+    },
+  );
 
   it("400s a bad request (traversal runId) without a 500", async () => {
     const res = await post({ ...REQ, runId: "../escape" });
