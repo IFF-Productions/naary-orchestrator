@@ -11,16 +11,16 @@
 #    keeps the image's deps + built dist intact while host edits flow in live.
 #  - `tsc -b --watch` rebuilds every @naary/* package's dist incrementally on
 #    change. This is REQUIRED: workspace deps resolve through dist/index.js, so a
-#    plain `ts-node`/`node --watch` on the app would never see edits to an
+#    plain `node --watch` on the app would never see edits to an
 #    imported package like @naary/secrets.
-#  - The app itself is NOT compiled — it runs through `ts-node` (same as the prod
+#  - The app itself is NOT compiled — it runs through `@swc/register` (same as the prod
 #    `start` script), so edits to the app's own src take effect on the next
 #    restart with no build step. `node --watch-path` restarts it when the app src
 #    OR any package's freshly-rebuilt dist changes.
 #  - The packages' dist already exists in the image from the build, so the app
 #    starts immediately; tsc --watch just keeps dist in sync with src edits.
 #
-# Trade-off vs prod compose: identical runtime (ts-node), just wrapped in a
+# Trade-off vs prod compose: identical runtime (@swc/register), just wrapped in a
 # watcher + a package build-watch. Use plain `docker compose up` (no -f override)
 # for the non-watching run.
 #
@@ -39,7 +39,7 @@ services:
     command:
       - sh
       - -c
-      - 'pnpm -w exec tsc -b --watch --preserveWatchOutput & exec node --watch-path=/app/apps/api/src --watch-path=/app/packages -r ts-node/register src/main.ts'
+      - 'pnpm -w exec tsc -b --watch --preserveWatchOutput & exec node --watch-path=/app/apps/api/src --watch-path=/app/packages -r @swc/register src/main.ts'
     volumes:
       - ./apps/api/src:/app/apps/api/src
       - ./packages/connections/src:/app/packages/connections/src
@@ -59,7 +59,7 @@ services:
     command:
       - sh
       - -c
-      - 'pnpm -w exec tsc -b --watch --preserveWatchOutput & exec node --watch-path=/app/apps/worker/src --watch-path=/app/packages -r ts-node/register src/worker.ts'
+      - 'pnpm -w exec tsc -b --watch --preserveWatchOutput & exec node --watch-path=/app/apps/worker/src --watch-path=/app/packages -r @swc/register src/worker.ts'
     volumes:
       - ./apps/worker/src:/app/apps/worker/src
       - ./packages/connections/src:/app/packages/connections/src
