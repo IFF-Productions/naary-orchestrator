@@ -408,7 +408,7 @@ export function Integrations() {
   return (
     <div
       style={{
-        padding: phone ? "16px 14px 32px" : "22px 28px 40px",
+        padding: phone ? "22px 14px 40px" : "22px 28px 40px",
         maxWidth: 1100,
       }}
     >
