@@ -296,6 +296,11 @@ export interface RunGraphResult {
  *  Enforcement is opt-in per cap: a cap that is undefined is not enforced. */
 export interface RunGraphCtx {
   tenantId: string;
+  /** The environment this run executes in (Slice 5b). Set at start from the endpoint's env (triggers)
+   *  or the caller's active env (manual/test); rides continueAsNew inside this ctx. Optional so a run
+   *  started before 5b (no env in its recorded ctx) resolves to the tenant default in-activity. Only
+   *  tenantId + this non-secret id flow through history (Tier-1 #4). */
+  environmentId?: string;
   /** The saved-graph key this run executes — recorded for the Runs list. */
   workflowKey?: string;
   perExecutionCapUsd?: number;
@@ -404,6 +409,19 @@ export async function runGraph(
   // Graph node-id set — lets the unresolved-input diagnostic tell "source ran but was empty"
   // (a real node) from "source doesn't exist" (a typo/deleted node). Pure + precomputed once.
   const nodeIdSet = new Set(nodeById.keys());
+
+  // Single source of truth for every activity's `meta` — ALL activity calls use this so a run's
+  // environmentId (Slice 5b) reaches EVERY env-scoped secret/cred read uniformly (a missed call site
+  // would silently read the default env's creds). environmentId is undefined for a pre-5b run (its
+  // ctx predates the field) → the activity falls back to the tenant default (byte-identical). Data-only
+  // threading — no new/removed/reordered command, so replay-safe WITHOUT patched(); and it rides
+  // continueAsNew because runCtx is re-passed whole.
+  const metaFor = (nodeId: string): activities.AgentMeta => ({
+    tenantId: runCtx.tenantId,
+    environmentId: runCtx.environmentId,
+    executionId: wf.workflowInfo().workflowId,
+    nodeId,
+  });
 
   // Items model (design ITEMS-MODEL-CURRENT-ITEM.md): precompute the splitOut→region map. Pure +
   // deterministic (same source of truth the save-gate validates), so computing it never affects
@@ -551,11 +569,7 @@ export async function runGraph(
         const result = await (over?.runAgent ?? runAgent)(
           cfg as unknown as activities.AgentConfig,
           ctx.__input,
-          {
-            tenantId: runCtx.tenantId,
-            executionId: wf.workflowInfo().workflowId,
-            nodeId: node.id,
-          },
+          metaFor(node.id),
         );
         ctx[node.id] = result satisfies NodeOutputMap["agent"];
         // Cost is a commutative SUM — accumulating it is order-independent (safe
@@ -588,11 +602,7 @@ export async function runGraph(
             connectionId: caCfg.connectionId,
           },
           ctx.__input,
-          {
-            tenantId: runCtx.tenantId,
-            executionId: wf.workflowInfo().workflowId,
-            nodeId: node.id,
-          },
+          metaFor(node.id),
         );
         ctx[node.id] = caResult satisfies NodeOutputMap["codeAgent"];
         costUsd += caResult.costUsd;
@@ -612,11 +622,7 @@ export async function runGraph(
             costUsd: mcpCfg.costUsd,
           },
           ctx.__input,
-          {
-            tenantId: runCtx.tenantId,
-            executionId: wf.workflowInfo().workflowId,
-            nodeId: node.id,
-          },
+          metaFor(node.id),
         );
         ctx[node.id] = toolResult satisfies NodeOutputMap["mcpTool"];
         // Meter tool spend into the run budget so the per-execution cap sees it
@@ -639,11 +645,7 @@ export async function runGraph(
         ctx[node.id] = (await runIntegration(
           iCfg,
           resolveIntegrationFields(iCfg, ctx),
-          {
-            tenantId: runCtx.tenantId,
-            executionId: wf.workflowInfo().workflowId,
-            nodeId: node.id,
-          },
+          metaFor(node.id),
         )) satisfies NodeOutputMap["integration"];
         return null;
       }
@@ -655,11 +657,7 @@ export async function runGraph(
         const result = await (over?.callHttpRequest ?? callHttpRequest)(
           resolveHttpRequest(httpCfg, ctx),
           ctx.__input,
-          {
-            tenantId: runCtx.tenantId,
-            executionId: wf.workflowInfo().workflowId,
-            nodeId: node.id,
-          },
+          metaFor(node.id),
         );
         // Expose the response as {status, headers, body} so edges branch on
         // `<nodeId>.status` (the HTTP code), per the node's behavior contract.
@@ -681,11 +679,7 @@ export async function runGraph(
         const result = await (over?.callSqlQuery ?? callSqlQuery)(
           resolveSqlQuery(sqlCfg, ctx),
           ctx.__input,
-          {
-            tenantId: runCtx.tenantId,
-            executionId: wf.workflowInfo().workflowId,
-            nodeId: node.id,
-          },
+          metaFor(node.id),
         );
         // Expose {rows, rowCount} so edges branch on `<nodeId>.rowCount`.
         ctx[node.id] = {
@@ -704,11 +698,7 @@ export async function runGraph(
         const result = await callSqlExec(
           resolveSqlExec(execCfg, ctx),
           ctx.__input,
-          {
-            tenantId: runCtx.tenantId,
-            executionId: wf.workflowInfo().workflowId,
-            nodeId: node.id,
-          },
+          metaFor(node.id),
         );
         // Expose {rowsAffected} so edges branch on `<nodeId>.rowsAffected`.
         ctx[node.id] = {
@@ -772,11 +762,7 @@ export async function runGraph(
         const result = await callXml(
           { operation: xmlCfg.operation },
           inputVal,
-          {
-            tenantId: runCtx.tenantId,
-            executionId: wf.workflowInfo().workflowId,
-            nodeId: node.id,
-          },
+          metaFor(node.id),
         );
         ctx[node.id] = result.result;
         return null;
@@ -789,11 +775,7 @@ export async function runGraph(
         const res = await callHtmlExtract(
           { extractions: htmlCfg.extractions ?? [] },
           htmlVal,
-          {
-            tenantId: runCtx.tenantId,
-            executionId: wf.workflowInfo().workflowId,
-            nodeId: node.id,
-          },
+          metaFor(node.id),
         );
         ctx[node.id] = res.result;
         return null;
@@ -803,11 +785,7 @@ export async function runGraph(
         // in the activity (parser out of the deterministic bundle, like htmlExtract).
         const mdCfg = asNodeConfig(cfg, "markdown");
         const mdVal = getByPath(ctx[mdCfg.from], mdCfg.path);
-        const res = await callMarkdown(mdVal, {
-          tenantId: runCtx.tenantId,
-          executionId: wf.workflowInfo().workflowId,
-          nodeId: node.id,
-        });
+        const res = await callMarkdown(mdVal, metaFor(node.id));
         ctx[node.id] = res.result;
         return null;
       }
@@ -819,11 +797,7 @@ export async function runGraph(
         const res = await callVectorUpsert(
           { collection: vuCfg.collection },
           vuVal,
-          {
-            tenantId: runCtx.tenantId,
-            executionId: wf.workflowInfo().workflowId,
-            nodeId: node.id,
-          },
+          metaFor(node.id),
         );
         ctx[node.id] = res.result;
         costUsd += res.costUsd; // embedding spend, metered like any activity
@@ -837,11 +811,7 @@ export async function runGraph(
         const res = await callVectorQuery(
           { collection: vqCfg.collection, topK: vqCfg.topK },
           vqVal,
-          {
-            tenantId: runCtx.tenantId,
-            executionId: wf.workflowInfo().workflowId,
-            nodeId: node.id,
-          },
+          metaFor(node.id),
         );
         ctx[node.id] = res.result;
         costUsd += res.costUsd;
@@ -866,11 +836,7 @@ export async function runGraph(
             delimiter: csvCfg.delimiter,
           },
           csvVal,
-          {
-            tenantId: runCtx.tenantId,
-            executionId: wf.workflowInfo().workflowId,
-            nodeId: node.id,
-          },
+          metaFor(node.id),
         );
         ctx[node.id] = res.result;
         return null;
@@ -947,11 +913,7 @@ export async function runGraph(
             min: rndCfg.min,
             max: rndCfg.max,
           },
-          {
-            tenantId: runCtx.tenantId,
-            executionId: wf.workflowInfo().workflowId,
-            nodeId: node.id,
-          },
+          metaFor(node.id),
         );
         ctx[node.id] = { value: res.value } satisfies NodeOutputMap["random"];
         return null;
@@ -961,11 +923,11 @@ export async function runGraph(
         // base64/hex isn't in the deterministic bundle). Output { result }.
         const encCfg = asNodeConfig(cfg, "encode");
         const encVal = getByPath(ctx[encCfg.from], encCfg.path);
-        const res = await callEncode({ operation: encCfg.operation }, encVal, {
-          tenantId: runCtx.tenantId,
-          executionId: wf.workflowInfo().workflowId,
-          nodeId: node.id,
-        });
+        const res = await callEncode(
+          { operation: encCfg.operation },
+          encVal,
+          metaFor(node.id),
+        );
         ctx[node.id] = { result: res.result };
         return null;
       }
@@ -973,11 +935,11 @@ export async function runGraph(
         // Binding resolution is deterministic (pure ctx read); the key fetch +
         // signing happen in the activity (the key never enters workflow history).
         const hmacCfg = asNodeConfig(cfg, "hmac");
-        const result = await callHmac(resolveHmac(hmacCfg, ctx), ctx.__input, {
-          tenantId: runCtx.tenantId,
-          executionId: wf.workflowInfo().workflowId,
-          nodeId: node.id,
-        });
+        const result = await callHmac(
+          resolveHmac(hmacCfg, ctx),
+          ctx.__input,
+          metaFor(node.id),
+        );
         ctx[node.id] = {
           digest: result.digest,
         } satisfies NodeOutputMap["hmac"];
@@ -987,11 +949,11 @@ export async function runGraph(
         // Keyless digest. Binding resolution is deterministic (pure ctx read); the hash
         // (node:crypto) runs in the activity, out of the deterministic bundle.
         const hashCfg = asNodeConfig(cfg, "hash");
-        const result = await callHash(resolveHash(hashCfg, ctx), ctx.__input, {
-          tenantId: runCtx.tenantId,
-          executionId: wf.workflowInfo().workflowId,
-          nodeId: node.id,
-        });
+        const result = await callHash(
+          resolveHash(hashCfg, ctx),
+          ctx.__input,
+          metaFor(node.id),
+        );
         ctx[node.id] = {
           digest: result.digest,
         } satisfies NodeOutputMap["hash"];
@@ -999,11 +961,11 @@ export async function runGraph(
       }
       case "jwt": {
         const jwtCfg = asNodeConfig(cfg, "jwt");
-        const result = await callJwt(resolveJwt(jwtCfg, ctx), ctx.__input, {
-          tenantId: runCtx.tenantId,
-          executionId: wf.workflowInfo().workflowId,
-          nodeId: node.id,
-        });
+        const result = await callJwt(
+          resolveJwt(jwtCfg, ctx),
+          ctx.__input,
+          metaFor(node.id),
+        );
         ctx[node.id] = { token: result.token } satisfies NodeOutputMap["jwt"];
         return null;
       }
@@ -1011,11 +973,7 @@ export async function runGraph(
         // No bindings: the seed comes from the connection, the time from the clock
         // — both handled in the activity. Output is the current code.
         const totpCfg = asNodeConfig(cfg, "totp");
-        const result = await callTotp(totpCfg, ctx.__input, {
-          tenantId: runCtx.tenantId,
-          executionId: wf.workflowInfo().workflowId,
-          nodeId: node.id,
-        });
+        const result = await callTotp(totpCfg, ctx.__input, metaFor(node.id));
         ctx[node.id] = { code: result.code } satisfies NodeOutputMap["totp"];
         return null;
       }
@@ -1026,11 +984,7 @@ export async function runGraph(
         const result = await callSendEmail(
           resolveSendEmail(emailCfg, ctx),
           ctx.__input,
-          {
-            tenantId: runCtx.tenantId,
-            executionId: wf.workflowInfo().workflowId,
-            nodeId: node.id,
-          },
+          metaFor(node.id),
         );
         ctx[node.id] = {
           messageId: result.messageId,
@@ -1048,11 +1002,7 @@ export async function runGraph(
         const result = await (over?.callRssRead ?? callRssRead)(
           resolveRss(rssCfg, ctx),
           ctx.__input,
-          {
-            tenantId: runCtx.tenantId,
-            executionId: wf.workflowInfo().workflowId,
-            nodeId: node.id,
-          },
+          metaFor(node.id),
         );
         ctx[node.id] = {
           items: result.items,
@@ -1076,6 +1026,7 @@ export async function runGraph(
         // the hash/version means a later edit to the child can't alter this run.
         const snapshot = await resolveSubWorkflowGraph({
           tenantId: runCtx.tenantId,
+          environmentId: runCtx.environmentId,
           workflowKey: subCfg.workflowKey,
         });
 
@@ -1092,6 +1043,9 @@ export async function runGraph(
             childInput,
             {
               tenantId: runCtx.tenantId,
+              // Child runs in the PARENT's env (Slice 5b) — a sandbox parent's sub-workflow uses
+              // sandbox creds/connections, not the default env.
+              environmentId: runCtx.environmentId,
               workflowKey: subCfg.workflowKey,
               perExecutionCapUsd:
                 runCtx.perExecutionCapUsd !== undefined
@@ -1151,6 +1105,7 @@ export async function runGraph(
         // one child per item with the item as its input.
         const snapshot = await resolveSubWorkflowGraph({
           tenantId: runCtx.tenantId,
+          environmentId: runCtx.environmentId,
           workflowKey: feCfg.workflowKey,
         });
         const parentId = wf.workflowInfo().workflowId;
@@ -1196,6 +1151,7 @@ export async function runGraph(
                       item,
                       {
                         tenantId: runCtx.tenantId,
+                        environmentId: runCtx.environmentId, // child inherits the parent's env (5b)
                         workflowKey: feCfg.workflowKey,
                         perExecutionCapUsd: childCap,
                         maxStepsPerRun: runCtx.maxStepsPerRun,
@@ -1246,6 +1202,7 @@ export async function runGraph(
                   item,
                   {
                     tenantId: runCtx.tenantId,
+                    environmentId: runCtx.environmentId, // child inherits the parent's env (5b)
                     workflowKey: feCfg.workflowKey,
                     perExecutionCapUsd: childCap,
                     maxStepsPerRun: runCtx.maxStepsPerRun,
@@ -1348,11 +1305,7 @@ export async function runGraph(
         const result = await callCode(
           codeCfg,
           { input: ctx.__input, ctx: snapshot },
-          {
-            tenantId: runCtx.tenantId,
-            executionId: wf.workflowInfo().workflowId,
-            nodeId: node.id,
-          },
+          metaFor(node.id),
         );
         ctx[node.id] = result.result;
         return null;
@@ -1718,11 +1671,7 @@ export async function runGraph(
                 }
                 let res: activities.MapNodeResult;
                 try {
-                  res = await mapNode(rnode.type, mapItems, {
-                    tenantId: runCtx.tenantId,
-                    executionId: wf.workflowInfo().workflowId,
-                    nodeId: rid,
-                  });
+                  res = await mapNode(rnode.type, mapItems, metaFor(rid));
                 } catch (err) {
                   // An INFRA-level mapNode crash (maxAttempts:1). Respect onError:"continue" like
                   // execNode does; else fail the run. (Per-ITEM errors don't throw — see below.)
@@ -1970,6 +1919,7 @@ export async function runGraph(
     try {
       const handler = await resolveSubWorkflowGraph({
         tenantId: runCtx.tenantId,
+        environmentId: runCtx.environmentId,
         workflowKey: runCtx.errorWorkflowKey,
       });
       const parentId = wf.workflowInfo().workflowId;
@@ -1996,6 +1946,9 @@ export async function runGraph(
           errorPayload,
           {
             tenantId: runCtx.tenantId,
+            // The error handler runs in the FAILED run's env (5b) — a sandbox failure's handler
+            // uses sandbox creds/connections.
+            environmentId: runCtx.environmentId,
             workflowKey: runCtx.errorWorkflowKey,
             isErrorHandler: true,
             graphContentHash: handler.contentHash,

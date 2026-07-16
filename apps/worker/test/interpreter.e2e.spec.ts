@@ -104,6 +104,7 @@ const mockActivities = {
   },
   resolveSubWorkflowGraph: async (meta: {
     tenantId: string;
+    environmentId?: string;
     workflowKey: string;
   }): Promise<activities.SubWorkflowGraph> => {
     subResolveCalls.push(meta);
@@ -259,7 +260,11 @@ const rssCalls: activities.ResolvedRss[] = [];
 const emailCalls: activities.ResolvedSendEmail[] = [];
 const hmacCalls: activities.ResolvedHmac[] = [];
 const jwtCalls: activities.ResolvedJwt[] = [];
-const subResolveCalls: { tenantId: string; workflowKey: string }[] = [];
+const subResolveCalls: {
+  tenantId: string;
+  environmentId?: string;
+  workflowKey: string;
+}[] = [];
 const mcpCalls: activities.McpToolConfig[] = [];
 const integrationCalls: {
   cfg: { provider: string; action: string };
@@ -1841,15 +1846,21 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
     const worker = await makeWorker();
     await worker.runUntil(async () => {
       const handle = await env.client.workflow.start(runGraph, {
-        args: [subParentGraph, { message: "go" }, { tenantId: "t-sub" }],
+        args: [
+          subParentGraph,
+          { message: "go" },
+          { tenantId: "t-sub", environmentId: "e-sub" },
+        ],
         taskQueue: TASK_QUEUE,
         workflowId: "e2e-subworkflow",
       });
       const result = await handle.result();
       expect(result.status).toBe("completed");
-      // the child graph was resolved by workflowKey (in the activity)
+      // the child graph was resolved by workflowKey (in the activity) AND in the PARENT's env — a
+      // sub-workflow inherits its parent's environment (Slice 5b).
       expect(subResolveCalls[subResolveCalls.length - 1]).toEqual({
         tenantId: "t-sub",
+        environmentId: "e-sub",
         workflowKey: "child-flow",
       });
       // the node output exposes the child's terminal status + its ctx

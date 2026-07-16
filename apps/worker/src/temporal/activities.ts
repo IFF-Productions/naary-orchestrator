@@ -155,6 +155,10 @@ export interface AgentConfig {
 
 export interface AgentMeta {
   tenantId: string;
+  /** The environment this run executes in (Slice 5b) — selects which env-scoped provider key the
+   *  activity reads. Optional: a pre-5b run's ctx has none, so the activity falls back to the
+   *  tenant's default env (byte-identical to pre-Slice-5 behavior). */
+  environmentId?: string;
   executionId: string;
   nodeId: string;
 }
@@ -310,10 +314,20 @@ export interface SubWorkflowGraph {
  */
 export async function resolveSubWorkflowGraph(meta: {
   tenantId: string;
+  /** The env to resolve the child graph in (Slice 5b) — GraphDefinition is env-scoped, so a sandbox
+   *  parent must pull the sandbox version of the child. Undefined for a pre-5b run → the tenant
+   *  default env, where all pre-environments graphs live (byte-identical to the old cross-env read). */
+  environmentId?: string;
   workflowKey: string;
 }): Promise<SubWorkflowGraph> {
+  const environmentId =
+    meta.environmentId ?? (await getDefaultEnvironmentId(meta.tenantId));
   const row = await getPrisma().graphDefinition.findFirst({
-    where: { tenantId: meta.tenantId, workflowKey: meta.workflowKey },
+    where: {
+      tenantId: meta.tenantId,
+      environmentId,
+      workflowKey: meta.workflowKey,
+    },
     orderBy: { version: "desc" },
   });
   if (!row) {
@@ -1929,11 +1943,11 @@ export async function runAgent(
     // anthropic is the only supported provider today; opus is a safe default model.
     const provider = cfg.provider?.trim() || "anthropic";
 
-    // In memory only — never returned from the activity, never logged. Slice 5a shim: creds are
-    // env-scoped, but the run's env isn't threaded through the workflow ctx yet (that's 5b), so
-    // resolve the tenant's DEFAULT env here — byte-identical to pre-Slice-5 behavior. In 5b this
-    // becomes `meta.environmentId`.
-    const envId = await __agentDeps.getDefaultEnvId(meta.tenantId);
+    // In memory only — never returned from the activity, never logged. Env-scoped creds (Slice 5):
+    // use the run's env (5b, threaded via meta) so a sandbox run reads the sandbox key; a pre-5b run
+    // has no meta.environmentId → fall back to the tenant default (byte-identical to pre-Slice-5).
+    const envId =
+      meta.environmentId ?? (await __agentDeps.getDefaultEnvId(meta.tenantId));
     const apiKey = await __agentDeps
       .getCredentials()
       .getDecryptedKey(meta.tenantId, envId, provider);
@@ -2251,9 +2265,11 @@ export async function callCodeAgent(
   const startedAt = process.hrtime.bigint();
   try {
     const driver = resolveDriver(cfg.tool);
-    // In memory only — injected as the subprocess env var, never returned/logged. Slice 5a shim:
-    // default env until the run's env threads through ctx (5b). See runAgent for the rationale.
-    const envId = await __codeAgentDeps.getDefaultEnvId(meta.tenantId);
+    // In memory only — injected as the subprocess env var, never returned/logged. Env-scoped creds:
+    // the run's env (5b) selects the key; a pre-5b run falls back to the tenant default. See runAgent.
+    const envId =
+      meta.environmentId ??
+      (await __codeAgentDeps.getDefaultEnvId(meta.tenantId));
     const apiKey = await __codeAgentDeps
       .getCredentials()
       .getDecryptedKey(meta.tenantId, envId, driver.credentialProvider);
@@ -3583,12 +3599,12 @@ const EMBED_DIM = 1536;
 
 /** Swappable seam for tests (embed + DB writes) — mirrors __agentDeps/__mapDeps. */
 export const __ragDeps = {
-  // Slice 5a shim: env-scoped creds, but the run's env isn't in ctx yet (5b) → default env, so
-  // behavior is byte-identical to pre-Slice-5. The two callers pass meta.tenantId.
-  getKey: async (tenantId: string): Promise<string> =>
+  // Env-scoped creds (Slice 5): the run's env (5b, threaded from meta) selects the key; a pre-5b run
+  // passes no env → fall back to the tenant default (byte-identical to pre-Slice-5).
+  getKey: async (tenantId: string, environmentId?: string): Promise<string> =>
     getCredentials().getDecryptedKey(
       tenantId,
-      await getDefaultEnvironmentId(tenantId),
+      environmentId ?? (await getDefaultEnvironmentId(tenantId)),
       "openai",
     ),
   embedOne: async (
@@ -3669,7 +3685,7 @@ export async function callVectorUpsert(
   }
   let apiKey: string;
   try {
-    apiKey = await __ragDeps.getKey(meta.tenantId);
+    apiKey = await __ragDeps.getKey(meta.tenantId, meta.environmentId);
   } catch {
     throw ApplicationFailure.nonRetryable(
       "No OpenAI key configured for embeddings",
@@ -3713,7 +3729,7 @@ export async function callVectorQuery(
   }
   let apiKey: string;
   try {
-    apiKey = await __ragDeps.getKey(meta.tenantId);
+    apiKey = await __ragDeps.getKey(meta.tenantId, meta.environmentId);
   } catch {
     throw ApplicationFailure.nonRetryable(
       "No OpenAI key configured for embeddings",

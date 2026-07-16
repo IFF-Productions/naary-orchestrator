@@ -110,6 +110,7 @@ export class PinsController {
     if (body?.autofillUpstream) {
       await this.fillUpstream(
         tenantId,
+        envId,
         workflowKey,
         found.graph,
         node.id,
@@ -127,10 +128,14 @@ export class PinsController {
         );
       }
     }
-    // Activity node: run the REAL activity via a short-lived test-mode Temporal exec.
+    // Activity node: run the REAL activity via a short-lived test-mode Temporal exec. Pass the SAME
+    // env used for the graph + pins read above (Slice 5b) so the node test — graph, pins, AND the
+    // creds/connections the activity fetches — all live in ONE env; when PinnedData is env-scoped this
+    // line's `envId` becomes the active env and everything follows together.
     try {
       const output = await this.executions.testNode(
         tenantId,
+        envId,
         workflowKey,
         node,
         ctx,
@@ -147,13 +152,20 @@ export class PinsController {
   /** Run one node against ctx (pure → in-process; activity → test-mode Temporal). */
   private runNode(
     tenantId: string,
+    environmentId: string,
     workflowKey: string,
     node: NodeDef,
     ctx: Record<string, unknown>,
   ): Promise<unknown> | unknown {
     return isPureNode(node.type)
       ? runPureNode(node, ctx)
-      : this.executions.testNode(tenantId, workflowKey, node, ctx);
+      : this.executions.testNode(
+          tenantId,
+          environmentId,
+          workflowKey,
+          node,
+          ctx,
+        );
   }
 
   /**
@@ -164,6 +176,7 @@ export class PinsController {
    */
   private async fillUpstream(
     tenantId: string,
+    environmentId: string,
     workflowKey: string,
     graph: GraphDef,
     nodeId: string,
@@ -178,6 +191,7 @@ export class PinsController {
       visiting.add(predId);
       await this.fillUpstream(
         tenantId,
+        environmentId,
         workflowKey,
         graph,
         predId,
@@ -185,7 +199,13 @@ export class PinsController {
         visiting,
       );
       try {
-        const out = await this.runNode(tenantId, workflowKey, pred, ctx);
+        const out = await this.runNode(
+          tenantId,
+          environmentId,
+          workflowKey,
+          pred,
+          ctx,
+        );
         ctx[predId] = out;
         await this.pins.set(tenantId, workflowKey, predId, out);
       } catch {
