@@ -7,6 +7,7 @@ import {
   type TenantSettings,
   UnauthorizedError,
 } from "../../lib/api";
+import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import { type Mode, useMode } from "../../mode";
 import { useWorkspace } from "../../workspace/WorkspaceProvider";
 
@@ -50,6 +51,7 @@ function defaultChannel(type: NotificationChannelType): EditableChannel {
 
 export function Settings() {
   const { refresh: refreshWorkspaces } = useWorkspace();
+  const phone = useMediaQuery(PHONE_QUERY);
   const { mode, setMode } = useMode();
   const [tenant, setTenant] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
@@ -194,7 +196,12 @@ export function Settings() {
   }
 
   return (
-    <div style={{ padding: "22px 28px 40px", maxWidth: 720 }}>
+    <div
+      style={{
+        padding: phone ? "22px 14px 40px" : "22px 28px 40px",
+        maxWidth: 720,
+      }}
+    >
       <div style={{ marginBottom: 20 }}>
         <div
           style={{
