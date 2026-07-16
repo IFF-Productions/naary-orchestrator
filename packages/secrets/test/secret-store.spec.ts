@@ -18,15 +18,21 @@ vi.mock("@naary/db", () => ({
           creds.get(`${w.tenantId}::${w.environmentId}::${w.provider}`) ?? null
         );
       },
+      // Match only the fields PRESENT in `where` — removeAllEnvs omits environmentId (delete across
+      // all envs), so an unconditional environmentId comparison would wrongly match nothing.
       deleteMany: async ({ where }: any) => {
+        let count = 0;
         for (const [k, r] of creds)
           if (
             r.tenantId === where.tenantId &&
-            r.environmentId === where.environmentId &&
-            r.provider === where.provider
-          )
+            (where.environmentId === undefined ||
+              r.environmentId === where.environmentId) &&
+            (where.provider === undefined || r.provider === where.provider)
+          ) {
             creds.delete(k);
-        return { count: 1 };
+            count++;
+          }
+        return { count };
       },
     },
   }),
@@ -59,5 +65,30 @@ describe("SecretStore", () => {
     await store.put("t1", "e1", "conn:c1", SECRET);
     await store.remove("t1", "e1", "conn:c1");
     expect(await store.get("t1", "e1", "conn:c1")).toBeNull();
+  });
+
+  it("remove is env-SCOPED — only the named env's row goes", async () => {
+    const store = new SecretStore();
+    await store.put("t1", "e1", "conn:c1", SECRET);
+    await store.put("t1", "e2", "conn:c1", SECRET);
+    await store.remove("t1", "e1", "conn:c1");
+    expect(await store.get("t1", "e1", "conn:c1")).toBeNull();
+    expect(await store.get("t1", "e2", "conn:c1")).toBe(SECRET); // other env untouched
+  });
+
+  it("removeAllEnvs deletes the key across EVERY env (not filtered by environmentId)", async () => {
+    const store = new SecretStore();
+    // Same globally-unique key present in two envs; removeAllEnvs must purge both. A regression that
+    // re-added environmentId to the filter would leave the other env's row (this guards that).
+    await store.put("t1", "e1", "conn:c1", SECRET);
+    await store.put("t1", "e2", "conn:c1", SECRET);
+    // A different tenant's identical key must survive (tenant-scoped).
+    await store.put("t2", "e1", "conn:c1", SECRET);
+
+    await store.removeAllEnvs("t1", "conn:c1");
+
+    expect(await store.get("t1", "e1", "conn:c1")).toBeNull();
+    expect(await store.get("t1", "e2", "conn:c1")).toBeNull();
+    expect(await store.get("t2", "e1", "conn:c1")).toBe(SECRET); // other tenant untouched
   });
 });

@@ -40,9 +40,20 @@ export async function getDefaultEnvironmentId(
   const prisma = getPrisma();
   const existing = await prisma.environment.findUnique({
     where: { tenantId_slug: { tenantId, slug: "prod" } },
-    select: { id: true },
+    select: { id: true, isDefault: true },
   });
-  if (existing) return existing.id;
+  if (existing) {
+    // Repair the inconsistent case (mirrors EnvironmentsService.ensureDefault): a prod-slug row that
+    // somehow lost isDefault (manual edit / partial write) must be restored, else the delete-guard
+    // ("can't delete the default env") could be bypassed and this shim would point at a deletable env.
+    if (!existing.isDefault) {
+      await prisma.environment.update({
+        where: { id: existing.id },
+        data: { isDefault: true },
+      });
+    }
+    return existing.id;
+  }
   // Create-if-missing, race-safe: a concurrent create is absorbed by the unique (empty update).
   const row = await prisma.environment.upsert({
     where: { tenantId_slug: { tenantId, slug: "prod" } },

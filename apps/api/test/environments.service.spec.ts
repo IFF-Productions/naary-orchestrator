@@ -183,6 +183,18 @@ describe("remove", () => {
     findFirst.mockResolvedValue(null);
     await expect(svc.remove("t1", "nope")).rejects.toThrow(/not found/);
   });
+
+  it("409s (clean message) when the env still holds env-scoped data (FK RESTRICT → P2003)", async () => {
+    findFirst.mockResolvedValue({ ...DEFAULT, id: "env-sb", isDefault: false });
+    // Prisma raises P2003 when an ON DELETE RESTRICT FK (creds/connections/endpoints/graphs) blocks
+    // the delete — we translate it to a 409 instead of leaking a generic 500.
+    deleteMany.mockRejectedValue(
+      Object.assign(new Error("FK violation"), { code: "P2003" }),
+    );
+    await expect(svc.remove("t1", "env-sb")).rejects.toThrow(
+      /still holds workflows, credentials, connections/,
+    );
+  });
 });
 
 describe("resolveEnvId (the compatibility shim)", () => {
