@@ -42,6 +42,7 @@ import {
   type NodeType,
 } from "@naary/dsl";
 import { Button, StatusPill } from "../components";
+import { CurlImportButton } from "../canvas/CurlImportButton";
 import { ExpressionField } from "../components/ExpressionField";
 import {
   api,
@@ -2760,6 +2761,17 @@ function ConfigPanel({
 
       {kind === "httpRequest" && (
         <>
+          <CurlImportButton
+            onApply={(c) =>
+              onChange({
+                method: c.method,
+                url: c.url,
+                headers: c.headers ?? {},
+                query: c.query ?? {},
+                body: c.body,
+              })
+            }
+          />
           <Labeled label="Method">
             <select
               value={str("method") || "GET"}
