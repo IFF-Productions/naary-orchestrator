@@ -383,6 +383,7 @@ model Environment {
   chatEndpoints       ChatEndpoint[]
   connections         Connection[]
   tenantCredentials   TenantCredential[]
+  variables           Variable[]
 
   @@unique([tenantId, slug])
   @@index([tenantId])
@@ -421,7 +422,6 @@ model Membership {
   @@index([tenantId])
 }
 
-// Per-tenant settings (Settings screen). One row per tenant.
 /// Non-secret per-workspace config, ENV-SCOPED, referenced in string expressions as
 /// `{{ $vars.KEY }}`. The worker loads a workspace+env's variables into the run ctx under `$vars`
 /// at start (as DATA), so a value can differ per environment (e.g. a URL in sandbox vs prod). NOT
@@ -433,10 +433,15 @@ model Variable {
   value         String
   updatedAt     DateTime @default(now()) @updatedAt
 
+  // Restrict (like the other env-scoped models) so an env can't be deleted out from under its
+  // variables, leaving orphans — env deletion re-parents/clears rows first (see EnvironmentsService).
+  environment Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
+
   @@id([tenantId, environmentId, key])
   @@index([tenantId, environmentId])
 }
 
+// Per-tenant settings (Settings screen). One row per tenant.
 model TenantSettings {
   tenantId     String   @id
   displayName  String?

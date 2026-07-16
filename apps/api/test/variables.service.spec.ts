@@ -114,4 +114,18 @@ describe("VariablesService.remove", () => {
       },
     });
   });
+
+  it("trims the key so it matches how upsert stored it", async () => {
+    variable.deleteMany.mockResolvedValue({ count: 1 });
+
+    await svc.remove("t-1", "env-prod", "  slackChannel  ");
+
+    expect(variable.deleteMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: "t-1",
+        environmentId: "env-prod",
+        key: "slackChannel",
+      },
+    });
+  });
 });

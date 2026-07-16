@@ -214,7 +214,9 @@ export function Settings() {
     );
   }
 
-  async function saveVariable(key: string, value: string) {
+  /** Returns true when the save landed, so callers (addVariable) can clear the draft
+   *  ONLY on success — a failed save (invalid key / 401) keeps the user's input. */
+  async function saveVariable(key: string, value: string): Promise<boolean> {
     setVarBusy(true);
     setVarError(null);
     try {
@@ -223,12 +225,14 @@ export function Settings() {
         const others = prev.filter((v) => v.key !== saved.key);
         return [...others, saved].sort((a, b) => a.key.localeCompare(b.key));
       });
+      return true;
     } catch (e) {
       setVarError(
         e instanceof UnauthorizedError
           ? "Sign in to edit variables."
           : "Could not save. Keys must be a valid identifier (letters, digits, underscore; not starting with a digit).",
       );
+      return false;
     } finally {
       setVarBusy(false);
     }
@@ -237,9 +241,10 @@ export function Settings() {
   async function addVariable() {
     const key = newVar.key.trim();
     if (!key) return;
-    await saveVariable(key, newVar.value);
-    // Only clear the draft if the save actually landed (the new key is now in the list).
-    setNewVar({ key: "", value: "" });
+    // Only clear the draft if the save actually landed — otherwise keep the input
+    // so the user can fix an invalid key / retry after a network or auth error.
+    if (await saveVariable(key, newVar.value))
+      setNewVar({ key: "", value: "" });
   }
 
   async function removeVariable(key: string) {

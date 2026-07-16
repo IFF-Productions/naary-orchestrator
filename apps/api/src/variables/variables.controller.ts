@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -51,8 +52,14 @@ export class VariablesController {
     @Body() body: { value?: string },
     @EnvironmentSel() envSel?: string,
   ): Promise<VariableView> {
+    // A JSON client can send a non-string value (number/object/array); the store column is
+    // TEXT, so reject it as a 400 rather than letting a non-string reach Prisma as a 500.
+    const value = body?.value ?? "";
+    if (typeof value !== "string") {
+      throw new BadRequestException("Variable value must be a string.");
+    }
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    return this.variables.upsert(tenantId, envId, key, body?.value ?? "");
+    return this.variables.upsert(tenantId, envId, key, value);
   }
 
   @ApiEndpoint({ summary: "Delete a variable (active environment)" })

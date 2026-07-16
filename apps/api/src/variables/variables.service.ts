@@ -50,14 +50,15 @@ export class VariablesService {
     });
   }
 
-  /** Delete a variable (no-op if absent). */
+  /** Delete a variable (no-op if absent). Trims the key so it matches how `upsert` stored it
+   *  (a value saved as "foo" isn't deletable via "  foo  " otherwise). */
   async remove(
     tenantId: string,
     environmentId: string,
     key: string,
   ): Promise<void> {
     await getPrisma().variable.deleteMany({
-      where: { tenantId, environmentId, key },
+      where: { tenantId, environmentId, key: (key ?? "").trim() },
     });
   }
 }
