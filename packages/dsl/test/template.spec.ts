@@ -198,6 +198,18 @@ describe("lintTemplates", () => {
     ]);
     expect(lintTemplates(graph)).toEqual([]);
   });
+
+  it("does NOT flag `{{ $vars.KEY }}` — Global Variables, seeded into ctx by the interpreter", () => {
+    const graph = g([
+      { id: "start", type: "start" },
+      {
+        id: "http",
+        type: "httpRequest",
+        config: { url: "https://x/{{ $vars.region }}", method: "GET" },
+      },
+    ]);
+    expect(lintTemplates(graph)).toEqual([]);
+  });
 });
 
 describe("lintBindings", () => {

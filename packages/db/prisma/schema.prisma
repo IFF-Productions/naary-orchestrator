@@ -422,6 +422,21 @@ model Membership {
 }
 
 // Per-tenant settings (Settings screen). One row per tenant.
+/// Non-secret per-workspace config, ENV-SCOPED, referenced in string expressions as
+/// `{{ $vars.KEY }}`. The worker loads a workspace+env's variables into the run ctx under `$vars`
+/// at start (as DATA), so a value can differ per environment (e.g. a URL in sandbox vs prod). NOT
+/// for secrets — those resolve in-activity and never enter the graph/ctx/history (separate feature).
+model Variable {
+  tenantId      String
+  environmentId String
+  key           String
+  value         String
+  updatedAt     DateTime @default(now()) @updatedAt
+
+  @@id([tenantId, environmentId, key])
+  @@index([tenantId, environmentId])
+}
+
 model TenantSettings {
   tenantId     String   @id
   displayName  String?

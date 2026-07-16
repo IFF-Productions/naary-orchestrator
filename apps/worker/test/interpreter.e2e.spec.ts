@@ -197,6 +197,15 @@ const mockActivities = {
   },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
   setExecutionStatus: async (): Promise<void> => undefined, // read-model push; no-op here
+  // Global Variables ($vars): return the env-scoped config the interpreter seeds into ctx.$vars.
+  // Captures the meta so a test can prove the run's (tenantId, environmentId) reach the read.
+  loadVariables: async (meta: {
+    tenantId: string;
+    environmentId?: string;
+  }): Promise<Record<string, string>> => {
+    loadVariablesCalls.push(meta);
+    return loadVariablesResult;
+  },
   // Items model A3: the batched per-item map. Echo each item's input so the test can prove the
   // interpreter passed the CURRENT ITEM per iteration (not the run input N times).
   mapNode: async (
@@ -212,6 +221,9 @@ const mockActivities = {
   },
 };
 const mapNodeCalls: { nodeType: string; count: number }[] = [];
+const loadVariablesCalls: { tenantId: string; environmentId?: string }[] = [];
+// Mutable so each test can fix the env's variable set (default: one var proving resolution).
+let loadVariablesResult: Record<string, string> = { slackChannel: "#alerts" };
 const pollCalls: activities.PollMeta[] = [];
 let pollChanged = true;
 const notifyCalls: activities.NotificationInput[] = [];
@@ -2664,6 +2676,54 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
 
       const result = await handle.result();
       expect(result.status).toBe("circuit_open");
+    });
+  });
+});
+
+describe("runGraph interpreter — global variables ($vars)", () => {
+  it("seeds ctx.$vars from the env-scoped read and resolves {{ $vars.KEY }} in config", async () => {
+    loadVariablesResult = { slackChannel: "#alerts", region: "eu" };
+    loadVariablesCalls.length = 0;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      // start → set{channel ← "{{ $vars.slackChannel }}"} → end. The template resolves against the
+      // seeded ctx.$vars using the SAME getByPath the rest of the engine uses (no resolver change).
+      const graph: GraphDef = {
+        startNodeId: "start",
+        nodes: [
+          { id: "start", type: "start" },
+          {
+            id: "cfg",
+            type: "set",
+            config: { fields: { channel: "{{ $vars.slackChannel }}" } },
+          },
+          { id: "end", type: "end" },
+        ],
+        edges: [
+          { from: "start", to: "cfg" },
+          { from: "cfg", to: "end" },
+        ],
+      };
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [graph, {}, { tenantId: "t-vars", environmentId: "env-prod" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-vars",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const final = await handle.query(stateQuery);
+      // $vars is seeded as DATA into ctx…
+      expect(final.ctx.$vars).toEqual({
+        slackChannel: "#alerts",
+        region: "eu",
+      });
+      // …and the template resolved end-to-end into the set node's output.
+      expect((final.ctx.cfg as Record<string, unknown>).channel).toBe(
+        "#alerts",
+      );
+      // The run's (tenantId, environmentId) reached the env-scoped read exactly once.
+      expect(loadVariablesCalls).toEqual([
+        { tenantId: "t-vars", environmentId: "env-prod" },
+      ]);
     });
   });
 });

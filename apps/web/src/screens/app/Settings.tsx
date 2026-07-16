@@ -6,6 +6,7 @@ import {
   type NotificationChannelType,
   type TenantSettings,
   UnauthorizedError,
+  type Variable,
 } from "../../lib/api";
 import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import { type Mode, useMode } from "../../mode";
@@ -76,6 +77,14 @@ export function Settings() {
   const [notifTest, setNotifTest] = useState<
     Record<string, { ok: boolean; message?: string }>
   >({});
+  // Global Variables ($vars) — non-secret, env-scoped config. Edited independently of settings.
+  const [variables, setVariables] = useState<Variable[]>([]);
+  const [newVar, setNewVar] = useState<{ key: string; value: string }>({
+    key: "",
+    value: "",
+  });
+  const [varBusy, setVarBusy] = useState(false);
+  const [varError, setVarError] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -96,6 +105,9 @@ export function Settings() {
             next[c.type] = { ...c, webhookUrl: c.webhookUrl ?? "" };
           return next;
         });
+        const vars = await api.listVariables();
+        if (!live) return;
+        setVariables(vars);
         setLoaded(true);
       } catch (e) {
         if (live)
@@ -192,6 +204,58 @@ export function Settings() {
       }));
     } finally {
       setNotifTestBusy((b) => ({ ...b, [type]: false }));
+    }
+  }
+
+  /** Set a variable's value in local edit state (no network) — the row's Save commits it. */
+  function patchVarValue(key: string, value: string) {
+    setVariables((prev) =>
+      prev.map((v) => (v.key === key ? { ...v, value } : v)),
+    );
+  }
+
+  async function saveVariable(key: string, value: string) {
+    setVarBusy(true);
+    setVarError(null);
+    try {
+      const saved = await api.setVariable(key, value);
+      setVariables((prev) => {
+        const others = prev.filter((v) => v.key !== saved.key);
+        return [...others, saved].sort((a, b) => a.key.localeCompare(b.key));
+      });
+    } catch (e) {
+      setVarError(
+        e instanceof UnauthorizedError
+          ? "Sign in to edit variables."
+          : "Could not save. Keys must be a valid identifier (letters, digits, underscore; not starting with a digit).",
+      );
+    } finally {
+      setVarBusy(false);
+    }
+  }
+
+  async function addVariable() {
+    const key = newVar.key.trim();
+    if (!key) return;
+    await saveVariable(key, newVar.value);
+    // Only clear the draft if the save actually landed (the new key is now in the list).
+    setNewVar({ key: "", value: "" });
+  }
+
+  async function removeVariable(key: string) {
+    setVarBusy(true);
+    setVarError(null);
+    try {
+      await api.deleteVariable(key);
+      setVariables((prev) => prev.filter((v) => v.key !== key));
+    } catch (e) {
+      setVarError(
+        e instanceof UnauthorizedError
+          ? "Sign in to edit variables."
+          : "Could not delete the variable.",
+      );
+    } finally {
+      setVarBusy(false);
     }
   }
 
@@ -365,6 +429,140 @@ export function Settings() {
               {status}
             </span>
           )}
+        </div>
+      </Card>
+
+      <div
+        className="mono"
+        style={{
+          fontSize: "var(--text-2xs)",
+          fontWeight: "var(--weight-semibold)",
+          letterSpacing: "var(--tracking-label)",
+          textTransform: "uppercase",
+          color: "var(--ink-3)",
+          margin: "24px 0 12px",
+        }}
+      >
+        Variables
+      </div>
+      <div
+        style={{
+          fontSize: "var(--text-body)",
+          lineHeight: "var(--leading-snug)",
+          color: "var(--ink-2)",
+          marginBottom: 12,
+        }}
+      >
+        Reusable, non-secret values for this workspace + environment — reference
+        them in any node's fields as <code>{"{{ $vars.KEY }}"}</code>. Scoped to
+        the active environment, so the same key can hold a different value in
+        sandbox vs prod. Not for secrets (API keys, tokens).
+      </div>
+      <Card style={{ padding: 18, marginBottom: 12 }}>
+        {varError && (
+          <div
+            style={{
+              marginBottom: 12,
+              fontSize: "var(--text-sm)",
+              color: "var(--state-error)",
+            }}
+          >
+            {varError}
+          </div>
+        )}
+        {variables.length === 0 && loaded && (
+          <div
+            style={{
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-3)",
+              marginBottom: 12,
+            }}
+          >
+            No variables yet — add one below.
+          </div>
+        )}
+        {variables.map((v) => (
+          <div
+            key={v.key}
+            style={{
+              display: "flex",
+              gap: 8,
+              alignItems: "center",
+              marginBottom: 10,
+            }}
+          >
+            <code
+              style={{
+                flex: "0 0 34%",
+                fontSize: "var(--text-sm)",
+                color: "var(--ink)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+              title={v.key}
+            >
+              {v.key}
+            </code>
+            <input
+              value={v.value}
+              onChange={(e) => patchVarValue(v.key, e.target.value)}
+              placeholder="value"
+              style={{ ...inputStyle, flex: 1 }}
+              disabled={!loaded || varBusy}
+            />
+            <Button
+              variant="secondary"
+              disabled={!loaded || varBusy}
+              onClick={() => void saveVariable(v.key, v.value)}
+            >
+              Save
+            </Button>
+            <Button
+              variant="ghost"
+              icon="trash"
+              disabled={!loaded || varBusy}
+              title={`Delete ${v.key}`}
+              onClick={() => void removeVariable(v.key)}
+            >
+              Delete
+            </Button>
+          </div>
+        ))}
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            marginTop: variables.length ? 14 : 0,
+            paddingTop: variables.length ? 14 : 0,
+            borderTop: variables.length ? "1px solid var(--line)" : "none",
+          }}
+        >
+          <input
+            value={newVar.key}
+            onChange={(e) => setNewVar((n) => ({ ...n, key: e.target.value }))}
+            placeholder="KEY"
+            style={{ ...inputStyle, flex: "0 0 34%" }}
+            disabled={!loaded || varBusy}
+          />
+          <input
+            value={newVar.value}
+            onChange={(e) =>
+              setNewVar((n) => ({ ...n, value: e.target.value }))
+            }
+            placeholder="value"
+            style={{ ...inputStyle, flex: 1 }}
+            disabled={!loaded || varBusy}
+          />
+          <Button
+            variant="primary"
+            loading={varBusy}
+            disabled={!loaded || !newVar.key.trim()}
+            onClick={() => void addVariable()}
+          >
+            Add
+          </Button>
         </div>
       </Card>
 

@@ -70,6 +70,7 @@ const {
   runAgent,
   callMcpTool,
   recordExecution,
+  loadVariables,
   setExecutionStatus,
   computeDateTime,
   resolveSubWorkflowGraph,
@@ -479,6 +480,20 @@ export async function runGraph(
       environmentId: runCtx.environmentId, // tag the run with its env (Slice 6)
       workflowKey: runCtx.workflowKey,
       graphVersion: runCtx.graphVersion,
+    });
+  }
+
+  // Global Variables ($vars): seed the run's env-scoped non-secret config into ctx as DATA, so string
+  // expressions can read `{{ $vars.KEY }}` (resolved by the same getByPath the rest of the template
+  // engine uses — no resolver change). ONE PG read via an activity (I/O → activity, Tier-1 #3); the
+  // workflow only threads the returned map. Behind a patched() gate so in-flight runs predating this
+  // stay replay-safe (CLAUDE.md: version interpreter changes with patched()). Only on first start —
+  // a continueAsNew/resume already carries $vars inside its ctx snapshot, so re-loading would be both
+  // redundant and a nondeterminism risk (the DB may have changed mid-run). NOT secrets (Tier-1 #4).
+  if (!resume && wf.patched("load-variables-v1")) {
+    ctx.$vars = await loadVariables({
+      tenantId: runCtx.tenantId,
+      environmentId: runCtx.environmentId,
     });
   }
 

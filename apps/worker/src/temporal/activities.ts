@@ -204,6 +204,29 @@ export async function recordExecution(meta: {
 }
 
 /**
+ * Global Variables ($vars): load a run's non-secret, env-scoped key/value config as a plain map,
+ * for the interpreter to seed into `ctx.$vars` at run start (design ROADMAP-ENTERPRISE). The DB read
+ * lives here (Tier-1 #3 — all I/O in activities); the workflow only threads the returned DATA into
+ * ctx. Env-scoped so a value can differ sandbox vs prod; a pre-env run (no environmentId) falls back
+ * to the tenant default, matching every other env-scoped read. NOT secrets — those resolve in-activity
+ * and never enter the graph/ctx/history (Tier-1 #4, separate feature).
+ */
+export async function loadVariables(meta: {
+  tenantId: string;
+  environmentId?: string;
+}): Promise<Record<string, string>> {
+  const environmentId =
+    meta.environmentId ?? (await getDefaultEnvironmentId(meta.tenantId));
+  const rows = await getPrisma().variable.findMany({
+    where: { tenantId: meta.tenantId, environmentId },
+    select: { key: true, value: true },
+  });
+  const out: Record<string, string> = {};
+  for (const r of rows) out[r.key] = r.value;
+  return out;
+}
+
+/**
  * Push the run's current status + accumulated cost to its Execution row — the
  * read-model the Runs list reads (so listing needs no per-run Temporal calls).
  * Best-effort: a missing row (race before recordExecution) is ignored.

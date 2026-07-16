@@ -624,6 +624,25 @@ export const api = {
       message: body?.message ?? `Request failed (${res.status}).`,
     };
   },
+  // --- Global Variables ($vars) ---
+  // Non-secret, env-scoped workspace config referenced in expressions as `{{ $vars.KEY }}`.
+  // Scoped to the ACTIVE environment via the x-environment-id header (sent by http()), so the
+  // same key can hold a different value in sandbox vs prod. NOT for secrets.
+  listVariables(): Promise<Variable[]> {
+    return http(`/variables`);
+  },
+  // Set (create or overwrite) one variable in the active environment. The key must be a valid
+  // identifier (server-validated) since it's read as a dot-path in `{{ $vars.KEY }}`.
+  setVariable(key: string, value: string): Promise<Variable> {
+    return http(`/variables/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    });
+  },
+  // Delete one variable from the active environment (204; no-op if absent).
+  deleteVariable(key: string): Promise<void> {
+    return http(`/variables/${encodeURIComponent(key)}`, { method: "DELETE" });
+  },
   // --- Integrations ---
   // Provider API keys (BYOK). The key is NEVER returned — list yields names + validity.
   listCredentials(tenantId: string): Promise<ProviderCredential[]> {
@@ -1050,6 +1069,12 @@ export interface Member {
 export interface TenantSettings {
   displayName: string | null;
   defaultModel: string | null;
+}
+
+/** A Global Variable — non-secret, env-scoped config referenced as `{{ $vars.KEY }}`. */
+export interface Variable {
+  key: string;
+  value: string;
 }
 
 /** An API token's metadata (never the token value). */
