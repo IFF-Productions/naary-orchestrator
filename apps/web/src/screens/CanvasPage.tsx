@@ -1499,9 +1499,12 @@ function ResizeHandle({ onResize }: { onResize: (clientX: number) => void }) {
 }
 
 /**
- * Docked, drag-resizable node/edge inspector (replaces the old centered modal). Lives inside the
- * canvas flex row as a right-hand column; a ResizeHandle on its left edge changes its width. Esc
- * still closes it.
+ * Node/edge inspector (replaces the old centered modal). Two responsive layouts:
+ *  - Desktop/tablet: a docked, drag-resizable right-hand column inside the canvas flex row; a
+ *    ResizeHandle on its left edge changes its width.
+ *  - Phone: a full-screen overlay sheet (a 440px docked column can't fit) — rendered as a modal
+ *    dialog (role="dialog" + aria-modal), the ResizeHandle is hidden.
+ * Esc closes it in both layouts.
  */
 function InspectorPanel({
   title,
@@ -1530,6 +1533,11 @@ function InspectorPanel({
 
   return (
     <div
+      // Phone renders as a full-screen modal sheet; expose dialog semantics so screen readers
+      // announce it and treat it as modal. Desktop is a docked column (no dialog role).
+      role={phone ? "dialog" : undefined}
+      aria-modal={phone ? true : undefined}
+      aria-label={phone ? title : undefined}
       style={
         phone
           ? {
