@@ -14,13 +14,20 @@ Browser ──HTTPS──▶ Cloudflare edge (TLS · DDoS · DNS)
   Firewall: inbound = SSH only. 80/443 CLOSED.
 ```
 
+> **Prefer not to run your own hardware?** See **[Variant B — Hetzner + Neon +
+> GitHub Actions](#variant-b--hetzner--neon--github-actions)** below: the same
+> Terraform also provisions a Hetzner VPS and a Neon (managed Postgres) project,
+> and a GitHub Actions workflow redeploys on every green `main`.
+
 ## What's here
 | File | Purpose |
 |---|---|
-| `terraform/` | Cloudflare tunnel + ingress + DNS record (the IaC part). Outputs the tunnel token. |
+| `terraform/` | Cloudflare tunnel + ingress + DNS record, **plus** (Variant B) the Hetzner server (`hetzner.tf` + `cloud-init.yaml.tftpl`) and Neon Postgres (`neon.tf`). |
 | `docker-compose.prod.yml` | Overlay on the repo's base compose: closes all ports, adds `cloudflared`. |
-| `.env.prod.example` | Template for the server `.env` (copy to repo-root `.env`). |
-| `backup.sh` | Nightly `pg_dump` + Temporal DB → local (+ optional rclone off-box). |
+| `docker-compose.neon.yml` | Second overlay (Variant B): DB = Neon; gates the local postgres off, splits pooled vs direct URLs. |
+| `.env.prod.example` | Template for the server `.env` (copy to repo-root `.env`). Variant B generates this via Terraform instead. |
+| `backup.sh` | Nightly `pg_dump` + Temporal DB → local (+ optional rclone off-box). **Not needed on Variant B** — Neon has PITR and Temporal is Cloud. |
+| `../.github/workflows/deploy.yml` | CD: after CI passes on `main`, SSH-deploys to the Hetzner box. |
 
 ## Prerequisites
 - **A Linux server** with Docker + Docker Compose v2 (≥ 2.24 for the `!override` in the overlay). ~8 GB RAM recommended (Postgres + Temporal + 3 Node services). x86 or ARM — images build on-box.
@@ -115,6 +122,99 @@ Set `BACKUP_RCLONE_REMOTE` in `.env` (e.g. `r2:naary-backups`) to also ship them
 - **Single point of failure** — one box, no HA. Backups are your recovery path.
 - **Isolate the box** on a separate VLAN/guest network if you can (attack surface is already small — no inbound ports).
 - **Free-plan upload cap:** Cloudflare's free tier limits proxied request bodies to ~100 MB. Fine for the API/webhooks.
+
+---
+
+## Variant B — Hetzner + Neon + GitHub Actions
+
+Same architecture (tunnel in front, no inbound web ports), but Terraform provisions
+**everything**: the Cloudflare tunnel, a **Hetzner VPS** (default `cx32`, 4 vCPU / 8 GB,
+~€7/mo, Nuremberg) and a **Neon** project (managed serverless Postgres, pgvector
+included — so the RAG migrations run unchanged). The app DB and durable execution both
+live off-box (Neon + Temporal Cloud), so the server is disposable.
+
+```
+Browser ──HTTPS──▶ Cloudflare edge ──tunnel──▶ Hetzner VPS (compose: cloudflared·web·api·worker·migrate)
+                                                   │                        │
+GitHub Actions ──SSH (deploy key)──────────────────┘              Neon (Postgres+pgvector)
+                                                                  Temporal Cloud (durable exec)
+```
+
+### Provision (once, on your laptop)
+
+1. Collect credentials into `terraform/terraform.tfvars` (see the example file):
+   - **Hetzner** API token — console → your project → *Security → API tokens* (Read & Write).
+   - **Neon** API key — console → *Account settings → API keys*.
+   - **Cloudflare** token/IDs — as in Variant A above.
+   - `ssh_public_key` — your personal key (admin access).
+   - `deploy_ssh_public_key` — a **dedicated** CI keypair: `ssh-keygen -t ed25519 -f deploy_key -N ""`.
+     Set it **before the first apply** (hcloud injects keys at create time only).
+   - Optional but recommended for hands-off boot: `repo_url` (embed a read-only
+     fine-grained PAT for a private repo) + the three `temporal_*` values (create the
+     Temporal Cloud namespace + API key first).
+
+2. Apply and grab outputs:
+   ```bash
+   cd deploy/terraform
+   terraform init && terraform apply
+   terraform output server_ipv4        # → GitHub secret DEPLOY_HOST
+   terraform output -raw server_env    # the generated server .env — SAVE ENCRYPTION_KEY in a password manager
+   ```
+
+3. First boot: cloud-init installs Docker, writes `/opt/naary/.env`, and — if `repo_url`
+   + `temporal_address` were set — clones the repo and starts the stack itself (first
+   build ~5–10 min). Otherwise SSH in (`terraform output ssh_command`) and follow
+   `/etc/motd`. Watch with `cloud-init status --wait`, then `docker compose ps`.
+
+The compose invocation for this variant layers **both** overlays (order matters):
+```bash
+docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml -f deploy/docker-compose.neon.yml up -d --build
+```
+`DATABASE_URL` (api/worker) uses Neon's **pooled** endpoint with `pgbouncer=true`;
+`MIGRATE_DATABASE_URL` (the `migrate` one-shot) uses the **direct** endpoint — Prisma
+migrations need a real session (advisory locks + DDL), not PgBouncer.
+
+### Releases & CD (GitHub Actions)
+
+Deploys are **release-driven**, semver-tagged (`v0.0.1`):
+
+1. **Cut a release:** *Actions → Release → Run workflow* → `version = 0.0.1` (or `v0.0.1`).
+   `release.yml` bumps **every** workspace `package.json` (root + `apps/*` + `packages/*`)
+   to that version, commits `chore(release): v0.0.1` to `main`, tags it, publishes a
+   GitHub Release with generated notes — then chains straight into the deploy.
+2. **Deploy** (`deploy.yml`): SSH → check out the tag (detached) → `compose up -d --build`
+   with `VITE_APP_VERSION=<tag>` baked into the SPA → wait for the api healthcheck
+   (fails the run, with logs, if it never goes healthy).
+3. **Rollback / redeploy:** run *Deploy* manually with any older tag as the ref.
+   Releases created by hand in the GitHub UI also trigger a deploy (`release: published`).
+
+Set two repo secrets (*Settings → Secrets and variables → Actions*):
+- `DEPLOY_SSH_KEY` — the **private** half of the deploy keypair (`deploy_key`).
+- `DEPLOY_HOST` — `terraform output -raw server_ipv4`.
+
+It deploys via a GitHub-**hosted** runner (prod credentials stay off the shared
+self-hosted CI runner), so `ssh_allowed_cidrs` must keep port 22 reachable from GitHub
+(the default `0.0.0.0/0` is fine — SSH is key-only). To require a human click before
+each deploy, add a *required reviewers* rule to the auto-created `production` environment.
+
+### Cut-over & gotchas
+
+- **One tunnel, one origin.** The Terraform manages a single tunnel — if `cloudflared`
+  is still running on the old box when the Hetzner one connects, Cloudflare will
+  round-robin between BOTH origins (two different DBs!). Stop the old `cloudflared`
+  before/at first boot of the new box. For a side-by-side trial instead, change
+  `hostname` (e.g. `hetzner.naar-y.com`) + `tunnel_name` in a separate state/workspace.
+- **Migrating existing data:** `pg_dump` from the old box → `psql "<MIGRATE_DATABASE_URL>"`
+  (direct endpoint) before cut-over.
+- **Secrets in state:** the tfstate now also holds the Neon password, `ENCRYPTION_KEY`,
+  and DB URLs — the GCS state bucket must stay private + versioned. Back up
+  `ENCRYPTION_KEY` separately; losing it invalidates stored tenant credentials.
+- **Neon autosuspend:** the default scale-to-zero adds a ~½s cold start after idle
+  periods. Fine to start; raise the suspend timeout in Neon if it bothers you.
+- **Costs:** Hetzner `cx32` ~€7/mo · Neon free tier (or Launch $19/mo) · Temporal Cloud
+  (usage-based) · Cloudflare free.
+
+---
 
 ## Switching to Temporal Cloud later
 Self-hosting Temporal is the one piece where *managed* pays off (HA, backups, upgrades). To switch:

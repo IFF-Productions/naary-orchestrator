@@ -1,0 +1,91 @@
+name: Deploy
+
+# Deploys a RELEASE to the Hetzner box (deploy/README.md): SSH in, check out the
+# release tag, and `compose up --build` (images build on-box). Three ways in:
+#   - chained from release.yml (the normal path — Actions → Release → run workflow)
+#   - `release: published` — for releases created by hand in the GitHub UI / gh CLI
+#     (release.yml can't use this: a release published with the workflow's own
+#     GITHUB_TOKEN never retriggers workflows — GitHub loop protection)
+#   - workflow_dispatch with an explicit ref, for reruns/rollbacks (pick any tag)
+#
+# Repo secrets required (Settings → Secrets and variables → Actions):
+#   DEPLOY_SSH_KEY  — private half of the dedicated deploy keypair
+#                     (public half = deploy_ssh_public_key in deploy/terraform).
+#   DEPLOY_HOST     — the server's IPv4 (terraform output -raw server_ipv4).
+#
+# Runs on a GITHUB-HOSTED runner (unlike ci.yml/e2e.yml): it only needs SSH egress,
+# and keeping prod credentials off the shared self-hosted runner is the safer split.
+# NOTE: runner IPs vary — ssh_allowed_cidrs in Terraform must stay open (default) or
+# include GitHub's ranges, or this workflow can't reach port 22.
+
+on:
+  release:
+    types: [published]
+  workflow_call:
+    inputs:
+      ref:
+        description: Tag to deploy
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Tag (vX.Y.Z) or branch to deploy — rollback = rerun with an older tag
+        type: string
+        default: main
+
+# Never run two deploys at once; queue (don't cancel) a deploy already in flight.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Auto-created on first run. Add a "required reviewers" protection rule to this
+    # environment in repo settings to make every deploy click-to-approve.
+    environment: production
+    env:
+      DEPLOY_REF: ${{ inputs.ref || github.event.release.tag_name }}
+    steps:
+      - name: Deploy over SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new "root@$DEPLOY_HOST" "DEPLOY_REF='$DEPLOY_REF' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/naary
+          git fetch --tags --force origin
+          # Tags deploy detached; a branch name falls back to its origin tip.
+          if git rev-parse -q --verify "refs/tags/$DEPLOY_REF" >/dev/null; then
+            target="refs/tags/$DEPLOY_REF"
+          else
+            target="origin/$DEPLOY_REF"
+          fi
+          git checkout --force --detach "$target"
+          # VITE_APP_VERSION is a build arg (baked into the SPA bundle) — stamp the release.
+          VITE_APP_VERSION="$DEPLOY_REF" docker compose \
+            -f docker-compose.yml \
+            -f deploy/docker-compose.prod.yml \
+            -f deploy/docker-compose.neon.yml \
+            up -d --build
+          # Gate on the api container's own compose healthcheck (3 min budget).
+          status=starting
+          for _ in $(seq 1 36); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' naary-api 2>/dev/null || echo starting)
+            [ "$status" = healthy ] && break
+            sleep 5
+          done
+          if [ "$status" != healthy ]; then
+            echo "api never became healthy (status: $status)"
+            docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml -f deploy/docker-compose.neon.yml logs --tail=100 api migrate
+            exit 1
+          fi
+          docker image prune -f >/dev/null
+          echo "Deployed $DEPLOY_REF ($(git rev-parse --short HEAD)) — api healthy."
+          REMOTE
