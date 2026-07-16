@@ -120,13 +120,17 @@ export class GraphsController {
     @Query("to") to?: string,
     @EnvironmentSel() envSel?: string,
   ) {
-    const fromV = Number(from);
-    const toV = Number(to);
-    if (!Number.isInteger(fromV) || !Number.isInteger(toV)) {
+    // Digit-only guard: Number("") / Number("  ") coerce to 0, which would pass an integer
+    // check and then wrongly 404. Require an explicit positive integer string for each.
+    const isVersion = (v?: string): boolean =>
+      /^[1-9][0-9]*$/.test((v ?? "").trim());
+    if (!isVersion(from) || !isVersion(to)) {
       throw new BadRequestException(
-        "`from` and `to` must be integer version numbers.",
+        "`from` and `to` must be positive integer version numbers.",
       );
     }
+    const fromV = Number(from);
+    const toV = Number(to);
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
     return this.graphs.diffVersions(tenantId, envId, workflowKey, fromV, toV);
   }

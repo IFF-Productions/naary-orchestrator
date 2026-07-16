@@ -215,9 +215,15 @@ export class GraphsService {
       this.getVersion(tenantId, environmentId, workflowKey, toVersion),
     ]);
     if (!from) {
-      throw new NotFoundException(`Version ${fromVersion} not found`);
+      throw new NotFoundException(
+        `No version ${fromVersion} for workflow '${workflowKey}'`,
+      );
     }
-    if (!to) throw new NotFoundException(`Version ${toVersion} not found`);
+    if (!to) {
+      throw new NotFoundException(
+        `No version ${toVersion} for workflow '${workflowKey}'`,
+      );
+    }
     return { fromVersion, toVersion, ...diffGraphs(from.graph, to.graph) };
   }
 
