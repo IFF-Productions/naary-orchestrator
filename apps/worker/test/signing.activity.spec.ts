@@ -1,6 +1,5 @@
 import { createHmac, generateKeyPairSync } from "node:crypto";
-import { importSPKI, jwtVerify } from "jose";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MissingConnectionTokenError } from "@naary/connections";
 import {
   __setObjectStore,
@@ -8,6 +7,17 @@ import {
   maybeOffload,
 } from "@naary/storage";
 import { __signingDeps, callHmac, callJwt } from "../src/temporal/activities";
+
+// `jose` is ESM-only; a static import from this CJS-typed test trips TS7's node16 guard. Load it
+// once in beforeAll into loosely-typed holders (vitest runs the test as ESM at runtime).
+let jwtVerify: (
+  ...a: unknown[]
+  // biome-ignore lint/suspicious/noExplicitAny: verified-JWT shape isn't asserted structurally
+) => Promise<{ payload: any; protectedHeader: any }>;
+let importSPKI: (...a: unknown[]) => Promise<unknown>;
+beforeAll(async () => {
+  ({ jwtVerify, importSPKI } = (await import("jose")) as never);
+});
 
 const KEY = "super-secret-signing-key";
 const meta = { tenantId: "t-1", executionId: "e-1", nodeId: "n-1" };

@@ -7,12 +7,12 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "start": "ts-node src/main.ts"
+    "start": "node -r @swc/register src/main.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.12",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "ai": "7.0.22",
+    "ai": "7.0.29",
     "@naary/connections": "workspace:*",
     "@naary/contracts": "workspace:*",
     "@naary/db": "workspace:*",
@@ -24,7 +24,7 @@
     "@nestjs/common": "^11.1.28",
     "@nestjs/core": "^11.1.28",
     "@nestjs/platform-express": "^11.1.28",
-    "@temporalio/client": "1.20.2",
+    "@temporalio/client": "1.20.3",
     "dotenv": "^17.4.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
@@ -38,8 +38,8 @@
     "@naary/logging": "workspace:*",
     "@naary/temporal-config": "workspace:*",
     "@naary/metrics": "workspace:*",
-    "@ai-sdk/openai": "^4.0.11",
-    "@ai-sdk/google": "^4.0.12",
+    "@ai-sdk/openai": "^4.0.15",
+    "@ai-sdk/google": "^4.0.17",
     "@nestjs/swagger": "^11.4.5"
   },
   "devDependencies": {

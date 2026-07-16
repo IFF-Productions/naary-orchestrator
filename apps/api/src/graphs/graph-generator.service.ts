@@ -1,6 +1,9 @@
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { createOpenAI } from "@ai-sdk/openai";
+// The AI SDK (`ai`, `@ai-sdk/*`) is ESM-only; this file emits CommonJS, so static imports trip
+// TS7's ESM/CJS guard. Load lazily via dynamic import() (the sanctioned CJS→ESM path).
+const aiSdk = () => import("ai");
+const anthropicSdk = () => import("@ai-sdk/anthropic");
+const openaiSdk = () => import("@ai-sdk/openai");
+const googleSdk = () => import("@ai-sdk/google");
 import {
   BadRequestException,
   HttpException,
@@ -20,7 +23,6 @@ import {
 } from "@naary/dsl";
 import { ConnectionService } from "@naary/connections";
 import { CredentialsService, MissingCredentialError } from "@naary/secrets";
-import { APICallError, generateText } from "ai";
 
 // Providers the generator can use, in preference order — when the caller doesn't pick one,
 // the first provider the tenant has a valid key for wins. Kept in sync with the worker's
@@ -34,11 +36,13 @@ const GEN_DEFAULT_MODEL: Record<GenProvider, string> = {
 };
 
 /** Build the AI SDK model handle for a provider (mirrors the worker's buildModel). */
-function buildGenModel(provider: GenProvider, apiKey: string) {
+async function buildGenModel(provider: GenProvider, apiKey: string) {
   const model = GEN_DEFAULT_MODEL[provider];
-  if (provider === "openai") return createOpenAI({ apiKey })(model);
-  if (provider === "google") return createGoogleGenerativeAI({ apiKey })(model);
-  return createAnthropic({ apiKey })(model);
+  if (provider === "openai")
+    return (await openaiSdk()).createOpenAI({ apiKey })(model);
+  if (provider === "google")
+    return (await googleSdk()).createGoogleGenerativeAI({ apiKey })(model);
+  return (await anthropicSdk()).createAnthropic({ apiKey })(model);
 }
 
 // The node types + operators the generator may use come from the shared @naary/dsl catalog
@@ -307,8 +311,9 @@ export class GraphGeneratorService {
     // actually writes edges + config; the JSON is parsed + validated (+ repair) below.
     let text: string;
     try {
+      const { generateText } = await aiSdk();
       const result = await generateText({
-        model: buildGenModel(provider, apiKey),
+        model: await buildGenModel(provider, apiKey),
         system: SYSTEM_PROMPT,
         prompt: `${userPrompt}\n\n${resources}Respond with ONLY the JSON graph object — start at { and end at }. No prose, no markdown code fences.`,
         // Headroom for large multi-branch workflows — a truncated response is unparseable
@@ -321,9 +326,9 @@ export class GraphGeneratorService {
       // status/url/message/body — never the API key. This is how we tell a stale model id
       // (404) apart from an overloaded provider (429/529) apart from a network failure.
       this.logger.warn(
-        `graph generate failed (provider=${provider}): ${describeProviderError(e)}`,
+        `graph generate failed (provider=${provider}): ${await describeProviderError(e)}`,
       );
-      throw mapProviderError(e, provider);
+      throw await mapProviderError(e, provider);
     }
     const parsed = parseGraphJson(text);
     if (!parsed) {
@@ -378,8 +383,11 @@ function parseGraphJson(text: string): GraphDraft | null {
 }
 
 /** Safe, key-free one-line summary of a provider error for logs. */
-function describeProviderError(e: unknown): string {
-  if (APICallError.isInstance(e)) {
+async function describeProviderError(e: unknown): Promise<string> {
+  // Defensive import: `ai` is already cached (the generate call resolved it), but never let a
+  // failed import in this error-describing helper mask the error we're trying to describe.
+  const aiMod = await aiSdk().catch(() => undefined);
+  if (aiMod?.APICallError.isInstance(e)) {
     const body =
       typeof e.responseBody === "string" ? e.responseBody.slice(0, 300) : "";
     return `APICallError status=${e.statusCode ?? "?"} url=${e.url ?? "?"} retryable=${e.isRetryable} msg=${e.message} body=${body}`;
@@ -406,8 +414,14 @@ function toGraphDef(out: {
 }
 
 /** Map provider failures to HTTP responses (mirrors the worker's AUTH/QUOTA split). */
-function mapProviderError(e: unknown, provider: string): HttpException {
-  if (APICallError.isInstance(e)) {
+async function mapProviderError(
+  e: unknown,
+  provider: string,
+): Promise<HttpException> {
+  // Defensive import: if `ai` can't load here (it's already cached from the generate call), don't
+  // let that mask the provider error — fall through to the generic 503 below.
+  const aiMod = await aiSdk().catch(() => undefined);
+  if (aiMod?.APICallError.isInstance(e)) {
     const status = e.statusCode;
     if (status === 401 || status === 403) {
       return new BadRequestException(

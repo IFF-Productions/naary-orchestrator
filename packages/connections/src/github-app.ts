@@ -10,7 +10,8 @@
  */
 import { createPrivateKey, randomBytes } from "node:crypto";
 import { SecretStore } from "@naary/secrets";
-import { SignJWT } from "jose";
+// `jose` is ESM-only; this file emits CommonJS (consumed via require), so a static import trips
+// TS7's ESM/CJS guard. Load it lazily via dynamic import() — the sanctioned CJS→ESM path.
 import {
   ConnectionService,
   ConnectionView,
@@ -87,6 +88,7 @@ async function signAppJwt(
     );
   }
   const iat = Math.floor(nowMs / 1000) - 60;
+  const { SignJWT } = await import("jose");
   return new SignJWT({})
     .setProtectedHeader({ alg: "RS256" })
     .setIssuer(cfg.appId)

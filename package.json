@@ -26,11 +26,11 @@
   },
   "devDependencies": {
     "@swc/core": "^1.15.43",
+    "@swc/register": "^0.1.10",
     "@types/node": "^26.1.1",
     "dotenv-cli": "^11.0.0",
     "prisma": "^7.8.0",
-    "ts-node": "^10.9.2",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "unplugin-swc": "^1.5.9",
     "vitest": "^4.1.10"
   }

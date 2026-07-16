@@ -7,7 +7,7 @@ import { GraphsService } from "./graphs.service";
 /**
  * Seed a tenant's graph definitions (idempotent — re-running with the same graphs
  * is a no-op, by content hash):
- *   pnpm --filter @naary/api exec ts-node src/graphs/seed-graphs.ts <tenantId>
+ *   pnpm --filter @naary/api exec node -r @swc/register src/graphs/seed-graphs.ts <tenantId>
  *
  * - `default`       → the support-triage demo POST /executions starts
  * - `wf-default`    → the webhook sample flow
@@ -16,7 +16,7 @@ import { GraphsService } from "./graphs.service";
 async function main(): Promise<void> {
   const tenantId = process.argv[2];
   if (!tenantId) {
-    console.error("usage: ts-node src/graphs/seed-graphs.ts <tenantId>");
+    console.error("usage: node -r @swc/register src/graphs/seed-graphs.ts <tenantId>");
     process.exit(1);
   }
   const graphs = new GraphsService();

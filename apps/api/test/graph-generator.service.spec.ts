@@ -4,15 +4,15 @@ import {
   UnprocessableEntityException,
 } from "@nestjs/common";
 import { MissingCredentialError } from "@naary/secrets";
-import { APICallError } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GraphGeneratorService } from "../src/graphs/graph-generator.service";
 
 // Mock only the model network — credentials are injected. Keeps the test hermetic
-// (no key, no LLM); like agent.activity.spec, the live model call is deferred.
+// (no key, no LLM); like agent.activity.spec, the live model call is deferred. `ai` is ESM-only,
+// so `orig()` is left untyped and APICallError is loaded via dynamic import where used.
 const generateText = vi.fn();
 vi.mock("ai", async (orig) => ({
-  ...(await orig<typeof import("ai")>()),
+  ...((await orig()) as Record<string, unknown>),
   generateText: (...args: unknown[]) => generateText(...args),
 }));
 
@@ -58,7 +58,11 @@ describe("GraphGeneratorService", () => {
   it("returns a validated draft graph on the first attempt", async () => {
     generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
 
-    const res = await makeService().generate("t-1", "e-1", "email me a daily digest");
+    const res = await makeService().generate(
+      "t-1",
+      "e-1",
+      "email me a daily digest",
+    );
 
     expect(res.name).toBe("Feed to email");
     expect(res.graph.startNodeId).toBe("start");
@@ -113,9 +117,9 @@ describe("GraphGeneratorService", () => {
   it("gives up with 422 when the repair is still invalid (no infinite loop)", async () => {
     generateText.mockResolvedValue({ text: JSON.stringify(invalidOut) });
 
-    await expect(makeService().generate("t-1", "e-1", "x")).rejects.toBeInstanceOf(
-      UnprocessableEntityException,
-    );
+    await expect(
+      makeService().generate("t-1", "e-1", "x"),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
     expect(generateText).toHaveBeenCalledTimes(2); // one attempt + one repair, then stop
   });
 
@@ -124,13 +128,14 @@ describe("GraphGeneratorService", () => {
       new MissingCredentialError("t-1", "anthropic"),
     );
 
-    await expect(makeService().generate("t-1", "e-1", "x")).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      makeService().generate("t-1", "e-1", "x"),
+    ).rejects.toBeInstanceOf(BadRequestException);
     expect(generateText).not.toHaveBeenCalled();
   });
 
   it("maps a provider 401 to a 400 (key rejected)", async () => {
+    const { APICallError } = await import("ai");
     generateText.mockRejectedValue(
       new APICallError({
         message: "unauthorized",
@@ -140,9 +145,9 @@ describe("GraphGeneratorService", () => {
       }),
     );
 
-    await expect(makeService().generate("t-1", "e-1", "x")).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      makeService().generate("t-1", "e-1", "x"),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it("uses an explicitly requested provider (openai) and its key", async () => {
@@ -171,9 +176,9 @@ describe("GraphGeneratorService", () => {
   it("400s when the tenant has no valid provider key at all", async () => {
     listProviders.mockResolvedValue([]);
 
-    await expect(makeService().generate("t-1", "e-1", "x")).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      makeService().generate("t-1", "e-1", "x"),
+    ).rejects.toBeInstanceOf(BadRequestException);
     expect(generateText).not.toHaveBeenCalled();
   });
 
@@ -185,9 +190,9 @@ describe("GraphGeneratorService", () => {
   });
 
   it("rejects an empty prompt with 400 before any key/model work", async () => {
-    await expect(makeService().generate("t-1", "e-1", "   ")).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      makeService().generate("t-1", "e-1", "   "),
+    ).rejects.toBeInstanceOf(BadRequestException);
     expect(getDecryptedKey).not.toHaveBeenCalled();
     expect(generateText).not.toHaveBeenCalled();
   });

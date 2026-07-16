@@ -1,13 +1,14 @@
-import { APICallError } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { computeCost } from "@naary/usage";
 import { MissingCredentialError } from "@naary/secrets";
 
 // Mock only the model network. Credentials + usage are injected via the
 // activity's test seam, so this test is hermetic (no DB, no LLM).
+// `ai` is ESM-only; `orig()` is left untyped (a `typeof import("ai")` type-arg would need a
+// node16 resolution-mode) and APICallError is loaded via dynamic import where used.
 const generateText = vi.fn();
 vi.mock("ai", async (orig) => ({
-  ...(await orig<typeof import("ai")>()),
+  ...((await orig()) as Record<string, unknown>),
   generateText: (...args: unknown[]) => generateText(...args),
 }));
 
@@ -130,6 +131,7 @@ describe("runAgent", () => {
   });
 
   it("maps provider 401 to a NON-retryable failure and records NO charge", async () => {
+    const { APICallError } = await import("ai");
     generateText.mockRejectedValue(
       new APICallError({
         message: "unauthorized",

@@ -1,6 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
-import { decodeProtectedHeader, decodeJwt } from "jose";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthConfigError, NeedsReauthError } from "../src/errors";
 import {
   __ghAppDeps,
@@ -10,6 +9,16 @@ import {
   resolveGithubAppHeader,
   startGithubAppInstall,
 } from "../src/github-app";
+
+// `jose` is ESM-only; load its decoders once into loose holders (a static import would trip TS7's
+// node16 CJS/ESM guard; vitest runs the test as ESM at runtime).
+// biome-ignore lint/suspicious/noExplicitAny: decoded JWT header/claims aren't asserted structurally
+let decodeProtectedHeader: (jwt: string) => any;
+// biome-ignore lint/suspicious/noExplicitAny: decoded JWT claims aren't asserted structurally
+let decodeJwt: (jwt: string) => any;
+beforeAll(async () => {
+  ({ decodeProtectedHeader, decodeJwt } = await import("jose"));
+});
 import { connectionSecretKey } from "../src/connection.service";
 
 // GitHub hands out a PKCS#1 key ("BEGIN RSA PRIVATE KEY"). Generate exactly that shape so the

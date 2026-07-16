@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 // Mock the model call so no network/key is needed; keep the REAL APICallError so
 // `APICallError.isInstance` works against the errors we throw from the mock.
 const generateTextMock = vi.fn();
 vi.mock("ai", async (importActual) => {
-  const actual = await importActual<typeof import("ai")>();
+  const actual = (await importActual()) as Record<string, unknown>;
   return {
     ...actual,
     generateText: (...a: unknown[]) => generateTextMock(...a),
@@ -20,7 +20,6 @@ vi.mock("@ai-sdk/google", () => ({
   createGoogleGenerativeAI: () => () => ({}) as never, // model factory → dummy handle
 }));
 
-import { APICallError } from "ai";
 import {
   validateAnthropicKey,
   validateClaudeCodeKey,
@@ -28,7 +27,15 @@ import {
   validateOpenAiKey,
 } from "../src/provider-validate";
 
-function apiError(statusCode: number): APICallError {
+// `ai` is ESM-only; load the REAL APICallError once (vitest resolves it through the mock above,
+// which spreads the actual module) into a loose holder — a static import would trip TS7's guard.
+// biome-ignore lint/suspicious/noExplicitAny: constructor shape isn't asserted structurally
+let APICallError: any;
+beforeAll(async () => {
+  ({ APICallError } = await import("ai"));
+});
+
+function apiError(statusCode: number): Error {
   return new APICallError({
     message: "provider error",
     url: "https://api.anthropic.com/v1/messages",

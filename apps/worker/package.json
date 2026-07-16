@@ -8,10 +8,10 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "start": "ts-node src/worker.ts"
+    "start": "node -r @swc/register src/worker.ts"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.12",
+    "@ai-sdk/anthropic": "^4.0.15",
     "@naary/connections": "workspace:*",
     "@naary/contracts": "workspace:*",
     "@naary/db": "workspace:*",
@@ -25,23 +25,23 @@
     "@naary/storage": "workspace:*",
     "@naary/temporal-config": "workspace:*",
     "@naary/usage": "workspace:*",
-    "@temporalio/activity": "^1.20.2",
-    "@temporalio/worker": "^1.20.2",
-    "@temporalio/workflow": "^1.20.2",
-    "ai": "7.0.22",
+    "@temporalio/activity": "^1.20.3",
+    "@temporalio/worker": "^1.20.3",
+    "@temporalio/workflow": "^1.20.3",
+    "ai": "7.0.29",
     "dotenv": "^17.4.2",
-    "fast-xml-parser": "^5.10.0",
+    "fast-xml-parser": "^5.10.1",
     "jose": "^6.2.3",
     "node-html-parser": "^9.0.0",
     "nodemailer": "^9.0.3",
     "papaparse": "^5.5.4",
     "quickjs-emscripten": "^0.32.0",
     "zod": "^4.4.3",
-    "@ai-sdk/openai": "^4.0.11",
-    "@ai-sdk/google": "^4.0.12"
+    "@ai-sdk/openai": "^4.0.15",
+    "@ai-sdk/google": "^4.0.17"
   },
   "devDependencies": {
-    "@temporalio/testing": "^1.20.2",
+    "@temporalio/testing": "^1.20.3",
     "@types/nodemailer": "^8.0.1",
     "@types/papaparse": "^5.5.2"
   }

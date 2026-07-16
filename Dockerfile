@@ -3,8 +3,13 @@
 # run the same monorepo and differ only by the `command` set in docker-compose.
 #
 # Dev-oriented (single-command local stack), not a tuned production image:
-# - runs via the existing `ts-node` start scripts (parity with local dev), so
-#   dev dependencies are kept rather than pruned;
+# - runs the app's src via `@swc/register` (node's require hook + SWC transpile;
+#   parity with local dev), so dev dependencies are kept rather than pruned.
+#   NB the `typescript` v7 package is the native (Go) tsc — its classic JS
+#   compiler API is gone, so ts-node/@swc-node/register (which import it) break;
+#   @swc/register uses SWC's own parser and is version-agnostic. It also emits
+#   decorator metadata, which NestJS DI requires (tsx/esbuild does not);
+
 # - one image is built once and reused by api + worker.
 # Production-grade images (distroless, non-root, pruned, dist-only) are a later
 # infra task — see PRODUCTION-READINESS.md §3.A.
@@ -35,10 +40,11 @@ WORKDIR /app
 # a deps-only layer (the .dockerignore already strips node_modules/dist/.env).
 COPY . .
 
-# Install all deps (incl. dev: ts-node/typescript power the start scripts), then
+# Install all deps (incl. dev: @swc/register + typescript power the start scripts), then
 # generate the Prisma client and compile every composite TS project to dist/.
 # @naary/* packages resolve through node_modules to their dist/index.js, so the
-# `tsc -b` build is REQUIRED — ts-node does not transpile imported packages.
+# `tsc -b` build is REQUIRED — @swc/register transpiles the app's own src on load
+# but not imported workspace packages (they're loaded from their built dist/).
 # A throwaway DATABASE_URL satisfies prisma.config.ts at generate time (generate
 # never connects); it is build-only and not persisted into the image.
 # BuildKit cache mount for the pnpm store: `COPY . .` above invalidates this layer on

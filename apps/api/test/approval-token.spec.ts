@@ -28,7 +28,7 @@ describe("approval-token", () => {
   });
 
   it("is domain-separated from resume tokens (different prefix)", async () => {
-    const { mintResumeToken } = await import("../src/executions/resume-token");
+    const { mintResumeToken } = await import("../src/executions/resume-token.js");
     expect(mintApprovalToken("wf-1")).not.toBe(mintResumeToken("wf-1"));
   });
 

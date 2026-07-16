@@ -1,14 +1,17 @@
 import { ApplicationFailure } from "@temporalio/activity";
-import { APICallError } from "ai";
 import { describe, expect, it } from "vitest";
 import { toSanitizedRetryable } from "../src/temporal/activities";
+
+// `ai` is ESM-only; a static import from this CJS-typed test trips TS7's node16 guard, so load it
+// dynamically (vitest runs the test as ESM at runtime regardless).
 
 // A non-key-shaped marker standing in for a leaked credential — the test asserts it
 // never reaches the serialized failure (a real key would be sk-…/Bearer …).
 const MARKER = "LEAKED-TENANT-CRED-MARKER";
 
 describe("toSanitizedRetryable — no provider secret reaches Temporal history", () => {
-  it("strips an APICallError's secret-bearing fields, keeps status, stays retryable", () => {
+  it("strips an APICallError's secret-bearing fields, keeps status, stays retryable", async () => {
+    const { APICallError } = await import("ai");
     const apiErr = new APICallError({
       message: `Upstream error; sent token ${MARKER}`,
       url: "https://api.anthropic.com/v1/messages",
