@@ -2772,4 +2772,46 @@ describe("runGraph interpreter — environment secrets ($secrets, Tier-1 §4)", 
       expect(final.ctx.__unresolved).toBeUndefined();
     });
   });
+
+  it("leaves `{{ $secrets.X }}` literal through the mcpTool ARGUMENT path (resolveMcpArguments)", async () => {
+    mcpCalls.length = 0;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      // A static mcpTool argument references a secret; the interpreter (resolveMcpArguments) must
+      // pass the token through VERBATIM for the activity to resolve — never resolve it itself.
+      const graph: GraphDef = {
+        startNodeId: "start",
+        nodes: [
+          { id: "start", type: "start" },
+          {
+            id: "call",
+            type: "mcpTool",
+            config: {
+              connectionId: "conn-x",
+              tool: "search",
+              arguments: { apiKey: "{{ $secrets.SEARCH_KEY }}", q: "hi" },
+            },
+          },
+          { id: "end", type: "end" },
+        ],
+        edges: [
+          { from: "start", to: "call" },
+          { from: "call", to: "end" },
+        ],
+      };
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [graph, {}, { tenantId: "t-sec-mcp" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-secrets-mcp",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      // The activity received the token VERBATIM in the arguments.
+      expect(
+        (mcpCalls[mcpCalls.length - 1]?.arguments as Record<string, unknown>)
+          ?.apiKey,
+      ).toBe("{{ $secrets.SEARCH_KEY }}");
+      const final = await handle.query(stateQuery);
+      expect(final.ctx.__unresolved).toBeUndefined();
+    });
+  });
 });

@@ -2379,6 +2379,13 @@ export interface McpToolResult {
 export const __mcpDeps = {
   resolveMcpTarget,
   callMcpTool: mcpCall,
+  // Environment Secrets ($secrets): decrypt one named secret for the run's env (in-memory only).
+  getSecret: (
+    tenantId: string,
+    environmentId: string,
+    name: string,
+  ): Promise<string | null> =>
+    getSecretStore().get(tenantId, environmentId, `secret:${name}`),
 };
 
 /**
@@ -2401,10 +2408,19 @@ export async function callMcpTool(
     );
     // Resolve any claim-checked upstream args back to their real values before the
     // call (Arch§4.6) — the workflow only ever carried the small reference.
-    const args = (await resolveClaimChecks(
+    const claimResolvedArgs = (await resolveClaimChecks(
       cfg.arguments ?? (input as Record<string, unknown>) ?? {},
       store,
     )) as Record<string, unknown>;
+    // Resolve `{{ $secrets.NAME }}` in the tool arguments in-memory (Tier-1 §4 — the workflow left
+    // them literal). Args ride in the request body to the MCP server, never in our result/logs (the
+    // result is the tool's output), so this needs no cross-origin handling like httpRequest headers.
+    const args = hasSecretRefDeep(claimResolvedArgs)
+      ? ((await resolveSecretsDeep(
+          claimResolvedArgs,
+          makeSecretResolver(meta, __mcpDeps.getSecret),
+        )) as Record<string, unknown>)
+      : claimResolvedArgs;
     const result = await __mcpDeps.callMcpTool({
       serverUrl: target.serverUrl,
       headers: target.headers,
@@ -2568,6 +2584,42 @@ function getSecretStore(): SecretStore {
 }
 
 /**
+ * A memoized, env-scoped `{{ $secrets.NAME }}` → plaintext resolver for use INSIDE an activity
+ * (Tier-1 §4 — never in the workflow). `getSecret` is injected so each activity swaps its own test
+ * seam. The run's env is resolved once (falling back to the tenant default for a pre-env run); each
+ * distinct NAME is decrypted once; a missing secret is a non-retryable failure naming only the NAME.
+ * Shared by httpRequest (headers + body) and mcpTool (arguments).
+ */
+function makeSecretResolver(
+  meta: AgentMeta,
+  getSecret: (
+    tenantId: string,
+    environmentId: string,
+    name: string,
+  ) => Promise<string | null>,
+): (name: string) => Promise<string> {
+  let envIdPromise: Promise<string> | undefined;
+  const cache = new Map<string, string>();
+  return async (name: string): Promise<string> => {
+    const hit = cache.get(name);
+    if (hit !== undefined) return hit;
+    envIdPromise ??= Promise.resolve(
+      meta.environmentId ?? getDefaultEnvironmentId(meta.tenantId),
+    );
+    const environmentId = await envIdPromise;
+    const value = await getSecret(meta.tenantId, environmentId, name);
+    if (value == null) {
+      throw ApplicationFailure.nonRetryable(
+        `Missing environment secret "${name}" — add it under Settings → Secrets for this environment.`,
+        "MISSING_SECRET",
+      );
+    }
+    cache.set(name, value);
+    return value;
+  };
+}
+
+/**
  * Resolve `{{ $secrets.NAME }}` tokens in the HTTP node's static headers AND request body, in-memory,
  * right before the request (Tier-1 §4 — the value never crosses the workflow boundary; the workflow
  * left these tokens literal). Slice 2 covers headers + body (the two places auth material belongs);
@@ -2597,26 +2649,7 @@ async function resolveHttpSecrets(
   if (!headerNeeds && !bodyNeeds) {
     return { headers, body, secretKeys: new Set(), bodyHasSecret: false };
   }
-  const environmentId =
-    meta.environmentId ?? (await getDefaultEnvironmentId(meta.tenantId));
-  const cache = new Map<string, string>();
-  const resolveOne = async (name: string): Promise<string> => {
-    const hit = cache.get(name);
-    if (hit !== undefined) return hit;
-    const value = await __httpDeps.getSecret(
-      meta.tenantId,
-      environmentId,
-      name,
-    );
-    if (value == null) {
-      throw ApplicationFailure.nonRetryable(
-        `Missing environment secret "${name}" — add it under Settings → Secrets for this environment.`,
-        "MISSING_SECRET",
-      );
-    }
-    cache.set(name, value);
-    return value;
-  };
+  const resolveOne = makeSecretResolver(meta, __httpDeps.getSecret);
   const outHeaders: Record<string, string> = {};
   const secretKeys = new Set<string>();
   for (const [k, v] of headerEntries) {

@@ -660,12 +660,13 @@ export function Settings() {
           marginBottom: 12,
         }}
       >
-        Encrypted, env-scoped secret values (API keys, tokens). Reference one in
-        an <strong>HTTP Request node's headers</strong> as{" "}
-        <code>{"{{ $secrets.NAME }}"}</code> (more node types coming). Resolved
-        only inside the activity that uses it, so a value never enters the flow,
-        run data, or logs. Values are <strong>write-only</strong>: you can set
-        or replace a secret, but its value is never shown again.
+        Encrypted, env-scoped secret values (API keys, tokens). Reference one as{" "}
+        <code>{"{{ $secrets.NAME }}"}</code> in an{" "}
+        <strong>HTTP Request node's headers or body</strong>, or in an{" "}
+        <strong>MCP Tool node's arguments</strong>. Resolved only inside the
+        activity that uses it, so a value never enters the flow, run data, or
+        logs. Values are <strong>write-only</strong>: you can set or replace a
+        secret, but its value is never shown again.
       </div>
       <Card style={{ padding: 18, marginBottom: 12 }}>
         {secretError && (
