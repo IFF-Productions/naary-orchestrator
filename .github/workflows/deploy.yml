@@ -175,6 +175,12 @@ jobs:
           if [ -f /opt/naary.env ] && [ ! -f /opt/naary/.env ]; then
             mv /opt/naary.env /opt/naary/.env && chmod 600 /opt/naary/.env
           fi
+          # Fail fast with a clear message — without .env, compose dies on every
+          # ${VAR:?} interpolation with far more confusing errors.
+          if [ ! -f /opt/naary/.env ]; then
+            echo "::error::/opt/naary/.env is missing on the server. cloud-init stages it on first boot; restore it with: terraform -chdir=deploy/terraform output -raw server_env > /opt/naary/.env && chmod 600 /opt/naary/.env"
+            exit 1
+          fi
           # Ephemeral packages:read token — expires with the workflow run anyway, but
           # don't leave it in the box's docker config even that long: logout on ANY
           # exit (set -e would otherwise skip a trailing logout on pull/up failure).
