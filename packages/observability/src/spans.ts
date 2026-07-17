@@ -24,18 +24,59 @@ function tracingActive(): boolean {
 /** Span attribute values Sentry accepts. Keep these to non-secret identifiers. */
 export type SpanAttrs = Record<string, string | number | boolean>;
 
+/**
+ * The ONLY fields lifted from an activity's arguments onto its span/log — a strict
+ * allowlist of non-secret correlation ids (CLAUDE.md Tier-1 §4: secrets never enter
+ * telemetry). Do NOT widen this to "all of meta" or spread an arg object: activity
+ * configs carry headers/tokens/DSNs, and a blanket copy would leak them. Every entry
+ * here must be an id that is safe to search on in Sentry.
+ */
+const ACTIVITY_ID_KEYS = [
+  "tenantId",
+  "environmentId",
+  "executionId",
+  "nodeId",
+  "workflowId",
+  "workflowKey",
+] as const;
+
+/**
+ * Pull the allowlisted correlation ids out of an activity's positional arguments. Activities
+ * take their ids on a `meta`/config object (usually the last arg), so we scan every object arg
+ * and copy ONLY {@link ACTIVITY_ID_KEYS} that are present and string-valued — never the raw arg.
+ * A later object's id wins over an earlier one (the explicit `meta` arg beats an incidental match).
+ * Exported so it can be unit-tested directly (the passthrough span tests can't observe attributes).
+ */
+export function activityIdAttrs(args: readonly unknown[]): SpanAttrs {
+  const attrs: SpanAttrs = {};
+  for (const arg of args) {
+    if (!arg || typeof arg !== "object") continue;
+    const rec = arg as Record<string, unknown>;
+    for (const key of ACTIVITY_ID_KEYS) {
+      const v = rec[key];
+      if (typeof v === "string" && v) attrs[key] = v;
+    }
+  }
+  return attrs;
+}
+
 export interface SpanOptions {
   /** Coarse category shown in the Sentry UI (e.g. "http.server", "db", "activity"). */
   op?: string;
-  /** Non-secret, id-only attributes (tenantId/executionId/nodeId). Never raw args. */
-  attributes?: SpanAttrs;
+  /**
+   * Non-secret, id-only attributes (tenantId/executionId/nodeId). Never raw args. May be a
+   * THUNK — resolved only when a span is actually created (tracing on), so extracting the
+   * ids costs nothing on the disabled passthrough path.
+   */
+  attributes?: SpanAttrs | (() => SpanAttrs);
 }
 
 /**
  * Run `fn` inside a span named `name`. Returns whatever `fn` returns (sync value or
  * promise). Sentry.startSpan auto-ends the span and, if `fn` throws/rejects, marks the
  * span errored before rethrowing — so callers see identical behavior whether tracing is
- * on or off. When Sentry is disabled this is a direct `fn()` call (no span, no cost).
+ * on or off. When Sentry is disabled this is a direct `fn()` call (no span, no cost) — and
+ * a thunk `attributes` is NOT evaluated, preserving the zero-overhead guarantee.
  */
 export function withSpan<T>(
   name: string,
@@ -43,10 +84,9 @@ export function withSpan<T>(
   opts: SpanOptions = {},
 ): T {
   if (!tracingActive()) return fn();
-  return Sentry.startSpan(
-    { name, op: opts.op, attributes: opts.attributes },
-    () => fn(),
-  );
+  const attributes =
+    typeof opts.attributes === "function" ? opts.attributes() : opts.attributes;
+  return Sentry.startSpan({ name, op: opts.op, attributes }, () => fn());
 }
 
 /**
@@ -121,6 +161,10 @@ export function TracedClass(opts: { op?: string } = {}) {
  * activity interceptor runs `continueSentryTrace` around this call). When no trace was propagated
  * (tracing off, or a run started before that wiring), it degrades to a ROOT span — still correct,
  * just not stitched into a single waterfall. See temporal-trace.ts.
+ *
+ * Each span is tagged with the run's correlation ids ({@link activityIdAttrs}) lifted off the
+ * activity's `meta` arg, so a trace can be filtered/pivoted by tenantId/executionId/nodeId in the
+ * Sentry UI. Only allowlisted ids are copied — never the raw config (secrets rule).
  */
 export function traceActivities<T extends Record<string, unknown>>(
   activities: T,
@@ -133,7 +177,9 @@ export function traceActivities<T extends Record<string, unknown>>(
             withSpan(
               `activity.${name}`,
               () => (value as (...a: unknown[]) => unknown)(...args),
-              { op: "activity" },
+              // Thunk: ids are extracted only when a span is actually created (tracing on),
+              // so the disabled passthrough stays zero-overhead.
+              { op: "activity", attributes: () => activityIdAttrs(args) },
             )
         : value;
   }

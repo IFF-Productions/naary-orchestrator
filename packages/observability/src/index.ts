@@ -16,6 +16,7 @@ export {
   Traced,
   TracedClass,
   traceActivities,
+  activityIdAttrs,
   type SpanAttrs,
   type SpanOptions,
 } from "./spans";

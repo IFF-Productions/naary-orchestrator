@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { getTraceContext } from "../src/index";
-import { Traced, TracedClass, traceActivities, withSpan } from "../src/spans";
+import {
+  Traced,
+  TracedClass,
+  activityIdAttrs,
+  traceActivities,
+  withSpan,
+} from "../src/spans";
 
 /**
  * These run with Sentry DISABLED (initSentry never called → no client), so every helper
@@ -67,6 +73,49 @@ describe("@Traced / @TracedClass (behavior-preserving)", () => {
 describe("getTraceContext", () => {
   it("returns undefined when there is no active span (Sentry off)", () => {
     expect(getTraceContext()).toBeUndefined();
+  });
+});
+
+describe("activityIdAttrs (allowlist — Tier-1 §4: never leak raw args)", () => {
+  it("lifts only allowlisted ids off a meta arg", () => {
+    const meta = {
+      tenantId: "t1",
+      environmentId: "e1",
+      executionId: "x1",
+      nodeId: "n1",
+      workflowId: "wf1",
+      workflowKey: "key1",
+    };
+    expect(activityIdAttrs([{ someConfig: true }, meta])).toEqual(meta);
+  });
+
+  it("drops secret-shaped fields even when they sit beside real ids", () => {
+    const attrs = activityIdAttrs([
+      {
+        tenantId: "t1",
+        nodeId: "n1",
+        // decoys — must NOT survive the allowlist
+        apiKey: "sk-live-abc",
+        authorization: "Bearer zzz",
+        headers: { authorization: "Bearer zzz" },
+        body: "secret-payload",
+      },
+    ]);
+    expect(attrs).toEqual({ tenantId: "t1", nodeId: "n1" });
+    expect(Object.keys(attrs)).not.toContain("apiKey");
+    expect(Object.keys(attrs)).not.toContain("authorization");
+  });
+
+  it("ignores non-object args and non-string id values", () => {
+    expect(activityIdAttrs(["a-string", 42, null, undefined])).toEqual({});
+    // a numeric/blank nodeId is not a usable id → skipped
+    expect(activityIdAttrs([{ nodeId: 123, tenantId: "" }])).toEqual({});
+  });
+
+  it("a later object's id wins (explicit meta beats an incidental match)", () => {
+    expect(
+      activityIdAttrs([{ tenantId: "config-t" }, { tenantId: "meta-t" }]),
+    ).toEqual({ tenantId: "meta-t" });
   });
 });
 
