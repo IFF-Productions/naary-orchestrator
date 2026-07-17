@@ -4,6 +4,7 @@ const aiSdk = () => import("ai");
 const anthropicSdk = () => import("@ai-sdk/anthropic");
 const openaiSdk = () => import("@ai-sdk/openai");
 const googleSdk = () => import("@ai-sdk/google");
+import { execFile } from "node:child_process";
 import {
   BadRequestException,
   HttpException,
@@ -34,6 +35,30 @@ const GEN_DEFAULT_MODEL: Record<GenProvider, string> = {
   openai: "gpt-4.1",
   google: "gemini-2.5-pro",
 };
+
+/**
+ * The Claude Code credential (its own BYOK slot since #296 — can be a subscription
+ * setup-token, not just an API key) can ALSO power the builder: generation then runs
+ * through the headless `claude -p` CLI instead of the Anthropic API, so it bills to the
+ * tenant's Claude subscription. API-model providers are still preferred when configured
+ * (faster, no subprocess); this is the fallback that makes a claude-code-only tenant work.
+ */
+const CLAUDE_CODE = "claude-code" as const;
+type GenSource = GenProvider | typeof CLAUDE_CODE;
+
+/** Subprocess ceiling: nginx proxies /api with its default 60s read timeout, so the CLI
+ *  must give up (with a clear error) before the proxy would turn the reply into a 504. */
+const CLAUDE_CODE_TIMEOUT_MS = 55_000;
+
+/** Exactly ONE auth env var for the CLI — a subscription setup-token (sk-ant-oat…) via
+ *  CLAUDE_CODE_OAUTH_TOKEN, a plain API key via ANTHROPIC_API_KEY. Mirrors the worker's
+ *  codeAgent driver `authEnv` (apps/worker/src/temporal/code-agent-drivers.ts). */
+function claudeCodeAuthEnv(key: string): Record<string, string> {
+  const k = key.trim();
+  return k.startsWith("sk-ant-oat")
+    ? { CLAUDE_CODE_OAUTH_TOKEN: k }
+    : { ANTHROPIC_API_KEY: k };
+}
 
 /** Build the AI SDK model handle for a provider (mirrors the worker's buildModel). */
 async function buildGenModel(provider: GenProvider, apiKey: string) {
@@ -88,6 +113,41 @@ Example of the expected quality — note filled configs AND complete edges (a tr
 
 Available nodes (each line shows the node's config: shape to fill in):
 ${nodeCatalogPrompt()}`;
+
+/**
+ * Test seam (mirrors the worker's __codeAgentDeps): run the `claude` CLI, resolving
+ * {stdout, exitCode} even on a non-zero exit (the CLI still emits its JSON envelope);
+ * reject only on spawn failure (binary missing) or timeout (killed).
+ */
+export const __genDeps = {
+  exec: (
+    binary: string,
+    args: string[],
+    opts: { env: NodeJS.ProcessEnv; timeoutMs: number },
+  ): Promise<{ stdout: string; exitCode: number }> =>
+    new Promise((resolve, reject) => {
+      execFile(
+        binary,
+        args,
+        { env: opts.env, timeout: opts.timeoutMs, maxBuffer: 24 * 1024 * 1024 },
+        (err, stdout) => {
+          if (err) {
+            const code = (err as NodeJS.ErrnoException).code;
+            if (
+              typeof code === "string" ||
+              (err as { killed?: boolean }).killed
+            )
+              return reject(err);
+            return resolve({
+              stdout: String(stdout),
+              exitCode: typeof code === "number" ? code : 1,
+            });
+          }
+          resolve({ stdout: String(stdout), exitCode: 0 });
+        },
+      );
+    }),
+};
 
 @Injectable()
 export class GraphGeneratorService {
@@ -258,9 +318,13 @@ export class GraphGeneratorService {
     tenantId: string,
     environmentId: string,
     requested?: string,
-  ): Promise<{ provider: GenProvider; apiKey: string }> {
-    let provider = requested?.trim() as GenProvider | undefined;
-    if (provider && !GEN_PROVIDERS.includes(provider)) {
+  ): Promise<{ provider: GenSource; apiKey: string }> {
+    let provider = requested?.trim() as GenSource | undefined;
+    if (
+      provider &&
+      !GEN_PROVIDERS.includes(provider as GenProvider) &&
+      provider !== CLAUDE_CODE
+    ) {
       throw new BadRequestException(`Unsupported provider: ${requested}`);
     }
     if (!provider) {
@@ -271,10 +335,15 @@ export class GraphGeneratorService {
       const valid = new Set(
         configured.filter((c) => c.isValid).map((c) => c.provider),
       );
-      provider = GEN_PROVIDERS.find((p) => valid.has(p));
+      // API-model providers first (faster, no subprocess); a claude-code credential
+      // (possibly a subscription setup-token) is the fallback that makes a
+      // claude-code-only tenant able to generate.
+      provider =
+        GEN_PROVIDERS.find((p) => valid.has(p)) ??
+        (valid.has(CLAUDE_CODE) ? CLAUDE_CODE : undefined);
       if (!provider) {
         throw new BadRequestException(
-          "Add a model provider key (Anthropic, OpenAI, or Google) in Integrations before generating a workflow.",
+          "Add a model provider key (Anthropic, OpenAI, or Google) or a Claude Code credential in Integrations before generating a workflow.",
         );
       }
     }
@@ -296,7 +365,7 @@ export class GraphGeneratorService {
   }
 
   private async callModel(
-    provider: GenProvider,
+    provider: GenSource,
     apiKey: string,
     description: string,
     repair?: { previous: string; error: string },
@@ -305,6 +374,9 @@ export class GraphGeneratorService {
     const userPrompt = repair
       ? `The previous graph was invalid: ${repair.error}\n\nPrevious graph:\n${repair.previous}\n\nFix it. Original request:\n${description}`
       : description;
+    if (provider === CLAUDE_CODE) {
+      return this.callClaudeCode(apiKey, userPrompt, resources);
+    }
     // Plain-text generation (NOT Output.object): the structured-output path returned a
     // skeleton — nodes with id+type but empty edges and empty config, even on repair.
     // Free-form generation follows the prompt (few-shot + fill rules), so the model
@@ -334,6 +406,110 @@ export class GraphGeneratorService {
     if (!parsed) {
       this.logger.warn(
         `graph generate: model returned unparseable JSON (head: ${text.slice(0, 120).replace(/\s+/g, " ")})`,
+      );
+      throw new UnprocessableEntityException(
+        "The model didn't return a valid workflow. Try rephrasing the description.",
+      );
+    }
+    return parsed;
+  }
+
+  /**
+   * Generate via the headless Claude Code CLI (`claude -p`) — bills to the tenant's
+   * Claude Code credential (a subscription setup-token or an API key), not a
+   * platform API key. Same system prompt + resource grounding as the API path;
+   * plan mode + a read-only tool clamp + one turn mirror the proven codeAgent
+   * read-only envelope (no edits, no Bash, minimal env — key never logged).
+   */
+  private async callClaudeCode(
+    apiKey: string,
+    userPrompt: string,
+    resources: string,
+  ): Promise<GraphDraft> {
+    const args = [
+      "-p",
+      `${userPrompt}\n\n${resources}Respond with ONLY the JSON graph object — start at { and end at }. No prose, no markdown code fences.`,
+      "--output-format",
+      "json",
+      "--permission-mode",
+      "plan",
+      "--allowedTools",
+      "Read,Grep,Glob",
+      "--max-turns",
+      "1",
+      "--append-system-prompt",
+      SYSTEM_PROMPT,
+    ];
+    let stdout: string;
+    let exitCode: number;
+    try {
+      ({ stdout, exitCode } = await __genDeps.exec("claude", args, {
+        // Minimal env: PATH/HOME + exactly one auth var. Never the API process env
+        // (DB URLs, ENCRYPTION_KEY must not reach the subprocess).
+        env: {
+          PATH: process.env.PATH,
+          HOME: process.env.HOME,
+          ...claudeCodeAuthEnv(apiKey),
+        },
+        timeoutMs: CLAUDE_CODE_TIMEOUT_MS,
+      }));
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        // The CLI is installed in the backend image (root Dockerfile); a dev host
+        // without it lands here.
+        throw new ServiceUnavailableException(
+          "Claude Code isn't available on this server. Add an Anthropic/OpenAI/Google API key in Integrations instead.",
+        );
+      }
+      this.logger.warn(
+        // Class + code only — the error message can echo argv (which contains the prompt).
+        `graph generate (claude-code): subprocess failed (${e instanceof Error ? e.name : "unknown"}${code ? `/${code}` : ""})`,
+      );
+      throw new ServiceUnavailableException(
+        "Claude Code took too long or couldn't start. Try again, or add an API-model provider key in Integrations.",
+      );
+    }
+
+    // `claude -p --output-format json` emits one JSON envelope; is_error is checked
+    // even on exit 0 (mirrors the codeAgent driver's parse).
+    let result = "";
+    let isError = exitCode !== 0;
+    try {
+      const envlp = JSON.parse(stdout.trim()) as {
+        result?: string;
+        is_error?: boolean;
+      };
+      result = typeof envlp.result === "string" ? envlp.result : "";
+      isError = isError || envlp.is_error === true;
+    } catch {
+      isError = true;
+    }
+    if (isError) {
+      this.logger.warn(
+        `graph generate (claude-code): CLI reported failure (exit=${exitCode}, head: ${result.slice(0, 120).replace(/\s+/g, " ")})`,
+      );
+      // The result text is the CLI's own error surface — classify the common
+      // user-fixable cases so the 4xx tells the user what to do.
+      if (/invalid api key|authentication|unauthorized|oauth/i.test(result)) {
+        throw new BadRequestException(
+          "Your Claude Code credential was rejected. Update it in Integrations → Code Agent.",
+        );
+      }
+      if (/rate limit|usage limit|overloaded|quota/i.test(result)) {
+        throw new HttpException(
+          "Claude Code is rate-limited or your usage limit is reached. Try again shortly.",
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+      throw new ServiceUnavailableException(
+        "Claude Code couldn't generate a workflow right now. Try again.",
+      );
+    }
+    const parsed = parseGraphJson(result);
+    if (!parsed) {
+      this.logger.warn(
+        `graph generate (claude-code): unparseable JSON (head: ${result.slice(0, 120).replace(/\s+/g, " ")})`,
       );
       throw new UnprocessableEntityException(
         "The model didn't return a valid workflow. Try rephrasing the description.",

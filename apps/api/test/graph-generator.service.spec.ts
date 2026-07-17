@@ -4,7 +4,7 @@ import {
   UnprocessableEntityException,
 } from "@nestjs/common";
 import { MissingCredentialError } from "@naary/secrets";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GraphGeneratorService } from "../src/graphs/graph-generator.service";
 
 // Mock only the model network — credentials are injected. Keeps the test hermetic
@@ -195,5 +195,174 @@ describe("GraphGeneratorService", () => {
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(getDecryptedKey).not.toHaveBeenCalled();
     expect(generateText).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// claude-code generation source: the builder runs headless `claude -p` so a
+// tenant whose ONLY credential is the Claude Code slot (possibly a subscription
+// setup-token, not an API key) can still generate — billed to their subscription.
+// ---------------------------------------------------------------------------
+import { __genDeps } from "../src/graphs/graph-generator.service";
+
+const execMock = vi.fn();
+const realExec = __genDeps.exec;
+
+/** The CLI's single JSON envelope, as `claude -p --output-format json` emits it. */
+function envelope(result: string, is_error = false): string {
+  return JSON.stringify({ type: "result", result, is_error });
+}
+
+describe("GraphGeneratorService (claude-code source)", () => {
+  beforeEach(() => {
+    __genDeps.exec = execMock;
+    execMock.mockReset();
+    generateText.mockReset();
+    listConnections.mockResolvedValue([]);
+    // Tenant with ONLY a claude-code credential (the case that used to 400).
+    listProviders
+      .mockReset()
+      .mockResolvedValue([{ provider: "claude-code", isValid: true }]);
+    getDecryptedKey.mockReset().mockResolvedValue("sk-ant-oat-fake");
+  });
+  afterEach(() => {
+    __genDeps.exec = realExec;
+  });
+
+  it("falls back to the claude-code credential and generates via the CLI", async () => {
+    execMock.mockResolvedValue({
+      stdout: envelope(JSON.stringify(validOut)),
+      exitCode: 0,
+    });
+
+    const res = await makeService().generate("t-1", "e-1", "email me a digest");
+
+    expect(res.graph.nodes).toHaveLength(2);
+    expect(getDecryptedKey).toHaveBeenCalledWith("t-1", "e-1", "claude-code");
+    expect(generateText).not.toHaveBeenCalled();
+    const [binary, args] = execMock.mock.calls[0];
+    expect(binary).toBe("claude");
+    expect(args).toContain("--output-format");
+    expect(args).toContain("plan");
+  });
+
+  it("a setup-token goes to CLAUDE_CODE_OAUTH_TOKEN; an API key to ANTHROPIC_API_KEY — never both", async () => {
+    execMock.mockResolvedValue({
+      stdout: envelope(JSON.stringify(validOut)),
+      exitCode: 0,
+    });
+    await makeService().generate("t-1", "e-1", "flow");
+    let env = execMock.mock.calls[0][2].env as Record<string, string>;
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-oat-fake");
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+
+    getDecryptedKey.mockResolvedValue("sk-ant-api-fake");
+    await makeService().generate("t-1", "e-1", "flow");
+    env = execMock.mock.calls[1][2].env as Record<string, string>;
+    expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-api-fake");
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  it("passes a MINIMAL env to the subprocess — API process secrets never leak in", async () => {
+    process.env.ENCRYPTION_KEY_TEST_SENTINEL = "must-not-leak";
+    try {
+      execMock.mockResolvedValue({
+        stdout: envelope(JSON.stringify(validOut)),
+        exitCode: 0,
+      });
+      await makeService().generate("t-1", "e-1", "flow");
+      const env = execMock.mock.calls[0][2].env as Record<string, string>;
+      expect(Object.keys(env).sort()).toEqual(
+        ["CLAUDE_CODE_OAUTH_TOKEN", "HOME", "PATH"].sort(),
+      );
+    } finally {
+      delete process.env.ENCRYPTION_KEY_TEST_SENTINEL;
+    }
+  });
+
+  it("still prefers an API-model provider when one is configured alongside claude-code", async () => {
+    listProviders.mockResolvedValue([
+      { provider: "claude-code", isValid: true },
+      { provider: "anthropic", isValid: true },
+    ]);
+    generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
+
+    await makeService().generate("t-1", "e-1", "flow");
+
+    expect(getDecryptedKey).toHaveBeenCalledWith("t-1", "e-1", "anthropic");
+    expect(execMock).not.toHaveBeenCalled();
+  });
+
+  it("honors an explicit provider:'claude-code' even when anthropic is configured", async () => {
+    listProviders.mockResolvedValue([
+      { provider: "claude-code", isValid: true },
+      { provider: "anthropic", isValid: true },
+    ]);
+    execMock.mockResolvedValue({
+      stdout: envelope(JSON.stringify(validOut)),
+      exitCode: 0,
+    });
+
+    await makeService().generate("t-1", "e-1", "flow", "claude-code");
+
+    expect(getDecryptedKey).toHaveBeenCalledWith("t-1", "e-1", "claude-code");
+    expect(generateText).not.toHaveBeenCalled();
+  });
+
+  it("maps a CLI auth failure to a 400 pointing at the Code Agent credential", async () => {
+    execMock.mockResolvedValue({
+      stdout: envelope("Invalid API key · Please run /login", true),
+      exitCode: 1,
+    });
+    await expect(
+      makeService().generate("t-1", "e-1", "flow"),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("maps a usage-limit failure to 429", async () => {
+    execMock.mockResolvedValue({
+      stdout: envelope("You've hit your usage limit for today.", true),
+      exitCode: 1,
+    });
+    await expect(
+      makeService().generate("t-1", "e-1", "flow"),
+    ).rejects.toSatisfy(
+      (e) => (e as { getStatus(): number }).getStatus() === 429,
+    );
+  });
+
+  it("tolerates markdown fences around the CLI's JSON (parse still succeeds)", async () => {
+    execMock.mockResolvedValue({
+      stdout: envelope("```json\n" + JSON.stringify(validOut) + "\n```"),
+      exitCode: 0,
+    });
+    const res = await makeService().generate("t-1", "e-1", "flow");
+    expect(res.graph.startNodeId).toBe("start");
+  });
+
+  it("repairs once through the CLI too (invalid graph → error fed back → valid)", async () => {
+    execMock
+      .mockResolvedValueOnce({
+        stdout: envelope(JSON.stringify(invalidOut)),
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: envelope(JSON.stringify(validOut)),
+        exitCode: 0,
+      });
+
+    const res = await makeService().generate("t-1", "e-1", "flow");
+
+    expect(res.graph.nodes).toHaveLength(2);
+    expect(execMock).toHaveBeenCalledTimes(2);
+    const repairPrompt = execMock.mock.calls[1][1][1] as string;
+    expect(repairPrompt).toContain("ghost");
+  });
+
+  it("the no-provider 400 now tells the user Claude Code is an option", async () => {
+    listProviders.mockResolvedValue([]);
+    await expect(makeService().generate("t-1", "e-1", "flow")).rejects.toThrow(
+      /Claude Code credential/,
+    );
   });
 });
