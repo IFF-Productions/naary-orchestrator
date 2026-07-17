@@ -10,7 +10,7 @@ hostname = "naar-y.com"    # or "app.naar-y.com"
 # ── Hetzner server ─────────────────────────────────────────────────────────────────────
 hcloud_token   = "your-hetzner-api-token"             # project → Security → API tokens (Read & Write)
 ssh_public_key = "ssh-ed25519 AAAA... you@laptop"     # contents of ~/.ssh/id_ed25519.pub
-# server_type     = "cx32"                            # 4 vCPU / 8 GB, EU-only (see variables.tf)
+# server_type     = "cx33"                            # 4 vCPU / 8 GB, EU-only (see variables.tf)
 # server_location = "nbg1"
 # ssh_allowed_cidrs = ["203.0.113.7/32"]              # tighten SSH to your IP if static
 

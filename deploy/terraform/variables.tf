@@ -48,8 +48,8 @@ variable "server_name" {
 
 variable "server_type" {
   type        = string
-  default     = "cx32"
-  description = "Hetzner server type. cx32 = 4 vCPU / 8 GB (~€7/mo, Intel shared, EU-only) matches the stack's ~8 GB guidance. Alternatives: cax21 (ARM, cheaper — images build on-box so arch doesn't matter), cpx31 (AMD, available in US locations)."
+  default     = "cx33"
+  description = "Hetzner server type. cx33 = 4 vCPU / 8 GB (Intel shared, EU-only) matches the stack's ~8 GB guidance. Alternatives: cax21 (ARM, cheaper — images build on-box so arch doesn't matter), cpx32 (AMD, also in sin), cpx31 (AMD, incl. US locations). Catalog names rotate generations (cx32→cx33) — on 'server type not found', list current ones: curl -H \"Authorization: Bearer $TOKEN\" https://api.hetzner.cloud/v1/server_types"
 }
 
 variable "server_location" {

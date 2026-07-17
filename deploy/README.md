@@ -128,7 +128,7 @@ Set `BACKUP_RCLONE_REMOTE` in `.env` (e.g. `r2:naary-backups`) to also ship them
 ## Variant B — Hetzner + Neon + GitHub Actions
 
 Same architecture (tunnel in front, no inbound web ports), but Terraform provisions
-**everything**: the Cloudflare tunnel, a **Hetzner VPS** (default `cx32`, 4 vCPU / 8 GB,
+**everything**: the Cloudflare tunnel, a **Hetzner VPS** (default `cx33`, 4 vCPU / 8 GB,
 ~€7/mo, Nuremberg) and a **Neon** project (managed serverless Postgres, pgvector
 included — so the RAG migrations run unchanged). The app DB and durable execution both
 live off-box (Neon + Temporal Cloud), so the server is disposable.
@@ -211,7 +211,7 @@ each deploy, add a *required reviewers* rule to the auto-created `production` en
   `ENCRYPTION_KEY` separately; losing it invalidates stored tenant credentials.
 - **Neon autosuspend:** the default scale-to-zero adds a ~½s cold start after idle
   periods. Fine to start; raise the suspend timeout in Neon if it bothers you.
-- **Costs:** Hetzner `cx32` ~€7/mo · Neon free tier (or Launch $19/mo) · Temporal Cloud
+- **Costs:** Hetzner `cx33` ~€7/mo · Neon free tier (or Launch $19/mo) · Temporal Cloud
   (usage-based) · Cloudflare free.
 
 ---
