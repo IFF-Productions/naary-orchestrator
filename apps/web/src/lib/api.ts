@@ -8,7 +8,11 @@
  * user is signed in, else the pasted `nry_` API token (see getBearerToken). The
  * server resolves tenantId from the token, so the client never sends it.
  */
-import type { GraphDef, OpenApiSummary } from "@naary/dsl";
+import type {
+  GraphDef,
+  GraphQLSchemaSummary,
+  OpenApiSummary,
+} from "@naary/dsl";
 import { getBearerToken } from "./firebase";
 
 /** Thrown on a 401 so screens can prompt the user to set their API token. */
@@ -351,6 +355,19 @@ export const api = {
       t
         ? { Authorization: /^bearer\s/i.test(t) ? t : `Bearer ${t}` }
         : undefined,
+    );
+  },
+  // Run the standard GraphQL introspection query against an endpoint → a schema summary
+  // (types/fields), to help author a graphQL node's query. `token` (optional) auths a private
+  // endpoint, forwarded verbatim (server never resolves $secrets).
+  introspectGraphQL(
+    url: string,
+    token?: string,
+  ): Promise<GraphQLSchemaSummary> {
+    return introspectFetch<GraphQLSchemaSummary>(
+      "/introspect/graphql",
+      url,
+      token?.trim() ? { Authorization: `Bearer ${token.trim()}` } : undefined,
     );
   },
   // AI workflow builder: describe a workflow → a validated DRAFT graph (unsaved).

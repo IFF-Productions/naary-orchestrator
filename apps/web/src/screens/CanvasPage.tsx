@@ -44,6 +44,7 @@ import {
 } from "@naary/dsl";
 import { Button, Icon, StatusPill } from "../components";
 import { CurlImportButton } from "../canvas/CurlImportButton";
+import { GraphQLIntrospectButton } from "../canvas/GraphQLIntrospectButton";
 import { OpenApiImportButton } from "../canvas/OpenApiImportButton";
 import { ExpressionField } from "../components/ExpressionField";
 import {
@@ -3184,6 +3185,101 @@ function ConfigPanel({
               </div>
             );
           })()}
+        </>
+      )}
+
+      {kind === "graphQL" && (
+        <>
+          <Labeled label="Endpoint URL">
+            {exprText("url", {
+              placeholder: "https://api.example.com/graphql",
+            })}
+          </Labeled>
+
+          <GraphQLIntrospectButton
+            url={str("url")}
+            onInsertQuery={(query) => onChange({ query })}
+          />
+
+          <Labeled label="Query">
+            {exprText("query", {
+              multiline: true,
+              minHeight: "120px",
+              placeholder: "query {\n  __typename\n}",
+            })}
+          </Labeled>
+
+          <BindingsEditor
+            bindings={
+              obj("argumentBindings") as Record<string, BindingRow> | undefined
+            }
+            upstreamIds={upstreamIds}
+            onChange={(v) => onChange({ argumentBindings: v })}
+          />
+
+          <JsonField
+            label="Variables (JSON)"
+            value={obj("variables")}
+            placeholder={'{\n  "id": "123"\n}'}
+            onChange={(v) => onChange({ variables: v })}
+          />
+          <JsonField
+            label="Headers (JSON, non-secret)"
+            value={obj("headers")}
+            placeholder={'{\n  "Accept": "application/json"\n}'}
+            onChange={(v) => onChange({ headers: v })}
+          />
+
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-2)",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={Boolean(config.failOnErrors)}
+              onChange={(e) => onChange({ failOnErrors: e.target.checked })}
+            />
+            Fail the node if the response has GraphQL errors (otherwise branch
+            on <code>.errors</code>)
+          </label>
+
+          <Labeled label="Timeout (ms)">
+            <input
+              type="number"
+              min={1}
+              value={num("timeoutMs") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  timeoutMs: e.target.value
+                    ? Number(e.target.value)
+                    : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="30000 (default)"
+            />
+          </Labeled>
+
+          <Labeled label="Cost (USD per call)">
+            <input
+              type="number"
+              min={0}
+              step={0.001}
+              value={num("costUsd") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  costUsd: e.target.value ? Number(e.target.value) : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="0.00"
+            />
+          </Labeled>
         </>
       )}
 
