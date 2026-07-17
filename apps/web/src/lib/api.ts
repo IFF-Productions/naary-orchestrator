@@ -10,6 +10,7 @@
  */
 import type {
   GraphDef,
+  GraphDiff,
   GraphQLSchemaSummary,
   OpenApiSummary,
 } from "@naary/dsl";
@@ -507,6 +508,18 @@ export const api = {
   // Every stored version of a workflow (newest first) — powers the "re-run at version" picker.
   listGraphVersions(workflowKey: string): Promise<GraphVersion[]> {
     return http(`/graphs/${encodeURIComponent(workflowKey)}/versions`);
+  },
+  // Structural diff between two saved versions (nodes/edges added/removed/changed) — "review
+  // what changed before promoting". The heavy lifting (diffGraphs) runs server-side; this returns
+  // the structured GraphDiff plus the compared version numbers.
+  diffGraphVersions(
+    workflowKey: string,
+    from: number,
+    to: number,
+  ): Promise<GraphDiff & { fromVersion: number; toVersion: number }> {
+    return http(
+      `/graphs/${encodeURIComponent(workflowKey)}/diff?from=${from}&to=${to}`,
+    );
   },
   // The signed resume-URL path for a run paused on a wait(webhook) node.
   getResumeUrl(id: string): Promise<{ path: string }> {

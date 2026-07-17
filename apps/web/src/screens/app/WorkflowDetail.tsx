@@ -20,6 +20,7 @@ import {
 } from "../../lib/api";
 import { decompileGraph } from "../../lib/decompile-graph";
 import { ACCENT, nodeDisplayLabel, nodeSubtitle } from "../../lib/graph-model";
+import { WorkflowDiffPanel } from "./WorkflowDiffPanel";
 
 interface ViewData extends Record<string, unknown> {
   kind: NodeType;
@@ -408,6 +409,9 @@ export function WorkflowDetail() {
           </div>
         </Card>
       </div>
+
+      {/* Compare two saved versions — review structural changes before promoting. */}
+      <WorkflowDiffPanel workflowKey={key} />
     </div>
   );
 }
