@@ -75,10 +75,38 @@ describe("IntrospectService.openapi", () => {
     expect(safeFetch.mock.calls[0][1].method).toBe("GET");
   });
 
-  it("rejects a non-JSON (YAML) spec with a NAMED 400", async () => {
-    safeFetch.mockResolvedValue(streamRes("openapi: 3.0.0\npaths: {}"));
+  it("fetches + parses a YAML spec into operations", async () => {
+    safeFetch.mockResolvedValue(
+      streamRes(
+        [
+          'openapi: "3.0.0"',
+          "servers:",
+          "  - url: https://api.x/v1",
+          "paths:",
+          "  /things:",
+          "    get:",
+          "      summary: list",
+        ].join("\n"),
+      ),
+    );
+
+    const out = await svc.openapi("https://spec.example.com/openapi.yaml");
+    expect(out.baseUrl).toBe("https://api.x/v1");
+    expect(out.operations).toEqual([
+      {
+        method: "GET",
+        path: "/things",
+        summary: "list",
+        parameters: [],
+        hasBody: false,
+      },
+    ]);
+  });
+
+  it("rejects a body that is neither valid JSON nor YAML with a 400", async () => {
+    safeFetch.mockResolvedValue(streamRes("{ unclosed: ["));
     await expect(
-      svc.openapi("https://spec.example.com/openapi.yaml"),
+      svc.openapi("https://spec.example.com/garbage"),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 

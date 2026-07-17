@@ -4,6 +4,7 @@ import {
   PayloadTooLargeException,
 } from "@nestjs/common";
 import { BlockedEgressError, safeFetch } from "@naary/connections";
+import { parse as parseYaml } from "yaml";
 import {
   GRAPHQL_INTROSPECTION_QUERY,
   type GraphQLSchemaSummary,
@@ -28,19 +29,26 @@ const MAX_SPEC_BYTES = 5 * 1024 * 1024; // 5 MB — generous for a spec, bounded
  */
 @Injectable()
 export class IntrospectService {
-  /** Fetch + parse an OpenAPI 3.x / Swagger 2.0 spec (JSON) into an operation list. */
+  /** Fetch + parse an OpenAPI 3.x / Swagger 2.0 spec (JSON or YAML) into an operation list. */
   async openapi(
     url: string,
     headers?: Record<string, string>,
   ): Promise<OpenApiSummary> {
     const raw = await this.fetchCapped(url, { headers });
+    // Content-type is unreliable (many specs are served as text/plain), so we sniff by parsing:
+    // JSON first (fast, and valid JSON is valid YAML anyway), then YAML. YAML decodes to the same
+    // plain-object shape parseOpenApi already handles — decoding stays here, the dsl parser stays pure.
     let spec: unknown;
     try {
       spec = JSON.parse(raw);
     } catch {
-      throw new BadRequestException(
-        "Only JSON OpenAPI/Swagger specs are supported yet — point at the JSON spec URL (a YAML spec won't parse).",
-      );
+      try {
+        spec = parseYaml(raw);
+      } catch {
+        throw new BadRequestException(
+          "That spec isn't valid JSON or YAML — point at a JSON or YAML OpenAPI/Swagger spec URL.",
+        );
+      }
     }
     return parseOpenApi(spec);
   }
