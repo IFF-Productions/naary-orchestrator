@@ -129,9 +129,14 @@ jobs:
           MSG
           exit 1
 
+      # dest MUST be per-runner: all runner services on the Windows CI VM run as the SAME
+      # account (NetworkService), so the default ~/setup-pnpm is ONE shared folder — two
+      # concurrent jobs race on it and the loser dies with "EPERM: operation not permitted,
+      # rmdir ...\setup-pnpm\...". runner.temp is per-runner (and wiped between jobs).
       - uses: pnpm/action-setup@v4
         with:
           version: 11.9.0
+          dest: ${{ runner.temp }}/setup-pnpm
 
       - uses: actions/setup-node@v4
         with:
