@@ -5,6 +5,9 @@
 x-backend-env: &backend-env
   DATABASE_URL: postgresql://${POSTGRES_USER:-naary}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-naary_orchestrator}?schema=public
   ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env (see .env.example)}
+  # Decrypt-only fallback during master-key rotation (see rotate-master-key CLI).
+  # Set alongside a NEW ENCRYPTION_KEY, run the rewrap, then remove it.
+  OLD_ENCRYPTION_KEY: ${OLD_ENCRYPTION_KEY:-}
   # Defaults to the in-stack dev server. Point at Temporal Cloud by overriding
   # TEMPORAL_ADDRESS + setting TEMPORAL_NAMESPACE and an auth method in .env
   # (TEMPORAL_API_KEY, or the mTLS cert/key paths). See @naary/temporal-config.

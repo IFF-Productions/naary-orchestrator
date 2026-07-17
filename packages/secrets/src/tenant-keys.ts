@@ -12,9 +12,31 @@ import {
 export const TENANT_KEY_VERSION = 3;
 
 /** AAD binding a WRAPPED DEK to its tenant — a TenantKey row swapped between tenants
- *  fails to unwrap (same Sec#7 property the credential rows have). */
-function dekAad(tenantId: string): string {
+ *  fails to unwrap (same Sec#7 property the credential rows have). Exported for the
+ *  master-rotation rewrap (rotate.ts), which re-wraps DEKs under the same binding. */
+export function dekAad(tenantId: string): string {
   return `dek:${tenantId}`;
+}
+
+/** A wrapped-DEK row (the columns the envelope layer reads/writes). */
+export interface TenantKeyRow {
+  tenantId: string;
+  ciphertext: string;
+  iv: string;
+  authTag: string;
+  keyVersion: number;
+}
+
+/** The slice of the Prisma client the envelope layer needs — injectable so tests
+ *  outside this package (which can't vi.mock this package's own @naary/db import)
+ *  can supply an in-memory TenantKey table. */
+export interface TenantKeyDb {
+  tenantKey: {
+    findUnique(args: {
+      where: { tenantId: string };
+    }): Promise<TenantKeyRow | null>;
+    create(args: { data: TenantKeyRow }): Promise<TenantKeyRow>;
+  };
 }
 
 /**
@@ -44,15 +66,21 @@ export class TenantKeyService {
 
   private readonly master: KeyEncryptor;
   private readonly maxCachedDeks: number;
+  private readonly db?: TenantKeyDb;
   /** tenantId → in-flight/settled DEK cipher, in LRU order (Map insertion order;
    *  hits re-insert). Promise-valued so concurrent first uses share one mint
    *  instead of racing several. */
   private readonly deks = new Map<string, Promise<KeyEncryptor>>();
 
-  constructor(opts?: { master?: KeyEncryptor; maxCachedDeks?: number }) {
+  constructor(opts?: {
+    master?: KeyEncryptor;
+    maxCachedDeks?: number;
+    db?: TenantKeyDb;
+  }) {
     this.master = opts?.master ?? createKeyEncryptor();
     this.maxCachedDeks =
       opts?.maxCachedDeks ?? TenantKeyService.DEFAULT_MAX_CACHED_DEKS;
+    this.db = opts?.db;
   }
 
   /** Drop a tenant's cached DEK. Call after deleting their TenantKey row so
@@ -106,7 +134,8 @@ export class TenantKeyService {
   }
 
   private async loadOrMint(tenantId: string): Promise<KeyEncryptor> {
-    const prisma = getPrisma();
+    // The real PrismaClient satisfies TenantKeyDb structurally on the two calls used.
+    const prisma = this.db ?? (getPrisma() as unknown as TenantKeyDb);
     let row = await prisma.tenantKey.findUnique({ where: { tenantId } });
     if (!row) {
       const wrapped = this.master.encrypt(

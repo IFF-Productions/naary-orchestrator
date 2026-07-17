@@ -84,11 +84,59 @@ export class AesGcmKeyEncryptor implements KeyEncryptor {
   }
 }
 
-/** Build the encryptor from the required ENCRYPTION_KEY env var (fail at boot). */
+/**
+ * Decrypt-fallback chain for MASTER-KEY ROTATION: `encrypt` always uses the primary
+ * (new) key; `decrypt` tries the primary first, then each retired key in order. GCM's
+ * auth tag makes try-in-order safe — a wrong key fails authentication, it can never
+ * "successfully" decrypt to garbage. This is what makes rotation zero-downtime:
+ * deploy with ENCRYPTION_KEY=<new> + OLD_ENCRYPTION_KEY=<old> (everything old still
+ * decrypts), run the rewrap script (scripts: rotate-master-key), then drop the old var.
+ */
+export class FallbackKeyEncryptor implements KeyEncryptor {
+  constructor(
+    private readonly primary: KeyEncryptor,
+    private readonly retired: KeyEncryptor[],
+  ) {}
+
+  encrypt(plaintext: string, aad?: string): EncryptedPayload {
+    return this.primary.encrypt(plaintext, aad);
+  }
+
+  decrypt(payload: EncryptedPayload, aad?: string): string {
+    try {
+      return this.primary.decrypt(payload, aad);
+    } catch (err) {
+      for (const key of this.retired) {
+        try {
+          return key.decrypt(payload, aad);
+        } catch {
+          // wrong key — GCM auth failed; try the next retired key
+        }
+      }
+      throw err; // preserve the primary's failure (most useful error)
+    }
+  }
+}
+
+/**
+ * Build the encryptor from the required ENCRYPTION_KEY env var (fail at boot).
+ * OLD_ENCRYPTION_KEY (comma-separated for multiple retired keys) adds decrypt-only
+ * fallbacks for the master-rotation window — see FallbackKeyEncryptor.
+ */
 export function createKeyEncryptor(): KeyEncryptor {
   const masterKey = process.env.ENCRYPTION_KEY;
   if (!masterKey) {
     throw new Error("ENCRYPTION_KEY is required");
   }
-  return new AesGcmKeyEncryptor(masterKey);
+  const primary = new AesGcmKeyEncryptor(masterKey);
+  const old = process.env.OLD_ENCRYPTION_KEY?.trim();
+  if (!old) return primary;
+  const retired = old
+    .split(",")
+    .map((k) => k.trim())
+    .filter((k) => k.length > 0)
+    .map((k) => new AesGcmKeyEncryptor(k));
+  return retired.length > 0
+    ? new FallbackKeyEncryptor(primary, retired)
+    : primary;
 }

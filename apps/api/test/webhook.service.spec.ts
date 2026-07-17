@@ -1,6 +1,6 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AesGcmKeyEncryptor } from "@naary/secrets";
+import { AesGcmKeyEncryptor, TenantKeyService } from "@naary/secrets";
 
 const m = vi.hoisted(() => ({
   create: vi.fn(),
@@ -10,6 +10,8 @@ const m = vi.hoisted(() => ({
   update: vi.fn(),
   deliveryCreate: vi.fn(),
   deliveryDeleteMany: vi.fn(),
+  // In-memory TenantKey table — the envelope layer mints per-tenant DEKs through it.
+  tenantKeys: new Map<string, object>(),
 }));
 vi.mock("@naary/db", () => ({
   getPrisma: () => ({
@@ -30,9 +32,31 @@ vi.mock("@naary/db", () => ({
 import { WebhookService } from "../src/webhooks/webhook.service";
 
 // Inject a real encryptor (random key) so createEndpoint can encrypt the secret
-// at rest without depending on a process ENCRYPTION_KEY.
+// at rest without depending on a process ENCRYPTION_KEY. It becomes the MASTER
+// (KEK) of an envelope service backed by the in-memory tenantKey table (injected —
+// vi.mock("@naary/db") here can't reach the secrets package's own import of it).
+const masterEncryptor = new AesGcmKeyEncryptor(randomBytes(32).toString("hex"));
 const svc = new WebhookService(
-  new AesGcmKeyEncryptor(randomBytes(32).toString("hex")),
+  undefined,
+  new TenantKeyService({
+    master: masterEncryptor,
+    db: {
+      tenantKey: {
+        findUnique: async ({ where }) => {
+          const row = m.tenantKeys.get(where.tenantId);
+          return row ? (row as never) : null;
+        },
+        create: async ({ data }) => {
+          if (m.tenantKeys.has(data.tenantId))
+            throw Object.assign(new Error("unique constraint"), {
+              code: "P2002",
+            });
+          m.tenantKeys.set(data.tenantId, data);
+          return data;
+        },
+      },
+    },
+  }),
 );
 const SECRET = "top-secret-hmac-key";
 const RAW = Buffer.from('{"action":"opened","number":42}');
@@ -168,20 +192,33 @@ describe("WebhookService.createEndpoint", () => {
     // the persisted column is ciphertext, not the plaintext key
     expect(stored).not.toContain(reg.signingSecret);
     expect(JSON.parse(stored)).toHaveProperty("ciphertext");
+    // stored at the ENVELOPE format (tenant DEK), with a wrapped DEK minted
+    expect(JSON.parse(stored).keyVersion).toBe(3);
+    expect(m.tenantKeys.has("t1")).toBe(true);
     // and it decrypts back for HMAC verification (AAD bound to the tenant, Sec#7)
     expect(
-      svc.decryptSigningSecret({
+      await svc.decryptSigningSecret({
         signingSecret: stored,
         tenantId: "t1",
       } as never),
     ).toBe(reg.signingSecret);
-    // a wrong-tenant AAD must fail to decrypt (row-swap detection)
-    expect(() =>
+    // a wrong-tenant lookup must fail to decrypt (different DEK + AAD — row-swap detection)
+    await expect(
       svc.decryptSigningSecret({
         signingSecret: stored,
         tenantId: "t2",
       } as never),
-    ).toThrow();
+    ).rejects.toThrow();
+  });
+
+  it("still decrypts a LEGACY master-encrypted blob (pre-envelope, keyVersion 2)", async () => {
+    const legacy = JSON.stringify(masterEncryptor.encrypt("old-secret", "t1"));
+    expect(
+      await svc.decryptSigningSecret({
+        signingSecret: legacy,
+        tenantId: "t1",
+      } as never),
+    ).toBe("old-secret");
   });
 });
 
