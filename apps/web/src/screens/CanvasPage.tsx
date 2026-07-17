@@ -44,6 +44,7 @@ import {
 } from "@naary/dsl";
 import { Button, Icon, StatusPill } from "../components";
 import { CurlImportButton } from "../canvas/CurlImportButton";
+import { OpenApiImportButton } from "../canvas/OpenApiImportButton";
 import { ExpressionField } from "../components/ExpressionField";
 import {
   api,
@@ -2849,6 +2850,19 @@ function ConfigPanel({
                 headers: c.headers ?? {},
                 query: c.query ?? {},
                 body: c.body,
+              })
+            }
+          />
+          <OpenApiImportButton
+            onApply={(c) =>
+              // Always write query/headers (empty when the operation declares none) so a
+              // re-import is idempotent — mirrors the cURL import above; a conditional
+              // spread would retain stale values from a previous import/edit.
+              onChange({
+                method: c.method,
+                url: c.url,
+                query: c.query ?? {},
+                headers: c.headers ?? {},
               })
             }
           />

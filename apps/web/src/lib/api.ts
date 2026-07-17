@@ -8,7 +8,7 @@
  * user is signed in, else the pasted `nry_` API token (see getBearerToken). The
  * server resolves tenantId from the token, so the client never sends it.
  */
-import type { GraphDef } from "@naary/dsl";
+import type { GraphDef, OpenApiSummary } from "@naary/dsl";
 import { getBearerToken } from "./firebase";
 
 /** Thrown on a 401 so screens can prompt the user to set their API token. */
@@ -157,6 +157,42 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/**
+ * POST to an /introspect endpoint. Hand-rolled (not http()) so the server's specific 400 message
+ * (bad URL, non-JSON spec, blocked host, non-2xx upstream) surfaces to the user instead of a generic
+ * "→ 400". Carries the same bearer + workspace/env headers as http(). `headers` (an OPTIONAL token
+ * the user pastes for a private spec) is forwarded VERBATIM by the server — it never resolves
+ * `{{ $secrets }}`, so a stored-secret reference would arrive as a literal string and fail; the UI
+ * offers its own token field instead.
+ */
+async function introspectFetch<T>(
+  path: string,
+  url: string,
+  headers?: Record<string, string>,
+): Promise<T> {
+  const token = await getBearerToken();
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(activeWorkspaceId ? { "x-workspace-id": activeWorkspaceId } : {}),
+      ...(activeEnvironmentId
+        ? { "x-environment-id": activeEnvironmentId }
+        : {}),
+    },
+    body: JSON.stringify({ url, ...(headers ? { headers } : {}) }),
+  });
+  if (res.status === 401) throw new UnauthorizedError();
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as {
+      message?: string;
+    } | null;
+    throw new Error(body?.message ?? `Introspection failed (${res.status}).`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export interface GraphSummary {
   workflowKey: string;
   name: string;
@@ -300,6 +336,21 @@ export const api = {
           ...(autofillUpstream ? { autofillUpstream: true } : {}),
         }),
       },
+    );
+  },
+  // --- Authoring-time introspection (node autocomplete) ---
+  // Fetch + parse a remote OpenAPI/Swagger JSON spec into an operation list, to pre-fill an
+  // httpRequest node. `token` (optional) is sent as an Authorization header for a private spec,
+  // forwarded VERBATIM to the spec URL (the server never resolves $secrets — see introspectFetch).
+  introspectOpenApi(url: string, token?: string): Promise<OpenApiSummary> {
+    // Accept a raw token OR a full pasted "Bearer …" value — never double-wrap.
+    const t = token?.trim();
+    return introspectFetch<OpenApiSummary>(
+      "/introspect/openapi",
+      url,
+      t
+        ? { Authorization: /^bearer\s/i.test(t) ? t : `Bearer ${t}` }
+        : undefined,
     );
   },
   // AI workflow builder: describe a workflow → a validated DRAFT graph (unsaved).
