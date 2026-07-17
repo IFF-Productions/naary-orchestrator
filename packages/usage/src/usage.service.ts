@@ -32,13 +32,23 @@ export async function recordUsage(input: RecordUsageInput) {
   const reasoningTokens = input.usage.reasoningTokens ?? 0;
   const totalTokens = input.usage.totalTokens ?? inputTokens + outputTokens;
 
-  const costUsd = computeCost({
-    provider: input.provider,
-    model: input.model,
-    inputTokens,
-    outputTokens,
-    cachedInputTokens,
-  });
+  // FAIL-SAFE (CLAUDE.md Tier-1 §6): a missing pricing row must never fail the run —
+  // that would kill the node AFTER the model call succeeded and ledger NOTHING (the
+  // worst outcome: a paid call with no usage record). Ledger the tokens with cost 0
+  // instead; an unpriced provider/model shows up as tokens-without-cost, which is
+  // auditable and fixable by adding the pricing row.
+  let costUsd = 0;
+  try {
+    costUsd = computeCost({
+      provider: input.provider,
+      model: input.model,
+      inputTokens,
+      outputTokens,
+      cachedInputTokens,
+    });
+  } catch {
+    costUsd = 0;
+  }
 
   const data = {
     tenantId: input.tenantId,

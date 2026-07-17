@@ -17,39 +17,47 @@ export interface ModelPrice {
 
 export const PRICING_AS_OF = "2026-06-25";
 
-export const MODEL_PRICING: Record<string, Record<string, ModelPrice>> = {
-  anthropic: {
-    "claude-opus-4-8": {
-      inputPerMTok: 5,
-      outputPerMTok: 25,
-      cachedInputPerMTok: 0.5,
-    },
-    "claude-opus-4-7": {
-      inputPerMTok: 5,
-      outputPerMTok: 25,
-      cachedInputPerMTok: 0.5,
-    },
-    "claude-opus-4-6": {
-      inputPerMTok: 5,
-      outputPerMTok: 25,
-      cachedInputPerMTok: 0.5,
-    },
-    "claude-sonnet-4-6": {
-      inputPerMTok: 3,
-      outputPerMTok: 15,
-      cachedInputPerMTok: 0.3,
-    },
-    "claude-haiku-4-5": {
-      inputPerMTok: 1,
-      outputPerMTok: 5,
-      cachedInputPerMTok: 0.1,
-    },
-    "claude-fable-5": {
-      inputPerMTok: 10,
-      outputPerMTok: 50,
-      cachedInputPerMTok: 1,
-    },
+const ANTHROPIC_MODELS: Record<string, ModelPrice> = {
+  "claude-opus-4-8": {
+    inputPerMTok: 5,
+    outputPerMTok: 25,
+    cachedInputPerMTok: 0.5,
   },
+  "claude-opus-4-7": {
+    inputPerMTok: 5,
+    outputPerMTok: 25,
+    cachedInputPerMTok: 0.5,
+  },
+  "claude-opus-4-6": {
+    inputPerMTok: 5,
+    outputPerMTok: 25,
+    cachedInputPerMTok: 0.5,
+  },
+  "claude-sonnet-4-6": {
+    inputPerMTok: 3,
+    outputPerMTok: 15,
+    cachedInputPerMTok: 0.3,
+  },
+  "claude-haiku-4-5": {
+    inputPerMTok: 1,
+    outputPerMTok: 5,
+    cachedInputPerMTok: 0.1,
+  },
+  "claude-fable-5": {
+    inputPerMTok: 10,
+    outputPerMTok: 50,
+    cachedInputPerMTok: 1,
+  },
+};
+
+export const MODEL_PRICING: Record<string, Record<string, ModelPrice>> = {
+  anthropic: ANTHROPIC_MODELS,
+  // The Claude Code CLI (codeAgent's `claude-code` BYOK credential — its own provider
+  // slot since #296, distinct from the `anthropic` model-provider key) runs the SAME
+  // Claude models at the same list prices. Shared by reference on purpose: a price
+  // update applies to both. Without this key, every codeAgent run died in recordUsage
+  // with UnknownModelPricingError after the CLI call had already succeeded.
+  "claude-code": ANTHROPIC_MODELS,
   // OpenAI list prices, USD per million tokens (cached-input = the discounted
   // prompt-cache read rate). As of 2026-06-25. Source: OpenAI API pricing.
   openai: {
