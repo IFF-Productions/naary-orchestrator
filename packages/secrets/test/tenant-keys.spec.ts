@@ -5,11 +5,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // so the mint-race path (unique violation → re-read the winner) is exercised for real.
 const rows = new Map<string, Record<string, unknown>>();
 const createSpy = vi.fn();
+const findUniqueSpy = vi.fn();
 vi.mock("@naary/db", () => ({
   getPrisma: () => ({
     tenantKey: {
-      findUnique: async ({ where }: { where: { tenantId: string } }) =>
-        rows.get(where.tenantId) ?? null,
+      findUnique: async ({ where }: { where: { tenantId: string } }) => {
+        findUniqueSpy(where.tenantId);
+        return rows.get(where.tenantId) ?? null;
+      },
       create: async ({ data }: { data: Record<string, unknown> }) => {
         createSpy(data);
         const tenantId = data.tenantId as string;
@@ -33,6 +36,7 @@ const SECRET = "sk-provider-key-value-123456";
 beforeEach(() => {
   rows.clear();
   createSpy.mockClear();
+  findUniqueSpy.mockClear();
 });
 
 describe("TenantKeyService (per-tenant envelope encryption)", () => {
@@ -115,6 +119,35 @@ describe("TenantKeyService (per-tenant envelope encryption)", () => {
     rows.set("t2", stolen);
     const fresh = new TenantKeyService({ master }); // no cache — forced to unwrap
     await expect(fresh.encrypt("t2", "x", "aad")).rejects.toThrow();
+  });
+
+  it("evict() drops the cached DEK so crypto-shredding takes effect in-process", async () => {
+    const svc = new TenantKeyService({ master });
+    const enc = await svc.encrypt("t1", SECRET, "aad");
+    // Without evict, the cached DEK would still decrypt after the row is gone.
+    rows.delete("t1");
+    svc.evict("t1");
+    // The next use re-mints a NEW DEK (row is gone) — the old ciphertext is dead
+    // even for the very instance that wrote it.
+    await expect(svc.decrypt("t1", enc, "aad")).rejects.toThrow();
+    expect(createSpy).toHaveBeenCalledTimes(2); // original mint + post-shred re-mint
+  });
+
+  it("bounds the DEK cache (LRU): least-recently-used entries are re-read on next use", async () => {
+    const svc = new TenantKeyService({ master, maxCachedDeks: 2 });
+    const enc1 = await svc.encrypt("t1", SECRET, "aad");
+    await svc.encrypt("t2", SECRET, "aad");
+    await svc.encrypt("t3", SECRET, "aad"); // evicts t1 (t2/t3 are the 2 newest)
+    findUniqueSpy.mockClear();
+
+    await svc.encrypt("t2", "x", "aad"); // still cached → no DB read
+    expect(findUniqueSpy).not.toHaveBeenCalled();
+
+    // t1 was evicted → its row is re-read + re-unwrapped, and the SAME DEK comes
+    // back (eviction is a cache concern, never a key change).
+    expect(await svc.decrypt("t1", enc1, "aad")).toBe(SECRET);
+    expect(findUniqueSpy).toHaveBeenCalledWith("t1");
+    expect(createSpy).toHaveBeenCalledTimes(3); // no re-mint, only the 3 originals
   });
 
   it("crypto-shredding: deleting the TenantKey row makes v3 ciphertexts unreadable", async () => {

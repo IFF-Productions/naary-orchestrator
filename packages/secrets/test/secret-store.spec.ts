@@ -52,6 +52,12 @@ vi.mock("@naary/db", () => ({
 }));
 
 import { SecretStore } from "../src/secret-store";
+import { TenantKeyService } from "../src/tenant-keys";
+
+// A FRESH envelope service per store: the default SecretStore() shares the
+// process-wide TenantKeyService, whose DEK cache would outlive the per-test
+// reset of the in-memory tenantKey table and make tests order-dependent.
+const makeStore = () => new SecretStore(undefined, new TenantKeyService());
 
 const SECRET = "oauth-refresh-token-value-xyz";
 
@@ -65,7 +71,7 @@ beforeEach(() => {
 
 describe("SecretStore", () => {
   it("stores ciphertext (not plaintext) and round-trips via get", async () => {
-    const store = new SecretStore();
+    const store = makeStore();
     await store.put("t1", "e1", "conn:c1", SECRET);
 
     const row = creds.get("t1::e1::conn:c1");
@@ -76,7 +82,7 @@ describe("SecretStore", () => {
   });
 
   it("returns null for an unknown key, and remove deletes", async () => {
-    const store = new SecretStore();
+    const store = makeStore();
     expect(await store.get("t1", "e1", "conn:missing")).toBeNull();
     await store.put("t1", "e1", "conn:c1", SECRET);
     await store.remove("t1", "e1", "conn:c1");
@@ -84,7 +90,7 @@ describe("SecretStore", () => {
   });
 
   it("remove is env-SCOPED — only the named env's row goes", async () => {
-    const store = new SecretStore();
+    const store = makeStore();
     await store.put("t1", "e1", "conn:c1", SECRET);
     await store.put("t1", "e2", "conn:c1", SECRET);
     await store.remove("t1", "e1", "conn:c1");
@@ -93,7 +99,7 @@ describe("SecretStore", () => {
   });
 
   it("removeAllEnvs deletes the key across EVERY env (not filtered by environmentId)", async () => {
-    const store = new SecretStore();
+    const store = makeStore();
     // Same globally-unique key present in two envs; removeAllEnvs must purge both. A regression that
     // re-added environmentId to the filter would leave the other env's row (this guards that).
     await store.put("t1", "e1", "conn:c1", SECRET);
