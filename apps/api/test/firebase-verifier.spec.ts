@@ -67,6 +67,18 @@ describe("userFromClaims", () => {
     });
   });
 
+  it("carries the user's display name (name claim), trimmed; ignores blank/non-string", () => {
+    expect(
+      userFromClaims({ uid: "u", name: "  Hassan Al Rawi " }, "tenant"),
+    ).toMatchObject({ name: "Hassan Al Rawi" });
+    expect(userFromClaims({ uid: "u", name: "   " }, "tenant")).toMatchObject({
+      name: undefined,
+    });
+    expect(userFromClaims({ uid: "u", name: 42 }, "tenant")).toMatchObject({
+      name: undefined,
+    });
+  });
+
   it("only treats email_verified === true as verified", () => {
     expect(
       userFromClaims({ uid: "u", email_verified: "true" }, "tenant"),

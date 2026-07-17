@@ -25,6 +25,8 @@ export interface FirebaseUser {
   userId: string;
   email?: string;
   emailVerified: boolean;
+  /** The user's display name (`name` claim — set by Google sign-in or updateProfile). */
+  name?: string;
   /** Legacy `tenant` custom claim, if present. A TRANSITIONAL owner grant for existing
    *  single-tenant users — the AuthGuard migrates it to a Membership on first request.
    *  Undefined for new (post-provisioning) users. */
@@ -54,6 +56,10 @@ export function userFromClaims(
     userId,
     email: typeof claims.email === "string" ? claims.email : undefined,
     emailVerified: claims.email_verified === true,
+    name:
+      typeof claims.name === "string" && claims.name.trim().length > 0
+        ? claims.name.trim()
+        : undefined,
     claimTenant:
       typeof claim === "string" && claim.length > 0 ? claim : undefined,
   };

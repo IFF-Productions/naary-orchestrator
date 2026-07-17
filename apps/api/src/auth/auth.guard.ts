@@ -233,6 +233,7 @@ export class AuthGuard implements CanActivate {
         userId: user.userId,
         subject: user.userId,
         email: user.email,
+        name: user.name,
         emailVerified: user.emailVerified,
       };
       return true;
@@ -243,6 +244,7 @@ export class AuthGuard implements CanActivate {
       userId: user.userId,
       subject: user.userId,
       email: user.email,
+      name: user.name,
       emailVerified: user.emailVerified,
       role: roleOf(active),
       environmentSel,

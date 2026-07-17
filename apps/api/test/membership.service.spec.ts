@@ -3,8 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const findMany = vi.fn();
 const upsert = vi.fn();
 const create = vi.fn();
+const settingsUpsert = vi.fn();
+const settingsUpdateMany = vi.fn();
 vi.mock("@naary/db", () => ({
-  getPrisma: () => ({ membership: { findMany, upsert, create } }),
+  getPrisma: () => ({
+    membership: { findMany, upsert, create },
+    tenantSettings: { upsert: settingsUpsert, updateMany: settingsUpdateMany },
+  }),
 }));
 
 import { MembershipService } from "../src/membership/membership.service";
@@ -20,6 +25,8 @@ beforeEach(() => {
   findMany.mockReset();
   upsert.mockReset().mockResolvedValue({});
   create.mockReset().mockResolvedValue({});
+  settingsUpsert.mockReset().mockResolvedValue({});
+  settingsUpdateMany.mockReset().mockResolvedValue({ count: 0 });
 });
 
 describe("MembershipService", () => {
@@ -79,6 +86,30 @@ describe("MembershipService", () => {
       { tenantId: ws.tenantId, role: "owner" },
     ]);
     expect(findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it("seedWorkspaceName fills a missing name but NEVER overwrites an existing one", async () => {
+    await makeService().seedWorkspaceName("t-demo", "  Hassan's workspace  ");
+    // Row created if absent — with an empty `update` so an existing name is untouched…
+    expect(settingsUpsert).toHaveBeenCalledWith({
+      where: { tenantId: "t-demo" },
+      create: { tenantId: "t-demo", displayName: "Hassan's workspace" },
+      update: {},
+    });
+    // …and a pre-existing row is only filled when its name is null/empty.
+    expect(settingsUpdateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: "t-demo",
+        OR: [{ displayName: null }, { displayName: "" }],
+      },
+      data: { displayName: "Hassan's workspace" },
+    });
+  });
+
+  it("seedWorkspaceName is a no-op on a blank name", async () => {
+    await makeService().seedWorkspaceName("t-demo", "   ");
+    expect(settingsUpsert).not.toHaveBeenCalled();
+    expect(settingsUpdateMany).not.toHaveBeenCalled();
   });
 
   it("createWorkspace generates a distinct id each call", async () => {
