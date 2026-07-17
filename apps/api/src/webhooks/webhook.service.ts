@@ -1,7 +1,11 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { getPrisma, type WebhookEndpoint } from "@naary/db";
-import { type KeyEncryptor, createKeyEncryptor } from "@naary/secrets";
+import {
+  type KeyEncryptor,
+  TenantKeyService,
+  getTenantKeyService,
+} from "@naary/secrets";
 
 export type WebhookProvider = "github" | "atlassian" | "generic";
 
@@ -32,12 +36,19 @@ export interface WebhookEndpointView {
 export class WebhookService {
   // Lazily built so constructing the service doesn't require ENCRYPTION_KEY until
   // a secret is actually encrypted/decrypted (keeps pure verify tests hermetic).
-  private _encryptor?: KeyEncryptor;
-  constructor(encryptor?: KeyEncryptor) {
-    this._encryptor = encryptor;
+  // Signing secrets use the same per-tenant ENVELOPE encryption as the credential
+  // store (tenant DEK, keyVersion 3); pre-envelope master-encrypted blobs keep
+  // decrypting via the keyVersion route in TenantKeyService.
+  private _keys?: TenantKeyService;
+  private readonly _master?: KeyEncryptor;
+  constructor(encryptor?: KeyEncryptor, tenantKeys?: TenantKeyService) {
+    this._master = encryptor;
+    this._keys = tenantKeys;
   }
-  private get encryptor(): KeyEncryptor {
-    return (this._encryptor ??= createKeyEncryptor());
+  private get keys(): TenantKeyService {
+    return (this._keys ??= this._master
+      ? new TenantKeyService({ master: this._master })
+      : getTenantKeyService());
   }
 
   /**
@@ -59,9 +70,9 @@ export class WebhookService {
         workflowId,
         provider,
         // store the encrypted payload as a JSON blob in the existing column;
-        // AAD-bound to the tenant (Sec#7)
+        // tenant-DEK encrypted, AAD-bound to the tenant (Sec#7)
         signingSecret: JSON.stringify(
-          this.encryptor.encrypt(signingSecret, tenantId),
+          await this.keys.encrypt(tenantId, signingSecret, tenantId),
         ),
       },
     });
@@ -134,7 +145,7 @@ export class WebhookService {
       where: { id: endpointId },
       data: {
         signingSecret: JSON.stringify(
-          this.encryptor.encrypt(signingSecret, tenantId),
+          await this.keys.encrypt(tenantId, signingSecret, tenantId),
         ),
       },
     });
@@ -150,9 +161,11 @@ export class WebhookService {
     return res.count > 0;
   }
 
-  /** Decrypt an endpoint's stored signing secret (in memory only; never logged). */
-  decryptSigningSecret(endpoint: WebhookEndpoint): string {
-    return this.encryptor.decrypt(
+  /** Decrypt an endpoint's stored signing secret (in memory only; never logged).
+   *  Routed by keyVersion: v3 → tenant DEK; pre-envelope v1/v2 → master key. */
+  decryptSigningSecret(endpoint: WebhookEndpoint): Promise<string> {
+    return this.keys.decrypt(
+      endpoint.tenantId,
       JSON.parse(endpoint.signingSecret),
       endpoint.tenantId,
     );

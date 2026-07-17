@@ -1,6 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { describe, expect, it } from "vitest";
-import { AesGcmKeyEncryptor } from "../src/crypto";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  AesGcmKeyEncryptor,
+  FallbackKeyEncryptor,
+  createKeyEncryptor,
+} from "../src/crypto";
 
 const masterKey = randomBytes(32).toString("hex");
 // A stand-in for a provider key — deliberately NOT key-shaped, to avoid tripping
@@ -66,5 +70,74 @@ describe("AesGcmKeyEncryptor", () => {
     expect(enc.decrypt(legacy)).toBe(SAMPLE_PLAINTEXT);
     // passing an aad to a v1 payload is ignored (still decrypts)
     expect(enc.decrypt(legacy, "t1:anthropic")).toBe(SAMPLE_PLAINTEXT);
+  });
+});
+
+describe("FallbackKeyEncryptor (master rotation window)", () => {
+  const oldKey = new AesGcmKeyEncryptor(randomBytes(32).toString("hex"));
+  const newKey = new AesGcmKeyEncryptor(randomBytes(32).toString("hex"));
+  const chain = new FallbackKeyEncryptor(newKey, [oldKey]);
+
+  it("encrypts with the NEW key only (never a retired key)", () => {
+    const payload = chain.encrypt(SAMPLE_PLAINTEXT, "aad");
+    expect(newKey.decrypt(payload, "aad")).toBe(SAMPLE_PLAINTEXT);
+    expect(() => oldKey.decrypt(payload, "aad")).toThrow();
+  });
+
+  it("decrypts material written under EITHER key (zero-downtime rotation)", () => {
+    const oldPayload = oldKey.encrypt(SAMPLE_PLAINTEXT, "aad");
+    const newPayload = newKey.encrypt(SAMPLE_PLAINTEXT, "aad");
+    expect(chain.decrypt(oldPayload, "aad")).toBe(SAMPLE_PLAINTEXT);
+    expect(chain.decrypt(newPayload, "aad")).toBe(SAMPLE_PLAINTEXT);
+  });
+
+  it("still fails on material NO key can decrypt, and on a wrong AAD", () => {
+    const stranger = new AesGcmKeyEncryptor(randomBytes(32).toString("hex"));
+    expect(() =>
+      chain.decrypt(stranger.encrypt(SAMPLE_PLAINTEXT, "aad"), "aad"),
+    ).toThrow();
+    // AAD mismatch must not be "rescued" by a retired key.
+    expect(() =>
+      chain.decrypt(newKey.encrypt(SAMPLE_PLAINTEXT, "aad"), "other"),
+    ).toThrow();
+  });
+});
+
+describe("createKeyEncryptor + OLD_ENCRYPTION_KEY", () => {
+  const saved = {
+    key: process.env.ENCRYPTION_KEY,
+    old: process.env.OLD_ENCRYPTION_KEY,
+  };
+  afterEach(() => {
+    if (saved.key === undefined) delete process.env.ENCRYPTION_KEY;
+    else process.env.ENCRYPTION_KEY = saved.key;
+    if (saved.old === undefined) delete process.env.OLD_ENCRYPTION_KEY;
+    else process.env.OLD_ENCRYPTION_KEY = saved.old;
+  });
+
+  it("builds a fallback chain from OLD_ENCRYPTION_KEY that reads old material", () => {
+    const oldHex = randomBytes(32).toString("hex");
+    const newHex = randomBytes(32).toString("hex");
+    const oldPayload = new AesGcmKeyEncryptor(oldHex).encrypt(
+      SAMPLE_PLAINTEXT,
+      "aad",
+    );
+
+    process.env.ENCRYPTION_KEY = newHex;
+    process.env.OLD_ENCRYPTION_KEY = oldHex;
+    const enc = createKeyEncryptor();
+
+    expect(enc.decrypt(oldPayload, "aad")).toBe(SAMPLE_PLAINTEXT); // old still reads
+    // …but writes go under the NEW key.
+    const written = enc.encrypt(SAMPLE_PLAINTEXT, "aad");
+    expect(new AesGcmKeyEncryptor(newHex).decrypt(written, "aad")).toBe(
+      SAMPLE_PLAINTEXT,
+    );
+  });
+
+  it("a blank OLD_ENCRYPTION_KEY yields the plain single-key encryptor", () => {
+    process.env.ENCRYPTION_KEY = randomBytes(32).toString("hex");
+    process.env.OLD_ENCRYPTION_KEY = "  ";
+    expect(createKeyEncryptor()).toBeInstanceOf(AesGcmKeyEncryptor);
   });
 });

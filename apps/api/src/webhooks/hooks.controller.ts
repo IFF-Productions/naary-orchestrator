@@ -109,7 +109,7 @@ export class HooksController {
         provider,
         rawBody,
         signature,
-        this.webhooks.decryptSigningSecret(endpoint), // decrypt at-rest secret
+        await this.webhooks.decryptSigningSecret(endpoint), // decrypt at-rest secret
       )
     ) {
       log.warn(
