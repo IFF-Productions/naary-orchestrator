@@ -226,7 +226,7 @@ describe("V1RunsController.approve", () => {
 });
 
 describe("V1RunsController.awaiting", () => {
-  it("maps AwaitingApproval[] to the v1 shape (workflowId → runId, createdAt → awaitingSince)", async () => {
+  it("maps AwaitingApproval[] to the v1 shape (workflowId → runId)", async () => {
     executions.listAwaiting.mockResolvedValue([
       {
         workflowId: "run-7",
@@ -248,15 +248,22 @@ describe("V1RunsController.awaiting", () => {
         nodeId: "node-approve-1",
         title: "Approve refund?",
         instructions: "Confirm $42 refund.",
-        awaitingSince: "2026-07-04T12:00:00.000Z",
+        createdAt: "2026-07-04T12:00:00.000Z",
       },
     ]);
-    // The internal name did not cross the v1 boundary.
+    // The internal id name did not cross the v1 boundary (workflowId → runId).
     expect(out[0]).not.toHaveProperty("workflowId");
-    expect(out[0]).not.toHaveProperty("createdAt");
   });
 
-  // ROUTE-ORDER GUARD: in the controller `@Get("awaiting")` is declared BEFORE `@Get(":id")`.
-  // If someone reorders them, Express matches "awaiting" as an :id and this inbox route 404s /
-  // hits getState instead. Keep awaiting() above get() in the source.
+  // ROUTE-ORDER GUARD (a real assertion, not just a comment): Nest registers routes in
+  // method-declaration order (MetadataScanner walks the prototype's own property names), and
+  // Express matches first-declared-wins. So `awaiting()` (GET "awaiting") MUST come before
+  // `get()` (GET ":id") in the source — otherwise "awaiting" is captured as an :id and the inbox
+  // route is shadowed. This fails if someone reorders the handlers.
+  it("declares the literal `awaiting` route before the `:id` route", () => {
+    const methods = Object.getOwnPropertyNames(V1RunsController.prototype);
+    expect(methods).toContain("awaiting");
+    expect(methods).toContain("get");
+    expect(methods.indexOf("awaiting")).toBeLessThan(methods.indexOf("get"));
+  });
 });

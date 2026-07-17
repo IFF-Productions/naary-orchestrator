@@ -127,7 +127,7 @@ export class V1RunsController {
       nodeId: r.nodeId,
       title: r.title,
       instructions: r.instructions,
-      awaitingSince: r.createdAt,
+      createdAt: r.createdAt,
     }));
   }
 
@@ -178,6 +178,7 @@ export class V1RunsController {
       "Terminates a running or paused run (status → terminated). 409 if it's already finished.",
     ok: RunActionResponse,
     notFound: true,
+    conflict: true,
   })
   @Post(":id/cancel")
   @HttpCode(200) // NestJS would otherwise return 201 for a POST
@@ -215,8 +216,9 @@ export class V1RunsController {
     summary: "Approve or reject a run",
     description:
       "Decides a run paused on a human-approval node. `approved:false` rejects it. 409 if the run is no longer awaiting approval.",
-    ok: RunActionResponse,
+    accepted: RunActionResponse, // 202 — matches @HttpCode(202); the decision is signalled, not applied inline
     notFound: true,
+    conflict: true,
   })
   @Post(":id/approve")
   @HttpCode(202) // explicit: the decision is signalled to the durable run, not applied inline

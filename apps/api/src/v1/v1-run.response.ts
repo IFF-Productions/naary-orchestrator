@@ -97,9 +97,10 @@ export class AwaitingRunResponse {
   @ApiProperty({
     format: "date-time",
     example: "2026-07-04T12:00:00.000Z",
-    description: "When the run started waiting for approval.",
+    description:
+      "When the run was created. (The run is currently awaiting approval; this is its creation time, not necessarily the moment it entered the awaiting state.)",
   })
-  awaitingSince!: string;
+  createdAt!: string;
 }
 
 export class RunHistoryEventResponse {
