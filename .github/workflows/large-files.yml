@@ -1,0 +1,105 @@
+name: Large files
+
+# Maintainability nudge: whenever a PR touches a SOURCE file that exceeds 1000 lines,
+# post (or update) one sticky comment listing the offenders, so the growth is visible
+# at review time instead of years later. Non-blocking by design — it never fails the
+# build; the comment flips to an all-clear when the PR no longer touches oversized files.
+#
+# Scope: *.ts / *.tsx / *.js / *.jsx / *.mjs / *.cjs files CHANGED by the PR (flagging
+# only what the PR touches keeps it actionable and avoids a permanent nag on every PR).
+# Generated/vendored content (lockfiles, dist, prisma migrations) is excluded.
+#
+# Runs on a GitHub-hosted runner (like deploy.yml): it only needs git + the API, and
+# keeps the shared self-hosted CI VM free for real builds.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: large-files-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  MAX_LOC: 1000
+  MARKER: "<!-- large-files-check -->"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the merge-base diff against the PR base is available.
+          fetch-depth: 0
+
+      - name: Find changed source files over the line limit
+        id: scan
+        run: |
+          set -euo pipefail
+          base="origin/${{ github.event.pull_request.base.ref }}"
+          # Changed source files only (added/copied/modified/renamed — deletions can't be large).
+          mapfile -t changed < <(
+            git diff --name-only --diff-filter=ACMR "$(git merge-base "$base" HEAD)"...HEAD \
+              -- '*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' '*.cjs' \
+              ':!**/dist/**' ':!**/node_modules/**' ':!packages/db/prisma/migrations/**'
+          )
+          rows=""
+          for f in "${changed[@]}"; do
+            [ -f "$f" ] || continue
+            loc=$(wc -l < "$f")
+            if [ "$loc" -gt "$MAX_LOC" ]; then
+              rows+="| \`$f\` | $loc |"$'\n'
+            fi
+          done
+          {
+            echo "rows<<ROWS"
+            printf '%s' "$rows"
+            echo "ROWS"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post or update the sticky PR comment
+        uses: actions/github-script@v7
+        env:
+          ROWS: ${{ steps.scan.outputs.rows }}
+        with:
+          script: |
+            const marker = process.env.MARKER;
+            const rows = (process.env.ROWS ?? "").trim();
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+
+            const body = rows
+              ? [
+                  marker,
+                  "### 📏 Large files touched by this PR",
+                  "",
+                  `These changed source files exceed **${process.env.MAX_LOC} lines**. Not a blocker — but consider splitting them into smaller modules before they get harder to maintain.`,
+                  "",
+                  "| File | Lines |",
+                  "| --- | ---: |",
+                  rows,
+                ].join("\n")
+              : `${marker}\n### 📏 Large files: all clear\n\nNo source file touched by this PR exceeds ${process.env.MAX_LOC} lines. 🎉`;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100,
+            });
+            const existing = comments.find((c) => c.body?.includes(marker));
+
+            if (existing) {
+              // Always update in place (including flipping to all-clear) so the PR
+              // never shows a stale offender list.
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: existing.id, body,
+              });
+            } else if (rows) {
+              // Only CREATE a comment when there is something to flag — clean PRs
+              // shouldn't accumulate congratulation comments.
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
