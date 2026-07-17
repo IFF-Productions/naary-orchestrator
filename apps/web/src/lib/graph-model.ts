@@ -136,6 +136,9 @@ export const NODE_KINDS: NodeKind[] = [
   { type: "httpRequest", label: "HTTP Request", group: "Data sources", accent: "var(--node-http, #2f9e8f)",
     description: "Call any REST API and use the response in later steps.",
     defaultConfig: { method: "GET", url: "https://api.example.com/resource" } },
+  { type: "graphQL", label: "GraphQL", group: "Data sources", accent: "var(--node-graphql, #e535ab)",
+    description: "Query a GraphQL API — the response data is available to later steps.",
+    defaultConfig: { url: "https://api.example.com/graphql", query: "query {\n  __typename\n}" } },
   { type: "sqlQuery", label: "SQL Query", group: "Data sources", accent: "var(--node-sql, #b06fd6)",
     description: "Run a read-only query against your database.",
     defaultConfig: { connectionId: "", sql: "SELECT 1" } },
@@ -328,6 +331,11 @@ export function nodeSubtitle(
     if (!url) return method;
     const short = url.replace(/^https?:\/\//, "");
     return `${method} ${short}`;
+  }
+  if (kind === "graphQL") {
+    const url = config.url as string | undefined;
+    if (!url) return "POST";
+    return `POST ${url.replace(/^https?:\/\//, "")}`;
   }
   if (kind === "sqlQuery" || kind === "sqlExec") {
     const conn = config.connectionId as string | undefined;

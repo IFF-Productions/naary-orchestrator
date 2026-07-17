@@ -136,6 +136,26 @@ export const FRIENDLY_CATALOG: Record<string, FriendlyStep> = {
       },
     ],
   },
+  graphQL: {
+    title: "Query a GraphQL API",
+    blurb:
+      "Runs a GraphQL query and makes the response data available to later steps.",
+    accent: "var(--node-graphql)",
+    fields: [
+      {
+        key: "url",
+        label: "Endpoint URL",
+        kind: "text",
+        placeholder: "https://api.example.com/graphql",
+      },
+      {
+        key: "query",
+        label: "Query",
+        kind: "textarea",
+        placeholder: "query {\n  __typename\n}",
+      },
+    ],
+  },
   wait: {
     title: "Wait",
     blurb: "Pauses for a set amount of time, then continues.",
