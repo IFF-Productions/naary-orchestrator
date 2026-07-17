@@ -32,6 +32,7 @@ import {
   resolveJson,
   resolveNumber,
   resolveHttpRequest,
+  resolveGraphQL,
   resolveJwt,
   resolveMcpArguments,
   resolveIntegrationFields,
@@ -159,7 +160,7 @@ function traceCell(value: unknown, live: boolean): TraceCell {
 // otherwise Temporal would kill a slow-but-running request and RETRY it, duplicating
 // a non-idempotent POST/PUT/PATCH/DELETE. The activity's AbortController is the real
 // deadline; this timeout is just the outer backstop.
-const { callHttpRequest } = wf.proxyActivities<typeof activities>({
+const { callHttpRequest, callGraphQL } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "150 seconds",
   retry: { maximumAttempts: 3 },
 });
@@ -683,6 +684,27 @@ export async function runGraph(
           headers: result.headers,
           body: result.body,
         } satisfies NodeOutputMap["httpRequest"];
+        costUsd += result.costUsd;
+        ctx.__costUsd = costUsd;
+        return null;
+      }
+      case "graphQL": {
+        // Binding resolution is deterministic graph work (pure ctx path-reads); the POST + egress
+        // check + $secrets resolution are in the activity. `{{ $secrets.X }}` stays literal here.
+        const gqlCfg = asNodeConfig(cfg, "graphQL");
+        const over = retryOverride(node.retry, 150_000);
+        const result = await (over?.callGraphQL ?? callGraphQL)(
+          resolveGraphQL(gqlCfg, ctx),
+          ctx.__input,
+          metaFor(node.id),
+        );
+        // Expose {data, errors, httpStatus} so edges branch on `<id>.errors` (GraphQL returns
+        // 200-with-errors) or read `<id>.data`.
+        ctx[node.id] = {
+          data: result.data,
+          errors: result.errors,
+          httpStatus: result.httpStatus,
+        } satisfies NodeOutputMap["graphQL"];
         costUsd += result.costUsd;
         ctx.__costUsd = costUsd;
         return null;

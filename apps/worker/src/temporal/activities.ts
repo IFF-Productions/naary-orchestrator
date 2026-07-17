@@ -40,6 +40,7 @@ import type {
   IntegrationNodeConfig,
   GraphDef,
   PollTriggerNodeConfig,
+  ResolvedGraphQL,
   ResolvedHash,
   ResolvedHmac,
   ResolvedJwt,
@@ -50,6 +51,7 @@ import type {
 // jwt/sendEmail/rss activity args are the DSL's Resolved* types).
 export type {
   CodeNodeConfig,
+  ResolvedGraphQL,
   ResolvedHash,
   ResolvedHmac,
   ResolvedJwt,
@@ -2983,6 +2985,140 @@ export async function callHttpRequest(
     // Transient (network blip, DNS, abort/timeout): sanitized retryable so a request
     // object carrying the auth header can't be serialized into history.
     throw toSanitizedRetryable(e, "HTTP_TRANSIENT");
+  }
+}
+
+export interface GraphQLResult {
+  status: "ok";
+  /** HTTP status of the POST (GraphQL usually 200 even on errors). Edges may branch on it. */
+  httpStatus: number;
+  /** The `data` field of the response (a claim-check reference if large). */
+  data: unknown;
+  /** The `errors` array (GraphQL returns 200-with-errors), or null when there were none. */
+  errors: unknown;
+  /** Metered per-call cost — the workflow accumulates it (Arch§4.6). */
+  costUsd: number;
+}
+
+/**
+ * GraphQL node: POST `{ query, variables }` to a GraphQL endpoint and return `{ data, errors,
+ * httpStatus }`. A thin node over the SAME hardened HTTP machinery as callHttpRequest — it reuses
+ * the SSRF egress guard (`__httpDeps.assertEgressAllowed`), the safe fetch (`__httpDeps.fetch`), the
+ * in-activity `$secrets` resolution (`resolveHttpSecrets` over headers + variables), and the
+ * claim-check offload (`maybeOffload`) — dropping only pagination + cross-origin (a single POST).
+ * `$secrets` values are resolved in memory here and NEVER cross the workflow boundary (Tier-1 §4).
+ */
+export async function callGraphQL(
+  cfg: ResolvedGraphQL,
+  input: unknown,
+  meta: AgentMeta,
+): Promise<GraphQLResult> {
+  void input; // variables carry upstream data via bindings, not the raw entry input
+  const startedAt = process.hrtime.bigint();
+  let host = "unknown";
+  try {
+    const store = getObjectStore();
+    // Resolve `{{ $secrets.NAME }}` in headers AND variables in-memory (Tier-1 §4 — the workflow left
+    // them literal). Reuse the httpRequest resolver (headers flat + variables deep); GraphQL has no
+    // pagination, so its cross-origin tracking fields are unused.
+    const { headers: secretHeaders, body: resolvedVariables } =
+      await resolveHttpSecrets(cfg.headers ?? {}, cfg.variables ?? {}, meta);
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      accept: "application/json",
+      ...secretHeaders,
+    };
+    const body = JSON.stringify({
+      query: cfg.query,
+      variables: resolvedVariables ?? {},
+    });
+    const timeoutMs = Math.min(
+      cfg.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS,
+      MAX_HTTP_TIMEOUT_MS,
+    );
+    const url = await __httpDeps.assertEgressAllowed(cfg.url);
+    host = url.host;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let res: Response;
+    try {
+      res = await __httpDeps.fetch(url, {
+        method: "POST",
+        headers,
+        body,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    const raw = await res.text();
+    let parsed: { data?: unknown; errors?: unknown };
+    try {
+      parsed = raw.length > 0 ? JSON.parse(raw) : {};
+    } catch {
+      // A GraphQL endpoint always speaks JSON — non-JSON (an HTML proxy/error page) is a
+      // misconfiguration, not a transient blip, so don't burn retries.
+      throw ApplicationFailure.nonRetryable(
+        `GraphQL endpoint returned a non-JSON response (status ${res.status})`,
+        "GRAPHQL_BAD_RESPONSE",
+        { httpStatus: res.status },
+      );
+    }
+    const errors = parsed.errors ?? null;
+    if (cfg.failOnErrors && Array.isArray(errors) && errors.length > 0) {
+      throw ApplicationFailure.nonRetryable(
+        `GraphQL returned ${errors.length} error(s)`,
+        "GRAPHQL_ERROR",
+        { httpStatus: res.status },
+      );
+    }
+    // Offload large `data` to object storage (claim-check) so it can't blow the ~2MB history cap.
+    const data = await maybeOffload(parsed.data ?? null, store, {
+      keyPrefix: `graphql/${meta.tenantId}`,
+    });
+    const cost = cfg.costUsd ?? 0;
+    log.info(
+      {
+        activity: "callGraphQL",
+        executionId: meta.executionId,
+        nodeId: meta.nodeId,
+        tenantId: meta.tenantId,
+        host,
+        httpStatus: res.status,
+        costUsd: cost,
+      },
+      "graphql request completed",
+    );
+    activityRuns.inc({ activity: "callGraphQL", outcome: "ok" });
+    activityDuration.observe(
+      { activity: "callGraphQL" },
+      secondsSince(startedAt),
+    );
+    if (cost > 0) runCostUsd.inc(cost);
+    return {
+      status: "ok",
+      httpStatus: res.status,
+      data,
+      errors,
+      costUsd: cost,
+    };
+  } catch (e) {
+    activityRuns.inc({ activity: "callGraphQL", outcome: "error" });
+    activityDuration.observe(
+      { activity: "callGraphQL" },
+      secondsSince(startedAt),
+    );
+    if (e instanceof ApplicationFailure) throw e;
+    if (e instanceof BlockedEgressError) {
+      throw ApplicationFailure.nonRetryable(
+        "Request target is not allowed",
+        "BLOCKED_EGRESS",
+        { host },
+      );
+    }
+    // Transient (network blip, DNS, abort/timeout): sanitized retryable — a request object
+    // carrying an auth header must not be serialized into history.
+    throw toSanitizedRetryable(e, "GRAPHQL_TRANSIENT");
   }
 }
 

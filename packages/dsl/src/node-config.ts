@@ -35,6 +35,7 @@ import type {
   VectorQueryConfig,
   SplitOutConfig,
   LoopEndConfig,
+  GraphQLConfig,
   HttpRequestConfig,
   HumanApprovalConfig,
   IfConfig,
@@ -81,6 +82,7 @@ export interface NodeConfigMap {
   mcpTool: McpToolConfig;
   integration: IntegrationConfig;
   httpRequest: HttpRequestConfig;
+  graphQL: GraphQLConfig;
   sqlQuery: SqlQueryConfig;
   sqlExec: SqlExecConfig;
   set: SetConfig;

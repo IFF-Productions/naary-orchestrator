@@ -72,6 +72,20 @@ const mockActivities = {
     httpCalls.push(cfg);
     return httpResponse;
   },
+  callGraphQL: async (
+    cfg: activities.ResolvedGraphQL,
+    _input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.GraphQLResult> => {
+    graphqlCalls.push(cfg);
+    return {
+      status: "ok",
+      httpStatus: 200,
+      data: { echoedVariables: cfg.variables },
+      errors: null,
+      costUsd: 0,
+    };
+  },
   callSqlQuery: async (
     cfg: activities.SqlQueryConfig,
     _input: unknown,
@@ -283,6 +297,7 @@ const integrationCalls: {
   fields: Record<string, unknown>;
 }[] = [];
 const httpCalls: activities.HttpRequestConfig[] = [];
+const graphqlCalls: activities.ResolvedGraphQL[] = [];
 const sqlCalls: activities.SqlQueryConfig[] = [];
 const sqlExecCalls: activities.SqlExecConfig[] = [];
 // Mutable so each test fixes the HTTP node's response (status drives the branch).
@@ -2811,6 +2826,60 @@ describe("runGraph interpreter — environment secrets ($secrets, Tier-1 §4)", 
           ?.apiKey,
       ).toBe("{{ $secrets.SEARCH_KEY }}");
       const final = await handle.query(stateQuery);
+      expect(final.ctx.__unresolved).toBeUndefined();
+    });
+  });
+});
+
+describe("runGraph interpreter — graphQL node", () => {
+  it("resolves variable bindings + leaves $secrets literal, exposes {data,errors,httpStatus}", async () => {
+    graphqlCalls.length = 0;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      // webhook → graphQL(query with a variable bound from the trigger + a $secrets auth header) → end.
+      const graph: GraphDef = {
+        startNodeId: "trigger",
+        nodes: [
+          { id: "trigger", type: "webhookTrigger" },
+          {
+            id: "gql",
+            type: "graphQL",
+            config: {
+              url: "https://api.example.com/graphql",
+              query: "query($id:ID!){ user(id:$id){ name } }",
+              variables: { id: "static" },
+              headers: { Authorization: "Bearer {{ $secrets.GQL_TOKEN }}" },
+              // bind variables.id from the trigger payload
+              argumentBindings: {
+                "variables.id": { from: "trigger", path: "userId" },
+              },
+            },
+          },
+          { id: "end", type: "end" },
+        ],
+        edges: [
+          { from: "trigger", to: "gql" },
+          { from: "gql", to: "end" },
+        ],
+      };
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [graph, { userId: "u-9" }, { tenantId: "t-gql" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-graphql",
+      });
+      expect((await handle.result()).status).toBe("completed");
+
+      const sent = graphqlCalls[graphqlCalls.length - 1];
+      // the interpreter resolved the variable binding from the trigger…
+      expect(sent?.variables).toEqual({ id: "u-9" });
+      // …and left the secret token LITERAL for the activity to resolve in-memory.
+      expect(sent?.headers?.Authorization).toBe(
+        "Bearer {{ $secrets.GQL_TOKEN }}",
+      );
+      const final = await handle.query(stateQuery);
+      const out = final.ctx.gql as Record<string, unknown>;
+      expect(out.httpStatus).toBe(200);
+      expect(out.errors).toBeNull();
       expect(final.ctx.__unresolved).toBeUndefined();
     });
   });

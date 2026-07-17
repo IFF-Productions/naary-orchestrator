@@ -42,6 +42,7 @@ import type {
   SplitOutNodeConfig,
   LoopEndNodeConfig,
   CodeAgentNodeConfig,
+  GraphQLNodeConfig,
   HttpRequestNodeConfig,
   IfNodeConfig,
   JsonNodeConfig,
@@ -250,6 +251,16 @@ const CONFIG_SCHEMAS = {
         maxPages: z.number().optional(),
       })
       .optional(),
+  }),
+  graphQL: z.object({
+    url: z.string(),
+    query: z.string(),
+    variables: z.record(z.string(), z.unknown()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+    argumentBindings: z.record(z.string(), argBinding).optional(),
+    failOnErrors: z.boolean().optional(),
+    timeoutMs: z.number().optional(),
+    costUsd: z.number().optional(),
   }),
   sqlQuery: z.object({
     connectionId: z.string(),
@@ -659,6 +670,7 @@ export type CodeAgentConfig = z.infer<typeof CONFIG_SCHEMAS.codeAgent>;
 export type McpToolConfig = z.infer<typeof CONFIG_SCHEMAS.mcpTool>;
 export type IntegrationConfig = z.infer<typeof CONFIG_SCHEMAS.integration>;
 export type HttpRequestConfig = z.infer<typeof CONFIG_SCHEMAS.httpRequest>;
+export type GraphQLConfig = z.infer<typeof CONFIG_SCHEMAS.graphQL>;
 export type SqlQueryConfig = z.infer<typeof CONFIG_SCHEMAS.sqlQuery>;
 export type SqlExecConfig = z.infer<typeof CONFIG_SCHEMAS.sqlExec>;
 export type RssReadConfig = z.infer<typeof CONFIG_SCHEMAS.rssRead>;
@@ -721,6 +733,7 @@ const _configParity: {
   mcpTool: Exact<McpToolConfig, McpToolNodeConfig>;
   integration: Exact<IntegrationConfig, IntegrationNodeConfig>;
   httpRequest: Exact<HttpRequestConfig, HttpRequestNodeConfig>;
+  graphQL: Exact<GraphQLConfig, GraphQLNodeConfig>;
   sqlQuery: Exact<SqlQueryConfig, SqlQueryNodeConfig>;
   sqlExec: Exact<SqlExecConfig, SqlExecNodeConfig>;
   rssRead: Exact<RssReadConfig, RssReadNodeConfig>;
@@ -772,6 +785,7 @@ const _configParity: {
   mcpTool: true,
   integration: true,
   httpRequest: true,
+  graphQL: true,
   sqlQuery: true,
   sqlExec: true,
   rssRead: true,

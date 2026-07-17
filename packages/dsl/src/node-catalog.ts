@@ -111,6 +111,12 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
     config:
       "{ method, url, headers?, query?, body?, connectionId?, pagination?: { mode: cursor|page|url, itemsPath?, cursorPath?, cursorParam?, pageParam?, nextUrlPath?, maxPages? } }",
   },
+  graphQL: {
+    group: "data-source",
+    summary:
+      "GraphQL query/mutation (POST); output {data,errors,httpStatus}. Branch on <id>.errors (GraphQL returns 200-with-errors) or read <id>.data. A secret auth header uses {{ $secrets.NAME }}.",
+    config: "{ url, query, variables?, headers? }",
+  },
   sqlQuery: {
     group: "data-source",
     summary: "Read-only SQL against a tenant DB; output {rows,rowCount}.",
