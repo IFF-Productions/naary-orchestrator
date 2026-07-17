@@ -55,7 +55,7 @@ describe("logActivities", () => {
     const boom = new TypeError("secret-token=abc leaked in message");
     const wrapped = logActivities(
       {
-        callAgent: async () => {
+        callAgent: async (_meta: unknown) => {
           throw boom;
         },
       },
@@ -85,7 +85,7 @@ describe("logActivities", () => {
     const err = new Error("sync boom");
     const wrapped = logActivities(
       {
-        syncActivity: () => {
+        syncActivity: (_meta: unknown) => {
           throw err;
         },
       },
@@ -97,5 +97,30 @@ describe("logActivities", () => {
       ok: false,
       errorName: "Error",
     });
+  });
+
+  it("treats a foreign thenable as async (logs on settle, not immediately)", async () => {
+    const log = makeLog();
+    // A thenable that is NOT a native Promise — `instanceof Promise` would miss it.
+    const thenable = {
+      then(onOk: (v: unknown) => void) {
+        onOk({ done: true });
+      },
+    };
+    const wrapped = logActivities(
+      { thenableActivity: (_meta: unknown) => thenable },
+      log,
+    );
+
+    const out = await wrapped.thenableActivity(META);
+    expect(out).toEqual({ done: true });
+    // Logged once, on resolution — with ids, as a success.
+    expect(log.info).toHaveBeenCalledTimes(1);
+    expect(log.info.mock.calls[0][0]).toMatchObject({
+      activity: "thenableActivity",
+      tenantId: "t1",
+      ok: true,
+    });
+    expect(log.warn).not.toHaveBeenCalled();
   });
 });

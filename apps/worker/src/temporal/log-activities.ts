@@ -27,6 +27,16 @@ import type { Logger } from "@naary/logging";
 /** The logger surface this wrapper needs — a subset of pino's Logger, so tests can inject a stub. */
 type ActivityLogger = Pick<Logger, "info" | "warn">;
 
+/** True for any PromiseLike — a native Promise OR a foreign/cross-realm thenable. `instanceof
+ *  Promise` misses the latter (different realm) and would log a false success before it settles. */
+function isThenable(v: unknown): v is PromiseLike<unknown> {
+  return (
+    v != null &&
+    (typeof v === "object" || typeof v === "function") &&
+    typeof (v as { then?: unknown }).then === "function"
+  );
+}
+
 function logCompletion(
   log: ActivityLogger,
   activity: string,
@@ -75,8 +85,11 @@ export function logActivities<T extends Record<string, unknown>>(
         logCompletion(log, name, ids, startMs, false, err);
         throw err;
       }
-      if (result instanceof Promise) {
-        return result.then(
+      if (isThenable(result)) {
+        // Normalize with Promise.resolve so a foreign thenable is handled the same as a native
+        // Promise; the returned promise resolves to the identical value / rejects with the
+        // identical error, so activity semantics are preserved.
+        return Promise.resolve(result).then(
           (v) => {
             logCompletion(log, name, ids, startMs, true);
             return v;

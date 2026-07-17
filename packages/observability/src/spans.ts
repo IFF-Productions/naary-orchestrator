@@ -63,15 +63,20 @@ export function activityIdAttrs(args: readonly unknown[]): SpanAttrs {
 export interface SpanOptions {
   /** Coarse category shown in the Sentry UI (e.g. "http.server", "db", "activity"). */
   op?: string;
-  /** Non-secret, id-only attributes (tenantId/executionId/nodeId). Never raw args. */
-  attributes?: SpanAttrs;
+  /**
+   * Non-secret, id-only attributes (tenantId/executionId/nodeId). Never raw args. May be a
+   * THUNK — resolved only when a span is actually created (tracing on), so extracting the
+   * ids costs nothing on the disabled passthrough path.
+   */
+  attributes?: SpanAttrs | (() => SpanAttrs);
 }
 
 /**
  * Run `fn` inside a span named `name`. Returns whatever `fn` returns (sync value or
  * promise). Sentry.startSpan auto-ends the span and, if `fn` throws/rejects, marks the
  * span errored before rethrowing — so callers see identical behavior whether tracing is
- * on or off. When Sentry is disabled this is a direct `fn()` call (no span, no cost).
+ * on or off. When Sentry is disabled this is a direct `fn()` call (no span, no cost) — and
+ * a thunk `attributes` is NOT evaluated, preserving the zero-overhead guarantee.
  */
 export function withSpan<T>(
   name: string,
@@ -79,10 +84,9 @@ export function withSpan<T>(
   opts: SpanOptions = {},
 ): T {
   if (!tracingActive()) return fn();
-  return Sentry.startSpan(
-    { name, op: opts.op, attributes: opts.attributes },
-    () => fn(),
-  );
+  const attributes =
+    typeof opts.attributes === "function" ? opts.attributes() : opts.attributes;
+  return Sentry.startSpan({ name, op: opts.op, attributes }, () => fn());
 }
 
 /**
@@ -173,7 +177,9 @@ export function traceActivities<T extends Record<string, unknown>>(
             withSpan(
               `activity.${name}`,
               () => (value as (...a: unknown[]) => unknown)(...args),
-              { op: "activity", attributes: activityIdAttrs(args) },
+              // Thunk: ids are extracted only when a span is actually created (tracing on),
+              // so the disabled passthrough stays zero-overhead.
+              { op: "activity", attributes: () => activityIdAttrs(args) },
             )
         : value;
   }
