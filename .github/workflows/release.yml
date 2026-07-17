@@ -1,0 +1,96 @@
+name: Release
+
+# Cut a release from main: bump every workspace package.json to the given semver,
+# commit + tag vX.Y.Z, publish a GitHub Release, then deploy that tag (chained call —
+# see the note in deploy.yml about why the `release` event can't do the chaining).
+#
+# Usage: Actions → Release → Run workflow → version = 0.0.1 (or v0.0.1).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver to release, e.g. 0.0.1 or v0.0.1
+        type: string
+        required: true
+
+permissions:
+  contents: write # push the bump commit + tag, create the release
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Validate + normalize version
+        id: version
+        env:
+          RAW: ${{ inputs.version }}
+        run: |
+          VERSION="${RAW#v}"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$RAW' is not semver (expected e.g. 0.0.1 or v0.0.1)"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "v$VERSION" >/dev/null 2>&1; then
+            echo "::error::tag v$VERSION already exists"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      # Root + every apps/* and packages/* manifest get the release version. Purely a
+      # stamp — all are private workspace packages (workspace:* deps, nothing published),
+      # so the lockfile is unaffected and CI's --frozen-lockfile stays green.
+      - name: Bump workspace package versions
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs'), path = require('path');
+          const files = ['package.json'];
+          for (const dir of ['apps', 'packages'])
+            for (const name of fs.readdirSync(dir)) {
+              const p = path.join(dir, name, 'package.json');
+              if (fs.existsSync(p)) files.push(p);
+            }
+          for (const p of files) {
+            const pkg = JSON.parse(fs.readFileSync(p, 'utf8'));
+            pkg.version = process.env.VERSION;
+            fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
+            console.log(`${p} → ${process.env.VERSION}`);
+          }
+          NODE
+
+      - name: Commit, tag, push
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(release): $TAG"
+          git tag "$TAG"
+          git push origin HEAD:main "$TAG"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: gh release create "$TAG" --title "$TAG" --generate-notes
+
+  deploy:
+    needs: release
+    uses: ./.github/workflows/deploy.yml
+    with:
+      ref: ${{ needs.release.outputs.tag }}
+    secrets: inherit

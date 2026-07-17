@@ -6,3 +6,22 @@ cloudflare_account_id = "your-account-id"
 cloudflare_zone_id    = "the-zone-id-for-naar-y.com"
 
 hostname = "naar-y.com"    # or "app.naar-y.com"
+
+# ── Hetzner server ─────────────────────────────────────────────────────────────────────
+hcloud_token   = "your-hetzner-api-token"             # project → Security → API tokens (Read & Write)
+ssh_public_key = "ssh-ed25519 AAAA... you@laptop"     # contents of ~/.ssh/id_ed25519.pub
+# server_type     = "cx33"                            # 4 vCPU / 8 GB, EU-only (see variables.tf)
+# server_location = "nbg1"
+# ssh_allowed_cidrs = ["203.0.113.7/32"]              # tighten SSH to your IP if static
+
+# ── Neon (managed Postgres) ────────────────────────────────────────────────────────────
+neon_api_key = "your-neon-api-key"                    # console → Account settings → API keys
+# neon_region = "aws-eu-central-1"
+
+# ── Optional: full hands-off first boot ────────────────────────────────────────────────
+# With all four set, cloud-init clones the repo and starts the stack by itself.
+# Private repo: embed a fine-grained PAT with read-only Contents access.
+# repo_url           = "https://<PAT>@github.com/<owner>/naary-orchestrator.git"
+# temporal_address   = "eu-central-1.aws.api.temporal.io:7233"
+# temporal_namespace = "naary.abc12"
+# temporal_api_key   = "tmprl_..."
