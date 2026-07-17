@@ -1,5 +1,6 @@
 import { getPrisma } from "@naary/db";
-import { type KeyEncryptor, createKeyEncryptor } from "./crypto";
+import { type KeyEncryptor } from "./crypto";
+import { TenantKeyService, getTenantKeyService } from "./tenant-keys";
 import {
   validateAnthropicKey,
   validateClaudeCodeKey,
@@ -52,14 +53,21 @@ export interface SaveCredentialResult {
  * caller of saveCredential, logged, or echoed in API responses.
  */
 export class CredentialsService {
-  private readonly encryptor: KeyEncryptor;
+  private readonly keys: TenantKeyService;
   private readonly validate: ProviderValidator;
 
   constructor(opts?: {
+    /** Master (KEK) override — wrapped in a fresh TenantKeyService. Tests inject this. */
     encryptor?: KeyEncryptor;
+    /** Full envelope-service override; wins over `encryptor`. */
+    tenantKeys?: TenantKeyService;
     validate?: ProviderValidator;
   }) {
-    this.encryptor = opts?.encryptor ?? createKeyEncryptor();
+    this.keys =
+      opts?.tenantKeys ??
+      (opts?.encryptor
+        ? new TenantKeyService({ master: opts.encryptor })
+        : getTenantKeyService());
     this.validate = opts?.validate ?? defaultValidator;
   }
 
@@ -74,7 +82,12 @@ export class CredentialsService {
     const isValid = await this.validate(provider, apiKey);
     // AAD binds the ciphertext to this tenant+provider slot (Sec#7). It stays (tenant, provider) —
     // NOT env-bound — so env is purely a row-lookup dimension and backfilled rows keep decrypting.
-    const enc = this.encryptor.encrypt(apiKey, `${tenantId}:${provider}`);
+    // Encrypted with the tenant's own DEK (envelope, keyVersion 3) — see tenant-keys.ts.
+    const enc = await this.keys.encrypt(
+      tenantId,
+      apiKey,
+      `${tenantId}:${provider}`,
+    );
 
     const row = await getPrisma().tenantCredential.upsert({
       where: {
@@ -141,7 +154,9 @@ export class CredentialsService {
     if (!row || !row.isValid) {
       throw new MissingCredentialError(tenantId, provider, environmentId);
     }
-    return this.encryptor.decrypt(
+    // Routed by keyVersion: v3 rows use the tenant DEK; legacy v1/v2 rows the master key.
+    return this.keys.decrypt(
+      tenantId,
       {
         ciphertext: row.ciphertext,
         iv: row.iv,

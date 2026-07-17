@@ -2,8 +2,21 @@ import { randomBytes } from "node:crypto";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const creds = new Map<string, any>();
+const tenantKeys = new Map<string, any>();
 vi.mock("@naary/db", () => ({
   getPrisma: () => ({
+    tenantKey: {
+      findUnique: async ({ where }: any) =>
+        tenantKeys.get(where.tenantId) ?? null,
+      create: async ({ data }: any) => {
+        if (tenantKeys.has(data.tenantId))
+          throw Object.assign(new Error("unique constraint"), {
+            code: "P2002",
+          });
+        tenantKeys.set(data.tenantId, data);
+        return data;
+      },
+    },
     tenantCredential: {
       upsert: async ({ where, create, update }: any) => {
         const w = where.tenantId_environmentId_provider;
@@ -45,7 +58,10 @@ const SECRET = "oauth-refresh-token-value-xyz";
 beforeAll(() => {
   process.env.ENCRYPTION_KEY = randomBytes(32).toString("hex");
 });
-beforeEach(() => creds.clear());
+beforeEach(() => {
+  creds.clear();
+  tenantKeys.clear();
+});
 
 describe("SecretStore", () => {
   it("stores ciphertext (not plaintext) and round-trips via get", async () => {

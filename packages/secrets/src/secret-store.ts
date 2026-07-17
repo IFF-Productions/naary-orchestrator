@@ -1,19 +1,27 @@
 import { getPrisma } from "@naary/db";
-import { type KeyEncryptor, createKeyEncryptor } from "./crypto";
+import { type KeyEncryptor } from "./crypto";
+import { TenantKeyService, getTenantKeyService } from "./tenant-keys";
 
 /**
  * Generic encrypted secret store, keyed by (tenantId, environmentId, key) since Slice 5 — secrets
- * are env-scoped (a sandbox connection's PAT ≠ prod's). Reuses the same AES-256-GCM encryptor + the
- * TenantCredential table as the BYOK store, but without the Anthropic-specific validation in
+ * are env-scoped (a sandbox connection's PAT ≠ prod's). Reuses the same per-tenant envelope
+ * encryption (TenantKeyService) + the TenantCredential table as the BYOK store, but without the Anthropic-specific validation in
  * CredentialsService — for storing connection PATs and OAuth refresh tokens (Slice #4), keyed e.g.
  * `conn:<id>`. NB the at-rest AAD stays bound to (tenantId, key), NOT env — env is a row-lookup
  * dimension only, so a backfilled row still decrypts. Plaintext is returned in memory only; never logged.
  */
 export class SecretStore {
-  private readonly encryptor: KeyEncryptor;
+  private readonly keys: TenantKeyService;
 
-  constructor(encryptor?: KeyEncryptor) {
-    this.encryptor = encryptor ?? createKeyEncryptor();
+  /** `encryptor` (kept positional for existing call sites/tests) is the MASTER key —
+   *  it becomes the KEK of a fresh envelope service. Default: the shared process-wide
+   *  TenantKeyService (one DEK cache across the many ad-hoc SecretStore instances). */
+  constructor(encryptor?: KeyEncryptor, tenantKeys?: TenantKeyService) {
+    this.keys =
+      tenantKeys ??
+      (encryptor
+        ? new TenantKeyService({ master: encryptor })
+        : getTenantKeyService());
   }
 
   /** AAD binds the ciphertext to its (tenant, key) slot (Sec#7) — a swapped row
@@ -28,7 +36,11 @@ export class SecretStore {
     key: string,
     plaintext: string,
   ): Promise<void> {
-    const enc = this.encryptor.encrypt(plaintext, this.aad(tenantId, key));
+    const enc = await this.keys.encrypt(
+      tenantId,
+      plaintext,
+      this.aad(tenantId, key),
+    );
     await getPrisma().tenantCredential.upsert({
       where: {
         tenantId_environmentId_provider: {
@@ -74,7 +86,9 @@ export class SecretStore {
       },
     });
     if (!row) return null;
-    return this.encryptor.decrypt(
+    // Routed by keyVersion: v3 rows use the tenant DEK; legacy v1/v2 rows the master key.
+    return this.keys.decrypt(
+      tenantId,
       {
         ciphertext: row.ciphertext,
         iv: row.iv,
