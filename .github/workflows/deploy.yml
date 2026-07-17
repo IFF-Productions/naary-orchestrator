@@ -186,22 +186,54 @@ jobs:
           # exit (set -e would otherwise skip a trailing logout on pull/up failure).
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
           trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-          COMPOSE="docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml -f deploy/docker-compose.neon.yml -f deploy/docker-compose.ghcr.yml"
+          FILES="-f docker-compose.yml -f deploy/docker-compose.prod.yml -f deploy/docker-compose.neon.yml -f deploy/docker-compose.ghcr.yml"
+          COMPOSE="docker compose $FILES"
           export APP_VERSION="$DEPLOY_REF" IMAGE_BASE
+
+          # docker-rollout (https://github.com/wowu/docker-rollout): start-first rolling
+          # replace for compose services — scale to 2, wait for the NEW container's
+          # healthcheck, then stop the old one. Pinned version; a ~10KB bash script, so
+          # just (re)install it every deploy rather than tracking box state.
+          mkdir -p ~/.docker/cli-plugins
+          curl -fsSL "https://raw.githubusercontent.com/wowu/docker-rollout/v0.14/docker-rollout" \
+            -o ~/.docker/cli-plugins/docker-rollout
+          chmod +x ~/.docker/cli-plugins/docker-rollout
+
           $COMPOSE pull
-          $COMPOSE up -d --no-build
-          # Gate on the api container's own compose healthcheck (3 min budget).
-          status=starting
-          for _ in $(seq 1 36); do
-            status=$(docker inspect -f '{{.State.Health.Status}}' naary-api 2>/dev/null || echo starting)
-            [ "$status" = healthy ] && break
-            sleep 5
-          done
-          if [ "$status" != healthy ]; then
-            echo "api never became healthy (status: $status)"
-            $COMPOSE logs --tail=100 api migrate
+
+          # 1) Migrations first, to completion. The OLD api/worker keep serving while these
+          #    run against the already-live DB — so migrations must stay backward-compatible
+          #    (expand/contract): the previous release runs on the new schema for a minute.
+          #    migrate keeps its fixed container_name (it is never rolled), and leaving the
+          #    exited container in place is what satisfies api/worker's
+          #    service_completed_successfully dependency during the rollouts below.
+          $COMPOSE up -d --no-build migrate
+          rc=$(docker wait naary-migrate)
+          if [ "$rc" != "0" ]; then
+            echo "migrations failed (exit $rc)"
+            $COMPOSE logs --tail=100 migrate
             exit 1
           fi
+
+          # 2) Health-gated rolling replace, ECS-style. Traffic drains via DNS: cloudflared
+          #    dials web:80 per connection and web's nginx re-resolves api:3000 per request,
+          #    so during the overlap both replicas serve and the retired one just stops
+          #    receiving. If a new container never reports healthy, rollout exits nonzero
+          #    and the OLD container is left running and serving — a failed deploy keeps
+          #    the previous release live instead of taking the site down.
+          for svc in api worker web; do
+            if ! docker rollout $FILES -t 180 "$svc"; then
+              echo "::error::rollout of $svc failed — previous release still serving"
+              $COMPOSE ps
+              $COMPOSE logs --tail=100 "$svc"
+              exit 1
+            fi
+          done
+
+          # 3) Reconcile everything else (cloudflared, removed services, config-only
+          #    changes) — api/worker/web already match the target config, so this is a
+          #    no-op for them.
+          $COMPOSE up -d --no-build --remove-orphans
           docker image prune -f >/dev/null
-          echo "Deployed $DEPLOY_REF — api healthy."
+          echo "Deployed $DEPLOY_REF — rolling replace complete, all services healthy."
           REMOTE

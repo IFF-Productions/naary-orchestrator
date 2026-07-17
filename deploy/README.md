@@ -200,8 +200,14 @@ Deploys are **release-driven**, semver-tagged (`v0.0.1`):
    image bakes `VITE_*` from repo **variables** and `VITE_APP_VERSION=<tag>`.
 3. **Deploy** (`deploy.yml`, deploy job): `scp`s the compose files, logs the box into
    GHCR with the run's **ephemeral** `GITHUB_TOKEN` (nothing long-lived on the server),
-   `compose pull` + `up -d --no-build` → wait for the api healthcheck (fails the run,
-   with logs, if it never goes healthy) → `docker logout`.
+   `compose pull` → run `migrate` to completion → **rolling replace** of api, worker,
+   web via [`docker rollout`](https://github.com/wowu/docker-rollout) (start the new
+   container next to the old, wait for its healthcheck, then retire the old — zero
+   downtime; traffic drains over compose DNS: cloudflared→`web:80`, nginx→`api:3000`
+   re-resolved per request) → `docker logout`. If a new container never goes healthy
+   the rollout fails the run **with the previous release still serving**. Consequence:
+   migrations must be backward-compatible (expand/contract) — the old api/worker run
+   against the new schema during the overlap.
 4. **Rollback / redeploy:** run *Deploy* manually with any older tag as the ref — it
    pulls the existing images for that tag, byte-identical to what ran before.
    Releases created by hand in the GitHub UI also trigger a deploy (`release: published`).
