@@ -14,6 +14,11 @@ resource "neon_project" "naary" {
   region_id  = var.neon_region # aws-eu-central-1 (Frankfurt) pairs with Hetzner nbg1/fsn1
   pg_version = 16              # match the pgvector/pgvector:pg16 image the dev stack uses
 
+  # Point-in-time-restore window. The provider defaults to 86400 (1 day), but Neon's
+  # FREE plan caps it at 21600 (6 h) and rejects project creation above that (HTTP 400).
+  # On a paid plan you can raise this (Launch allows up to 7 days).
+  history_retention_seconds = 21600
+
   branch {
     name          = "main"
     database_name = "naary_orchestrator"
