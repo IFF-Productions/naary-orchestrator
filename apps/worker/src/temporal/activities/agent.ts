@@ -1,0 +1,373 @@
+// agent node — the AI-SDK model call (BYOK, budget reservation, billing).
+import { createLogger } from "@naary/logging";
+import { ApplicationFailure } from "@temporalio/activity";
+import { getDefaultEnvironmentId } from "@naary/db";
+import { MissingCredentialError } from "@naary/secrets";
+import {
+  computeCost,
+  estimateCallCost,
+  getBudget,
+  monthToDateSpend,
+  recordUsage,
+  releaseReservation,
+  reserveBudget,
+} from "@naary/usage";
+import {
+  activityDuration,
+  activityRuns,
+  agentTokens,
+  runCostUsd,
+  secondsSince,
+} from "../../metrics";
+import {
+  type AgentMeta,
+  aiSdk,
+  anthropicSdk,
+  estimateTokens,
+  getCredentials,
+  googleSdk,
+  openaiSdk,
+  toSanitizedRetryable,
+} from "./shared";
+
+// Activities run in the worker PROCESS (a side-effect zone), so structured
+// logging is fine here — unlike workflows.ts, which must stay deterministic.
+// Logs carry execution-correlated ids (executionId/nodeId/tenantId) and token/
+// cost numbers only — never prompts, completions, or keys (the logger scrubs).
+const log = createLogger({ component: "worker" });
+
+const MAX_OUTPUT_TOKENS = 1024;
+
+export interface AgentConfig {
+  provider: string;
+  model: string;
+  systemPrompt: string;
+  /** Per-node structured-output JSON Schema (Slice #6 / QA#9). When set, the agent
+   *  is constrained to it; otherwise the default {category, urgency} schema. */
+  outputSchema?: Record<string, unknown>;
+  /** Sampling temperature (0–2). Omitted ⇒ provider default. */
+  temperature?: number;
+  /** Per-node output cap; omitted ⇒ MAX_OUTPUT_TOKENS. Also sizes the budget estimate. */
+  maxOutputTokens?: number;
+  /** Opt-in Anthropic prompt caching of the system prompt (default off). Only worthwhile for a
+   *  high-volume agent reusing a large, stable system prompt within Anthropic's ~5-min TTL. */
+  cacheSystemPrompt?: boolean;
+}
+
+export interface AgentOutput {
+  category: string;
+  urgency: number;
+}
+
+export interface AgentResult {
+  status: "ok";
+  /** The structured output; shape depends on the node's outputSchema (QA#9). */
+  output: Record<string, unknown>;
+  /** The model that actually ran (may differ from cfg.model after a downgrade). */
+  model: string;
+  /** Cost of THIS call — the workflow accumulates these deterministically. */
+  costUsd: number;
+}
+
+// Slice #2 ships one structured-output schema. It can't ride in JSON graph
+// config, so it lives here; per-node schema routing is a later slice. Using the
+// AI SDK's jsonSchema<T> (vs zod) gives an explicit output type and avoids a
+// TS2589 deep-instantiation blow-up in generateText's generics.
+const DEFAULT_OUTPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    category: { type: "string" },
+    urgency: { type: "number" },
+  },
+  required: ["category", "urgency"],
+  additionalProperties: false,
+} as const;
+// The AI SDK's `jsonSchema()` wrapper is applied lazily inside runAgent (the `ai` package is
+// ESM-only, loaded via dynamic import) — this stays a plain JSON-schema object with no SDK dep.
+
+async function buildModel(provider: string, model: string, apiKey: string) {
+  if (provider === "anthropic") {
+    return (await anthropicSdk()).createAnthropic({ apiKey })(model);
+  }
+  if (provider === "openai") {
+    return (await openaiSdk()).createOpenAI({ apiKey })(model);
+  }
+  if (provider === "google") {
+    return (await googleSdk()).createGoogleGenerativeAI({ apiKey })(model);
+  }
+  throw ApplicationFailure.nonRetryable(
+    `Unsupported provider: ${provider}`,
+    "UNSUPPORTED_PROVIDER",
+  );
+}
+
+/**
+ * Test seam: the credential source and usage sink, swappable in unit tests so
+ * the activity's orchestration (in-activity key fetch, billing fallback, error
+ * mapping) can be exercised without a live DB or LLM. Cost-from-tokens
+ * correctness is covered by @naary/usage's own tests.
+ */
+export const __agentDeps = {
+  getCredentials,
+  getDefaultEnvId: getDefaultEnvironmentId,
+  recordUsage,
+  getBudget,
+  monthToDateSpend,
+  reserveBudget,
+  releaseReservation,
+};
+
+/**
+ * The real agent node. Fetches the tenant's key INSIDE the activity (never as a
+ * workflow arg / return), calls the model with structured output, records spend,
+ * and maps auth/quota failures to non-retryable so Temporal doesn't burn retries
+ * on a key the user must fix.
+ */
+export async function runAgent(
+  cfg: AgentConfig,
+  input: unknown,
+  meta: AgentMeta,
+): Promise<AgentResult> {
+  const startedAt = process.hrtime.bigint();
+  // Released in `finally` (Arch§4.3) — whether the call succeeds or throws — so a
+  // failed/retried activity never leaves a dangling reservation.
+  let reservationId: string | undefined;
+  try {
+    // Defaults for graphs whose agent node didn't persist provider/model (e.g. the
+    // canvas inspector showed the default but the user never changed the dropdown).
+    // anthropic is the only supported provider today; opus is a safe default model.
+    const provider = cfg.provider?.trim() || "anthropic";
+
+    // In memory only — never returned from the activity, never logged. Env-scoped creds (Slice 5):
+    // use the run's env (5b, threaded via meta) so a sandbox run reads the sandbox key; a pre-5b run
+    // has no meta.environmentId → fall back to the tenant default (byte-identical to pre-Slice-5).
+    const envId =
+      meta.environmentId ?? (await __agentDeps.getDefaultEnvId(meta.tenantId));
+    const apiKey = await __agentDeps
+      .getCredentials()
+      .getDecryptedKey(meta.tenantId, envId, provider);
+
+    // Pre-flight budget enforcement via an atomic RESERVATION (Arch§4.3): reserve
+    // this call's estimated cost against the monthly cap BEFORE the LLM call, so
+    // concurrent runs for one tenant can't all overshoot. The reservation counts
+    // committed spend + other in-flight reservations. No budget set ⇒ no cap.
+    let model = cfg.model?.trim() || "claude-opus-4-8";
+    // Per-node output cap (sizes both the budget estimate and the actual call) and
+    // optional sampling temperature.
+    const maxOutputTokens = cfg.maxOutputTokens ?? MAX_OUTPUT_TOKENS;
+    const budget = await __agentDeps.getBudget(meta.tenantId);
+    if (budget) {
+      const estimateFor = (m: string) =>
+        estimateCallCost(
+          {
+            provider,
+            model: m,
+            systemPrompt: cfg.systemPrompt,
+            maxOutputTokens,
+          },
+          input,
+        );
+      let res = await __agentDeps.reserveBudget(
+        meta.tenantId,
+        estimateFor(model),
+        budget.monthlyCapUsd,
+      );
+      if (!res.ok) {
+        if (budget.onBudgetExceeded === "downgrade" && budget.fallbackModel) {
+          // Re-validate the cheaper model (QA#6): it must be priced AND its own
+          // reservation must fit the cap — else reject.
+          let fallbackEstimate: number;
+          try {
+            fallbackEstimate = estimateFor(budget.fallbackModel);
+          } catch {
+            throw ApplicationFailure.nonRetryable(
+              "Configured fallback model has no pricing",
+              "FALLBACK_UNPRICED",
+              { tenantId: meta.tenantId },
+            );
+          }
+          res = await __agentDeps.reserveBudget(
+            meta.tenantId,
+            fallbackEstimate,
+            budget.monthlyCapUsd,
+          );
+          if (!res.ok) {
+            throw ApplicationFailure.nonRetryable(
+              "Monthly budget exceeded (even after downgrade)",
+              "BUDGET",
+              { tenantId: meta.tenantId },
+            );
+          }
+          model = budget.fallbackModel;
+        } else {
+          throw ApplicationFailure.nonRetryable(
+            "Monthly budget exceeded",
+            "BUDGET",
+            { tenantId: meta.tenantId },
+          );
+        }
+      }
+      reservationId = res.id;
+    }
+
+    // Opt-in Anthropic prompt caching (default off): mark the STABLE system prompt as an
+    // ephemeral cache breakpoint so repeated calls reuse it within Anthropic's ~5-min TTL.
+    // Anthropic-only (cacheControl is its provider option) and needs the `messages` form to
+    // carry providerOptions; a short prompt is a no-op below Anthropic's min cacheable size,
+    // and billing already meters cache-read tokens separately (see the usage read below).
+    const cachePrompt =
+      cfg.cacheSystemPrompt === true &&
+      provider === "anthropic" &&
+      !!cfg.systemPrompt;
+
+    const { generateText, Output, jsonSchema } = await aiSdk();
+    const result = await generateText({
+      model: await buildModel(provider, model, apiKey),
+      ...(cachePrompt
+        ? {
+            messages: [
+              {
+                role: "system" as const,
+                content: cfg.systemPrompt as string,
+                providerOptions: {
+                  anthropic: { cacheControl: { type: "ephemeral" } },
+                },
+              },
+              { role: "user" as const, content: JSON.stringify(input) },
+            ],
+          }
+        : { system: cfg.systemPrompt, prompt: JSON.stringify(input) }),
+      output: Output.object({
+        // Per-node schema when configured (QA#9), else the default shape. `as const` literals are
+        // widened to the mutable JSONSchema7 the SDK expects (runtime schema unchanged).
+        schema: jsonSchema<Record<string, unknown>>(
+          (cfg.outputSchema ?? DEFAULT_OUTPUT_SCHEMA) as unknown as Parameters<
+            typeof jsonSchema
+          >[0],
+        ),
+      }),
+      maxOutputTokens,
+      ...(cfg.temperature !== undefined
+        ? { temperature: cfg.temperature }
+        : {}),
+    });
+
+    // BILLING (CLAUDE.md rule 6): totalUsage sums across tool steps; guard the
+    // ai@6 undefined-usage bug so we never silently record a free call.
+    // NOTE (QA#2): for Anthropic, `inputTokens` EXCLUDES cache-read tokens (those
+    // arrive separately as cache-read tokens), so input and cached are independent
+    // billing buckets — computeCost must not subtract one from the other.
+    // ai@7 moved the cache/reasoning counts into inputTokenDetails/outputTokenDetails.
+    const u = result.totalUsage ?? result.usage;
+    const real = {
+      inputTokens: u?.inputTokens ?? 0,
+      outputTokens: u?.outputTokens ?? 0,
+      totalTokens: u?.totalTokens,
+      cachedInputTokens: u?.inputTokenDetails?.cacheReadTokens,
+      reasoningTokens: u?.outputTokenDetails?.reasoningTokens,
+    };
+    const usage =
+      real.inputTokens || real.outputTokens
+        ? real
+        : estimateTokens(
+            cfg.systemPrompt,
+            input,
+            // output text may be empty under structured output — fall back to the object
+            result.text || JSON.stringify(result.output ?? ""),
+          );
+
+    await __agentDeps.recordUsage({
+      tenantId: meta.tenantId,
+      environmentId: meta.environmentId, // per-env cost tag (Slice 6)
+      executionId: meta.executionId,
+      nodeId: meta.nodeId,
+      provider,
+      model, // the model that actually ran (post-downgrade)
+      usage,
+    });
+
+    // Same cost recordUsage computed — returned so the workflow can accumulate
+    // it deterministically (no DB read in workflow code).
+    const costUsd = computeCost({
+      provider,
+      model,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cachedInputTokens: (usage as { cachedInputTokens?: number })
+        .cachedInputTokens,
+    });
+
+    log.info(
+      {
+        activity: "runAgent",
+        executionId: meta.executionId,
+        nodeId: meta.nodeId,
+        tenantId: meta.tenantId,
+        provider,
+        model,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        costUsd,
+      },
+      "agent node completed",
+    );
+
+    activityRuns.inc({ activity: "runAgent", outcome: "ok" });
+    activityDuration.observe({ activity: "runAgent" }, secondsSince(startedAt));
+    agentTokens.inc({ kind: "input" }, usage.inputTokens);
+    agentTokens.inc({ kind: "output" }, usage.outputTokens);
+    if (costUsd > 0) runCostUsd.inc(costUsd);
+
+    return {
+      status: "ok",
+      output: result.output as Record<string, unknown>,
+      model,
+      costUsd,
+    };
+  } catch (e) {
+    activityRuns.inc({ activity: "runAgent", outcome: "error" });
+    activityDuration.observe({ activity: "runAgent" }, secondsSince(startedAt));
+    // Our own deliberate failures (BUDGET, UNSUPPORTED_PROVIDER, …) are already
+    // safe + correctly (non-)retryable — pass them through untouched.
+    if (e instanceof ApplicationFailure) throw e;
+    if (e instanceof MissingCredentialError) {
+      throw ApplicationFailure.nonRetryable(
+        "Missing or invalid provider credential",
+        "AUTH",
+        { tenantId: meta.tenantId },
+      );
+    }
+    // Load APICallError defensively: `ai` is already cached here (the generateText call above
+    // resolved it), so this can't realistically fail — but if it ever did, don't let the import
+    // error mask the ORIGINAL provider error; fall through to the sanitized retryable below.
+    const aiMod = await aiSdk().catch(() => undefined);
+    if (aiMod?.APICallError.isInstance(e)) {
+      if (e.statusCode === 401 || e.statusCode === 403) {
+        throw ApplicationFailure.nonRetryable(
+          "Invalid provider credentials",
+          "AUTH",
+          { tenantId: meta.tenantId },
+        );
+      }
+      if (e.statusCode === 429) {
+        throw ApplicationFailure.nonRetryable(
+          "Provider rate limit / quota (tenant key)",
+          "QUOTA",
+        );
+      }
+    }
+    // Genuine transient error: rethrow a SANITIZED retryable failure (the raw
+    // AI-SDK error can carry the key in request headers) so Temporal retries
+    // without that material ever reaching durable history/logs.
+    throw toSanitizedRetryable(e, "AGENT_TRANSIENT");
+  } finally {
+    // Reconcile: the actual cost is now a UsageEvent (on success) or the call
+    // failed — either way the estimate reservation is no longer needed. Best-
+    // effort; a missed release is reaped by the reservation TTL.
+    if (reservationId !== undefined) {
+      await __agentDeps
+        .releaseReservation(reservationId)
+        .catch(() => undefined);
+    }
+  }
+}
