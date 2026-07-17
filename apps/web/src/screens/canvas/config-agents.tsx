@@ -1,0 +1,528 @@
+// Agent / code-agent / MCP tool / integration config sections of the node inspector (extracted verbatim from CanvasPage).
+import type { ConfigSectionCtx } from "./ConfigPanel";
+import { getIntegrationProvider } from "@naary/dsl";
+import { ExpressionField } from "../../components/ExpressionField";
+import type { JsonSchemaObject } from "../../lib/schema-fields";
+import { SchemaEditor } from "./SchemaFieldEditor";
+import { ACCENT } from "../../lib/graph-model";
+import { summarize } from "./flow";
+import {
+  type BindingRow,
+  BindingsEditor,
+  CONNECTION_TYPES,
+  ConnectionSelect,
+  inputStyle,
+  JsonField,
+  Labeled,
+  MODELS,
+  PROVIDERS,
+} from "./fields";
+import { RowHead } from "./PinSection";
+
+export function renderAgentSections(c: ConfigSectionCtx) {
+  const {
+    node,
+    kind,
+    config,
+    str,
+    num,
+    obj,
+    exprText,
+    onChange,
+    upstreamIds,
+    edges,
+    nodeKinds,
+    connections,
+    pins,
+  } = c;
+  return (
+    <>
+      {kind === "agent" && (
+        <>
+          <Labeled label="Provider">
+            <select
+              value={str("provider") || "anthropic"}
+              onChange={(e) =>
+                // Switching provider resets the model to that provider's default —
+                // otherwise a Claude model could linger on an OpenAI node (a run-time mismatch).
+                onChange({
+                  provider: e.target.value,
+                  model: MODELS[e.target.value]?.[0],
+                })
+              }
+              style={inputStyle}
+            >
+              {PROVIDERS.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </Labeled>
+
+          <Labeled label="Model">
+            <select
+              value={str("model") || MODELS.anthropic[0]}
+              onChange={(e) => onChange({ model: e.target.value })}
+              style={inputStyle}
+            >
+              {(MODELS[str("provider") || "anthropic"] ?? []).map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <div
+              style={{
+                display: "flex",
+                gap: 6,
+                marginTop: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              {(MODELS[str("provider") || "anthropic"] ?? []).map((m) => {
+                const active = (str("model") || MODELS.anthropic[0]) === m;
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => onChange({ model: m })}
+                    className="mono"
+                    style={{
+                      fontSize: "var(--text-2xs)",
+                      cursor: "pointer",
+                      border: `1px solid ${active ? ACCENT.agent : "var(--line-2)"}`,
+                      color: active ? ACCENT.agent : "var(--ink-2)",
+                      background: "var(--card)",
+                      padding: "3px 9px",
+                      borderRadius: "var(--radius-sm)",
+                    }}
+                  >
+                    {m.replace("claude-", "")}
+                  </button>
+                );
+              })}
+            </div>
+          </Labeled>
+
+          <div>
+            <RowHead
+              label="Temperature"
+              value={
+                num("temperature") === undefined
+                  ? "default"
+                  : (num("temperature") as number).toFixed(2)
+              }
+            />
+            <input
+              type="range"
+              min={0}
+              max={2}
+              step={0.05}
+              value={num("temperature") ?? 0}
+              onChange={(e) =>
+                onChange({ temperature: Number(e.target.value) })
+              }
+              style={{ width: "100%", accentColor: ACCENT.agent }}
+            />
+          </div>
+
+          <div>
+            <RowHead
+              label="System prompt"
+              value={`~${Math.ceil(str("systemPrompt").length / 4)} tok`}
+            />
+            {exprText("systemPrompt", {
+              multiline: true,
+              minHeight: "7em",
+              placeholder: "You are a support triage agent…",
+            })}
+          </div>
+
+          <div>
+            <RowHead label="Structured output" value="fields" />
+            <SchemaEditor
+              schema={obj("outputSchema") as JsonSchemaObject | undefined}
+              onChange={(v) => onChange({ outputSchema: v })}
+            />
+          </div>
+
+          <Labeled label="Max output tokens">
+            <input
+              type="number"
+              min={1}
+              value={num("maxOutputTokens") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  maxOutputTokens: e.target.value
+                    ? Number(e.target.value)
+                    : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="1024 (default)"
+            />
+          </Labeled>
+
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-2)",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={Boolean(config.cacheSystemPrompt)}
+              onChange={(e) =>
+                onChange({ cacheSystemPrompt: e.target.checked || undefined })
+              }
+            />
+            Cache the system prompt (Anthropic)
+          </label>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
+            Only worth it for a HIGH-VOLUME agent reusing a large, stable system
+            prompt within ~5&nbsp;minutes. For one-shot flows it can slightly
+            increase cost (a cache-write premium with no reuse), so leave it off
+            unless this agent runs often with the same prompt.
+          </div>
+        </>
+      )}
+
+      {kind === "codeAgent" && (
+        <>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              lineHeight: "var(--leading-snug)",
+              marginBottom: 4,
+            }}
+          >
+            Runs an agentic coding CLI on your task. Today it's{" "}
+            <strong>read-only</strong> (reads code, returns a plan) — cloning,
+            edits, and PRs land in later slices.
+          </div>
+
+          <Labeled label="Tool">
+            <select
+              value={str("tool") || "claude"}
+              onChange={(e) => onChange({ tool: e.target.value })}
+              style={inputStyle}
+            >
+              <option value="claude">Claude Code</option>
+              <option value="cursor" disabled>
+                Cursor (coming soon)
+              </option>
+              <option value="copilot" disabled>
+                Copilot (coming soon)
+              </option>
+            </select>
+          </Labeled>
+
+          <div>
+            <RowHead
+              label="Prompt"
+              value={`~${Math.ceil(str("prompt").length / 4)} tok`}
+            />
+            {exprText("prompt", {
+              multiline: true,
+              minHeight: "7em",
+              placeholder:
+                "Review the auth module and summarize any security issues…",
+            })}
+          </div>
+
+          <div>
+            <RowHead label="System prompt" value="optional" />
+            {exprText("systemPrompt", {
+              multiline: true,
+              minHeight: "4em",
+              placeholder: "House rules for the agent…",
+            })}
+          </div>
+
+          <Labeled label="Model">
+            <input
+              value={str("model")}
+              onChange={(e) => onChange({ model: e.target.value || undefined })}
+              style={inputStyle}
+              placeholder="default (tenant's Anthropic default)"
+            />
+          </Labeled>
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <Labeled label="Max turns">
+              <input
+                type="number"
+                min={1}
+                value={num("maxTurns") ?? ""}
+                onChange={(e) =>
+                  onChange({
+                    maxTurns: e.target.value
+                      ? Number(e.target.value)
+                      : undefined,
+                  })
+                }
+                style={inputStyle}
+                placeholder="default"
+              />
+            </Labeled>
+            <Labeled label="Max budget (USD)">
+              <input
+                type="number"
+                min={0.5}
+                step={0.5}
+                value={num("maxBudgetUsd") ?? ""}
+                onChange={(e) => {
+                  // Schema requires > 0 — use valueAsNumber (a partial/empty number input is
+                  // NaN) and coerce anything non-positive/non-finite to undefined so the node
+                  // stays saveable (rather than persisting an invalid 0).
+                  const v = e.target.valueAsNumber;
+                  onChange({
+                    maxBudgetUsd: Number.isFinite(v) && v > 0 ? v : undefined,
+                  });
+                }}
+                style={inputStyle}
+                placeholder="hard stop"
+              />
+            </Labeled>
+          </div>
+        </>
+      )}
+
+      {kind === "mcpTool" && (
+        <>
+          <Labeled label="Connection">
+            <ConnectionSelect
+              connections={connections}
+              types={CONNECTION_TYPES[kind] ?? []}
+              value={str("connectionId")}
+              onChange={(id) => onChange({ connectionId: id })}
+            />
+          </Labeled>
+          <Labeled label="Tool">
+            <input
+              value={str("tool")}
+              onChange={(e) => onChange({ tool: e.target.value })}
+              style={inputStyle}
+              placeholder="add_pull_request_comment"
+            />
+          </Labeled>
+
+          <BindingsEditor
+            bindings={
+              obj("argumentBindings") as Record<string, BindingRow> | undefined
+            }
+            upstreamIds={upstreamIds}
+            onChange={(v) => onChange({ argumentBindings: v })}
+          />
+
+          <JsonField
+            label="Static arguments (JSON)"
+            value={obj("arguments")}
+            placeholder={'{\n  "state": "open"\n}'}
+            onChange={(v) => onChange({ arguments: v })}
+          />
+
+          <Labeled label="Cost (USD per call)">
+            <input
+              type="number"
+              min={0}
+              step={0.001}
+              value={num("costUsd") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  costUsd: e.target.value ? Number(e.target.value) : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="0.00"
+            />
+          </Labeled>
+        </>
+      )}
+
+      {kind === "integration" &&
+        (() => {
+          // Data-driven from the integration catalog (@naary/dsl): provider is preset by the
+          // palette tile; the action list + its fields come from the catalog, so a new
+          // integration never needs a new panel branch.
+          const provider = getIntegrationProvider(str("provider"));
+          const action = provider?.actions.find((a) => a.key === str("action"));
+          const fields = (obj("fields") ?? {}) as Record<string, unknown>;
+          // A field can be satisfied by an upstream BINDING (below) instead of a typed value —
+          // so a required field bound from a prior step is NOT "missing". Look up the binding
+          // per field to show a "bound from …" hint and drop the required `*` nag when bound.
+          const fieldBindings = (obj("fieldBindings") ?? {}) as Record<
+            string,
+            BindingRow
+          >;
+          const boundFrom = (key: string): string | null => {
+            const b = fieldBindings[key];
+            if (!b?.from) return null;
+            return b.path ? `${b.from}.${b.path}` : b.from;
+          };
+          // Coerce the typed-in string to the catalog field's type, so a static value is stored
+          // as the right JSON type (a number, or a string[] for labels) instead of a raw string
+          // that would build a malformed request.
+          const coerce = (type: string | undefined, raw: string): unknown => {
+            if (type === "number") return raw === "" ? "" : Number(raw);
+            if (type === "boolean") return raw === "true";
+            if (type === "string[]")
+              return raw
+                .split(/[\n,]/)
+                .map((s) => s.trim())
+                .filter((s) => s.length > 0);
+            return raw;
+          };
+          const setField = (
+            key: string,
+            type: string | undefined,
+            raw: string,
+          ) => onChange({ fields: { ...fields, [key]: coerce(type, raw) } });
+          // Render the stored value back into the input.
+          const display = (v: unknown): string =>
+            Array.isArray(v) ? v.join(", ") : v == null ? "" : String(v);
+          return (
+            <>
+              <Labeled label="Provider">
+                <input
+                  value={provider?.label ?? str("provider")}
+                  disabled
+                  style={inputStyle}
+                />
+              </Labeled>
+              <Labeled label="Connection">
+                <ConnectionSelect
+                  connections={connections}
+                  types={CONNECTION_TYPES[kind] ?? []}
+                  value={str("connectionId")}
+                  onChange={(id) => onChange({ connectionId: id })}
+                />
+              </Labeled>
+              <Labeled label="Action">
+                <select
+                  value={str("action")}
+                  // Switching action clears the static fields (each action has its own set).
+                  onChange={(e) =>
+                    onChange({ action: e.target.value, fields: {} })
+                  }
+                  style={inputStyle}
+                >
+                  {(provider?.actions ?? []).map((a) => (
+                    <option key={a.key} value={a.key}>
+                      {a.label}
+                    </option>
+                  ))}
+                </select>
+              </Labeled>
+              {action && (
+                <div
+                  style={{
+                    fontSize: "var(--text-xs)",
+                    color: "var(--ink-3)",
+                    marginTop: -4,
+                  }}
+                >
+                  {action.description}
+                  {action.write ? " · runs at-most-once (no retry)" : ""}
+                </div>
+              )}
+              {(action?.fields ?? []).map((f) => {
+                const bound = boundFrom(f.key);
+                // Bound → the upstream value overrides any typed value at run time, and it
+                // satisfies "required", so show a hint + drop the `*` nag instead of the star.
+                const label = bound
+                  ? `${f.label} · bound`
+                  : `${f.label}${f.required ? " *" : ""}`;
+                const hint = bound ? (
+                  <div
+                    className="mono"
+                    style={{
+                      fontSize: "var(--text-2xs)",
+                      color: "var(--ink-3)",
+                      marginTop: 3,
+                    }}
+                  >
+                    ↳ from {bound} (upstream value overrides this)
+                  </div>
+                ) : null;
+                return f.type === "json" ? (
+                  // Schema-driven value (Notion properties, etc.) — a raw JSON editor.
+                  <div key={f.key}>
+                    <JsonField
+                      label={label}
+                      value={fields[f.key]}
+                      placeholder={f.hint ?? "{ }"}
+                      // A `json` field accepts an object OR an array (e.g. Notion `children`).
+                      allowArray
+                      onChange={(v) =>
+                        onChange({ fields: { ...fields, [f.key]: v } })
+                      }
+                    />
+                    {hint}
+                  </div>
+                ) : (
+                  <div key={f.key}>
+                    <Labeled label={label}>
+                      {f.type === "string" ? (
+                        // Free-text integration field (e.g. repo/owner/number) — supports
+                        // {{ upstream.path }} with highlighting + autocomplete.
+                        <ExpressionField
+                          value={display(fields[f.key])}
+                          onChange={(v) => setField(f.key, f.type, v)}
+                          nodeId={node.id}
+                          edges={edges}
+                          pins={pins}
+                          nodeKinds={nodeKinds}
+                          placeholder={
+                            bound
+                              ? "bound from an upstream step ↓"
+                              : (f.hint ?? "value or {{ upstream.path }}")
+                          }
+                        />
+                      ) : (
+                        <input
+                          type={f.type === "number" ? "number" : "text"}
+                          value={display(fields[f.key])}
+                          onChange={(e) =>
+                            setField(f.key, f.type, e.target.value)
+                          }
+                          style={inputStyle}
+                          placeholder={
+                            bound
+                              ? "bound from an upstream step ↓"
+                              : (f.hint ??
+                                (f.type === "string[]"
+                                  ? "comma-separated, or bind from an upstream step"
+                                  : ""))
+                          }
+                        />
+                      )}
+                    </Labeled>
+                    {hint}
+                  </div>
+                );
+              })}
+              <BindingsEditor
+                bindings={
+                  obj("fieldBindings") as Record<string, BindingRow> | undefined
+                }
+                upstreamIds={upstreamIds}
+                onChange={(v) => onChange({ fieldBindings: v })}
+              />
+            </>
+          );
+        })()}
+    </>
+  );
+}

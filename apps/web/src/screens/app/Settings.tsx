@@ -2,58 +2,29 @@ import { useEffect, useState } from "react";
 import { Button, Card } from "../../components";
 import {
   api,
-  type NotificationChannel,
   type NotificationChannelType,
   type TenantSettings,
   UnauthorizedError,
   type Variable,
 } from "../../lib/api";
 import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
-import { type Mode, useMode } from "../../mode";
 import { useWorkspace } from "../../workspace/WorkspaceProvider";
+import { ExperienceCard } from "./settings/ExperienceCard";
+import {
+  defaultChannel,
+  type EditableChannel,
+  NOTIFICATION_CHANNELS,
+  NotificationsSection,
+} from "./settings/NotificationsSection";
+import { SecretsSection } from "./settings/SecretsSection";
+import { Field, inputStyle } from "./settings/shared";
+import { VariablesSection } from "./settings/VariablesSection";
 
 const MODELS = ["", "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"];
-
-/** The notification channels the UI renders — each configured + toggled INDEPENDENTLY.
- *  Adding email later = one more entry here + the server-side type. */
-const NOTIFICATION_CHANNELS: {
-  type: NotificationChannelType;
-  label: string;
-  placeholder: string;
-  hint?: string;
-}[] = [
-  {
-    type: "slack",
-    label: "Slack",
-    placeholder: "https://hooks.slack.com/services/…",
-  },
-  {
-    type: "teams",
-    label: "Microsoft Teams",
-    placeholder: "https://prod-00.westus.logic.azure.com/workflows/…",
-    hint: "Paste a Teams Workflows (Power Automate) webhook URL — “When a Teams webhook request is received”. We send an Adaptive Card; the legacy Office 365 connector format isn’t supported.",
-  },
-];
-
-/** Channel config as held in edit state — webhookUrl is a string ("" not null) for the input. */
-type EditableChannel = Omit<NotificationChannel, "webhookUrl"> & {
-  webhookUrl: string;
-};
-
-function defaultChannel(type: NotificationChannelType): EditableChannel {
-  return {
-    type,
-    enabled: false,
-    webhookUrl: "",
-    onApprovalPending: true,
-    onRunFailed: true,
-  };
-}
 
 export function Settings() {
   const { refresh: refreshWorkspaces } = useWorkspace();
   const phone = useMediaQuery(PHONE_QUERY);
-  const { mode, setMode } = useMode();
   const [tenant, setTenant] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
@@ -361,80 +332,7 @@ export function Settings() {
         </div>
       </div>
 
-      {/* Experience mode — Builder (full canvas) vs Simple (describe + step list). Per-user. */}
-      <Card style={{ padding: 18, marginBottom: 16 }}>
-        <div
-          style={{
-            fontSize: "var(--text-md)",
-            fontWeight: "var(--weight-semibold)",
-            color: "var(--ink)",
-            marginBottom: 4,
-          }}
-        >
-          Experience
-        </div>
-        <div
-          style={{
-            fontSize: "var(--text-sm)",
-            color: "var(--ink-2)",
-            marginBottom: 12,
-          }}
-        >
-          Choose how you build automations. This is your personal preference.
-        </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {[
-            {
-              m: "simple" as Mode,
-              title: "Simple",
-              blurb: "Describe it in English, review friendly steps.",
-            },
-            {
-              m: "builder" as Mode,
-              title: "Builder",
-              blurb: "The full visual canvas + advanced features.",
-            },
-          ].map((o) => {
-            const active = mode === o.m;
-            return (
-              <button
-                key={o.m}
-                type="button"
-                onClick={() => setMode(o.m)}
-                style={{
-                  all: "unset",
-                  cursor: "pointer",
-                  flex: "1 1 220px",
-                  padding: "12px 14px",
-                  borderRadius: "var(--radius-md)",
-                  border: `1px solid ${active ? "var(--brand)" : "var(--line-2)"}`,
-                  background: active ? "var(--brand-soft)" : "var(--card-2)",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: "var(--text-body)",
-                    fontWeight: "var(--weight-semibold)",
-                    color: active ? "var(--brand)" : "var(--ink)",
-                  }}
-                >
-                  {o.title}
-                  {active ? " ✓" : ""}
-                </div>
-                <div
-                  style={{
-                    fontSize: "var(--text-xs)",
-                    color: "var(--ink-3)",
-                    marginTop: 2,
-                  }}
-                >
-                  {o.blurb}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </Card>
+      <ExperienceCard />
 
       {error && (
         <div
@@ -505,517 +403,44 @@ export function Settings() {
         </div>
       </Card>
 
-      <div
-        className="mono"
-        style={{
-          fontSize: "var(--text-2xs)",
-          fontWeight: "var(--weight-semibold)",
-          letterSpacing: "var(--tracking-label)",
-          textTransform: "uppercase",
-          color: "var(--ink-3)",
-          margin: "24px 0 12px",
-        }}
-      >
-        Variables
-      </div>
-      <div
-        style={{
-          fontSize: "var(--text-body)",
-          lineHeight: "var(--leading-snug)",
-          color: "var(--ink-2)",
-          marginBottom: 12,
-        }}
-      >
-        Reusable, non-secret values for this workspace + environment — reference
-        them in any node's fields as <code>{"{{ $vars.KEY }}"}</code>. Scoped to
-        the active environment, so the same key can hold a different value in
-        sandbox vs prod. Not for secrets (API keys, tokens).
-      </div>
-      <Card style={{ padding: 18, marginBottom: 12 }}>
-        {varError && (
-          <div
-            style={{
-              marginBottom: 12,
-              fontSize: "var(--text-sm)",
-              color: "var(--state-error)",
-            }}
-          >
-            {varError}
-          </div>
-        )}
-        {variables.length === 0 && loaded && (
-          <div
-            style={{
-              fontSize: "var(--text-sm)",
-              color: "var(--ink-3)",
-              marginBottom: 12,
-            }}
-          >
-            No variables yet — add one below.
-          </div>
-        )}
-        {variables.map((v) => (
-          <div
-            key={v.key}
-            style={{
-              display: "flex",
-              gap: 8,
-              alignItems: "center",
-              marginBottom: 10,
-            }}
-          >
-            <code
-              style={{
-                flex: "0 0 34%",
-                fontSize: "var(--text-sm)",
-                color: "var(--ink)",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-              title={v.key}
-            >
-              {v.key}
-            </code>
-            <input
-              value={v.value}
-              onChange={(e) => patchVarValue(v.key, e.target.value)}
-              placeholder="value"
-              style={{ ...inputStyle, flex: 1 }}
-              disabled={!loaded || varBusy}
-            />
-            <Button
-              variant="secondary"
-              disabled={!loaded || varBusy}
-              onClick={() => void saveVariable(v.key, v.value)}
-            >
-              Save
-            </Button>
-            <Button
-              variant="ghost"
-              icon="trash"
-              disabled={!loaded || varBusy}
-              title={`Delete ${v.key}`}
-              onClick={() => void removeVariable(v.key)}
-            >
-              Delete
-            </Button>
-          </div>
-        ))}
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            alignItems: "center",
-            marginTop: variables.length ? 14 : 0,
-            paddingTop: variables.length ? 14 : 0,
-            borderTop: variables.length ? "1px solid var(--line)" : "none",
-          }}
-        >
-          <input
-            value={newVar.key}
-            onChange={(e) => setNewVar((n) => ({ ...n, key: e.target.value }))}
-            placeholder="KEY"
-            style={{ ...inputStyle, flex: "0 0 34%" }}
-            disabled={!loaded || varBusy}
-          />
-          <input
-            value={newVar.value}
-            onChange={(e) =>
-              setNewVar((n) => ({ ...n, value: e.target.value }))
-            }
-            placeholder="value"
-            style={{ ...inputStyle, flex: 1 }}
-            disabled={!loaded || varBusy}
-          />
-          <Button
-            variant="primary"
-            loading={varBusy}
-            disabled={!loaded || !newVar.key.trim()}
-            onClick={() => void addVariable()}
-          >
-            Add
-          </Button>
-        </div>
-      </Card>
+      <VariablesSection
+        variables={variables}
+        loaded={loaded}
+        varBusy={varBusy}
+        varError={varError}
+        newVar={newVar}
+        setNewVar={setNewVar}
+        patchVarValue={patchVarValue}
+        saveVariable={saveVariable}
+        addVariable={addVariable}
+        removeVariable={removeVariable}
+      />
 
-      <div
-        className="mono"
-        style={{
-          fontSize: "var(--text-2xs)",
-          fontWeight: "var(--weight-semibold)",
-          letterSpacing: "var(--tracking-label)",
-          textTransform: "uppercase",
-          color: "var(--ink-3)",
-          margin: "24px 0 12px",
-        }}
-      >
-        Secrets
-      </div>
-      <div
-        style={{
-          fontSize: "var(--text-body)",
-          lineHeight: "var(--leading-snug)",
-          color: "var(--ink-2)",
-          marginBottom: 12,
-        }}
-      >
-        Encrypted, env-scoped secret values (API keys, tokens). Reference one as{" "}
-        <code>{"{{ $secrets.NAME }}"}</code> in an{" "}
-        <strong>HTTP Request node's headers or body</strong>, or in an{" "}
-        <strong>MCP Tool node's arguments</strong>. Resolved only inside the
-        activity that uses it, so a value never enters the flow, run data, or
-        logs. Values are <strong>write-only</strong>: you can set or replace a
-        secret, but its value is never shown again.
-      </div>
-      <Card style={{ padding: 18, marginBottom: 12 }}>
-        {secretError && (
-          <div
-            style={{
-              marginBottom: 12,
-              fontSize: "var(--text-sm)",
-              color: "var(--state-error)",
-            }}
-          >
-            {secretError}
-          </div>
-        )}
-        {secretNames.length === 0 && loaded && (
-          <div
-            style={{
-              fontSize: "var(--text-sm)",
-              color: "var(--ink-3)",
-              marginBottom: 12,
-            }}
-          >
-            No secrets yet — add one below.
-          </div>
-        )}
-        {secretNames.map((name) => (
-          <div
-            key={name}
-            style={{
-              display: "flex",
-              gap: 8,
-              alignItems: "center",
-              marginBottom: 10,
-            }}
-          >
-            <code
-              style={{
-                flex: "0 0 34%",
-                fontSize: "var(--text-sm)",
-                color: "var(--ink)",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-              title={name}
-            >
-              {name}
-            </code>
-            <input
-              type="password"
-              value={secretReplace[name] ?? ""}
-              onChange={(e) =>
-                setSecretReplace((prev) => ({
-                  ...prev,
-                  [name]: e.target.value,
-                }))
-              }
-              placeholder="Set new value"
-              autoComplete="new-password"
-              style={{ ...inputStyle, flex: 1 }}
-              disabled={!loaded || secretBusy}
-            />
-            <Button
-              variant="secondary"
-              disabled={!loaded || secretBusy || !(secretReplace[name] ?? "")}
-              onClick={() => void replaceSecret(name)}
-            >
-              Update
-            </Button>
-            <Button
-              variant="ghost"
-              icon="trash"
-              disabled={!loaded || secretBusy}
-              title={`Delete ${name}`}
-              onClick={() => void removeSecret(name)}
-            >
-              Delete
-            </Button>
-          </div>
-        ))}
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            alignItems: "center",
-            marginTop: secretNames.length ? 14 : 0,
-            paddingTop: secretNames.length ? 14 : 0,
-            borderTop: secretNames.length ? "1px solid var(--line)" : "none",
-          }}
-        >
-          <input
-            value={newSecret.name}
-            onChange={(e) =>
-              setNewSecret((n) => ({ ...n, name: e.target.value }))
-            }
-            placeholder="NAME"
-            style={{ ...inputStyle, flex: "0 0 34%" }}
-            disabled={!loaded || secretBusy}
-          />
-          <input
-            type="password"
-            value={newSecret.value}
-            onChange={(e) =>
-              setNewSecret((n) => ({ ...n, value: e.target.value }))
-            }
-            placeholder="value"
-            autoComplete="new-password"
-            style={{ ...inputStyle, flex: 1 }}
-            disabled={!loaded || secretBusy}
-          />
-          <Button
-            variant="primary"
-            loading={secretBusy}
-            disabled={!loaded || !newSecret.name.trim() || !newSecret.value}
-            onClick={() => void addSecret()}
-          >
-            Add
-          </Button>
-        </div>
-      </Card>
+      <SecretsSection
+        secretNames={secretNames}
+        loaded={loaded}
+        secretBusy={secretBusy}
+        secretError={secretError}
+        secretReplace={secretReplace}
+        setSecretReplace={setSecretReplace}
+        newSecret={newSecret}
+        setNewSecret={setNewSecret}
+        replaceSecret={replaceSecret}
+        removeSecret={removeSecret}
+        addSecret={addSecret}
+      />
 
-      <div
-        className="mono"
-        style={{
-          fontSize: "var(--text-2xs)",
-          fontWeight: "var(--weight-semibold)",
-          letterSpacing: "var(--tracking-label)",
-          textTransform: "uppercase",
-          color: "var(--ink-3)",
-          margin: "24px 0 12px",
-        }}
-      >
-        Notifications
-      </div>
-      <div
-        style={{
-          fontSize: "var(--text-body)",
-          lineHeight: "var(--leading-snug)",
-          color: "var(--ink-2)",
-          marginBottom: 12,
-        }}
-      >
-        Get pinged when a run needs a human — an approval can wait for days, so
-        it shouldn't rely on someone watching the inbox. We POST a formatted
-        message (with Approve / Reject / View-run buttons) on each event.
-        Configure each channel independently — enable the ones you use; alerts
-        go to every enabled channel.
-      </div>
-      {NOTIFICATION_CHANNELS.map((meta) => {
-        const ch = channels[meta.type];
-        const busy = !!notifBusy[meta.type];
-        const testBusy = !!notifTestBusy[meta.type];
-        const chStatus = notifStatus[meta.type];
-        const chTest = notifTest[meta.type];
-        return (
-          <Card
-            key={meta.type}
-            style={{
-              padding: 18,
-              marginBottom: 12,
-              opacity: ch.enabled ? 1 : 0.72,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 14,
-              }}
-            >
-              <div
-                style={{
-                  fontSize: "var(--text-body)",
-                  fontWeight: "var(--weight-semibold)",
-                  color: "var(--ink)",
-                }}
-              >
-                {meta.label}
-              </div>
-              <label
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  alignItems: "center",
-                  cursor: loaded ? "pointer" : "default",
-                }}
-                title={`Turn ${meta.label} notifications on or off`}
-              >
-                <input
-                  type="checkbox"
-                  checked={ch.enabled}
-                  onChange={(e) =>
-                    patchChannel(meta.type, { enabled: e.target.checked })
-                  }
-                  disabled={!loaded}
-                />
-                <span
-                  style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}
-                >
-                  {ch.enabled ? "Enabled" : "Disabled"}
-                </span>
-              </label>
-            </div>
-            {meta.hint && (
-              <div
-                style={{
-                  fontSize: "var(--text-sm)",
-                  color: "var(--ink-3)",
-                  margin: "0 0 12px",
-                  lineHeight: "var(--leading-snug)",
-                }}
-              >
-                {meta.hint}
-              </div>
-            )}
-            <Field label="Webhook URL">
-              <input
-                value={ch.webhookUrl}
-                onChange={(e) =>
-                  patchChannel(meta.type, { webhookUrl: e.target.value })
-                }
-                placeholder={meta.placeholder}
-                style={inputStyle}
-                disabled={!loaded}
-              />
-            </Field>
-            <label
-              style={{
-                display: "flex",
-                gap: 8,
-                alignItems: "center",
-                marginBottom: 10,
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={ch.onApprovalPending}
-                onChange={(e) =>
-                  patchChannel(meta.type, {
-                    onApprovalPending: e.target.checked,
-                  })
-                }
-                disabled={!loaded}
-              />
-              <span
-                style={{ fontSize: "var(--text-body)", color: "var(--ink)" }}
-              >
-                When an approval is waiting
-              </span>
-            </label>
-            <label
-              style={{
-                display: "flex",
-                gap: 8,
-                alignItems: "center",
-                marginBottom: 14,
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={ch.onRunFailed}
-                onChange={(e) =>
-                  patchChannel(meta.type, { onRunFailed: e.target.checked })
-                }
-                disabled={!loaded}
-              />
-              <span
-                style={{ fontSize: "var(--text-body)", color: "var(--ink)" }}
-              >
-                When a run fails
-              </span>
-            </label>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <Button
-                variant="primary"
-                loading={busy}
-                disabled={!loaded}
-                onClick={() => void saveChannel(meta.type)}
-              >
-                {busy ? "Saving…" : "Save"}
-              </Button>
-              <Button
-                variant="secondary"
-                icon="bell"
-                disabled={testBusy || !loaded || !ch.webhookUrl.trim()}
-                onClick={() => void testChannel(meta.type)}
-                title={
-                  ch.webhookUrl.trim()
-                    ? `POST a sample message to your ${meta.label} webhook`
-                    : "Add a webhook URL first"
-                }
-              >
-                {testBusy ? "Sending…" : "Send test"}
-              </Button>
-              {chStatus && (
-                <span
-                  style={{
-                    fontSize: "var(--text-sm)",
-                    color: "var(--state-done)",
-                  }}
-                >
-                  {chStatus}
-                </span>
-              )}
-              {chTest && (
-                <span
-                  style={{
-                    fontSize: "var(--text-sm)",
-                    color: chTest.ok
-                      ? "var(--state-done)"
-                      : "var(--state-error)",
-                  }}
-                >
-                  {chTest.ok
-                    ? "✓ Test sent — check your channel."
-                    : chTest.message}
-                </span>
-              )}
-            </div>
-          </Card>
-        );
-      })}
+      <NotificationsSection
+        channels={channels}
+        loaded={loaded}
+        notifBusy={notifBusy}
+        notifStatus={notifStatus}
+        notifTestBusy={notifTestBusy}
+        notifTest={notifTest}
+        patchChannel={patchChannel}
+        saveChannel={saveChannel}
+        testChannel={testChannel}
+      />
     </div>
   );
 }
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label style={{ display: "block", marginBottom: 16 }}>
-      <span style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
-        {label}
-      </span>
-      <div style={{ marginTop: 6 }}>{children}</div>
-    </label>
-  );
-}
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "8px 10px",
-  borderRadius: "var(--radius-sm)",
-  border: "1px solid var(--line-2)",
-  background: "var(--card)",
-  color: "var(--ink)",
-  fontSize: "var(--text-body)",
-};
