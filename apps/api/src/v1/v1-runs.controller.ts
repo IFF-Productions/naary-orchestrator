@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   Post,
   Query,
@@ -11,14 +12,17 @@ import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { EnvironmentSel, TenantId } from "../auth/tenant.decorator";
 import { EnvironmentsService } from "../environments/environments.service";
 import {
+  type AwaitingApproval,
   type RunEvent,
   ExecutionsService,
   type RunStateView,
 } from "../executions/executions.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { ApiTokenThrottlerGuard } from "./api-token-throttler.guard";
-import { StartRunDto } from "./v1-run.dto";
+import { ApproveRunDto, RerunRunDto, StartRunDto } from "./v1-run.dto";
 import {
+  AwaitingRunResponse,
+  RunActionResponse,
   RunDetailResponse,
   RunHistoryEventResponse,
   RunListItemResponse,
@@ -47,7 +51,8 @@ export function parseLimit(raw: string | undefined): number {
  * ({@link ApiTokenThrottlerGuard}), additive to the global per-IP throttler.
  *
  * Mounted at v1/runs; the `/api` prefix is stripped by the web proxy/nginx, so callers hit
- * /api/v1/runs. Slice 1 = start + the run read paths; cancel/rerun/approve are slice 2.
+ * /api/v1/runs. Slice 1 = start + the run read paths; slice 2 adds the lifecycle actions
+ * (cancel/rerun/approve) + the awaiting-approval inbox.
  */
 @ApiTags("v1")
 @ApiBearerAuth("bearer")
@@ -106,6 +111,27 @@ export class V1RunsController {
   }
 
   @ApiEndpoint({
+    summary: "List runs awaiting approval",
+    description:
+      "Runs currently paused on a human-approval node, each with the approval prompt — the `approvals list` inbox.",
+    ok: [AwaitingRunResponse],
+  })
+  // MUST be declared before `@Get(":id")`, or Express captures "awaiting" as an :id.
+  @Get("awaiting")
+  async awaiting(@TenantId() tenantId: string): Promise<AwaitingRunResponse[]> {
+    const rows: AwaitingApproval[] =
+      await this.executions.listAwaiting(tenantId);
+    return rows.map((r) => ({
+      runId: r.workflowId,
+      workflowKey: r.workflowKey,
+      nodeId: r.nodeId,
+      title: r.title,
+      instructions: r.instructions,
+      createdAt: r.createdAt,
+    }));
+  }
+
+  @ApiEndpoint({
     summary: "Get a run",
     description: "Live status, current node, and output context for one run.",
     ok: RunDetailResponse,
@@ -144,5 +170,64 @@ export class V1RunsController {
       at: e.at,
       detail: e.detail,
     }));
+  }
+
+  @ApiEndpoint({
+    summary: "Cancel a run",
+    description:
+      "Terminates a running or paused run (status → terminated). 409 if it's already finished.",
+    ok: RunActionResponse,
+    notFound: true,
+    conflict: true,
+  })
+  @Post(":id/cancel")
+  @HttpCode(200) // NestJS would otherwise return 201 for a POST
+  async cancel(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+  ): Promise<RunActionResponse> {
+    await this.executions.cancel(id, tenantId);
+    return { accepted: true };
+  }
+
+  @ApiEndpoint({
+    summary: "Re-run a past run",
+    description:
+      "Starts a NEW run of the same workflow with the original trigger input. Re-runs against the current graph by default; pass `graphVersion` to pin a saved version. 400 if the run predates workflow-key tracking; 404 if the version doesn't exist.",
+    created: RunRefResponse,
+    notFound: true,
+  })
+  @Post(":id/rerun")
+  async rerun(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+    // Default to {} so a bodyless POST re-runs against the latest graph (never an undefined-body read).
+    @Body() body: RerunRunDto = {},
+  ): Promise<RunRefResponse> {
+    const { workflowId } = await this.executions.rerun(
+      id,
+      tenantId,
+      body?.graphVersion,
+    );
+    return { runId: workflowId };
+  }
+
+  @ApiEndpoint({
+    summary: "Approve or reject a run",
+    description:
+      "Decides a run paused on a human-approval node. `approved:false` rejects it. 409 if the run is no longer awaiting approval.",
+    accepted: RunActionResponse, // 202 — matches @HttpCode(202); the decision is signalled, not applied inline
+    notFound: true,
+    conflict: true,
+  })
+  @Post(":id/approve")
+  @HttpCode(202) // explicit: the decision is signalled to the durable run, not applied inline
+  async approve(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+    @Body() body: ApproveRunDto,
+  ): Promise<RunActionResponse> {
+    await this.executions.approve(id, body.approved, tenantId, body.comment);
+    return { accepted: true };
   }
 }

@@ -30,6 +30,10 @@ const executions = {
   list: vi.fn(),
   getState: vi.fn(),
   history: vi.fn(),
+  cancel: vi.fn(),
+  rerun: vi.fn(),
+  approve: vi.fn(),
+  listAwaiting: vi.fn(),
 };
 const environments = { resolveEnvId: vi.fn() };
 
@@ -153,5 +157,113 @@ describe("V1RunsController.history", () => {
       at: "2026-07-04T12:00:01.000Z",
       detail: "GET x → 200",
     });
+  });
+});
+
+describe("V1RunsController.cancel", () => {
+  it("delegates to ExecutionsService.cancel (id, tenantId) and returns accepted", async () => {
+    executions.cancel.mockResolvedValue(undefined);
+
+    const out = await ctrl.cancel("t-1", "run-9");
+
+    expect(executions.cancel).toHaveBeenCalledWith("run-9", "t-1");
+    expect(out).toEqual({ accepted: true });
+  });
+});
+
+describe("V1RunsController.rerun", () => {
+  it("maps the new run's workflowId → runId and passes graphVersion through", async () => {
+    executions.rerun.mockResolvedValue({ workflowId: "run-new" });
+
+    const out = await ctrl.rerun("t-1", "run-9", { graphVersion: 3 });
+
+    expect(executions.rerun).toHaveBeenCalledWith("run-9", "t-1", 3);
+    expect(out).toEqual({ runId: "run-new" });
+    expect(out).not.toHaveProperty("workflowId");
+  });
+
+  it("defaults to a bodyless re-run (graphVersion undefined → latest graph)", async () => {
+    executions.rerun.mockResolvedValue({ workflowId: "run-new" });
+
+    // The controller defaults @Body() to {} so a legacy bodyless POST still works.
+    await ctrl.rerun("t-1", "run-9");
+
+    expect(executions.rerun).toHaveBeenCalledWith("run-9", "t-1", undefined);
+  });
+});
+
+describe("V1RunsController.approve", () => {
+  it("passes approved + comment through in the service arg order", async () => {
+    executions.approve.mockResolvedValue(undefined);
+
+    const out = await ctrl.approve("t-1", "run-9", {
+      approved: true,
+      comment: "ship it",
+    });
+
+    // service signature is (id, approved, tenantId, comment) — tenantId is NOT a body arg.
+    expect(executions.approve).toHaveBeenCalledWith(
+      "run-9",
+      true,
+      "t-1",
+      "ship it",
+    );
+    expect(out).toEqual({ accepted: true });
+  });
+
+  it("a reject is approved:false (one handler, no separate endpoint)", async () => {
+    executions.approve.mockResolvedValue(undefined);
+
+    await ctrl.approve("t-1", "run-9", { approved: false });
+
+    expect(executions.approve).toHaveBeenCalledWith(
+      "run-9",
+      false,
+      "t-1",
+      undefined,
+    );
+  });
+});
+
+describe("V1RunsController.awaiting", () => {
+  it("maps AwaitingApproval[] to the v1 shape (workflowId → runId)", async () => {
+    executions.listAwaiting.mockResolvedValue([
+      {
+        workflowId: "run-7",
+        workflowKey: "refunds",
+        nodeId: "node-approve-1",
+        title: "Approve refund?",
+        instructions: "Confirm $42 refund.",
+        createdAt: "2026-07-04T12:00:00.000Z",
+      },
+    ]);
+
+    const out = await ctrl.awaiting("t-1");
+
+    expect(executions.listAwaiting).toHaveBeenCalledWith("t-1");
+    expect(out).toEqual([
+      {
+        runId: "run-7",
+        workflowKey: "refunds",
+        nodeId: "node-approve-1",
+        title: "Approve refund?",
+        instructions: "Confirm $42 refund.",
+        createdAt: "2026-07-04T12:00:00.000Z",
+      },
+    ]);
+    // The internal id name did not cross the v1 boundary (workflowId → runId).
+    expect(out[0]).not.toHaveProperty("workflowId");
+  });
+
+  // ROUTE-ORDER GUARD (a real assertion, not just a comment): Nest registers routes in
+  // method-declaration order (MetadataScanner walks the prototype's own property names), and
+  // Express matches first-declared-wins. So `awaiting()` (GET "awaiting") MUST come before
+  // `get()` (GET ":id") in the source — otherwise "awaiting" is captured as an :id and the inbox
+  // route is shadowed. This fails if someone reorders the handlers.
+  it("declares the literal `awaiting` route before the `:id` route", () => {
+    const methods = Object.getOwnPropertyNames(V1RunsController.prototype);
+    expect(methods).toContain("awaiting");
+    expect(methods).toContain("get");
+    expect(methods.indexOf("awaiting")).toBeLessThan(methods.indexOf("get"));
   });
 });

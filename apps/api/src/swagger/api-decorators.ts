@@ -1,5 +1,6 @@
 import { applyDecorators, type Type } from "@nestjs/common";
 import {
+  ApiAcceptedResponse,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
@@ -13,7 +14,7 @@ import { ErrorResponse } from "./error-response.dto";
  * a whole controller; pass `{ notFound: true }` on routes that look up a resource by id.
  */
 export function ApiStandardErrors(
-  opts: { notFound?: boolean } = {},
+  opts: { notFound?: boolean; conflict?: boolean } = {},
 ): ClassDecorator & MethodDecorator {
   const decs = [
     ApiResponse({
@@ -46,6 +47,16 @@ export function ApiStandardErrors(
       }),
     );
   }
+  if (opts.conflict) {
+    decs.push(
+      ApiResponse({
+        status: 409,
+        description:
+          "The resource is in a state that conflicts with the request.",
+        type: ErrorResponse,
+      }),
+    );
+  }
   return applyDecorators(...decs);
 }
 
@@ -63,14 +74,19 @@ export function ApiEndpoint(opts: {
   ok?: Type<unknown> | [Type<unknown>];
   /** 201 Created response type (for POSTs that create a resource). */
   created?: Type<unknown>;
+  /** 202 Accepted response type (for POSTs that hand work to a durable/async process). */
+  accepted?: Type<unknown>;
   /** Add a 404 (for routes that resolve a resource by id). */
   notFound?: boolean;
+  /** Add a 409 (for actions that conflict with the resource's current state). */
+  conflict?: boolean;
 }): MethodDecorator {
   const decs: (MethodDecorator | ClassDecorator)[] = [
     ApiOperation({ summary: opts.summary, description: opts.description }),
-    ApiStandardErrors({ notFound: opts.notFound }),
+    ApiStandardErrors({ notFound: opts.notFound, conflict: opts.conflict }),
   ];
   if (opts.ok) decs.push(ApiOkResponse({ type: opts.ok }));
   if (opts.created) decs.push(ApiCreatedResponse({ type: opts.created }));
+  if (opts.accepted) decs.push(ApiAcceptedResponse({ type: opts.accepted }));
   return applyDecorators(...decs);
 }
