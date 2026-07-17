@@ -16,6 +16,7 @@ export type NodeType =
   | "mcpTool" // Slice #4: calls a remote MCP server tool via a connection
   | "integration" // native provider action (GitHub/Jira/…) via a catalog + connection
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}
+  | "graphQL" // POSTs a GraphQL query/mutation; output is {data,errors,httpStatus}
   | "sqlQuery" // runs a read-only query against a tenant DB; output is {rows,rowCount}
   | "sqlExec" // runs a WRITE (INSERT/UPDATE/DELETE) in a txn; output is {rowsAffected}
   | "set" // builds a plain object from static fields + upstream bindings (pure, no I/O)
@@ -287,6 +288,38 @@ export interface HttpRequestNodeConfig {
   /** Auto-follow pages and return the accumulated items. The whole loop runs in the
    *  activity (side-effecting), so the workflow stays deterministic. Omit for a single call. */
   pagination?: HttpPaginationConfig;
+}
+
+/**
+ * GraphQL node: POST a query/mutation to a GraphQL endpoint. Mechanically an extension of REST
+ * (a single POST of `{ query, variables }`), so it runs the SAME hardened HTTP machinery as
+ * `httpRequest` in-activity (SSRF egress guard, `$secrets` resolution) — it just owns the GraphQL
+ * body shape and surfaces `{ data, errors, httpStatus }` as first-class output (GraphQL returns
+ * 200-with-`errors`, so `errors` deserves its own field, not `<id>.body.errors`).
+ *
+ * SECURITY (Tier-1 rule 4): auth headers carry a secret via `{{ $secrets.NAME }}`, resolved
+ * in-activity — never a plaintext token in config. (A `connectionId`-based auth is a follow-up.)
+ */
+export interface GraphQLNodeConfig {
+  /** GraphQL endpoint URL (https only — enforced by the egress guard at call time). */
+  url: string;
+  /** The GraphQL document (query or mutation). */
+  query: string;
+  /** Variables object. String values may embed `{{ node.path }}` (upstream) or `{{ $secrets.NAME }}`
+   *  (resolved in-activity). */
+  variables?: Record<string, unknown>;
+  /** Static headers. A secret auth header uses `{{ $secrets.NAME }}` (resolved in-activity). */
+  headers?: Record<string, string>;
+  /** field path (e.g. "url", "variables.id", "headers.X-Trace") → upstream output binding;
+   *  overrides the static value at that path. */
+  argumentBindings?: Record<string, ArgBinding>;
+  /** When true, a non-empty GraphQL `errors` array fails the node (non-retryable) instead of being
+   *  returned for the graph to branch on. Default false. */
+  failOnErrors?: boolean;
+  /** Abort the request after this many ms (default applied in the activity). */
+  timeoutMs?: number;
+  /** Flat per-call cost metered into the run budget (Arch§4.6) — operator-configured. */
+  costUsd?: number;
 }
 
 /**

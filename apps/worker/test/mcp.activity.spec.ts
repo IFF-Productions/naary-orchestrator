@@ -13,13 +13,16 @@ const CFG = { connectionId: "conn-1", tool: "createIssue" };
 
 const resolveMcpTarget = vi.fn();
 const mcpCall = vi.fn();
+const secretMock = vi.fn();
 let store: MemoryObjectStore;
 
 beforeEach(() => {
   resolveMcpTarget.mockReset();
   mcpCall.mockReset();
+  secretMock.mockReset().mockResolvedValue(null); // no secret unless a test sets one
   __mcpDeps.resolveMcpTarget = resolveMcpTarget as never;
   __mcpDeps.callMcpTool = mcpCall as never;
+  __mcpDeps.getSecret = secretMock as never;
   store = new MemoryObjectStore();
   __setObjectStore(store);
 });
@@ -98,5 +101,65 @@ describe("callMcpTool activity", () => {
     resolveMcpTarget.mockResolvedValue({ serverUrl: "u", headers: {} });
     mcpCall.mockRejectedValue(new Error("network blip"));
     await expect(callMcpTool(CFG, {}, META)).rejects.toThrow("network blip");
+  });
+});
+
+describe("callMcpTool — $secrets in tool arguments (in-activity, Tier-1 §4)", () => {
+  const SECRET = "sk-tool-secret";
+
+  it("resolves `{{ $secrets.NAME }}` nested in arguments; the value is in the CALL, not the result", async () => {
+    secretMock.mockResolvedValue(SECRET);
+    resolveMcpTarget.mockResolvedValue({
+      serverUrl: "https://mcp/x",
+      headers: {},
+    });
+    mcpCall.mockResolvedValue({
+      content: [{ type: "text", text: "ok" }],
+      isError: false,
+    });
+
+    const result = await callMcpTool(
+      {
+        connectionId: "conn-1",
+        tool: "search",
+        arguments: { auth: { apiKey: "{{ $secrets.SEARCH_KEY }}" }, q: "cats" },
+      },
+      {},
+      { ...META, environmentId: "env-prod" },
+    );
+
+    // Fetched by NAME for the run's env, and inlined into the arguments SENT to the tool…
+    expect(secretMock).toHaveBeenCalledWith("t1", "env-prod", "SEARCH_KEY");
+    expect(mcpCall.mock.calls[0][0].arguments).toEqual({
+      auth: { apiKey: SECRET },
+      q: "cats",
+    });
+    // …but the plaintext never rides back in the result (which enters Temporal history).
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+    expect(JSON.stringify(result)).not.toContain("$secrets");
+  });
+
+  it("a missing secret is a non-retryable failure naming the NAME (no tool call)", async () => {
+    secretMock.mockResolvedValue(null);
+    resolveMcpTarget.mockResolvedValue({
+      serverUrl: "https://mcp/x",
+      headers: {},
+    });
+
+    await expect(
+      callMcpTool(
+        {
+          connectionId: "conn-1",
+          tool: "search",
+          arguments: { key: "{{ $secrets.NOPE }}" },
+        },
+        {},
+        { ...META, environmentId: "env-prod" },
+      ),
+    ).rejects.toMatchObject({
+      nonRetryable: true,
+      message: expect.stringContaining("NOPE"),
+    });
+    expect(mcpCall).not.toHaveBeenCalled();
   });
 });

@@ -73,6 +73,7 @@ export interface NodeOutputMap {
     headers: Record<string, string>;
     body: unknown;
   };
+  graphQL: { data: unknown; errors: unknown; httpStatus: number };
   sqlQuery: { rows: unknown; rowCount: number };
   sqlExec: { rowsAffected: number };
   sendEmail: { messageId: string };
