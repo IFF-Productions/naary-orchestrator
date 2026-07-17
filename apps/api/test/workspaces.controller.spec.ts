@@ -9,12 +9,14 @@ const listForUser = vi.fn();
 const ensureMembership = vi.fn();
 const createWorkspace = vi.fn();
 const workspaceNames = vi.fn();
+const seedWorkspaceName = vi.fn();
 function makeController(): WorkspacesController {
   return new WorkspacesController({
     listForUser,
     ensureMembership,
     createWorkspace,
     workspaceNames,
+    seedWorkspaceName,
   } as unknown as MembershipService);
 }
 
@@ -25,6 +27,7 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ tenantId: "ws-new", role: "owner" });
   workspaceNames.mockReset().mockResolvedValue(new Map());
+  seedWorkspaceName.mockReset().mockResolvedValue(undefined);
 });
 
 describe("WorkspacesController", () => {
@@ -70,6 +73,74 @@ describe("WorkspacesController", () => {
       { tenantId: "t1", role: "owner", name: "Acme Inc" },
       { tenantId: "t2", role: "member", name: undefined },
     ]);
+  });
+
+  describe("personal default name for unnamed legacy tenants", () => {
+    it('seeds "<user name>\'s workspace" for an unnamed legacy tenant the caller owns', async () => {
+      listForUser.mockResolvedValue([{ tenantId: "t-demo", role: "owner" }]);
+      const res = await makeController().list({
+        tenantId: "t-demo",
+        subject: "user-9",
+        name: "Hassan",
+        email: "hassan@acme.com",
+      });
+      expect(seedWorkspaceName).toHaveBeenCalledWith(
+        "t-demo",
+        "Hassan's workspace",
+      );
+      expect(res).toEqual([
+        { tenantId: "t-demo", role: "owner", name: "Hassan's workspace" },
+      ]);
+    });
+
+    it("falls back to the email local-part when the user has no display name", async () => {
+      listForUser.mockResolvedValue([{ tenantId: "t-demo", role: "owner" }]);
+      const res = await makeController().list({
+        tenantId: "t-demo",
+        subject: "user-9",
+        email: "tarazena@gmail.com",
+      });
+      expect(seedWorkspaceName).toHaveBeenCalledWith(
+        "t-demo",
+        "tarazena's workspace",
+      );
+      expect(res[0].name).toBe("tarazena's workspace");
+    });
+
+    it("never overwrites a name the user already set", async () => {
+      listForUser.mockResolvedValue([{ tenantId: "t-demo", role: "owner" }]);
+      workspaceNames.mockResolvedValue(new Map([["t-demo", "Acme Inc"]]));
+      const res = await makeController().list({
+        tenantId: "t-demo",
+        subject: "user-9",
+        name: "Hassan",
+      });
+      expect(seedWorkspaceName).not.toHaveBeenCalled();
+      expect(res[0].name).toBe("Acme Inc");
+    });
+
+    it("skips server-minted ws-* workspaces and ones the caller doesn't own", async () => {
+      listForUser.mockResolvedValue([
+        { tenantId: "ws-abc123", role: "owner" },
+        { tenantId: "t-other", role: "member" },
+      ]);
+      await makeController().list({
+        tenantId: "ws-abc123",
+        subject: "user-9",
+        name: "Hassan",
+      });
+      expect(seedWorkspaceName).not.toHaveBeenCalled();
+    });
+
+    it("does nothing when the principal has no name or email to derive from", async () => {
+      listForUser.mockResolvedValue([{ tenantId: "t-demo", role: "owner" }]);
+      const res = await makeController().list({
+        tenantId: "t-demo",
+        subject: "user-9",
+      });
+      expect(seedWorkspaceName).not.toHaveBeenCalled();
+      expect(res[0].name).toBeUndefined();
+    });
   });
 
   it("synthesizes the single workspace for an API-token principal (no subject, no persist)", async () => {

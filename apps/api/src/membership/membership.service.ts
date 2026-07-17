@@ -80,6 +80,30 @@ export class MembershipService {
   }
 
   /**
+   * Fill in a workspace's display name ONLY if it doesn't have one yet — never overwrites
+   * a name the user set in Settings. Used to lazily seed a personal default (e.g.
+   * "Hassan's workspace") for legacy claim-provisioned tenants that would otherwise show
+   * their raw id in the switcher. Idempotent and race-tolerant: concurrent first-login
+   * requests seed the same value.
+   */
+  async seedWorkspaceName(tenantId: string, name: string): Promise<void> {
+    const displayName = name.trim();
+    if (!displayName) return;
+    const prisma = getPrisma();
+    // Create the settings row if absent (update: {} keeps an existing name untouched)…
+    await prisma.tenantSettings.upsert({
+      where: { tenantId },
+      create: { tenantId, displayName },
+      update: {},
+    });
+    // …and fill the name on a pre-existing row that has none (null/empty).
+    await prisma.tenantSettings.updateMany({
+      where: { tenantId, OR: [{ displayName: null }, { displayName: "" }] },
+      data: { displayName },
+    });
+  }
+
+  /**
    * Map tenantId → workspace display name (TenantSettings.displayName) for the given ids.
    * Only ids with a non-empty name appear in the result. Used to enrich /me/workspaces so the
    * switcher shows the real name instead of an id-derived stub.

@@ -14,6 +14,8 @@ export interface Principal {
   /** = `userId` for Firebase users; absent for API tokens. Kept for audit/logging. */
   subject?: string;
   email?: string;
+  /** The user's display name (Firebase `name` claim), if the provider supplies one. */
+  name?: string;
   /** Firebase `email_verified` — gates workspace creation (design Path A). Absent for
    *  API-token principals. */
   emailVerified?: boolean;
