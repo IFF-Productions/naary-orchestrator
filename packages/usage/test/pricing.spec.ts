@@ -119,4 +119,15 @@ describe("computeCost", () => {
       }),
     ).toThrow(UnknownModelPricingError);
   });
+
+  it("prices the claude-code provider identically to anthropic (codeAgent regression)", () => {
+    // Since #296 codeAgent bills under its own `claude-code` credential slot; a missing
+    // pricing key here made EVERY codeAgent run die in recordUsage after the CLI succeeded.
+    const tokens = { inputTokens: 100_000, outputTokens: 50_000 };
+    for (const model of ["claude-opus-4-8", "claude-haiku-4-5"]) {
+      expect(computeCost({ provider: "claude-code", model, ...tokens })).toBe(
+        computeCost({ provider: "anthropic", model, ...tokens }),
+      );
+    }
+  });
 });

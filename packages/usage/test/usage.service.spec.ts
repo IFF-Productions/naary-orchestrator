@@ -112,6 +112,24 @@ describe("recordUsage", () => {
     expect(data.reasoningTokens).toBe(0);
   });
 
+  it("FAIL-SAFE: still ledgers tokens (cost 0) for an unpriced provider/model instead of throwing", async () => {
+    // Tier-1 §6: a missing pricing row must not fail the run after the model call
+    // succeeded — that would kill the node AND leave the paid call unrecorded.
+    // (This is exactly how every codeAgent run died when `claude-code` had no pricing key.)
+    await recordUsage({
+      tenantId: "t1",
+      executionId: "exec-1",
+      nodeId: "codeAgent",
+      provider: "no-such-provider",
+      model: "mystery-model",
+      usage: { inputTokens: 1000, outputTokens: 500 },
+    });
+    expect(upsert).toHaveBeenCalledOnce();
+    const data = upsert.mock.calls[0][0].create;
+    expect(data.inputTokens).toBe(1000); // tokens ledgered regardless
+    expect(String(data.costUsd)).toBe("0.000000"); // unpriced → auditable zero cost
+  });
+
   it("never records zero for a real call (fallback estimate is non-zero)", async () => {
     await recordUsage({
       tenantId: "t1",
