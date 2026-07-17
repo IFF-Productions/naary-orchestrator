@@ -37,7 +37,14 @@ services:
   temporal:
     profiles: ["local-temporal-disabled"]
 
+  # api/worker/web are ROLLED on deploy (docker rollout: scale to 2 → wait for the new
+  # container's healthcheck → stop the old). That requires NO fixed container_name (a
+  # pinned name can't scale to 2) and NO published host ports (two replicas can't share
+  # a bind) — hence `container_name: !reset null` on all three. Traffic keeps flowing
+  # during the overlap because nothing addresses these by container name: cloudflared
+  # dials web:80 and web's nginx re-resolves api:3000 per request (see apps/web/nginx.conf).
   api:
+    container_name: !reset null
     ports: !override [] # reached internally as api:3000 (via web's nginx proxy)
     environment:
       # The browser origin the SPA is served from — used for CORS on the control plane.
@@ -50,12 +57,18 @@ services:
         condition: service_completed_successfully
 
   worker:
+    container_name: !reset null
+    # Close the base file's published 9091 (metrics). Nothing scrapes it over the network
+    # in prod (Sentry gets the metrics), and "every published port is closed" (header
+    # point 1) should actually include this one — it was the lone hole.
+    ports: !override []
     # Drop the local-temporal dependency (Temporal is Cloud); wait only for migrations.
     depends_on: !override
       migrate:
         condition: service_completed_successfully
 
   web:
+    container_name: !reset null
     ports: !override [] # cloudflared forwards to web:80 inside the compose network
 
   # Cloudflare Tunnel: outbound-only connection to the edge. No inbound ports, free TLS,
