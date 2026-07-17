@@ -1,18 +1,17 @@
 #cloud-config
 # First-boot provisioning for the naary Hetzner server (rendered by hetzner.tf).
-# Installs Docker (with the compose v2 plugin — >= 2.24, needed for the overlay's
-# !override), stages the .env, and — when repo_url + Temporal Cloud creds were given —
-# clones the repo and brings the prod stack up.
+# Installs Docker (with the compose v2 plugin — >= 2.24, needed for the overlays'
+# !override/!reset) and stages the generated .env. That's ALL a box needs: the app
+# arrives as prebuilt GHCR images via the Deploy workflow, which ships the compose
+# files over SSH and `docker compose pull && up`s. No repo, no source, no git on the box.
 
 package_update: true
 packages:
-  - git
   - ca-certificates
   - curl
 
 write_files:
-  # Staged OUTSIDE the repo dir so `git clone` finds an empty target; moved in below.
-  - path: /opt/naary.env
+  - path: /opt/naary/.env
     permissions: "0600"
     content: |
       ${indent(6, env_file)}
@@ -20,15 +19,4 @@ write_files:
 runcmd:
   - curl -fsSL https://get.docker.com | sh
   - systemctl enable --now docker
-%{ if repo_url != "" ~}
-  - git clone '${repo_url}' /opt/naary
-  - mv /opt/naary.env /opt/naary/.env
-  - chmod 600 /opt/naary/.env
-%{ if auto_up ~}
-  - cd /opt/naary && docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml -f deploy/docker-compose.neon.yml up -d --build
-%{ else ~}
-  - echo "naary — repo cloned to /opt/naary; fill TEMPORAL_* in /opt/naary/.env, then run docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml -f deploy/docker-compose.neon.yml up -d --build" > /etc/motd
-%{ endif ~}
-%{ else ~}
-  - echo "naary — Docker is ready. Clone the repo to /opt/naary, mv /opt/naary.env /opt/naary/.env, fill TEMPORAL_*, then run docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml -f deploy/docker-compose.neon.yml up -d --build" > /etc/motd
-%{ endif ~}
+  - echo "naary — Docker ready, .env staged at /opt/naary/.env. Deploy from GitHub Actions (Actions -> Release, or Deploy with a tag); it ships the compose files and pulls the GHCR images." > /etc/motd

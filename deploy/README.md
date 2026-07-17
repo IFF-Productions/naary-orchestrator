@@ -25,6 +25,7 @@ Browser ──HTTPS──▶ Cloudflare edge (TLS · DDoS · DNS)
 | `terraform/` | Cloudflare tunnel + ingress + DNS record, **plus** (Variant B) the Hetzner server (`hetzner.tf` + `cloud-init.yaml.tftpl`) and Neon Postgres (`neon.tf`). |
 | `docker-compose.prod.yml` | Overlay on the repo's base compose: closes all ports, adds `cloudflared`. |
 | `docker-compose.neon.yml` | Second overlay (Variant B): DB = Neon; gates the local postgres off, splits pooled vs direct URLs. |
+| `docker-compose.ghcr.yml` | Third overlay (Variant B): run prebuilt `ghcr.io/…:${APP_VERSION}` images; `!reset`s all on-box builds. |
 | `.env.prod.example` | Template for the server `.env` (copy to repo-root `.env`). Variant B generates this via Terraform instead. |
 | `backup.sh` | Nightly `pg_dump` + Temporal DB → local (+ optional rclone off-box). **Not needed on Variant B** — Neon has PITR and Temporal is Cloud. |
 | `../.github/workflows/deploy.yml` | CD: after CI passes on `main`, SSH-deploys to the Hetzner box. |
@@ -137,13 +138,15 @@ Same architecture (tunnel in front, no inbound web ports), but Terraform provisi
 **everything**: the Cloudflare tunnel, a **Hetzner VPS** (default `cx33`, 4 vCPU / 8 GB,
 ~€7/mo, Nuremberg) and a **Neon** project (managed serverless Postgres, pgvector
 included — so the RAG migrations run unchanged). The app DB and durable execution both
-live off-box (Neon + Temporal Cloud), so the server is disposable.
+live off-box (Neon + Temporal Cloud), and the app itself arrives as **prebuilt images
+from GHCR** — the box never sees source code, git, or a build. It holds exactly two
+things: `/opt/naary/.env` and the compose files (re-shipped on every deploy).
 
 ```
 Browser ──HTTPS──▶ Cloudflare edge ──tunnel──▶ Hetzner VPS (compose: cloudflared·web·api·worker·migrate)
-                                                   │                        │
-GitHub Actions ──SSH (deploy key)──────────────────┘              Neon (Postgres+pgvector)
-                                                                  Temporal Cloud (durable exec)
+                                                   │  ▲                     │
+GitHub Actions ── build+push ─▶ GHCR ── pull ──────┘  │           Neon (Postgres+pgvector)
+       └───────── SSH (deploy key): compose files ────┘           Temporal Cloud (durable exec)
 ```
 
 ### Provision (once, on your laptop)
@@ -155,9 +158,9 @@ GitHub Actions ──SSH (deploy key)──────────────�
    - `ssh_public_key` — your personal key (admin access).
    - `deploy_ssh_public_key` — a **dedicated** CI keypair: `ssh-keygen -t ed25519 -f deploy_key -N ""`.
      Set it **before the first apply** (hcloud injects keys at create time only).
-   - Optional but recommended for hands-off boot: `repo_url` (embed a read-only
-     fine-grained PAT for a private repo) + the three `temporal_*` values (create the
-     Temporal Cloud namespace + API key first).
+   - Recommended: the three `temporal_*` values (create the Temporal Cloud namespace +
+     API key first), so the generated `.env` is complete. No repo access/PAT is needed —
+     the box pulls prebuilt images.
 
 2. Apply and grab outputs:
    ```bash
@@ -167,18 +170,21 @@ GitHub Actions ──SSH (deploy key)──────────────�
    terraform output -raw server_env    # the generated server .env — SAVE ENCRYPTION_KEY in a password manager
    ```
 
-3. First boot: cloud-init installs Docker, writes `/opt/naary/.env`, and — if `repo_url`
-   + `temporal_address` were set — clones the repo and starts the stack itself (first
-   build ~5–10 min). Otherwise SSH in (`terraform output ssh_command`) and follow
-   `/etc/motd`. Watch with `cloud-init status --wait`, then `docker compose ps`.
+3. First boot: cloud-init installs Docker and writes `/opt/naary/.env` — that's all.
+   The first *deploy* comes from GitHub Actions (next section). Watch the boot with
+   `cloud-init status --wait` if you're curious.
 
-The compose invocation for this variant layers **both** overlays (order matters):
+The compose invocation layers **three** overlays (order matters; the Deploy workflow
+runs this for you — shown here for manual ops/debugging on the box):
 ```bash
-docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml -f deploy/docker-compose.neon.yml up -d --build
+APP_VERSION=v0.0.1 docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml \
+  -f deploy/docker-compose.neon.yml -f deploy/docker-compose.ghcr.yml up -d --no-build
 ```
 `DATABASE_URL` (api/worker) uses Neon's **pooled** endpoint with `pgbouncer=true`;
 `MIGRATE_DATABASE_URL` (the `migrate` one-shot) uses the **direct** endpoint — Prisma
-migrations need a real session (advisory locks + DDL), not PgBouncer.
+migrations need a real session (advisory locks + DDL), not PgBouncer. The `ghcr` overlay
+swaps every `build:` for `image: ghcr.io/…:${APP_VERSION}` (and `!reset`s the build
+config so nothing can rebuild on the box).
 
 ### Releases & CD (GitHub Actions)
 
@@ -188,15 +194,30 @@ Deploys are **release-driven**, semver-tagged (`v0.0.1`):
    `release.yml` bumps **every** workspace `package.json` (root + `apps/*` + `packages/*`)
    to that version, commits `chore(release): v0.0.1` to `main`, tags it, publishes a
    GitHub Release with generated notes — then chains straight into the deploy.
-2. **Deploy** (`deploy.yml`): SSH → check out the tag (detached) → `compose up -d --build`
-   with `VITE_APP_VERSION=<tag>` baked into the SPA → wait for the api healthcheck
-   (fails the run, with logs, if it never goes healthy).
-3. **Rollback / redeploy:** run *Deploy* manually with any older tag as the ref.
+2. **Build** (`deploy.yml`, build job): builds `ghcr.io/<owner>/naary-backend:<tag>` and
+   `…/naary-web:<tag>` in CI (gha layer cache) and pushes to GHCR — **unless both tags
+   already exist**, so re-runs/rollbacks reuse the exact original artifact. The web
+   image bakes `VITE_*` from repo **variables** and `VITE_APP_VERSION=<tag>`.
+3. **Deploy** (`deploy.yml`, deploy job): `scp`s the compose files, logs the box into
+   GHCR with the run's **ephemeral** `GITHUB_TOKEN` (nothing long-lived on the server),
+   `compose pull` + `up -d --no-build` → wait for the api healthcheck (fails the run,
+   with logs, if it never goes healthy) → `docker logout`.
+4. **Rollback / redeploy:** run *Deploy* manually with any older tag as the ref — it
+   pulls the existing images for that tag, byte-identical to what ran before.
    Releases created by hand in the GitHub UI also trigger a deploy (`release: published`).
 
 Set two repo secrets (*Settings → Secrets and variables → Actions*):
 - `DEPLOY_SSH_KEY` — the **private** half of the deploy keypair (`deploy_key`).
 - `DEPLOY_HOST` — `terraform output -raw server_ipv4`.
+
+And, if you use Firebase login / browser Sentry, set repo **variables** (same page,
+*Variables* tab — they're publishable client-side values, inlined into the web bundle
+at image build): `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`,
+`VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`,
+`VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`, `VITE_SENTRY_DSN`,
+`VITE_SENTRY_TRACES_SAMPLE_RATE`. Unset ⇒ those features are simply off, as before.
+(The server `.env` copies of `VITE_*` are ignored in this variant — the web image is
+already built when it reaches the box.)
 
 It deploys via a GitHub-**hosted** runner (prod credentials stay off the shared
 self-hosted CI runner), so `ssh_allowed_cidrs` must keep port 22 reachable from GitHub
@@ -217,8 +238,16 @@ each deploy, add a *required reviewers* rule to the auto-created `production` en
   `ENCRYPTION_KEY` separately; losing it invalidates stored tenant credentials.
 - **Neon autosuspend:** the default scale-to-zero adds a ~½s cold start after idle
   periods. Fine to start; raise the suspend timeout in Neon if it bothers you.
+- **Box provisioned before the GHCR switch?** It may still carry a git checkout in
+  `/opt/naary` (with a PAT in `.git/config`). The GHCR deploy works right over it, but
+  clean up: revoke that PAT, then keep only the env file —
+  `find /opt/naary -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +`
+  (the deploy re-ships the compose files every run).
+- **GHCR visibility:** the first push creates both packages **private** and linked to
+  the repo, which is what lets the workflow's `GITHUB_TOKEN` pull them — no action needed.
 - **Costs:** Hetzner `cx33` ~€7/mo · Neon free tier (or Launch $19/mo) · Temporal Cloud
-  (usage-based) · Cloudflare free.
+  (usage-based) · Cloudflare free · GHCR free for private packages within GitHub's
+  storage quota.
 
 ---
 

@@ -1,0 +1,31 @@
+# GHCR overlay: run PREBUILT images from GitHub Container Registry instead of building
+# on the box. CI (.github/workflows/deploy.yml) builds + pushes both images per release
+# tag; the server only ever pulls. Layer it LAST:
+#
+#   APP_VERSION=v0.0.1 docker compose \
+#     -f docker-compose.yml -f deploy/docker-compose.prod.yml \
+#     -f deploy/docker-compose.neon.yml -f deploy/docker-compose.ghcr.yml \
+#     pull && ... up -d --no-build
+#
+# APP_VERSION is the image tag (the release tag). `build: !reset null` REMOVES the base
+# file's build config (compose >= 2.24, same requirement as the prod overlay's !override),
+# so nothing can accidentally rebuild on the box. The VITE_* build args in the base file
+# become inert here — for GHCR builds they are supplied by CI from GitHub Actions
+# repository VARIABLES (they're baked into the web bundle at image-build time).
+
+services:
+  migrate:
+    image: ${IMAGE_BASE:-ghcr.io/tarazena}/naary-backend:${APP_VERSION:?set APP_VERSION to the release tag (e.g. v0.0.1)}
+    build: !reset null
+
+  api:
+    image: ${IMAGE_BASE:-ghcr.io/tarazena}/naary-backend:${APP_VERSION:?set APP_VERSION to the release tag (e.g. v0.0.1)}
+    build: !reset null
+
+  worker:
+    image: ${IMAGE_BASE:-ghcr.io/tarazena}/naary-backend:${APP_VERSION:?set APP_VERSION to the release tag (e.g. v0.0.1)}
+    build: !reset null
+
+  web:
+    image: ${IMAGE_BASE:-ghcr.io/tarazena}/naary-web:${APP_VERSION:?set APP_VERSION to the release tag (e.g. v0.0.1)}
+    build: !reset null

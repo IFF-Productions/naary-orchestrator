@@ -18,10 +18,10 @@ ssh_public_key = "ssh-ed25519 AAAA... you@laptop"     # contents of ~/.ssh/id_ed
 neon_api_key = "your-neon-api-key"                    # console → Account settings → API keys
 # neon_region = "aws-eu-central-1"
 
-# ── Optional: full hands-off first boot ────────────────────────────────────────────────
-# With all four set, cloud-init clones the repo and starts the stack by itself.
-# Private repo: embed a fine-grained PAT with read-only Contents access.
-# repo_url           = "https://<PAT>@github.com/<owner>/naary-orchestrator.git"
+# ── Temporal Cloud (recommended: set now so the generated .env is complete) ────────────
+# Empty ⇒ cloud-init still stages /opt/naary/.env; fill these in on the server before
+# the first deploy. The app itself arrives via GitHub Actions (GHCR images) — no repo
+# access or PAT is needed on the box.
 # temporal_address   = "eu-central-1.aws.api.temporal.io:7233"
 # temporal_namespace = "naary.abc12"
 # temporal_api_key   = "tmprl_..."

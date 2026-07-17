@@ -43,16 +43,6 @@ locals {
     TEMPORAL_NAMESPACE=${var.temporal_namespace}
     TEMPORAL_API_KEY=${var.temporal_api_key}
   EOT
-
-  # Only auto-start the stack when cloud-init has everything it needs — all three
-  # Temporal Cloud values, not just the address; a partial set (address without
-  # namespace/API key) would auto-start api/worker into a connection crash-loop.
-  auto_up = alltrue([
-    var.repo_url != "",
-    var.temporal_address != "",
-    var.temporal_namespace != "",
-    var.temporal_api_key != "",
-  ])
 }
 
 resource "hcloud_ssh_key" "naary" {
@@ -99,8 +89,6 @@ resource "hcloud_server" "naary" {
 
   user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", {
     env_file = local.server_env
-    repo_url = var.repo_url
-    auto_up  = local.auto_up
   })
 
   labels = {
@@ -108,10 +96,13 @@ resource "hcloud_server" "naary" {
     managed_by = "terraform"
   }
 
-  # cloud-init only runs on first boot; a changed template must recreate the server.
-  # The DB is on Neon and execution state in Temporal Cloud, so the box holds no
-  # irreplaceable data — but replacement still means a few minutes of downtime.
+  # cloud-init runs on FIRST BOOT only, but user_data is a create-time attribute — a
+  # changed template would otherwise force the server to be REPLACED. Ignore it so
+  # template evolution never destroys a live box (new boxes always get the latest;
+  # to force-apply a template change to an existing one: terraform taint, or update
+  # the box by hand — it only stages Docker + /opt/naary/.env anyway).
   lifecycle {
     create_before_destroy = false
+    ignore_changes        = [user_data]
   }
 }
