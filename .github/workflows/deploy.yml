@@ -83,23 +83,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      # Rollbacks and re-runs must deploy the EXISTING artifact, never a rebuild.
-      - name: Check whether both images already exist for this tag
+      # Rollbacks and re-runs must deploy the EXISTING artifact, never a rebuild —
+      # checked PER IMAGE, so a partially-pushed tag (e.g. backend made it, web didn't)
+      # only builds the missing one and never overwrites the one that exists.
+      - name: Check which images already exist for this tag
         id: exists
         run: |
-          if docker manifest inspect "$IMAGE_BASE/naary-backend:$DEPLOY_REF" >/dev/null 2>&1 \
-          && docker manifest inspect "$IMAGE_BASE/naary-web:$DEPLOY_REF" >/dev/null 2>&1; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Images for $DEPLOY_REF already in GHCR — skipping build (rollback/re-run)."
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
+          for img in backend web; do
+            if docker manifest inspect "$IMAGE_BASE/naary-$img:$DEPLOY_REF" >/dev/null 2>&1; then
+              echo "$img=true" >> "$GITHUB_OUTPUT"
+              echo "naary-$img:$DEPLOY_REF already in GHCR — will not rebuild/overwrite it."
+            else
+              echo "$img=false" >> "$GITHUB_OUTPUT"
+            fi
+          done
 
       - uses: docker/setup-buildx-action@v3
-        if: steps.exists.outputs.skip != 'true'
+        if: steps.exists.outputs.backend != 'true' || steps.exists.outputs.web != 'true'
 
       - name: Build + push backend image (api / worker / migrate)
-        if: steps.exists.outputs.skip != 'true'
+        if: steps.exists.outputs.backend != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -113,7 +116,7 @@ jobs:
       # VARIABLES here (publishable client-side config, not secrets) instead of the
       # server .env. VITE_APP_VERSION is stamped with the release tag.
       - name: Build + push web image (SPA + nginx)
-        if: steps.exists.outputs.skip != 'true'
+        if: steps.exists.outputs.web != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -172,8 +175,11 @@ jobs:
           if [ -f /opt/naary.env ] && [ ! -f /opt/naary/.env ]; then
             mv /opt/naary.env /opt/naary/.env && chmod 600 /opt/naary/.env
           fi
-          # Ephemeral packages:read token — expires with the workflow run; logout below.
+          # Ephemeral packages:read token — expires with the workflow run anyway, but
+          # don't leave it in the box's docker config even that long: logout on ANY
+          # exit (set -e would otherwise skip a trailing logout on pull/up failure).
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
           COMPOSE="docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml -f deploy/docker-compose.neon.yml -f deploy/docker-compose.ghcr.yml"
           export APP_VERSION="$DEPLOY_REF" IMAGE_BASE
           $COMPOSE pull
@@ -188,10 +194,8 @@ jobs:
           if [ "$status" != healthy ]; then
             echo "api never became healthy (status: $status)"
             $COMPOSE logs --tail=100 api migrate
-            docker logout ghcr.io
             exit 1
           fi
           docker image prune -f >/dev/null
-          docker logout ghcr.io
           echo "Deployed $DEPLOY_REF — api healthy."
           REMOTE
