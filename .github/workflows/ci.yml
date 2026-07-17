@@ -49,10 +49,12 @@ jobs:
           version: 11.9.0
           dest: ${{ runner.temp }}/setup-pnpm
 
+      # No `cache: pnpm` — on the self-hosted runner the pnpm store persists on the
+      # VM's disk, so the Actions cache upload (~287MB per branch) is redundant and
+      # was the main consumer of the repo's 10GB Actions cache quota.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
