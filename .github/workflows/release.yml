@@ -1,18 +1,24 @@
 name: Release
 
-# Cut a release from main: bump every workspace package.json to the given semver,
-# commit + tag vX.Y.Z, publish a GitHub Release, then deploy that tag (chained call —
-# see the note in deploy.yml about why the `release` event can't do the chaining).
+# Cut a release from main: pick patch/minor/major, bump every workspace package.json
+# to the next semver, commit + tag vX.Y.Z, publish a GitHub Release, then deploy that
+# tag (chained call — see the note in deploy.yml about why the `release` event can't
+# do the chaining).
 #
-# Usage: Actions → Release → Run workflow → version = 0.0.1 (or v0.0.1).
+# Usage: Actions → Release → Run workflow → bump = patch | minor | major.
 
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: Semver to release, e.g. 0.0.1 or v0.0.1
-        type: string
+      bump:
+        description: Version bump
+        type: choice
         required: true
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
 
 concurrency:
   group: release
@@ -31,20 +37,42 @@ jobs:
         with:
           ref: main
 
-      - name: Validate + normalize version
+      # Base the bump on the LATEST v* TAG, not package.json — tags are the record of
+      # what was actually released, and the two can drift (v0.0.3 was tagged without a
+      # bump commit, leaving package.json at 0.0.2; bumping from package.json would then
+      # try to re-mint an existing tag). Fall back to package.json only when no release
+      # tag exists yet. checkout is shallow and tagless, so read tags from the remote.
+      - name: Compute next version
         id: version
         env:
-          RAW: ${{ inputs.version }}
+          BUMP: ${{ inputs.bump }}
         run: |
-          VERSION="${RAW#v}"
-          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
-            echo "::error::'$RAW' is not semver (expected e.g. 0.0.1 or v0.0.1)"
+          BASE=$(git ls-remote --tags origin 'refs/tags/v[0-9]*' \
+            | awk -F'refs/tags/' '{print $2}' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V | tail -n1)
+          BASE="${BASE#v}"
+          if [ -z "$BASE" ]; then
+            BASE=$(node -p "require('./package.json').version")
+          fi
+          if ! printf '%s' "$BASE" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::base version '$BASE' is not plain X.Y.Z"
             exit 1
           fi
-          if git ls-remote --exit-code --tags origin "v$VERSION" >/dev/null 2>&1; then
+          IFS=. read -r MAJ MIN PAT <<EOF
+          $BASE
+          EOF
+          case "$BUMP" in
+            major) VERSION="$((MAJ + 1)).0.0" ;;
+            minor) VERSION="$MAJ.$((MIN + 1)).0" ;;
+            patch) VERSION="$MAJ.$MIN.$((PAT + 1))" ;;
+            *) echo "::error::unknown bump type '$BUMP'"; exit 1 ;;
+          esac
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
             echo "::error::tag v$VERSION already exists"
             exit 1
           fi
+          echo "Releasing: $BASE --($BUMP)--> $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
