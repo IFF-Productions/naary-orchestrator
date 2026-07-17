@@ -19,3 +19,4 @@ _design-reference/
 
 # Bind-mounted DB / Temporal data (self-host deploy)
 /data/
+deploy_key*

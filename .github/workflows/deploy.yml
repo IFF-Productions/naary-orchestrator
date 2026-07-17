@@ -12,6 +12,11 @@ name: Deploy
 #   DEPLOY_SSH_KEY  — private half of the dedicated deploy keypair
 #                     (public half = deploy_ssh_public_key in deploy/terraform).
 #   DEPLOY_HOST     — the server's IPv4 (terraform output -raw server_ipv4).
+#   DEPLOY_REPO_URL — git URL to clone on FIRST deploy if /opt/naary doesn't exist yet
+#                     (same value as terraform's repo_url — a PAT-embedded HTTPS URL for a
+#                     private repo). Makes the deploy self-bootstrapping when cloud-init was
+#                     run without repo_url; after the first clone the token lives in
+#                     /opt/naary/.git/config and later deploys just `git fetch`.
 #
 # Runs on a GITHUB-HOSTED runner (unlike ci.yml/e2e.yml): it only needs SSH egress,
 # and keeping prod credentials off the shared self-hosted runner is the safer split.
@@ -62,12 +67,27 @@ jobs:
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          REPO_URL: ${{ secrets.DEPLOY_REPO_URL }}
         run: |
           install -d -m 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new "root@$DEPLOY_HOST" "DEPLOY_REF='$DEPLOY_REF' bash -s" <<'REMOTE'
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new "root@$DEPLOY_HOST" "DEPLOY_REF='$DEPLOY_REF' REPO_URL='$REPO_URL' bash -s" <<'REMOTE'
           set -euo pipefail
+          # First deploy on a box cloud-init provisioned WITHOUT repo_url: /opt/naary won't exist
+          # yet. Bootstrap-clone it (and move in the staged /opt/naary.env cloud-init wrote), so the
+          # deploy is self-healing. Subsequent deploys skip this and just fetch.
+          if [ ! -d /opt/naary/.git ]; then
+            if [ -z "${REPO_URL:-}" ]; then
+              echo "::error::/opt/naary is not a git checkout and DEPLOY_REPO_URL secret is unset — cannot bootstrap. Set DEPLOY_REPO_URL (same value as terraform repo_url), or clone the repo to /opt/naary on the server once."
+              exit 1
+            fi
+            git clone "$REPO_URL" /opt/naary
+            if [ -f /opt/naary.env ]; then
+              mv /opt/naary.env /opt/naary/.env
+              chmod 600 /opt/naary/.env
+            fi
+          fi
           cd /opt/naary
           git fetch --tags --force origin
           # Tags deploy detached; a branch name falls back to its origin tip.
