@@ -1,7 +1,13 @@
 import { ApiProperty } from "@nestjs/swagger";
 
-/** One independently-configurable notification channel for a tenant. */
+/** One notification channel row — a tenant can have any number per type. */
 export class NotificationChannelResponse {
+  @ApiProperty({
+    example: "9a8b7c6d-…",
+    description: "Channel id — the handle for update/delete/test.",
+  })
+  id!: string;
+
   @ApiProperty({
     enum: ["slack", "teams"],
     example: "slack",
@@ -9,6 +15,14 @@ export class NotificationChannelResponse {
       "Channel type — determines the payload format + which webhook to use.",
   })
   type!: "slack" | "teams";
+
+  @ApiProperty({
+    nullable: true,
+    example: "#alerts",
+    description:
+      "User-facing name distinguishing same-type channels. Null = unnamed.",
+  })
+  label!: string | null;
 
   @ApiProperty({
     example: true,

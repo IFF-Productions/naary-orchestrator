@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import {
   assertEgressAllowed,
   BlockedEgressError,
@@ -6,19 +10,27 @@ import {
 } from "@naary/connections";
 import { getPrisma } from "@naary/db";
 
-/** Channel types the product ships today. Each is configured + toggled INDEPENDENTLY
- *  (not the old either/or). `email` and others slot in here later without a schema change. */
+/** Channel types the product ships today. A tenant may have ANY NUMBER of channels per
+ *  type (N Slack + N Teams webhooks); `email` and others slot in here later without a
+ *  schema change. */
 export const NOTIFICATION_CHANNEL_TYPES = ["slack", "teams"] as const;
 export type NotificationChannelType =
   (typeof NOTIFICATION_CHANNEL_TYPES)[number];
+
+/** Per-tenant channel cap — plenty for real fan-out, a backstop against abuse (each
+ *  enabled row is an outbound POST per event). */
+export const MAX_CHANNELS_PER_TENANT = 20;
 
 function isChannelType(v: string): v is NotificationChannelType {
   return (NOTIFICATION_CHANNEL_TYPES as readonly string[]).includes(v);
 }
 
-/** One independently-configurable channel for a tenant. */
+/** One notification channel row — addressed by `id` (a tenant can have several per type). */
 export interface NotificationChannelView {
+  id: string;
   type: NotificationChannelType;
+  /** User-facing name distinguishing same-type channels (e.g. "#alerts"). Null = unnamed. */
+  label: string | null;
   /** Off = the worker skips this channel entirely, even with a URL set. */
   enabled: boolean;
   webhookUrl: string | null;
@@ -26,130 +38,150 @@ export interface NotificationChannelView {
   onRunFailed: boolean;
 }
 
-export interface SaveChannelPatch {
+export interface ChannelPatch {
+  label?: string | null;
   enabled?: boolean;
   webhookUrl?: string | null;
   onApprovalPending?: boolean;
   onRunFailed?: boolean;
 }
 
+interface ChannelRow {
+  id: string;
+  type: string;
+  label: string | null;
+  enabled: boolean;
+  webhookUrl: string | null;
+  onApprovalPending: boolean;
+  onRunFailed: boolean;
+}
+
+function toView(row: ChannelRow): NotificationChannelView {
+  return {
+    id: row.id,
+    type: row.type as NotificationChannelType,
+    label: row.label,
+    enabled: row.enabled,
+    webhookUrl: row.webhookUrl,
+    onApprovalPending: row.onApprovalPending,
+    onRunFailed: row.onRunFailed,
+  };
+}
+
+/** Blank strings normalize to null (clears the value). Undefined = leave unchanged. */
+function normalize(v: string | null | undefined): string | null | undefined {
+  return v === undefined ? undefined : v?.trim() || null;
+}
+
 /**
- * Per-tenant notification channels — Slack, Teams (and later email) each configured and toggled
- * on their own, so an alert fans out to every enabled channel rather than one either/or webhook.
- * A channel with no saved row reports its defaults (disabled, no URL, both events on) so the UI
- * can render all known channels uniformly.
+ * Per-tenant notification channels — any number of Slack/Teams webhooks (e.g. #alerts AND
+ * #oncall), each configured and toggled on its own. An alert fans out to EVERY enabled
+ * channel whose event toggle is on. Channels are addressed by row id; `label` tells
+ * same-type channels apart in the UI.
  */
 @Injectable()
 export class NotificationsService {
-  /** Every known channel type for the tenant, saved-or-default, in a stable order. */
+  /** All of the tenant's channels, in a stable order (type, then creation order). */
   async list(tenantId: string): Promise<NotificationChannelView[]> {
     const rows = await getPrisma().notificationChannel.findMany({
       where: { tenantId },
+      orderBy: [{ type: "asc" }, { createdAt: "asc" }, { id: "asc" }],
     });
-    const byType = new Map(rows.map((r) => [r.type, r]));
-    return NOTIFICATION_CHANNEL_TYPES.map((type) => {
-      const row = byType.get(type);
-      return {
-        type,
-        // No row yet → disabled (an unconfigured channel never sends).
-        enabled: row?.enabled ?? false,
-        webhookUrl: row?.webhookUrl ?? null,
-        onApprovalPending: row?.onApprovalPending ?? true,
-        onRunFailed: row?.onRunFailed ?? true,
-      };
-    });
+    return rows.map(toView);
   }
 
-  private async getChannel(
-    tenantId: string,
-    type: NotificationChannelType,
-  ): Promise<NotificationChannelView> {
-    const row = await getPrisma().notificationChannel.findUnique({
-      where: { tenantId_type: { tenantId, type } },
-    });
-    return {
-      type,
-      enabled: row?.enabled ?? false,
-      webhookUrl: row?.webhookUrl ?? null,
-      onApprovalPending: row?.onApprovalPending ?? true,
-      onRunFailed: row?.onRunFailed ?? true,
-    };
-  }
-
-  /** Upsert ONE channel's config (identified by type). Other channels are untouched. */
-  async saveChannel(
+  /** Create a new channel of the given type. Enabled by default — creating one is an
+   *  explicit user action, unlike the old implicit per-type rows. */
+  async createChannel(
     tenantId: string,
     type: string,
-    patch: SaveChannelPatch,
+    patch: ChannelPatch,
   ): Promise<NotificationChannelView> {
     if (!isChannelType(type)) {
       throw new BadRequestException(`Unknown notification channel '${type}'.`);
     }
-    // Normalize a blank URL to null (clears the target).
-    const webhookUrl =
-      patch.webhookUrl === undefined
-        ? undefined
-        : patch.webhookUrl?.trim() || null;
-    const row = await getPrisma().notificationChannel.upsert({
-      where: { tenantId_type: { tenantId, type } },
-      create: {
+    const count = await getPrisma().notificationChannel.count({
+      where: { tenantId },
+    });
+    if (count >= MAX_CHANNELS_PER_TENANT) {
+      throw new BadRequestException(
+        `Channel limit reached (${MAX_CHANNELS_PER_TENANT}). Delete one before adding another.`,
+      );
+    }
+    const row = await getPrisma().notificationChannel.create({
+      data: {
         tenantId,
         type,
-        enabled: patch.enabled ?? false,
-        webhookUrl: webhookUrl ?? null,
+        label: normalize(patch.label) ?? null,
+        enabled: patch.enabled ?? true,
+        webhookUrl: normalize(patch.webhookUrl) ?? null,
         onApprovalPending: patch.onApprovalPending ?? true,
         onRunFailed: patch.onRunFailed ?? true,
       },
-      update: {
+    });
+    return toView(row);
+  }
+
+  /** Update ONE channel by id (tenant-scoped — can't touch another tenant's). 404 if absent. */
+  async updateChannel(
+    tenantId: string,
+    channelId: string,
+    patch: ChannelPatch,
+  ): Promise<NotificationChannelView> {
+    // Tenant-scoped existence check first: `update` alone would key on the global id.
+    const existing = await getPrisma().notificationChannel.findFirst({
+      where: { id: channelId, tenantId },
+      select: { id: true },
+    });
+    if (!existing) {
+      throw new NotFoundException("Unknown notification channel.");
+    }
+    const row = await getPrisma().notificationChannel.update({
+      where: { id: channelId },
+      data: {
+        label: normalize(patch.label),
         enabled: patch.enabled,
-        webhookUrl,
+        webhookUrl: normalize(patch.webhookUrl),
         onApprovalPending: patch.onApprovalPending,
         onRunFailed: patch.onRunFailed,
       },
     });
-    return {
-      type,
-      enabled: row.enabled,
-      webhookUrl: row.webhookUrl,
-      onApprovalPending: row.onApprovalPending,
-      onRunFailed: row.onRunFailed,
-    };
+    return toView(row);
   }
 
-  /** Remove a channel's config entirely (idempotent — deleting an unconfigured channel is a no-op). */
-  async deleteChannel(tenantId: string, type: string): Promise<void> {
-    if (!isChannelType(type)) {
-      throw new BadRequestException(`Unknown notification channel '${type}'.`);
-    }
+  /** Delete ONE channel by id (tenant-scoped; idempotent). */
+  async deleteChannel(tenantId: string, channelId: string): Promise<void> {
     await getPrisma().notificationChannel.deleteMany({
-      where: { tenantId, type },
+      where: { id: channelId, tenantId },
     });
   }
 
   /**
-   * Send a one-off TEST message to ONE channel's webhook so the user can confirm — from their own
-   * Slack/Teams channel — that the URL works and the format renders. Unlike the worker's
+   * Send a one-off TEST message to ONE channel's webhook so the user can confirm — from their
+   * own Slack/Teams channel — that the URL works and the format renders. Unlike the worker's
    * fire-and-forget fan-out, this reports the outcome: it egress-guards the URL (SSRF: https +
    * public only) and surfaces a non-2xx / unreachable webhook as a 400 the UI can show. This is
-   * the real verification path for the Teams integration (a mocked test can't prove Teams accepts
-   * the Adaptive Card).
+   * the real verification path for the Teams integration (a mocked test can't prove Teams
+   * accepts the Adaptive Card).
    */
   async sendTest(
     tenantId: string,
-    type: string,
+    channelId: string,
   ): Promise<{ ok: true; status: number }> {
-    if (!isChannelType(type)) {
-      throw new BadRequestException(`Unknown notification channel '${type}'.`);
+    const row = await getPrisma().notificationChannel.findFirst({
+      where: { id: channelId, tenantId },
+    });
+    if (!row) {
+      throw new NotFoundException("Unknown notification channel.");
     }
-    const channel = await this.getChannel(tenantId, type);
-    if (!channel.webhookUrl) {
+    if (!row.webhookUrl) {
       throw new BadRequestException(
-        `No webhook URL configured for ${type} — save one first.`,
+        `No webhook URL configured for this ${row.type} channel — save one first.`,
       );
     }
     // Fail fast on a private/non-https target before opening a socket.
     try {
-      await assertEgressAllowed(channel.webhookUrl);
+      await assertEgressAllowed(row.webhookUrl);
     } catch (e) {
       if (e instanceof BlockedEgressError) {
         throw new BadRequestException(
@@ -159,12 +191,12 @@ export class NotificationsService {
       throw e;
     }
 
-    const payload = type === "teams" ? teamsTestCard() : slackTestPayload();
+    const payload = row.type === "teams" ? teamsTestCard() : slackTestPayload();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
     let res: { ok: boolean; status: number };
     try {
-      res = (await safeFetch(channel.webhookUrl, {
+      res = (await safeFetch(row.webhookUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
@@ -185,7 +217,9 @@ export class NotificationsService {
     if (!res.ok) {
       throw new BadRequestException(
         `The webhook responded ${res.status}. Check the URL${
-          type === "teams" ? " (for Teams, it must be a Workflows webhook)" : ""
+          row.type === "teams"
+            ? " (for Teams, it must be a Workflows webhook)"
+            : ""
         }.`,
       );
     }

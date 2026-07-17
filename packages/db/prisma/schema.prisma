@@ -521,12 +521,14 @@ model NotificationSettings {
 // toggled INDEPENDENTLY, so a run-failed alert can fan out to several at once rather than the
 // old either/or `NotificationSettings.channel`. The worker reads all `enabled` rows and POSTs
 // each, formatting per `type`. Event routing is per-channel (send failures to Slack, approvals
-// to Teams, …). `@@unique([tenantId, type])` = one config per type for now; `id` is a standalone
-// uuid so that can be relaxed later without a data migration.
+// to Teams, …). A tenant may have ANY NUMBER of channels per type (N Slack + N Teams
+// webhooks — e.g. #alerts and #oncall); each row is addressed by its `id` and the worker
+// fans out to every enabled row. `label` is the user-facing name distinguishing same-type rows.
 model NotificationChannel {
   id                String   @id @default(uuid())
   tenantId          String
   type              String // "slack" | "teams" | (future: "email")
+  label             String? // user-facing name (e.g. "#alerts"); null = unnamed
   enabled           Boolean  @default(true)
   webhookUrl        String? // POST target for slack/teams; null for channels that don't use one
   // Channel-specific settings a URL can't hold (e.g. email recipients). Null + unused for
@@ -534,9 +536,9 @@ model NotificationChannel {
   config            Json?
   onApprovalPending Boolean  @default(true)
   onRunFailed       Boolean  @default(true)
+  createdAt         DateTime @default(now()) // stable list/fan-out order among same-type rows
   updatedAt         DateTime @default(now()) @updatedAt
 
-  @@unique([tenantId, type])
   @@index([tenantId])
 }
 

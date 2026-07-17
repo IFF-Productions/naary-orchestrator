@@ -11,9 +11,8 @@ import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import { useWorkspace } from "../../workspace/WorkspaceProvider";
 import { ExperienceCard } from "./settings/ExperienceCard";
 import {
-  defaultChannel,
+  draftChannel,
   type EditableChannel,
-  NOTIFICATION_CHANNELS,
   NotificationsSection,
 } from "./settings/NotificationsSection";
 import { SecretsSection } from "./settings/SecretsSection";
@@ -32,14 +31,11 @@ export function Settings() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Notifications — one editable config per channel, keyed by type, each saved/tested on its own.
-  const [channels, setChannels] = useState<Record<string, EditableChannel>>(
-    () =>
-      Object.fromEntries(
-        NOTIFICATION_CHANNELS.map((c) => [c.type, defaultChannel(c.type)]),
-      ),
-  );
-  // Per-channel transient UI state (keyed by channel type).
+  // Notifications — a LIST of channels (any number per type: several Slack/Teams webhooks),
+  // each saved/tested/deleted on its own. `localKey` is the stable UI handle: the server id
+  // for saved rows, a draft key for not-yet-created ones (it survives the first save).
+  const [channels, setChannels] = useState<EditableChannel[]>([]);
+  // Per-channel transient UI state (keyed by localKey).
   const [notifBusy, setNotifBusy] = useState<Record<string, boolean>>({});
   const [notifStatus, setNotifStatus] = useState<Record<string, string>>({});
   const [notifTestBusy, setNotifTestBusy] = useState<Record<string, boolean>>(
@@ -82,12 +78,14 @@ export function Settings() {
         setDefaultModel(s.defaultModel ?? "");
         const list = await api.listNotificationChannels(me.tenantId);
         if (!live) return;
-        setChannels((prev) => {
-          const next = { ...prev };
-          for (const c of list)
-            next[c.type] = { ...c, webhookUrl: c.webhookUrl ?? "" };
-          return next;
-        });
+        setChannels(
+          list.map((c) => ({
+            ...c,
+            localKey: c.id,
+            label: c.label ?? "",
+            webhookUrl: c.webhookUrl ?? "",
+          })),
+        );
         const vars = await api.listVariables();
         if (!live) return;
         setVariables(vars);
@@ -137,29 +135,48 @@ export function Settings() {
     }
   }
 
-  /** Update one channel's edit state without touching the others. */
-  function patchChannel(
-    type: NotificationChannelType,
-    patch: Partial<EditableChannel>,
-  ) {
-    setChannels((prev) => ({ ...prev, [type]: { ...prev[type], ...patch } }));
+  /** Update one channel's edit state (by localKey) without touching the others. */
+  function patchChannel(localKey: string, patch: Partial<EditableChannel>) {
+    setChannels((prev) =>
+      prev.map((c) => (c.localKey === localKey ? { ...c, ...patch } : c)),
+    );
   }
 
-  async function saveChannel(type: NotificationChannelType) {
+  /** Append a new (unsaved) channel of the given type — created server-side on first Save. */
+  function addChannel(type: NotificationChannelType) {
+    setChannels((prev) => [...prev, draftChannel(type)]);
+  }
+
+  async function saveChannel(localKey: string) {
     if (!tenant) return;
-    setNotifBusy((b) => ({ ...b, [type]: true }));
-    setNotifStatus((s) => ({ ...s, [type]: "" }));
+    const ch = channels.find((c) => c.localKey === localKey);
+    if (!ch) return;
+    setNotifBusy((b) => ({ ...b, [localKey]: true }));
+    setNotifStatus((s) => ({ ...s, [localKey]: "" }));
     setError(null);
     try {
-      const ch = channels[type];
-      const saved = await api.saveNotificationChannel(tenant, type, {
+      const patch = {
+        label: ch.label.trim() || null,
         enabled: ch.enabled,
         webhookUrl: ch.webhookUrl.trim() || null,
         onApprovalPending: ch.onApprovalPending,
         onRunFailed: ch.onRunFailed,
+      };
+      // A draft has no server id yet → create; afterwards it patches in place. The
+      // localKey stays put so transient UI state (busy/status) survives the first save.
+      const saved = ch.id
+        ? await api.saveNotificationChannel(tenant, ch.id, patch)
+        : await api.createNotificationChannel(tenant, {
+            type: ch.type,
+            ...patch,
+          });
+      patchChannel(localKey, {
+        ...saved,
+        localKey,
+        label: saved.label ?? "",
+        webhookUrl: saved.webhookUrl ?? "",
       });
-      patchChannel(type, { ...saved, webhookUrl: saved.webhookUrl ?? "" });
-      setNotifStatus((s) => ({ ...s, [type]: "Saved." }));
+      setNotifStatus((s) => ({ ...s, [localKey]: "Saved." }));
     } catch (e) {
       setError(
         e instanceof UnauthorizedError
@@ -167,29 +184,52 @@ export function Settings() {
           : "Could not save notifications.",
       );
     } finally {
-      setNotifBusy((b) => ({ ...b, [type]: false }));
+      setNotifBusy((b) => ({ ...b, [localKey]: false }));
     }
   }
 
-  async function testChannel(type: NotificationChannelType) {
+  async function deleteChannel(localKey: string) {
     if (!tenant) return;
-    setNotifTestBusy((b) => ({ ...b, [type]: true }));
+    const ch = channels.find((c) => c.localKey === localKey);
+    if (!ch) return;
+    setNotifBusy((b) => ({ ...b, [localKey]: true }));
+    setError(null);
+    try {
+      // A draft only exists locally — just drop it; a saved row is deleted server-side.
+      if (ch.id) await api.deleteNotificationChannel(tenant, ch.id);
+      setChannels((prev) => prev.filter((c) => c.localKey !== localKey));
+    } catch (e) {
+      setError(
+        e instanceof UnauthorizedError
+          ? "Sign in to edit notifications."
+          : "Could not delete the channel.",
+      );
+    } finally {
+      setNotifBusy((b) => ({ ...b, [localKey]: false }));
+    }
+  }
+
+  async function testChannel(localKey: string) {
+    if (!tenant) return;
+    const ch = channels.find((c) => c.localKey === localKey);
+    if (!ch?.id) return; // drafts have nothing saved to test
+    setNotifTestBusy((b) => ({ ...b, [localKey]: true }));
     setNotifTest((t) => {
       const next = { ...t };
-      delete next[type];
+      delete next[localKey];
       return next;
     });
     try {
       // Tests the SAVED webhook for this channel — remind the user to save an edited URL first.
-      const res = await api.testNotificationChannel(tenant, type);
-      setNotifTest((t) => ({ ...t, [type]: res }));
+      const res = await api.testNotificationChannel(tenant, ch.id);
+      setNotifTest((t) => ({ ...t, [localKey]: res }));
     } catch {
       setNotifTest((t) => ({
         ...t,
-        [type]: { ok: false, message: "Could not send the test." },
+        [localKey]: { ok: false, message: "Could not send the test." },
       }));
     } finally {
-      setNotifTestBusy((b) => ({ ...b, [type]: false }));
+      setNotifTestBusy((b) => ({ ...b, [localKey]: false }));
     }
   }
 
@@ -438,7 +478,9 @@ export function Settings() {
         notifTestBusy={notifTestBusy}
         notifTest={notifTest}
         patchChannel={patchChannel}
+        addChannel={addChannel}
         saveChannel={saveChannel}
+        deleteChannel={deleteChannel}
         testChannel={testChannel}
       />
     </div>

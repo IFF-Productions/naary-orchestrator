@@ -384,6 +384,34 @@ describe("sendNotification", () => {
     expect(teamsBody.type).toBe("message");
   });
 
+  it("fans out to SEVERAL channels of the SAME type (two Slack webhooks → two POSTs)", async () => {
+    channels = [
+      {
+        type: "slack",
+        webhookUrl: "https://hooks.slack.com/alerts",
+        onApprovalPending: true,
+        onRunFailed: true,
+      },
+      {
+        type: "slack",
+        webhookUrl: "https://hooks.slack.com/oncall",
+        onApprovalPending: true,
+        onRunFailed: true,
+      },
+    ];
+    await sendNotification({ ...BASE, kind: "run_failed", detail: "boom" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls.map((c) => c[0])).toEqual([
+      "https://hooks.slack.com/alerts",
+      "https://hooks.slack.com/oncall",
+    ]);
+    // Same type → same (Slack) format to both.
+    for (const call of fetch.mock.calls) {
+      const body = JSON.parse(call[1].body as string);
+      expect(Array.isArray(body.blocks)).toBe(true);
+    }
+  });
+
   it("routes per-channel: a failure goes to the channel with onRunFailed, not the other", async () => {
     channels = [
       {

@@ -34,8 +34,9 @@ export const __notifyDeps = {
     getPrisma().notificationChannel.findMany({
       where: { tenantId, enabled: true },
       // Deterministic order (findMany has no default order — Postgres would return physical
-      // row order), so the fan-out is stable and testable.
-      orderBy: { type: "asc" },
+      // row order), so the fan-out is stable and testable. A tenant can have SEVERAL rows
+      // per type (N Slack + N Teams webhooks) — each enabled row gets its own POST.
+      orderBy: [{ type: "asc" }, { createdAt: "asc" }, { id: "asc" }],
       select: {
         type: true,
         webhookUrl: true,
