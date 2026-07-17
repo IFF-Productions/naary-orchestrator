@@ -317,12 +317,29 @@ model TenantCredential {
   ciphertext      String // base64 AES-256-GCM ciphertext
   iv              String // base64 nonce
   authTag         String // base64 GCM auth tag
-  keyVersion      Int       @default(1) // at-rest format: 1 = legacy (no AAD), 2 = AAD-bound (Sec#7)
+  keyVersion      Int       @default(1) // at-rest format: 1 = legacy (no AAD), 2 = AAD-bound (Sec#7), 3 = per-tenant DEK (TenantKey envelope)
   isValid         Boolean   @default(false)
   lastValidatedAt DateTime?
   createdAt       DateTime  @default(now())
 
   @@unique([tenantId, environmentId, provider])
+}
+
+// Per-tenant data-encryption key (DEK) for ENVELOPE encryption: a random 32-byte AES key,
+// stored WRAPPED (AES-256-GCM, AAD `dek:<tenantId>`) by the master ENCRYPTION_KEY — the
+// master is the key-encryption key (KEK) and never touches tenant data directly for
+// keyVersion >= 3 rows. Minted lazily on a tenant's first secret write. Consequences:
+//  - rotating the master = re-wrapping these small rows, not re-encrypting every secret;
+//  - deleting a tenant's row crypto-shreds ALL their keyVersion 3 secrets (GDPR erasure);
+//  - a leaked DEK exposes ONE tenant, never the fleet.
+// The plaintext DEK exists in process memory only — never returned, logged, or traced.
+model TenantKey {
+  tenantId   String   @id
+  ciphertext String // base64 AES-256-GCM ciphertext of the hex-encoded DEK
+  iv         String // base64 nonce
+  authTag    String // base64 GCM auth tag
+  keyVersion Int      @default(2) // wrap format (master-key versioning hook)
+  createdAt  DateTime @default(now())
 }
 
 model UsageEvent {
