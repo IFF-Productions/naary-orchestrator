@@ -24,6 +24,7 @@ import { createKeyEncryptor } from "@naary/secrets";
 import { temporalConnectionConfig } from "@naary/temporal-config";
 import { sentryTraceActivityInterceptors } from "./temporal/activity-trace-interceptor";
 import * as activities from "./temporal/activities";
+import { logActivities } from "./temporal/log-activities";
 
 // Structured logger for worker BOOT code only. NOT imported by workflows.ts —
 // logging is I/O and would break deterministic replay (CLAUDE.md Tier-1 rule 2).
@@ -87,9 +88,12 @@ async function run(): Promise<void> {
       namespace,
       taskQueue: TASK_QUEUE,
       workflowsPath: require.resolve("./temporal/workflows"),
-      // Wrap each activity so its execution is a span (activity.<name>). Preserves the object
-      // keys, so Temporal's dispatch-by-name is unchanged.
-      activities: traceActivities(activities),
+      // Wrap each activity twice, inner→outer: logActivities emits a completion line (ids +
+      // duration + ok/fail) so every side-effecting node is visible in the logs; traceActivities
+      // opens the `activity.<name>` span AROUND that log so the line is stamped with the span's
+      // trace id (→ Sentry Logs, correlated to the trace). Both preserve the object keys, so
+      // Temporal's dispatch-by-name is unchanged.
+      activities: traceActivities(logActivities(activities, log)),
       // Distributed tracing across the Temporal boundary (one connected Sentry trace for
       // API→workflow→activity). The workflow module (sandbox-safe, deterministic) forwards the
       // Sentry trace headers from the run's start headers onto each scheduled activity; the
