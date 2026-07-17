@@ -660,30 +660,52 @@ export const api = {
     );
   },
 
-  // --- Notifications (per-channel: Slack, Teams, … each configured independently) ---
+  // --- Notifications (N channels per type: several Slack/Teams webhooks, each its own row) ---
   listNotificationChannels(tenantId: string): Promise<NotificationChannel[]> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/notifications`);
   },
-  // Upsert ONE channel's config (identified by type); other channels are untouched.
+  // Add a new channel of the given type (a workspace can have several per type).
+  createNotificationChannel(
+    tenantId: string,
+    body: { type: NotificationChannelType } & Partial<
+      Omit<NotificationChannel, "id" | "type">
+    >,
+  ): Promise<NotificationChannel> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/notifications`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+  // Patch ONE channel (by id); other channels are untouched.
   saveNotificationChannel(
     tenantId: string,
-    type: NotificationChannelType,
-    patch: Partial<Omit<NotificationChannel, "type">>,
+    channelId: string,
+    patch: Partial<Omit<NotificationChannel, "id" | "type">>,
   ): Promise<NotificationChannel> {
     return http(
-      `/tenants/${encodeURIComponent(tenantId)}/notifications/${encodeURIComponent(type)}`,
-      { method: "PUT", body: JSON.stringify(patch) },
+      `/tenants/${encodeURIComponent(tenantId)}/notifications/${encodeURIComponent(channelId)}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+    );
+  },
+  // Delete ONE channel (by id; idempotent).
+  deleteNotificationChannel(
+    tenantId: string,
+    channelId: string,
+  ): Promise<{ ok: boolean }> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/notifications/${encodeURIComponent(channelId)}`,
+      { method: "DELETE" },
     );
   },
   // Send a test message to ONE channel's webhook. Returns a result (not a throw) so the
   // UI can show the server's specific failure reason (bad URL, non-2xx, unreachable).
   async testNotificationChannel(
     tenantId: string,
-    type: NotificationChannelType,
+    channelId: string,
   ): Promise<{ ok: boolean; message?: string }> {
     const token = await getBearerToken();
     const res = await fetch(
-      `${BASE}/tenants/${encodeURIComponent(tenantId)}/notifications/${encodeURIComponent(type)}/test`,
+      `${BASE}/tenants/${encodeURIComponent(tenantId)}/notifications/${encodeURIComponent(channelId)}/test`,
       {
         method: "POST",
         headers: {
@@ -1215,10 +1237,13 @@ export interface AuditEvent {
 
 export type NotificationChannelType = "slack" | "teams";
 
-/** One independently-configurable notification channel. The server returns every known
- *  channel (saved or default), so the UI renders them uniformly. */
+/** One notification channel row — a workspace can have ANY NUMBER per type (e.g. two
+ *  Slack webhooks for #alerts and #oncall). Addressed by `id`; `label` tells same-type
+ *  channels apart. */
 export interface NotificationChannel {
+  id: string;
   type: NotificationChannelType;
+  label: string | null;
   /** Off = the worker skips this channel entirely, even with a URL set. */
   enabled: boolean;
   webhookUrl: string | null;

@@ -1,4 +1,6 @@
-// Notification channels (Slack/Teams) section of the Settings screen.
+// Notification channels (Slack/Teams) section of the Settings screen. A workspace can
+// have ANY NUMBER of channels per type (e.g. two Slack webhooks for #alerts and #oncall) —
+// each is its own card, saved/tested/deleted independently.
 import { Button, Card } from "../../../components";
 import type {
   NotificationChannel,
@@ -6,36 +8,43 @@ import type {
 } from "../../../lib/api";
 import { Field, inputStyle } from "./shared";
 
-/** The notification channels the UI renders — each configured + toggled INDEPENDENTLY.
- *  Adding email later = one more entry here + the server-side type. */
-export const NOTIFICATION_CHANNELS: {
-  type: NotificationChannelType;
-  label: string;
-  placeholder: string;
-  hint?: string;
-}[] = [
-  {
-    type: "slack",
-    label: "Slack",
+/** Per-type display metadata. Adding email later = one more entry here + the server-side type. */
+export const CHANNEL_META: Record<
+  NotificationChannelType,
+  { title: string; placeholder: string; hint?: string }
+> = {
+  slack: {
+    title: "Slack",
     placeholder: "https://hooks.slack.com/services/…",
   },
-  {
-    type: "teams",
-    label: "Microsoft Teams",
+  teams: {
+    title: "Microsoft Teams",
     placeholder: "https://prod-00.westus.logic.azure.com/workflows/…",
     hint: "Paste a Teams Workflows (Power Automate) webhook URL — “When a Teams webhook request is received”. We send an Adaptive Card; the legacy Office 365 connector format isn’t supported.",
   },
-];
+};
 
-/** Channel config as held in edit state — webhookUrl is a string ("" not null) for the input. */
-export type EditableChannel = Omit<NotificationChannel, "webhookUrl"> & {
+/** Channel config as held in edit state — strings ("" not null) for the inputs, plus a
+ *  stable `localKey` (server id, or a draft key until the first save assigns one). */
+export type EditableChannel = Omit<
+  NotificationChannel,
+  "id" | "label" | "webhookUrl"
+> & {
+  localKey: string;
+  id?: string;
+  label: string;
   webhookUrl: string;
 };
 
-export function defaultChannel(type: NotificationChannelType): EditableChannel {
+let draftCounter = 0;
+/** A new, not-yet-saved channel — created server-side on first Save. */
+export function draftChannel(type: NotificationChannelType): EditableChannel {
+  draftCounter += 1;
   return {
+    localKey: `draft-${draftCounter}`,
     type,
-    enabled: false,
+    label: "",
+    enabled: true,
     webhookUrl: "",
     onApprovalPending: true,
     onRunFailed: true,
@@ -50,21 +59,22 @@ export function NotificationsSection({
   notifTestBusy,
   notifTest,
   patchChannel,
+  addChannel,
   saveChannel,
+  deleteChannel,
   testChannel,
 }: {
-  channels: Record<string, EditableChannel>;
+  channels: EditableChannel[];
   loaded: boolean;
   notifBusy: Record<string, boolean>;
   notifStatus: Record<string, string>;
   notifTestBusy: Record<string, boolean>;
   notifTest: Record<string, { ok: boolean; message?: string }>;
-  patchChannel: (
-    type: NotificationChannelType,
-    patch: Partial<EditableChannel>,
-  ) => void;
-  saveChannel: (type: NotificationChannelType) => Promise<void>;
-  testChannel: (type: NotificationChannelType) => Promise<void>;
+  patchChannel: (localKey: string, patch: Partial<EditableChannel>) => void;
+  addChannel: (type: NotificationChannelType) => void;
+  saveChannel: (localKey: string) => Promise<void>;
+  deleteChannel: (localKey: string) => Promise<void>;
+  testChannel: (localKey: string) => Promise<void>;
 }) {
   return (
     <>
@@ -91,19 +101,20 @@ export function NotificationsSection({
       >
         Get pinged when a run needs a human — an approval can wait for days, so
         it shouldn't rely on someone watching the inbox. We POST a formatted
-        message (with Approve / Reject / View-run buttons) on each event.
-        Configure each channel independently — enable the ones you use; alerts
-        go to every enabled channel.
+        message (with Approve / Reject / View-run buttons) on each event. Add as
+        many webhooks as you need — e.g. Slack #alerts AND #oncall; alerts go to
+        every enabled one.
       </div>
-      {NOTIFICATION_CHANNELS.map((meta) => {
-        const ch = channels[meta.type];
-        const busy = !!notifBusy[meta.type];
-        const testBusy = !!notifTestBusy[meta.type];
-        const chStatus = notifStatus[meta.type];
-        const chTest = notifTest[meta.type];
+      {channels.map((ch) => {
+        const meta = CHANNEL_META[ch.type];
+        const key = ch.localKey;
+        const busy = !!notifBusy[key];
+        const testBusy = !!notifTestBusy[key];
+        const chStatus = notifStatus[key];
+        const chTest = notifTest[key];
         return (
           <Card
-            key={meta.type}
+            key={key}
             style={{
               padding: 18,
               marginBottom: 12,
@@ -116,6 +127,7 @@ export function NotificationsSection({
                 alignItems: "center",
                 justifyContent: "space-between",
                 marginBottom: 14,
+                gap: 12,
               }}
             >
               <div
@@ -123,9 +135,22 @@ export function NotificationsSection({
                   fontSize: "var(--text-body)",
                   fontWeight: "var(--weight-semibold)",
                   color: "var(--ink)",
+                  whiteSpace: "nowrap",
                 }}
               >
-                {meta.label}
+                {meta.title}
+                {!ch.id && (
+                  <span
+                    style={{
+                      marginLeft: 8,
+                      fontSize: "var(--text-2xs)",
+                      color: "var(--ink-3)",
+                      fontWeight: "var(--weight-regular)",
+                    }}
+                  >
+                    (not saved yet)
+                  </span>
+                )}
               </div>
               <label
                 style={{
@@ -134,13 +159,13 @@ export function NotificationsSection({
                   alignItems: "center",
                   cursor: loaded ? "pointer" : "default",
                 }}
-                title={`Turn ${meta.label} notifications on or off`}
+                title={`Turn this ${meta.title} webhook on or off`}
               >
                 <input
                   type="checkbox"
                   checked={ch.enabled}
                   onChange={(e) =>
-                    patchChannel(meta.type, { enabled: e.target.checked })
+                    patchChannel(key, { enabled: e.target.checked })
                   }
                   disabled={!loaded}
                 />
@@ -163,11 +188,22 @@ export function NotificationsSection({
                 {meta.hint}
               </div>
             )}
+            <Field label="Label">
+              <input
+                value={ch.label}
+                onChange={(e) => patchChannel(key, { label: e.target.value })}
+                placeholder={
+                  ch.type === "slack" ? "#alerts (optional)" : "Ops (optional)"
+                }
+                style={inputStyle}
+                disabled={!loaded}
+              />
+            </Field>
             <Field label="Webhook URL">
               <input
                 value={ch.webhookUrl}
                 onChange={(e) =>
-                  patchChannel(meta.type, { webhookUrl: e.target.value })
+                  patchChannel(key, { webhookUrl: e.target.value })
                 }
                 placeholder={meta.placeholder}
                 style={inputStyle}
@@ -186,9 +222,7 @@ export function NotificationsSection({
                 type="checkbox"
                 checked={ch.onApprovalPending}
                 onChange={(e) =>
-                  patchChannel(meta.type, {
-                    onApprovalPending: e.target.checked,
-                  })
+                  patchChannel(key, { onApprovalPending: e.target.checked })
                 }
                 disabled={!loaded}
               />
@@ -210,7 +244,7 @@ export function NotificationsSection({
                 type="checkbox"
                 checked={ch.onRunFailed}
                 onChange={(e) =>
-                  patchChannel(meta.type, { onRunFailed: e.target.checked })
+                  patchChannel(key, { onRunFailed: e.target.checked })
                 }
                 disabled={!loaded}
               />
@@ -220,27 +254,47 @@ export function NotificationsSection({
                 When a run fails
               </span>
             </label>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
               <Button
                 variant="primary"
                 loading={busy}
                 disabled={!loaded}
-                onClick={() => void saveChannel(meta.type)}
+                onClick={() => void saveChannel(key)}
               >
                 {busy ? "Saving…" : "Save"}
               </Button>
               <Button
                 variant="secondary"
                 icon="bell"
-                disabled={testBusy || !loaded || !ch.webhookUrl.trim()}
-                onClick={() => void testChannel(meta.type)}
+                disabled={
+                  testBusy || !loaded || !ch.id || !ch.webhookUrl.trim()
+                }
+                onClick={() => void testChannel(key)}
                 title={
-                  ch.webhookUrl.trim()
-                    ? `POST a sample message to your ${meta.label} webhook`
-                    : "Add a webhook URL first"
+                  !ch.id
+                    ? "Save the channel first"
+                    : ch.webhookUrl.trim()
+                      ? `POST a sample message to this ${meta.title} webhook`
+                      : "Add a webhook URL first"
                 }
               >
                 {testBusy ? "Sending…" : "Send test"}
+              </Button>
+              <Button
+                variant="secondary"
+                icon="trash"
+                disabled={busy || !loaded}
+                onClick={() => void deleteChannel(key)}
+                title={ch.id ? "Delete this webhook" : "Discard this draft"}
+              >
+                {ch.id ? "Delete" : "Discard"}
               </Button>
               {chStatus && (
                 <span
@@ -270,6 +324,21 @@ export function NotificationsSection({
           </Card>
         );
       })}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {(Object.keys(CHANNEL_META) as NotificationChannelType[]).map(
+          (type) => (
+            <Button
+              key={type}
+              variant="secondary"
+              icon="plus"
+              disabled={!loaded}
+              onClick={() => addChannel(type)}
+            >
+              Add {CHANNEL_META[type].title} webhook
+            </Button>
+          ),
+        )}
+      </div>
     </>
   );
 }
