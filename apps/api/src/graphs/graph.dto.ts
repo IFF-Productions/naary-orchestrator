@@ -25,9 +25,9 @@ export class GenerateGraphDto {
   prompt!: string;
 
   @ApiPropertyOptional({
-    enum: ["anthropic", "openai", "google"],
+    enum: ["anthropic", "openai", "google", "claude-code"],
     description:
-      "Provider to generate with. Omitted ⇒ the tenant's first configured+valid provider.",
+      "Provider to generate with. Omitted ⇒ the tenant's first configured+valid model provider, falling back to the Claude Code credential (subscription-billed, via the headless CLI).",
   })
   @IsOptional()
   @IsString()
