@@ -63,6 +63,45 @@ export class RunDetailResponse {
   output!: Record<string, unknown>;
 }
 
+export class RunActionResponse {
+  @ApiProperty({
+    example: true,
+    description:
+      "The action was accepted. cancel/approve are fire-and-forget against the durable run.",
+  })
+  accepted!: true;
+}
+
+export class AwaitingRunResponse {
+  @ApiProperty({ example: "run-8f3a1c2e" })
+  runId!: string;
+  @ApiProperty({ nullable: true, example: "support-triage" })
+  workflowKey!: string | null;
+  @ApiProperty({
+    example: "node-approve-1",
+    description: "The humanApproval node the run is paused on.",
+  })
+  nodeId!: string;
+  @ApiProperty({
+    example: "Approve refund?",
+    description:
+      "The approval prompt's title (resolved from the stored graph).",
+  })
+  title!: string;
+  @ApiProperty({
+    nullable: true,
+    example: "Confirm the refund of $42 to the customer.",
+    description: "The approval prompt's instructions, if any.",
+  })
+  instructions!: string | null;
+  @ApiProperty({
+    format: "date-time",
+    example: "2026-07-04T12:00:00.000Z",
+    description: "When the run started waiting for approval.",
+  })
+  awaitingSince!: string;
+}
+
 export class RunHistoryEventResponse {
   @ApiProperty({ example: 12 })
   id!: number;
