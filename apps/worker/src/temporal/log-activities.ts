@@ -1,6 +1,8 @@
 /**
  * Wrap every activity so each invocation emits ONE structured lifecycle line — a completion
- * record carrying the run's correlation ids, wall-clock duration, and success/failure. This is
+ * record carrying the run's correlation ids, wall-clock duration, and success/failure — and,
+ * on UNEXPECTED failure, a Sentry issue (captureActivityFailure; expected user-fixable
+ * credential failures are filtered there). This is
  * the universal "what is going on" timeline: unlike the hand-written domain logs (tokens, cost,
  * provider), every side-effecting node gets a line for free, including future activities and —
  * importantly — the ones that currently log NOTHING on failure.
@@ -21,7 +23,7 @@
  * DETERMINISM: runs on the worker (activity) side only — never in workflows.ts. `Date.now()` is
  * fine here (activities do I/O and read the clock); it would break replay only in workflow code.
  */
-import { activityIdAttrs } from "@naary/observability";
+import { activityIdAttrs, captureActivityFailure } from "@naary/observability";
 import type { Logger } from "@naary/logging";
 
 /** The logger surface this wrapper needs — a subset of pino's Logger, so tests can inject a stub. */
@@ -54,6 +56,12 @@ function logCompletion(
       { ...base, errorName: err instanceof Error ? err.name : "unknown" },
       "activity failed",
     );
+    // ALSO a Sentry ISSUE (the #339 deferred follow-up): the error here is exactly what
+    // enters Temporal history — already sanitized by the activity — and beforeSend scrubs
+    // again on egress. Expected user-fixable failures (bad credential AUTH/QUOTA, …) are
+    // filtered inside so issues stay operator-relevant. Fires within the activity span
+    // (traceActivities wraps this), so the issue is linked to its trace.
+    captureActivityFailure(activity, ids, err);
   }
 }
 

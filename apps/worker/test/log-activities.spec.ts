@@ -1,5 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { captureActivityFailure } from "@naary/observability";
 import { logActivities } from "../src/temporal/log-activities";
+
+// Spy on the Sentry capture only — everything else (activityIdAttrs) stays real.
+vi.mock("@naary/observability", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("@naary/observability")>();
+  return { ...orig, captureActivityFailure: vi.fn() };
+});
+
+beforeEach(() => {
+  vi.mocked(captureActivityFailure).mockClear();
+});
 
 /**
  * logActivities emits ONE completion line per activity invocation, carrying the run's
@@ -78,6 +89,35 @@ describe("logActivities", () => {
     expect(serialized).not.toContain("secret-token");
     expect(serialized).not.toContain("leaked");
     expect(log.info).not.toHaveBeenCalled();
+  });
+
+  it("reports a failure to Sentry with the activity name + ids, and a success not at all", async () => {
+    const log = makeLog();
+    const boom = new Error("kaput");
+    const wrapped = logActivities(
+      {
+        okActivity: async (_meta: unknown) => "fine",
+        badActivity: async (_meta: unknown) => {
+          throw boom;
+        },
+      },
+      log,
+    );
+
+    await wrapped.okActivity(META);
+    expect(captureActivityFailure).not.toHaveBeenCalled();
+
+    await expect(wrapped.badActivity(META)).rejects.toBe(boom);
+    expect(captureActivityFailure).toHaveBeenCalledTimes(1);
+    expect(captureActivityFailure).toHaveBeenCalledWith(
+      "badActivity",
+      expect.objectContaining({
+        tenantId: "t1",
+        executionId: "x1",
+        nodeId: "n1",
+      }),
+      boom,
+    );
   });
 
   it("handles a synchronous throw the same way (rethrow + failure log)", () => {

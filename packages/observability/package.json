@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@sentry/node": "^10.66.0"
+    "@sentry/node": "^10.66.0",
+    "@sentry/profiling-node": "^10.66.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.1"
