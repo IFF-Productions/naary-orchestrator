@@ -17,6 +17,11 @@ allowBuilds:
   msw: true
   # Downloads/builds the native CPU-profiler binary for @sentry/profiling-node.
   '@sentry/node-cpu-profiler': true
+  # testcontainers (integration tests) pulls ssh2/cpu-features transitively for SSH-based
+  # Docker connections. We talk to Docker over the local socket, not SSH, so these native
+  # postinstalls are unneeded — false (skip the build) keeps installs clean + fast.
+  cpu-features: false
+  ssh2: false
 
 minimumReleaseAgeExclude:
   - '@ai-sdk/anthropic@4.0.8 || 4.0.12'

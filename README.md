@@ -367,13 +367,32 @@ secrets; the service account is API-side only.
 ## Tests
 
 ```bash
-pnpm test        # builds, then runs vitest (incl. the e2e pause→signal→resume DoD)
-pnpm typecheck   # tsc -b across the workspace + per-app --noEmit fan-out
+pnpm test              # builds, then runs vitest (incl. the e2e pause→signal→resume DoD)
+pnpm test:integration  # node-level integration tests against REAL services (needs Docker)
+pnpm typecheck         # tsc -b across the workspace + per-app --noEmit fan-out
 ```
 
 The authoritative correctness gate is `apps/worker/test/interpreter.e2e.spec.ts`
 (`@temporalio/testing` / `TestWorkflowEnvironment`): it starts `runGraph`, polls until
 `awaiting_approval`, signals, and asserts `completed` — plus the reject path.
+
+### Integration tests (`*.integration.spec.ts`) — real services, no mocks
+
+`pnpm test:integration` runs whole graphs through the **real interpreter + real activities**
+against **real backing services**, proving the data-source nodes actually work:
+
+- **sqlQuery / sqlExec** → a throwaway **Postgres** spun up per-run by
+  [`@testcontainers/postgresql`](https://node.testcontainers.org/) (needs a reachable Docker
+  daemon). The graph writes and reads real rows through the real `@naary/sql` adapter.
+- **httpRequest / graphQL** → a real in-process `node:http` server (REST + a
+  GraphQL-over-HTTP endpoint); a genuine network round-trip through the real activity.
+
+Only the SSRF host-guard seams are relaxed so the activities can reach the local test service
+(the guards themselves are unit-tested in `sql.activity.spec` / `http.activity.spec`); every other
+layer runs for real. These tests are **excluded from `pnpm test`** (so it stays Docker-free) and
+run in CI on the self-hosted runner via `.github/workflows/integration.yml` — separate from and
+non-blocking to the fast `verify` gate. To add coverage for a new service-backed node, drop a
+`*.integration.spec.ts` beside the others.
 
 ## Durability runbook — surviving a worker crash mid-pause
 

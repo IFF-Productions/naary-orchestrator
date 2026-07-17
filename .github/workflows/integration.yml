@@ -1,0 +1,67 @@
+name: Integration
+
+# Node-level integration tests: the sqlQuery/sqlExec/httpRequest/graphQL NODES run through the REAL
+# Temporal interpreter + real activities against REAL backing services — a throwaway Postgres spun
+# up per-run by testcontainers, and in-process HTTP/GraphQL servers. See apps/worker/test/*.integration.spec.ts.
+#
+# testcontainers needs a reachable Docker daemon (it manages its own containers — NO docker-compose),
+# so this runs on the SELF-HOSTED runner (same one e2e.yml uses). It is SEPARATE from ci.yml's fast
+# verify gate and from e2e.yml's browser stack: a flake here never blocks the proven typecheck/test/
+# build gate. Kept out of the default `pnpm test` (vitest.config excludes *.integration.spec.ts).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Per-ref economics only (a newer push to the same PR cancels the stale run). testcontainers
+# namespaces its own containers per-process, so parallel runs on one host cannot collide.
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    # SECURITY: never run untrusted fork code on the self-hosted runner (same rule as e2e.yml).
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted]
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # Make `shell: bash` resolve to Git Bash on a self-hosted Windows runner (shared action).
+      - uses: ./.github/actions/ensure-git-bash-on-path
+
+      # testcontainers talks to the Docker daemon directly — fail here with the fix if it's
+      # unreachable (the usual self-hosted "socket owned by another user" case), not deep in a test.
+      - name: Verify Docker daemon is reachable
+        run: |
+          if docker info >/dev/null 2>&1; then
+            echo "Docker daemon reachable as user '$(whoami)'."
+            exit 0
+          fi
+          echo "::error::Cannot reach the Docker daemon as the runner account '$(whoami)'. Docker Desktop is per-user; run the runner as the Docker owner (or 'colima start' on macOS / add the account to docker-users on Windows), then restart the runner."
+          exit 1
+
+      # Per-runner dest: all runner services on the CI VM share an account, so the default
+      # ~/setup-pnpm is one shared folder two jobs race on. runner.temp is per-runner.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # `test:integration` runs `pnpm build` (db:generate + tsc -b) first, then the integration
+      # vitest config. testcontainers pulls postgres:16-alpine on the first run (cached after).
+      - name: Run node integration tests (testcontainers)
+        run: pnpm test:integration
