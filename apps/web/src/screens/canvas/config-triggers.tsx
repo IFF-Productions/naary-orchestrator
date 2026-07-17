@@ -1,0 +1,329 @@
+// Poll / schedule / chat / form trigger config sections of the node inspector (extracted verbatim from CanvasPage).
+import type { ConfigSectionCtx } from "./ConfigPanel";
+import { Button } from "../../components";
+import { api } from "../../lib/api";
+import { inputStyle, Labeled } from "./fields";
+
+export function renderTriggerSections(c: ConfigSectionCtx) {
+  const {
+    node,
+    kind,
+    config,
+    str,
+    num,
+    obj,
+    exprText,
+    onChange,
+    upstreamIds,
+    edges,
+    nodeKinds,
+    connections,
+    pins,
+  } = c;
+  return (
+    <>
+      {kind === "pollTrigger" && (
+        <>
+          <Labeled label="URL to poll">
+            {exprText("url", {
+              placeholder: "https://api.example.com/resource",
+            })}
+          </Labeled>
+          <Labeled label="Check every (seconds)">
+            <input
+              type="number"
+              value={num("intervalSeconds") ?? 300}
+              onChange={(e) =>
+                onChange({ intervalSeconds: Number(e.target.value) })
+              }
+              style={inputStyle}
+              placeholder="300"
+            />
+          </Labeled>
+          <Labeled label="Change key (JSON path, optional)">
+            <input
+              value={str("changeKey")}
+              onChange={(e) => onChange({ changeKey: e.target.value })}
+              style={inputStyle}
+              placeholder="items.0.id (blank = whole response)"
+            />
+          </Labeled>
+        </>
+      )}
+
+      {kind === "scheduleTrigger" && (
+        <>
+          <Labeled label="Cron expression">
+            <input
+              value={str("cron")}
+              onChange={(e) => onChange({ cron: e.target.value })}
+              style={inputStyle}
+              placeholder="0 9 * * 1-5"
+            />
+          </Labeled>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
+            Standard cron (min hour day month weekday). The schedule is created
+            server-side when you save. Examples: <code>*/15 * * * *</code>{" "}
+            (every 15 min), <code>0 9 * * 1-5</code> (weekdays 9am),{" "}
+            <code>0 0 1 * *</code> (1st of the month).
+          </div>
+        </>
+      )}
+
+      {kind === "chatTrigger" && (
+        <>
+          <Labeled label="Chat title (optional)">
+            <input
+              value={str("title")}
+              onChange={(e) => onChange({ title: e.target.value })}
+              style={inputStyle}
+              placeholder="Ask us anything"
+            />
+          </Labeled>
+          <Labeled label="Description (optional)">
+            <input
+              value={str("description")}
+              onChange={(e) => onChange({ description: e.target.value })}
+              style={inputStyle}
+              placeholder="We're here to help."
+            />
+          </Labeled>
+          <Labeled label="Input placeholder (optional)">
+            <input
+              value={str("placeholder")}
+              onChange={(e) => onChange({ placeholder: e.target.value })}
+              style={inputStyle}
+              placeholder="Type a message…"
+            />
+          </Labeled>
+          <Labeled label="Greeting (optional)">
+            <input
+              value={str("greeting")}
+              onChange={(e) => onChange({ greeting: e.target.value })}
+              style={inputStyle}
+              placeholder="Hi! How can I help?"
+            />
+          </Labeled>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-2)",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={Boolean(config.durableSession)}
+              onChange={(e) => onChange({ durableSession: e.target.checked })}
+            />
+            Durable session (remember the conversation across messages)
+          </label>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
+            The message + session id arrive as <code>{node.id}</code>. With
+            durable session on, a long-lived per-session workflow holds the
+            conversation in Temporal; off, each message is threaded with the
+            saved history.
+          </div>
+        </>
+      )}
+
+      {kind === "formTrigger" &&
+        (() => {
+          const fields = (
+            Array.isArray(config.fields) ? config.fields : []
+          ) as Array<{
+            key?: string;
+            label?: string;
+            type?: string;
+            required?: boolean;
+            options?: string[];
+          }>;
+          const setFields = (next: unknown[]) => onChange({ fields: next });
+          const patchField = (i: number, patch: Record<string, unknown>) =>
+            setFields(fields.map((f, j) => (j === i ? { ...f, ...patch } : f)));
+          return (
+            <>
+              <Labeled label="Form title (optional)">
+                <input
+                  value={str("title")}
+                  onChange={(e) => onChange({ title: e.target.value })}
+                  style={inputStyle}
+                  placeholder="Contact us"
+                />
+              </Labeled>
+              <Labeled label="Description (optional)">
+                <input
+                  value={str("description")}
+                  onChange={(e) => onChange({ description: e.target.value })}
+                  style={inputStyle}
+                  placeholder="We'll get back to you shortly."
+                />
+              </Labeled>
+              <Labeled label="Submit button label (optional)">
+                <input
+                  value={str("submitLabel")}
+                  onChange={(e) => onChange({ submitLabel: e.target.value })}
+                  style={inputStyle}
+                  placeholder="Submit"
+                />
+              </Labeled>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "var(--text-sm)",
+                      color: "var(--ink-2)",
+                      fontWeight: "var(--weight-semibold)",
+                    }}
+                  >
+                    Fields
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon="plus"
+                    onClick={() =>
+                      setFields([
+                        ...fields,
+                        { key: "", label: "", type: "text" },
+                      ])
+                    }
+                  >
+                    Add field
+                  </Button>
+                </div>
+                {fields.length === 0 && (
+                  <div
+                    style={{
+                      fontSize: "var(--text-xs)",
+                      color: "var(--ink-3)",
+                    }}
+                  >
+                    No fields yet. Each submitted value becomes the trigger
+                    output, keyed by the field's key.
+                  </div>
+                )}
+                {fields.map((f, i) => (
+                  <div
+                    // biome-ignore lint/suspicious/noArrayIndexKey: fields are positional
+                    key={i}
+                    style={{
+                      border: "1px solid var(--line)",
+                      borderRadius: "var(--radius-md)",
+                      padding: 10,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                    }}
+                  >
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <input
+                        value={f.key ?? ""}
+                        onChange={(e) => patchField(i, { key: e.target.value })}
+                        style={inputStyle}
+                        placeholder="key (e.g. email)"
+                      />
+                      <input
+                        value={f.label ?? ""}
+                        onChange={(e) =>
+                          patchField(i, { label: e.target.value })
+                        }
+                        style={inputStyle}
+                        placeholder="Label"
+                      />
+                    </div>
+                    <div
+                      style={{ display: "flex", gap: 6, alignItems: "center" }}
+                    >
+                      <select
+                        value={f.type ?? "text"}
+                        onChange={(e) =>
+                          patchField(i, { type: e.target.value })
+                        }
+                        style={inputStyle}
+                      >
+                        {["text", "textarea", "number", "email", "select"].map(
+                          (t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                      <label
+                        style={{
+                          display: "flex",
+                          gap: 6,
+                          alignItems: "center",
+                          fontSize: "var(--text-sm)",
+                          color: "var(--ink-2)",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={Boolean(f.required)}
+                          onChange={(e) =>
+                            patchField(i, {
+                              required: e.target.checked || undefined,
+                            })
+                          }
+                        />
+                        Required
+                      </label>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        icon="trash"
+                        iconOnly
+                        title="Remove field"
+                        onClick={() =>
+                          setFields(fields.filter((_, j) => j !== i))
+                        }
+                      />
+                    </div>
+                    {f.type === "select" && (
+                      <input
+                        value={(f.options ?? []).join(", ")}
+                        onChange={(e) =>
+                          patchField(i, {
+                            options: e.target.value
+                              .split(",")
+                              .map((s) => s.trim())
+                              .filter(Boolean),
+                          })
+                        }
+                        style={inputStyle}
+                        placeholder="option1, option2, option3"
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          );
+        })()}
+    </>
+  );
+}
