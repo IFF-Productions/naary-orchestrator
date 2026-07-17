@@ -1,45 +1,49 @@
-# CI-only overlay that ISOLATES the e2e stack from a co-located prod stack on the
-# same self-hosted host. The base compose hardcodes host-global container names
-# (naary-postgres, …) and host ports (5432, 3000, 8081, …). Prod
-# (deploy/docker-compose.prod.yml) inherits those, so without isolation the e2e job
-# would bind/see PROD's containers and ports — the token mint would hit prod's
-# Postgres (→ "password authentication failed") and e2e up/down could stop prod.
+# CI-only overlay that ISOLATES the e2e stack from anything else on the same Docker
+# host — a co-located prod stack AND other CONCURRENT e2e runs (multiple runners on
+# one VM). The base compose hardcodes host-global container names (naary-postgres, …)
+# and host ports (5432, 3000, 8081, …); two stacks using them cannot coexist.
 #
-# Run it with a DEDICATED project so networks + named volumes are namespaced too:
-#   docker compose -p naary-e2e -f docker-compose.yml -f docker-compose.e2e.yml up -d --build
-# `-p naary-e2e` makes the named volume `naary-e2e_naary-pgdata` (not prod's), and
-# `down -v` under that project can only ever remove the e2e stack — never prod.
+# Isolation is per-RUN, not a single fixed namespace:
+#   - The workflow passes a UNIQUE project per run (-p naary-e2e-<run_id>-<attempt>),
+#     which namespaces the network and named volumes (naary-e2e-<id>_naary-pgdata).
+#   - `container_name: !reset` drops the base file's fixed names so compose falls
+#     back to project-prefixed defaults (naary-e2e-<id>-postgres-1) — unique per run.
+#   - Host ports are EPHEMERAL (`127.0.0.1::5432` = Docker picks a free high port),
+#     so parallel stacks never fight over a bind. The workflow reads the assigned
+#     ports back with `docker compose port <service> <internal-port>` after `up`.
 #
-# Only HOST-published ports + container names change here. In-cluster wiring is
-# unchanged: services still reach each other by SERVICE name on INTERNAL ports
-# (postgres:5432, temporal:7233, api:3000, web:80), which compose DNS resolves from
-# the service name, not the container_name or the host port.
+# `down -v` under a run's project can only ever remove THAT run's stack — never prod
+# (whose DB is a host bind-mount anyway) and never another run's.
+#
+# In-cluster wiring is unchanged: services still reach each other by SERVICE name on
+# INTERNAL ports (postgres:5432, temporal:7233, api:3000, web:80), which compose DNS
+# resolves from the service name, not the container_name or the host port.
 services:
   postgres:
-    container_name: naary-e2e-postgres
+    container_name: !reset null
     ports: !override
-      - "127.0.0.1:55432:5432"
+      - "127.0.0.1::5432"
 
   temporal:
-    container_name: naary-e2e-temporal
+    container_name: !reset null
     ports: !override
-      - "127.0.0.1:57233:7233"
-      - "127.0.0.1:58233:8233"
+      - "127.0.0.1::7233"
+      - "127.0.0.1::8233"
 
   migrate:
-    container_name: naary-e2e-migrate
+    container_name: !reset null
 
   api:
-    container_name: naary-e2e-api
+    container_name: !reset null
     ports: !override
-      - "127.0.0.1:53000:3000"
+      - "127.0.0.1::3000"
 
   worker:
-    container_name: naary-e2e-worker
+    container_name: !reset null
     ports: !override
-      - "127.0.0.1:59091:9091"
+      - "127.0.0.1::9091"
 
   web:
-    container_name: naary-e2e-web
+    container_name: !reset null
     ports: !override
-      - "127.0.0.1:58081:80"
+      - "127.0.0.1::80"

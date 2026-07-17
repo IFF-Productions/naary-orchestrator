@@ -13,7 +13,7 @@ name: E2E
 #     runner whose user lacks the plugin (e.g. Docker Desktop installed under a DIFFERENT
 #     user), auto-links Docker Desktop's bundled plugin into this user's ~/.docker/cli-plugins.
 #   - Node 22 + pnpm (the setup steps install pnpm; Node via setup-node)
-#   - Free ports 5432 / 7233 / 3000 / 8081, ~4 GB RAM
+#   - ~4 GB RAM per concurrent run (host ports are ephemeral — no fixed ports needed)
 #   - Playwright's bundled Chromium is fetched per-user by `playwright install chromium`
 #     (no sudo, no system browser needed). We deliberately do NOT use the branded
 #     `channel: chrome`, whose install needs root and dies on a non-interactive runner.
@@ -22,17 +22,14 @@ on:
   push:
     branches: [main]
 
-# The e2e stack is a SINGLETON on the runner host: fixed container names
-# (naary-postgres), fixed host ports (5432/7233/3000/8081), and one shared named
-# volume (naary-pgdata). Two e2e runs on the same host would collide — port binds
-# conflict, and each run's pre-`up` `down -v` would nuke the other's database
-# mid-run. So serialize e2e REPO-WIDE (not per-ref), and QUEUE rather than cancel
-# so an in-flight run finishes cleanly instead of being killed mid-stack by a newer
-# PR (which would also leave the shared stack half-torn-down). Correctness over
-# speed: e2e is a heavy singleton, so serial is the only safe schedule.
+# The e2e stack is namespaced PER RUN (unique compose project + ephemeral host
+# ports + per-project volumes — see docker-compose.e2e.yml), so parallel runs on
+# the same host cannot collide and repo-wide serialization is no longer needed.
+# Concurrency here is only per-REF economics: a newer push to the same PR cancels
+# the now-stale run (its `always()` teardown still removes its own stack).
 concurrency:
-  group: e2e-global
-  cancel-in-progress: false
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   e2e:
@@ -99,12 +96,17 @@ jobs:
               exit 1
             }
           fi
-          # Bake in a DEDICATED project (-p naary-e2e) + the CI isolation overlay for EVERY
-          # invocation (up/down/logs/ps). This namespaces the containers, network, and named
-          # volumes as `naary-e2e_*` and remaps host ports, so the e2e stack cannot bind, see,
-          # or tear down a co-located PROD stack on the same host. `down -v` here can only ever
-          # remove the naary-e2e project — never prod (whose DB is a host bind-mount anyway).
-          CMD="$CMD -p naary-e2e -f docker-compose.yml -f docker-compose.e2e.yml"
+          # Expose the BARE compose command too (no -p/-f baked) — the stale-stack reaper
+          # below needs to `down` OTHER runs' leftover projects by name.
+          echo "base=$CMD" >> "$GITHUB_OUTPUT"
+          # Bake in a PER-RUN project + the CI isolation overlay for EVERY invocation
+          # (up/down/logs/ps). The unique project namespaces the containers, network, and
+          # named volumes as `naary-e2e-<run>_*`, and the overlay publishes EPHEMERAL host
+          # ports — so this run's stack cannot bind, see, or tear down a co-located PROD
+          # stack OR another concurrent e2e run on the same host. `down -v` here can only
+          # ever remove THIS run's project. RUN_ATTEMPT is included so a re-run never
+          # collides with leftovers of the attempt it replaces.
+          CMD="$CMD -p naary-e2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} -f docker-compose.yml -f docker-compose.e2e.yml"
           echo "Using compose command: $CMD"
           echo "cmd=$CMD" >> "$GITHUB_OUTPUT"
 
@@ -148,24 +150,64 @@ jobs:
           ENCRYPTION_KEY=${ENCRYPTION_KEY}
           ENV
 
-      # Start from a CLEAN slate. A self-hosted runner PERSISTS named volumes between runs, and
-      # `naary-pgdata` is one — so a postgres data dir first-initialized on a PRIOR run keeps its
-      # OLD password (POSTGRES_PASSWORD is honored only on first init with an empty data dir). The
-      # result is "password authentication failed for user naary" at the host-side token mint,
-      # while `pg_isready` still reports the stack healthy (it never authenticates). Tearing the
-      # stack + its volumes down first forces postgres to re-init with THIS run's password.
-      - name: Tear down any prior stack + volumes
-        run: ${{ steps.compose.outputs.cmd }} down -v --remove-orphans || true
+      # Each run gets a FRESH project (and thus fresh volumes), so there is no stale-password
+      # problem and nothing of OURS to tear down before `up`. But a run that dies hard (runner
+      # crash, VM reboot mid-job) skips its `always()` teardown and leaves its whole stack —
+      # containers, network, volumes — orphaned forever, slowly eating the box. Reap any
+      # naary-e2e-* project whose newest container is older than 2 HOURS: the job timeout is
+      # 30 min, so anything past 2h cannot belong to a live concurrent run.
+      - name: Reap stale e2e stacks from crashed runs
+        run: |
+          now=$(node -e 'process.stdout.write(String(Date.now()))')
+          projects=$(docker ps -a --format '{{.Label "com.docker.compose.project"}}' | sort -u | grep -E '^naary-e2e-' || true)
+          for p in $projects; do
+            newest=0
+            for c in $(docker ps -aq --filter "label=com.docker.compose.project=$p"); do
+              t=$(docker inspect -f '{{.Created}}' "$c" 2>/dev/null) || continue
+              ms=$(node -e 'process.stdout.write(String(Date.parse(process.argv[1]) || 0))' "$t")
+              [ "$ms" -gt "$newest" ] && newest=$ms
+            done
+            age_min=$(( (now - newest) / 60000 ))
+            if [ "$newest" -gt 0 ] && [ "$age_min" -gt 120 ]; then
+              echo "Reaping stale stack '$p' (newest container ${age_min} min old)"
+              ${{ steps.compose.outputs.base }} -p "$p" down -v --remove-orphans || true
+            fi
+          done
 
       - name: Build + start the stack
         run: ${{ steps.compose.outputs.cmd }} up -d --build
 
+      # The overlay publishes EPHEMERAL host ports (Docker picks free ones), so ask compose
+      # which ports this run actually got and export them for every later step. `port` prints
+      # `127.0.0.1:NNNNN`; strip everything up to the last colon.
+      - name: Resolve this run's published ports
+        run: |
+          set -e
+          port_of() {
+            ${{ steps.compose.outputs.cmd }} port "$1" "$2" | tail -n1 | sed 's/.*://'
+          }
+          PG_PORT=$(port_of postgres 5432)
+          API_PORT=$(port_of api 3000)
+          WEB_PORT=$(port_of web 80)
+          for v in PG_PORT API_PORT WEB_PORT; do
+            if [ -z "$(eval echo \$$v)" ]; then
+              echo "::error::could not resolve published port for $v"
+              ${{ steps.compose.outputs.cmd }} ps
+              exit 1
+            fi
+          done
+          echo "Published ports: postgres=$PG_PORT api=$API_PORT web=$WEB_PORT"
+          {
+            echo "E2E_PG_PORT=$PG_PORT"
+            echo "E2E_API_PORT=$API_PORT"
+            echo "E2E_WEB_PORT=$WEB_PORT"
+          } >> "$GITHUB_ENV"
+
       - name: Wait for api + web to be healthy
         run: |
-          # Isolated host ports (see docker-compose.e2e.yml): api 53000, web 58081.
           for i in $(seq 1 60); do
-            if curl -fsS http://localhost:53000/healthz >/dev/null 2>&1 \
-               && curl -fsS http://localhost:58081 >/dev/null 2>&1; then
+            if curl -fsS "http://localhost:${E2E_API_PORT}/healthz" >/dev/null 2>&1 \
+               && curl -fsS "http://localhost:${E2E_WEB_PORT}" >/dev/null 2>&1; then
               echo "stack healthy after ${i} tries"; exit 0
             fi
             sleep 5
@@ -174,9 +216,9 @@ jobs:
           ${{ steps.compose.outputs.cmd }} ps
           exit 1
 
-      # Mint a tenant API token by inserting DIRECTLY into the running DB (localhost:55432 — the
-      # ISOLATED e2e postgres port; NOT 5432, which is a co-located prod stack), then hand it to
-      # Playwright via E2E_API_TOKEN so global-setup skips its own mint.
+      # Mint a tenant API token by inserting DIRECTLY into the running DB (E2E_PG_PORT — THIS
+      # run's ephemeral postgres port; NOT 5432, which is a co-located prod stack), then hand it
+      # to Playwright via E2E_API_TOKEN so global-setup skips its own mint.
       #
       # We do NOT use `pnpm exec ts-node` here: pnpm 11's pre-run deps-status-check spawns a
       # `pnpm install` that fails on this runner, and — because the mint pipes through `| tail`
@@ -191,7 +233,7 @@ jobs:
           # shell-expanded by Actions, so `${POSTGRES_USER}` there would reach Postgres
           # verbatim (→ "password authentication failed for user ${POSTGRES_USER}"). The
           # job-level env vars ARE real shell variables inside `run:`.
-          export DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:55432/${POSTGRES_DB}?schema=public"
+          export DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:${E2E_PG_PORT}/${POSTGRES_DB}?schema=public"
           TOKEN=$(node -e '
             const { createHash, randomBytes } = require("node:crypto");
             const { Client } = require("pg");
@@ -219,11 +261,11 @@ jobs:
         run: pnpm --filter @naary/web exec playwright install chromium
 
       - name: Run Playwright e2e
-        # Point Playwright + global-setup at the ISOLATED e2e host ports (web 58081, api 53000),
-        # not the defaults (8081/3000) which a co-located prod stack would occupy.
+        # Point Playwright + global-setup at THIS run's ephemeral host ports, not the
+        # defaults (8081/3000) which a co-located prod stack would occupy.
         env:
-          E2E_BASE_URL: http://localhost:58081
-          E2E_API_BASE: http://localhost:53000
+          E2E_BASE_URL: http://localhost:${{ env.E2E_WEB_PORT }}
+          E2E_API_BASE: http://localhost:${{ env.E2E_API_PORT }}
         run: pnpm --filter @naary/web test:e2e
 
       - name: Stack logs (on failure)
