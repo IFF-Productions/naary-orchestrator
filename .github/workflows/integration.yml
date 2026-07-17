@@ -61,6 +61,17 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # `pnpm build` runs `prisma generate` via a `dotenv -e ../../.env` wrapper, which fails
+      # without a .env even though generate never connects. Seed a dummy one (same as ci.yml).
+      # DATABASE_URL is a placeholder — the integration tests use a throwaway testcontainers
+      # Postgres, not this; nothing here connects to it. NOT real secrets.
+      - name: Seed a dummy .env for prisma generate
+        run: |
+          cat > .env <<'ENV'
+          DATABASE_URL="postgresql://ci:ci@localhost:5432/ci?schema=public"
+          ENCRYPTION_KEY="0000000000000000000000000000000000000000000000000000000000000000"
+          ENV
+
       # `test:integration` runs `pnpm build` (db:generate + tsc -b) first, then the integration
       # vitest config. testcontainers pulls postgres:16-alpine on the first run (cached after).
       - name: Run node integration tests (testcontainers)

@@ -387,6 +387,11 @@ against **real backing services**, proving the data-source nodes actually work:
 - **httpRequest / graphQL** → a real in-process `node:http` server (REST + a
   GraphQL-over-HTTP endpoint); a genuine network round-trip through the real activity.
 
+Prerequisites: a running Docker daemon, and a repo-root `.env` (any `DATABASE_URL` — the
+`pnpm build` step's `prisma generate` needs it to resolve, but nothing connects to it; the
+tests use the testcontainers Postgres). A normal dev checkout already has one; a bare CI runner
+gets a dummy one seeded by `.github/workflows/integration.yml`.
+
 Only the SSRF host-guard seams are relaxed so the activities can reach the local test service
 (the guards themselves are unit-tested in `sql.activity.spec` / `http.activity.spec`); every other
 layer runs for real. These tests are **excluded from `pnpm test`** (so it stays Docker-free) and
