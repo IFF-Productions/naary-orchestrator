@@ -15,6 +15,7 @@
     "typecheck": "pnpm db:generate && tsc -b && pnpm -r run typecheck",
     "test": "pnpm build && vitest run",
     "test:watch": "vitest",
+    "test:integration": "pnpm build && vitest run --config vitest.integration.config.ts",
     "worker": "pnpm --filter @naary/worker start",
     "start": "pnpm --filter @naary/api start",
     "dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d",

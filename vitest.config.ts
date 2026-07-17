@@ -10,6 +10,10 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["packages/**/test/**/*.spec.ts", "apps/**/test/**/*.spec.ts"],
+    // Docker-gated integration tests (real Postgres/HTTP/GraphQL via testcontainers) run
+    // separately via vitest.integration.config.ts + `pnpm test:integration`, never in the
+    // fast default suite. Exclude them here so `pnpm test` needs no Docker.
+    exclude: ["**/node_modules/**", "**/*.integration.spec.ts"],
     // Temporal's TestWorkflowEnvironment + worker startup needs headroom.
     testTimeout: 60_000,
     hookTimeout: 60_000,
