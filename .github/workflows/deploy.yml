@@ -49,6 +49,15 @@ jobs:
     env:
       DEPLOY_REF: ${{ inputs.ref || github.event.release.tag_name }}
     steps:
+      # DEPLOY_REF is embedded in the remote command line — reject anything outside
+      # safe ref characters so a crafted dispatch input can't break out of the quoting.
+      - name: Validate ref
+        run: |
+          if ! printf '%s' "$DEPLOY_REF" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]*$'; then
+            echo "::error::ref '$DEPLOY_REF' has characters outside [A-Za-z0-9._/-]"
+            exit 1
+          fi
+
       - name: Deploy over SSH
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}

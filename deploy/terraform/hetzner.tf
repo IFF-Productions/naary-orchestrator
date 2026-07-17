@@ -44,9 +44,15 @@ locals {
     TEMPORAL_API_KEY=${var.temporal_api_key}
   EOT
 
-  # Only auto-start the stack when cloud-init has everything it needs; otherwise the
-  # worker/api would crash-loop against an empty TEMPORAL_ADDRESS.
-  auto_up = var.repo_url != "" && var.temporal_address != ""
+  # Only auto-start the stack when cloud-init has everything it needs — all three
+  # Temporal Cloud values, not just the address; a partial set (address without
+  # namespace/API key) would auto-start api/worker into a connection crash-loop.
+  auto_up = alltrue([
+    var.repo_url != "",
+    var.temporal_address != "",
+    var.temporal_namespace != "",
+    var.temporal_api_key != "",
+  ])
 }
 
 resource "hcloud_ssh_key" "naary" {

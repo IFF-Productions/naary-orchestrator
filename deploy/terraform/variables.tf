@@ -79,7 +79,7 @@ variable "repo_url" {
   type        = string
   default     = ""
   sensitive   = true # may embed a token for a private repo
-  description = "Git URL cloud-init clones to /opt/naary. For a private GitHub repo use https://<fine-grained-PAT>@github.com/<owner>/<repo>.git (marked sensitive for that reason). Empty ⇒ skip; you clone manually after boot."
+  description = "Git URL cloud-init clones to /opt/naary. For a private GitHub repo use https://<fine-grained-PAT>@github.com/<owner>/<repo>.git (marked sensitive for that reason). NOTE: the token persists in /opt/naary/.git/config on the server — deliberate (each CD deploy runs `git fetch`), but it means box compromise = token compromise, so scope the PAT to READ-ONLY Contents on this ONE repo and give it an expiry. Empty ⇒ skip; you clone manually after boot."
 }
 
 variable "temporal_address" {

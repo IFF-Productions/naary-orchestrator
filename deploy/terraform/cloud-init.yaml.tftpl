@@ -21,7 +21,7 @@ runcmd:
   - curl -fsSL https://get.docker.com | sh
   - systemctl enable --now docker
 %{ if repo_url != "" ~}
-  - git clone ${repo_url} /opt/naary
+  - git clone '${repo_url}' /opt/naary
   - mv /opt/naary.env /opt/naary/.env
   - chmod 600 /opt/naary/.env
 %{ if auto_up ~}

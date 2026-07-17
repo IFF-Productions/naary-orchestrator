@@ -37,6 +37,12 @@ Browser ──HTTPS──▶ Cloudflare edge (TLS · DDoS · DNS)
 
 ---
 
+> **Note:** the Terraform config now provisions the **full Variant B footprint**
+> (tunnel + Hetzner server + Neon) on every `apply`, and `hcloud_token` /
+> `neon_api_key` are required inputs. To run Variant A (tunnel only, your own
+> hardware), delete `terraform/hetzner.tf`, `terraform/neon.tf` and their variables —
+> both files are self-contained by design (see their headers).
+
 ## Step 1 — Cloudflare side (Terraform, on your laptop)
 
 ```bash
