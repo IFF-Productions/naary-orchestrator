@@ -2855,11 +2855,14 @@ function ConfigPanel({
           />
           <OpenApiImportButton
             onApply={(c) =>
+              // Always write query/headers (empty when the operation declares none) so a
+              // re-import is idempotent — mirrors the cURL import above; a conditional
+              // spread would retain stale values from a previous import/edit.
               onChange({
                 method: c.method,
                 url: c.url,
-                ...(c.query ? { query: c.query } : {}),
-                ...(c.headers ? { headers: c.headers } : {}),
+                query: c.query ?? {},
+                headers: c.headers ?? {},
               })
             }
           />

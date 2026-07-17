@@ -343,10 +343,14 @@ export const api = {
   // httpRequest node. `token` (optional) is sent as an Authorization header for a private spec,
   // forwarded VERBATIM to the spec URL (the server never resolves $secrets — see introspectFetch).
   introspectOpenApi(url: string, token?: string): Promise<OpenApiSummary> {
+    // Accept a raw token OR a full pasted "Bearer …" value — never double-wrap.
+    const t = token?.trim();
     return introspectFetch<OpenApiSummary>(
       "/introspect/openapi",
       url,
-      token?.trim() ? { Authorization: `Bearer ${token.trim()}` } : undefined,
+      t
+        ? { Authorization: /^bearer\s/i.test(t) ? t : `Bearer ${t}` }
+        : undefined,
     );
   },
   // AI workflow builder: describe a workflow → a validated DRAFT graph (unsaved).

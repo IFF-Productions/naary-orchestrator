@@ -63,4 +63,31 @@ describe("toConfig", () => {
     expect(c.query).toBeUndefined();
     expect(c.headers).toBeUndefined();
   });
+
+  it("never seeds sensitive header params (the headers field is non-secret)", () => {
+    const c = toConfig(
+      summary({ baseUrl: "https://api.x" }),
+      op({
+        parameters: [
+          { name: "Authorization", in: "header", required: true },
+          { name: "Cookie", in: "header", required: false },
+          { name: "X-Api-Key", in: "header", required: false },
+          { name: "api_key", in: "header", required: false },
+          { name: "X-Trace", in: "header", required: false },
+        ],
+      }),
+    );
+    // Only the benign header survives; credentials belong in $secrets/a connection.
+    expect(c.headers).toEqual({ "X-Trace": "" });
+  });
+
+  it("omits headers when ONLY sensitive header params are declared", () => {
+    const c = toConfig(
+      summary({ baseUrl: "https://api.x" }),
+      op({
+        parameters: [{ name: "Authorization", in: "header", required: true }],
+      }),
+    );
+    expect(c.headers).toBeUndefined();
+  });
 });

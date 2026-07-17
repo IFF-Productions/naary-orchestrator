@@ -42,10 +42,13 @@ export function OpenApiImportButton({
     setError(undefined);
     try {
       const s = await api.introspectOpenApi(url.trim(), token);
-      setSummary(s);
       if (s.operations.length === 0) {
+        // Stay on the URL form — that's the only view that renders the error; showing
+        // the summary view would bury it behind an empty "0 operations" list.
         setError("No operations found in that spec.");
+        return;
       }
+      setSummary(s);
     } catch (e) {
       setSummary(null);
       setError(e instanceof Error ? e.message : "Couldn't load that spec.");

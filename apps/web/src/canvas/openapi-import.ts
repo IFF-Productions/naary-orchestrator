@@ -24,6 +24,15 @@ export function joinUrl(baseUrl: string | undefined, path: string): string {
  * params so the user sees what the operation expects (values left empty — never invented). Path
  * params stay as `{id}` placeholders inside the URL; a declared body is not pre-filled here.
  */
+/**
+ * Header params NEVER seeded into the node's headers JSON — that field is explicitly
+ * "non-secret" (credentials belong in $secrets / a connection), and pre-seeding e.g. an
+ * `Authorization` key the spec declares would nudge users toward pasting a credential
+ * into graph config, which lands in Temporal history.
+ */
+const SENSITIVE_HEADER_RE =
+  /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[-_]?key)$/i;
+
 export function toConfig(
   summary: OpenApiSummary,
   op: ApiOperation,
@@ -32,7 +41,8 @@ export function toConfig(
   const headers: Record<string, string> = {};
   for (const p of op.parameters) {
     if (p.in === "query") query[p.name] = "";
-    else if (p.in === "header") headers[p.name] = "";
+    else if (p.in === "header" && !SENSITIVE_HEADER_RE.test(p.name))
+      headers[p.name] = "";
   }
   return {
     method: op.method,
