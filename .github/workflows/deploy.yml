@@ -192,12 +192,19 @@ jobs:
 
           # docker-rollout (https://github.com/wowu/docker-rollout): start-first rolling
           # replace for compose services — scale to 2, wait for the NEW container's
-          # healthcheck, then stop the old one. Pinned version; a ~10KB bash script, so
-          # just (re)install it every deploy rather than tracking box state.
+          # healthcheck, then stop the old one. A ~10KB bash script we run as root, so we
+          # (re)install it every deploy but harden the supply chain: pin to an IMMUTABLE
+          # commit SHA (git tags are movable) AND verify a sha256 before making it
+          # executable — a tampered/replaced upstream file fails the deploy (set -e). To
+          # bump: re-resolve the tag to its commit and recompute the hash.
           mkdir -p ~/.docker/cli-plugins
-          curl -fsSL "https://raw.githubusercontent.com/wowu/docker-rollout/v0.14/docker-rollout" \
-            -o ~/.docker/cli-plugins/docker-rollout
-          chmod +x ~/.docker/cli-plugins/docker-rollout
+          ROLLOUT_PLUGIN=~/.docker/cli-plugins/docker-rollout
+          ROLLOUT_SHA=a72a9632c38187abd6d8799e4a9d5054a67fe615 # tag v0.14
+          ROLLOUT_SHA256=cdeaba6ae9eee3b0b606286e585bbda6787283d801a6ad6d9b9d2bc347fda05b
+          curl -fsSL "https://raw.githubusercontent.com/wowu/docker-rollout/${ROLLOUT_SHA}/docker-rollout" \
+            -o "$ROLLOUT_PLUGIN"
+          echo "${ROLLOUT_SHA256}  ${ROLLOUT_PLUGIN}" | sha256sum -c -
+          chmod +x "$ROLLOUT_PLUGIN"
 
           $COMPOSE pull
 
