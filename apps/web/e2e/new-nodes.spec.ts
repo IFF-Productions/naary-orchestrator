@@ -32,6 +32,7 @@ const NEW_NODES = [
   { label: "TOTP", field: "Period (seconds)" },
   { label: "Send Email", field: "SMTP connection id" },
   { label: "RSS Read", field: "Feed URL (https)" },
+  { label: "GraphQL", field: "Endpoint URL" },
 ];
 
 for (const n of NEW_NODES) {
