@@ -23,6 +23,7 @@ import { MembershipModule } from "./membership/membership.module";
 import { CompaniesModule } from "./companies/companies.module";
 import { VariablesModule } from "./variables/variables.module";
 import { EnvSecretsModule } from "./env-secrets/env-secrets.module";
+import { IntrospectModule } from "./introspect/introspect.module";
 import { EnvironmentsModule } from "./environments/environments.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { PinsModule } from "./pins/pins.module";
@@ -57,6 +58,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     CompaniesModule,
     VariablesModule,
     EnvSecretsModule,
+    IntrospectModule,
     SettingsModule,
     PreferencesModule,
     EnvironmentsModule,

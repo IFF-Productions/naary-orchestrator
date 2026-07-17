@@ -57,6 +57,16 @@ export {
 export { resolveHttpRequest, type ResolvedHttpRequest } from "./http-request";
 export { parseCurl, type CurlImportResult } from "./curl-import";
 export {
+  parseOpenApi,
+  parseIntrospection,
+  GRAPHQL_INTROSPECTION_QUERY,
+  type ApiOperation,
+  type OpenApiSummary,
+  type GraphQLField,
+  type GraphQLTypeSummary,
+  type GraphQLSchemaSummary,
+} from "./introspection";
+export {
   resolveSqlQuery,
   type ResolvedSqlQuery,
   resolveSqlExec,
