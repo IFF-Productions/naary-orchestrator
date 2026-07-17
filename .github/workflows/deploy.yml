@@ -21,9 +21,12 @@ name: Deploy
 #   DEPLOY_SSH_KEY  — private half of the dedicated deploy keypair
 #                     (public half = deploy_ssh_public_key in deploy/terraform).
 #   DEPLOY_HOST     — the server's IPv4 (terraform output -raw server_ipv4).
-# Repo VARIABLES (not secrets — publishable values baked into the web bundle at build):
-#   VITE_FIREBASE_* / VITE_SENTRY_DSN / VITE_SENTRY_TRACES_SAMPLE_RATE — optional;
-#   unset ⇒ same behavior as before (Firebase login off in the SPA, Sentry off).
+# Optional repo secrets (publishable client-side values, kept as secrets for convenience):
+#   VITE_FIREBASE_* / VITE_SENTRY_* — baked into the web bundle at build time; unset ⇒
+#   same behavior as before (Firebase login off in the SPA, Sentry off).
+#   SENTRY_DSN / SENTRY_TRACES_SAMPLE_RATE / SENTRY_PROFILES_SAMPLE_RATE — backend (api/
+#   worker) Sentry env, exported on the box for compose; unset ⇒ the box's /opt/naary/.env
+#   value (if any) still applies. SENTRY_RELEASE defaults to the deployed tag.
 #
 # Deploys via a GITHUB-HOSTED runner (unlike ci.yml/e2e.yml): it only needs SSH egress,
 # and keeping prod credentials off the shared self-hosted runner is the safer split.
@@ -134,6 +137,9 @@ jobs:
             VITE_FIREBASE_APP_ID=${{ secrets.VITE_FIREBASE_APP_ID }}
             VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN }}
             VITE_SENTRY_TRACES_SAMPLE_RATE=${{ secrets.VITE_SENTRY_TRACES_SAMPLE_RATE }}
+            VITE_SENTRY_PROFILES_SAMPLE_RATE=${{ secrets.VITE_SENTRY_PROFILES_SAMPLE_RATE }}
+            VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE=${{ secrets.VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE }}
+            VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE=${{ secrets.VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE }}
             VITE_APP_VERSION=${{ env.DEPLOY_REF }}
 
   deploy:
@@ -157,6 +163,11 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           GHCR_TOKEN: ${{ github.token }}
           GHCR_USER: ${{ github.actor }}
+          # Backend Sentry env (worker + api). The DSN is near-publishable, but flows the
+          # same env-prefix path as GHCR_TOKEN: never written to disk on the box.
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_TRACES_SAMPLE_RATE: ${{ secrets.SENTRY_TRACES_SAMPLE_RATE }}
+          SENTRY_PROFILES_SAMPLE_RATE: ${{ secrets.SENTRY_PROFILES_SAMPLE_RATE }}
         run: |
           install -d -m 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
@@ -168,7 +179,7 @@ jobs:
             deploy/docker-compose.prod.yml deploy/docker-compose.neon.yml deploy/docker-compose.ghcr.yml \
             | $SSH "mkdir -p /opt/naary && tar xzf - -C /opt/naary"
 
-          $SSH "DEPLOY_REF='$DEPLOY_REF' IMAGE_BASE='$IMAGE_BASE' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' bash -s" <<'REMOTE'
+          $SSH "DEPLOY_REF='$DEPLOY_REF' IMAGE_BASE='$IMAGE_BASE' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' SENTRY_DSN='$SENTRY_DSN' SENTRY_TRACES_SAMPLE_RATE='$SENTRY_TRACES_SAMPLE_RATE' SENTRY_PROFILES_SAMPLE_RATE='$SENTRY_PROFILES_SAMPLE_RATE' bash -s" <<'REMOTE'
           set -euo pipefail
           cd /opt/naary
           # Boxes cloud-init'd by the pre-GHCR template staged the .env one level up.
@@ -189,6 +200,13 @@ jobs:
           FILES="-f docker-compose.yml -f deploy/docker-compose.prod.yml -f deploy/docker-compose.neon.yml -f deploy/docker-compose.ghcr.yml"
           COMPOSE="docker compose $FILES"
           export APP_VERSION="$DEPLOY_REF" IMAGE_BASE
+          # Backend Sentry env: a repo secret, when SET, overrides the box .env; an UNSET
+          # secret must not blank a manually-set .env value — compose treats a set-but-EMPTY
+          # shell var as set, so unset the empties. Release defaults to the deployed tag.
+          [ -n "${SENTRY_DSN:-}" ] || unset SENTRY_DSN
+          [ -n "${SENTRY_TRACES_SAMPLE_RATE:-}" ] || unset SENTRY_TRACES_SAMPLE_RATE
+          [ -n "${SENTRY_PROFILES_SAMPLE_RATE:-}" ] || unset SENTRY_PROFILES_SAMPLE_RATE
+          export SENTRY_RELEASE="${SENTRY_RELEASE:-$DEPLOY_REF}"
 
           # docker-rollout (https://github.com/wowu/docker-rollout): start-first rolling
           # replace for compose services — scale to 2, wait for the NEW container's

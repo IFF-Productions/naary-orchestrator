@@ -6,8 +6,14 @@
  *     token / API key can't leak into telemetry (CLAUDE.md: secrets never reach telemetry).
  *
  * The DSN is a *publishable* value (safe in the client bundle) — it is NOT one of the
- * secrets guarded elsewhere. Tracing is on (the SDK's recommended default); Session
- * Replay is intentionally NOT enabled here (it records user sessions — opt in separately).
+ * secrets guarded elsewhere. Tracing is on (the SDK's recommended default). Session
+ * Replay is on in MASKED mode (all text/inputs masked, media blocked — the recording
+ * carries DOM *structure*, not readable user content): by default it records only
+ * sessions where an error happened. Browser profiling is opt-in via
+ * VITE_SENTRY_PROFILES_SAMPLE_RATE (> 0) and additionally requires the
+ * `Document-Policy: js-profiling` response header (set in apps/web/nginx.conf) —
+ * without it the integration is inert (dev serves without the header, so no profiles
+ * from `vite dev`). Chromium-only; other browsers just don't profile.
  */
 import * as Sentry from "@sentry/react";
 import {
@@ -31,6 +37,17 @@ function safeScrub<T>(value: T): T | null {
   }
 }
 
+/** A VITE_-inlined sample rate with a default; NaN (a typo'd value) falls back too. */
+function sampleRate(raw: unknown, fallback: number): number {
+  const n = Number((raw as string | undefined) ?? "");
+  return Number.isFinite(n) ? n : fallback;
+}
+
+const profilesSampleRate = sampleRate(
+  import.meta.env.VITE_SENTRY_PROFILES_SAMPLE_RATE,
+  0,
+);
+
 if (dsn) {
   Sentry.init({
     dsn,
@@ -53,12 +70,37 @@ if (dsn) {
       }),
       // Capture console calls as Sentry logs.
       Sentry.consoleLoggingIntegration(),
+      // Session Replay, PRIVACY-FIRST: mask all text + inputs, block media — the recording
+      // is DOM structure and interaction timing, never readable user content. NOTE: do NOT
+      // route recording events through redactSecrets — it is depth-bounded (deep trees →
+      // "[Truncated]") and would destroy the rrweb DOM snapshot; masking IS the privacy
+      // layer here. Network capture stays at the SDK default (URLs only, no bodies/headers),
+      // and those URLs flow through the scrubbed breadcrumb path.
+      Sentry.replayIntegration({
+        maskAllText: true,
+        maskAllInputs: true,
+        blockAllMedia: true,
+      }),
+      // Browser profiling — only bundled into the running config when opted in.
+      ...(profilesSampleRate > 0 ? [Sentry.browserProfilingIntegration()] : []),
     ],
     // Opt-in sample rate; default 0.1 so production isn't fully traced. Override with
     // VITE_SENTRY_TRACES_SAMPLE_RATE at build time.
-    tracesSampleRate: Number(
-      (import.meta.env.VITE_SENTRY_TRACES_SAMPLE_RATE as string | undefined) ??
-        "0.1",
+    tracesSampleRate: sampleRate(
+      import.meta.env.VITE_SENTRY_TRACES_SAMPLE_RATE,
+      0.1,
+    ),
+    // Profiles are taken INSIDE sampled transactions (effective rate = this × traces rate).
+    profilesSampleRate,
+    // Replay defaults: don't record ordinary sessions (0), DO keep the replay when an
+    // error happens (1) — the debugging payoff without recording everyone all the time.
+    replaysSessionSampleRate: sampleRate(
+      import.meta.env.VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE,
+      0,
+    ),
+    replaysOnErrorSampleRate: sampleRate(
+      import.meta.env.VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE,
+      1,
     ),
     // Only propagate the trace header to our own API (avoid leaking it cross-origin).
     tracePropagationTargets: [/^\/(api)\//, /naar-y\.com/],

@@ -9,6 +9,7 @@
  */
 import * as Sentry from "@sentry/node";
 import { scrubEvent } from "./scrub";
+import type { SpanAttrs } from "./spans";
 
 export { redactString, deepScrub, scrubEvent } from "./scrub";
 export {
@@ -50,9 +51,42 @@ function safeScrub(event: unknown): unknown {
   }
 }
 
+/**
+ * The default integration set, plus — when profiling is opted into — the node profiler.
+ * `@sentry/profiling-node` is a NATIVE addon (prebuilt binary per platform/libc): load it
+ * lazily and guarded, so a platform without a prebuild degrades to "no profiling" instead
+ * of crashing the api/worker at boot (observability must never take the product down).
+ */
+type SentryIntegration = Parameters<typeof Sentry.addIntegration>[0];
+
+function buildIntegrations(profilesSampleRate: number): SentryIntegration[] {
+  const integrations: SentryIntegration[] = [
+    Sentry.prismaIntegration(),
+    Sentry.pinoIntegration(),
+    // Node runtime metrics (event-loop lag, memory, GC) → Sentry, mirroring what
+    // prom-client's collectDefaultMetrics already exposes for the /metrics scrape.
+    Sentry.nodeRuntimeMetricsIntegration(),
+  ];
+  if (profilesSampleRate > 0) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { nodeProfilingIntegration } =
+        require("@sentry/profiling-node") as typeof import("@sentry/profiling-node");
+      integrations.push(nodeProfilingIntegration());
+    } catch {
+      /* no prebuilt profiler binary for this platform — run without profiling */
+    }
+  }
+  return integrations;
+}
+
 export function initSentry(opts: { component: "api" | "worker" }): void {
   const dsn = process.env.SENTRY_DSN;
   if (!dsn) return; // disabled — no DSN configured
+  // Opt-in CPU profiling; 0 (off) unless explicitly configured. Requires tracing on.
+  const profilesSampleRate = Number(
+    process.env.SENTRY_PROFILES_SAMPLE_RATE ?? "0",
+  );
   Sentry.init({
     dsn,
     environment: process.env.NODE_ENV ?? "development",
@@ -69,13 +103,10 @@ export function initSentry(opts: { component: "api" | "worker" }): void {
     // defaults (httpIntegration etc. preserved). Relies on initSentry() running before
     // @prisma/client / the pino loggers are created — main.ts + worker.ts call it before
     // the app/activity imports (CommonJS preserves require order).
-    integrations: [
-      Sentry.prismaIntegration(),
-      Sentry.pinoIntegration(),
-      // Node runtime metrics (event-loop lag, memory, GC) → Sentry, mirroring what
-      // prom-client's collectDefaultMetrics already exposes for the /metrics scrape.
-      Sentry.nodeRuntimeMetricsIntegration(),
-    ],
+    integrations: buildIntegrations(profilesSampleRate),
+    // Profiling is TRACE-based: a profile is only collected inside a sampled transaction,
+    // so this is effectively profilesSampleRate × tracesSampleRate — both must be > 0.
+    profilesSampleRate,
     // Never attach IPs / cookies / user PII automatically.
     sendDefaultPii: false,
     initialScope: { tags: { component: opts.component } },
@@ -117,6 +148,57 @@ export function captureError(error: unknown, context: ErrorContext = {}): void {
       ...(context.nodeId ? { nodeId: context.nodeId } : {}),
       ...(context.where ? { where: context.where } : {}),
     },
+  });
+}
+
+/**
+ * `ApplicationFailure.type` values that are EXPECTED, user-fixable failures — a bad or
+ * exhausted tenant credential, an unconfigured integration, a connection needing re-auth.
+ * These surface to the USER on the run (that's their fix to make); reporting each one as a
+ * Sentry issue would flood the tracker with noise that no operator can act on. Everything
+ * else — subprocess crashes, parse errors, provider 5xx, our own bugs — IS operator-relevant.
+ */
+const EXPECTED_ACTIVITY_FAILURE_TYPES = new Set([
+  "AUTH",
+  "QUOTA",
+  "AUTH_NOT_CONFIGURED",
+  "CONNECTION_REAUTH",
+]);
+
+/** True when the error is an expected user-fixable activity failure (see above). Duck-typed
+ *  on `type` so this package needs no @temporalio import. Exported for unit tests. */
+export function isExpectedActivityFailure(err: unknown): boolean {
+  const type = (err as { type?: unknown } | null)?.type;
+  return typeof type === "string" && EXPECTED_ACTIVITY_FAILURE_TYPES.has(type);
+}
+
+/**
+ * Report a failed activity (a workflow NODE failure) as a Sentry ISSUE. No-op when Sentry
+ * is disabled or the failure is an expected user-fixable one ({@link isExpectedActivityFailure}).
+ *
+ * SAFE BY CONSTRUCTION: the error captured here is the exact object that propagates into
+ * Temporal history — every activity already sanitizes what it throws (generic messages;
+ * never argv/prompt/key material), and `beforeSend` scrubs the event again on egress.
+ * Fingerprinted by activity + failure type so each (node kind, failure kind) pair groups
+ * into ONE issue instead of splintering by message.
+ */
+export function captureActivityFailure(
+  activity: string,
+  ids: SpanAttrs,
+  err: unknown,
+): void {
+  if (!enabled) return;
+  if (isExpectedActivityFailure(err)) return;
+  const type = (err as { type?: unknown } | null)?.type;
+  const kind =
+    typeof type === "string" && type
+      ? type
+      : err instanceof Error
+        ? err.name
+        : "unknown";
+  Sentry.captureException(err, {
+    tags: { activity, errorType: kind, ...ids },
+    fingerprint: ["activity-failure", activity, kind],
   });
 }
 
