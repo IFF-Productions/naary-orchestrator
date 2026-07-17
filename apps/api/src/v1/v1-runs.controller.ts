@@ -26,6 +26,19 @@ import {
 } from "./v1-run.response";
 
 /**
+ * Parse the public `?limit=` query into a safe integer in 1..100 (default 50). Rejects non-integers
+ * ("10.5"), negatives/zero, and garbage — so a predictable value always reaches the service/Prisma
+ * `take`, never a float or a NaN. Exported for direct unit testing.
+ */
+export function parseLimit(raw: string | undefined): number {
+  const DEFAULT = 50;
+  if (raw === undefined || raw.trim() === "") return DEFAULT;
+  const n = Number(raw);
+  if (!Number.isInteger(n)) return DEFAULT;
+  return Math.min(Math.max(n, 1), 100);
+}
+
+/**
  * Public v1 run API — the "run" resource aliases the internal "execution". Thin: every method calls
  * the SAME ExecutionsService the SPA uses (so a run started here meters usage + is durable exactly
  * like a UI/MCP-started one), and maps the internal result into a v1-OWNED response DTO (§5 — the
@@ -78,11 +91,10 @@ export class V1RunsController {
     @TenantId() tenantId: string,
     @Query("limit") limit?: string,
   ): Promise<RunListItemResponse[]> {
-    const n = limit ? Number(limit) : 50;
-    const rows = await this.executions.list(
-      tenantId,
-      Number.isFinite(n) ? n : 50,
-    );
+    // Coerce + clamp at the PUBLIC boundary so the API behaves predictably: a non-integer
+    // ("10.5"), a negative, or garbage never reaches Prisma `take`. Default 50, bounded 1..100
+    // (the service clamps too, but the public contract shouldn't rely on that).
+    const rows = await this.executions.list(tenantId, parseLimit(limit));
     return rows.map((r) => ({
       runId: r.workflowId,
       workflowKey: r.workflowKey,

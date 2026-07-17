@@ -1,5 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { V1RunsController } from "../src/v1/v1-runs.controller";
+import { V1RunsController, parseLimit } from "../src/v1/v1-runs.controller";
+
+describe("parseLimit (public ?limit= coercion)", () => {
+  it("defaults to 50 for missing/blank/garbage/non-integer", () => {
+    expect(parseLimit(undefined)).toBe(50);
+    expect(parseLimit("")).toBe(50);
+    expect(parseLimit("abc")).toBe(50);
+    expect(parseLimit("10.5")).toBe(50); // non-integer → default, never a float into `take`
+    expect(parseLimit("NaN")).toBe(50);
+  });
+  it("clamps integers into 1..100", () => {
+    expect(parseLimit("10")).toBe(10);
+    expect(parseLimit("0")).toBe(1); // zero → 1 (never an empty/again-defaulted page)
+    expect(parseLimit("-1")).toBe(1); // negative → 1
+    expect(parseLimit("1000")).toBe(100); // over cap → 100
+  });
+});
 
 /**
  * The v1 runs controller is thin glue over ExecutionsService — its job is (1) call the SAME service
