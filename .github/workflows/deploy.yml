@@ -1,7 +1,16 @@
 name: Deploy
 
-# Deploys a RELEASE to the Hetzner box (deploy/README.md): SSH in, check out the
-# release tag, and `compose up --build` (images build on-box). Three ways in:
+# Deploys a RELEASE to the Hetzner box (deploy/README.md) from PREBUILT GHCR images:
+#   build job  — builds ghcr.io/<owner>/naary-backend + naary-web for the ref and pushes
+#                them, UNLESS both tags already exist (so a rollback pulls the exact
+#                bytes that ran before, never a rebuild).
+#   deploy job — ships the compose files over SSH, logs the box into GHCR with this
+#                run's EPHEMERAL GITHUB_TOKEN (no long-lived registry credential ever
+#                touches the server), then `compose pull` + `up -d --no-build`.
+#
+# The repo is NOT cloned on the server — no source, no PAT in .git/config.
+#
+# Three ways in:
 #   - chained from release.yml (the normal path — Actions → Release → run workflow)
 #   - `release: published` — for releases created by hand in the GitHub UI / gh CLI
 #     (release.yml can't use this: a release published with the workflow's own
@@ -12,13 +21,11 @@ name: Deploy
 #   DEPLOY_SSH_KEY  — private half of the dedicated deploy keypair
 #                     (public half = deploy_ssh_public_key in deploy/terraform).
 #   DEPLOY_HOST     — the server's IPv4 (terraform output -raw server_ipv4).
-#   DEPLOY_REPO_URL — git URL to clone on FIRST deploy if /opt/naary doesn't exist yet
-#                     (same value as terraform's repo_url — a PAT-embedded HTTPS URL for a
-#                     private repo). Makes the deploy self-bootstrapping when cloud-init was
-#                     run without repo_url; after the first clone the token lives in
-#                     /opt/naary/.git/config and later deploys just `git fetch`.
+# Repo VARIABLES (not secrets — publishable values baked into the web bundle at build):
+#   VITE_FIREBASE_* / VITE_SENTRY_DSN / VITE_SENTRY_TRACES_SAMPLE_RATE — optional;
+#   unset ⇒ same behavior as before (Firebase login off in the SPA, Sentry off).
 #
-# Runs on a GITHUB-HOSTED runner (unlike ci.yml/e2e.yml): it only needs SSH egress,
+# Deploys via a GITHUB-HOSTED runner (unlike ci.yml/e2e.yml): it only needs SSH egress,
 # and keeping prod credentials off the shared self-hosted runner is the safer split.
 # NOTE: runner IPs vary — ssh_allowed_cidrs in Terraform must stay open (default) or
 # include GitHub's ranges, or this workflow can't reach port 22.
@@ -44,65 +51,145 @@ concurrency:
   group: deploy-prod
   cancel-in-progress: false
 
+env:
+  DEPLOY_REF: ${{ inputs.ref || github.event.release.tag_name }}
+  IMAGE_BASE: ghcr.io/${{ github.repository_owner }}
+
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Auto-created on first run. Add a "required reviewers" protection rule to this
-    # environment in repo settings to make every deploy click-to-approve.
-    environment: production
-    env:
-      DEPLOY_REF: ${{ inputs.ref || github.event.release.tag_name }}
+    permissions:
+      contents: read
+      packages: write
     steps:
-      # DEPLOY_REF is embedded in the remote command line — reject anything outside
-      # safe ref characters so a crafted dispatch input can't break out of the quoting.
+      # DEPLOY_REF becomes a docker image tag and is embedded in the remote command
+      # line — reject anything outside safe tag characters (no '/', so tags or `main`;
+      # slash-branches can't be image tags anyway).
       - name: Validate ref
         run: |
-          if ! printf '%s' "$DEPLOY_REF" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]*$'; then
-            echo "::error::ref '$DEPLOY_REF' has characters outside [A-Za-z0-9._/-]"
+          if ! printf '%s' "$DEPLOY_REF" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$'; then
+            echo "::error::ref '$DEPLOY_REF' has characters outside [A-Za-z0-9._-]"
             exit 1
           fi
 
-      - name: Deploy over SSH
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_REF }}
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # Rollbacks and re-runs must deploy the EXISTING artifact, never a rebuild —
+      # checked PER IMAGE, so a partially-pushed tag (e.g. backend made it, web didn't)
+      # only builds the missing one and never overwrites the one that exists.
+      - name: Check which images already exist for this tag
+        id: exists
+        run: |
+          for img in backend web; do
+            if docker manifest inspect "$IMAGE_BASE/naary-$img:$DEPLOY_REF" >/dev/null 2>&1; then
+              echo "$img=true" >> "$GITHUB_OUTPUT"
+              echo "naary-$img:$DEPLOY_REF already in GHCR — will not rebuild/overwrite it."
+            else
+              echo "$img=false" >> "$GITHUB_OUTPUT"
+            fi
+          done
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.exists.outputs.backend != 'true' || steps.exists.outputs.web != 'true'
+
+      - name: Build + push backend image (api / worker / migrate)
+        if: steps.exists.outputs.backend != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_BASE }}/naary-backend:${{ env.DEPLOY_REF }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+      # VITE_* are inlined into the bundle at build time, so they come from repo
+      # VARIABLES here (publishable client-side config, not secrets) instead of the
+      # server .env. VITE_APP_VERSION is stamped with the release tag.
+      - name: Build + push web image (SPA + nginx)
+        if: steps.exists.outputs.web != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_BASE }}/naary-web:${{ env.DEPLOY_REF }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+          build-args: |
+            VITE_FIREBASE_API_KEY=${{ vars.VITE_FIREBASE_API_KEY }}
+            VITE_FIREBASE_AUTH_DOMAIN=${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+            VITE_FIREBASE_PROJECT_ID=${{ vars.VITE_FIREBASE_PROJECT_ID }}
+            VITE_FIREBASE_STORAGE_BUCKET=${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}
+            VITE_FIREBASE_MESSAGING_SENDER_ID=${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+            VITE_FIREBASE_APP_ID=${{ vars.VITE_FIREBASE_APP_ID }}
+            VITE_SENTRY_DSN=${{ vars.VITE_SENTRY_DSN }}
+            VITE_SENTRY_TRACES_SAMPLE_RATE=${{ vars.VITE_SENTRY_TRACES_SAMPLE_RATE }}
+            VITE_APP_VERSION=${{ env.DEPLOY_REF }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read # the box pulls with this run's ephemeral token
+    # Auto-created on first run. Add a "required reviewers" protection rule to this
+    # environment in repo settings to make every deploy click-to-approve.
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_REF }}
+
+      - name: Ship compose files + deploy over SSH
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          REPO_URL: ${{ secrets.DEPLOY_REPO_URL }}
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_USER: ${{ github.actor }}
         run: |
           install -d -m 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new "root@$DEPLOY_HOST" "DEPLOY_REF='$DEPLOY_REF' REPO_URL='$REPO_URL' bash -s" <<'REMOTE'
+          SSH="ssh -i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=accept-new root@$DEPLOY_HOST"
+
+          # The box needs only the compose files (+ its .env, which stays put) — no repo.
+          tar czf - docker-compose.yml \
+            deploy/docker-compose.prod.yml deploy/docker-compose.neon.yml deploy/docker-compose.ghcr.yml \
+            | $SSH "mkdir -p /opt/naary && tar xzf - -C /opt/naary"
+
+          $SSH "DEPLOY_REF='$DEPLOY_REF' IMAGE_BASE='$IMAGE_BASE' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' bash -s" <<'REMOTE'
           set -euo pipefail
-          # First deploy on a box cloud-init provisioned WITHOUT repo_url: /opt/naary won't exist
-          # yet. Bootstrap-clone it (and move in the staged /opt/naary.env cloud-init wrote), so the
-          # deploy is self-healing. Subsequent deploys skip this and just fetch.
-          if [ ! -d /opt/naary/.git ]; then
-            if [ -z "${REPO_URL:-}" ]; then
-              echo "::error::/opt/naary is not a git checkout and DEPLOY_REPO_URL secret is unset — cannot bootstrap. Set DEPLOY_REPO_URL (same value as terraform repo_url), or clone the repo to /opt/naary on the server once."
-              exit 1
-            fi
-            git clone "$REPO_URL" /opt/naary
-            if [ -f /opt/naary.env ]; then
-              mv /opt/naary.env /opt/naary/.env
-              chmod 600 /opt/naary/.env
-            fi
-          fi
           cd /opt/naary
-          git fetch --tags --force origin
-          # Tags deploy detached; a branch name falls back to its origin tip.
-          if git rev-parse -q --verify "refs/tags/$DEPLOY_REF" >/dev/null; then
-            target="refs/tags/$DEPLOY_REF"
-          else
-            target="origin/$DEPLOY_REF"
+          # Boxes cloud-init'd by the pre-GHCR template staged the .env one level up.
+          if [ -f /opt/naary.env ] && [ ! -f /opt/naary/.env ]; then
+            mv /opt/naary.env /opt/naary/.env && chmod 600 /opt/naary/.env
           fi
-          git checkout --force --detach "$target"
-          # VITE_APP_VERSION is a build arg (baked into the SPA bundle) — stamp the release.
-          VITE_APP_VERSION="$DEPLOY_REF" docker compose \
-            -f docker-compose.yml \
-            -f deploy/docker-compose.prod.yml \
-            -f deploy/docker-compose.neon.yml \
-            up -d --build
+          # Fail fast with a clear message — without .env, compose dies on every
+          # ${VAR:?} interpolation with far more confusing errors.
+          if [ ! -f /opt/naary/.env ]; then
+            echo "::error::/opt/naary/.env is missing on the server. cloud-init stages it on first boot; restore it with: terraform -chdir=deploy/terraform output -raw server_env > /opt/naary/.env && chmod 600 /opt/naary/.env"
+            exit 1
+          fi
+          # Ephemeral packages:read token — expires with the workflow run anyway, but
+          # don't leave it in the box's docker config even that long: logout on ANY
+          # exit (set -e would otherwise skip a trailing logout on pull/up failure).
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          COMPOSE="docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml -f deploy/docker-compose.neon.yml -f deploy/docker-compose.ghcr.yml"
+          export APP_VERSION="$DEPLOY_REF" IMAGE_BASE
+          $COMPOSE pull
+          $COMPOSE up -d --no-build
           # Gate on the api container's own compose healthcheck (3 min budget).
           status=starting
           for _ in $(seq 1 36); do
@@ -112,9 +199,9 @@ jobs:
           done
           if [ "$status" != healthy ]; then
             echo "api never became healthy (status: $status)"
-            docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml -f deploy/docker-compose.neon.yml logs --tail=100 api migrate
+            $COMPOSE logs --tail=100 api migrate
             exit 1
           fi
           docker image prune -f >/dev/null
-          echo "Deployed $DEPLOY_REF ($(git rev-parse --short HEAD)) — api healthy."
+          echo "Deployed $DEPLOY_REF — api healthy."
           REMOTE

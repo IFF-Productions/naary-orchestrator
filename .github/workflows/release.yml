@@ -14,9 +14,6 @@ on:
         type: string
         required: true
 
-permissions:
-  contents: write # push the bump commit + tag, create the release
-
 concurrency:
   group: release
   cancel-in-progress: false
@@ -25,6 +22,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write # push the bump commit + tag, create the release
     outputs:
       tag: ${{ steps.version.outputs.tag }}
     steps:
@@ -91,6 +90,11 @@ jobs:
   deploy:
     needs: release
     uses: ./.github/workflows/deploy.yml
+    # A called workflow can only downgrade the caller's token — grant here what
+    # deploy.yml's jobs need (packages: write to push the GHCR images).
+    permissions:
+      contents: read
+      packages: write
     with:
       ref: ${{ needs.release.outputs.tag }}
     secrets: inherit
