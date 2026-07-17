@@ -44,6 +44,7 @@ import {
 } from "@naary/dsl";
 import { Button, Icon, StatusPill } from "../components";
 import { CurlImportButton } from "../canvas/CurlImportButton";
+import { OpenApiImportButton } from "../canvas/OpenApiImportButton";
 import { ExpressionField } from "../components/ExpressionField";
 import {
   api,
@@ -2849,6 +2850,16 @@ function ConfigPanel({
                 headers: c.headers ?? {},
                 query: c.query ?? {},
                 body: c.body,
+              })
+            }
+          />
+          <OpenApiImportButton
+            onApply={(c) =>
+              onChange({
+                method: c.method,
+                url: c.url,
+                ...(c.query ? { query: c.query } : {}),
+                ...(c.headers ? { headers: c.headers } : {}),
               })
             }
           />
