@@ -49,10 +49,17 @@ export class ApiTokenService {
 
   /** Resolve a bearer token to its tenant + optional env binding, or null if unknown. The env id
    *  is free (same row we already read for the tenant) — the token's bound env is authoritative for
-   *  runs it starts (design ENVIRONMENTS.md §3, Slice 4). Null environmentId = unbound. */
+   *  runs it starts (design ENVIRONMENTS.md §3, Slice 4). Null environmentId = unbound.
+   *  Additionally returns the token ROW id (RBAC-GROUPS.md §4a, slice G1): the identity a
+   *  WorkflowGrant hangs on when the workspace opts into group enforcement. Additive — the id
+   *  is not the secret (the hash stays write-once) and callers that ignore it are unchanged. */
   async verify(
     token: string,
-  ): Promise<{ tenantId: string; environmentId: string | null } | null> {
+  ): Promise<{
+    id: string;
+    tenantId: string;
+    environmentId: string | null;
+  } | null> {
     const row = await getPrisma().apiToken.findUnique({
       where: { tokenHash: hashToken(token) },
     });
@@ -64,6 +71,10 @@ export class ApiTokenService {
         data: { lastUsedAt: new Date() },
       })
       .catch(() => undefined);
-    return { tenantId: row.tenantId, environmentId: row.environmentId };
+    return {
+      id: row.id,
+      tenantId: row.tenantId,
+      environmentId: row.environmentId,
+    };
   }
 }

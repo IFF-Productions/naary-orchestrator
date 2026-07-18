@@ -78,3 +78,46 @@ describe("PinsService env scoping", () => {
     for (const w of wheres) expect(w.environmentId).toBeTruthy();
   });
 });
+
+// RBAC G1: pins GET is `view`-gated, pin PUT/DELETE `edit`-gated — actor only;
+// the single-node test's internal autofill writes pass no actor and stay open.
+import { ForbiddenException } from "@nestjs/common";
+import type { Principal } from "../src/auth/tenant.decorator";
+import type { PermissionsService } from "../src/permissions/permissions.service";
+
+describe("PinsService G1 gates", () => {
+  const member: Principal = { tenantId: "t-1", userId: "u-1", role: "member" };
+
+  function withPerms(assertCan: ReturnType<typeof vi.fn>) {
+    return new PinsService({ assertCan } as unknown as PermissionsService);
+  }
+
+  it("list asserts `view`; set/clear assert `edit` (denial writes nothing)", async () => {
+    const assertCan = vi.fn().mockRejectedValue(new ForbiddenException("no"));
+    const s = withPerms(assertCan);
+    await expect(s.list("t-1", "env-a", "wf", member)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    await expect(
+      s.set("t-1", "env-a", "wf", "n1", { x: 1 }, member),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      s.clear("t-1", "env-a", "wf", "n1", member),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(assertCan).toHaveBeenNthCalledWith(1, member, "view", "wf", "env-a");
+    expect(assertCan).toHaveBeenNthCalledWith(2, member, "edit", "wf", "env-a");
+    expect(assertCan).toHaveBeenNthCalledWith(3, member, "edit", "wf", "env-a");
+    expect(upsert).not.toHaveBeenCalled();
+    expect(deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("a granted member passes; an actor-less call never consults permissions", async () => {
+    const assertCan = vi.fn().mockResolvedValue(undefined);
+    const s = withPerms(assertCan);
+    await s.set("t-1", "env-a", "wf", "n1", { x: 1 }, member);
+    expect(upsert).toHaveBeenCalledTimes(1);
+    assertCan.mockClear();
+    await s.set("t-1", "env-a", "wf", "n1", { x: 1 }); // internal autofill path
+    expect(assertCan).not.toHaveBeenCalled();
+  });
+});

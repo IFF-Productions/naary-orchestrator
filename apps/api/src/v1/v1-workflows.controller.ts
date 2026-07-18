@@ -90,9 +90,11 @@ export class V1WorkflowsController {
   async list(
     @TenantId() tenantId: string,
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<WorkflowSummaryResponse[]> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    const rows = await this.graphs.list(tenantId, envId);
+    // A restricted token (RBAC-GROUPS.md §4a) sees only its viewable keys — filtered in-service.
+    const rows = await this.graphs.list(tenantId, envId, principal);
     return rows.map((r) => ({
       workflowKey: r.workflowKey,
       name: r.name,
@@ -114,9 +116,15 @@ export class V1WorkflowsController {
     @TenantId() tenantId: string,
     @Param("key") key: string,
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<WorkflowExportResponse> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    const doc = await this.graphs.getLatestNamed(tenantId, envId, key);
+    const doc = await this.graphs.getLatestNamed(
+      tenantId,
+      envId,
+      key,
+      principal,
+    );
     if (!doc) throw new NotFoundException(`No workflow '${key}'`);
     return {
       workflowKey: doc.workflowKey,
@@ -139,17 +147,20 @@ export class V1WorkflowsController {
     @Param("key") key: string,
     @Body() body: ImportWorkflowDto,
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<WorkflowSavedResponse> {
     const graph = toGraphDef(body.graph);
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
     // Consolidated save path (shared with graphs.controller): upsert + the DEFAULT-ENV-ONLY,
-    // best-effort poll/cron schedule sync live in WorkflowLifecycleService.
+    // best-effort poll/cron schedule sync live in WorkflowLifecycleService. The principal
+    // gates the save (§4): existing key ⇒ edit, new key ⇒ canCreate.
     const snap = await this.lifecycle.saveWorkflow(
       tenantId,
       envId,
       key,
       body.name,
       graph,
+      principal,
     );
     return {
       workflowKey: key,
@@ -170,11 +181,18 @@ export class V1WorkflowsController {
     @TenantId() tenantId: string,
     @Param("key") key: string,
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<{ deleted: true }> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
     // Consolidated delete path (shared with graphs.controller): the DEFAULT-ENV-ONLY, best-effort
-    // schedule teardown + deleteShared gating live in WorkflowLifecycleService.
-    const deleted = await this.lifecycle.deleteWorkflow(tenantId, envId, key);
+    // schedule teardown + deleteShared gating live in WorkflowLifecycleService. The principal
+    // gates the delete (§4) before any teardown side effect.
+    const deleted = await this.lifecycle.deleteWorkflow(
+      tenantId,
+      envId,
+      key,
+      principal,
+    );
     if (!deleted) throw new NotFoundException(`No workflow '${key}'`);
     return { deleted: true };
   }
@@ -198,6 +216,7 @@ export class V1WorkflowsController {
     const toEnvId = await this.environments.resolveEnvId(tenantId, body.toEnv);
     // API-token principals have no subject/userId → 'api-token' (matches graphs.controller).
     const actor = principal.subject ?? principal.userId ?? "api-token";
+    // share = promote (§8.2); the grant must match the SOURCE env — asserted in-service.
     return this.graphs.promote(
       tenantId,
       key,
@@ -205,6 +224,7 @@ export class V1WorkflowsController {
       toEnvId,
       actor,
       body.fromVersion,
+      principal,
     );
   }
 
@@ -218,8 +238,17 @@ export class V1WorkflowsController {
   async promotions(
     @TenantId() tenantId: string,
     @Param("key") key: string,
+    @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<PromotionLineageResponse[]> {
-    const rows = await this.graphs.listPromotions(tenantId, key);
+    // View-gated (§4) against the caller's ACTIVE env, like the SPA promotions route.
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    const rows = await this.graphs.listPromotions(
+      tenantId,
+      key,
+      principal,
+      envId,
+    );
     return rows.map((r) => ({
       fromEnvId: r.fromEnvId,
       toEnvId: r.toEnvId,

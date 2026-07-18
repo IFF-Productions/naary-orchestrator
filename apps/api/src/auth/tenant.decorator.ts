@@ -19,8 +19,15 @@ export interface Principal {
   /** Firebase `email_verified` — gates workspace creation (design Path A). Absent for
    *  API-token principals. */
   emailVerified?: boolean;
-  /** Role in the active workspace ('owner' | 'admin' | 'member'); 'owner' for API tokens. */
+  /** Role in the active workspace ('owner' | 'admin' | 'member'). For API tokens: 'owner'
+   *  while the workspace has NO WorkflowGrant rows (today's behavior), 'member' once the
+   *  workspace opted into group enforcement (RBAC-GROUPS.md §4a — the first-grant cliff). */
   role?: string;
+  /** ApiToken row id — set ONLY for RESTRICTED `nry_` principals (the workspace has ≥1
+   *  WorkflowGrant, so the token is an RBAC subject; RBAC-GROUPS.md §4a). PermissionsService
+   *  resolves grants by tokenId when set, by userId otherwise. Absent for user principals
+   *  and for tokens in zero-grant (unenforced) workspaces. */
+  tokenId?: string;
   /** RAW `X-Environment-Id` header (env id or slug), stashed by the guard WITHOUT a DB lookup
    *  (design ENVIRONMENTS.md §4). Env-scoped controllers resolve it to a concrete env id via
    *  `EnvironmentsService.resolveEnvId` at the query boundary (undefined → the tenant's default). */

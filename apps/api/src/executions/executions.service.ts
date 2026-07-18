@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
@@ -33,7 +34,9 @@ import type { GraphDef, NodeDef } from "@naary/dsl";
 import { getPrisma } from "@naary/db";
 import { TracedClass } from "@naary/observability";
 import { getBudget } from "@naary/usage";
+import type { Principal } from "../auth/tenant.decorator";
 import { assertWithinMonthlyBudget } from "../budget/budget-guard";
+import { PermissionsService } from "../permissions/permissions.service";
 import { assertWithinCompanyMonthlyBudget } from "../budget/company-budget-guard";
 import { executionsStarted } from "../common/metrics";
 import { EnvironmentsService } from "../environments/environments.service";
@@ -296,7 +299,24 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly graphs: GraphsService,
     private readonly environments: EnvironmentsService,
+    /** @Optional so the many bare test constructions still work; when an ACTOR is passed
+     *  to start/rerun the service must be wired (fail CLOSED, never skip authz). */
+    @Optional() private readonly permissions?: PermissionsService,
   ) {}
+
+  /** In-service `run` assert (RBAC-GROUPS.md §4). Gates USER-principal-initiated starts
+   *  only — trigger paths (webhook/form/chat/schedule) carry no principal by design. */
+  private async assertRun(
+    actor: Principal | undefined,
+    workflowKey: string,
+    environmentId: string,
+  ): Promise<void> {
+    if (!actor) return;
+    if (!this.permissions) {
+      throw new Error("ExecutionsService: PermissionsService is not wired");
+    }
+    await this.permissions.assertCan(actor, "run", workflowKey, environmentId);
+  }
 
   async onModuleInit(): Promise<void> {
     const { client, connection } = await connectTemporal();
@@ -319,7 +339,11 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     input?: Record<string, unknown>,
     workflowKey: string = DEFAULT_WORKFLOW_KEY,
     graphVersion?: number,
+    /** The user-facing caller (SPA/v1/MCP manual start). Absent for internal/trigger
+     *  callers — those are workspace-level automation (§0) and are never gated. */
+    actor?: Principal,
   ): Promise<{ workflowId: string }> {
+    await this.assertRun(actor, workflowKey, environmentId);
     const snapshot =
       graphVersion === undefined
         ? await this.graphs.getLatest(tenantId, environmentId, workflowKey)
@@ -1352,6 +1376,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     id: string,
     tenantId: string,
     graphVersion?: number,
+    actor?: Principal,
   ): Promise<{ workflowId: string }> {
     await this.assertOwner(id, tenantId);
     const row = await getPrisma().execution.findUnique({
@@ -1362,13 +1387,16 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         "This run predates workflow-key tracking and can't be re-run.",
       );
     }
-    const input = await this.originalTriggerInput(id);
     // Re-run in the ORIGINAL run's env (Slice 6) — a sandbox run re-runs against the sandbox graph.
     // A pre-Slice-6 run has no env tag → the tenant default (where its graph lived).
     const envId =
       row.environmentId ?? (await this.environments.defaultEnvId(tenantId));
+    // `run` gate (§4) against the run's own key + env, BEFORE reading the original input.
+    await this.assertRun(actor, row.workflowKey, envId);
+    const input = await this.originalTriggerInput(id);
     // workflowKey is the run's OWN key; graphVersion (if given) is resolved against
     // that key inside start() — the caller can't target another workflow's version.
+    // No actor forwarded: the gate already ran just above (same key + env).
     return this.start(tenantId, envId, input, row.workflowKey, graphVersion);
   }
 

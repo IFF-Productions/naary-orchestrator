@@ -1,7 +1,9 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import type { GraphDef } from "@naary/dsl";
 import { TracedClass } from "@naary/observability";
+import type { Principal } from "../auth/tenant.decorator";
 import { EnvironmentsService } from "../environments/environments.service";
+import { PermissionsService } from "../permissions/permissions.service";
 import { SchedulesService } from "../schedules/schedules.service";
 import { type GraphSnapshot, GraphsService } from "./graphs.service";
 
@@ -22,6 +24,10 @@ import { type GraphSnapshot, GraphsService } from "./graphs.service";
  *   the default/prod copy's triggers.
  * - Best-effort side-effects: a scheduling hiccup must not fail the save/delete
  *   (`.catch(() => undefined)`).
+ * - Permission asserts (RBAC-GROUPS.md §4, slice G1) run BEFORE any side effect: the save
+ *   gate lives in GraphsService.upsert (edit vs canCreate — the upsert already reads the
+ *   latest row, so "new key?" is free); the DELETE gate is asserted here, ahead of the
+ *   schedule teardown. No actor (internal callers) ⇒ no check.
  */
 @Injectable()
 @TracedClass()
@@ -30,16 +36,19 @@ export class WorkflowLifecycleService {
     private readonly graphs: GraphsService,
     private readonly schedules: SchedulesService,
     private readonly environments: EnvironmentsService,
+    @Optional() private readonly permissions?: PermissionsService,
   ) {}
 
   /** Upsert (content-hash + version) the graph, then — default env only — (re)sync its
-   *  poll/cron schedules so a saved trigger graph actually fires. */
+   *  poll/cron schedules so a saved trigger graph actually fires. With an actor, the
+   *  upsert asserts `edit` (existing key) or `canCreate` (new key) before persisting. */
   async saveWorkflow(
     tenantId: string,
     environmentId: string,
     workflowKey: string,
     name: string,
     graph: GraphDef,
+    actor?: Principal,
   ): Promise<GraphSnapshot> {
     const snap = await this.graphs.upsert(
       tenantId,
@@ -47,6 +56,7 @@ export class WorkflowLifecycleService {
       workflowKey,
       name,
       graph,
+      actor,
     );
     if (await this.environments.isDefaultEnv(tenantId, environmentId)) {
       await this.schedules
@@ -61,12 +71,28 @@ export class WorkflowLifecycleService {
 
   /** Delete the workflow in this env; for the DEFAULT env's copy also tear down its
    *  Temporal schedules and the shared (tenant-wide) rows/triggers (deleteShared).
-   *  Returns false when the key doesn't exist in the env (caller 404s). */
+   *  Returns false when the key doesn't exist in the env (caller 404s). With an actor,
+   *  asserts `delete` FIRST — before the teardown side effect can fire. */
   async deleteWorkflow(
     tenantId: string,
     environmentId: string,
     workflowKey: string,
+    actor?: Principal,
   ): Promise<boolean> {
+    if (actor) {
+      if (!this.permissions) {
+        // Fail CLOSED: an actor implies a user-facing call site — authz must run.
+        throw new Error(
+          "WorkflowLifecycleService: PermissionsService is not wired",
+        );
+      }
+      await this.permissions.assertCan(
+        actor,
+        "delete",
+        workflowKey,
+        environmentId,
+      );
+    }
     const isDefault = await this.environments.isDefaultEnv(
       tenantId,
       environmentId,

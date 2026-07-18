@@ -71,3 +71,39 @@ describe("GraphsService error-handler binding", () => {
     expect(upsert).not.toHaveBeenCalled();
   });
 });
+
+// RBAC G1: the error-handler routes are view/edit-gated for a user-facing actor;
+// the run-start read (no actor) stays ungated.
+import { ForbiddenException } from "@nestjs/common";
+import type { Principal } from "../src/auth/tenant.decorator";
+import type { PermissionsService } from "../src/permissions/permissions.service";
+
+describe("GraphsService error-handler G1 gates", () => {
+  const member: Principal = { tenantId: "t1", userId: "u-1", role: "member" };
+
+  it("getErrorHandler asserts `view` for an actor; setErrorHandler asserts `edit`", async () => {
+    const assertCan = vi.fn().mockRejectedValue(new ForbiddenException("no"));
+    const svc = new GraphsService({
+      assertCan,
+    } as unknown as PermissionsService);
+    await expect(
+      svc.getErrorHandler("t1", "e1", "wf", member),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      svc.setErrorHandler("t1", "e1", "wf", "on-error", member),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(assertCan).toHaveBeenNthCalledWith(1, member, "view", "wf", "e1");
+    expect(assertCan).toHaveBeenNthCalledWith(2, member, "edit", "wf", "e1");
+    expect(upsert).not.toHaveBeenCalled(); // denial persisted nothing
+  });
+
+  it("the internal (actor-less) read is unchanged — no permissions consulted", async () => {
+    const assertCan = vi.fn();
+    const svc = new GraphsService({
+      assertCan,
+    } as unknown as PermissionsService);
+    findUnique.mockResolvedValue(null);
+    await svc.getErrorHandler("t1", "e1", "wf");
+    expect(assertCan).not.toHaveBeenCalled();
+  });
+});

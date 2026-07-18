@@ -429,3 +429,111 @@ describe("diffVersions", () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
+
+// ---------------------------------------------------------------------------
+// RBAC G1 (RBAC-GROUPS.md §4): in-service permission gates. The service asserts
+// through PermissionsService ONLY when an actor is passed — internal/trigger
+// callers (no actor) are byte-identical to before (migration neutrality).
+// ---------------------------------------------------------------------------
+import { ForbiddenException } from "@nestjs/common";
+import type { Principal } from "../src/auth/tenant.decorator";
+import type { PermissionsService } from "../src/permissions/permissions.service";
+
+describe("GraphsService G1 permission gates", () => {
+  const member: Principal = { tenantId: "t1", userId: "u-1", role: "member" };
+  const deny = () => Promise.reject(new ForbiddenException("no"));
+  const allow = () => Promise.resolve();
+
+  function withPerms(perms: Partial<Record<string, unknown>>): GraphsService {
+    return new GraphsService(perms as unknown as PermissionsService);
+  }
+
+  it("upsert of an EXISTING key asserts `edit` (and a denial persists nothing)", async () => {
+    const assertCan = vi.fn().mockImplementation(deny);
+    const svc = withPerms({ assertCan });
+    findFirst.mockResolvedValue({
+      version: 1,
+      contentHash: "other",
+      graph,
+    });
+    await expect(
+      svc.upsert("t1", "e1", "wf", "WF", graph, member),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(assertCan).toHaveBeenCalledWith(member, "edit", "wf", "e1");
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("upsert of a NEW key asserts canCreate (its own verb — never edit)", async () => {
+    const assertCan = vi.fn().mockImplementation(allow);
+    const assertCanCreate = vi.fn().mockImplementation(deny);
+    const svc = withPerms({ assertCan, assertCanCreate });
+    findFirst.mockResolvedValue(null); // no prior version = a CREATE
+    await expect(
+      svc.upsert("t1", "e1", "brand-new", "New", graph, member),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(assertCanCreate).toHaveBeenCalledWith(member, "e1");
+    expect(assertCan).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("a GRANTED member's save goes through", async () => {
+    const assertCan = vi.fn().mockImplementation(allow);
+    const svc = withPerms({ assertCan });
+    findFirst.mockResolvedValue({ version: 1, contentHash: "old", graph });
+    create.mockImplementation(async ({ data }) => ({ ...data }));
+    const snap = await svc.upsert("t1", "e1", "wf", "WF", graph, member);
+    expect(snap.version).toBe(2);
+    expect(assertCan).toHaveBeenCalledWith(member, "edit", "wf", "e1");
+  });
+
+  it("upsert with NO actor never consults permissions (trigger/internal path unchanged)", async () => {
+    const assertCan = vi.fn();
+    const assertCanCreate = vi.fn();
+    const svc = withPerms({ assertCan, assertCanCreate });
+    findFirst.mockResolvedValue(null);
+    create.mockImplementation(async ({ data }) => ({ ...data }));
+    await svc.upsert("t1", "e1", "wf", "WF", graph);
+    expect(assertCan).not.toHaveBeenCalled();
+    expect(assertCanCreate).not.toHaveBeenCalled();
+  });
+
+  it("getLatestNamed asserts `view` BEFORE the read (403, no existence oracle)", async () => {
+    const assertCan = vi.fn().mockImplementation(deny);
+    const svc = withPerms({ assertCan });
+    await expect(
+      svc.getLatestNamed("t1", "e1", "wf", member),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(assertCan).toHaveBeenCalledWith(member, "view", "wf", "e1");
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it("listVersions + diffVersions assert `view`", async () => {
+    const assertCan = vi.fn().mockImplementation(deny);
+    const svc = withPerms({ assertCan });
+    await expect(
+      svc.listVersions("t1", "e1", "wf", member),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      svc.diffVersions("t1", "e1", "wf", 1, 2, member),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(assertCan).toHaveBeenNthCalledWith(1, member, "view", "wf", "e1");
+    expect(assertCan).toHaveBeenNthCalledWith(2, member, "view", "wf", "e1");
+  });
+
+  it("promote asserts `share` against the SOURCE env (§8.2) before reading anything", async () => {
+    const assertCan = vi.fn().mockImplementation(deny);
+    const svc = withPerms({ assertCan });
+    await expect(
+      svc.promote("t1", "wf", "e-src", "e-dst", "u-1", undefined, member),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(assertCan).toHaveBeenCalledWith(member, "share", "wf", "e-src");
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it("an actor WITHOUT wired permissions fails CLOSED (never silently skips authz)", async () => {
+    const svc = new GraphsService(); // no PermissionsService — a wiring bug
+    await expect(
+      svc.getLatestNamed("t1", "e1", "wf", member),
+    ).rejects.toThrow(/PermissionsService is not wired/);
+  });
+});

@@ -190,3 +190,77 @@ describe("rerun", () => {
     );
   });
 });
+
+// RBAC G1: rerun is `run`-gated against the run's OWN key + env (before reading
+// the original trigger input from Temporal history).
+import { ForbiddenException } from "@nestjs/common";
+import type { Principal } from "../src/auth/tenant.decorator";
+import type { PermissionsService } from "../src/permissions/permissions.service";
+
+describe("rerun (G1 run gate)", () => {
+  const member: Principal = { tenantId: "t-1", userId: "u-1", role: "member" };
+
+  function makePermService(
+    assertCan: ReturnType<typeof vi.fn>,
+    fetchHistory: unknown,
+  ): ExecutionsService {
+    const service = new ExecutionsService(
+      {} as never,
+      {
+        defaultEnvId: async () => "env-test",
+        resolveEnvId: async () => "env-test",
+      } as never,
+      { assertCan } as unknown as PermissionsService,
+    );
+    (service as unknown as { client: unknown }).client = {
+      workflow: { getHandle: () => ({ fetchHistory }) },
+    };
+    return service;
+  }
+
+  it("denies a restricted member on the run's own key + env (403, no new start)", async () => {
+    findUnique.mockResolvedValue({
+      workflowId: "wf-old",
+      tenantId: "t-1",
+      workflowKey: "refunds",
+      environmentId: "env-orig",
+    });
+    const assertCan = vi.fn().mockRejectedValue(new ForbiddenException("no"));
+    const fetchHistory = vi.fn();
+    const service = makePermService(assertCan, fetchHistory);
+    const start = vi.spyOn(service, "start");
+    await expect(
+      service.rerun("wf-old", "t-1", undefined, member),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(assertCan).toHaveBeenCalledWith(member, "run", "refunds", "env-orig");
+    expect(fetchHistory).not.toHaveBeenCalled(); // gate runs before the history read
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("a granted member re-runs normally (gate passes, no double-check in start)", async () => {
+    findUnique.mockResolvedValue({
+      workflowId: "wf-old",
+      tenantId: "t-1",
+      workflowKey: "refunds",
+      environmentId: "env-orig",
+    });
+    const assertCan = vi.fn().mockResolvedValue(undefined);
+    const service = makePermService(
+      assertCan,
+      vi.fn().mockResolvedValue(startedWith({ a: 1 })),
+    );
+    const start = vi
+      .spyOn(service, "start")
+      .mockResolvedValue({ workflowId: "wf-new" });
+    await service.rerun("wf-old", "t-1", undefined, member);
+    // start() receives NO actor — rerun already asserted on the same key+env.
+    expect(start).toHaveBeenCalledWith(
+      "t-1",
+      "env-orig",
+      { a: 1 },
+      "refunds",
+      undefined,
+    );
+    expect(assertCan).toHaveBeenCalledTimes(1);
+  });
+});

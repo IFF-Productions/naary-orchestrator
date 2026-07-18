@@ -55,12 +55,15 @@ describe("V1RunsController.start", () => {
     );
 
     expect(environments.resolveEnvId).toHaveBeenCalledWith("t-1", "sandbox");
-    // tenantId from the token, resolved env id, then input + workflowKey — never a tenant arg from the body.
+    // tenantId from the token, resolved env id, then input + workflowKey — never a tenant arg
+    // from the body. Trailing undefineds = graphVersion + the G1 actor (no principal here).
     expect(executions.start).toHaveBeenCalledWith(
       "t-1",
       "env-1",
       { a: 1 },
       "triage",
+      undefined,
+      undefined,
     );
     expect(out).toEqual({ runId: "run-42" });
   });
@@ -206,7 +209,7 @@ describe("V1RunsController.rerun", () => {
 
     const out = await ctrl.rerun("t-1", "run-9", { graphVersion: 3 });
 
-    expect(executions.rerun).toHaveBeenCalledWith("run-9", "t-1", 3);
+    expect(executions.rerun).toHaveBeenCalledWith("run-9", "t-1", 3, undefined);
     expect(out).toEqual({ runId: "run-new" });
     expect(out).not.toHaveProperty("workflowId");
   });
@@ -217,7 +220,12 @@ describe("V1RunsController.rerun", () => {
     // The controller defaults @Body() to {} so a legacy bodyless POST still works.
     await ctrl.rerun("t-1", "run-9");
 
-    expect(executions.rerun).toHaveBeenCalledWith("run-9", "t-1", undefined);
+    expect(executions.rerun).toHaveBeenCalledWith(
+      "run-9",
+      "t-1",
+      undefined,
+      undefined,
+    );
   });
 });
 

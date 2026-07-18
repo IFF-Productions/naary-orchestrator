@@ -9,7 +9,12 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
-import { EnvironmentSel, TenantId } from "../auth/tenant.decorator";
+import {
+  CurrentPrincipal,
+  EnvironmentSel,
+  type Principal,
+  TenantId,
+} from "../auth/tenant.decorator";
 import { EnvironmentsService } from "../environments/environments.service";
 import {
   type AwaitingApproval,
@@ -75,13 +80,17 @@ export class V1RunsController {
     @TenantId() tenantId: string,
     @Body() body: StartRunDto,
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<RunRefResponse> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    // The principal gates the start with `run` (RBAC-GROUPS.md §4a — restricted tokens).
     const { workflowId } = await this.executions.start(
       tenantId,
       envId,
       body.input,
       body.workflowKey,
+      undefined,
+      principal,
     );
     return { runId: workflowId };
   }
@@ -212,11 +221,13 @@ export class V1RunsController {
     @Param("id") id: string,
     // Default to {} so a bodyless POST re-runs against the latest graph (never an undefined-body read).
     @Body() body: RerunRunDto = {},
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<RunRefResponse> {
     const { workflowId } = await this.executions.rerun(
       id,
       tenantId,
       body?.graphVersion,
+      principal,
     );
     return { runId: workflowId };
   }
