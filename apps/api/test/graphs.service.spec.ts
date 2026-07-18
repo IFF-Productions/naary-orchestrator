@@ -294,8 +294,7 @@ describe("GraphsService.deleteWorkflow", () => {
     // A single atomic transaction — not a series of loose deletes.
     expect($transaction).toHaveBeenCalledOnce();
 
-    // The env-scoped tables (graph + activation) are purged for THIS env; the rest (not yet
-    // env-scoped — deferred) stay keyed by (tenant, workflowKey).
+    // Everything env-scoped is purged for THIS env.
     expect(del.graphDefinition).toHaveBeenCalledWith({
       where: { tenantId: "t1", environmentId: "e1", workflowKey: "wf-1" },
     });
@@ -306,29 +305,32 @@ describe("GraphsService.deleteWorkflow", () => {
     expect(del.pinnedData).toHaveBeenCalledWith({
       where: { tenantId: "t1", environmentId: "e1", workflowKey: "wf-1" },
     });
+    // PollState is the LAST tenant-wide row (schedules are default-env-only) — still gated.
     expect(del.pollState).toHaveBeenCalledWith({
       where: { tenantId: "t1", workflowKey: "wf-1" },
     });
-    // Error-handler bindings are cleared whether this key is the FAILING flow or the HANDLER.
+    // Error-handler bindings (env-scoped, slice-6 cleanup) are cleared whether this key is
+    // the FAILING flow or the HANDLER — but only in THIS env.
     expect(del.errorHandler).toHaveBeenCalledWith({
       where: {
         tenantId: "t1",
+        environmentId: "e1",
         OR: [{ workflowKey: "wf-1" }, { errorWorkflowKey: "wf-1" }],
       },
     });
-    // Triggers reference the graph key as `workflowId` (not `workflowKey`).
+    // Triggers reference the graph key as `workflowId` (not `workflowKey`) and are env-scoped.
     for (const trigger of [
       del.webhookEndpoint,
       del.formEndpoint,
       del.chatEndpoint,
     ]) {
       expect(trigger).toHaveBeenCalledWith({
-        where: { tenantId: "t1", workflowId: "wf-1" },
+        where: { tenantId: "t1", environmentId: "e1", workflowId: "wf-1" },
       });
     }
   });
 
-  it("NON-default env (deleteShared=false): removes ONLY the env-scoped copy, not shared rows", async () => {
+  it("NON-default env (deleteShared=false): removes THIS env's rows only; PollState survives", async () => {
     findFirst.mockResolvedValue({ workflowKey: "wf-1" });
 
     const ok = await new GraphsService().deleteWorkflow(
@@ -339,30 +341,39 @@ describe("GraphsService.deleteWorkflow", () => {
     );
 
     expect(ok).toBe(true);
-    // The env's definition + activation are removed…
-    expect(del.graphDefinition).toHaveBeenCalledWith({
-      where: {
-        tenantId: "t1",
-        environmentId: "e-sandbox",
-        workflowKey: "wf-1",
-      },
-    });
+    const sandboxScoped = {
+      tenantId: "t1",
+      environmentId: "e-sandbox",
+      workflowKey: "wf-1",
+    };
+    // The env's definition + activation + pins are removed…
+    expect(del.graphDefinition).toHaveBeenCalledWith({ where: sandboxScoped });
     expect(del.workflowActivation).toHaveBeenCalledOnce();
-    // Pins are env-scoped (6b): the SANDBOX env's pins go with its copy — prod's pins survive
-    // because the where targets only this env.
-    expect(del.pinnedData).toHaveBeenCalledWith({
+    expect(del.pinnedData).toHaveBeenCalledWith({ where: sandboxScoped });
+    // …and (slice-6 cleanup) so are the env's error-handler bindings + trigger endpoints —
+    // scoped to e-sandbox, so prod's copies of the same key survive.
+    expect(del.errorHandler).toHaveBeenCalledWith({
       where: {
         tenantId: "t1",
         environmentId: "e-sandbox",
-        workflowKey: "wf-1",
+        OR: [{ workflowKey: "wf-1" }, { errorWorkflowKey: "wf-1" }],
       },
     });
-    // …but the SHARED (tenant-wide) rows/triggers are left intact (prod's copy uses them).
+    for (const trigger of [
+      del.webhookEndpoint,
+      del.formEndpoint,
+      del.chatEndpoint,
+    ]) {
+      expect(trigger).toHaveBeenCalledWith({
+        where: {
+          tenantId: "t1",
+          environmentId: "e-sandbox",
+          workflowId: "wf-1",
+        },
+      });
+    }
+    // PollState (default-env-only schedules) is untouched by a non-default delete.
     expect(del.pollState).not.toHaveBeenCalled();
-    expect(del.errorHandler).not.toHaveBeenCalled();
-    expect(del.webhookEndpoint).not.toHaveBeenCalled();
-    expect(del.formEndpoint).not.toHaveBeenCalled();
-    expect(del.chatEndpoint).not.toHaveBeenCalled();
   });
 });
 

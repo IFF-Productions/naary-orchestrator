@@ -182,7 +182,16 @@ Each slice is independently shippable behind the §5 shim.
    consistency rule so a triggered run lands in the endpoint's env.
 5. **Credentials + connections** — env-scope `TenantCredential` / `Connection`.
 6. **Notifications + usage** — env-scope `NotificationChannel`; tag `UsageEvent` with `environmentId`.
+   *(Shipped as 6a/6b + the slice-6 cleanup: `PinnedData` and `ErrorHandler` env-scoped too, and
+   `deleteWorkflow` now deletes the env-scoped trigger endpoints per-env.)*
 7. **Cleanup** — drop the nullable/default fallback once all call sites are env-aware.
+   **Deferred to its own slice — env-scoped schedules:** `Schedule` + `PollState` stay tenant-wide
+   (and effectively default-env-only) because scoping them means putting the env into the schedule
+   IDENTITY — the Temporal schedule id (`poll-${tenantId}-${workflowKey}` →
+   `poll-${tenantId}-${environmentId}-${workflowKey}`), the startWorkflow action args (which carry
+   no env today, so scheduled runs start env-less), and the worker's `PollMeta` cursor key. Until
+   then `WorkflowLifecycleService` keeps schedule sync/teardown default-env-only, and PollState is
+   the last row behind `deleteWorkflow`'s `deleteShared` gate.
 
 ## 8. Decisions (confirmed — was "open before Slice 1")
 

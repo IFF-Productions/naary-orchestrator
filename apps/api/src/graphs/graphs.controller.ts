@@ -286,10 +286,13 @@ export class GraphsController {
   async getErrorHandler(
     @TenantId() tenantId: string,
     @Param("workflowKey") workflowKey: string,
+    @EnvironmentSel() envSel?: string,
   ): Promise<{ errorWorkflowKey: string | null }> {
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
     return {
       errorWorkflowKey: await this.graphs.getErrorHandler(
         tenantId,
+        envId,
         workflowKey,
       ),
     };
@@ -305,6 +308,7 @@ export class GraphsController {
     @TenantId() tenantId: string,
     @Param("workflowKey") workflowKey: string,
     @Body() body: { errorWorkflowKey?: string | null },
+    @EnvironmentSel() envSel?: string,
   ): Promise<{ errorWorkflowKey: string | null }> {
     const value = body.errorWorkflowKey?.trim() || null;
     if (value === workflowKey) {
@@ -312,7 +316,8 @@ export class GraphsController {
         "A workflow cannot be its own error handler",
       );
     }
-    await this.graphs.setErrorHandler(tenantId, workflowKey, value);
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    await this.graphs.setErrorHandler(tenantId, envId, workflowKey, value);
     return { errorWorkflowKey: value };
   }
 
