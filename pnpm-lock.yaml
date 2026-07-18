@@ -333,6 +333,12 @@ importers:
         specifier: ^5.5.2
         version: 5.5.2
 
+  packages/cli:
+    devDependencies:
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+
   packages/connections:
     dependencies:
       '@modelcontextprotocol/sdk':
