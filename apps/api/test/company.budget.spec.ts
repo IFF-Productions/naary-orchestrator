@@ -25,7 +25,11 @@ vi.mock("@naary/usage", () => ({ monthToDateSpendForTenants: spend }));
 import { CompaniesController } from "../src/companies/companies.controller";
 import { CompanyService } from "../src/companies/company.service";
 
-const svc = new CompanyService();
+const svc = new CompanyService(
+  {} as never, // ExecutionsService — not exercised here
+  {} as never, // GraphsService
+  {} as never, // EnvironmentsService
+);
 
 beforeEach(() => {
   for (const m of [
