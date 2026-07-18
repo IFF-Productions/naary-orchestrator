@@ -21,7 +21,17 @@ export function createSseParser(): { push(chunk: string): SseFrame[] } {
   let buffer = "";
   return {
     push(chunk: string): SseFrame[] {
-      buffer += chunk.replace(/\r\n/g, "\n");
+      // Normalize AFTER concatenation so a CRLF split across chunks (buffer ends
+      // "\r", chunk starts "\n") still collapses. A trailing "\r" is held back —
+      // it may be the first half of a split CRLF — and any remaining lone "\r"
+      // is a line break per the SSE spec.
+      buffer = (buffer + chunk).replace(/\r\n/g, "\n");
+      let heldCr = "";
+      if (buffer.endsWith("\r")) {
+        heldCr = "\r";
+        buffer = buffer.slice(0, -1);
+      }
+      buffer = buffer.replace(/\r/g, "\n");
       const frames: SseFrame[] = [];
       let sep: number;
       while ((sep = buffer.indexOf("\n\n")) !== -1) {
@@ -31,12 +41,15 @@ export function createSseParser(): { push(chunk: string): SseFrame[] } {
         const data: string[] = [];
         for (const line of block.split("\n")) {
           if (line.startsWith(":")) continue; // comment (heartbeat)
-          if (line.startsWith("event:")) event = line.slice(6).trimStart();
+          // Per spec, strip at most ONE leading space after the colon.
+          if (line.startsWith("event:"))
+            event = line.slice(6).replace(/^ /, "");
           else if (line.startsWith("data:"))
             data.push(line.slice(5).replace(/^ /, ""));
         }
         if (data.length > 0) frames.push({ event, data: data.join("\n") });
       }
+      buffer += heldCr;
       return frames;
     },
   };

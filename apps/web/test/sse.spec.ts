@@ -40,6 +40,23 @@ describe("createSseParser", () => {
     ]);
   });
 
+  it("handles a CRLF pair split across chunks (buffer ends \\r, next starts \\n)", () => {
+    const p = createSseParser();
+    expect(p.push("event: result\r")).toEqual([]);
+    expect(p.push("\ndata: x\r\n\r")).toEqual([]);
+    expect(p.push("\n")).toEqual([{ event: "result", data: "x" }]);
+  });
+
+  it("treats a lone \\r as a line break (SSE spec)", () => {
+    const p = createSseParser();
+    expect(p.push("event: result\rdata: x\r\r")).toEqual([]);
+    // held-back trailing \r resolves as a bare line break on the next push
+    expect(p.push("data: y\n\n")).toEqual([
+      { event: "result", data: "x" },
+      { event: "message", data: "y" },
+    ]);
+  });
+
   it("joins multi-line data with newlines", () => {
     const p = createSseParser();
     expect(p.push("data: line1\ndata: line2\n\n")).toEqual([
@@ -52,6 +69,10 @@ describe("createSseParser", () => {
     expect(p.push("data:no-space\n\ndata:  two-spaces\n\n")).toEqual([
       { event: "message", data: "no-space" },
       { event: "message", data: " two-spaces" },
+    ]);
+    // Same one-space rule for event: names — never trim all leading whitespace.
+    expect(p.push("event:  spaced\ndata: x\n\n")).toEqual([
+      { event: " spaced", data: "x" },
     ]);
   });
 });
