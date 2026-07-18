@@ -105,8 +105,10 @@ export class ExecutionsController {
   listRuns(
     @TenantId() tenantId: string,
     @Query("archived") archived?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<RunListItemResponse[]> {
-    return this.executions.list(tenantId, 50, archived === "true");
+    // G3 (§8.4): a restricted member/token sees only runs of workflows it may view.
+    return this.executions.list(tenantId, 50, archived === "true", principal);
   }
 
   /** The tenant's runs paused for approval, each with its prompt (the inbox). Must
@@ -117,8 +119,11 @@ export class ExecutionsController {
     ok: [AwaitingApprovalResponse],
   })
   @Get("awaiting")
-  awaiting(@TenantId() tenantId: string): Promise<AwaitingApproval[]> {
-    return this.executions.listAwaiting(tenantId);
+  awaiting(
+    @TenantId() tenantId: string,
+    @CurrentPrincipal() principal?: Principal,
+  ): Promise<AwaitingApproval[]> {
+    return this.executions.listAwaiting(tenantId, principal);
   }
 
   /** Decide many paused runs at once (same decision applied to each). Declared among the
@@ -134,12 +139,14 @@ export class ExecutionsController {
   approveBatch(
     @TenantId() tenantId: string,
     @Body() body: ApproveBatchDto,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<BatchDecisionResult[]> {
     return this.executions.approveBatch(
       body.ids,
       body.approved,
       tenantId,
       body.comment,
+      principal,
     );
   }
 
@@ -171,8 +178,17 @@ export class ExecutionsController {
     @TenantId() tenantId: string,
     @Param("id") id: string,
     @Body() body: ApproveDto,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<{ accepted: true }> {
-    await this.executions.approve(id, body.approved, tenantId, body.comment);
+    // G3: deciding an approval asserts `run` on the run's workflow. The PUBLIC signed-link
+    // decision path (/approvals/:id/decide, HMAC-authorized) does NOT come through here.
+    await this.executions.approve(
+      id,
+      body.approved,
+      tenantId,
+      body.comment,
+      principal,
+    );
     return { accepted: true };
   }
 
@@ -188,8 +204,9 @@ export class ExecutionsController {
   async cancel(
     @TenantId() tenantId: string,
     @Param("id") id: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<{ accepted: true }> {
-    await this.executions.cancel(id, tenantId);
+    await this.executions.cancel(id, tenantId, principal);
     return { accepted: true };
   }
 
@@ -275,12 +292,13 @@ export class ExecutionsController {
   runGraph(
     @TenantId() tenantId: string,
     @Param("id") id: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<{
     graph: Record<string, unknown>;
     version: number | null;
     workflowKey: string | null;
   }> {
-    return this.executions.runGraph(id, tenantId);
+    return this.executions.runGraph(id, tenantId, principal);
   }
 
   @ApiEndpoint({
@@ -292,8 +310,9 @@ export class ExecutionsController {
   getState(
     @TenantId() tenantId: string,
     @Param("id") id: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<RunStateView> {
-    return this.executions.getState(id, tenantId);
+    return this.executions.getState(id, tenantId, principal);
   }
 
   /** The run's execution log (curated Temporal history). */
@@ -307,7 +326,8 @@ export class ExecutionsController {
   history(
     @TenantId() tenantId: string,
     @Param("id") id: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<RunEvent[]> {
-    return this.executions.history(id, tenantId);
+    return this.executions.history(id, tenantId, principal);
   }
 }

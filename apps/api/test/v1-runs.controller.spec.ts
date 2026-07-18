@@ -89,10 +89,11 @@ describe("V1RunsController.list", () => {
 
     const out = await ctrl.list("t-1", "10");
 
-    expect(executions.listPage).toHaveBeenCalledWith("t-1", {
-      limit: 10,
-      cursor: undefined,
-    });
+    expect(executions.listPage).toHaveBeenCalledWith(
+      "t-1",
+      { limit: 10, cursor: undefined },
+      undefined, // the G3 actor — none in this bare-call test
+    );
     expect(out).toEqual({
       items: [
         {
@@ -115,29 +116,33 @@ describe("V1RunsController.list", () => {
   it("defaults limit to 50 when absent or non-numeric", async () => {
     executions.listPage.mockResolvedValue({ items: [], nextCursor: null });
     await ctrl.list("t-1", undefined);
-    expect(executions.listPage).toHaveBeenCalledWith("t-1", {
-      limit: 50,
-      cursor: undefined,
-    });
+    expect(executions.listPage).toHaveBeenCalledWith(
+      "t-1",
+      { limit: 50, cursor: undefined },
+      undefined,
+    );
     await ctrl.list("t-1", "abc");
-    expect(executions.listPage).toHaveBeenLastCalledWith("t-1", {
-      limit: 50,
-      cursor: undefined,
-    });
+    expect(executions.listPage).toHaveBeenLastCalledWith(
+      "t-1",
+      { limit: 50, cursor: undefined },
+      undefined,
+    );
   });
 
   it("passes ?cursor= through verbatim (opaque) and blanks to undefined", async () => {
     executions.listPage.mockResolvedValue({ items: [], nextCursor: null });
     await ctrl.list("t-1", "5", "abc123");
-    expect(executions.listPage).toHaveBeenCalledWith("t-1", {
-      limit: 5,
-      cursor: "abc123",
-    });
+    expect(executions.listPage).toHaveBeenCalledWith(
+      "t-1",
+      { limit: 5, cursor: "abc123" },
+      undefined,
+    );
     await ctrl.list("t-1", "5", "  ");
-    expect(executions.listPage).toHaveBeenLastCalledWith("t-1", {
-      limit: 5,
-      cursor: undefined,
-    });
+    expect(executions.listPage).toHaveBeenLastCalledWith(
+      "t-1",
+      { limit: 5, cursor: undefined },
+      undefined,
+    );
   });
 });
 
@@ -151,7 +156,7 @@ describe("V1RunsController.get", () => {
 
     const out = await ctrl.get("t-1", "run-9");
 
-    expect(executions.getState).toHaveBeenCalledWith("run-9", "t-1");
+    expect(executions.getState).toHaveBeenCalledWith("run-9", "t-1", undefined);
     expect(out).toEqual({
       runId: "run-9",
       status: "running",
@@ -181,7 +186,7 @@ describe("V1RunsController.history", () => {
 
     const out = await ctrl.history("t-1", "run-9");
 
-    expect(executions.history).toHaveBeenCalledWith("run-9", "t-1");
+    expect(executions.history).toHaveBeenCalledWith("run-9", "t-1", undefined);
     expect(out[1]).toEqual({
       id: 2,
       kind: "activity",
@@ -198,7 +203,7 @@ describe("V1RunsController.cancel", () => {
 
     const out = await ctrl.cancel("t-1", "run-9");
 
-    expect(executions.cancel).toHaveBeenCalledWith("run-9", "t-1");
+    expect(executions.cancel).toHaveBeenCalledWith("run-9", "t-1", undefined);
     expect(out).toEqual({ accepted: true });
   });
 });
@@ -244,6 +249,7 @@ describe("V1RunsController.approve", () => {
       true,
       "t-1",
       "ship it",
+      undefined, // the G3 actor
     );
     expect(out).toEqual({ accepted: true });
   });
@@ -257,6 +263,7 @@ describe("V1RunsController.approve", () => {
       "run-9",
       false,
       "t-1",
+      undefined,
       undefined,
     );
   });
@@ -277,7 +284,7 @@ describe("V1RunsController.awaiting", () => {
 
     const out = await ctrl.awaiting("t-1");
 
-    expect(executions.listAwaiting).toHaveBeenCalledWith("t-1");
+    expect(executions.listAwaiting).toHaveBeenCalledWith("t-1", undefined);
     expect(out).toEqual([
       {
         runId: "run-7",

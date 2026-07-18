@@ -106,15 +106,21 @@ export class V1RunsController {
     @TenantId() tenantId: string,
     @Query("limit") limit?: string,
     @Query("cursor") cursor?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<RunListResponse> {
     // Coerce + clamp at the PUBLIC boundary so the API behaves predictably: a non-integer
     // ("10.5"), a negative, or garbage never reaches Prisma `take`. Default 50, bounded 1..100
     // (the service clamps too, but the public contract shouldn't rely on that). The cursor is
     // opaque — passed through verbatim; the service 400s on a malformed one.
-    const page = await this.executions.listPage(tenantId, {
-      limit: parseLimit(limit),
-      cursor: cursor?.trim() || undefined,
-    });
+    // G3 (§8.4): a restricted token's rows are view-filtered in the where clause.
+    const page = await this.executions.listPage(
+      tenantId,
+      {
+        limit: parseLimit(limit),
+        cursor: cursor?.trim() || undefined,
+      },
+      principal,
+    );
     return {
       items: page.items.map((r) => ({
         runId: r.workflowId,
@@ -136,9 +142,14 @@ export class V1RunsController {
   })
   // MUST be declared before `@Get(":id")`, or Express captures "awaiting" as an :id.
   @Get("awaiting")
-  async awaiting(@TenantId() tenantId: string): Promise<AwaitingRunResponse[]> {
-    const rows: AwaitingApproval[] =
-      await this.executions.listAwaiting(tenantId);
+  async awaiting(
+    @TenantId() tenantId: string,
+    @CurrentPrincipal() principal?: Principal,
+  ): Promise<AwaitingRunResponse[]> {
+    const rows: AwaitingApproval[] = await this.executions.listAwaiting(
+      tenantId,
+      principal,
+    );
     return rows.map((r) => ({
       runId: r.workflowId,
       workflowKey: r.workflowKey,
@@ -159,8 +170,13 @@ export class V1RunsController {
   async get(
     @TenantId() tenantId: string,
     @Param("id") id: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<RunDetailResponse> {
-    const s: RunStateView = await this.executions.getState(id, tenantId);
+    const s: RunStateView = await this.executions.getState(
+      id,
+      tenantId,
+      principal,
+    );
     return {
       runId: id,
       status: s.status,
@@ -179,8 +195,13 @@ export class V1RunsController {
   async history(
     @TenantId() tenantId: string,
     @Param("id") id: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<RunHistoryEventResponse[]> {
-    const events: RunEvent[] = await this.executions.history(id, tenantId);
+    const events: RunEvent[] = await this.executions.history(
+      id,
+      tenantId,
+      principal,
+    );
     return events.map((e) => ({
       id: e.id,
       kind: e.kind,
@@ -203,8 +224,9 @@ export class V1RunsController {
   async cancel(
     @TenantId() tenantId: string,
     @Param("id") id: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<RunActionResponse> {
-    await this.executions.cancel(id, tenantId);
+    await this.executions.cancel(id, tenantId, principal);
     return { accepted: true };
   }
 
@@ -246,8 +268,16 @@ export class V1RunsController {
     @TenantId() tenantId: string,
     @Param("id") id: string,
     @Body() body: ApproveRunDto,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<RunActionResponse> {
-    await this.executions.approve(id, body.approved, tenantId, body.comment);
+    // G3: a restricted token needs `run` on the run's workflow to decide its approval.
+    await this.executions.approve(
+      id,
+      body.approved,
+      tenantId,
+      body.comment,
+      principal,
+    );
     return { accepted: true };
   }
 }

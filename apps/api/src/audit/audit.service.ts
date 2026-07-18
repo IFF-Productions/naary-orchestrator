@@ -85,6 +85,34 @@ export function actionFor(method: string, path: string): string {
   if (method === "POST" && is(/\/webhooks$/)) return "Registered a webhook";
   if (method === "DELETE" && is(/\/webhooks\/[^/]+$/))
     return "Removed a webhook";
-  if (method === "POST" && is(/\/members$/)) return "Added a member";
+  // Permission groups (G3) — matched BEFORE the member routes: a group's member/token
+  // attach also ends in /members/:id, and the /groups/ segment must win.
+  if (method === "POST" && is(/\/groups\/[^/]+\/members\/[^/]+$/))
+    return "Added a member to a permission group";
+  if (method === "DELETE" && is(/\/groups\/[^/]+\/members\/[^/]+$/))
+    return "Removed a member from a permission group";
+  if (method === "POST" && is(/\/groups\/[^/]+\/tokens\/[^/]+$/))
+    return "Added an API token to a permission group";
+  if (method === "DELETE" && is(/\/groups\/[^/]+\/tokens\/[^/]+$/))
+    return "Removed an API token from a permission group";
+  if (method === "POST" && is(/\/groups\/[^/]+\/grants$/))
+    return "Changed workflow permissions";
+  if (method === "PATCH" && is(/\/groups\/[^/]+\/grants\/[^/]+$/))
+    return "Changed workflow permissions";
+  if (method === "DELETE" && is(/\/groups\/[^/]+\/grants\/[^/]+$/))
+    return "Removed a workflow permission grant";
+  if (method === "POST" && is(/\/groups$/)) return "Created a permission group";
+  if (method === "PATCH" && is(/\/groups\/[^/]+$/))
+    return "Renamed a permission group";
+  if (method === "DELETE" && is(/\/groups\/[^/]+$/))
+    return "Deleted a permission group";
+  // Team routes (U1: POST invites; the invitations DELETE must precede the generic
+  // /members/:userId DELETE — both would match it).
+  if (method === "POST" && is(/\/members$/)) return "Invited a member";
+  if (method === "PATCH" && is(/\/members\/[^/]+$/))
+    return "Changed a member's role";
+  if (method === "DELETE" && is(/\/members\/invitations\/[^/]+$/))
+    return "Revoked an invitation";
+  if (method === "DELETE" && is(/\/members\/[^/]+$/)) return "Removed a member";
   return `${method} ${p}`;
 }

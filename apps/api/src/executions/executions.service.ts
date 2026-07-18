@@ -304,6 +304,15 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly permissions?: PermissionsService,
   ) {}
 
+  /** The wired PermissionsService, or throw. Only consulted when an ACTOR is present —
+   *  an actor without wired permissions must fail CLOSED, never skip authz. */
+  private perms(): PermissionsService {
+    if (!this.permissions) {
+      throw new Error("ExecutionsService: PermissionsService is not wired");
+    }
+    return this.permissions;
+  }
+
   /** In-service `run` assert (RBAC-GROUPS.md §4). Gates USER-principal-initiated starts
    *  only — trigger paths (webhook/form/chat/schedule) carry no principal by design. */
   private async assertRun(
@@ -312,10 +321,81 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     environmentId: string,
   ): Promise<void> {
     if (!actor) return;
-    if (!this.permissions) {
-      throw new Error("ExecutionsService: PermissionsService is not wired");
+    await this.perms().assertCan(actor, "run", workflowKey, environmentId);
+  }
+
+  /**
+   * G3 (§8.4) — gate a SINGLE run surface on the run's own workflow. `view` for the read
+   * surfaces (detail/history/graph), `run` for approve/cancel (run-control actions). No
+   * actor (trigger/internal caller, the company rollup path, the PUBLIC signed-link
+   * approval path) = never checked. Env-EXACT: the check resolves against the RUN'S OWN
+   * environment (a legacy env-less row falls back to the tenant default, the env its graph
+   * lived in — the same convention as approvalPrompt/rerun). A run with NO workflowKey
+   * (pre-key-tracking) can't be matched against key-scoped grants — it is visible only to
+   * UNRESTRICTED subjects (owner/admin, unrestricted tokens, the zero-grant cliff).
+   */
+  private async assertRunAccess(
+    actor: Principal | undefined,
+    action: "view" | "run",
+    row: {
+      tenantId: string;
+      workflowKey: string | null;
+      environmentId: string | null;
+    },
+  ): Promise<void> {
+    if (!actor) return;
+    const perms = this.perms();
+    // Bypassed subjects short-circuit here — no env resolution (no extra DB read) on the
+    // common owner/admin/unrestricted path.
+    const eff = await perms.getEffective(actor);
+    if (!eff.restricted) return;
+    if (row.workflowKey === null) {
+      throw new ForbiddenException(
+        `You don't have permission to ${action === "run" ? "act on" : "view"} this run. ` +
+          "Ask a workspace owner or admin for access.",
+      );
     }
-    await this.permissions.assertCan(actor, "run", workflowKey, environmentId);
+    const envId =
+      row.environmentId ?? (await this.environments.defaultEnvId(row.tenantId));
+    await perms.assertCan(actor, action, row.workflowKey, envId);
+  }
+
+  /**
+   * G3 (§8.4) — the Runs-list view filter for a RESTRICTED subject, as a Prisma where
+   * fragment, or null when the caller is unrestricted / absent (the query stays
+   * byte-identical — the common path). Pushed INTO the where clause (not post-filtered)
+   * so keyset pagination stays EXACT: every fetched row is viewable, pages run full, and
+   * the cursor math never sees hidden rows. Env-exact per §8.5: one OR term per tenant
+   * environment from the subject's effective view there ({all} ⇒ every key in that env,
+   * else the key list); rows with a NULL environmentId (pre-env rows) count as the
+   * DEFAULT env's; rows with a NULL workflowKey are visible only to unrestricted
+   * subjects, so a restricted subject's terms always constrain workflowKey.
+   */
+  private async runViewFilter(
+    actor: Principal | undefined,
+    tenantId: string,
+  ): Promise<Record<string, unknown> | null> {
+    if (!actor) return null;
+    const perms = this.perms();
+    const eff = await perms.getEffective(actor);
+    if (!eff.restricted) return null;
+    const envs = await this.environments.list(tenantId);
+    const terms: Record<string, unknown>[] = [];
+    for (const env of envs) {
+      const effEnv = await perms.getEffective(actor, env.id);
+      const keyCond = effEnv.view.all
+        ? { workflowKey: { not: null } }
+        : effEnv.view.keys.length > 0
+          ? { workflowKey: { in: effEnv.view.keys } }
+          : null;
+      if (!keyCond) continue; // nothing viewable in this env — no term
+      const envCond = env.isDefault
+        ? { OR: [{ environmentId: env.id }, { environmentId: null }] }
+        : { environmentId: env.id };
+      terms.push({ ...keyCond, ...envCond });
+    }
+    // No terms ⇒ nothing viewable anywhere: `OR: []` matches no rows (deny-by-default).
+    return { OR: terms };
   }
 
   async onModuleInit(): Promise<void> {
@@ -766,8 +846,13 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     approved: boolean,
     tenantId: string,
     comment?: string,
+    /** The user-facing caller (SPA/v1/MCP). G3: asserts `run` on the run's workflow —
+     *  deciding an approval is a run-control action. The PUBLIC signed-link path goes
+     *  through decideByToken (HMAC-authorized), NOT here, and stays ungated. */
+    actor?: Principal,
   ): Promise<void> {
-    await this.assertOwner(id, tenantId);
+    const row = await this.assertOwner(id, tenantId);
+    await this.assertRunAccess(actor, "run", row);
     try {
       await this.client.workflow
         .getHandle(id)
@@ -798,10 +883,11 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     approved: boolean,
     tenantId: string,
     comment?: string,
+    actor?: Principal,
   ): Promise<BatchDecisionResult[]> {
     const unique = [...new Set(ids)];
     const settled = await Promise.allSettled(
-      unique.map((id) => this.approve(id, approved, tenantId, comment)),
+      unique.map((id) => this.approve(id, approved, tenantId, comment, actor)),
     );
     return settled.map((r, i) =>
       r.status === "fulfilled"
@@ -891,8 +977,10 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
    * CancelledFailure, so terminate gives a definitive stop. Tenant-scoped via assertOwner. A run
    * that's already closed returns NOT_FOUND → 409 (nothing to cancel).
    */
-  async cancel(id: string, tenantId: string): Promise<void> {
-    await this.assertOwner(id, tenantId);
+  async cancel(id: string, tenantId: string, actor?: Principal): Promise<void> {
+    const row = await this.assertOwner(id, tenantId);
+    // G3: cancelling is a run-control action — `run` on the run's workflow (§8.4).
+    await this.assertRunAccess(actor, "run", row);
     try {
       await this.client.workflow.getHandle(id).terminate("Canceled by user");
     } catch (e) {
@@ -957,12 +1045,34 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
    * STILL awaiting via a live query (a run may have been decided since the row was
    * written) and reads its current node. Bounded by the number of paused runs.
    */
-  async listAwaiting(tenantId: string): Promise<AwaitingApproval[]> {
-    const rows = await getPrisma().execution.findMany({
+  async listAwaiting(
+    tenantId: string,
+    actor?: Principal,
+  ): Promise<AwaitingApproval[]> {
+    let rows = await getPrisma().execution.findMany({
       where: { tenantId, status: "awaiting_approval" },
       orderBy: { createdAt: "desc" },
       take: 100,
     });
+    // G3 (§8.4): a RESTRICTED subject's inbox is view-filtered to its workflows —
+    // BEFORE the per-run Temporal queries, so invisible runs cost nothing. Key-less
+    // legacy rows are visible only to unrestricted subjects (same rule as the list).
+    if (actor) {
+      const perms = this.perms();
+      const eff = await perms.getEffective(actor);
+      if (eff.restricted) {
+        const visible = await Promise.all(
+          rows.map(async (r) => {
+            if (r.workflowKey === null) return false;
+            const envId =
+              r.environmentId ??
+              (await this.environments.defaultEnvId(tenantId));
+            return perms.can(actor, "view", r.workflowKey, envId);
+          }),
+        );
+        rows = rows.filter((_, i) => visible[i]);
+      }
+    }
     const items = await Promise.all(
       rows.map(async (r): Promise<AwaitingApproval | null> => {
         let currentNodeId = "";
@@ -1071,8 +1181,9 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
     limit = 50,
     archived = false,
+    actor?: Principal,
   ): Promise<RunSummary[]> {
-    const { items } = await this.listPage(tenantId, { limit, archived });
+    const { items } = await this.listPage(tenantId, { limit, archived }, actor);
     return items;
   }
 
@@ -1086,12 +1197,16 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   async listPage(
     tenantId: string,
     opts: { limit?: number; cursor?: string; archived?: boolean } = {},
+    /** The user-facing caller (SPA Runs screen / v1 GET /runs). G3 (§8.4): a RESTRICTED
+     *  subject's rows are view-filtered IN the where clause, so pagination stays exact.
+     *  Absent for internal callers + the company rollup path (workspace-level reads). */
+    actor?: Principal,
   ): Promise<RunPage> {
     const take = Math.min(Math.max(opts.limit ?? 50, 1), 100);
     // Default view hides archived runs; `archived: true` shows only the archived ones.
     const base = { tenantId, archivedAt: opts.archived ? { not: null } : null };
     // Keyset filter: rows strictly AFTER the cursor row in the (DESC, DESC) order.
-    const where = opts.cursor
+    const keyset = opts.cursor
       ? {
           ...base,
           OR: (({ createdAt, workflowId }) => [
@@ -1100,6 +1215,10 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           ])(decodeRunCursor(opts.cursor)),
         }
       : base;
+    // View scoping composes via AND so it can't collide with the keyset's own OR. Null
+    // for unrestricted callers — their query is byte-identical to before G3.
+    const viewFilter = await this.runViewFilter(actor, tenantId);
+    const where = viewFilter ? { ...keyset, AND: [viewFilter] } : keyset;
     const rows = await getPrisma().execution.findMany({
       where,
       // The workflowId tiebreak makes the order TOTAL, so a page boundary can't
@@ -1164,8 +1283,14 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
    * failure (FAILED/TIMED_OUT/TERMINATED/CANCELED) maps to a real status instead
    * of throwing a 500. Only a truly-gone run is a 404.
    */
-  async getState(id: string, tenantId: string): Promise<RunStateView> {
-    await this.assertOwner(id, tenantId);
+  async getState(
+    id: string,
+    tenantId: string,
+    actor?: Principal,
+  ): Promise<RunStateView> {
+    const row = await this.assertOwner(id, tenantId);
+    // G3 (§8.4): the run detail (incl. its ctx/output) is view-gated on its workflow.
+    await this.assertRunAccess(actor, "view", row);
     const handle = this.client.workflow.getHandle(id);
     try {
       const desc = await handle.describe();
@@ -1216,8 +1341,13 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
    * name, failure message — already sanitized at the activity) — no payload
    * decoding, so nothing secret-bearing is surfaced.
    */
-  async history(id: string, tenantId: string): Promise<RunEvent[]> {
-    await this.assertOwner(id, tenantId);
+  async history(
+    id: string,
+    tenantId: string,
+    actor?: Principal,
+  ): Promise<RunEvent[]> {
+    const row = await this.assertOwner(id, tenantId);
+    await this.assertRunAccess(actor, "view", row);
     let h: { events?: unknown[] | null };
     try {
       h = await this.client.workflow.getHandle(id).fetchHistory();
@@ -1291,12 +1421,14 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   async runGraph(
     id: string,
     tenantId: string,
+    actor?: Principal,
   ): Promise<{
     graph: Record<string, unknown>;
     version: number | null;
     workflowKey: string | null;
   }> {
-    await this.assertOwner(id, tenantId);
+    const owned = await this.assertOwner(id, tenantId);
+    await this.assertRunAccess(actor, "view", owned);
     let h: { events?: unknown[] | null };
     try {
       h = await this.client.workflow.getHandle(id).fetchHistory();
@@ -1400,11 +1532,16 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     return this.start(tenantId, envId, input, row.workflowKey, graphVersion);
   }
 
-  /** 404 if the execution is unknown, 403 if it belongs to another tenant. */
+  /** 404 if the execution is unknown, 403 if it belongs to another tenant. Returns the
+   *  row so callers can gate on its workflowKey/environmentId without a second read. */
   private async assertOwner(
     workflowId: string,
     tenantId: string,
-  ): Promise<void> {
+  ): Promise<{
+    tenantId: string;
+    workflowKey: string | null;
+    environmentId: string | null;
+  }> {
     const row = await getPrisma().execution.findUnique({
       where: { workflowId },
     });
@@ -1412,5 +1549,6 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     if (row.tenantId !== tenantId) {
       throw new ForbiddenException("Execution belongs to another tenant");
     }
+    return row;
   }
 }

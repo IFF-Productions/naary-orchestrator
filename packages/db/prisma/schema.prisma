@@ -458,19 +458,9 @@ model Environment {
   // in Prisma's DSL) enforces exactly one default env per tenant at the DB level.
 }
 
-// LEGACY workspace member directory (pre-U1 Team screen). Read/written by NOTHING since
-// RBAC U1 — the Team screen is Membership+Invitation-backed now. Rows were seeded into
-// Invitation once (U1 migration); the table itself retires in slice G3 (RBAC-GROUPS.md §5).
-model Member {
-  id        String   @id @default(uuid())
-  tenantId  String
-  email     String
-  role      String   @default("member") // 'owner' | 'admin' | 'member'
-  createdAt DateTime @default(now())
-
-  @@unique([tenantId, email])
-  @@index([tenantId])
-}
+// NB: the legacy advisory `Member` directory (pre-U1 Team screen) was dropped in G3
+// (20260801120000_drop_member_directory) — U1 seeded its rows into Invitation and made
+// the Team screen Membership+Invitation-backed; Membership below is the authority.
 
 // Multi-workspace membership (design: PROVISIONING-MULTIUSER.md). The AUTHORITY for
 // which workspaces a user belongs to + their role — a user has one row per workspace.
