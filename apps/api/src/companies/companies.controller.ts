@@ -7,18 +7,24 @@ import {
   HttpCode,
   Param,
   Post,
+  Query,
 } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
 import { CurrentPrincipal, type Principal } from "../auth/tenant.decorator";
 import { UserScoped } from "../auth/user-scoped.decorator";
 import { ApiEndpoint } from "../swagger/api-decorators";
-import { type CompanyView, CompanyService } from "./company.service";
-import { CompanyViewResponse } from "./company.response";
+import {
+  type CompanyUsageRollup,
+  type CompanyView,
+  CompanyService,
+} from "./company.service";
+import { CompanyUsageResponse, CompanyViewResponse } from "./company.response";
 
 /**
- * Companies foundation (COMPANIES.md Slice 1). All routes are `@UserScoped()` and keyed by the
- * caller's Firebase uid — `CompanyMembership` is uid-keyed, so an `nry_` API-token principal (no
- * uid) can't hold one: list returns [], writes are forbidden. No cross-workspace reads here yet.
+ * Companies (COMPANIES.md Slices 1–2). All routes are `@UserScoped()` and keyed by the caller's
+ * Firebase uid — `CompanyMembership` is uid-keyed, so an `nry_` API-token principal (no uid) can't
+ * hold one: list returns [], everything else is forbidden. The only cross-workspace read is the
+ * usage rollup, gated by company membership (§4).
  */
 @ApiBearerAuth("bearer")
 @Controller()
@@ -51,6 +57,26 @@ export class CompaniesController {
   ): Promise<CompanyView> {
     const userId = this.requireUser(principal);
     return this.companies.create(userId, body?.name);
+  }
+
+  @ApiEndpoint({
+    summary: "Company usage rollup",
+    description:
+      "Total + per-workspace (+ nested per-environment) spend across the company's member workspaces. " +
+      "Company members only (§4 — the sole cross-workspace read). Optional from/to (ISO date) window. " +
+      "Tokens + cost only.",
+    ok: CompanyUsageResponse,
+  })
+  @Get("companies/:id/usage")
+  @UserScoped()
+  async usage(
+    @CurrentPrincipal() principal: Principal,
+    @Param("id") companyId: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ): Promise<CompanyUsageRollup> {
+    const userId = this.requireUser(principal);
+    return this.companies.getCompanyUsage(userId, companyId, { from, to });
   }
 
   @ApiEndpoint({
