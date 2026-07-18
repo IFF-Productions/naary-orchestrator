@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import {
   BadRequestException,
+  ServiceUnavailableException,
   UnprocessableEntityException,
 } from "@nestjs/common";
 import { MissingCredentialError } from "@naary/secrets";
@@ -356,6 +357,30 @@ describe("GraphGeneratorService (claude-code source)", () => {
     ).rejects.toSatisfy(
       (e) => (e as { getStatus(): number }).getStatus() === 429,
     );
+  });
+
+  // The reported failure: exit 1 with NO stdout JSON — the real reason is on stderr. Classify from
+  // there too, so an auth error still becomes an actionable 400 instead of an opaque 503.
+  it("classifies an auth failure written to STDERR (empty stdout) as a 400", async () => {
+    execMock.mockResolvedValue({
+      stdout: "",
+      stderr: "Error: unauthorized — invalid api key",
+      exitCode: 1,
+    });
+    await expect(
+      makeService().generate("t-1", "e-1", "flow"),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("an unknown CLI failure (stderr only) surfaces as a 503 (logged at error for Sentry)", async () => {
+    execMock.mockResolvedValue({
+      stdout: "",
+      stderr: "panic: unexpected internal error",
+      exitCode: 1,
+    });
+    await expect(
+      makeService().generate("t-1", "e-1", "flow"),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 
   it("tolerates markdown fences around the CLI's JSON (parse still succeeds)", async () => {
