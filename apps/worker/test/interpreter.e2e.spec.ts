@@ -189,6 +189,60 @@ const mockActivities = {
     ];
     return { status: "ok", items, count: items.length, costUsd: 0 };
   },
+  // Per-node matrix (Part 2): activity-backed transform nodes. Deterministic stubs so the e2e stays
+  // hermetic (the real parse/crypto/Buffer work is unit-tested); each captures its resolved request so
+  // a test can prove the interpreter threaded config + upstream bindings into the activity.
+  callCsv: async (
+    cfg: activities.CsvConfig,
+    input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.CsvResult> => {
+    csvCalls.push({ cfg, input });
+    // Echo a deterministic parse result so ctx.<node> === res.result (interpreter unwraps .result).
+    return {
+      status: "ok",
+      result: [{ id: "1", name: "Ada" }],
+      costUsd: 0,
+    };
+  },
+  callEncode: async (
+    cfg: activities.EncodeConfig,
+    input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.EncodeResult> => {
+    encodeCalls.push({ cfg, input });
+    return { status: "ok", result: `enc(${String(input)})`, costUsd: 0 };
+  },
+  callHash: async (
+    cfg: activities.ResolvedHash,
+    _input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.HashResult> => {
+    hashCalls.push(cfg);
+    return { status: "ok", digest: "deadbeef", costUsd: 0 };
+  },
+  callRandom: async (
+    cfg: activities.RandomConfig,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.RandomResult> => {
+    randomCalls.push(cfg);
+    return { status: "ok", value: "r4nd0mhex", costUsd: 0 };
+  },
+  callHtmlExtract: async (
+    cfg: activities.HtmlExtractConfig,
+    input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.HtmlExtractResult> => {
+    htmlExtractCalls.push({ cfg, input });
+    return { status: "ok", result: { title: "Hello" }, costUsd: 0 };
+  },
+  callMarkdown: async (
+    input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.MarkdownResult> => {
+    markdownCalls.push(input);
+    return { status: "ok", result: { markdown: "# Hi" }, costUsd: 0 };
+  },
   callCode: async (
     cfg: activities.CodeNodeConfig,
     input: activities.CodeInput,
@@ -282,6 +336,16 @@ const codeCalls: {
   input: activities.CodeInput;
 }[] = [];
 const totpCalls: activities.TotpConfig[] = [];
+// Per-node matrix (Part 2) capture arrays.
+const csvCalls: { cfg: activities.CsvConfig; input: unknown }[] = [];
+const encodeCalls: { cfg: activities.EncodeConfig; input: unknown }[] = [];
+const hashCalls: activities.ResolvedHash[] = [];
+const randomCalls: activities.RandomConfig[] = [];
+const htmlExtractCalls: {
+  cfg: activities.HtmlExtractConfig;
+  input: unknown;
+}[] = [];
+const markdownCalls: unknown[] = [];
 const xmlCalls: { cfg: activities.XmlConfig; input: unknown }[] = [];
 const rssCalls: activities.ResolvedRss[] = [];
 const emailCalls: activities.ResolvedSendEmail[] = [];

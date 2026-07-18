@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TASK_QUEUE, stateQuery } from "@naary/contracts";
 import type { GraphDef } from "@naary/dsl";
 import { MemoryObjectStore, __setObjectStore } from "@naary/storage";
-import { getPrisma } from "@naary/db";
+import { disconnectPrisma, getPrisma } from "@naary/db";
 import * as activities from "../src/temporal/activities";
 import { runGraph } from "../src/temporal/workflows";
 
@@ -52,12 +52,17 @@ function embedText(text: string): number[] {
 
 let env: TestWorkflowEnvironment;
 let container: Awaited<ReturnType<PostgreSqlContainer["start"]>>;
+// The process-wide Prisma singleton reads DATABASE_URL at FIRST call — capture the prior value so
+// teardown can restore it, and reset the singleton so an earlier spec's pool can't be reused here.
+let priorDatabaseUrl: string | undefined;
 
 beforeAll(async () => {
   // pgvector image ships the `vector` extension the migration needs.
   container = await new PostgreSqlContainer("pgvector/pgvector:pg16").start();
-  // getPrisma() is a process-wide singleton keyed off DATABASE_URL at FIRST call — set it before any
-  // activity (or our schema bootstrap) touches Prisma.
+  priorDatabaseUrl = process.env.DATABASE_URL;
+  // If any earlier spec in this process initialized Prisma (against another URL), close that pool
+  // BEFORE repointing DATABASE_URL — the next getPrisma() then binds to the container cleanly.
+  await disconnectPrisma();
   process.env.DATABASE_URL = container.getConnectionUri();
   env = await createLocalTestEnv();
 
@@ -89,11 +94,16 @@ beforeAll(async () => {
     embedding: embedText(value),
     tokens: 1,
   });
-  activities.__agentDeps.recordUsage = async () => undefined;
+  activities.__agentDeps.recordUsage = (async () => undefined) as never; // no UsageEvent table in this bare container
 }, 180_000);
 
 afterAll(async () => {
   await env?.teardown();
+  // Close the container-backed pool BEFORE stopping the container, then restore the process
+  // env so later specs in this process see the original DATABASE_URL and a fresh singleton.
+  await disconnectPrisma().catch(() => undefined);
+  if (priorDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+  else process.env.DATABASE_URL = priorDatabaseUrl;
   await container?.stop();
 });
 
