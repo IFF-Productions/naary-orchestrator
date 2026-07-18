@@ -4,8 +4,10 @@ import type { GraphDef } from "@naary/dsl";
 import { Button, Card, Icon, LoadingBlock, StatusPill } from "../../components";
 import { RunDiagram } from "../../components/RunDiagram";
 import { api, type ExecutionState, UnauthorizedError } from "../../lib/api";
+import { canDo } from "../../lib/permissions-logic";
 import { isTerminal, runStatusUi } from "../../lib/run-status";
 import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
+import { usePermissions } from "../../lib/usePermissions";
 import { RerunMenu, VersionBadge } from "./RerunMenu";
 import { NodeOutputBody } from "./run-detail/NodeOutputBody";
 import { RegionTraceSection } from "./run-detail/RegionTraceSection";
@@ -80,6 +82,10 @@ function RunView({ id }: { id: string }) {
   const [runVersion, setRunVersion] = useState<number | null>(null);
   const [runWorkflowKey, setRunWorkflowKey] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Affordance gating (RBAC-GROUPS G2): re-run needs `run` on the workflow. Unknown key
+  // (older runs) → keep the affordance; the server still enforces on the request.
+  const perms = usePermissions();
+  const mayRerun = !runWorkflowKey || canDo(perms, "run", runWorkflowKey);
 
   const poll = useCallback(async () => {
     try {
@@ -306,7 +312,7 @@ function RunView({ id }: { id: string }) {
             </Button>
           </div>
         )}
-        {status && isTerminal(status) && (
+        {status && isTerminal(status) && mayRerun && (
           <RerunMenu
             runId={id}
             workflowKey={runWorkflowKey}

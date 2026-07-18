@@ -74,6 +74,7 @@ const GROUPS: { heading: string; items: NavItemDef[] }[] = [
 
 const FOOTER_ITEMS: NavItemDef[] = [
   { to: "/app/team", label: "Team", icon: "users" },
+  { to: "/app/groups", label: "Groups", icon: "key" },
   { to: "/app/settings", label: "Settings", icon: "settings" },
 ];
 

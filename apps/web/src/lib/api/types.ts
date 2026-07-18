@@ -326,6 +326,9 @@ export interface ApiTokenRow {
   label: string;
   createdAt: string;
   lastUsedAt: string | null;
+  /** How many permission groups this token belongs to (RBAC-GROUPS.md §4a). Under group
+   *  enforcement an ungrouped token is deny-by-default; >0 shows the "Restricted" badge. */
+  groupCount: number;
 }
 
 /** A freshly minted token — `token` is the plaintext, shown once. */
@@ -467,6 +470,67 @@ export interface CompanyBudgetView {
   mtdSpendUsd: number;
   /** monthlyCapUsd − mtdSpendUsd (may be negative); null when no budget is configured. */
   remainingUsd: number | null;
+}
+
+/* ---- Permission groups + grants (RBAC-GROUPS.md, slice G2) ---- */
+
+/** One grant on a permission group: env scope + workflow scope + the six-verb matrix. */
+export interface GroupGrant {
+  id: string;
+  /** null = every environment; otherwise the one env this grant applies to (§8.5). */
+  environmentId: string | null;
+  /** 'all' = every workflow in the workspace; 'selected' = exactly workflowKeys. */
+  scope: "all" | "selected";
+  canView: boolean;
+  canRun: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  /** share = PROMOTE to another environment only (§8.2). */
+  canShare: boolean;
+  /** Create NEW workflows — its own verb (§8.3); valid only with scope 'all'. */
+  canCreate: boolean;
+  workflowKeys: string[];
+}
+
+/** A permission group with its members, attached API tokens, and grants. */
+export interface PermissionGroup {
+  id: string;
+  name: string;
+  createdAt: string;
+  members: { userId: string; createdAt: string }[];
+  tokens: { tokenId: string; createdAt: string }[];
+  grants: GroupGrant[];
+}
+
+/** Grant create/update payload (PATCH semantics on update — absent fields keep their value). */
+export interface GrantInput {
+  environmentId?: string | null;
+  scope?: "all" | "selected";
+  canView?: boolean;
+  canRun?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  canShare?: boolean;
+  canCreate?: boolean;
+  workflowKeys?: string[];
+}
+
+/** Effective access for one verb: everything, or an explicit key list. */
+export interface VerbAccess {
+  all: boolean;
+  keys: string[];
+}
+
+/** GET /me/permissions — the caller's effective matrix in the active workspace + env.
+ *  `restricted:false` = full access (owner/admin, unrestricted token, or zero grants). */
+export interface EffectivePermissions {
+  restricted: boolean;
+  canCreate: boolean;
+  view: VerbAccess;
+  run: VerbAccess;
+  edit: VerbAccess;
+  delete: VerbAccess;
+  share: VerbAccess;
 }
 
 /** Map a control-plane status to a design run-state token. */

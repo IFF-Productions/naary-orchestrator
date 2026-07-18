@@ -48,7 +48,9 @@ import {
 } from "../lib/api";
 import { compileGraph } from "../lib/compile-graph";
 import { decompileGraph } from "../lib/decompile-graph";
+import { canSaveWorkflow } from "../lib/permissions-logic";
 import { PHONE_QUERY, useMediaQuery } from "../lib/useMediaQuery";
+import { usePermissions } from "../lib/usePermissions";
 import {
   type CanvasNode,
   defaultConfigFor,
@@ -495,6 +497,16 @@ export function CanvasPage() {
   /** The key to save/run under: an opened workflow's key, else slug(name). */
   const activeKey = workflowKey || slugify(name);
 
+  // Affordance gating (RBAC-GROUPS G2): saving an EXISTING key needs `edit` on it, a NEW
+  // key needs `create`. Disabled-not-hidden (with a tooltip) so the state is explainable;
+  // the API enforces regardless — a forced request still 403s.
+  const perms = usePermissions();
+  const keyExists = workflows.some((w) => w.workflowKey === activeKey);
+  const maySave = canSaveWorkflow(perms, activeKey, keyExists);
+  const saveDeniedTitle = keyExists
+    ? "You don't have edit permission on this workflow"
+    : "You don't have permission to create workflows in this environment";
+
   function newWorkflow() {
     setNodes(SEED_NODES);
     setEdges(SEED_EDGES);
@@ -836,14 +848,16 @@ export function CanvasPage() {
           </Button>
           <Button
             variant="secondary"
-            disabled={busy || !graph}
+            disabled={busy || !graph || !maySave}
+            title={maySave ? undefined : saveDeniedTitle}
             onClick={() => void saveOnly()}
           >
             Save
           </Button>
           <Button
             variant="primary"
-            disabled={busy || !graph}
+            disabled={busy || !graph || !maySave}
+            title={maySave ? undefined : saveDeniedTitle}
             onClick={() => void run()}
           >
             {busy ? "Running…" : "Save & run"}

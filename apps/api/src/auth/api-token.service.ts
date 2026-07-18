@@ -26,17 +26,37 @@ export class ApiTokenService {
     return { id: row.id, token, label: row.label, createdAt: row.createdAt };
   }
 
-  /** A tenant's tokens — metadata only, never the token/hash (write-once). */
-  async list(
-    tenantId: string,
-  ): Promise<
-    { id: string; label: string; createdAt: Date; lastUsedAt: Date | null }[]
+  /** A tenant's tokens — metadata only, never the token/hash (write-once).
+   *  `groupCount` (additive, RBAC-GROUPS.md §4a slice G2): how many permission groups the
+   *  token belongs to — the SPA's "Restricted" badge. One batched query (a relation
+   *  `_count` in the same findMany), no per-row lookups. */
+  async list(tenantId: string): Promise<
+    {
+      id: string;
+      label: string;
+      createdAt: Date;
+      lastUsedAt: Date | null;
+      groupCount: number;
+    }[]
   > {
-    return getPrisma().apiToken.findMany({
+    const rows = await getPrisma().apiToken.findMany({
       where: { tenantId },
       orderBy: { createdAt: "desc" },
-      select: { id: true, label: true, createdAt: true, lastUsedAt: true },
+      select: {
+        id: true,
+        label: true,
+        createdAt: true,
+        lastUsedAt: true,
+        _count: { select: { groupMemberships: true } },
+      },
     });
+    return rows.map((r) => ({
+      id: r.id,
+      label: r.label,
+      createdAt: r.createdAt,
+      lastUsedAt: r.lastUsedAt,
+      groupCount: r._count.groupMemberships,
+    }));
   }
 
   /** Revoke a tenant's token by id (tenant-scoped). Returns true if a row was removed. */
@@ -53,9 +73,7 @@ export class ApiTokenService {
    *  Additionally returns the token ROW id (RBAC-GROUPS.md §4a, slice G1): the identity a
    *  WorkflowGrant hangs on when the workspace opts into group enforcement. Additive — the id
    *  is not the secret (the hash stays write-once) and callers that ignore it are unchanged. */
-  async verify(
-    token: string,
-  ): Promise<{
+  async verify(token: string): Promise<{
     id: string;
     tenantId: string;
     environmentId: string | null;

@@ -24,6 +24,7 @@ import { configApi } from "./api/config";
 import { graphsApi } from "./api/graphs";
 import { integrationsApi } from "./api/integrations";
 import { notificationsApi } from "./api/notifications";
+import { permissionsApi } from "./api/permissions";
 import { runsApi } from "./api/runs";
 import { workspacesApi } from "./api/workspaces";
 
@@ -45,6 +46,7 @@ export const api = {
   ...workspacesApi,
   ...companiesApi,
   ...notificationsApi,
+  ...permissionsApi,
   ...configApi,
   ...integrationsApi,
 };
