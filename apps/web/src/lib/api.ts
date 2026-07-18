@@ -116,15 +116,28 @@ export function getActiveWorkspace(): string | null {
 const ENVIRONMENT_KEY = "naary.environment";
 let activeEnvironmentId: string | null = lsGet(ENVIRONMENT_KEY);
 
-/** Set (or clear) the active environment slug/id sent on every subsequent request. */
+// Subscribers notified when the active environment changes — lets the UI re-render + re-fetch under
+// the new X-Environment-Id WITHOUT a full page reload (see useActiveEnvironment + AppShell's keyed
+// Outlet). A plain Set so this stays framework-agnostic; React subscribes via useSyncExternalStore.
+const envListeners = new Set<() => void>();
+
+/** Set (or clear) the active environment slug/id sent on every subsequent request. Notifies subscribers. */
 export function setActiveEnvironment(idOrSlug: string | null): void {
+  if (idOrSlug === activeEnvironmentId) return;
   activeEnvironmentId = idOrSlug;
   lsSet(ENVIRONMENT_KEY, idOrSlug);
+  for (const l of envListeners) l();
 }
 
 /** The active environment id/slug, or null if none selected yet. */
 export function getActiveEnvironment(): string | null {
   return activeEnvironmentId;
+}
+
+/** Subscribe to active-environment changes. Returns an unsubscribe fn. */
+export function subscribeActiveEnvironment(onChange: () => void): () => void {
+  envListeners.add(onChange);
+  return () => envListeners.delete(onChange);
 }
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
