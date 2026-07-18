@@ -20,15 +20,19 @@ FROM (
 ON CONFLICT ("tenantId", "slug") DO NOTHING;
 
 -- 3) Backfill existing rows to the tenant's default env (pre-6b rows keep working as before).
+--    NULL-guarded so the backfill is idempotent and can never clobber a row a newer API/worker
+--    already scoped during the rolling-deploy window (column exists, migration mid-flight).
 UPDATE "NotificationChannel" n
 SET "environmentId" = e."id"
 FROM "Environment" e
-WHERE e."tenantId" = n."tenantId" AND e."slug" = 'prod';
+WHERE e."tenantId" = n."tenantId" AND e."slug" = 'prod'
+  AND n."environmentId" IS NULL;
 
 UPDATE "PinnedData" p
 SET "environmentId" = e."id"
 FROM "Environment" e
-WHERE e."tenantId" = p."tenantId" AND e."slug" = 'prod';
+WHERE e."tenantId" = p."tenantId" AND e."slug" = 'prod'
+  AND p."environmentId" IS NULL;
 
 -- 4) Require an env from here on (HARD scope, design §3).
 ALTER TABLE "NotificationChannel" ALTER COLUMN "environmentId" SET NOT NULL;
