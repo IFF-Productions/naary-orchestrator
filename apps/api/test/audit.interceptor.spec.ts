@@ -118,4 +118,59 @@ describe("actionFor", () => {
       "PATCH /something/weird",
     );
   });
+
+  // G3: group/grant/member/token-member mutations get human labels.
+  it("maps permission-group routes (G3)", () => {
+    expect(actionFor("POST", "/tenants/t-1/groups")).toBe(
+      "Created a permission group",
+    );
+    expect(actionFor("PATCH", "/tenants/t-1/groups/g-1")).toBe(
+      "Renamed a permission group",
+    );
+    expect(actionFor("DELETE", "/tenants/t-1/groups/g-1")).toBe(
+      "Deleted a permission group",
+    );
+    expect(actionFor("POST", "/tenants/t-1/groups/g-1/members/u-9")).toBe(
+      "Added a member to a permission group",
+    );
+    expect(actionFor("DELETE", "/tenants/t-1/groups/g-1/members/u-9")).toBe(
+      "Removed a member from a permission group",
+    );
+    expect(actionFor("POST", "/tenants/t-1/groups/g-1/tokens/tok-3")).toBe(
+      "Added an API token to a permission group",
+    );
+    expect(actionFor("DELETE", "/tenants/t-1/groups/g-1/tokens/tok-3")).toBe(
+      "Removed an API token from a permission group",
+    );
+    expect(actionFor("POST", "/tenants/t-1/groups/g-1/grants")).toBe(
+      "Changed workflow permissions",
+    );
+    expect(actionFor("PATCH", "/tenants/t-1/groups/g-1/grants/gr-2")).toBe(
+      "Changed workflow permissions",
+    );
+    expect(actionFor("DELETE", "/tenants/t-1/groups/g-1/grants/gr-2")).toBe(
+      "Removed a workflow permission grant",
+    );
+  });
+
+  it("maps the U1 team routes (invite semantics, invitations before :userId)", () => {
+    expect(actionFor("POST", "/tenants/t-1/members")).toBe("Invited a member");
+    expect(actionFor("PATCH", "/tenants/t-1/members/uid-1")).toBe(
+      "Changed a member's role",
+    );
+    expect(actionFor("DELETE", "/tenants/t-1/members/uid-1")).toBe(
+      "Removed a member",
+    );
+    // The literal `invitations` segment must NOT be swallowed by /members/:userId.
+    expect(actionFor("DELETE", "/tenants/t-1/members/invitations/inv-1")).toBe(
+      "Revoked an invitation",
+    );
+  });
+
+  it("a group's member attach is never mislabeled as a TEAM member change (order)", () => {
+    // Both regexes end in /members/:id — the /groups/ mapping must win.
+    expect(actionFor("DELETE", "/tenants/t-1/groups/g-1/members/u-9")).not.toBe(
+      "Removed a member",
+    );
+  });
 });

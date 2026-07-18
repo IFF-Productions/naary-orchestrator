@@ -140,7 +140,9 @@ export class McpController {
     const server = buildMcpServer({
       tenantId,
       listWorkflows: () => this.graphs.list(tenantId, envId, actor),
-      getRun: (runId) => this.executions.getState(runId, tenantId),
+      // G3 (§8.4): run reads/decisions are gated on the run's workflow for a
+      // restricted token — same actor threading as runWorkflow.
+      getRun: (runId) => this.executions.getState(runId, tenantId, actor),
       runWorkflow: (workflowKey, input) =>
         this.executions
           .start(tenantId, envId, input, workflowKey, undefined, actor)
@@ -148,7 +150,7 @@ export class McpController {
       createWorkflow: (args) =>
         this.createWorkflow(tenantId, envId, args, actor),
       approve: (runId, approved, note) =>
-        this.executions.approve(runId, approved, tenantId, note),
+        this.executions.approve(runId, approved, tenantId, note, actor),
       exposedWorkflows,
     });
     const transport = new StreamableHTTPServerTransport({
