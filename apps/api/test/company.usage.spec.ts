@@ -12,7 +12,11 @@ vi.mock("@naary/db", () => ({
 import { CompaniesController } from "../src/companies/companies.controller";
 import { CompanyService } from "../src/companies/company.service";
 
-const svc = new CompanyService();
+const svc = new CompanyService(
+  {} as never, // ExecutionsService — not exercised in this spec
+  {} as never, // GraphsService
+  {} as never, // EnvironmentsService
+);
 
 // Ledger rows carry Decimal costUsd — fake it as the string Prisma's Decimal stringifies to
 // (Decimal(12,6)); the service converts via Number(r.costUsd), same as usage.service.ts.

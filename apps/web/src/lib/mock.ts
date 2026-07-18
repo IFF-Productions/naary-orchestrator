@@ -34,6 +34,10 @@ export const PAGE_META: Record<string, [string, string]> = {
     "Plan, spend caps, invoices and usage by model.",
   ],
   "/app/team": ["Team", "Members, roles and approval permissions."],
+  "/app/company": [
+    "Company",
+    "Cross-workspace usage and read-only visibility for company admins.",
+  ],
   "/app/settings": [
     "Settings",
     "Workspace, environments, API keys and secrets.",

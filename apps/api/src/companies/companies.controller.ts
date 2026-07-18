@@ -13,18 +13,25 @@ import { ApiBearerAuth } from "@nestjs/swagger";
 import { CurrentPrincipal, type Principal } from "../auth/tenant.decorator";
 import { UserScoped } from "../auth/user-scoped.decorator";
 import { ApiEndpoint } from "../swagger/api-decorators";
+import type { RunPage } from "../executions/executions.service";
+import type { GraphSummary } from "../graphs/graphs.service";
 import {
   type CompanyUsageRollup,
   type CompanyView,
   CompanyService,
 } from "./company.service";
-import { CompanyUsageResponse, CompanyViewResponse } from "./company.response";
+import {
+  CompanyUsageResponse,
+  CompanyViewResponse,
+  CompanyWorkspaceRunsResponse,
+  CompanyWorkspaceWorkflowResponse,
+} from "./company.response";
 
 /**
- * Companies (COMPANIES.md Slices 1–2). All routes are `@UserScoped()` and keyed by the caller's
+ * Companies (COMPANIES.md Slices 1–3). All routes are `@UserScoped()` and keyed by the caller's
  * Firebase uid — `CompanyMembership` is uid-keyed, so an `nry_` API-token principal (no uid) can't
- * hold one: list returns [], everything else is forbidden. The only cross-workspace read is the
- * usage rollup, gated by company membership (§4).
+ * hold one: list returns [], everything else is forbidden. Cross-workspace reads (usage rollup +
+ * the Slice-3 runs/workflows visibility) are gated by company membership (§4) and are READ-ONLY.
  */
 @ApiBearerAuth("bearer")
 @Controller()
@@ -77,6 +84,49 @@ export class CompaniesController {
   ): Promise<CompanyUsageRollup> {
     const userId = this.requireUser(principal);
     return this.companies.getCompanyUsage(userId, companyId, { from, to });
+  }
+
+  @ApiEndpoint({
+    summary: "List a member workspace's runs (company console)",
+    description:
+      "READ-ONLY page of runs in one of the company's workspaces (§7.3). Company members only " +
+      "(§4). Run detail stays workspace-gated — this returns summaries only.",
+    ok: CompanyWorkspaceRunsResponse,
+    notFound: true,
+  })
+  @Get("companies/:id/workspaces/:tenantId/runs")
+  @UserScoped()
+  async workspaceRuns(
+    @CurrentPrincipal() principal: Principal,
+    @Param("id") companyId: string,
+    @Param("tenantId") tenantId: string,
+    @Query("limit") limit?: string,
+    @Query("cursor") cursor?: string,
+  ): Promise<RunPage> {
+    const userId = this.requireUser(principal);
+    return this.companies.listWorkspaceRuns(userId, companyId, tenantId, {
+      limit: limit ? Number(limit) : undefined,
+      cursor,
+    });
+  }
+
+  @ApiEndpoint({
+    summary: "List a member workspace's workflows (company console)",
+    description:
+      "READ-ONLY workflow summaries (names/keys — never graph bodies) from the workspace's " +
+      "default environment (§7.3). Company members only (§4).",
+    ok: [CompanyWorkspaceWorkflowResponse],
+    notFound: true,
+  })
+  @Get("companies/:id/workspaces/:tenantId/workflows")
+  @UserScoped()
+  async workspaceWorkflows(
+    @CurrentPrincipal() principal: Principal,
+    @Param("id") companyId: string,
+    @Param("tenantId") tenantId: string,
+  ): Promise<GraphSummary[]> {
+    const userId = this.requireUser(principal);
+    return this.companies.listWorkspaceWorkflows(userId, companyId, tenantId);
   }
 
   @ApiEndpoint({

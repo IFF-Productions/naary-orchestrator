@@ -1,6 +1,10 @@
 # Companies — a cross-workspace org + admin layer
 
-> Status: **Slice 1 (Foundation) shipped.** §8 decisions confirmed; remaining slices below.
+> Status: **Slices 1–3 shipped** (1 Foundation #327; 2 usage rollup #379; 3 data visibility —
+> read-only runs/workflows via the company-authz path + the `/app/company` console). §8 decisions
+> confirmed. Slice 4 note: it says "reuses the invitations machinery", which was never built
+> (PROVISIONING-MULTIUSER §6 is design-only) — slice 4 adds company admins by email→uid lookup
+> against `Membership` instead; real invitations land with the RBAC-GROUPS program (slice U1).
 
 ## 0. Premise (state this first — if it's wrong, everything below is)
 

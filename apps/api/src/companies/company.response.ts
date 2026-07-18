@@ -85,3 +85,42 @@ export class CompanyUsageResponse {
   })
   byWorkspace!: CompanyUsageWorkspaceResponse[];
 }
+
+// ---- Slice 3: cross-workspace visibility (READ-ONLY) --------------------------------------------
+
+/** One run summary row as the console sees it (mirror of the runs list item — no detail). */
+export class CompanyWorkspaceRunItemResponse {
+  @ApiProperty({ description: "Run id (Temporal workflowId)." })
+  workflowId!: string;
+  @ApiProperty({ nullable: true, description: "The workflow's key." })
+  workflowKey!: string | null;
+  @ApiProperty({ example: "completed" })
+  status!: string;
+  @ApiProperty({ format: "date-time" })
+  createdAt!: string;
+}
+
+/** Keyset page of a member workspace's runs. */
+export class CompanyWorkspaceRunsResponse {
+  @ApiProperty({ type: [CompanyWorkspaceRunItemResponse] })
+  items!: CompanyWorkspaceRunItemResponse[];
+  @ApiProperty({
+    nullable: true,
+    description: "Opaque cursor for the next page; null = end.",
+  })
+  nextCursor!: string | null;
+}
+
+/** Workflow summary (name/key/version — never the graph body) from the workspace's default env. */
+export class CompanyWorkspaceWorkflowResponse {
+  @ApiProperty()
+  workflowKey!: string;
+  @ApiProperty({ description: "Whether automatic triggers fire." })
+  active!: boolean;
+  @ApiProperty()
+  name!: string;
+  @ApiProperty()
+  version!: number;
+  @ApiProperty({ format: "date-time" })
+  updatedAt!: string;
+}
