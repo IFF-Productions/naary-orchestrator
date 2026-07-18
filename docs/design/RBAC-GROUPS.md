@@ -10,16 +10,17 @@ for invitations.
 
 ## 0. Premise (state this first — if it's wrong, everything below is)
 
-**Groups gate the `member` tier only; `owner`/`admin` — and API-token principals, and trigger-fired
-runs — always bypass.** A workspace with zero grants behaves exactly as today. Grants target
-workflows by `workflowKey` **tenant-wide across environments** (env-scoped grants are a §9 seam,
-not v1). If you want to gate admins, or env-/company-scoped grants now, stop — that is a different
-design.
+**Groups gate the `member` tier AND explicitly-restricted API tokens; `owner`/`admin` users,
+UNRESTRICTED tokens, and trigger-fired runs bypass.** A workspace with zero grants behaves exactly
+as today, and an ungrouped token behaves exactly as today. Grants target workflows by
+`workflowKey` **tenant-wide across environments** (env-scoped grants are a §9 seam, not v1). If
+you want to gate admins, or env-/company-scoped grants now, stop — that is a different design.
 
 Confirmed product decisions (user, Jul 2026): groups are per-workspace; a grant carries the FULL
 matrix (`view` / `run` / `edit` / `delete` / `share`); tags are organizational metadata only —
 grants never reference tags in v1 (the schema deliberately does not preclude tag-scoped grants
-later).
+later); **API tokens are RBAC subjects too** (Jul 18) — a token joins permission groups exactly
+like a user, with the opt-in default described in §4a.
 
 ## 1. Motivation
 
@@ -106,6 +107,19 @@ model GroupMember {
   @@index([userId])
 }
 
+// API tokens as grant subjects (§4a). A SEPARATE join (not a polymorphic subject column on
+// GroupMember): both FKs stay honest and Cascade — deleting a token or a group cleans its rows.
+// The mere EXISTENCE of a row for a token is what flips it from unrestricted to restricted.
+model GroupTokenMember {
+  groupId   String
+  group     PermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  tokenId   String
+  token     ApiToken        @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@id([groupId, tokenId])
+  @@index([tokenId])
+}
+
 // A group may hold several grants (e.g. view-all + edit-selected); effective = union.
 model WorkflowGrant {
   id        String  @id @default(uuid())
@@ -144,12 +158,11 @@ changes; (b) no hidden toggle state; (c) per-workflow default-allow is incoheren
 prominent "this restricts all members" warning before the first grant saves. (Alternative — an
 explicit `enforceGroups` toggle — is §8 decision 1.)
 
-- **Bypass / precedence:** `principal.role !== 'member'` ⇒ bypass. That covers workspace owners
-  and admins, API tokens (the guard stamps `role: "owner"` on `nry_` principals — workspace-scoped
-  secrets keep full access, env-binding already constrains them), and there is no principal at all
-  on trigger-fired/scheduled runs (workspace-level automation — unaffected). Company admins reach
-  data only via the `/companies` path (COMPANIES §4), which is untouched. Grants are purely
-  additive — no deny rules; effective = union across all the user's groups' grants.
+- **Bypass / precedence:** owner/admin USERS bypass; `member` users are gated per THE RULE;
+  API tokens are gated per §4a below; there is no principal at all on trigger-fired/scheduled
+  runs (workspace-level automation — unaffected). Company admins reach data only via the
+  `/companies` path (COMPANIES §4), which is untouched. Grants are purely additive — no deny
+  rules; effective = union across all of the subject's groups' grants.
 - **Implication:** any of run/edit/delete/share **implies view** (operating on an invisible
   workflow is incoherent). Nothing else is implied — run does not imply edit.
 - **Create:** saving a NEW `workflowKey` requires an `'all'`-scope grant with `canEdit` (a
@@ -183,6 +196,32 @@ explicit `enforceGroups` toggle — is §8 decision 1.)
   have NO role checks — harmless while the table is inert, a real hole once membership is real;
   U1 ships the gates in the same slice.
 
+### 4a. API tokens as RBAC subjects (confirmed Jul 18)
+
+- **Today's mechanics to change:** the AuthGuard stamps `role: "owner"` on every `nry_` principal
+  (auth.guard.ts:148) and `ApiTokenService.verify` deliberately returns `{tenantId,
+  environmentId}` with NO token id — there is currently no identity to hang a grant on. G1 makes
+  `verify` additionally return the token's row id (additive) and `Principal` gains `tokenId?`.
+- **Default: a token is UNRESTRICTED until explicitly grouped.** The §4 first-grant cliff does
+  NOT apply to tokens — creating a group for humans must never break every CI pipeline and MCP
+  client in the workspace. A token becomes restricted the moment it holds ≥1 `GroupTokenMember`
+  row; from then on its effective permissions are exactly the union of its groups' grants (same
+  math as users: implies-view, the 'all'-scope create rule, share semantics).
+- **Guard/enforcement mechanics:** the guard already reads the token row to verify it — it
+  additionally learns "is restricted?" (a `_count` on the join in the same lookup) and stamps
+  `role: "member"` + `tokenId` for restricted tokens instead of `"owner"`.
+  `PermissionsService` resolves grants by `tokenId` when set, by `userId` otherwise; nothing else
+  changes, so the v1 public API, MCP server, and CLI callers inherit enforcement automatically
+  (they all authenticate with `nry_` tokens through the same services).
+- **Composition with env-binding:** unchanged and orthogonal — env-binding restricts WHERE a
+  token may act (which environment); grants restrict WHAT it may touch (which workflows, which
+  verbs). Both apply.
+- **Managing token groups** is owner/admin-only, on the same Groups surface (G2 adds a token
+  picker beside the member picker; the API-tokens screen shows a "restricted" badge listing the
+  token's groups).
+- Trigger-fired and scheduled runs remain workspace-level automation with no principal —
+  unaffected.
+
 ## 5. User management (Member → Membership + Invitation, slice U1)
 
 > **Deliberate change from PROVISIONING-MULTIUSER.md §6–§7** (which specified token links —
@@ -209,8 +248,9 @@ explicit `enforceGroups` toggle — is §8 decision 1.)
 ## 6. Migration / rollout
 
 Everything additive and behavior-neutral at every step: new tables only; no existing keys change;
-zero grants ⇒ §4 keeps every member fully functional until an admin opts in; API tokens, triggers,
-and v1 token callers unchanged. The two deliberate behavior changes are U1's members-route role
+zero grants ⇒ §4 keeps every member fully functional until an admin opts in; API tokens stay
+unrestricted until someone explicitly groups them (§4a — existing CI/MCP/v1 callers unchanged at
+deploy); triggers unaffected. The two deliberate behavior changes are U1's members-route role
 gates (a security fix, flagged in its PR) and the Member→Invitation seed.
 
 ## 7. Slice plan
@@ -219,10 +259,13 @@ gates (a security fix, flagged in its PR) and the Member→Invitation seed.
   filter, editor dialog. *Shippable immediately.*
 - **U1 — Real user/role management**: Invitation + accept-on-login + Membership-backed Team +
   role gates + Member seed. *Prerequisite for G1 (groups reference real uids).*
-- **G1 — Groups + grants + enforcement (API-only)**: schema + PermissionsService + asserts on the
-  §4 matrix surfaces + groups CRUD API + `GET /me/permissions`. *Blocked on §8 sign-off.*
-- **G2 — Groups UI + grant matrix**: Groups screen (create, member picker, scope toggle ×
-  five-checkbox matrix, first-grant warning); SPA affordance gating from `/me/permissions`.
+- **G1 — Groups + grants + enforcement (API-only)**: schema (incl. `GroupTokenMember`) +
+  PermissionsService + asserts on the §4 matrix surfaces + groups CRUD API (member AND token
+  attachment) + `GET /me/permissions` + the §4a guard/verify changes (`tokenId` in the principal;
+  restricted tokens stamped `member`). *Blocked on §8 sign-off.*
+- **G2 — Groups UI + grant matrix**: Groups screen (create, member picker + TOKEN picker, scope
+  toggle × five-checkbox matrix, first-grant warning); SPA affordance gating from
+  `/me/permissions`; "restricted" badge + group list on the API-tokens screen.
 - **G3 — Long tail**: v1 coverage specs; execution-read scoping to viewable keys (widest blast
   radius — Runs/insights screens); audit labels for group/grant/member mutations; retire `Member`.
 
@@ -239,6 +282,10 @@ gates (a security fix, flagged in its PR) and the Member→Invitation seed.
    pull G3's read-scoping into G1.
 5. **Grants are tenant-wide across envs in v1** (a member with edit can edit in any env they can
    select). Env-scoped grants (incl. a future `promote:prod`) are §9 seams. **Accept for v1.**
+6. **API-token default** (tokens-have-RBAC itself is CONFIRMED, Jul 18 — this is only the
+   default): **unrestricted until explicitly grouped** (recommended — the human-group cliff must
+   not break CI/MCP integrations) vs tokens fall under the same first-grant cliff as members
+   (stricter, but a group created for humans silently locks out every existing token).
 
 ## 9. Seams
 
