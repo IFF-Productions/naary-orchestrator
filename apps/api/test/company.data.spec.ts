@@ -112,4 +112,26 @@ describe("CompaniesController slice-3 routes", () => {
       cursor: "cur",
     });
   });
+
+  it("drops a garbage ?limit (NaN never reaches Prisma) and trims/empties the cursor", async () => {
+    const { c, svc } = controller();
+    await c.workspaceRuns(
+      { userId: "u-1" } as never,
+      "c-1",
+      "t-2",
+      "abc",
+      "  cur  ",
+    );
+    expect(svc.listWorkspaceRuns).toHaveBeenCalledWith("u-1", "c-1", "t-2", {
+      limit: undefined,
+      cursor: "cur",
+    });
+    await c.workspaceRuns({ userId: "u-1" } as never, "c-1", "t-2", "5", "   ");
+    expect(svc.listWorkspaceRuns).toHaveBeenLastCalledWith(
+      "u-1",
+      "c-1",
+      "t-2",
+      { limit: 5, cursor: undefined },
+    );
+  });
 });

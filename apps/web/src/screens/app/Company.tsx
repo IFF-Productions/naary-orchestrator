@@ -336,10 +336,16 @@ function DrillPanel({
           cursor: runs.nextCursor,
         },
       );
-      setRuns({
-        items: [...runs.items, ...next.items],
-        nextCursor: next.nextCursor,
-      });
+      // Functional update: if the drill target/tab changed mid-flight the effect above reset
+      // `runs` to null — appending the captured page here would resurrect stale rows.
+      setRuns((cur) =>
+        cur === null
+          ? cur
+          : {
+              items: [...cur.items, ...next.items],
+              nextCursor: next.nextCursor,
+            },
+      );
     } finally {
       setLoadingMore(false);
     }

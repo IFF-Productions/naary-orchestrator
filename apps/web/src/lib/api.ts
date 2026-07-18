@@ -1390,8 +1390,8 @@ export interface Company {
   id: string;
   name: string;
   slug: string;
-  /** The caller's company role: "owner" | "admin". */
-  role: string;
+  /** The caller's company role. */
+  role: "owner" | "admin";
 }
 
 export interface CompanyUsageBucket {

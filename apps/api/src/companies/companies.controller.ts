@@ -104,9 +104,13 @@ export class CompaniesController {
     @Query("cursor") cursor?: string,
   ): Promise<RunPage> {
     const userId = this.requireUser(principal);
+    // Garbage ?limit ("abc" → NaN) must not reach Prisma's `take`; listPage clamps the RANGE,
+    // this guards the TYPE. Whitespace around a pasted cursor is trimmed, empty = absent.
+    const parsedLimit = limit ? Number(limit) : undefined;
+    const trimmedCursor = cursor?.trim() || undefined;
     return this.companies.listWorkspaceRuns(userId, companyId, tenantId, {
-      limit: limit ? Number(limit) : undefined,
-      cursor,
+      limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+      cursor: trimmedCursor,
     });
   }
 
