@@ -8,5 +8,6 @@ import { VariablesService } from "./variables.service";
   imports: [EnvironmentsModule],
   controllers: [VariablesController],
   providers: [VariablesService],
+  exports: [VariablesService],
 })
 export class VariablesModule {}
