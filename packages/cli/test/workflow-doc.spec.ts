@@ -32,6 +32,15 @@ describe("toImport (export doc → import body)", () => {
     expect(() => toImport({ graph: {} })).toThrow(/key/i);
   });
 
+  it("throws when the doc has a key but no graph (malformed export file)", () => {
+    // Without this fast-fail, JSON.stringify drops the undefined `graph` and the PUT hits a
+    // confusing server-side validation error instead of a clear CLI message.
+    expect(() => toImport({ workflowKey: "k" })).toThrow(/graph/i);
+    expect(() => toImport({ name: "N" }, { key: "provided" })).toThrow(
+      /graph/i,
+    );
+  });
+
   it("uses --key when the doc itself has no workflowKey", () => {
     const { key } = toImport({ name: "N", graph: {} }, { key: "provided" });
     expect(key).toBe("provided");

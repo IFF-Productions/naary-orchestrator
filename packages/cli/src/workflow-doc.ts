@@ -38,6 +38,13 @@ export function toImport(
       "No workflow key: the file has no `workflowKey` and no --key was given.",
     );
   }
+  // Fail fast on a missing graph: JSON.stringify would silently drop an undefined `graph`, sending a
+  // bodiless PUT that surfaces as a confusing server-side validation error. Catch it here instead.
+  if (doc.graph === undefined || doc.graph === null) {
+    throw new Error(
+      "Malformed workflow file: no `graph` field. Expected an export document from `naary workflows export`.",
+    );
+  }
   const name = overrides.name ?? doc.name ?? key;
   return { key, body: { name, graph: doc.graph } };
 }

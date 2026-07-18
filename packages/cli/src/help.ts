@@ -11,16 +11,16 @@ Groups:
   workflows   List, get, export, import, delete, promote workflows
   approvals   List and act on human-approval waits
 
-Global options (any command):
+Connection options (pass after <group> <command>):
   --api-url <url>   API base URL (default http://localhost:3000)
   --token <nry_..>  Bearer token
   --env <id>        Environment id (sent as X-Environment-Id)
-  -h, --help        Show help
-  -v, --version     Show version
 
-Config precedence: flags > env (NAARY_API_URL/NAARY_TOKEN/NAARY_ENV) > ~/.naary/config.json > defaults
+Help & version:
+  naary <group> --help   Group commands   (also: naary --help)
+  naary --version        Show naary version   (top level only; -v)
 
-Run \`naary <group> --help\` for group commands.`;
+Config precedence: flags > env (NAARY_API_URL/NAARY_TOKEN/NAARY_ENV) > ~/.naary/config.json > defaults`;
 
 export const GROUP_HELP: Record<string, string> = {
   auth: `naary auth — manage credentials

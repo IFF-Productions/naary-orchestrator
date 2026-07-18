@@ -35,6 +35,15 @@ describe("routing", () => {
     expect(await run(["--version"], ctx, "1.2.3")).toBe(0);
     expect(out).toContain("1.2.3");
   });
+  it("--version is top-level only: after a group it is not the CLI version", async () => {
+    // `--version` is a top-level flag; once a group is selected it belongs to the command
+    // (e.g. `runs rerun --version N` = graph version). So `naary runs --version` must NOT print
+    // the CLI version — it's an unknown command. Guards the router's global-flag handling.
+    const { ctx, out, err } = makeCtx(() => ({}));
+    expect(await run(["runs", "--version"], ctx, "1.2.3")).toBe(1);
+    expect(err.join("\n")).toContain("Unknown command");
+    expect(out).not.toContain("1.2.3");
+  });
   it("unknown group → help, exit 1", async () => {
     const { ctx } = makeCtx(() => ({}));
     expect(await run(["bogus"], ctx)).toBe(1);

@@ -98,13 +98,22 @@ export function configPath(): string {
   return path.join(configDir(), "config.json");
 }
 
-/** Read + parse the config file, or {} if it does not exist / is unreadable. */
+/**
+ * Read + parse the config file, or {} if it does not exist / is unreadable. Only string-typed
+ * `apiUrl`/`token`/`env` are kept — a corrupt file (e.g. a token stored as an object or number)
+ * would otherwise produce garbage like `Bearer [object Object]` in a request header.
+ */
 export function readConfigFile(file: string = configPath()): ConfigFile {
   try {
     const raw = fs.readFileSync(file, "utf8");
     const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object") return parsed as ConfigFile;
-    return {};
+    if (!parsed || typeof parsed !== "object") return {};
+    const o = parsed as Record<string, unknown>;
+    const clean: ConfigFile = {};
+    if (typeof o.apiUrl === "string") clean.apiUrl = o.apiUrl;
+    if (typeof o.token === "string") clean.token = o.token;
+    if (typeof o.env === "string") clean.env = o.env;
+    return clean;
   } catch {
     return {};
   }
