@@ -58,11 +58,7 @@ import {
 } from "../lib/graph-model";
 import { ConfigPanel } from "./canvas/ConfigPanel";
 import { EdgeConfigPanel } from "./canvas/EdgeConfigPanel";
-import {
-  CONNECTION_TYPES,
-  headerInputStyle,
-  PROVIDERS,
-} from "./canvas/fields";
+import { CONNECTION_TYPES, headerInputStyle, PROVIDERS } from "./canvas/fields";
 import {
   DEFAULT_KEY,
   type FlowEdge,
@@ -75,11 +71,7 @@ import {
   toFlowEdges,
   toFlowNodes,
 } from "./canvas/flow";
-import {
-  clampW,
-  InspectorPanel,
-  ResizeHandle,
-} from "./canvas/InspectorPanel";
+import { clampW, InspectorPanel, ResizeHandle } from "./canvas/InspectorPanel";
 
 export function CanvasPage() {
   const navigate = useNavigate();
@@ -526,7 +518,7 @@ export function CanvasPage() {
     setGenerating(true);
     setStatus("Generating workflow…");
     try {
-      const { name: genName, graph: gen } = await api.generateGraph(
+      const { name: genName, graph: gen } = await api.generateGraphStream(
         prompt,
         genProvider || undefined,
       );

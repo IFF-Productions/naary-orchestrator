@@ -46,8 +46,10 @@ const GEN_DEFAULT_MODEL: Record<GenProvider, string> = {
 const CLAUDE_CODE = "claude-code" as const;
 type GenSource = GenProvider | typeof CLAUDE_CODE;
 
-/** Subprocess ceiling: nginx proxies /api with its default 60s read timeout, so the CLI
- *  must give up (with a clear error) before the proxy would turn the reply into a 504. */
+/** Default subprocess ceiling (legacy JSON route): nginx proxies /api with its default 60s
+ *  read timeout, so that route's CLI call must give up (with a clear error) before the proxy
+ *  would turn the reply into a 504. The SSE route (POST /graphs/generate/stream) heartbeats
+ *  past the proxy timeout and passes its own, much larger ceiling via generate() opts. */
 const CLAUDE_CODE_TIMEOUT_MS = 55_000;
 
 /** Exactly ONE auth env var for the CLI — a subscription setup-token (sk-ant-oat…) via
@@ -214,10 +216,12 @@ export class GraphGeneratorService {
     environmentId: string,
     prompt: string,
     provider?: string,
+    opts?: { timeoutMs?: number },
   ): Promise<{ name: string; graph: GraphDef }> {
     const description = prompt?.trim();
     if (!description)
       throw new BadRequestException("A description is required");
+    const timeoutMs = opts?.timeoutMs ?? CLAUDE_CODE_TIMEOUT_MS;
 
     // Env-scoped (Slice 5): use THIS env's provider key + connections to ground generation.
     const { provider: chosen, apiKey } = await this.resolveProvider(
@@ -236,6 +240,7 @@ export class GraphGeneratorService {
       description,
       undefined,
       resources,
+      timeoutMs,
     );
     this.logDraftShape("first", out);
     let graph = toGraphDef(out);
@@ -252,6 +257,7 @@ export class GraphGeneratorService {
           error: check.error ?? "invalid graph",
         },
         resources,
+        timeoutMs,
       );
       this.logDraftShape(`repair(${check.error})`, out);
       graph = toGraphDef(out);
@@ -368,14 +374,17 @@ export class GraphGeneratorService {
     provider: GenSource,
     apiKey: string,
     description: string,
-    repair?: { previous: string; error: string },
-    resources = "",
+    repair: { previous: string; error: string } | undefined,
+    resources: string,
+    timeoutMs: number,
   ): Promise<GraphDraft> {
     const userPrompt = repair
       ? `The previous graph was invalid: ${repair.error}\n\nPrevious graph:\n${repair.previous}\n\nFix it. Original request:\n${description}`
       : description;
     if (provider === CLAUDE_CODE) {
-      return this.callClaudeCode(apiKey, userPrompt, resources);
+      // timeoutMs only bounds the CLI subprocess; the AI-SDK path below has no per-call
+      // timeout today (unchanged), and the SSE transport removes its 504 risk anyway.
+      return this.callClaudeCode(apiKey, userPrompt, resources, timeoutMs);
     }
     // Plain-text generation (NOT Output.object): the structured-output path returned a
     // skeleton — nodes with id+type but empty edges and empty config, even on repair.
@@ -425,6 +434,7 @@ export class GraphGeneratorService {
     apiKey: string,
     userPrompt: string,
     resources: string,
+    timeoutMs: number,
   ): Promise<GraphDraft> {
     const args = [
       "-p",
@@ -451,7 +461,7 @@ export class GraphGeneratorService {
           HOME: process.env.HOME,
           ...claudeCodeAuthEnv(apiKey),
         },
-        timeoutMs: CLAUDE_CODE_TIMEOUT_MS,
+        timeoutMs,
       }));
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;

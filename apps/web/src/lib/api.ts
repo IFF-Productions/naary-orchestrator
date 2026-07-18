@@ -15,6 +15,7 @@ import type {
   OpenApiSummary,
 } from "@naary/dsl";
 import { getBearerToken } from "./firebase";
+import { createSseParser } from "./sse";
 
 /** Thrown on a 401 so screens can prompt the user to set their API token. */
 export class UnauthorizedError extends Error {
@@ -382,6 +383,83 @@ export const api = {
       method: "POST",
       body: JSON.stringify(provider ? { prompt, provider } : { prompt }),
     });
+  },
+  // SSE variant of generateGraph: the server streams `: ping` heartbeats while the
+  // model runs (so long generations survive the 60s proxy read timeout) and ends
+  // with an `event: result` or `event: error` frame. Same resolved value/throws as
+  // generateGraph; falls back to it against an older API without the route.
+  async generateGraphStream(
+    prompt: string,
+    provider?: string,
+  ): Promise<{ name: string; graph: GraphDef }> {
+    const token = await getBearerToken();
+    const res = await fetch(`${BASE}/graphs/generate/stream`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...(activeWorkspaceId ? { "x-workspace-id": activeWorkspaceId } : {}),
+        ...(activeEnvironmentId
+          ? { "x-environment-id": activeEnvironmentId }
+          : {}),
+      },
+      body: JSON.stringify(provider ? { prompt, provider } : { prompt }),
+    });
+    // Deploy skew: an older API has no /stream route → use the legacy JSON one.
+    if (res.status === 404) return api.generateGraph(prompt, provider);
+    if (res.status === 401) throw new UnauthorizedError();
+    if (!res.ok) {
+      // Pre-stream failures (validation 400, guards 403) are plain JSON — mirror
+      // http()'s mapping but surface the server message (CanvasPage shows it).
+      const body = (await res.json().catch(() => null)) as {
+        code?: string;
+        message?: string | string[];
+      } | null;
+      const message = Array.isArray(body?.message)
+        ? body.message.join("; ")
+        : body?.message;
+      if (res.status === 403 && body?.code === "access_not_allowed") {
+        throw new AccessNotAllowedError(message);
+      }
+      throw new Error(
+        message ?? `POST /graphs/generate/stream → ${res.status}`,
+      );
+    }
+    // Defensive skew tolerance: a proxy/server that answered JSON instead of SSE.
+    if (
+      !res.headers.get("content-type")?.includes("text/event-stream") ||
+      !res.body
+    ) {
+      return res.json() as Promise<{ name: string; graph: GraphDef }>;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    const parser = createSseParser();
+    for (;;) {
+      const { done, value } = await reader.read();
+      const frames = parser.push(
+        done ? decoder.decode() : decoder.decode(value, { stream: true }),
+      );
+      for (const frame of frames) {
+        if (frame.event === "result") {
+          return JSON.parse(frame.data) as { name: string; graph: GraphDef };
+        }
+        if (frame.event === "error") {
+          const err = JSON.parse(frame.data) as {
+            status: number;
+            message?: string;
+            code?: string;
+          };
+          if (err.status === 401) throw new UnauthorizedError();
+          if (err.status === 403 && err.code === "access_not_allowed") {
+            throw new AccessNotAllowedError(err.message);
+          }
+          throw new Error(err.message ?? "Couldn't generate a workflow.");
+        }
+      }
+      if (done) break;
+    }
+    throw new Error("The generation stream ended unexpectedly. Try again.");
   },
   // The workflowKey of this workflow's error handler (null if none).
   getErrorHandler(

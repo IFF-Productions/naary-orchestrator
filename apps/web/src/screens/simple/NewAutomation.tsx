@@ -27,7 +27,7 @@ export function NewAutomation() {
     setBusy(true);
     setErr(null);
     try {
-      setDraft(await api.generateGraph(prompt.trim()));
+      setDraft(await api.generateGraphStream(prompt.trim()));
     } catch {
       setErr(
         "Couldn't build that. Try rephrasing — and make sure your AI provider is connected (Settings → Connect AI).",
