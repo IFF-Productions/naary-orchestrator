@@ -9,7 +9,13 @@ function makeController(
   const service = { rerun } as unknown as ConstructorParameters<
     typeof ExecutionsController
   >[0];
-  return { controller: new ExecutionsController(service, { defaultEnvId: async () => "e1", resolveEnvId: async () => "e1" } as never), rerun };
+  return {
+    controller: new ExecutionsController(service, {
+      defaultEnvId: async () => "e1",
+      resolveEnvId: async () => "e1",
+    } as never),
+    rerun,
+  };
 }
 
 describe("ExecutionsController.rerun (body optional)", () => {
@@ -20,12 +26,13 @@ describe("ExecutionsController.rerun (body optional)", () => {
       "t1",
       "wf-old",
     );
-    expect(rerun).toHaveBeenCalledWith("wf-old", "t1", undefined);
+    // Trailing undefineds = the optional graphVersion + G1 actor params.
+    expect(rerun).toHaveBeenCalledWith("wf-old", "t1", undefined, undefined);
   });
 
   it("passes an explicit graphVersion through to the service", async () => {
     const { controller, rerun } = makeController();
     await controller.rerun("t1", "wf-old", { graphVersion: 2 });
-    expect(rerun).toHaveBeenCalledWith("wf-old", "t1", 2);
+    expect(rerun).toHaveBeenCalledWith("wf-old", "t1", 2, undefined);
   });
 });

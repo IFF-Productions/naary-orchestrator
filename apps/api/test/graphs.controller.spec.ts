@@ -61,13 +61,15 @@ describe("GraphsController", () => {
       version: 3,
       contentHash: "abc123",
     });
-    // tenantId comes from the principal (arg 0), never the body.
+    // tenantId comes from the principal (arg 0), never the body. The trailing undefined
+    // is the G1 actor param (no principal in this direct-call unit test).
     expect(saveWorkflow).toHaveBeenCalledWith(
       "t-1",
       "e1",
       "canvas",
       "Canvas draft",
       validGraph,
+      undefined,
     );
   });
 
@@ -96,7 +98,12 @@ describe("GraphsController", () => {
     );
 
     expect(await controller.remove("t-1", "canvas")).toEqual({ deleted: true });
-    expect(deleteWorkflow).toHaveBeenCalledWith("t-1", "e1", "canvas");
+    expect(deleteWorkflow).toHaveBeenCalledWith(
+      "t-1",
+      "e1",
+      "canvas",
+      undefined,
+    );
 
     deleteWorkflow.mockResolvedValue(false);
     await expect(controller.remove("t-1", "gone")).rejects.toBeInstanceOf(
@@ -124,7 +131,7 @@ describe("GraphsController", () => {
     );
 
     expect(await controller.list("t-1")).toBe(summaries);
-    expect(list).toHaveBeenCalledWith("t-1", "e1");
+    expect(list).toHaveBeenCalledWith("t-1", "e1", undefined);
   });
 
   it("gets a single workflow's latest graph", async () => {
@@ -145,7 +152,12 @@ describe("GraphsController", () => {
     );
 
     expect(await controller.get("t-1", "canvas")).toBe(named);
-    expect(getLatestNamed).toHaveBeenCalledWith("t-1", "e1", "canvas");
+    expect(getLatestNamed).toHaveBeenCalledWith(
+      "t-1",
+      "e1",
+      "canvas",
+      undefined,
+    );
   });
 
   it("404s when the workflowKey is unknown", async () => {
@@ -371,7 +383,12 @@ describe("GraphsController error-handler env scoping", () => {
     const res = await controller.getErrorHandler("t-1", "wf", "sandbox");
     expect(res).toEqual({ errorWorkflowKey: "on-error" });
     // envStub resolves every selector to "e1".
-    expect(graphs.getErrorHandler).toHaveBeenCalledWith("t-1", "e1", "wf");
+    expect(graphs.getErrorHandler).toHaveBeenCalledWith(
+      "t-1",
+      "e1",
+      "wf",
+      undefined,
+    );
   });
 
   it("PUT binds in the resolved env (absent selector = tenant default)", async () => {
@@ -387,6 +404,7 @@ describe("GraphsController error-handler env scoping", () => {
       "e1",
       "wf",
       "on-error",
+      undefined,
     );
   });
 });

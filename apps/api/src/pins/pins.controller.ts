@@ -12,10 +12,16 @@ import {
 import { ApiBearerAuth } from "@nestjs/swagger";
 import type { GraphDef, NodeDef } from "@naary/dsl";
 import { isPureNode, runPureNode } from "@naary/dsl";
-import { EnvironmentSel, TenantId } from "../auth/tenant.decorator";
+import {
+  CurrentPrincipal,
+  EnvironmentSel,
+  type Principal,
+  TenantId,
+} from "../auth/tenant.decorator";
 import { ExecutionsService } from "../executions/executions.service";
 import { EnvironmentsService } from "../environments/environments.service";
 import { GraphsService } from "../graphs/graphs.service";
+import { PermissionsService } from "../permissions/permissions.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { PinsService } from "./pins.service";
 
@@ -50,6 +56,7 @@ export class PinsController {
     private readonly graphs: GraphsService,
     private readonly executions: ExecutionsService,
     private readonly environments: EnvironmentsService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   /**
@@ -76,12 +83,19 @@ export class PinsController {
       autofillUpstream?: boolean;
     },
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<
     { pure: true; output: unknown } | { pure: false; message: string }
   > {
     // ACTIVE env throughout (Slice 6b): the graph read, the pins, and the creds/connections the
     // activity fetches all live in the env the caller selected (absent header = tenant default).
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    // Single-node test = the `run` verb (RBAC-GROUPS.md §4 matrix). Asserted ONCE here —
+    // the inner graph/pins reads and autofill pin writes below run actor-less (run implies
+    // view, and the pin writes are this route's own side effect, not a user edit).
+    if (principal) {
+      await this.permissions.assertCan(principal, "run", workflowKey, envId);
+    }
     const found = await this.graphs.getLatestNamed(
       tenantId,
       envId,
@@ -220,9 +234,10 @@ export class PinsController {
     @TenantId() tenantId: string,
     @Param("workflowKey") workflowKey: string,
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<Record<string, unknown>> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    return this.pins.list(tenantId, envId, workflowKey);
+    return this.pins.list(tenantId, envId, workflowKey, principal);
   }
 
   @ApiEndpoint({ summary: "Pin (or replace) a node's sample output" })
@@ -233,9 +248,17 @@ export class PinsController {
     @Param("nodeId") nodeId: string,
     @Body() body: { output: unknown },
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<{ pinned: true }> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    await this.pins.set(tenantId, envId, workflowKey, nodeId, body?.output);
+    await this.pins.set(
+      tenantId,
+      envId,
+      workflowKey,
+      nodeId,
+      body?.output,
+      principal,
+    );
     return { pinned: true };
   }
 
@@ -246,10 +269,17 @@ export class PinsController {
     @Param("workflowKey") workflowKey: string,
     @Param("nodeId") nodeId: string,
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<{ cleared: boolean }> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
     return {
-      cleared: await this.pins.clear(tenantId, envId, workflowKey, nodeId),
+      cleared: await this.pins.clear(
+        tenantId,
+        envId,
+        workflowKey,
+        nodeId,
+        principal,
+      ),
     };
   }
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
 import { type MembershipCache, type UserMembership } from "./membership-cache";
 
@@ -13,6 +13,8 @@ export const MEMBERSHIP_CACHE = Symbol("MEMBERSHIP_CACHE");
  */
 @Injectable()
 export class MembershipService {
+  private readonly logger = new Logger(MembershipService.name);
+
   constructor(
     @Inject(MEMBERSHIP_CACHE) private readonly cache: MembershipCache,
   ) {}
@@ -91,7 +93,37 @@ export class MembershipService {
         create: { userId, tenantId: inv.tenantId, role: inv.role, email },
         update: {},
       });
-      // TODO(G1 — RBAC-GROUPS.md §3): join PermissionGroups from `inv.groupIds` on accept.
+      // G1 (RBAC-GROUPS.md §3/§5): join the invitation's PermissionGroups on accept.
+      // Swallow-and-log — a group-join hiccup must not abort the membership conversion
+      // (access resolves from the Membership table; the group only shapes grants). Only
+      // groups that actually belong to the invitation's tenant are joined (a stale or
+      // cross-tenant id in the Json list is silently dropped). skipDuplicates absorbs a
+      // parallel first-login race. Cold-cache note: the invitee's effective permissions
+      // haven't been resolved yet at this point (first login), so no permissions-cache
+      // invalidation is needed here; the short TTL covers the already-active-session edge.
+      const groupIds = Array.isArray(inv.groupIds)
+        ? inv.groupIds.filter((g): g is string => typeof g === "string")
+        : [];
+      if (groupIds.length > 0) {
+        try {
+          const owned = await prisma.permissionGroup.findMany({
+            where: { id: { in: groupIds }, tenantId: inv.tenantId },
+            select: { id: true },
+          });
+          if (owned.length > 0) {
+            await prisma.groupMember.createMany({
+              data: owned.map((g) => ({ groupId: g.id, userId })),
+              skipDuplicates: true,
+            });
+          }
+        } catch (err) {
+          this.logger.warn(
+            `invitation group-join failed for user=${userId} tenant=${inv.tenantId}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
       await prisma.invitation.update({
         where: { id: inv.id },
         data: { acceptedAt: new Date() },

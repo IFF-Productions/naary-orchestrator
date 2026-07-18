@@ -10,7 +10,13 @@ import {
   Put,
 } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
-import { TenantId } from "../auth/tenant.decorator";
+import {
+  CurrentPrincipal,
+  EnvironmentSel,
+  type Principal,
+  TenantId,
+} from "../auth/tenant.decorator";
+import { EnvironmentsService } from "../environments/environments.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { CreateTagDto, SetWorkflowTagsDto, UpdateTagDto } from "./tag.dto";
 import {
@@ -29,7 +35,10 @@ import { type TagRef, TagsService, type TagView } from "./tags.service";
 @ApiBearerAuth("bearer")
 @Controller()
 export class TagsController {
-  constructor(private readonly tags: TagsService) {}
+  constructor(
+    private readonly tags: TagsService,
+    private readonly environments: EnvironmentsService,
+  ) {}
 
   @ApiEndpoint({
     summary: "List tags",
@@ -100,7 +109,18 @@ export class TagsController {
     @TenantId() tenantId: string,
     @Param("workflowKey") workflowKey: string,
     @Body() body: SetWorkflowTagsDto,
+    @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<TagRef[]> {
-    return this.tags.setWorkflowTags(tenantId, workflowKey, body.tagIds);
+    // Tag editing is the EDIT verb (RBAC-GROUPS.md §8.2), checked against the caller's
+    // ACTIVE env (tags themselves stay tenant-wide — only the permission check is env-scoped).
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    return this.tags.setWorkflowTags(
+      tenantId,
+      workflowKey,
+      body.tagIds,
+      principal,
+      envId,
+    );
   }
 }

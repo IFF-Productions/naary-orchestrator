@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { MembershipService } from "../membership/membership.service";
+import { PermissionsService } from "../permissions/permissions.service";
 import { ApiTokenService } from "./api-token.service";
 import { FirebaseVerifier } from "./firebase-verifier";
 import { IS_PUBLIC_KEY } from "./public.decorator";
@@ -84,6 +85,7 @@ export class AuthGuard implements CanActivate {
     private readonly firebase: FirebaseVerifier,
     private readonly reflector: Reflector,
     private readonly memberships: MembershipService,
+    private readonly permissions: PermissionsService,
   ) {
     // Log the lock state at boot (COUNT only, never the emails) so a misspelled env var —
     // which silently means "wide open" — is easy to catch after deploy.
@@ -125,12 +127,12 @@ export class AuthGuard implements CanActivate {
     }
     const target = pathTenant ?? headerTenant;
 
-    // `nry_…` → API token: full access to its ONE tenant, no membership model. Unchanged
-    // from the claim era — this keeps the cross-tenant isolation tests green.
+    // `nry_…` → API token, scoped to its ONE tenant. Cross-tenant isolation is unchanged
+    // from the claim era — this keeps the isolation tests green.
     if (token.startsWith("nry_")) {
       const verified = await this.tokens.verify(token);
       if (!verified) throw new UnauthorizedException("Invalid credentials");
-      const { tenantId, environmentId: tokenEnvId } = verified;
+      const { id: tokenRowId, tenantId, environmentId: tokenEnvId } = verified;
       if (target && target !== tenantId) {
         throw new ForbiddenException("Tenant mismatch");
       }
@@ -143,11 +145,27 @@ export class AuthGuard implements CanActivate {
           "This API token is scoped to a fixed environment; do not send X-Environment-Id.",
         );
       }
-      req.principal = {
-        tenantId,
-        role: "owner",
-        environmentSel: tokenEnvId ?? environmentSel,
-      };
+      // Tokens fall under the SAME first-grant cliff as members (RBAC-GROUPS.md §4a/§8.6):
+      // zero grants in the workspace ⇒ today's full-access `owner` stamp (migration-neutral);
+      // ≥1 grant ⇒ the token is a RESTRICTED subject — stamped `member` + its row id, and
+      // PermissionsService resolves the union of its groups' grants by that tokenId. The
+      // check is cached (short TTL + invalidation on grant writes) so the hot path stays
+      // free of an extra per-request query in steady state.
+      const restricted = tokenRowId
+        ? await this.permissions.isTenantEnforced(tenantId)
+        : false;
+      req.principal = restricted
+        ? {
+            tenantId,
+            role: "member",
+            tokenId: tokenRowId,
+            environmentSel: tokenEnvId ?? environmentSel,
+          }
+        : {
+            tenantId,
+            role: "owner",
+            environmentSel: tokenEnvId ?? environmentSel,
+          };
       return true;
     }
 

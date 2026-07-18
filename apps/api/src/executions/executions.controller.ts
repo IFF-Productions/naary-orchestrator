@@ -8,7 +8,12 @@ import {
   Query,
 } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
-import { EnvironmentSel, TenantId } from "../auth/tenant.decorator";
+import {
+  CurrentPrincipal,
+  EnvironmentSel,
+  type Principal,
+  TenantId,
+} from "../auth/tenant.decorator";
 import { EnvironmentsService } from "../environments/environments.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import {
@@ -55,10 +60,19 @@ export class ExecutionsController {
     @TenantId() tenantId: string,
     @Body() body: StartExecutionDto,
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<{ workflowId: string }> {
-    // Manual run → the ACTIVE environment (from X-Environment-Id).
+    // Manual run → the ACTIVE environment (from X-Environment-Id). The principal gates
+    // the start with `run` (RBAC-GROUPS.md §4) — trigger paths never come through here.
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    return this.executions.start(tenantId, envId, body.input, body.workflowKey);
+    return this.executions.start(
+      tenantId,
+      envId,
+      body.input,
+      body.workflowKey,
+      undefined,
+      principal,
+    );
   }
 
   /** Run a minimal read-only codeAgent (Claude Code) run to verify the CLI + BYOK key work
@@ -228,8 +242,9 @@ export class ExecutionsController {
     // behaviour) still re-runs against the latest graph instead of hitting an
     // undefined-body read.
     @Body() body: RerunDto = {},
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<{ workflowId: string }> {
-    return this.executions.rerun(id, tenantId, body?.graphVersion);
+    return this.executions.rerun(id, tenantId, body?.graphVersion, principal);
   }
 
   /** The signed resume URL for a run paused on a wait(webhook) node (owner-scoped). Declared

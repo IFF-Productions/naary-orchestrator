@@ -40,7 +40,15 @@ describe("saveWorkflow", () => {
 
     const snap = await svc.saveWorkflow("t-1", "env-1", "k", "K", GRAPH);
 
-    expect(graphs.upsert).toHaveBeenCalledWith("t-1", "env-1", "k", "K", GRAPH);
+    // Trailing undefined = the G1 actor param (no principal in this unit test).
+    expect(graphs.upsert).toHaveBeenCalledWith(
+      "t-1",
+      "env-1",
+      "k",
+      "K",
+      GRAPH,
+      undefined,
+    );
     expect(environments.isDefaultEnv).toHaveBeenCalledWith("t-1", "env-1");
     expect(schedules.syncPollSchedule).toHaveBeenCalledWith("t-1", "k", GRAPH);
     expect(schedules.syncCronSchedule).toHaveBeenCalledWith("t-1", "k", GRAPH);
@@ -121,5 +129,82 @@ describe("deleteWorkflow", () => {
     await expect(svc.deleteWorkflow("t-1", "env-1", "gone")).resolves.toBe(
       false,
     );
+  });
+});
+
+// RBAC G1: the delete gate is asserted HERE (before the teardown side effect);
+// the save gate lives inside GraphsService.upsert (the actor is threaded down).
+import { ForbiddenException } from "@nestjs/common";
+import type { Principal } from "../src/auth/tenant.decorator";
+import type { PermissionsService } from "../src/permissions/permissions.service";
+
+describe("G1 permission gates", () => {
+  const member: Principal = { tenantId: "t-1", userId: "u-1", role: "member" };
+
+  function withPerms(assertCan: ReturnType<typeof vi.fn>) {
+    return new WorkflowLifecycleService(
+      graphs as never,
+      schedules as never,
+      environments as never,
+      { assertCan } as unknown as PermissionsService,
+    );
+  }
+
+  it("saveWorkflow forwards the actor to upsert (where edit-vs-create is gated)", async () => {
+    graphs.upsert.mockResolvedValue({ version: 1, contentHash: "h" });
+    const s = withPerms(vi.fn());
+    await s.saveWorkflow("t-1", "env-1", "k", "K", GRAPH, member);
+    expect(graphs.upsert).toHaveBeenCalledWith(
+      "t-1",
+      "env-1",
+      "k",
+      "K",
+      GRAPH,
+      member,
+    );
+  });
+
+  it("deleteWorkflow asserts `delete` BEFORE any teardown side effect", async () => {
+    const assertCan = vi
+      .fn()
+      .mockRejectedValue(new ForbiddenException("no delete"));
+    const s = withPerms(assertCan);
+    await expect(
+      s.deleteWorkflow("t-1", "env-1", "k", member),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(assertCan).toHaveBeenCalledWith(member, "delete", "k", "env-1");
+    // Denied → the Temporal teardown and the DB delete must both be untouched.
+    expect(schedules.teardownForWorkflow).not.toHaveBeenCalled();
+    expect(graphs.deleteWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("a GRANTED member's delete proceeds through the normal path", async () => {
+    const assertCan = vi.fn().mockResolvedValue(undefined);
+    graphs.deleteWorkflow.mockResolvedValue(true);
+    const s = withPerms(assertCan);
+    await expect(s.deleteWorkflow("t-1", "env-1", "k", member)).resolves.toBe(
+      true,
+    );
+    expect(schedules.teardownForWorkflow).toHaveBeenCalledWith("t-1", "k");
+  });
+
+  it("an actor-less delete (internal caller) never consults permissions", async () => {
+    const assertCan = vi.fn();
+    graphs.deleteWorkflow.mockResolvedValue(true);
+    const s = withPerms(assertCan);
+    await s.deleteWorkflow("t-1", "env-1", "k");
+    expect(assertCan).not.toHaveBeenCalled();
+  });
+
+  it("an actor WITHOUT wired permissions fails CLOSED", async () => {
+    const s = new WorkflowLifecycleService(
+      graphs as never,
+      schedules as never,
+      environments as never,
+    );
+    await expect(s.deleteWorkflow("t-1", "env-1", "k", member)).rejects.toThrow(
+      /PermissionsService is not wired/,
+    );
+    expect(graphs.deleteWorkflow).not.toHaveBeenCalled();
   });
 });

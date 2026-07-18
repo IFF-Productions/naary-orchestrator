@@ -177,3 +177,74 @@ describe("start (version resolution)", () => {
     ).rejects.toThrow(/save one first/);
   });
 });
+
+// RBAC G1 (§4): manual starts carry an actor and are `run`-gated; trigger paths
+// carry NO principal and must stay byte-identical (workspace-level automation).
+import { ForbiddenException } from "@nestjs/common";
+import type { Principal } from "../src/auth/tenant.decorator";
+import type { PermissionsService } from "../src/permissions/permissions.service";
+
+describe("start (G1 run gate)", () => {
+  const member: Principal = { tenantId: "t1", userId: "u-1", role: "member" };
+
+  function makePermService(assertCan: ReturnType<typeof vi.fn>) {
+    const service = new ExecutionsService(
+      {} as never,
+      {
+        defaultEnvId: async () => "env-test",
+        resolveEnvId: async () => "env-test",
+      } as never,
+      { assertCan } as unknown as PermissionsService,
+    );
+    const getLatest = vi.fn().mockResolvedValue(SNAP_LATEST);
+    (service as unknown as { graphs: unknown }).graphs = { getLatest };
+    const startGraph = vi
+      .spyOn(
+        service as unknown as {
+          startGraph: (...a: unknown[]) => Promise<unknown>;
+        },
+        "startGraph",
+      )
+      .mockResolvedValue({ workflowId: "wf-new" });
+    return { service, getLatest, startGraph };
+  }
+
+  it("denies a restricted member BEFORE the graph is even read", async () => {
+    const assertCan = vi.fn().mockRejectedValue(new ForbiddenException("no"));
+    const { service, getLatest, startGraph } = makePermService(assertCan);
+    await expect(
+      service.start("t1", "e1", { x: 1 }, "refunds", undefined, member),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(assertCan).toHaveBeenCalledWith(member, "run", "refunds", "e1");
+    expect(getLatest).not.toHaveBeenCalled();
+    expect(startGraph).not.toHaveBeenCalled();
+  });
+
+  it("a GRANTED member's start proceeds", async () => {
+    const assertCan = vi.fn().mockResolvedValue(undefined);
+    const { service, startGraph } = makePermService(assertCan);
+    await service.start("t1", "e1", { x: 1 }, "refunds", undefined, member);
+    expect(startGraph).toHaveBeenCalledTimes(1);
+  });
+
+  it("an actor-less start (trigger/internal path) never consults permissions", async () => {
+    const assertCan = vi.fn();
+    const { service, startGraph } = makePermService(assertCan);
+    await service.start("t1", "e1", { x: 1 }, "refunds");
+    expect(assertCan).not.toHaveBeenCalled();
+    expect(startGraph).toHaveBeenCalledTimes(1);
+  });
+
+  it("an actor WITHOUT wired permissions fails CLOSED", async () => {
+    const service = new ExecutionsService(
+      {} as never,
+      {
+        defaultEnvId: async () => "env-test",
+        resolveEnvId: async () => "env-test",
+      } as never,
+    );
+    await expect(
+      service.start("t1", "e1", undefined, "refunds", undefined, member),
+    ).rejects.toThrow(/PermissionsService is not wired/);
+  });
+});

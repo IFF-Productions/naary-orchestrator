@@ -27,6 +27,7 @@ import { EnvSecretsModule } from "./env-secrets/env-secrets.module";
 import { IntrospectModule } from "./introspect/introspect.module";
 import { EnvironmentsModule } from "./environments/environments.module";
 import { NotificationsModule } from "./notifications/notifications.module";
+import { PermissionsModule } from "./permissions/permissions.module";
 import { PinsModule } from "./pins/pins.module";
 import { SchedulesModule } from "./schedules/schedules.module";
 import { TagsModule } from "./tags/tags.module";
@@ -43,6 +44,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     // protecting credential-save / execution-start / oauth / hooks from abuse.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     AuthModule,
+    PermissionsModule,
     AuditModule,
     HealthModule,
     GraphsModule,

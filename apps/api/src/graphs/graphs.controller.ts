@@ -101,9 +101,10 @@ export class GraphsController {
   async list(
     @TenantId() tenantId: string,
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<GraphSummary[]> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    return this.graphs.list(tenantId, envId);
+    return this.graphs.list(tenantId, envId, principal);
   }
 
   /**
@@ -214,9 +215,10 @@ export class GraphsController {
     @TenantId() tenantId: string,
     @Param("workflowKey") workflowKey: string,
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<{ version: number; contentHash: string; createdAt: string }[]> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    return this.graphs.listVersions(tenantId, envId, workflowKey);
+    return this.graphs.listVersions(tenantId, envId, workflowKey, principal);
   }
 
   /** Structural diff between two versions of a workflow — review what changed before promoting. */
@@ -232,6 +234,7 @@ export class GraphsController {
     @Query("from") from?: string,
     @Query("to") to?: string,
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ) {
     // Digit-only guard: Number("") / Number("  ") coerce to 0, which would pass an integer
     // check and then wrongly 404. Require an explicit positive integer string for each.
@@ -245,7 +248,14 @@ export class GraphsController {
     const fromV = Number(from);
     const toV = Number(to);
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    return this.graphs.diffVersions(tenantId, envId, workflowKey, fromV, toV);
+    return this.graphs.diffVersions(
+      tenantId,
+      envId,
+      workflowKey,
+      fromV,
+      toV,
+      principal,
+    );
   }
 
   /** The latest graph for a workflowKey — used to open it in the canvas. */
@@ -259,6 +269,7 @@ export class GraphsController {
     @TenantId() tenantId: string,
     @Param("workflowKey") workflowKey: string,
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<{
     workflowKey: string;
     name: string;
@@ -270,6 +281,7 @@ export class GraphsController {
       tenantId,
       envId,
       workflowKey,
+      principal,
     );
     if (!found) {
       throw new NotFoundException(`No graph for workflowKey '${workflowKey}'`);
@@ -287,6 +299,7 @@ export class GraphsController {
     @TenantId() tenantId: string,
     @Param("workflowKey") workflowKey: string,
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<{ errorWorkflowKey: string | null }> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
     return {
@@ -294,6 +307,7 @@ export class GraphsController {
         tenantId,
         envId,
         workflowKey,
+        principal,
       ),
     };
   }
@@ -309,6 +323,7 @@ export class GraphsController {
     @Param("workflowKey") workflowKey: string,
     @Body() body: { errorWorkflowKey?: string | null },
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<{ errorWorkflowKey: string | null }> {
     const value = body.errorWorkflowKey?.trim() || null;
     if (value === workflowKey) {
@@ -317,7 +332,13 @@ export class GraphsController {
       );
     }
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    await this.graphs.setErrorHandler(tenantId, envId, workflowKey, value);
+    await this.graphs.setErrorHandler(
+      tenantId,
+      envId,
+      workflowKey,
+      value,
+      principal,
+    );
     return { errorWorkflowKey: value };
   }
 
@@ -332,17 +353,20 @@ export class GraphsController {
     @TenantId() tenantId: string,
     @Body() body: SaveGraphDto,
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<{ workflowKey: string; version: number; contentHash: string }> {
     const graph = toGraphDef(body.graph);
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
     // Consolidated save path (shared with v1): upsert + the DEFAULT-ENV-ONLY, best-effort
-    // poll/cron schedule sync live in WorkflowLifecycleService.
+    // poll/cron schedule sync live in WorkflowLifecycleService. The principal gates the
+    // save (§4): existing key ⇒ edit, new key ⇒ canCreate.
     const snap = await this.lifecycle.saveWorkflow(
       tenantId,
       envId,
       body.workflowKey,
       body.name,
       graph,
+      principal,
     );
     return {
       workflowKey: body.workflowKey,
@@ -371,6 +395,7 @@ export class GraphsController {
     const fromEnvId = await this.environments.resolveEnvId(tenantId, envSel);
     const toEnvId = await this.environments.resolveEnvId(tenantId, body.toEnv);
     const actor = principal.subject ?? principal.userId ?? "api-token";
+    // share = promote (§8.2); the grant must match the SOURCE env — asserted in-service.
     return this.graphs.promote(
       tenantId,
       workflowKey,
@@ -378,6 +403,7 @@ export class GraphsController {
       toEnvId,
       actor,
       body.fromVersion,
+      principal,
     );
   }
 
@@ -389,11 +415,15 @@ export class GraphsController {
     ok: [PromotionResponse],
   })
   @Get(":workflowKey/promotions")
-  promotions(
+  async promotions(
     @TenantId() tenantId: string,
     @Param("workflowKey") workflowKey: string,
+    @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<PromotionResponse[]> {
-    return this.graphs.listPromotions(tenantId, workflowKey);
+    // View-gated (§4) against the caller's ACTIVE env — resolved here like every other route.
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    return this.graphs.listPromotions(tenantId, workflowKey, principal, envId);
   }
 
   /** Delete a workflow and everything bound to it (graph versions, activation, pins, error-handler
@@ -409,14 +439,17 @@ export class GraphsController {
     @TenantId() tenantId: string,
     @Param("workflowKey") workflowKey: string,
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<{ deleted: true }> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
     // Consolidated delete path (shared with v1): the DEFAULT-ENV-ONLY, best-effort schedule
-    // teardown + deleteShared gating live in WorkflowLifecycleService.
+    // teardown + deleteShared gating live in WorkflowLifecycleService. The principal gates
+    // the delete (§4) before any teardown side effect.
     const deleted = await this.lifecycle.deleteWorkflow(
       tenantId,
       envId,
       workflowKey,
+      principal,
     );
     if (!deleted) {
       throw new NotFoundException(`No workflow '${workflowKey}'`);

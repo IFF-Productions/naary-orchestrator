@@ -51,7 +51,8 @@ describe("V1WorkflowsController.list", () => {
     const out = await ctrl.list("t-1", "sandbox");
 
     expect(environments.resolveEnvId).toHaveBeenCalledWith("t-1", "sandbox");
-    expect(graphs.list).toHaveBeenCalledWith("t-1", "env-1");
+    // Trailing undefined = the G1 actor param (no principal in this direct-call unit test).
+    expect(graphs.list).toHaveBeenCalledWith("t-1", "env-1", undefined);
     expect(out).toEqual([
       {
         workflowKey: "triage",
@@ -79,6 +80,7 @@ describe("V1WorkflowsController.get (export)", () => {
       "t-1",
       "env-1",
       "triage",
+      undefined,
     );
     expect(out).toEqual({
       workflowKey: "triage",
@@ -117,6 +119,7 @@ describe("V1WorkflowsController.put (create/update/import)", () => {
       "triage",
       "Triage",
       GRAPH,
+      undefined,
     );
     expect(out).toEqual({
       workflowKey: "triage",
@@ -139,7 +142,12 @@ describe("V1WorkflowsController.remove", () => {
 
     const out = await ctrl.remove("t-1", "k", undefined);
 
-    expect(lifecycle.deleteWorkflow).toHaveBeenCalledWith("t-1", "env-1", "k");
+    expect(lifecycle.deleteWorkflow).toHaveBeenCalledWith(
+      "t-1",
+      "env-1",
+      "k",
+      undefined,
+    );
     expect(out).toEqual({ deleted: true });
   });
 
@@ -178,6 +186,7 @@ describe("V1WorkflowsController.promote", () => {
       "env-prod",
       "auth0|abc",
       5,
+      { tenantId: "t-1", subject: "auth0|abc" },
     );
     expect(out).toEqual({ fromVersion: 5, toVersion: 3, contentHash: "h" });
   });
@@ -207,6 +216,7 @@ describe("V1WorkflowsController.promote", () => {
       "env-prod",
       "api-token",
       undefined,
+      { tenantId: "t-1" },
     );
   });
 });
@@ -226,7 +236,13 @@ describe("V1WorkflowsController.promotions", () => {
 
     const out = await ctrl.promotions("t-1", "triage");
 
-    expect(graphs.listPromotions).toHaveBeenCalledWith("t-1", "triage");
+    // The route now resolves the active env for the G1 view gate.
+    expect(graphs.listPromotions).toHaveBeenCalledWith(
+      "t-1",
+      "triage",
+      undefined,
+      "env-1",
+    );
     expect(out[0]).toEqual({
       fromEnvId: "env-a",
       toEnvId: "env-b",

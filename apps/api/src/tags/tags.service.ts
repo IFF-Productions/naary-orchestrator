@@ -3,8 +3,11 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
+import type { Principal } from "../auth/tenant.decorator";
+import { PermissionsService } from "../permissions/permissions.service";
 
 /** A tag's name may be at most this long (fits a chip; matches the DTO). */
 export const MAX_TAG_NAME_LENGTH = 40;
@@ -32,6 +35,8 @@ export interface TagRef {
  */
 @Injectable()
 export class TagsService {
+  constructor(@Optional() private readonly permissions?: PermissionsService) {}
+
   /** The tenant's tags with usage counts, name order (stable for pickers). */
   async list(tenantId: string): Promise<TagView[]> {
     const rows = await getPrisma().tag.findMany({
@@ -114,7 +119,22 @@ export class TagsService {
     tenantId: string,
     workflowKey: string,
     tagIds: string[],
+    /** Tag editing is EDIT, not share (§8.2) — gated against the caller's active env. */
+    actor?: Principal,
+    environmentId?: string,
   ): Promise<TagRef[]> {
+    if (actor) {
+      if (!this.permissions) {
+        // Fail CLOSED: an actor implies a user-facing call site — authz must run.
+        throw new Error("TagsService: PermissionsService is not wired");
+      }
+      await this.permissions.assertCan(
+        actor,
+        "edit",
+        workflowKey,
+        environmentId,
+      );
+    }
     const unique = [...new Set(tagIds)];
     const owned = unique.length
       ? await getPrisma().tag.findMany({

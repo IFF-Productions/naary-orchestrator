@@ -286,3 +286,79 @@ describe("GraphsService.list tags", () => {
     expect(wtFindMany).not.toHaveBeenCalled();
   });
 });
+
+// RBAC G1: attaching tags to a workflow is the EDIT verb (§8.2 — edit, not share),
+// checked against the caller's active env; the tag-entity CRUD stays ungated in G1.
+import { ForbiddenException } from "@nestjs/common";
+import type { Principal } from "../src/auth/tenant.decorator";
+import type { PermissionsService } from "../src/permissions/permissions.service";
+
+describe("TagsService.setWorkflowTags G1 edit gate", () => {
+  const member: Principal = { tenantId: "t-1", userId: "u-1", role: "member" };
+
+  it("asserts `edit` on the workflow and a denial replaces nothing", async () => {
+    const assertCan = vi.fn().mockRejectedValue(new ForbiddenException("no"));
+    const s = new TagsService({ assertCan } as unknown as PermissionsService);
+    await expect(
+      s.setWorkflowTags("t-1", "wf-a", ["tag_1"], member, "env-1"),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(assertCan).toHaveBeenCalledWith(member, "edit", "wf-a", "env-1");
+    expect($transaction).not.toHaveBeenCalled();
+  });
+
+  it("a granted member passes; an actor-less call never consults permissions", async () => {
+    const assertCan = vi.fn().mockResolvedValue(undefined);
+    const s = new TagsService({ assertCan } as unknown as PermissionsService);
+    tagFindMany.mockResolvedValue([
+      { id: "tag_1", name: "prod", color: null },
+    ]);
+    await s.setWorkflowTags("t-1", "wf-a", ["tag_1"], member, "env-1");
+    expect($transaction).toHaveBeenCalledTimes(1);
+    assertCan.mockClear();
+    $transaction.mockClear();
+    await s.setWorkflowTags("t-1", "wf-a", ["tag_1"]);
+    expect(assertCan).not.toHaveBeenCalled();
+  });
+});
+
+// RBAC G1: the Workflows list is FILTERED to the actor's viewable keys (§4 —
+// list endpoints filter; single-resource endpoints 403).
+describe("GraphsService.list G1 view filtering", () => {
+  const member: Principal = { tenantId: "t-1", userId: "u-1", role: "member" };
+  const graphRow = (workflowKey: string) => ({
+    workflowKey,
+    name: workflowKey,
+    version: 1,
+    createdAt: new Date("2026-07-29T12:00:00Z"),
+  });
+
+  it("keeps only the keys filterViewable returns (and batches tags over those)", async () => {
+    graphFindMany.mockResolvedValue([graphRow("wf-a"), graphRow("wf-b")]);
+    const filterViewable = vi.fn().mockResolvedValue(["wf-b"]);
+    const svc = new GraphsService({
+      filterViewable,
+    } as unknown as PermissionsService);
+    const out = await svc.list("t-1", "e-1", member);
+    expect(filterViewable).toHaveBeenCalledWith(
+      member,
+      ["wf-a", "wf-b"],
+      "e-1",
+    );
+    expect(out.map((g) => g.workflowKey)).toEqual(["wf-b"]);
+    // The tag batch only covers the VISIBLE keys.
+    expect(wtFindMany.mock.calls[0][0].where.workflowKey).toEqual({
+      in: ["wf-b"],
+    });
+  });
+
+  it("an actor-less list is unfiltered (trigger/internal callers see everything)", async () => {
+    graphFindMany.mockResolvedValue([graphRow("wf-a"), graphRow("wf-b")]);
+    const filterViewable = vi.fn();
+    const svc = new GraphsService({
+      filterViewable,
+    } as unknown as PermissionsService);
+    const out = await svc.list("t-1", "e-1");
+    expect(filterViewable).not.toHaveBeenCalled();
+    expect(out).toHaveLength(2);
+  });
+});

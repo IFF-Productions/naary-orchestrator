@@ -10,6 +10,7 @@ import type { ApiTokenService } from "../src/auth/api-token.service";
 import { AuthGuard } from "../src/auth/auth.guard";
 import type { FirebaseVerifier } from "../src/auth/firebase-verifier";
 import type { MembershipService } from "../src/membership/membership.service";
+import type { PermissionsService } from "../src/permissions/permissions.service";
 import { IS_USER_SCOPED_KEY } from "../src/auth/user-scoped.decorator";
 
 const verify = vi.fn();
@@ -17,6 +18,7 @@ const firebaseVerify = vi.fn();
 const listForUser = vi.fn();
 const ensureMembership = vi.fn();
 const acceptPendingInvitations = vi.fn();
+const isTenantEnforced = vi.fn();
 const getAllAndOverride = vi.fn();
 let firebaseEnabled = false;
 /** Routes flagged user-scoped for a given test (keyed by metadata key). */
@@ -34,11 +36,15 @@ function makeGuard(): AuthGuard {
     ensureMembership,
     acceptPendingInvitations,
   } as unknown as MembershipService;
+  const permissions = {
+    isTenantEnforced,
+  } as unknown as PermissionsService;
   return new AuthGuard(
     { verify } as unknown as ApiTokenService,
     firebase,
     { getAllAndOverride } as unknown as Reflector,
     memberships,
+    permissions,
   );
 }
 
@@ -63,6 +69,7 @@ beforeEach(() => {
   listForUser.mockReset().mockResolvedValue([]);
   ensureMembership.mockReset().mockResolvedValue(undefined);
   acceptPendingInvitations.mockReset().mockResolvedValue(undefined);
+  isTenantEnforced.mockReset().mockResolvedValue(false);
   firebaseEnabled = false;
   userScoped = false;
   // Reflector: IS_PUBLIC_KEY → false, IS_USER_SCOPED_KEY → the per-test `userScoped`.
@@ -235,6 +242,63 @@ describe("AuthGuard", () => {
       tenantId: "t-1",
       role: "owner",
       environmentSel: "env-sandbox",
+    });
+  });
+
+  // --- API tokens under the first-grant cliff (RBAC-GROUPS.md §4a/§8.6, slice G1) ---
+
+  it("stamps a token `member` + tokenId when the workspace HAS grants (restricted)", async () => {
+    verify.mockResolvedValue({
+      id: "tok-1",
+      tenantId: "t-1",
+      environmentId: null,
+    });
+    isTenantEnforced.mockResolvedValue(true);
+    const req: FakeReq = {
+      headers: { authorization: "Bearer nry_restricted" },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(isTenantEnforced).toHaveBeenCalledWith("t-1");
+    expect(req.principal).toEqual({
+      tenantId: "t-1",
+      role: "member",
+      tokenId: "tok-1",
+    });
+  });
+
+  it("keeps today's `owner` stamp (NO tokenId) in a zero-grant workspace — migration neutrality", async () => {
+    verify.mockResolvedValue({
+      id: "tok-1",
+      tenantId: "t-1",
+      environmentId: null,
+    });
+    isTenantEnforced.mockResolvedValue(false);
+    const req: FakeReq = {
+      headers: { authorization: "Bearer nry_free" },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(req.principal).toEqual({ tenantId: "t-1", role: "owner" });
+  });
+
+  it("a restricted env-BOUND token keeps its env binding alongside the member stamp", async () => {
+    verify.mockResolvedValue({
+      id: "tok-1",
+      tenantId: "t-1",
+      environmentId: "env-uat",
+    });
+    isTenantEnforced.mockResolvedValue(true);
+    const req: FakeReq = {
+      headers: { authorization: "Bearer nry_bound" },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(req.principal).toEqual({
+      tenantId: "t-1",
+      role: "member",
+      tokenId: "tok-1",
+      environmentSel: "env-uat",
     });
   });
 

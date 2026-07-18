@@ -6,10 +6,12 @@ import { ApiExcludeController } from "@nestjs/swagger";
 import type { GraphDef } from "@naary/dsl";
 import { ApiTokenService } from "../auth/api-token.service";
 import { Public } from "../auth/public.decorator";
+import type { Principal } from "../auth/tenant.decorator";
 import { ExecutionsService } from "../executions/executions.service";
 import { GraphGeneratorService } from "../graphs/graph-generator.service";
 import { EnvironmentsService } from "../environments/environments.service";
 import { GraphsService } from "../graphs/graphs.service";
+import { PermissionsService } from "../permissions/permissions.service";
 import type { McpCreateWorkflowArgs } from "./mcp.server";
 import { buildMcpServer } from "./mcp.server";
 
@@ -81,6 +83,7 @@ export class McpController {
     private readonly executions: ExecutionsService,
     private readonly generator: GraphGeneratorService,
     private readonly environments: EnvironmentsService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   @Public()
@@ -116,22 +119,34 @@ export class McpController {
     const envId =
       auth.environmentId ?? (await this.environments.defaultEnvId(tenantId));
 
+    // MCP auths OUTSIDE the AuthGuard, so the §4a token stamping is mirrored here: in a
+    // workspace with ≥1 WorkflowGrant this token is a RESTRICTED subject (member+tokenId)
+    // and every tool call below threads it as the actor — same first-grant cliff, same
+    // union-of-groups resolution as v1/SPA callers. Zero grants ⇒ no actor (full access,
+    // today's behavior).
+    const actor: Principal | undefined =
+      (await this.permissions.isTenantEnforced(tenantId))
+        ? { tenantId, role: "member", tokenId: auth.id }
+        : undefined;
+
     // Fetch the tenant's workflows up front so each can be exposed as its own tool (flavor B).
     // Best-effort — a listing hiccup just means no per-workflow tools this session.
+    // View-FILTERED for a restricted token (never expose tools it can't see).
     const exposedWorkflows = await this.graphs
-      .list(tenantId, envId)
+      .list(tenantId, envId, actor)
       .catch(() => []);
 
     // Deps are pre-scoped to the token's tenantId — a tool can't reach another tenant.
     const server = buildMcpServer({
       tenantId,
-      listWorkflows: () => this.graphs.list(tenantId, envId),
+      listWorkflows: () => this.graphs.list(tenantId, envId, actor),
       getRun: (runId) => this.executions.getState(runId, tenantId),
       runWorkflow: (workflowKey, input) =>
         this.executions
-          .start(tenantId, envId, input, workflowKey)
+          .start(tenantId, envId, input, workflowKey, undefined, actor)
           .then((r) => ({ runId: r.workflowId })),
-      createWorkflow: (args) => this.createWorkflow(tenantId, envId, args),
+      createWorkflow: (args) =>
+        this.createWorkflow(tenantId, envId, args, actor),
       approve: (runId, approved, note) =>
         this.executions.approve(runId, approved, tenantId, note),
       exposedWorkflows,
@@ -157,6 +172,8 @@ export class McpController {
     tenantId: string,
     environmentId: string,
     { prompt, name, graph, save, workflowKey }: McpCreateWorkflowArgs,
+    /** Restricted-token subject (§4a) — gates the save (edit vs canCreate) in upsert. */
+    actor?: Principal,
   ) {
     let draftName: string;
     let draftGraph: GraphDef;
@@ -184,6 +201,7 @@ export class McpController {
       key,
       draftName,
       draftGraph,
+      actor,
     );
     return {
       name: draftName,
@@ -195,11 +213,14 @@ export class McpController {
     };
   }
 
-  /** Resolve a `nry_` bearer token to its tenantId + bound env (env is null if the token isn't
-   *  pinned to one), or null if absent/invalid. */
-  private async authenticate(
-    req: McpRequest,
-  ): Promise<{ tenantId: string; environmentId: string | null } | null> {
+  /** Resolve a `nry_` bearer token to its row id + tenantId + bound env (env is null if the
+   *  token isn't pinned to one), or null if absent/invalid. The id is the token's RBAC subject
+   *  identity (§4a) when the workspace is under group enforcement. */
+  private async authenticate(req: McpRequest): Promise<{
+    id: string;
+    tenantId: string;
+    environmentId: string | null;
+  } | null> {
     const header = req.headers.authorization;
     if (!header?.startsWith("Bearer ")) return null;
     return this.tokens.verify(header.slice("Bearer ".length).trim());

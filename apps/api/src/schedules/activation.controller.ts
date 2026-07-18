@@ -1,8 +1,13 @@
 import { Body, Controller, Param, Put } from "@nestjs/common";
 import { ApiProperty, ApiBearerAuth } from "@nestjs/swagger";
 import { IsBoolean } from "class-validator";
-import { EnvironmentSel } from "../auth/tenant.decorator";
+import {
+  CurrentPrincipal,
+  EnvironmentSel,
+  type Principal,
+} from "../auth/tenant.decorator";
 import { EnvironmentsService } from "../environments/environments.service";
+import { PermissionsService } from "../permissions/permissions.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { SchedulesService } from "./schedules.service";
 
@@ -33,6 +38,7 @@ export class WorkflowActivationController {
   constructor(
     private readonly schedules: SchedulesService,
     private readonly environments: EnvironmentsService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   @ApiEndpoint({
@@ -47,9 +53,15 @@ export class WorkflowActivationController {
     @Param("workflowKey") workflowKey: string,
     @Body() body: SetActiveDto,
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<WorkflowActiveResponse> {
     // The active toggle is env-scoped — resolve the ACTIVE env (the flag write lands there).
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    // Activation toggle = the EDIT verb (RBAC-GROUPS.md §4 matrix), asserted before the
+    // flag write / schedule pause side effects.
+    if (principal) {
+      await this.permissions.assertCan(principal, "edit", workflowKey, envId);
+    }
     await this.schedules.setActive(tenantId, envId, workflowKey, body.active);
     return { workflowKey, active: body.active };
   }
