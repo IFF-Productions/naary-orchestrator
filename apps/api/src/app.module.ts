@@ -29,6 +29,7 @@ import { EnvironmentsModule } from "./environments/environments.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { PinsModule } from "./pins/pins.module";
 import { SchedulesModule } from "./schedules/schedules.module";
+import { TagsModule } from "./tags/tags.module";
 import { SecretsModule } from "./secrets/secrets.module";
 import { PreferencesModule } from "./preferences/preferences.module";
 import { SettingsModule } from "./settings/settings.module";
@@ -64,6 +65,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     PreferencesModule,
     EnvironmentsModule,
     NotificationsModule,
+    TagsModule,
     TemplatesModule,
     SchedulesModule,
     McpModule,
