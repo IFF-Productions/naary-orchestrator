@@ -23,6 +23,7 @@ import {
   validateGraph,
 } from "@naary/dsl";
 import { ConnectionService } from "@naary/connections";
+import { redactString } from "@naary/observability";
 import { CredentialsService, MissingCredentialError } from "@naary/secrets";
 
 // Providers the generator can use, in preference order — when the caller doesn't pick one,
@@ -508,7 +509,9 @@ export class GraphGeneratorService {
       // (where it writes the real reason when it exits before/without JSON — the common empty-head
       // case). Classify + log against BOTH.
       const errText = [result, stderr].filter(Boolean).join(" | ").trim();
-      const head = errText.slice(0, 200).replace(/\s+/g, " ");
+      // Redact secret-shaped substrings — the CLI's stderr could echo a token/key, and this head is
+      // logged at error level (→ Sentry / log aggregation).
+      const head = redactString(errText.slice(0, 200).replace(/\s+/g, " "));
       // User-fixable cases → a 4xx telling the user what to do; keep these at warn (expected,
       // AUTH/QUOTA are filtered from issue capture — they're the user's to fix, not an outage).
       if (/invalid api key|authentication|unauthorized|oauth/i.test(errText)) {
