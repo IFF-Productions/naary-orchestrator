@@ -10,6 +10,12 @@ body,
   margin: 0;
   padding: 0;
   height: 100%;
+  /* Never let a stray-wide element push the page past the viewport. On iOS Safari an element wider
+   * than the device width expands the layout viewport and zooms the whole page out — which then
+   * makes the responsive breakpoints read "desktop" (icon rail instead of the phone drawer). Clamping
+   * the root to 100% width with no horizontal scroll keeps the layout viewport == the device width. */
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 body {
