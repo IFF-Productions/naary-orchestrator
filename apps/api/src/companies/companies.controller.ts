@@ -6,6 +6,7 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -19,6 +20,7 @@ import type { GraphSummary } from "../graphs/graphs.service";
 import {
   type CompanyBudgetConfig,
   type CompanyBudgetView,
+  type CompanyMemberView,
   type CompanyUsageRollup,
   type CompanyView,
   CompanyService,
@@ -26,6 +28,7 @@ import {
 import {
   CompanyBudgetConfigResponse,
   CompanyBudgetViewResponse,
+  CompanyMemberResponse,
   CompanyUsageResponse,
   CompanyViewResponse,
   CompanyWorkspaceRunsResponse,
@@ -172,6 +175,140 @@ export class CompaniesController {
   ): Promise<CompanyBudgetConfig> {
     const userId = this.requireUser(principal);
     return this.companies.setCompanyBudget(userId, companyId, body);
+  }
+
+  // ---- Slice 4: company management (§7.4) --------------------------------------------------
+
+  @ApiEndpoint({
+    summary: "Rename a member workspace",
+    description:
+      "Sets the workspace's display name (the same field its own Settings screen edits). " +
+      "Company members only (§4-gated).",
+    notFound: true,
+  })
+  @Patch("companies/:id/workspaces/:tenantId")
+  @UserScoped()
+  async renameWorkspace(
+    @CurrentPrincipal() principal: Principal,
+    @Param("id") companyId: string,
+    @Param("tenantId") tenantId: string,
+    @Body() body: { displayName?: string },
+  ): Promise<void> {
+    const userId = this.requireUser(principal);
+    await this.companies.renameWorkspace(
+      userId,
+      companyId,
+      tenantId,
+      body?.displayName ?? "",
+    );
+  }
+
+  @ApiEndpoint({
+    summary: "Archive a member workspace",
+    description:
+      "Soft + reversible: hides the workspace from the switcher; runs/schedules/budgets are " +
+      "untouched. Company members only (§4-gated). Idempotent.",
+    notFound: true,
+  })
+  @Post("companies/:id/workspaces/:tenantId/archive")
+  @HttpCode(204)
+  @UserScoped()
+  async archiveWorkspace(
+    @CurrentPrincipal() principal: Principal,
+    @Param("id") companyId: string,
+    @Param("tenantId") tenantId: string,
+  ): Promise<void> {
+    const userId = this.requireUser(principal);
+    await this.companies.setWorkspaceArchived(
+      userId,
+      companyId,
+      tenantId,
+      true,
+    );
+  }
+
+  @ApiEndpoint({
+    summary: "Unarchive a member workspace",
+    description:
+      "Reverses an archive. Company members only (§4-gated). Idempotent.",
+    notFound: true,
+  })
+  @Post("companies/:id/workspaces/:tenantId/unarchive")
+  @HttpCode(204)
+  @UserScoped()
+  async unarchiveWorkspace(
+    @CurrentPrincipal() principal: Principal,
+    @Param("id") companyId: string,
+    @Param("tenantId") tenantId: string,
+  ): Promise<void> {
+    const userId = this.requireUser(principal);
+    await this.companies.setWorkspaceArchived(
+      userId,
+      companyId,
+      tenantId,
+      false,
+    );
+  }
+
+  @ApiEndpoint({
+    summary: "List the company's members",
+    description:
+      "Company members only. Emails are enriched from workspace memberships and may be null.",
+    ok: [CompanyMemberResponse],
+  })
+  @Get("companies/:id/members")
+  @UserScoped()
+  async listMembers(
+    @CurrentPrincipal() principal: Principal,
+    @Param("id") companyId: string,
+  ): Promise<CompanyMemberView[]> {
+    const userId = this.requireUser(principal);
+    return this.companies.listMembers(userId, companyId);
+  }
+
+  @ApiEndpoint({
+    summary: "Add a company member by email",
+    description:
+      "Company OWNER only. The email must belong to an account that has signed in before " +
+      "(404 otherwise — no invitations yet; those land with the RBAC program). Re-adding an " +
+      "existing member changes their role; demoting the last owner is refused (409).",
+    created: CompanyMemberResponse,
+    notFound: true,
+  })
+  @Post("companies/:id/members")
+  @HttpCode(201)
+  @UserScoped()
+  async addMember(
+    @CurrentPrincipal() principal: Principal,
+    @Param("id") companyId: string,
+    @Body() body: { email?: string; role?: string },
+  ): Promise<CompanyMemberView> {
+    const userId = this.requireUser(principal);
+    return this.companies.addMember(
+      userId,
+      companyId,
+      body?.email ?? "",
+      body?.role ?? "admin",
+    );
+  }
+
+  @ApiEndpoint({
+    summary: "Remove a company member",
+    description:
+      "Company OWNER only — except self-removal (leaving), which any member may do. " +
+      "Removing the last owner is refused (409).",
+    notFound: true,
+  })
+  @Delete("companies/:id/members/:userId")
+  @HttpCode(204)
+  @UserScoped()
+  async removeMember(
+    @CurrentPrincipal() principal: Principal,
+    @Param("id") companyId: string,
+    @Param("userId") targetUserId: string,
+  ): Promise<void> {
+    const userId = this.requireUser(principal);
+    await this.companies.removeMember(userId, companyId, targetUserId);
   }
 
   @ApiEndpoint({

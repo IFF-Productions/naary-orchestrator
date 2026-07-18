@@ -8,14 +8,14 @@ import { WorkspacesController } from "../src/membership/workspaces.controller";
 const listForUser = vi.fn();
 const ensureMembership = vi.fn();
 const createWorkspace = vi.fn();
-const workspaceNames = vi.fn();
+const workspaceMeta = vi.fn();
 const seedWorkspaceName = vi.fn();
 function makeController(): WorkspacesController {
   return new WorkspacesController({
     listForUser,
     ensureMembership,
     createWorkspace,
-    workspaceNames,
+    workspaceMeta,
     seedWorkspaceName,
   } as unknown as MembershipService);
 }
@@ -26,9 +26,16 @@ beforeEach(() => {
   createWorkspace
     .mockReset()
     .mockResolvedValue({ tenantId: "ws-new", role: "owner" });
-  workspaceNames.mockReset().mockResolvedValue(new Map());
+  workspaceMeta
+    .mockReset()
+    .mockResolvedValue({ names: new Map(), archived: new Set() });
   seedWorkspaceName.mockReset().mockResolvedValue(undefined);
 });
+
+/** Shorthand: a workspaceMeta result with the given names + archived ids. */
+function meta(names: [string, string][] = [], archived: string[] = []) {
+  return { names: new Map(names), archived: new Set(archived) };
+}
 
 describe("WorkspacesController", () => {
   it("returns the user's memberships (Firebase subject present)", async () => {
@@ -41,8 +48,8 @@ describe("WorkspacesController", () => {
       subject: "user-9",
     });
     expect(res).toEqual([
-      { tenantId: "t1", role: "owner" },
-      { tenantId: "t2", role: "member" },
+      { tenantId: "t1", role: "owner", archived: false },
+      { tenantId: "t2", role: "member", archived: false },
     ]);
     expect(ensureMembership).not.toHaveBeenCalled();
   });
@@ -56,7 +63,7 @@ describe("WorkspacesController", () => {
       subject: "user-9",
     });
     expect(ensureMembership).toHaveBeenCalledWith("user-9", "t-claim", "owner");
-    expect(res).toEqual([{ tenantId: "t-claim", role: "owner" }]);
+    expect(res).toEqual([{ tenantId: "t-claim", role: "owner", archived: false }]);
   });
 
   it("enriches workspaces with their display name (TenantSettings.displayName)", async () => {
@@ -64,14 +71,14 @@ describe("WorkspacesController", () => {
       { tenantId: "t1", role: "owner" },
       { tenantId: "t2", role: "member" },
     ]);
-    workspaceNames.mockResolvedValue(new Map([["t1", "Acme Inc"]]));
+    workspaceMeta.mockResolvedValue(meta([["t1", "Acme Inc"]]));
     const res = await makeController().list({
       tenantId: "t1",
       subject: "user-9",
     });
     expect(res).toEqual([
-      { tenantId: "t1", role: "owner", name: "Acme Inc" },
-      { tenantId: "t2", role: "member", name: undefined },
+      { tenantId: "t1", role: "owner", name: "Acme Inc", archived: false },
+      { tenantId: "t2", role: "member", name: undefined, archived: false },
     ]);
   });
 
@@ -89,7 +96,12 @@ describe("WorkspacesController", () => {
         "Hassan's workspace",
       );
       expect(res).toEqual([
-        { tenantId: "t-demo", role: "owner", name: "Hassan's workspace" },
+        {
+          tenantId: "t-demo",
+          role: "owner",
+          name: "Hassan's workspace",
+          archived: false,
+        },
       ]);
     });
 
@@ -109,7 +121,7 @@ describe("WorkspacesController", () => {
 
     it("never overwrites a name the user already set", async () => {
       listForUser.mockResolvedValue([{ tenantId: "t-demo", role: "owner" }]);
-      workspaceNames.mockResolvedValue(new Map([["t-demo", "Acme Inc"]]));
+      workspaceMeta.mockResolvedValue(meta([["t-demo", "Acme Inc"]]));
       const res = await makeController().list({
         tenantId: "t-demo",
         subject: "user-9",
@@ -143,9 +155,25 @@ describe("WorkspacesController", () => {
     });
   });
 
+  it("flags archived workspaces but NEVER drops them (a stranded-user guard)", async () => {
+    listForUser.mockResolvedValue([
+      { tenantId: "t1", role: "owner" },
+      { tenantId: "t2", role: "member" },
+    ]);
+    workspaceMeta.mockResolvedValue(meta([["t1", "Acme Inc"]], ["t1"]));
+    const res = await makeController().list({
+      tenantId: "t1",
+      subject: "user-9",
+    });
+    expect(res).toEqual([
+      { tenantId: "t1", role: "owner", name: "Acme Inc", archived: true },
+      { tenantId: "t2", role: "member", name: undefined, archived: false },
+    ]);
+  });
+
   it("synthesizes the single workspace for an API-token principal (no subject, no persist)", async () => {
     const res = await makeController().list({ tenantId: "t-token" });
-    expect(res).toEqual([{ tenantId: "t-token", role: "owner" }]);
+    expect(res).toEqual([{ tenantId: "t-token", role: "owner", archived: false }]);
     expect(listForUser).not.toHaveBeenCalled();
     expect(ensureMembership).not.toHaveBeenCalled();
   });
@@ -161,6 +189,7 @@ describe("WorkspacesController", () => {
       expect(await makeController().create(principal, {})).toEqual({
         tenantId: "ws-new",
         role: "owner",
+        archived: false,
       });
       expect(createWorkspace).toHaveBeenCalledWith("u-1", "a@b.co", undefined);
     });

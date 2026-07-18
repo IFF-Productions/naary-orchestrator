@@ -534,6 +534,10 @@ model TenantSettings {
   // cascades. Company is NOT an isolation dimension; no tenantId-scoped query reads this.
   companyId    String?
   company      Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  // Soft + REVERSIBLE archive (COMPANIES.md Slice 4): set → hidden from the workspace
+  // switcher; null → live. Runs/schedules/budgets are untouched — this is a UI-visibility
+  // flag, not a lifecycle change.
+  archivedAt   DateTime?
   updatedAt    DateTime @default(now()) @updatedAt
 
   @@index([companyId])

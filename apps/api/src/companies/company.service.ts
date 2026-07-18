@@ -38,11 +38,20 @@ export interface CompanyUsageRollup {
     CompanyUsageBucket & {
       tenantId: string;
       displayName: string | null;
+      /** Soft-archived (TenantSettings.archivedAt — Slice 4). Additive; rows are never dropped. */
+      archived: boolean;
       byEnvironment: Array<
         CompanyUsageBucket & { environmentId: string | null }
       >;
     }
   >;
+}
+
+/** One company member (COMPANIES.md Slice 4). Email is enriched from Membership (may be null). */
+export interface CompanyMemberView {
+  userId: string;
+  email: string | null;
+  role: string;
 }
 
 /** The persisted company-wide budget config (COMPANIES.md §8, Slice 5). */
@@ -231,7 +240,7 @@ export class CompanyService {
     // even with zero spend, so the company view shows all workspaces.
     const workspaces = await getPrisma().tenantSettings.findMany({
       where: { companyId },
-      select: { tenantId: true, displayName: true },
+      select: { tenantId: true, displayName: true, archivedAt: true },
     });
     if (workspaces.length === 0) {
       return {
@@ -309,6 +318,7 @@ export class CompanyService {
           return {
             tenantId: w.tenantId,
             displayName: w.displayName ?? null,
+            archived: w.archivedAt != null,
             costUsd: round6(agg.costUsd),
             totalTokens: agg.totalTokens,
             calls: agg.calls,
@@ -375,6 +385,188 @@ export class CompanyService {
     await this.assertCompanyWorkspace(userId, companyId, tenantId);
     const envId = await this.environments.defaultEnvId(tenantId);
     return this.graphs.list(tenantId, envId);
+  }
+
+  // ---- Slice 4: company management (§7.4) — workspace rename/archive + member admin ---------
+
+  /**
+   * Rename a member workspace's display name (the same TenantSettings.displayName the
+   * workspace's own Settings screen edits). §4-gated: company membership + attached-to-THIS-
+   * company, checked FIRST, before any write.
+   */
+  async renameWorkspace(
+    userId: string,
+    companyId: string,
+    tenantId: string,
+    displayName: string,
+  ): Promise<void> {
+    await this.assertCompanyWorkspace(userId, companyId, tenantId);
+    const clean = (displayName ?? "").trim();
+    if (!clean) throw new BadRequestException("Workspace name is required.");
+    if (clean.length > 80) {
+      throw new BadRequestException(
+        "Workspace name is too long (80 characters max).",
+      );
+    }
+    await getPrisma().tenantSettings.update({
+      where: { tenantId },
+      data: { displayName: clean },
+    });
+  }
+
+  /**
+   * Soft-archive (or unarchive) a member workspace. Sets/clears TenantSettings.archivedAt —
+   * reversible, hides it from the switcher; runs/schedules/budgets are untouched. Idempotent:
+   * archiving an archived workspace just refreshes the timestamp; unarchiving a live one is a
+   * no-op null write.
+   */
+  async setWorkspaceArchived(
+    userId: string,
+    companyId: string,
+    tenantId: string,
+    archived: boolean,
+  ): Promise<void> {
+    await this.assertCompanyWorkspace(userId, companyId, tenantId);
+    await getPrisma().tenantSettings.update({
+      where: { tenantId },
+      data: { archivedAt: archived ? new Date() : null },
+    });
+  }
+
+  /**
+   * The company's members, with emails enriched from the per-workspace `Membership` table
+   * (CompanyMembership stores only the uid; Membership rows carry the email the user joined
+   * with — nullable, so we take the first non-null email per uid). Any company member may list.
+   */
+  async listMembers(
+    userId: string,
+    companyId: string,
+  ): Promise<CompanyMemberView[]> {
+    await this.assertCompanyMember(userId, companyId);
+    const rows = await getPrisma().companyMembership.findMany({
+      where: { companyId },
+      orderBy: { createdAt: "asc" },
+      select: { userId: true, role: true },
+    });
+    const uids = rows.map((r) => r.userId);
+    const emails = new Map<string, string>();
+    if (uids.length > 0) {
+      const memberships = await getPrisma().membership.findMany({
+        where: { userId: { in: uids } },
+        select: { userId: true, email: true },
+      });
+      for (const m of memberships) {
+        if (m.email && !emails.has(m.userId)) emails.set(m.userId, m.email);
+      }
+    }
+    return rows.map((r) => ({
+      userId: r.userId,
+      email: emails.get(r.userId) ?? null,
+      role: r.role,
+    }));
+  }
+
+  /**
+   * Add (or re-role) a company member by EMAIL. Company OWNER only — the first real
+   * owner-vs-admin distinction on the membership surface. NO invitations machinery (that lands
+   * with RBAC-GROUPS U1): the email must already resolve to a signed-in account, via the
+   * `Membership` table — the uid-carrying authority for who a user is (NOT the inert `Member`
+   * directory table, which has no uid). Case-insensitive match, newest row wins.
+   *
+   * LAST-OWNER GUARD: re-adding the final owner as "admin" is a demote — refused (409). A
+   * company must keep at least one owner or it becomes unadministerable.
+   */
+  async addMember(
+    userId: string,
+    companyId: string,
+    email: string,
+    role: string,
+  ): Promise<CompanyMemberView> {
+    await this.assertCompanyOwner(userId, companyId);
+    if (role !== "owner" && role !== "admin") {
+      throw new BadRequestException('Role must be "owner" or "admin".');
+    }
+    const clean = (email ?? "").trim();
+    if (!clean) throw new BadRequestException("Email is required.");
+    const account = await getPrisma().membership.findFirst({
+      where: { email: { equals: clean, mode: "insensitive" } },
+      orderBy: { createdAt: "desc" },
+      select: { userId: true },
+    });
+    if (!account) {
+      throw new NotFoundException(
+        "No account with that email — they must sign in first.",
+      );
+    }
+    if (role !== "owner") {
+      // Demote guard: only bites when the target is CURRENTLY an owner (a fresh add of an
+      // admin, or re-adding an existing admin, never trips it).
+      const existing = await getPrisma().companyMembership.findUnique({
+        where: { companyId_userId: { companyId, userId: account.userId } },
+        select: { role: true },
+      });
+      if (existing?.role === "owner") {
+        await this.assertNotLastOwner(companyId, "demote");
+      }
+    }
+    await getPrisma().companyMembership.upsert({
+      where: { companyId_userId: { companyId, userId: account.userId } },
+      create: { companyId, userId: account.userId, role },
+      update: { role }, // re-add = role change
+    });
+    return { userId: account.userId, email: clean, role };
+  }
+
+  /**
+   * Remove a company member. Allowed for a company OWNER (admin of others is owner-only) OR
+   * for the member themselves (self-leave). LAST-OWNER GUARD: removing the final owner is
+   * refused (409) — even by themselves.
+   */
+  async removeMember(
+    userId: string,
+    companyId: string,
+    targetUserId: string,
+  ): Promise<void> {
+    const callerRole = await this.companyRole(userId, companyId);
+    if (callerRole === null) {
+      throw new ForbiddenException("You are not a member of this company.");
+    }
+    if (callerRole !== "owner" && userId !== targetUserId) {
+      throw new ForbiddenException(
+        "Only the company owner can remove other members.",
+      );
+    }
+    const target = await getPrisma().companyMembership.findUnique({
+      where: { companyId_userId: { companyId, userId: targetUserId } },
+      select: { role: true },
+    });
+    if (!target) {
+      throw new NotFoundException("That user is not a member of this company.");
+    }
+    if (target.role === "owner") {
+      await this.assertNotLastOwner(companyId, "remove");
+    }
+    await getPrisma().companyMembership.delete({
+      where: { companyId_userId: { companyId, userId: targetUserId } },
+    });
+  }
+
+  /**
+   * 409 when the company has only ONE owner left — demoting/removing them would leave the
+   * company with no one able to administer it. Call only when the target IS currently an owner.
+   */
+  private async assertNotLastOwner(
+    companyId: string,
+    verb: "demote" | "remove",
+  ): Promise<void> {
+    const owners = await getPrisma().companyMembership.count({
+      where: { companyId, role: "owner" },
+    });
+    if (owners <= 1) {
+      throw new ConflictException(
+        `Cannot ${verb} the last owner — a company must keep at least one owner.`,
+      );
+    }
   }
 
   // ---- Slice 5: CompanyBudget (§8 cap) ------------------------------------------------------
@@ -465,15 +657,14 @@ export class CompanyService {
     }
   }
 
-  /** Company OWNER or 403 — for actions that affect every member workspace (e.g. the budget). */
+  /** Company OWNER or 403 — for actions that affect every member workspace (budget) or the
+   *  company's own administration (member add/role changes). */
   private async assertCompanyOwner(
     userId: string,
     companyId: string,
   ): Promise<void> {
     if ((await this.companyRole(userId, companyId)) !== "owner") {
-      throw new ForbiddenException(
-        "Only the company owner can set the company budget.",
-      );
+      throw new ForbiddenException("Only the company owner can do that.");
     }
   }
 

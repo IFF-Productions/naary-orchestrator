@@ -13,6 +13,22 @@ export class CompanyViewResponse {
   role!: string;
 }
 
+// ---- Company members (COMPANIES.md §7.4, Slice 4) -----------------------------------------------
+
+/** One company member. Email is enriched from workspace Membership rows and may be null. */
+export class CompanyMemberResponse {
+  @ApiProperty({ example: "firebase-uid-1" }) userId!: string;
+  @ApiProperty({
+    nullable: true,
+    example: "admin@acme.com",
+    description:
+      "Best-known email for this user (from their workspace memberships); null if unknown.",
+  })
+  email!: string | null;
+  @ApiProperty({ example: "admin", enum: ["owner", "admin"] })
+  role!: string;
+}
+
 // ---- Company budget (COMPANIES.md §8, Slice 5) --------------------------------------------------
 
 /** The persisted company-wide budget config. */
@@ -79,6 +95,12 @@ export class CompanyUsageWorkspaceResponse extends CompanyUsageBucketResponse {
     description: "The workspace's display name; null if it has none.",
   })
   displayName!: string | null;
+  @ApiProperty({
+    example: false,
+    description:
+      "Soft-archived (TenantSettings.archivedAt set). Archived workspaces stay in the rollup.",
+  })
+  archived!: boolean;
   @ApiProperty({
     type: [CompanyUsageEnvironmentResponse],
     description:
