@@ -116,7 +116,11 @@ export class InsightsBucketResponse {
 }
 
 export class InsightsByDayResponse extends InsightsBucketResponse {
-  @ApiProperty({ example: "2026-07-16", description: "UTC calendar day." })
+  @ApiProperty({
+    format: "date",
+    example: "2026-07-16",
+    description: "UTC calendar day.",
+  })
   date!: string;
 }
 
@@ -139,9 +143,10 @@ export class InsightsByWorkflowResponse extends InsightsBucketResponse {
 }
 
 export class InsightsRangeResponse {
-  @ApiProperty({ nullable: true, format: "date-time", example: "2026-07-01" })
+  // The window echoes back the caller's ?from&?to — ISO dates (YYYY-MM-DD), so format: "date".
+  @ApiProperty({ nullable: true, format: "date", example: "2026-07-01" })
   from!: string | null;
-  @ApiProperty({ nullable: true, format: "date-time", example: "2026-07-31" })
+  @ApiProperty({ nullable: true, format: "date", example: "2026-07-31" })
   to!: string | null;
 }
 
