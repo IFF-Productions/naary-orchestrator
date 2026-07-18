@@ -206,12 +206,16 @@ type State =
  */
 export function InsightsSection({
   tenantId,
-  now = Date.now(),
+  now,
 }: {
   tenantId: string;
   /** Injectable for tests/stories. */
   now?: number;
 }) {
+  // Snapshot once per mount. `now` defaults to Date.now() — if that default were re-evaluated each
+  // render AND kept in the re-fetch effect's deps, every setState would produce a new `now` and the
+  // effect would loop (fetch → render → new now → fetch …). Freeze it here instead.
+  const [now0] = useState(() => now ?? Date.now());
   const [state, setState] = useState<State>({ kind: "loading" });
   const [days, setDays] = useState<number | null>(DEFAULT_WINDOW_DAYS);
   const [envId, setEnvId] = useState<string | null>(null);
@@ -234,13 +238,13 @@ export function InsightsSection({
     let live = true;
     setState({ kind: "loading" });
     api
-      .getInsights(tenantId, insightsQuery(now, days, envId))
+      .getInsights(tenantId, insightsQuery(now0, days, envId))
       .then((data) => live && setState({ kind: "ready", data }))
       .catch(() => live && setState({ kind: "error" }));
     return () => {
       live = false;
     };
-  }, [tenantId, now, days, envId]);
+  }, [tenantId, now0, days, envId]);
 
   return (
     <div style={{ marginTop: 4 }}>
@@ -363,28 +367,28 @@ function FilterBar({
         })}
       </div>
 
-      {envs.length > 0 && (
-        <select
-          value={envId ?? ""}
-          onChange={(e) => onEnv(e.target.value || null)}
-          aria-label="Environment"
-          style={{
-            border: "1px solid var(--line)",
-            borderRadius: 8,
-            background: "var(--card)",
-            color: "var(--ink)",
-            fontSize: "var(--text-xs)",
-            padding: "5px 9px",
-          }}
-        >
-          <option value="">All environments</option>
-          {envs.map((env) => (
-            <option key={env.id} value={env.id}>
-              {env.name}
-            </option>
-          ))}
-        </select>
-      )}
+      {/* Always render the picker — before envs load and if listEnvironments fails, it shows only
+          "All environments" (the degrade-to-All behavior), so the filter stays discoverable. */}
+      <select
+        value={envId ?? ""}
+        onChange={(e) => onEnv(e.target.value || null)}
+        aria-label="Environment"
+        style={{
+          border: "1px solid var(--line)",
+          borderRadius: 8,
+          background: "var(--card)",
+          color: "var(--ink)",
+          fontSize: "var(--text-xs)",
+          padding: "5px 9px",
+        }}
+      >
+        <option value="">All environments</option>
+        {envs.map((env) => (
+          <option key={env.id} value={env.id}>
+            {env.name}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
