@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
+import { createLocalTestEnv } from "./local-test-env";
 import { Worker } from "@temporalio/worker";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TASK_QUEUE, stateQuery } from "@naary/contracts";
@@ -32,7 +33,7 @@ let container: Awaited<ReturnType<PostgreSqlContainer["start"]>>;
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer("postgres:16-alpine").start();
-  env = await TestWorkflowEnvironment.createLocal();
+  env = await createLocalTestEnv();
 
   // Claim-check offload store the SQL activities touch for large results (in-memory here).
   __setObjectStore(new MemoryObjectStore());

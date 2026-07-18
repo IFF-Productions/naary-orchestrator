@@ -3,6 +3,7 @@ import { type AddressInfo } from "node:net";
 import * as path from "node:path";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
+import { createLocalTestEnv } from "./local-test-env";
 import { Worker } from "@temporalio/worker";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TASK_QUEUE, stateQuery } from "@naary/contracts";
@@ -47,7 +48,7 @@ beforeAll(async () => {
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
   container = await new PostgreSqlContainer("postgres:16-alpine").start();
-  env = await TestWorkflowEnvironment.createLocal();
+  env = await createLocalTestEnv();
   __setObjectStore(new MemoryObjectStore());
 
   // SQL: point the real adapter at the container; bypass only the host-public check.
