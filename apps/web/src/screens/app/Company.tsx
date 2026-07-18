@@ -17,6 +17,7 @@ import {
 import {
   api,
   type Company,
+  type CompanyMember,
   type CompanyUsage,
   type CompanyWorkspaceRuns,
   type CompanyWorkspaceWorkflow,
@@ -35,7 +36,7 @@ interface Drill {
 
 export function Company() {
   const navigate = useNavigate();
-  const { workspaces, setActive } = useWorkspace();
+  const { workspaces, setActive, refresh } = useWorkspace();
   const [companies, setCompanies] = useState<Company[] | null>(null);
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [usage, setUsage] = useState<CompanyUsage | null>(null);
@@ -44,6 +45,11 @@ export function Company() {
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [rename, setRename] = useState<{
+    tenantId: string;
+    name: string;
+  } | null>(null);
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
 
   const reloadCompanies = useCallback(async () => {
     const list = await api.getMyCompanies();
@@ -123,7 +129,49 @@ export function Company() {
   }
 
   const company = companies.find((c) => c.id === companyId) ?? companies[0];
+  const isOwner = company.role === "owner";
   const memberTenantIds = new Set(workspaces.map((w) => w.tenantId));
+
+  const reloadUsage = () => api.getCompanyUsage(company.id).then(setUsage);
+
+  async function toggleArchive(tenantId: string, archived: boolean) {
+    setRowBusy(tenantId);
+    setErr(null);
+    try {
+      await api.setCompanyWorkspaceArchived(company.id, tenantId, archived);
+      await reloadUsage();
+      // The switcher hides archived workspaces — refresh the list so it reflects the change.
+      await refresh();
+    } catch {
+      setErr(
+        archived
+          ? "Couldn't archive the workspace."
+          : "Couldn't unarchive the workspace.",
+      );
+    } finally {
+      setRowBusy(null);
+    }
+  }
+
+  async function saveRename() {
+    if (!rename || !rename.name.trim() || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.renameCompanyWorkspace(
+        company.id,
+        rename.tenantId,
+        rename.name.trim(),
+      );
+      setRename(null);
+      await reloadUsage();
+      await refresh(); // the switcher shows displayName too
+    } catch {
+      setErr("Couldn't rename the workspace.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div style={{ padding: "22px 28px 40px", maxWidth: 1080 }}>
@@ -194,8 +242,30 @@ export function Company() {
                 {
                   key: "name",
                   header: "Workspace",
-                  render: (w: CompanyUsage["byWorkspace"][number]) =>
-                    workspaceLabel(w.tenantId, w.displayName ?? undefined),
+                  render: (w: CompanyUsage["byWorkspace"][number]) => (
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      {workspaceLabel(w.tenantId, w.displayName ?? undefined)}
+                      {w.archived && (
+                        <span
+                          style={{
+                            fontSize: 10.5,
+                            padding: "1px 7px",
+                            borderRadius: 99,
+                            border: "1px solid var(--line)",
+                            color: "var(--ink-3)",
+                          }}
+                        >
+                          Archived
+                        </span>
+                      )}
+                    </span>
+                  ),
                 },
                 {
                   key: "spend",
@@ -243,6 +313,28 @@ export function Company() {
                       >
                         Workflows
                       </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() =>
+                          setRename({
+                            tenantId: w.tenantId,
+                            name: w.displayName ?? "",
+                          })
+                        }
+                      >
+                        Rename
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        loading={rowBusy === w.tenantId}
+                        onClick={() =>
+                          void toggleArchive(w.tenantId, !w.archived)
+                        }
+                      >
+                        {w.archived ? "Unarchive" : "Archive"}
+                      </Button>
                       {memberTenantIds.has(w.tenantId) && (
                         <Button
                           size="sm"
@@ -272,8 +364,40 @@ export function Company() {
               onClose={() => setDrill(null)}
             />
           )}
+
+          <MembersCard companyId={company.id} isOwner={isOwner} />
         </>
       )}
+
+      <Dialog
+        open={rename !== null}
+        onClose={() => setRename(null)}
+        title="Rename workspace"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setRename(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              loading={busy}
+              disabled={!rename?.name.trim()}
+              onClick={() => void saveRename()}
+            >
+              Save
+            </Button>
+          </>
+        }
+      >
+        <TextInput
+          value={rename?.name ?? ""}
+          onChange={(e) =>
+            setRename((r) => (r ? { ...r, name: e.target.value } : r))
+          }
+          placeholder="Acme Production"
+          autoFocus
+        />
+      </Dialog>
 
       <CreateCompanyDialog
         open={createOpen}
@@ -284,6 +408,182 @@ export function Company() {
         onCreate={createCompany}
       />
     </div>
+  );
+}
+
+/**
+ * Company members (Slice 4): list with roles; owner-only add form (email + owner/admin —
+ * NO invitations: the email must already have signed in, mirroring Team.tsx's invite style);
+ * remove is owner-only except self-leave. Last-owner demote/removal is refused server-side (409).
+ */
+function MembersCard({
+  companyId,
+  isOwner,
+}: {
+  companyId: string;
+  isOwner: boolean;
+}) {
+  const [members, setMembers] = useState<CompanyMember[] | null>(null);
+  const [myUid, setMyUid] = useState<string | null>(null);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<"owner" | "admin">("admin");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setMembers(null);
+    setErr(null);
+    api
+      .listCompanyMembers(companyId)
+      .then((m) => live && setMembers(m))
+      .catch(() => live && setErr("Couldn't load the company members."));
+    api
+      .getMe()
+      .then((me) => live && setMyUid(me.subject ?? null))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [companyId]);
+
+  async function add() {
+    if (!email.trim() || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.addCompanyMember(companyId, email.trim(), role);
+      setEmail("");
+      setMembers(await api.listCompanyMembers(companyId));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      // http() throws generic "<METHOD> <path> → <status>" errors — map the meaningful ones.
+      if (msg.includes("→ 404")) {
+        setErr("No account with that email — they must sign in first.");
+      } else if (msg.includes("→ 409")) {
+        setErr("A company must keep at least one owner.");
+      } else if (msg.includes("→ 403")) {
+        setErr("Only the company owner can manage members.");
+      } else {
+        setErr("Couldn't add the member.");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(userId: string) {
+    setErr(null);
+    try {
+      await api.removeCompanyMember(companyId, userId);
+      setMembers((ms) => (ms ?? []).filter((m) => m.userId !== userId));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      setErr(
+        msg.includes("→ 409")
+          ? "A company must keep at least one owner."
+          : "Couldn't remove the member.",
+      );
+    }
+  }
+
+  return (
+    <Card style={{ marginTop: 16 }}>
+      <div
+        style={{
+          fontWeight: "var(--weight-semibold)",
+          marginBottom: 10,
+        }}
+      >
+        Members
+      </div>
+      {err && <ErrorLine text={err} />}
+      {isOwner && (
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            marginBottom: 12,
+          }}
+        >
+          <TextInput
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="admin@company.com"
+            type="email"
+            style={{ flex: 1 }}
+          />
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value as "owner" | "admin")}
+            style={{ padding: "8px 10px", borderRadius: "var(--radius-md)" }}
+          >
+            <option value="admin">admin</option>
+            <option value="owner">owner</option>
+          </select>
+          <Button
+            variant="primary"
+            disabled={busy || !email.trim()}
+            onClick={() => void add()}
+          >
+            {busy ? "Adding…" : "Add"}
+          </Button>
+        </div>
+      )}
+      {members === null ? (
+        <Spinner />
+      ) : members.length === 0 ? (
+        <div style={{ fontSize: "var(--text-sm)", color: "var(--ink-3)" }}>
+          No members.
+        </div>
+      ) : (
+        members.map((m) => (
+          <div
+            key={m.userId}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "9px 2px",
+              borderTop: "1px solid var(--line)",
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span
+                style={{
+                  fontSize: "var(--text-body)",
+                  color: "var(--ink)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {m.email ?? m.userId}
+                {m.userId === myUid ? " (you)" : ""}
+              </span>
+            </div>
+            <span
+              style={{
+                fontSize: "var(--text-sm)",
+                color: m.role === "owner" ? "var(--brand)" : "var(--ink-2)",
+              }}
+            >
+              {m.role}
+            </span>
+            {(isOwner || m.userId === myUid) && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void remove(m.userId)}
+              >
+                {m.userId === myUid ? "Leave" : "Remove"}
+              </Button>
+            )}
+          </div>
+        ))
+      )}
+    </Card>
   );
 }
 

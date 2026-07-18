@@ -71,8 +71,12 @@ describe("getCompanyUsage — rollup math", () => {
 
   it("rolls up totals + per-workspace + nested per-environment, desc by cost", async () => {
     tenantSettings.findMany.mockResolvedValue([
-      { tenantId: "ws1", displayName: "Acme Prod" },
-      { tenantId: "ws2", displayName: null },
+      { tenantId: "ws1", displayName: "Acme Prod", archivedAt: null },
+      {
+        tenantId: "ws2",
+        displayName: null,
+        archivedAt: new Date("2026-07-01"),
+      },
     ]);
     usageEvent.findMany.mockResolvedValue([
       event({
@@ -114,6 +118,7 @@ describe("getCompanyUsage — rollup math", () => {
     expect(out.byWorkspace[0]).toEqual({
       tenantId: "ws2",
       displayName: null,
+      archived: true, // Slice 4: archivedAt set → flagged, row NOT dropped from the rollup
       costUsd: 0.5,
       totalTokens: 500,
       calls: 1,
@@ -123,6 +128,7 @@ describe("getCompanyUsage — rollup math", () => {
     });
     const ws1 = out.byWorkspace[1];
     expect(ws1.displayName).toBe("Acme Prod");
+    expect(ws1.archived).toBe(false);
     expect(ws1.costUsd).toBeCloseTo(0.412345, 9);
     expect(ws1.totalTokens).toBe(410);
     expect(ws1.calls).toBe(3);
@@ -148,7 +154,7 @@ describe("getCompanyUsage — rollup math", () => {
     await svc.getCompanyUsage("u1", "co1");
     expect(tenantSettings.findMany).toHaveBeenCalledWith({
       where: { companyId: "co1" },
-      select: { tenantId: true, displayName: true },
+      select: { tenantId: true, displayName: true, archivedAt: true },
     });
     expect(usageEvent.findMany).toHaveBeenCalledWith({
       where: { tenantId: { in: ["ws1", "ws2"] } },
@@ -188,6 +194,7 @@ describe("getCompanyUsage — rollup math", () => {
     expect(out.byWorkspace[1]).toEqual({
       tenantId: "ws-idle",
       displayName: "Idle",
+      archived: false,
       costUsd: 0,
       totalTokens: 0,
       calls: 0,

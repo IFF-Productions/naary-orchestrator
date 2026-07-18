@@ -104,19 +104,27 @@ export class MembershipService {
   }
 
   /**
-   * Map tenantId → workspace display name (TenantSettings.displayName) for the given ids.
-   * Only ids with a non-empty name appear in the result. Used to enrich /me/workspaces so the
-   * switcher shows the real name instead of an id-derived stub.
+   * Per-workspace metadata for /me/workspaces, in ONE batched TenantSettings read (no
+   * per-workspace query): `names` maps tenantId → display name (only ids with a non-empty
+   * name appear); `archived` holds the soft-archived ids (COMPANIES.md Slice 4 — archived
+   * workspaces stay IN the list, flagged, so the SPA can de-prioritize without stranding a
+   * user whose only workspace is archived).
    */
-  async workspaceNames(tenantIds: string[]): Promise<Map<string, string>> {
-    const out = new Map<string, string>();
-    if (tenantIds.length === 0) return out;
+  async workspaceMeta(
+    tenantIds: string[],
+  ): Promise<{ names: Map<string, string>; archived: Set<string> }> {
+    const names = new Map<string, string>();
+    const archived = new Set<string>();
+    if (tenantIds.length === 0) return { names, archived };
     const rows = await getPrisma().tenantSettings.findMany({
       where: { tenantId: { in: tenantIds } },
-      select: { tenantId: true, displayName: true },
+      select: { tenantId: true, displayName: true, archivedAt: true },
     });
-    for (const r of rows) if (r.displayName) out.set(r.tenantId, r.displayName);
-    return out;
+    for (const r of rows) {
+      if (r.displayName) names.set(r.tenantId, r.displayName);
+      if (r.archivedAt) archived.add(r.tenantId);
+    }
+    return { names, archived };
   }
 
   /** Drop the user's cached memberships (call after any membership/role write). */

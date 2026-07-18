@@ -116,59 +116,63 @@ export function WorkspaceSwitcher({ labelOp = 1 }: { labelOp?: number }) {
               padding: 6,
             }}
           >
-            {workspaces.map((w) => {
-              const isActive = w.tenantId === activeId;
-              return (
-                <button
-                  key={w.tenantId}
-                  type="button"
-                  role="option"
-                  aria-selected={isActive}
-                  onClick={() => {
-                    setActive(w.tenantId);
-                    setOpen(false);
-                  }}
-                  style={{
-                    all: "unset",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    width: "100%",
-                    boxSizing: "border-box",
-                    padding: "7px 9px",
-                    borderRadius: 7,
-                    background: isActive
-                      ? "var(--bg-3, rgba(255,255,255,.05))"
-                      : "transparent",
-                  }}
-                >
-                  <span
+            {/* Archived workspaces are hidden from the dropdown (soft archive — the list
+                itself still carries them so the provider can resolve an active one). */}
+            {workspaces
+              .filter((w) => !w.archived)
+              .map((w) => {
+                const isActive = w.tenantId === activeId;
+                return (
+                  <button
+                    key={w.tenantId}
+                    type="button"
+                    role="option"
+                    aria-selected={isActive}
+                    onClick={() => {
+                      setActive(w.tenantId);
+                      setOpen(false);
+                    }}
                     style={{
-                      flex: 1,
-                      minWidth: 0,
-                      fontSize: 12.5,
-                      color: "var(--ink)",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
+                      all: "unset",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      width: "100%",
+                      boxSizing: "border-box",
+                      padding: "7px 9px",
+                      borderRadius: 7,
+                      background: isActive
+                        ? "var(--bg-3, rgba(255,255,255,.05))"
+                        : "transparent",
                     }}
                   >
-                    {workspaceLabel(w.tenantId, w.name)}
-                  </span>
-                  <span style={{ fontSize: 10, color: "var(--ink-3)" }}>
-                    {w.role}
-                  </span>
-                  {isActive && (
-                    <Icon
-                      name="check"
-                      size={13}
-                      style={{ color: "var(--state-info)", flex: "none" }}
-                    />
-                  )}
-                </button>
-              );
-            })}
+                    <span
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        fontSize: 12.5,
+                        color: "var(--ink)",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {workspaceLabel(w.tenantId, w.name)}
+                    </span>
+                    <span style={{ fontSize: 10, color: "var(--ink-3)" }}>
+                      {w.role}
+                    </span>
+                    {isActive && (
+                      <Icon
+                        name="check"
+                        size={13}
+                        style={{ color: "var(--state-info)", flex: "none" }}
+                      />
+                    )}
+                  </button>
+                );
+              })}
             <div
               style={{
                 height: 1,

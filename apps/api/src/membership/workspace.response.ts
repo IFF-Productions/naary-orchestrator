@@ -15,4 +15,10 @@ export class WorkspaceViewResponse {
       "The workspace's display name (TenantSettings.displayName), if set.",
   })
   name?: string;
+  @ApiProperty({
+    example: false,
+    description:
+      "Soft-archived (hidden from the switcher; still listed so clients never see an empty list).",
+  })
+  archived!: boolean;
 }

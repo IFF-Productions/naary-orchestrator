@@ -336,6 +336,9 @@ export interface Workspace {
   role: string;
   /** Display name (TenantSettings.displayName); may be unset for un-named workspaces. */
   name?: string;
+  /** Soft-archived (COMPANIES.md Slice 4) — hidden from the switcher, but still listed
+   *  so a user whose only workspace is archived isn't stranded on the create screen. */
+  archived?: boolean;
 }
 
 /** A company the caller belongs to (COMPANIES.md — the admin/rollup layer above workspaces). */
@@ -361,11 +364,20 @@ export interface CompanyUsage {
     CompanyUsageBucket & {
       tenantId: string;
       displayName: string | null;
+      /** Soft-archived (reversible; hidden from the switcher, still billed/rolled up). */
+      archived: boolean;
       byEnvironment: Array<
         CompanyUsageBucket & { environmentId: string | null }
       >;
     }
   >;
+}
+
+/** One company member (COMPANIES.md Slice 4). Email may be null (enriched best-effort). */
+export interface CompanyMember {
+  userId: string;
+  email: string | null;
+  role: "owner" | "admin";
 }
 
 /** READ-ONLY run summaries of a member workspace (company console drill-down). */

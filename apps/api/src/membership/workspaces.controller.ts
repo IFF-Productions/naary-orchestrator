@@ -18,6 +18,12 @@ export interface WorkspaceView {
   role: string;
   /** The workspace's display name (TenantSettings.displayName), if set. */
   name?: string;
+  /**
+   * Soft-archived (TenantSettings.archivedAt — COMPANIES.md Slice 4). Archived workspaces
+   * are still LISTED (dropping them would strand a user whose only workspace is archived);
+   * the SPA hides them from the switcher and prefers a non-archived active workspace.
+   */
+  archived: boolean;
 }
 
 /**
@@ -62,12 +68,15 @@ export class WorkspacesController {
     // API-token principals have no user identity (no subject) — return the token's
     // single workspace synthesized, without persisting a Membership.
     if (!userId) {
-      const names = await this.memberships.workspaceNames([principal.tenantId]);
+      const { names, archived } = await this.memberships.workspaceMeta([
+        principal.tenantId,
+      ]);
       return [
         {
           tenantId: principal.tenantId,
           role: "owner",
           name: names.get(principal.tenantId),
+          archived: archived.has(principal.tenantId),
         },
       ];
     }
@@ -82,8 +91,9 @@ export class WorkspacesController {
       memberships = await this.memberships.listForUser(userId);
     }
     // Enrich with the display name (TenantSettings.displayName) so the switcher shows the
-    // real name the user set in Settings — not an id-derived stub.
-    const names = await this.memberships.workspaceNames(
+    // real name the user set in Settings — not an id-derived stub — plus the archived flag
+    // (one batched read).
+    const { names, archived } = await this.memberships.workspaceMeta(
       memberships.map((m) => m.tenantId),
     );
     // Legacy claim-provisioned tenants (`t-*`, not server-minted `ws-*`) were never named,
@@ -107,6 +117,7 @@ export class WorkspacesController {
       tenantId: m.tenantId,
       role: m.role,
       name: names.get(m.tenantId),
+      archived: archived.has(m.tenantId),
     }));
   }
 
@@ -140,10 +151,11 @@ export class WorkspacesController {
         "Verify your email address before creating a workspace.",
       );
     }
-    return this.memberships.createWorkspace(
+    const ws = await this.memberships.createWorkspace(
       principal.userId,
       principal.email,
       body?.name,
     );
+    return { ...ws, archived: false }; // brand-new workspaces are never archived
   }
 }

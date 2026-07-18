@@ -43,12 +43,19 @@ export interface WorkspaceState {
 
 const WorkspaceContext = createContext<WorkspaceState | undefined>(undefined);
 
-/** Pick the active workspace: keep the persisted one if still valid, else the first. */
+/**
+ * Pick the active workspace: keep the persisted one if still valid AND non-archived, else the
+ * first non-archived. Archived workspaces are still IN the list (the server never drops them —
+ * dropping would empty the list and strand the user on the create screen), so only when EVERY
+ * workspace is archived do we fall back to the full list.
+ */
 function resolveActive(list: Workspace[]): string | null {
   if (list.length === 0) return null;
+  const live = list.filter((w) => !w.archived);
+  const pool = live.length > 0 ? live : list;
   const persisted = getActiveWorkspace();
-  if (persisted && list.some((w) => w.tenantId === persisted)) return persisted;
-  return list[0].tenantId;
+  if (persisted && pool.some((w) => w.tenantId === persisted)) return persisted;
+  return pool[0].tenantId;
 }
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
