@@ -73,7 +73,9 @@ export class ApiTokenService {
    *  Additionally returns the token ROW id (RBAC-GROUPS.md §4a, slice G1): the identity a
    *  WorkflowGrant hangs on when the workspace opts into group enforcement. Additive — the id
    *  is not the secret (the hash stays write-once) and callers that ignore it are unchanged. */
-  async verify(token: string): Promise<{
+  async verify(
+    token: string,
+  ): Promise<{
     id: string;
     tenantId: string;
     environmentId: string | null;
