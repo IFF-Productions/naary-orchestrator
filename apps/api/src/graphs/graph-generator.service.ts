@@ -126,13 +126,15 @@ export const __genDeps = {
     binary: string,
     args: string[],
     opts: { env: NodeJS.ProcessEnv; timeoutMs: number },
-  ): Promise<{ stdout: string; exitCode: number }> =>
+  ): Promise<{ stdout: string; stderr?: string; exitCode: number }> =>
     new Promise((resolve, reject) => {
       execFile(
         binary,
         args,
         { env: opts.env, timeout: opts.timeoutMs, maxBuffer: 24 * 1024 * 1024 },
-        (err, stdout) => {
+        // Capture stderr too: on a non-zero exit the CLI often writes the real reason there and
+        // emits no JSON on stdout — without it a failure is undiagnosable ("head:" empty).
+        (err, stdout, stderr) => {
           if (err) {
             const code = (err as NodeJS.ErrnoException).code;
             if (
@@ -142,10 +144,15 @@ export const __genDeps = {
               return reject(err);
             return resolve({
               stdout: String(stdout),
+              stderr: String(stderr),
               exitCode: typeof code === "number" ? code : 1,
             });
           }
-          resolve({ stdout: String(stdout), exitCode: 0 });
+          resolve({
+            stdout: String(stdout),
+            stderr: String(stderr),
+            exitCode: 0,
+          });
         },
       );
     }),
@@ -451,9 +458,10 @@ export class GraphGeneratorService {
       SYSTEM_PROMPT,
     ];
     let stdout: string;
+    let stderr: string | undefined;
     let exitCode: number;
     try {
-      ({ stdout, exitCode } = await __genDeps.exec("claude", args, {
+      ({ stdout, stderr, exitCode } = await __genDeps.exec("claude", args, {
         // Minimal env: PATH/HOME + exactly one auth var. Never the API process env
         // (DB URLs, ENCRYPTION_KEY must not reach the subprocess).
         env: {
@@ -496,22 +504,35 @@ export class GraphGeneratorService {
       isError = true;
     }
     if (isError) {
-      this.logger.warn(
-        `graph generate (claude-code): CLI reported failure (exit=${exitCode}, head: ${result.slice(0, 120).replace(/\s+/g, " ")})`,
-      );
-      // The result text is the CLI's own error surface — classify the common
-      // user-fixable cases so the 4xx tells the user what to do.
-      if (/invalid api key|authentication|unauthorized|oauth/i.test(result)) {
+      // The CLI's error surface: the JSON envelope's `result` (when it emitted one) AND stderr
+      // (where it writes the real reason when it exits before/without JSON — the common empty-head
+      // case). Classify + log against BOTH.
+      const errText = [result, stderr].filter(Boolean).join(" | ").trim();
+      const head = errText.slice(0, 200).replace(/\s+/g, " ");
+      // User-fixable cases → a 4xx telling the user what to do; keep these at warn (expected,
+      // AUTH/QUOTA are filtered from issue capture — they're the user's to fix, not an outage).
+      if (/invalid api key|authentication|unauthorized|oauth/i.test(errText)) {
+        this.logger.warn(
+          `graph generate (claude-code): credential rejected (exit=${exitCode})`,
+        );
         throw new BadRequestException(
           "Your Claude Code credential was rejected. Update it in Integrations → Code Agent.",
         );
       }
-      if (/rate limit|usage limit|overloaded|quota/i.test(result)) {
+      if (/rate limit|usage limit|overloaded|quota/i.test(errText)) {
+        this.logger.warn(
+          `graph generate (claude-code): rate/usage limit (exit=${exitCode})`,
+        );
         throw new HttpException(
           "Claude Code is rate-limited or your usage limit is reached. Try again shortly.",
           HttpStatus.TOO_MANY_REQUESTS,
         );
       }
+      // Unknown/unexpected failure — surface as an ERROR (a real problem worth an alert, not just a
+      // warn), and INCLUDE the stderr head so we can actually see why (stdout is usually empty here).
+      this.logger.error(
+        `graph generate (claude-code): CLI reported failure (exit=${exitCode}, head: ${head})`,
+      );
       throw new ServiceUnavailableException(
         "Claude Code couldn't generate a workflow right now. Try again.",
       );
