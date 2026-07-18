@@ -2885,3 +2885,258 @@ describe("runGraph interpreter — graphQL node", () => {
     });
   });
 });
+
+/**
+ * Conditional & multi-path routing — the interpreter walking real branches. Proves switch
+ * (multi-way), the standalone if gate, the full edge-condition operator set, a diamond fan-out→merge,
+ * and a nested if→switch chain. All pure control-flow (no activity stubs): the branch a run takes is
+ * asserted by which terminal `set` node wrote its output into ctx.
+ */
+describe("runGraph interpreter — conditional & multi-path routing", () => {
+  // Run a graph to completion and return {status, ctx}. Each caller passes a unique workflowId.
+  async function runFlow(
+    graph: GraphDef,
+    input: Record<string, unknown>,
+    workflowId: string,
+    tenantId = "t-route",
+  ): Promise<{ status: string; ctx: Record<string, unknown> }> {
+    const worker = await makeWorker();
+    let result!: { status: string; ctx: Record<string, unknown> };
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [graph, input, { tenantId }],
+        taskQueue: TASK_QUEUE,
+        workflowId,
+      });
+      result = (await handle.result()) as {
+        status: string;
+        ctx: Record<string, unknown>;
+      };
+    });
+    return result;
+  }
+
+  // --- switch: multi-way branch on the first matching rule, else fallback ---------------------
+  const switchGraph: GraphDef = {
+    startNodeId: "trigger",
+    nodes: [
+      { id: "trigger", type: "webhookTrigger" },
+      {
+        id: "sw",
+        type: "switch",
+        config: {
+          rules: [
+            { name: "high", condition: { path: "trigger.amount", op: "gt", value: 100 } },
+            { name: "mid", condition: { path: "trigger.amount", op: "gt", value: 10 } },
+          ],
+          fallback: "low",
+        },
+      },
+      { id: "tHigh", type: "set", config: { fields: { tier: "high" } } },
+      { id: "tMid", type: "set", config: { fields: { tier: "mid" } } },
+      { id: "tLow", type: "set", config: { fields: { tier: "low" } } },
+      { id: "end", type: "end" },
+    ],
+    edges: [
+      { from: "trigger", to: "sw" },
+      { from: "sw", to: "tHigh", condition: { path: "sw.matched", op: "eq", value: "high" } },
+      { from: "sw", to: "tMid", condition: { path: "sw.matched", op: "eq", value: "mid" } },
+      { from: "sw", to: "tLow", condition: { path: "sw.matched", op: "eq", value: "low" } },
+      { from: "tHigh", to: "end" },
+      { from: "tMid", to: "end" },
+      { from: "tLow", to: "end" },
+    ],
+  };
+
+  it("switch: first matching rule wins (250 matches high AND mid → high) and only that branch runs", async () => {
+    const r = await runFlow(switchGraph, { amount: 250 }, "e2e-switch-high");
+    expect(r.status).toBe("completed");
+    expect(r.ctx.sw).toEqual({ matched: "high" });
+    expect(r.ctx.tHigh).toEqual({ tier: "high" });
+    expect(r.ctx.tMid).toBeUndefined();
+    expect(r.ctx.tLow).toBeUndefined();
+  });
+
+  it("switch: a later rule matches when the first doesn't (50 → mid)", async () => {
+    const r = await runFlow(switchGraph, { amount: 50 }, "e2e-switch-mid");
+    expect(r.ctx.sw).toEqual({ matched: "mid" });
+    expect(r.ctx.tMid).toEqual({ tier: "mid" });
+    expect(r.ctx.tHigh).toBeUndefined();
+  });
+
+  it("switch: no rule matches → the fallback branch (5 → low)", async () => {
+    const r = await runFlow(switchGraph, { amount: 5 }, "e2e-switch-low");
+    expect(r.ctx.sw).toEqual({ matched: "low" });
+    expect(r.ctx.tLow).toEqual({ tier: "low" });
+  });
+
+  // --- if: boolean gate → true/false edges ----------------------------------------------------
+  function ifGraph(config: Record<string, unknown>): GraphDef {
+    return {
+      startNodeId: "trigger",
+      nodes: [
+        { id: "trigger", type: "webhookTrigger" },
+        { id: "gate", type: "if", config },
+        { id: "tYes", type: "set", config: { fields: { took: "yes" } } },
+        { id: "tNo", type: "set", config: { fields: { took: "no" } } },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "trigger", to: "gate" },
+        { from: "gate", to: "tYes", condition: { path: "gate.result", op: "eq", value: true } },
+        { from: "gate", to: "tNo", condition: { path: "gate.result", op: "eq", value: false } },
+        { from: "tYes", to: "end" },
+        { from: "tNo", to: "end" },
+      ],
+    };
+  }
+
+  it("if: a passing predicate takes the true edge", async () => {
+    const g = ifGraph({ conditions: [{ path: "trigger.amount", op: "gt", value: 100 }] });
+    const r = await runFlow(g, { amount: 250 }, "e2e-if-true");
+    expect(r.ctx.gate).toEqual({ result: true });
+    expect(r.ctx.tYes).toEqual({ took: "yes" });
+    expect(r.ctx.tNo).toBeUndefined();
+  });
+
+  it("if: a failing predicate takes the false edge", async () => {
+    const g = ifGraph({ conditions: [{ path: "trigger.amount", op: "gt", value: 100 }] });
+    const r = await runFlow(g, { amount: 5 }, "e2e-if-false");
+    expect(r.ctx.gate).toEqual({ result: false });
+    expect(r.ctx.tNo).toEqual({ took: "no" });
+    expect(r.ctx.tYes).toBeUndefined();
+  });
+
+  it("if: combine 'or' passes when any predicate holds; 'and' needs all", async () => {
+    const or = ifGraph({
+      combine: "or",
+      conditions: [
+        { path: "trigger.a", op: "eq", value: 1 },
+        { path: "trigger.b", op: "eq", value: 2 },
+      ],
+    });
+    expect((await runFlow(or, { a: 0, b: 2 }, "e2e-if-or")).ctx.gate).toEqual({ result: true });
+
+    const and = ifGraph({
+      combine: "and",
+      conditions: [
+        { path: "trigger.a", op: "eq", value: 1 },
+        { path: "trigger.b", op: "eq", value: 2 },
+      ],
+    });
+    expect((await runFlow(and, { a: 1, b: 0 }, "e2e-if-and")).ctx.gate).toEqual({ result: false });
+  });
+
+  it("if: empty conditions ⇒ false (a gate with nothing to test doesn't pass)", async () => {
+    const r = await runFlow(ifGraph({ conditions: [] }), {}, "e2e-if-empty");
+    expect(r.ctx.gate).toEqual({ result: false });
+    expect(r.ctx.tNo).toEqual({ took: "no" });
+  });
+
+  // --- edge-condition operators: the full op set, via a single-condition if gate --------------
+  const OP_CASES: Array<{
+    op: string;
+    value?: unknown;
+    v: unknown;
+    expected: boolean;
+  }> = [
+    { op: "eq", value: "x", v: "x", expected: true },
+    { op: "eq", value: "x", v: "y", expected: false },
+    { op: "neq", value: "x", v: "y", expected: true },
+    { op: "gt", value: 10, v: 20, expected: true },
+    { op: "gt", value: 10, v: 5, expected: false },
+    { op: "gte", value: 10, v: 10, expected: true },
+    { op: "lt", value: 10, v: 5, expected: true },
+    { op: "lte", value: 10, v: 10, expected: true },
+    { op: "in", value: ["a", "b"], v: "b", expected: true },
+    { op: "in", value: ["a", "b"], v: "c", expected: false },
+    { op: "contains", value: "ell", v: "hello", expected: true },
+    { op: "notContains", value: "z", v: "hello", expected: true },
+    { op: "startsWith", value: "he", v: "hello", expected: true },
+    { op: "endsWith", value: "lo", v: "hello", expected: true },
+    { op: "regex", value: "^h.*o$", v: "hello", expected: true },
+    { op: "exists", v: "present", expected: true },
+    { op: "isEmpty", v: "", expected: true },
+    { op: "notEmpty", v: "x", expected: true },
+  ];
+
+  it.each(OP_CASES)(
+    "edge condition op '$op' (value=$value, v=$v) → $expected",
+    async ({ op, value, v, expected }) => {
+      const condition =
+        value === undefined
+          ? { path: "trigger.v", op }
+          : { path: "trigger.v", op, value };
+      const g = ifGraph({ conditions: [condition] });
+      const r = await runFlow(g, { v }, `e2e-op-${op}-${String(v)}`);
+      expect(r.ctx.gate).toEqual({ result: expected });
+    },
+  );
+
+  // --- diamond: unconditional fan-out to 3 parallel branches → merge (object) ------------------
+  it("diamond: fan-out to 3 parallel set nodes, merge combines all (multi-path join)", async () => {
+    const diamond: GraphDef = {
+      startNodeId: "trigger",
+      nodes: [
+        { id: "trigger", type: "webhookTrigger" },
+        { id: "a", type: "set", config: { fields: { a: 1 } } },
+        { id: "b", type: "set", config: { fields: { b: 2 } } },
+        { id: "c", type: "set", config: { fields: { c: 3 } } },
+        { id: "join", type: "merge", config: { mode: "object" } },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "trigger", to: "a" },
+        { from: "trigger", to: "b" },
+        { from: "trigger", to: "c" },
+        { from: "a", to: "join" },
+        { from: "b", to: "join" },
+        { from: "c", to: "join" },
+        { from: "join", to: "end" },
+      ],
+    };
+    const r = await runFlow(diamond, {}, "e2e-diamond");
+    expect(r.status).toBe("completed");
+    expect(r.ctx.join).toEqual({ a: 1, b: 2, c: 3 });
+  });
+
+  // --- nested: if → (true) switch → branch; the false branch is never entered -----------------
+  it("nested if→switch: chained conditionals route to the deep branch", async () => {
+    const nested: GraphDef = {
+      startNodeId: "trigger",
+      nodes: [
+        { id: "trigger", type: "webhookTrigger" },
+        { id: "gate", type: "if", config: { conditions: [{ path: "trigger.amount", op: "gt", value: 0 }] } },
+        {
+          id: "sw",
+          type: "switch",
+          config: {
+            rules: [{ name: "b", condition: { path: "trigger.category", op: "eq", value: "b" } }],
+            fallback: "other",
+          },
+        },
+        { id: "hitB", type: "set", config: { fields: { path: "b" } } },
+        { id: "hitOther", type: "set", config: { fields: { path: "other" } } },
+        { id: "neg", type: "set", config: { fields: { path: "neg" } } },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "trigger", to: "gate" },
+        { from: "gate", to: "sw", condition: { path: "gate.result", op: "eq", value: true } },
+        { from: "gate", to: "neg", condition: { path: "gate.result", op: "eq", value: false } },
+        { from: "sw", to: "hitB", condition: { path: "sw.matched", op: "eq", value: "b" } },
+        { from: "sw", to: "hitOther", condition: { path: "sw.matched", op: "eq", value: "other" } },
+        { from: "hitB", to: "end" },
+        { from: "hitOther", to: "end" },
+        { from: "neg", to: "end" },
+      ],
+    };
+    const r = await runFlow(nested, { amount: 5, category: "b" }, "e2e-nested");
+    expect(r.status).toBe("completed");
+    expect(r.ctx.gate).toEqual({ result: true });
+    expect(r.ctx.sw).toEqual({ matched: "b" });
+    expect(r.ctx.hitB).toEqual({ path: "b" });
+    expect(r.ctx.hitOther).toBeUndefined();
+    expect(r.ctx.neg).toBeUndefined();
+  });
+});
