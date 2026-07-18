@@ -528,6 +528,19 @@ model Company {
   createdAt   DateTime            @default(now())
   memberships CompanyMembership[]
   workspaces  TenantSettings[]
+  budget      CompanyBudget?
+}
+
+/// Company-wide monthly spend cap (COMPANIES.md §8, Slice 5): an OUTER start-time gate layered
+/// ABOVE the per-workspace TenantBudgets — a run start must pass BOTH. Enforced fail-open
+/// (Tier-1 rule 6): a metering/lookup error never blocks a run — the worker's per-tenant
+/// reserveBudget remains the authoritative inner guard.
+model CompanyBudget {
+  companyId        String   @id
+  company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  monthlyCapUsd    Decimal  @db.Decimal(12, 2)
+  onBudgetExceeded String   @default("reject") // 'reject' (only mode today)
+  updatedAt        DateTime @default(now()) @updatedAt
 }
 
 /// A user's role IN A COMPANY (distinct from the per-workspace Membership). Keyed by Firebase uid.

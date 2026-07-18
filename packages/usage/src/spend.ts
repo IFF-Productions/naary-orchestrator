@@ -17,6 +17,27 @@ export async function monthToDateSpend(tenantId: string): Promise<number> {
 }
 
 /**
+ * Sum of recorded cost for the current calendar month (UTC) across MANY tenants — the
+ * company-wide read behind the CompanyBudget outer gate (COMPANIES.md §8, Slice 5).
+ * Same Date.UTC month window and DB-side `_sum` as monthToDateSpend, widened to an IN-list.
+ * An empty list is 0 without touching the DB (a company with no member workspaces).
+ */
+export async function monthToDateSpendForTenants(
+  tenantIds: string[],
+): Promise<number> {
+  if (tenantIds.length === 0) return 0;
+  const now = new Date();
+  const monthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+  );
+  const agg = await getPrisma().usageEvent.aggregate({
+    where: { tenantId: { in: tenantIds }, createdAt: { gte: monthStart } },
+    _sum: { costUsd: true },
+  });
+  return Number(Number(agg._sum.costUsd ?? 0).toFixed(6));
+}
+
+/**
  * Is the tenant AT or OVER its monthly cap right now? A fast-fail pre-check for the run-start
  * gate — the authoritative per-call guard is still `reserveBudget` inside the agent activity.
  * Returns false when no cap is configured (cap unset / <= 0 ⇒ never gated). Reuses

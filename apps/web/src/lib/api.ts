@@ -1177,6 +1177,22 @@ export const api = {
   getBudget(tenantId: string): Promise<BudgetView> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/budget`);
   },
+  // Company-wide budget (COMPANIES.md §8, Slice 5). Company members only; `budget`
+  // is null when no cap is configured yet (unlike getBudget, no 404).
+  getCompanyBudget(companyId: string): Promise<CompanyBudgetView> {
+    return http(`/companies/${encodeURIComponent(companyId)}/budget`);
+  },
+  // Company OWNER only (403 otherwise) — the cap gates run starts across every
+  // member workspace, as an OUTER gate above per-workspace budgets.
+  setCompanyBudget(
+    companyId: string,
+    input: { monthlyCapUsd: number; onBudgetExceeded?: "reject" },
+  ): Promise<CompanyBudgetConfig> {
+    return http(`/companies/${encodeURIComponent(companyId)}/budget`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  },
   // --- Schedules (recurring runs, Temporal Schedules) ---
   listSchedules(tenantId: string): Promise<ScheduleRow[]> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/schedules`);
@@ -1526,6 +1542,23 @@ export interface BudgetView {
   mtdSpendUsd: number;
   /** monthlyCapUsd − mtdSpendUsd (may be negative if over cap). */
   remainingUsd: number;
+}
+
+/** The persisted company-wide budget config (COMPANIES.md §8, Slice 5). */
+export interface CompanyBudgetConfig {
+  monthlyCapUsd: number;
+  onBudgetExceeded: "reject";
+}
+
+/**
+ * GET /companies/:id/budget — company budget config (null when unset) plus the live
+ * company-wide month-to-date spend across all member workspaces.
+ */
+export interface CompanyBudgetView {
+  budget: CompanyBudgetConfig | null;
+  mtdSpendUsd: number;
+  /** monthlyCapUsd − mtdSpendUsd (may be negative); null when no budget is configured. */
+  remainingUsd: number | null;
 }
 
 /** Map a control-plane status to a design run-state token. */

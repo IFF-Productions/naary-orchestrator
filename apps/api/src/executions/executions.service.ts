@@ -34,6 +34,7 @@ import { getPrisma } from "@naary/db";
 import { TracedClass } from "@naary/observability";
 import { getBudget } from "@naary/usage";
 import { assertWithinMonthlyBudget } from "../budget/budget-guard";
+import { assertWithinCompanyMonthlyBudget } from "../budget/company-budget-guard";
 import { executionsStarted } from "../common/metrics";
 import { EnvironmentsService } from "../environments/environments.service";
 import {
@@ -519,8 +520,10 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     const sessionWorkflowId = `chatsession-${tenantId}-${environmentId}-${workflowKey}-${safeSession}`;
     const turnId = randomUUID(); // minted here, never in workflow code (determinism)
     const budget = await getBudget(tenantId);
-    // Same fast-fail gate as startGraph — a chat turn is a run start too.
+    // Same fast-fail gates as startGraph — a chat turn is a run start too.
+    // Tenant gate first, then the company-wide OUTER gate (both must pass).
     await assertWithinMonthlyBudget(tenantId, budget);
+    await assertWithinCompanyMonthlyBudget(tenantId);
 
     await this.client.workflow.signalWithStart(CHAT_SESSION_WORKFLOW, {
       workflowId: sessionWorkflowId,
@@ -638,6 +641,9 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     // which all funnel here). Optimization only — reserveBudget in the agent activity is the
     // authoritative guard; this just avoids starting a run that would die at the first agent.
     await assertWithinMonthlyBudget(tenantId, budget);
+    // Company-wide OUTER gate (COMPANIES.md §8, Slice 5) — layered above the tenant gate,
+    // both must pass. No-op for standalone workspaces; fails open on lookup errors.
+    await assertWithinCompanyMonthlyBudget(tenantId);
     // Bind the current error handler (if any) at start — the interpreter starts it
     // detached on failure. Read now (deterministic in-workflow needs it via args).
     // Env-scoped (slice-6 cleanup): the RUN'S env's binding, so a sandbox failure

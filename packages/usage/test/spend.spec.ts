@@ -9,6 +9,7 @@ import {
   estimateCallCost,
   isOverMonthlyBudget,
   monthToDateSpend,
+  monthToDateSpendForTenants,
 } from "../src/spend";
 
 beforeEach(() => aggregate.mockReset());
@@ -28,6 +29,35 @@ describe("monthToDateSpend", () => {
   it("is 0 for a tenant with no usage (null sum)", async () => {
     aggregate.mockResolvedValue({ _sum: { costUsd: null } });
     expect(await monthToDateSpend("t1")).toBe(0);
+  });
+});
+
+describe("monthToDateSpendForTenants (company-wide sum)", () => {
+  it("returns the DB-side sum over an IN-list of tenants for the current month", async () => {
+    aggregate.mockResolvedValue({ _sum: { costUsd: "12.34" } });
+    expect(await monthToDateSpendForTenants(["t1", "t2"])).toBeCloseTo(
+      12.34,
+      9,
+    );
+
+    // one aggregate: IN-list of tenants + the same month-start lower bound, summed in Postgres
+    const arg = aggregate.mock.calls[0][0];
+    expect(arg.where.tenantId).toEqual({ in: ["t1", "t2"] });
+    expect(arg.where.createdAt.gte).toBeInstanceOf(Date);
+    // UTC month start — the same window as monthToDateSpend (day 1, midnight UTC)
+    expect(arg.where.createdAt.gte.getUTCDate()).toBe(1);
+    expect(arg.where.createdAt.gte.getUTCHours()).toBe(0);
+    expect(arg._sum).toEqual({ costUsd: true });
+  });
+
+  it("is 0 for an empty tenant list WITHOUT querying the DB", async () => {
+    expect(await monthToDateSpendForTenants([])).toBe(0);
+    expect(aggregate).not.toHaveBeenCalled();
+  });
+
+  it("is 0 when the tenants have no usage (null sum)", async () => {
+    aggregate.mockResolvedValue({ _sum: { costUsd: null } });
+    expect(await monthToDateSpendForTenants(["t1"])).toBe(0);
   });
 });
 

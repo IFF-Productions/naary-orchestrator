@@ -6,7 +6,8 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { getPrisma } from "@naary/db";
+import { getPrisma, Prisma } from "@naary/db";
+import { monthToDateSpendForTenants } from "@naary/usage";
 import { EnvironmentsService } from "../environments/environments.service";
 import {
   ExecutionsService,
@@ -42,6 +43,20 @@ export interface CompanyUsageRollup {
       >;
     }
   >;
+}
+
+/** The persisted company-wide budget config (COMPANIES.md §8, Slice 5). */
+export interface CompanyBudgetConfig {
+  monthlyCapUsd: number;
+  onBudgetExceeded: string;
+}
+
+/** Company budget view: config (null when unset) + live company-wide month-to-date spend. */
+export interface CompanyBudgetView {
+  budget: CompanyBudgetConfig | null;
+  mtdSpendUsd: number;
+  /** monthlyCapUsd − mtdSpendUsd (may be negative); null when no budget is configured. */
+  remainingUsd: number | null;
 }
 
 /**
@@ -362,6 +377,73 @@ export class CompanyService {
     return this.graphs.list(tenantId, envId);
   }
 
+  // ---- Slice 5: CompanyBudget (§8 cap) ------------------------------------------------------
+
+  /**
+   * The company's budget config + live company-wide month-to-date spend (COMPANIES.md §8,
+   * Slice 5). Any company member may read it (same authz altitude as the usage rollup — the
+   * §4 owner-authorized attach is what makes the cross-workspace read safe). `budget` is null
+   * when no cap is configured; `remainingUsd` is null in that case too (nothing to subtract
+   * from), while `mtdSpendUsd` is always the live company-wide sum.
+   */
+  async getCompanyBudget(
+    userId: string,
+    companyId: string,
+  ): Promise<CompanyBudgetView> {
+    await this.assertCompanyMember(userId, companyId);
+    const row = await getPrisma().companyBudget.findUnique({
+      where: { companyId },
+    });
+    const members = await getPrisma().tenantSettings.findMany({
+      where: { companyId },
+      select: { tenantId: true },
+    });
+    const mtdSpendUsd = await monthToDateSpendForTenants(
+      members.map((m) => m.tenantId),
+    );
+    const budget = row
+      ? {
+          monthlyCapUsd: Number(row.monthlyCapUsd),
+          onBudgetExceeded: row.onBudgetExceeded,
+        }
+      : null;
+    return {
+      budget,
+      mtdSpendUsd,
+      remainingUsd: budget
+        ? Number((budget.monthlyCapUsd - mtdSpendUsd).toFixed(6))
+        : null,
+    };
+  }
+
+  /**
+   * Set (upsert) the company-wide monthly cap. Company OWNER only — the cap gates run starts
+   * across EVERY member workspace, so a mere admin must not be able to throttle the fleet.
+   * Same Decimal(12,2) write discipline as the per-tenant setBudget (toFixed(2) → Decimal).
+   */
+  async setCompanyBudget(
+    userId: string,
+    companyId: string,
+    input: { monthlyCapUsd: number; onBudgetExceeded?: "reject" },
+  ): Promise<CompanyBudgetConfig> {
+    await this.assertCompanyOwner(userId, companyId);
+    const data = {
+      monthlyCapUsd: new Prisma.Decimal(input.monthlyCapUsd.toFixed(2)),
+      ...(input.onBudgetExceeded
+        ? { onBudgetExceeded: input.onBudgetExceeded }
+        : {}),
+    };
+    const row = await getPrisma().companyBudget.upsert({
+      where: { companyId },
+      create: { companyId, ...data },
+      update: data,
+    });
+    return {
+      monthlyCapUsd: Number(row.monthlyCapUsd),
+      onBudgetExceeded: row.onBudgetExceeded,
+    };
+  }
+
   /** The caller's role in a company, or null if they're not a member. */
   private async companyRole(
     userId: string,
@@ -380,6 +462,18 @@ export class CompanyService {
   ): Promise<void> {
     if ((await this.companyRole(userId, companyId)) === null) {
       throw new ForbiddenException("You are not a member of this company.");
+    }
+  }
+
+  /** Company OWNER or 403 — for actions that affect every member workspace (e.g. the budget). */
+  private async assertCompanyOwner(
+    userId: string,
+    companyId: string,
+  ): Promise<void> {
+    if ((await this.companyRole(userId, companyId)) !== "owner") {
+      throw new ForbiddenException(
+        "Only the company owner can set the company budget.",
+      );
     }
   }
 
