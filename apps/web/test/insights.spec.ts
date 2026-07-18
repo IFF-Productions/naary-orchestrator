@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   dayBars,
   envLabel,
+  insightsQuery,
   rankBuckets,
   usd,
   wfLabel,
   windowFromDate,
+  windowLabel,
 } from "../src/screens/app/insights.logic";
 
 describe("windowFromDate", () => {
@@ -67,6 +69,38 @@ describe("rankBuckets", () => {
     expect(
       rankBuckets([], (r) => envLabel((r as never)["environmentId"])),
     ).toEqual([]);
+  });
+});
+
+describe("insightsQuery", () => {
+  const now = Date.parse("2026-07-31T12:00:00.000Z");
+
+  it("30d window → from set, no environmentId", () => {
+    expect(insightsQuery(now, 30, null)).toEqual({ from: "2026-07-01" });
+  });
+
+  it("all time (days null) → empty query (no from)", () => {
+    expect(insightsQuery(now, null, null)).toEqual({});
+  });
+
+  it("includes environmentId when selected", () => {
+    expect(insightsQuery(now, 7, "env-prod")).toEqual({
+      from: "2026-07-24",
+      environmentId: "env-prod",
+    });
+  });
+
+  it("all time + an environment → only environmentId", () => {
+    expect(insightsQuery(now, null, "env-prod")).toEqual({
+      environmentId: "env-prod",
+    });
+  });
+});
+
+describe("windowLabel", () => {
+  it("describes the selected window", () => {
+    expect(windowLabel(30)).toBe("last 30 days");
+    expect(windowLabel(null)).toBe("all time");
   });
 });
 
