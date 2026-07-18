@@ -8,6 +8,12 @@
 boundary** (`docs/audit/AUTH-PROVISIONING-AUDIT-2026-07-04.md`). The security model has
 to be right on paper before a line is written.
 
+> **Invitations superseded (RBAC U1, Jul 2026):** the token-based invite flow sketched in
+> §3 Path B / §6–§7 (`tokenHash`/`expiresAt` + `POST /invitations/:token/accept`) was never
+> built. `docs/design/RBAC-GROUPS.md` §3/§5 is the source of truth for invitations now —
+> U1 shipped **verified-email accept-on-login** instead (no token channel, nothing
+> phishable; a link flow can be layered on later by adding `tokenHash`/`expiresAt`).
+
 ---
 
 ## 1. Current state (grounded)

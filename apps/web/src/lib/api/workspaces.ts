@@ -70,19 +70,46 @@ export const workspacesApi = {
   revokeApiToken(id: string): Promise<void> {
     return http(`/tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
-  // --- Team (members) ---
+  // --- Team (RBAC U1: Membership-backed members + pending invitations) ---
+  // Active members ∪ pending invitations; rows discriminate on `status`.
   listMembers(tenantId: string): Promise<Member[]> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/members`);
   },
-  addMember(tenantId: string, email: string, role?: string): Promise<Member> {
+  // Creates a pending INVITATION (not a membership) — the invitee joins when they sign in
+  // with this email verified. 409 (HttpError.status) when already a member/invited.
+  inviteMember(
+    tenantId: string,
+    email: string,
+    role?: string,
+  ): Promise<Member> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/members`, {
       method: "POST",
       body: JSON.stringify({ email, ...(role ? { role } : {}) }),
     });
   },
-  removeMember(tenantId: string, memberId: string): Promise<void> {
+  // Change an active member's role (by Firebase uid). Owner-only for admin/owner grants;
+  // 409 when demoting the last owner.
+  changeMemberRole(
+    tenantId: string,
+    userId: string,
+    role: string,
+  ): Promise<Member> {
     return http(
-      `/tenants/${encodeURIComponent(tenantId)}/members/${encodeURIComponent(memberId)}`,
+      `/tenants/${encodeURIComponent(tenantId)}/members/${encodeURIComponent(userId)}`,
+      { method: "PATCH", body: JSON.stringify({ role }) },
+    );
+  },
+  // Remove an active member (by Firebase uid). 409 when removing the last owner.
+  removeMember(tenantId: string, userId: string): Promise<void> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" },
+    );
+  },
+  // Revoke a pending invitation (by invitation id).
+  revokeInvitation(tenantId: string, invitationId: string): Promise<void> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/members/invitations/${encodeURIComponent(invitationId)}`,
       { method: "DELETE" },
     );
   },

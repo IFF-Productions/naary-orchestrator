@@ -16,6 +16,7 @@ const verify = vi.fn();
 const firebaseVerify = vi.fn();
 const listForUser = vi.fn();
 const ensureMembership = vi.fn();
+const acceptPendingInvitations = vi.fn();
 const getAllAndOverride = vi.fn();
 let firebaseEnabled = false;
 /** Routes flagged user-scoped for a given test (keyed by metadata key). */
@@ -31,6 +32,7 @@ function makeGuard(): AuthGuard {
   const memberships = {
     listForUser,
     ensureMembership,
+    acceptPendingInvitations,
   } as unknown as MembershipService;
   return new AuthGuard(
     { verify } as unknown as ApiTokenService,
@@ -60,6 +62,7 @@ beforeEach(() => {
   firebaseVerify.mockReset();
   listForUser.mockReset().mockResolvedValue([]);
   ensureMembership.mockReset().mockResolvedValue(undefined);
+  acceptPendingInvitations.mockReset().mockResolvedValue(undefined);
   firebaseEnabled = false;
   userScoped = false;
   // Reflector: IS_PUBLIC_KEY → false, IS_USER_SCOPED_KEY → the per-test `userScoped`.
@@ -406,6 +409,81 @@ describe("AuthGuard", () => {
     };
     await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
     expect(ensureMembership).not.toHaveBeenCalled();
+  });
+
+  // --- Invitation accept-on-login (RBAC-GROUPS.md §5, slice U1) ---
+
+  it("runs invitation acceptance for a VERIFIED email, BEFORE the membership read", async () => {
+    firebaseEnabled = true;
+    firebaseVerify.mockResolvedValue({
+      userId: "u-1",
+      email: "invited@x.com",
+      emailVerified: true,
+    });
+    // The accepted workspace is already visible on THIS request: acceptance runs first,
+    // then listForUser reads the (invalidated) memberships.
+    listForUser.mockResolvedValue([{ tenantId: "t-inv", role: "member" }]);
+    const req: FakeReq = {
+      headers: { authorization: "Bearer good.jwt" },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(acceptPendingInvitations).toHaveBeenCalledWith(
+      "u-1",
+      "invited@x.com",
+      true,
+    );
+    expect(acceptPendingInvitations.mock.invocationCallOrder[0]).toBeLessThan(
+      listForUser.mock.invocationCallOrder[0],
+    );
+    expect(req.principal).toMatchObject({ tenantId: "t-inv", role: "member" });
+  });
+
+  it("does NOT accept invitations for an UNVERIFIED email (must never claim an invited address)", async () => {
+    firebaseEnabled = true;
+    userScoped = true; // isolate from workspace resolution
+    firebaseVerify.mockResolvedValue({
+      userId: "u-1",
+      email: "invited@x.com",
+      emailVerified: false,
+    });
+    const req: FakeReq = {
+      headers: { authorization: "Bearer good.jwt" },
+      path: "/me/workspaces",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(acceptPendingInvitations).not.toHaveBeenCalled();
+  });
+
+  it("does NOT accept invitations when the token carries no email at all", async () => {
+    firebaseEnabled = true;
+    userScoped = true;
+    firebaseVerify.mockResolvedValue({ userId: "u-1", emailVerified: true });
+    const req: FakeReq = {
+      headers: { authorization: "Bearer good.jwt" },
+      path: "/me/workspaces",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(acceptPendingInvitations).not.toHaveBeenCalled();
+  });
+
+  it("still authorizes when invitation acceptance FAILS (swallow-and-log, non-authorizing)", async () => {
+    // Same posture as the claim backfill: the accept write only CONVERTS invitations —
+    // access resolves from the Membership table, so a DB error here must not 500.
+    firebaseEnabled = true;
+    firebaseVerify.mockResolvedValue({
+      userId: "u-1",
+      email: "invited@x.com",
+      emailVerified: true,
+    });
+    acceptPendingInvitations.mockRejectedValue(new Error("db down"));
+    listForUser.mockResolvedValue([{ tenantId: "t-1", role: "owner" }]);
+    const req: FakeReq = {
+      headers: { authorization: "Bearer good.jwt" },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(req.principal).toMatchObject({ tenantId: "t-1", role: "owner" });
   });
 
   it("403s when the header and path name different workspaces", async () => {

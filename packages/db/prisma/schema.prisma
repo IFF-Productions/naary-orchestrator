@@ -453,8 +453,9 @@ model Environment {
   // in Prisma's DSL) enforces exactly one default env per tenant at the DB level.
 }
 
-// Workspace members (Team screen). Lightweight directory keyed by tenant; auth
-// itself is Keycloak/API-token (this is not the identity source of truth).
+// LEGACY workspace member directory (pre-U1 Team screen). Read/written by NOTHING since
+// RBAC U1 — the Team screen is Membership+Invitation-backed now. Rows were seeded into
+// Invitation once (U1 migration); the table itself retires in slice G3 (RBAC-GROUPS.md §5).
 model Member {
   id        String   @id @default(uuid())
   tenantId  String
@@ -482,6 +483,26 @@ model Membership {
   @@unique([userId, tenantId])
   @@index([userId])
   @@index([tenantId])
+}
+
+// A pending workspace invitation (design: RBAC-GROUPS.md §3/§5, slice U1 — SUPERSEDES the
+// PROVISIONING-MULTIUSER token-invite flow). Created by an owner/admin on the Team screen;
+// converted to a Membership by the AuthGuard's accept-on-login when a user whose Firebase
+// email is VERIFIED and matches `email` (case-insensitively; stored lowercased) signs in.
+// `acceptedAt` null = pending. `groupIds` is honored from slice G1 on (permission groups
+// joined on accept).
+model Invitation {
+  id         String    @id @default(uuid())
+  tenantId   String
+  email      String // matched against the VERIFIED Firebase email on login
+  role       String    @default("member") // 'owner' | 'admin' | 'member'
+  groupIds   Json? // permission-group ids joined on accept (used from G1 on)
+  invitedBy  String // uid of the inviting owner/admin ('member-seed' for migrated rows)
+  createdAt  DateTime  @default(now())
+  acceptedAt DateTime?
+
+  @@unique([tenantId, email])
+  @@index([email])
 }
 
 /// Non-secret per-workspace config, ENV-SCOPED, referenced in string expressions as

@@ -51,6 +51,56 @@ export class MembershipService {
   }
 
   /**
+   * Accept-on-login (design RBAC-GROUPS.md §5, slice U1): convert pending `Invitation`s
+   * matching the caller's VERIFIED email into real Memberships. Called by the AuthGuard
+   * beside the claim→Membership backfill — same posture: NON-authorizing (it only converts
+   * invitations; access still resolves from the Membership table), and the guard swallows +
+   * logs any error so a DB hiccup never 500s an authenticated user.
+   *
+   * Gated on a membership-cache MISS so the hot path (cached principal) stays a zero-DB
+   * check: acceptance runs on login / after any invalidation / at TTL expiry — an invited
+   * user's first request converts their invitation before the membership read below, so the
+   * workspace appears on that very response. Worst case for an already-active session is
+   * one cache TTL (~60s) before a new invitation is picked up.
+   *
+   * The caller MUST pre-check `emailVerified === true` — an unverified account must never
+   * claim an invited address (the guard enforces this; asserted again here as defense).
+   */
+  async acceptPendingInvitations(
+    userId: string,
+    email: string,
+    emailVerified: boolean,
+  ): Promise<void> {
+    if (!emailVerified || !email) return;
+    if (this.cache.get(userId)) return; // hot path: cached principal, no invitation scan
+    const prisma = getPrisma();
+    const pending = await prisma.invitation.findMany({
+      // Stored lowercased, but match case-insensitively (seeded/legacy rows may vary).
+      where: {
+        email: { equals: email, mode: "insensitive" },
+        acceptedAt: null,
+      },
+    });
+    if (pending.length === 0) return;
+    for (const inv of pending) {
+      // upsert with an empty update: if a Membership already exists its role WINS — an
+      // invitation never re-roles an existing member (silent escalation), and the P2002
+      // race (parallel first-login requests) is absorbed.
+      await prisma.membership.upsert({
+        where: { userId_tenantId: { userId, tenantId: inv.tenantId } },
+        create: { userId, tenantId: inv.tenantId, role: inv.role, email },
+        update: {},
+      });
+      // TODO(G1 — RBAC-GROUPS.md §3): join PermissionGroups from `inv.groupIds` on accept.
+      await prisma.invitation.update({
+        where: { id: inv.id },
+        data: { acceptedAt: new Date() },
+      });
+    }
+    this.cache.invalidate(userId); // new workspace visible on the very next read
+  }
+
+  /**
    * Create a brand-new workspace owned by the caller (design Path A). The `tenantId` is
    * SERVER-GENERATED (never from the request body — attack #2), so a user can neither pick
    * nor collide with an existing tenant. The caller becomes its owner. Invalidates the
