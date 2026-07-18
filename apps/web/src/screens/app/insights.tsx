@@ -6,17 +6,19 @@
  */
 import { type CSSProperties, useEffect, useState } from "react";
 import { Card } from "../../components";
-import { api, type InsightsReport } from "../../lib/api";
+import { api, type Environment, type InsightsReport } from "../../lib/api";
 import {
   type Bar,
   DEFAULT_WINDOW_DAYS,
   type RankedRow,
+  WINDOW_PRESETS,
   dayBars,
   envLabel,
+  insightsQuery,
   rankBuckets,
   usd,
   wfLabel,
-  windowFromDate,
+  windowLabel,
 } from "./insights.logic";
 
 const cardStyle: CSSProperties = {
@@ -204,36 +206,74 @@ type State =
  */
 export function InsightsSection({
   tenantId,
-  now = Date.now(),
+  now,
 }: {
   tenantId: string;
   /** Injectable for tests/stories. */
   now?: number;
 }) {
+  // Snapshot once per mount. `now` defaults to Date.now() — if that default were re-evaluated each
+  // render AND kept in the re-fetch effect's deps, every setState would produce a new `now` and the
+  // effect would loop (fetch → render → new now → fetch …). Freeze it here instead.
+  const [now0] = useState(() => now ?? Date.now());
   const [state, setState] = useState<State>({ kind: "loading" });
+  const [days, setDays] = useState<number | null>(DEFAULT_WINDOW_DAYS);
+  const [envId, setEnvId] = useState<string | null>(null);
+  const [envs, setEnvs] = useState<Environment[]>([]);
 
+  // Environments for the picker — load once; degrade to "All environments" only if it fails.
   useEffect(() => {
     let live = true;
     api
-      .getInsights(tenantId, { from: windowFromDate(now) })
+      .listEnvironments(tenantId)
+      .then((rows) => live && setEnvs(rows))
+      .catch(() => live && setEnvs([]));
+    return () => {
+      live = false;
+    };
+  }, [tenantId]);
+
+  // Re-fetch whenever the tenant or the selected filters change.
+  useEffect(() => {
+    let live = true;
+    setState({ kind: "loading" });
+    api
+      .getInsights(tenantId, insightsQuery(now0, days, envId))
       .then((data) => live && setState({ kind: "ready", data }))
       .catch(() => live && setState({ kind: "error" }));
     return () => {
       live = false;
     };
-  }, [tenantId, now]);
+  }, [tenantId, now0, days, envId]);
 
   return (
     <div style={{ marginTop: 4 }}>
       <div
         style={{
-          fontSize: "var(--text-body)",
-          fontWeight: "var(--weight-semibold)",
-          color: "var(--ink)",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
           marginBottom: 12,
         }}
       >
-        Insights · last {DEFAULT_WINDOW_DAYS} days
+        <div
+          style={{
+            fontSize: "var(--text-body)",
+            fontWeight: "var(--weight-semibold)",
+            color: "var(--ink)",
+          }}
+        >
+          Insights · {windowLabel(days)}
+        </div>
+        <FilterBar
+          days={days}
+          onDays={setDays}
+          envId={envId}
+          onEnv={setEnvId}
+          envs={envs}
+        />
       </div>
 
       {state.kind === "loading" && (
@@ -266,6 +306,89 @@ export function InsightsSection({
       )}
 
       {state.kind === "ready" && <InsightsBody data={state.data} />}
+    </div>
+  );
+}
+
+/** Window-preset segmented control + environment picker. */
+function FilterBar({
+  days,
+  onDays,
+  envId,
+  onEnv,
+  envs,
+}: {
+  days: number | null;
+  onDays: (d: number | null) => void;
+  envId: string | null;
+  onEnv: (id: string | null) => void;
+  envs: Environment[];
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        flexWrap: "wrap",
+      }}
+    >
+      <div
+        style={{
+          display: "inline-flex",
+          border: "1px solid var(--line)",
+          borderRadius: 8,
+          overflow: "hidden",
+        }}
+        role="group"
+        aria-label="Time window"
+      >
+        {WINDOW_PRESETS.map((p) => {
+          const active = p.days === days;
+          return (
+            <button
+              key={p.label}
+              type="button"
+              onClick={() => onDays(p.days)}
+              aria-pressed={active}
+              style={{
+                border: "none",
+                padding: "5px 11px",
+                fontSize: "var(--text-xs)",
+                fontWeight: "var(--weight-semibold)",
+                cursor: "pointer",
+                background: active ? "var(--brand)" : "var(--card)",
+                color: active ? "var(--on-brand, #fff)" : "var(--ink-2)",
+              }}
+            >
+              {p.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Always render the picker — before envs load and if listEnvironments fails, it shows only
+          "All environments" (the degrade-to-All behavior), so the filter stays discoverable. */}
+      <select
+        value={envId ?? ""}
+        onChange={(e) => onEnv(e.target.value || null)}
+        aria-label="Environment"
+        style={{
+          border: "1px solid var(--line)",
+          borderRadius: 8,
+          background: "var(--card)",
+          color: "var(--ink)",
+          fontSize: "var(--text-xs)",
+          padding: "5px 9px",
+        }}
+      >
+        <option value="">All environments</option>
+        {envs.map((env) => (
+          <option key={env.id} value={env.id}>
+            {env.name}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

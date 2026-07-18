@@ -61,3 +61,31 @@ export function usd(n: number): string {
 
 export const envLabel = (id: string | null): string => id ?? "— untagged";
 export const wfLabel = (key: string | null): string => key ?? "— no key";
+
+/** Time-window presets for the dashboard filter. `days: null` = all time. */
+export const WINDOW_PRESETS: { label: string; days: number | null }[] = [
+  { label: "7d", days: 7 },
+  { label: "30d", days: 30 },
+  { label: "90d", days: 90 },
+  { label: "All", days: null },
+];
+
+/**
+ * Build the getInsights query args from the selected filters. `days: null` → no `from` (all time);
+ * `environmentId: null` → omitted (all environments). Pure, so the fetch args are testable.
+ */
+export function insightsQuery(
+  now: number,
+  days: number | null,
+  environmentId: string | null,
+): { from?: string; environmentId?: string } {
+  return {
+    ...(days !== null ? { from: windowFromDate(now, days) } : {}),
+    ...(environmentId ? { environmentId } : {}),
+  };
+}
+
+/** Heading suffix for the selected window ("last 30 days" / "all time"). */
+export function windowLabel(days: number | null): string {
+  return days === null ? "all time" : `last ${days} days`;
+}
