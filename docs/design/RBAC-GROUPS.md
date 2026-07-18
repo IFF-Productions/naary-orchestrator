@@ -1,8 +1,12 @@
 # RBAC-GROUPS — per-workspace permission groups, real user management, workflow tags
 
 Status: DESIGN (slices T1/U1 may start immediately; G1 blocked on §8 sign-off).
-Related: COMPANIES.md §9 (company roles compose above), ENVIRONMENTS.md §9 (env-scoped RBAC seam),
-PROVISIONING-MULTIUSER.md §6–§7 (invitations — designed there, built HERE as slice U1).
+Related: COMPANIES.md §9 (company roles compose above), ENVIRONMENTS.md §9 (env-scoped RBAC seam).
+Invitations: PROVISIONING-MULTIUSER.md §6–§7 designed a token-based flow
+(`tokenHash`/`expiresAt` + `POST /invitations/:token/accept`) that was never built. **This doc
+SUPERSEDES that flow** — U1 ships verified-email accept-on-login instead (§5, rationale there);
+update PROVISIONING-MULTIUSER.md to point here when U1 lands. This doc is the source of truth
+for invitations.
 
 ## 0. Premise (state this first — if it's wrong, everything below is)
 
@@ -180,6 +184,15 @@ explicit `enforceGroups` toggle — is §8 decision 1.)
   U1 ships the gates in the same slice.
 
 ## 5. User management (Member → Membership + Invitation, slice U1)
+
+> **Deliberate change from PROVISIONING-MULTIUSER.md §6–§7** (which specified token links —
+> `tokenHash`/`expiresAt` + `POST /invitations/:token/accept`, never implemented): U1 uses
+> **accept-on-login by verified-email match** instead. Rationale: no out-of-band token channel
+> exists yet (no email sending), a copy-pasteable token is a phishable secret, and the
+> verified-email match gives the same guarantee the token flow's security matrix wanted ("verified
+> email must equal the invite email") with zero new endpoints. A token flow can be layered on
+> later for invite-by-link without schema changes (add `tokenHash`/`expiresAt` columns then).
+> PROVISIONING-MULTIUSER.md gets a pointer to this section when U1 lands.
 
 - Team screen + members module become **Membership-backed**: list = `Membership WHERE tenantId` ∪
   pending `Invitation`s; add = create `Invitation`; remove = delete `Membership` (or revoke the
