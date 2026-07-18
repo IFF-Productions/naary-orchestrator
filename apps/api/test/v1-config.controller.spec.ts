@@ -11,7 +11,7 @@ import { V1ConfigController } from "../src/v1/v1-config.controller";
 
 const variables = { list: vi.fn(), upsert: vi.fn(), remove: vi.fn() };
 const secrets = { list: vi.fn(), set: vi.fn(), remove: vi.fn() };
-const usage = { getUsage: vi.fn() };
+const usage = { getUsage: vi.fn(), getInsights: vi.fn() };
 const environments = { resolveEnvId: vi.fn() };
 
 let ctrl: V1ConfigController;
@@ -189,6 +189,72 @@ describe("V1ConfigController — usage", () => {
       totalTokens: 0,
       byModel: [],
       events: [],
+    });
+  });
+});
+
+describe("V1ConfigController — insights", () => {
+  const INSIGHTS = {
+    range: { from: "2026-07-01", to: null },
+    totals: { costUsd: 0.36, totalTokens: 360, calls: 4 },
+    byDay: [{ date: "2026-07-16", costUsd: 0.15, totalTokens: 150, calls: 2 }],
+    byEnvironment: [
+      { environmentId: "env-prod", costUsd: 0.2, totalTokens: 200, calls: 1 },
+      { environmentId: null, costUsd: 0.16, totalTokens: 160, calls: 3 },
+    ],
+    byWorkflow: [
+      { workflowKey: "triage", costUsd: 0.2, totalTokens: 200, calls: 1 },
+      { workflowKey: null, costUsd: 0.16, totalTokens: 160, calls: 3 },
+    ],
+    byModel: [
+      {
+        provider: "anthropic",
+        model: "claude-sonnet-4",
+        calls: 4,
+        totalTokens: 360,
+        costUsd: 0.36,
+      },
+    ],
+  };
+
+  it("passes ?from&to&environmentId through and maps the rollup to the v1 shape", async () => {
+    usage.getInsights.mockResolvedValue(INSIGHTS);
+
+    const out = await ctrl.getInsights(
+      "t-1",
+      "2026-07-01",
+      "2026-07-31",
+      "env-prod",
+    );
+
+    // tenant from the token; the env filter is an explicit query param (cross-env rollup).
+    expect(usage.getInsights).toHaveBeenCalledWith("t-1", {
+      from: "2026-07-01",
+      to: "2026-07-31",
+      environmentId: "env-prod",
+    });
+    expect(out).toEqual(INSIGHTS);
+    // null env/workflow buckets survive the mapping (not dropped).
+    expect(out.byEnvironment[1].environmentId).toBeNull();
+    expect(out.byWorkflow[1].workflowKey).toBeNull();
+  });
+
+  it("works with no window / no env filter (all params omitted)", async () => {
+    usage.getInsights.mockResolvedValue({
+      range: { from: null, to: null },
+      totals: { costUsd: 0, totalTokens: 0, calls: 0 },
+      byDay: [],
+      byEnvironment: [],
+      byWorkflow: [],
+      byModel: [],
+    });
+
+    await ctrl.getInsights("t-1", undefined, undefined, undefined);
+
+    expect(usage.getInsights).toHaveBeenCalledWith("t-1", {
+      from: undefined,
+      to: undefined,
+      environmentId: undefined,
     });
   });
 });

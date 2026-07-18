@@ -19,6 +19,7 @@ import { ApiTokenThrottlerGuard } from "./api-token-throttler.guard";
 import { SetSecretDto, SetVariableDto } from "./v1-config.dto";
 import {
   ConfigDeletedResponse,
+  InsightsResponse,
   SecretNameResponse,
   SecretSetResponse,
   UsageResponse,
@@ -192,6 +193,57 @@ export class V1ConfigController {
         costUsd: e.costUsd,
         createdAt:
           e.createdAt instanceof Date ? e.createdAt.toISOString() : e.createdAt,
+      })),
+    };
+  }
+
+  @ApiEndpoint({
+    summary: "Get usage insights",
+    description:
+      "Spend & tokens (tokens + cost only) rolled up by day, environment, workflow, and model for the token's tenant. Optional ISO ?from & ?to window and ?environmentId filter (all environments if omitted).",
+    ok: InsightsResponse,
+  })
+  @Get("insights")
+  async getInsights(
+    @TenantId() tenantId: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+    @Query("environmentId") environmentId?: string,
+  ): Promise<InsightsResponse> {
+    // Insights is a cross-environment rollup (it breaks spend down BY environment), so the env
+    // filter is an explicit optional ?environmentId — not the token's active env.
+    const r = await this.usage.getInsights(tenantId, {
+      from,
+      to,
+      environmentId,
+    });
+    return {
+      range: r.range,
+      totals: r.totals,
+      byDay: r.byDay.map((d) => ({
+        date: d.date,
+        costUsd: d.costUsd,
+        totalTokens: d.totalTokens,
+        calls: d.calls,
+      })),
+      byEnvironment: r.byEnvironment.map((e) => ({
+        environmentId: e.environmentId,
+        costUsd: e.costUsd,
+        totalTokens: e.totalTokens,
+        calls: e.calls,
+      })),
+      byWorkflow: r.byWorkflow.map((w) => ({
+        workflowKey: w.workflowKey,
+        costUsd: w.costUsd,
+        totalTokens: w.totalTokens,
+        calls: w.calls,
+      })),
+      byModel: r.byModel.map((m) => ({
+        provider: m.provider,
+        model: m.model,
+        calls: m.calls,
+        totalTokens: m.totalTokens,
+        costUsd: m.costUsd,
       })),
     };
   }

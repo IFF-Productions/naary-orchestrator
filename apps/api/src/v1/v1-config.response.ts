@@ -102,3 +102,80 @@ export class UsageResponse {
   })
   events!: UsageEventResponse[];
 }
+
+// ---- Insights (usage rolled up by day / environment / workflow / model) -------------------------
+
+/** The cost/tokens/calls totals shared by every insights bucket. */
+export class InsightsBucketResponse {
+  @ApiProperty({ example: 0.4213 })
+  costUsd!: number;
+  @ApiProperty({ example: 34567 })
+  totalTokens!: number;
+  @ApiProperty({ example: 12, description: "Number of metered calls." })
+  calls!: number;
+}
+
+export class InsightsByDayResponse extends InsightsBucketResponse {
+  @ApiProperty({
+    format: "date",
+    example: "2026-07-16",
+    description: "UTC calendar day (YYYY-MM-DD).",
+  })
+  date!: string;
+}
+
+export class InsightsByEnvironmentResponse extends InsightsBucketResponse {
+  @ApiProperty({
+    nullable: true,
+    example: "env-prod",
+    description: "Environment id; null for spend recorded before env tagging.",
+  })
+  environmentId!: string | null;
+}
+
+export class InsightsByWorkflowResponse extends InsightsBucketResponse {
+  @ApiProperty({
+    nullable: true,
+    example: "support-triage",
+    description: "Workflow key; null for runs with no key (pre-migration).",
+  })
+  workflowKey!: string | null;
+}
+
+export class InsightsRangeResponse {
+  // No `format`: these ECHO the caller's ?from/?to verbatim, which may be an ISO date
+  // ("2026-07-01") or a full date-time — pinning either format would misdocument the other.
+  @ApiProperty({
+    nullable: true,
+    example: "2026-07-01",
+    description:
+      "The requested window's lower bound, echoed back (ISO 8601 date or date-time); null = unbounded.",
+  })
+  from!: string | null;
+  @ApiProperty({
+    nullable: true,
+    example: "2026-07-31",
+    description:
+      "The requested window's upper bound, echoed back (ISO 8601 date or date-time); null = unbounded.",
+  })
+  to!: string | null;
+}
+
+/**
+ * Usage rolled up by day (time-series), environment, workflow, and model for the token's tenant —
+ * optionally windowed by ?from&to and scoped to one ?environmentId. Tokens + cost only (privacy).
+ */
+export class InsightsResponse {
+  @ApiProperty({ type: InsightsRangeResponse })
+  range!: InsightsRangeResponse;
+  @ApiProperty({ type: InsightsBucketResponse })
+  totals!: InsightsBucketResponse;
+  @ApiProperty({ type: [InsightsByDayResponse] })
+  byDay!: InsightsByDayResponse[];
+  @ApiProperty({ type: [InsightsByEnvironmentResponse] })
+  byEnvironment!: InsightsByEnvironmentResponse[];
+  @ApiProperty({ type: [InsightsByWorkflowResponse] })
+  byWorkflow!: InsightsByWorkflowResponse[];
+  @ApiProperty({ type: [UsageByModelResponse] })
+  byModel!: UsageByModelResponse[];
+}
