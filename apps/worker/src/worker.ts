@@ -15,6 +15,7 @@ initSentry({ component: "worker" });
 initMetrics({ component: "worker" });
 
 import { createServer } from "node:http";
+import { hostname } from "node:os";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { TASK_QUEUE } from "@naary/contracts";
 import { disconnectPrisma } from "@naary/db";
@@ -25,6 +26,8 @@ import { temporalConnectionConfig } from "@naary/temporal-config";
 import { sentryTraceActivityInterceptors } from "./temporal/activity-trace-interceptor";
 import * as activities from "./temporal/activities";
 import { logActivities } from "./temporal/log-activities";
+import { countActivities } from "./temporal/activity-gauge";
+import { startHeartbeat } from "./worker-heartbeat";
 import { workerIdentity, workerTuning } from "./worker-tuning";
 
 // Structured logger for worker BOOT code only. NOT imported by workflows.ts —
@@ -93,12 +96,14 @@ async function run(): Promise<void> {
       identity: workerIdentity(),
       ...workerTuning(),
       workflowsPath: require.resolve("./temporal/workflows"),
-      // Wrap each activity twice, inner→outer: logActivities emits a completion line (ids +
-      // duration + ok/fail) so every side-effecting node is visible in the logs; traceActivities
-      // opens the `activity.<name>` span AROUND that log so the line is stamped with the span's
-      // trace id (→ Sentry Logs, correlated to the trace). Both preserve the object keys, so
-      // Temporal's dispatch-by-name is unchanged.
-      activities: traceActivities(logActivities(activities, log)),
+      // Wrap each activity inner→outer: countActivities tracks live slot usage (the heartbeat
+      // reports it); logActivities emits a completion line so every side-effecting node is visible;
+      // traceActivities opens the `activity.<name>` span AROUND that log so the line is stamped with
+      // the span's trace id (→ Sentry Logs). All preserve the object keys, so Temporal's
+      // dispatch-by-name is unchanged.
+      activities: traceActivities(
+        logActivities(countActivities(activities), log),
+      ),
       // Distributed tracing across the Temporal boundary (one connected Sentry trace for
       // API→workflow→activity). The workflow module (sandbox-safe, deterministic) forwards the
       // Sentry trace headers from the run's start headers onto each scheduled activity; the
@@ -121,7 +126,22 @@ async function run(): Promise<void> {
       },
       "worker polling",
     );
-    await worker.run();
+    // Fleet heartbeat: emit live slot usage to the WorkerHeartbeat registry while polling. Best-effort
+    // (never affects execution). maxActivities = the configured cap, else the SDK default (100).
+    const heartbeat = startHeartbeat(
+      {
+        taskQueue: TASK_QUEUE,
+        host: hostname(),
+        maxActivities:
+          workerTuning().maxConcurrentActivityTaskExecutions ?? 100,
+      },
+      log,
+    );
+    try {
+      await worker.run();
+    } finally {
+      await heartbeat.stop();
+    }
   } finally {
     metricsServer?.close();
     await connection.close();

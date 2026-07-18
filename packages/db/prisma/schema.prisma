@@ -712,3 +712,20 @@ model AuditEvent {
 
   @@index([tenantId, createdAt])
 }
+
+// Queue-mode fleet registry (QUEUE-MODE.md §3.2): each worker replica upserts a heartbeat with its
+// live slot usage. Infra telemetry only — NO tenant data, NO secrets (Tier-1 §4). The control plane
+// reads it for the Worker view; staleness (lastSeen age) marks a replica offline. Keyed on the
+// worker identity `<host>/<pid>/<version>`. The worker writes it directly (it already has DB access
+// for the execution/usage ledgers) — no extra API surface.
+model WorkerHeartbeat {
+  identity         String   @id // <host>/<pid>/<version>
+  taskQueue        String
+  version          String
+  host             String
+  activeActivities Int      @default(0) // live: activities executing right now on this replica
+  maxActivities    Int // configured slot capacity (WORKER_MAX_ACTIVITIES, else the SDK default)
+  lastSeen         DateTime @default(now())
+
+  @@index([lastSeen])
+}
