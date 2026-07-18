@@ -2,6 +2,7 @@ import { type Server, createServer } from "node:http";
 import { type AddressInfo } from "node:net";
 import * as path from "node:path";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
+import { createLocalTestEnv } from "./local-test-env";
 import { Worker } from "@temporalio/worker";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TASK_QUEUE, stateQuery } from "@naary/contracts";
@@ -79,7 +80,7 @@ beforeAll(async () => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
-  env = await TestWorkflowEnvironment.createLocal();
+  env = await createLocalTestEnv();
   __setObjectStore(new MemoryObjectStore());
 
   // Reach the local server: bypass the https/public pre-check and the private-IP transport guard.

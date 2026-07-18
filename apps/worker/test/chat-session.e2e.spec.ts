@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
+import { createLocalTestEnv } from "./local-test-env";
 import { Worker } from "@temporalio/worker";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -79,7 +80,7 @@ const mockActivities = {
 let env: TestWorkflowEnvironment;
 
 beforeAll(async () => {
-  env = await TestWorkflowEnvironment.createLocal();
+  env = await createLocalTestEnv();
 }, 60_000);
 
 afterAll(async () => {
