@@ -12,6 +12,7 @@ import { wantsHelp, wantsVersion } from "./args";
 import { ApiError, AuthError } from "./client";
 import { AUTH_COMMANDS } from "./commands/auth";
 import { APPROVALS_COMMANDS } from "./commands/approvals";
+import { CONFIG_COMMANDS } from "./commands/config";
 import { RUNS_COMMANDS } from "./commands/runs";
 import { WORKFLOWS_COMMANDS } from "./commands/workflows";
 import type { CommandContext } from "./context";
@@ -24,6 +25,7 @@ const GROUPS: Record<string, Record<string, CommandFn>> = {
   runs: RUNS_COMMANDS,
   workflows: WORKFLOWS_COMMANDS,
   approvals: APPROVALS_COMMANDS,
+  config: CONFIG_COMMANDS,
 };
 
 export async function run(
