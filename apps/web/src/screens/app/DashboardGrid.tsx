@@ -18,6 +18,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Icon } from "../../components";
 import type { DashboardItem } from "../../lib/api";
+import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 
 /** Widths a widget can cycle through on the 12-col grid. */
 const SPANS = [4, 6, 8, 12] as const;
@@ -60,6 +61,11 @@ export function DashboardGrid({
     }),
   );
 
+  // On phone the 12-col grid collapses to a single stacked column. Without this, a widget's span
+  // keeps the grid ~desktop-wide, overflowing the viewport → iOS Safari shrink-to-fit zooms the
+  // whole app out and every responsive breakpoint then reads "desktop". Stacking removes the overflow.
+  const phone = useMediaQuery(PHONE_QUERY);
+
   const titleOf = (id: string) => widgets.find((w) => w.id === id)?.title ?? id;
   const visible = layout.filter((i) => !i.hidden);
   const hidden = layout.filter((i) => i.hidden);
@@ -94,7 +100,7 @@ export function DashboardGrid({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
+              gridTemplateColumns: phone ? "1fr" : "repeat(12, minmax(0, 1fr))",
               gap: 16,
               alignItems: "start",
             }}
@@ -103,6 +109,7 @@ export function DashboardGrid({
               <SortableWidget
                 key={item.id}
                 item={item}
+                phone={phone}
                 title={titleOf(item.id)}
                 customizing={customizing}
                 onCycleWidth={() => {
@@ -162,6 +169,7 @@ export function DashboardGrid({
 
 function SortableWidget({
   item,
+  phone,
   title,
   customizing,
   onCycleWidth,
@@ -169,6 +177,7 @@ function SortableWidget({
   children,
 }: {
   item: DashboardItem;
+  phone: boolean;
   title: string;
   customizing: boolean;
   onCycleWidth: () => void;
@@ -188,7 +197,9 @@ function SortableWidget({
     <div
       ref={setNodeRef}
       style={{
-        gridColumn: `span ${item.span}`,
+        // Full-width when stacked on phone; `span N` against a 1-col grid would create implicit
+        // columns and re-introduce the overflow.
+        gridColumn: phone ? "1 / -1" : `span ${item.span}`,
         transform: CSS.Transform.toString(transform),
         transition,
         opacity: isDragging ? 0.55 : 1,
