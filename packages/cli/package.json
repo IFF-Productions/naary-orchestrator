@@ -1,0 +1,17 @@
+{
+  "name": "@naary/cli",
+  "version": "0.0.1",
+  "private": true,
+  "description": "naary — a thin, dependency-free HTTP client over the public /api/v1 surface (runs, workflows, approvals). Node built-ins only; imports NO server code.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "naary": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1"
+  }
+}
