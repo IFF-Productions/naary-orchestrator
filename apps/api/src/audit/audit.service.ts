@@ -58,22 +58,33 @@ export class AuditService {
 export function actionFor(method: string, path: string): string {
   const p = path.replace(/\/+$/, "");
   const is = (re: RegExp) => re.test(p);
-  if (method === "POST" && is(/\/graphs\/generate$/)) return "Generated a workflow with AI";
+  if (method === "POST" && is(/\/graphs\/generate$/))
+    return "Generated a workflow with AI";
+  // SSE variant; statusCode is always 200 here (errors travel as stream frames).
+  if (method === "POST" && is(/\/graphs\/generate\/stream$/))
+    return "Generated a workflow with AI";
   if (method === "POST" && is(/\/graphs$/)) return "Saved a workflow";
-  if (method === "PUT" && is(/\/graphs\/[^/]+\/error-handler$/)) return "Changed an error handler";
-  if (method === "POST" && is(/\/executions\/[^/]+\/approve$/)) return "Decided an approval";
+  if (method === "PUT" && is(/\/graphs\/[^/]+\/error-handler$/))
+    return "Changed an error handler";
+  if (method === "POST" && is(/\/executions\/[^/]+\/approve$/))
+    return "Decided an approval";
   if (method === "POST" && is(/\/executions$/)) return "Started a run";
   if (method === "POST" && is(/\/connections$/)) return "Added a connection";
-  if (method === "DELETE" && is(/\/connections\/[^/]+$/)) return "Removed a connection";
+  if (method === "DELETE" && is(/\/connections\/[^/]+$/))
+    return "Removed a connection";
   if (method === "PUT" && is(/\/credentials$/)) return "Saved a provider key";
-  if (method === "DELETE" && is(/\/credentials\/[^/]+$/)) return "Removed a provider key";
+  if (method === "DELETE" && is(/\/credentials\/[^/]+$/))
+    return "Removed a provider key";
   if (method === "PUT" && is(/\/settings$/)) return "Updated settings";
-  if (method === "PUT" && is(/\/notifications$/)) return "Updated notifications";
+  if (method === "PUT" && is(/\/notifications$/))
+    return "Updated notifications";
   if (method === "PUT" && is(/\/budget$/)) return "Updated the budget";
   if (method === "POST" && is(/\/schedules$/)) return "Created a schedule";
-  if (method === "DELETE" && is(/\/schedules\/[^/]+$/)) return "Removed a schedule";
+  if (method === "DELETE" && is(/\/schedules\/[^/]+$/))
+    return "Removed a schedule";
   if (method === "POST" && is(/\/webhooks$/)) return "Registered a webhook";
-  if (method === "DELETE" && is(/\/webhooks\/[^/]+$/)) return "Removed a webhook";
+  if (method === "DELETE" && is(/\/webhooks\/[^/]+$/))
+    return "Removed a webhook";
   if (method === "POST" && is(/\/members$/)) return "Added a member";
   return `${method} ${p}`;
 }

@@ -263,6 +263,33 @@ describe("GraphGeneratorService (claude-code source)", () => {
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
 
+  it("bounds the CLI at 55s by default; a caller override (SSE route) reaches exec — including the repair retry", async () => {
+    execMock.mockResolvedValue({
+      stdout: envelope(JSON.stringify(validOut)),
+      exitCode: 0,
+    });
+    await makeService().generate("t-1", "e-1", "flow");
+    expect(execMock.mock.calls[0][2].timeoutMs).toBe(55_000);
+
+    // Invalid first draft forces the repair retry; both CLI calls get the override.
+    execMock
+      .mockReset()
+      .mockResolvedValueOnce({
+        stdout: envelope(JSON.stringify(invalidOut)),
+        exitCode: 0,
+      })
+      .mockResolvedValueOnce({
+        stdout: envelope(JSON.stringify(validOut)),
+        exitCode: 0,
+      });
+    await makeService().generate("t-1", "e-1", "flow", undefined, {
+      timeoutMs: 300_000,
+    });
+    expect(execMock).toHaveBeenCalledTimes(2);
+    expect(execMock.mock.calls[0][2].timeoutMs).toBe(300_000);
+    expect(execMock.mock.calls[1][2].timeoutMs).toBe(300_000);
+  });
+
   it("passes a MINIMAL env to the subprocess — API process secrets never leak in", async () => {
     process.env.ENCRYPTION_KEY_TEST_SENTINEL = "must-not-leak";
     try {
