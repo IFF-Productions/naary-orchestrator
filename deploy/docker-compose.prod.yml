@@ -49,6 +49,8 @@ services:
     environment:
       # The browser origin the SPA is served from — used for CORS on the control plane.
       CORS_ORIGINS: "https://${PUBLIC_HOSTNAME:-naar-y.com}"
+      # Label Sentry events as production (the code otherwise falls back to NODE_ENV → "development").
+      SENTRY_ENVIRONMENT: production
     # Drop the local-temporal dependency (Temporal is Cloud); keep DB + migrations.
     depends_on: !override
       postgres:
@@ -58,6 +60,9 @@ services:
 
   worker:
     container_name: !reset null
+    environment:
+      # Label Sentry events as production (see api above).
+      SENTRY_ENVIRONMENT: production
     # Close the base file's published 9091 (metrics). Nothing scrapes it over the network
     # in prod (Sentry gets the metrics), and "every published port is closed" (header
     # point 1) should actually include this one — it was the lone hole.
