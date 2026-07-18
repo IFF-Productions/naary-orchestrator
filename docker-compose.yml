@@ -182,6 +182,12 @@ services:
     command: ['pnpm', '--filter', '@naary/worker', 'start']
     environment:
       <<: *backend-env
+      # Queue-mode per-replica capacity knobs (unset ⇒ Temporal SDK defaults; see worker-tuning.ts).
+      # Raise `replicas` to scale horizontally; tune these to size each replica.
+      WORKER_MAX_ACTIVITIES: ${WORKER_MAX_ACTIVITIES:-}
+      WORKER_MAX_WORKFLOW_TASKS: ${WORKER_MAX_WORKFLOW_TASKS:-}
+      WORKER_MAX_CACHED_WORKFLOWS: ${WORKER_MAX_CACHED_WORKFLOWS:-}
+      WORKER_SHUTDOWN_GRACE: ${WORKER_SHUTDOWN_GRACE:-} # e.g. "30s" — drain in-flight activities on deploy
     ports:
       - '9091:9091' # Prometheus /metrics scrape
     depends_on:

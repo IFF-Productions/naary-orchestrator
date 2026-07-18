@@ -25,6 +25,7 @@ import { temporalConnectionConfig } from "@naary/temporal-config";
 import { sentryTraceActivityInterceptors } from "./temporal/activity-trace-interceptor";
 import * as activities from "./temporal/activities";
 import { logActivities } from "./temporal/log-activities";
+import { workerIdentity, workerTuning } from "./worker-tuning";
 
 // Structured logger for worker BOOT code only. NOT imported by workflows.ts —
 // logging is I/O and would break deterministic replay (CLAUDE.md Tier-1 rule 2).
@@ -87,6 +88,10 @@ async function run(): Promise<void> {
       connection,
       namespace,
       taskQueue: TASK_QUEUE,
+      // Identify this replica on every Temporal poller (Queue-mode Slice 1) so the fleet can be
+      // told apart; the registry keys on it. Capacity/drain knobs come from env (unset → defaults).
+      identity: workerIdentity(),
+      ...workerTuning(),
       workflowsPath: require.resolve("./temporal/workflows"),
       // Wrap each activity twice, inner→outer: logActivities emits a completion line (ids +
       // duration + ok/fail) so every side-effecting node is visible in the logs; traceActivities
@@ -106,7 +111,16 @@ async function run(): Promise<void> {
         activity: [sentryTraceActivityInterceptors],
       },
     });
-    log.info({ taskQueue: TASK_QUEUE, address, namespace }, "worker polling");
+    log.info(
+      {
+        taskQueue: TASK_QUEUE,
+        address,
+        namespace,
+        identity: workerIdentity(),
+        ...workerTuning(),
+      },
+      "worker polling",
+    );
     await worker.run();
   } finally {
     metricsServer?.close();
