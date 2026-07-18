@@ -355,29 +355,43 @@ export class GraphsService {
   /** The workflowKey of this workflow's error handler, or null if none is bound. */
   async getErrorHandler(
     tenantId: string,
+    environmentId: string,
     workflowKey: string,
   ): Promise<string | null> {
     const row = await getPrisma().errorHandler.findUnique({
-      where: { tenantId_workflowKey: { tenantId, workflowKey } },
+      where: {
+        tenantId_environmentId_workflowKey: {
+          tenantId,
+          environmentId,
+          workflowKey,
+        },
+      },
     });
     return row?.errorWorkflowKey ?? null;
   }
 
-  /** Bind (or, with null, clear) this workflow's error handler. */
+  /** Bind (or, with null, clear) this workflow's error handler in this env. */
   async setErrorHandler(
     tenantId: string,
+    environmentId: string,
     workflowKey: string,
     errorWorkflowKey: string | null,
   ): Promise<void> {
     if (!errorWorkflowKey) {
       await getPrisma().errorHandler.deleteMany({
-        where: { tenantId, workflowKey },
+        where: { tenantId, environmentId, workflowKey },
       });
       return;
     }
     await getPrisma().errorHandler.upsert({
-      where: { tenantId_workflowKey: { tenantId, workflowKey } },
-      create: { tenantId, workflowKey, errorWorkflowKey },
+      where: {
+        tenantId_environmentId_workflowKey: {
+          tenantId,
+          environmentId,
+          workflowKey,
+        },
+      },
+      create: { tenantId, environmentId, workflowKey, errorWorkflowKey },
       update: { errorWorkflowKey },
     });
   }
@@ -448,11 +462,11 @@ export class GraphsService {
     tenantId: string,
     environmentId: string,
     workflowKey: string,
-    /** True only when deleting the DEFAULT env's copy. The shared (not-yet-env-scoped) rows —
-     *  poll/error-handler/triggers, keyed by (tenant, workflowKey) — are removed ONLY then,
-     *  so deleting a non-default (sandbox) copy of a key can't wipe the default/prod copy's
-     *  webhooks. Those tables env-scope in later slices; this gate goes away with them.
-     *  (Pins env-scoped in 6b and moved out of this gate.) */
+    /** True only when deleting the DEFAULT env's copy. The ONLY remaining tenant-wide row is
+     *  PollState (the poll cursor) — schedules (and so poll cursors) are default-env-only until
+     *  the env-scoped-schedules slice puts the env into the schedule identity (schedule id +
+     *  startWorkflow action args + PollMeta). Everything else is env-scoped and always deleted
+     *  for THIS env: pins (6b), error-handler bindings + trigger endpoints (slice-6 cleanup). */
     deleteShared: boolean,
   ): Promise<boolean> {
     const existed = await getPrisma().graphDefinition.findFirst({
@@ -462,7 +476,9 @@ export class GraphsService {
     if (!existed) return false;
 
     const p = getPrisma();
-    // Always delete THIS env's GraphDefinition + WorkflowActivation + pins (env-scoped, 6b).
+    // Always delete THIS env's rows: graph, activation, pins, error-handler bindings, and the
+    // trigger endpoints (all env-scoped now) — a sandbox delete can no longer wipe prod's
+    // webhooks for the same key, and no longer orphans its own.
     const ops = [
       p.graphDefinition.deleteMany({
         where: { tenantId, environmentId, workflowKey },
@@ -473,30 +489,29 @@ export class GraphsService {
       p.pinnedData.deleteMany({
         where: { tenantId, environmentId, workflowKey },
       }),
+      // Bindings where this key is EITHER the failing workflow or the handler.
+      p.errorHandler.deleteMany({
+        where: {
+          tenantId,
+          environmentId,
+          OR: [{ workflowKey }, { errorWorkflowKey: workflowKey }],
+        },
+      }),
+      // Triggers reference the graph key as `workflowId`.
+      p.webhookEndpoint.deleteMany({
+        where: { tenantId, environmentId, workflowId: workflowKey },
+      }),
+      p.formEndpoint.deleteMany({
+        where: { tenantId, environmentId, workflowId: workflowKey },
+      }),
+      p.chatEndpoint.deleteMany({
+        where: { tenantId, environmentId, workflowId: workflowKey },
+      }),
     ];
-    // The shared, tenant-wide rows/triggers belong to the default env's copy — only remove them
-    // when deleting THAT copy (else a sandbox delete kills prod's webhooks for the same key).
+    // PollState is the last tenant-wide row — removed only with the default env's copy (its
+    // schedules are default-env-only; see the deleteShared doc above).
     if (deleteShared) {
-      ops.push(
-        p.pollState.deleteMany({ where: { tenantId, workflowKey } }),
-        // Error-handler bindings where this key is EITHER the failing workflow or the handler.
-        p.errorHandler.deleteMany({
-          where: {
-            tenantId,
-            OR: [{ workflowKey }, { errorWorkflowKey: workflowKey }],
-          },
-        }),
-        // Triggers reference the graph key as `workflowId`.
-        p.webhookEndpoint.deleteMany({
-          where: { tenantId, workflowId: workflowKey },
-        }),
-        p.formEndpoint.deleteMany({
-          where: { tenantId, workflowId: workflowKey },
-        }),
-        p.chatEndpoint.deleteMany({
-          where: { tenantId, workflowId: workflowKey },
-        }),
-      );
+      ops.push(p.pollState.deleteMany({ where: { tenantId, workflowKey } }));
     }
     await p.$transaction(ops);
     return true;

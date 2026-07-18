@@ -346,3 +346,47 @@ describe("GraphsController POST /graphs/generate/stream", () => {
     expect(res.chunks.some((c) => c.startsWith("event: result"))).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Error-handler binding routes are ENV-scoped (slice-6 cleanup): both resolve
+// the X-Environment-Id selector and pass the RESOLVED env id to the service.
+// ---------------------------------------------------------------------------
+describe("GraphsController error-handler env scoping", () => {
+  function make() {
+    const graphs = {
+      getErrorHandler: vi.fn().mockResolvedValue("on-error"),
+      setErrorHandler: vi.fn().mockResolvedValue(undefined),
+    };
+    const controller = new GraphsController(
+      graphs as unknown as GraphsService,
+      {} as unknown as GraphGeneratorService,
+      lifecycleStub,
+      envStub,
+    );
+    return { controller, graphs };
+  }
+
+  it("GET resolves the env selector and reads that env's binding", async () => {
+    const { controller, graphs } = make();
+    const res = await controller.getErrorHandler("t-1", "wf", "sandbox");
+    expect(res).toEqual({ errorWorkflowKey: "on-error" });
+    // envStub resolves every selector to "e1".
+    expect(graphs.getErrorHandler).toHaveBeenCalledWith("t-1", "e1", "wf");
+  });
+
+  it("PUT binds in the resolved env (absent selector = tenant default)", async () => {
+    const { controller, graphs } = make();
+    await controller.setErrorHandler(
+      "t-1",
+      "wf",
+      { errorWorkflowKey: "on-error" },
+      undefined,
+    );
+    expect(graphs.setErrorHandler).toHaveBeenCalledWith(
+      "t-1",
+      "e1",
+      "wf",
+      "on-error",
+    );
+  });
+});

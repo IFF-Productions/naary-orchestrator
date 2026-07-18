@@ -640,8 +640,11 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     await assertWithinMonthlyBudget(tenantId, budget);
     // Bind the current error handler (if any) at start — the interpreter starts it
     // detached on failure. Read now (deterministic in-workflow needs it via args).
+    // Env-scoped (slice-6 cleanup): the RUN'S env's binding, so a sandbox failure
+    // triggers sandbox's handler, never prod's.
     const errorWorkflowKey = await this.graphs.getErrorHandler(
       tenantId,
+      environmentId,
       workflowKey,
     );
 
