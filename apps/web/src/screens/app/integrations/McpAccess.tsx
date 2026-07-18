@@ -191,12 +191,28 @@ export function McpAccess() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
                       fontSize: "var(--text-body)",
                       fontWeight: "var(--weight-semibold)",
                       color: "var(--ink)",
                     }}
                   >
                     {t.label}
+                    {/* RBAC-GROUPS §4a: the token is a grant subject — under group
+                        enforcement it gets exactly its groups' grants. */}
+                    {t.groupCount > 0 && (
+                      <span
+                        className="tag"
+                        title={`This token belongs to ${t.groupCount} permission group${
+                          t.groupCount === 1 ? "" : "s"
+                        } — under group enforcement it only gets what those groups grant (see the Groups screen).`}
+                      >
+                        Restricted · {t.groupCount} group
+                        {t.groupCount === 1 ? "" : "s"}
+                      </span>
+                    )}
                   </div>
                   <div
                     style={{

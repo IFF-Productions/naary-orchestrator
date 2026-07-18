@@ -21,8 +21,10 @@ import {
   type RunSummary,
   type Tag as TagRow,
 } from "../../lib/api";
+import { canCreateWorkflow, canDo } from "../../lib/permissions-logic";
 import { runStatusUi, successRate } from "../../lib/run-status";
 import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
+import { usePermissions } from "../../lib/usePermissions";
 import { WorkflowTagsDialog } from "./WorkflowTagsDialog";
 
 /**
@@ -44,6 +46,9 @@ interface Row {
 export function Workflows() {
   const navigate = useNavigate();
   const phone = useMediaQuery(PHONE_QUERY); // phone: rows render as stacked cards
+  // Affordance gating (RBAC-GROUPS G2): hide what /me/permissions says the server
+  // would 403. Gating only — the API enforces; a forced request still fails.
+  const perms = usePermissions();
   const [graphs, setGraphs] = useState<GraphSummary[] | null>(null);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [tenant, setTenant] = useState<string | null>(null);
@@ -265,13 +270,15 @@ export function Workflows() {
             {runs.length ? ` · ${runs.length} recent runs` : ""}
           </div>
         </div>
-        <Button
-          variant="primary"
-          icon="plus"
-          onClick={() => navigate("/app/canvas")}
-        >
-          New workflow
-        </Button>
+        {canCreateWorkflow(perms) && (
+          <Button
+            variant="primary"
+            icon="plus"
+            onClick={() => navigate("/app/canvas")}
+          >
+            New workflow
+          </Button>
+        )}
       </div>
 
       <div
@@ -431,6 +438,11 @@ export function Workflows() {
         )}
 
         {filtered.map((r) => {
+          // Per-row affordances mirror the effective matrix; "Open" stays — the row
+          // being listed means it's viewable (the graphs list is server-filtered).
+          const mayEdit = canDo(perms, "edit", r.graph.workflowKey);
+          const mayDelete = canDo(perms, "delete", r.graph.workflowKey);
+          const mayPromote = canDo(perms, "share", r.graph.workflowKey);
           const go = () =>
             navigate(
               `/app/workflows/${encodeURIComponent(r.graph.workflowKey)}`,
@@ -442,7 +454,7 @@ export function Workflows() {
               No runs
             </span>
           );
-          const activeSwitch = (
+          const activeSwitch = mayEdit ? (
             <span
               onClick={(e) => e.stopPropagation()}
               title={
@@ -459,6 +471,13 @@ export function Workflows() {
                 }
               />
             </span>
+          ) : (
+            <span
+              title="You don't have edit permission on this workflow"
+              style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
+            >
+              {r.graph.active ? "Active" : "Inactive"}
+            </span>
           );
           const actions = (
             <>
@@ -473,26 +492,30 @@ export function Workflows() {
               >
                 Open
               </Button>
-              <Button
-                variant="secondary"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void openPromote(r.graph.workflowKey);
-                }}
-                title="Copy this workflow into another environment"
-              >
-                Promote
-              </Button>
-              <Button
-                variant="secondary"
-                disabled={deleting === r.graph.workflowKey}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void remove(r.graph.workflowKey, r.graph.name);
-                }}
-              >
-                {deleting === r.graph.workflowKey ? "Deleting…" : "Delete"}
-              </Button>
+              {mayPromote && (
+                <Button
+                  variant="secondary"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void openPromote(r.graph.workflowKey);
+                  }}
+                  title="Copy this workflow into another environment"
+                >
+                  Promote
+                </Button>
+              )}
+              {mayDelete && (
+                <Button
+                  variant="secondary"
+                  disabled={deleting === r.graph.workflowKey}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void remove(r.graph.workflowKey, r.graph.name);
+                  }}
+                >
+                  {deleting === r.graph.workflowKey ? "Deleting…" : "Delete"}
+                </Button>
+              )}
             </>
           );
           const title = (
@@ -527,21 +550,25 @@ export function Workflows() {
                     {t.name}
                   </Tag>
                 ))}
-                <button
-                  type="button"
-                  className="tag"
-                  title="Edit tags"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEditTags({
-                      key: r.graph.workflowKey,
-                      name: r.graph.name,
-                    });
-                  }}
-                  style={{ cursor: "pointer", background: "transparent" }}
-                >
-                  {(r.graph.tags ?? []).length ? "+" : "+ tag"}
-                </button>
+                {/* Tag editing is `edit` (§4 — tags PUT is edit-gated), so hide the
+                    affordance without it. */}
+                {mayEdit && (
+                  <button
+                    type="button"
+                    className="tag"
+                    title="Edit tags"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditTags({
+                        key: r.graph.workflowKey,
+                        name: r.graph.name,
+                      });
+                    }}
+                    style={{ cursor: "pointer", background: "transparent" }}
+                  >
+                    {(r.graph.tags ?? []).length ? "+" : "+ tag"}
+                  </button>
+                )}
               </div>
             </div>
           );

@@ -172,6 +172,10 @@ export const router = createRouter([
                 ...lazy(() => import("./screens/app/Team"), "Team"),
               },
               {
+                path: "groups",
+                ...lazy(() => import("./screens/app/Groups"), "Groups"),
+              },
+              {
                 path: "company",
                 ...lazy(() => import("./screens/app/Company"), "Company"),
               },
