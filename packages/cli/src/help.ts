@@ -53,7 +53,7 @@ export const GROUP_HELP: Record<string, string> = {
   naary approvals approve <id> [--comment ...]  Approve
   naary approvals reject <id> [--comment ...]   Reject`,
 
-  config: `naary config — variables, secrets, usage (per environment)
+  config: `naary config — variables + secrets (per environment), usage (whole workspace)
 
   naary config variables list                       List variables ($vars)
   naary config variables set <key> <value>          Create/overwrite a variable
@@ -61,5 +61,5 @@ export const GROUP_HELP: Record<string, string> = {
   naary config secrets list                         List secret NAMES (values are write-only)
   naary config secrets set <name> <value>           Create/replace a secret (value never echoed)
   naary config secrets delete <name>                Delete a secret
-  naary config usage [--from ISO] [--to ISO]        Spend + tokens (totals and by model)`,
+  naary config usage [--from ISO] [--to ISO]        Spend + tokens, workspace-wide (totals and by model)`,
 };
