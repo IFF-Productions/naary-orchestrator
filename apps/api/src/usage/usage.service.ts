@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
+import { type InsightsResult, aggregateInsights } from "@naary/usage";
 
 export interface UsageLineItem {
   id: string;
@@ -101,5 +102,61 @@ export class UsageService {
         createdAt: r.createdAt,
       })),
     };
+  }
+
+  /**
+   * Usage rolled up along the dimensions a cost dashboard needs: by UTC day (time-series), by
+   * environment, by workflow, and by model. Same tenant-scoped ledger as getUsage; the per-workflow
+   * breakdown joins each event's executionId to its Execution.workflowKey. `environmentId` filters to
+   * a single env (Slice-6a tag). Fetch-then-aggregate mirrors getUsage; the pure rollup lives in
+   * @naary/usage `aggregateInsights`.
+   */
+  async getInsights(
+    tenantId: string,
+    opts: { from?: string; to?: string; environmentId?: string } = {},
+  ): Promise<InsightsResult> {
+    const { from, to, environmentId } = opts;
+    const createdAt =
+      from || to
+        ? {
+            ...(from ? { gte: new Date(from) } : {}),
+            ...(to ? { lte: new Date(to) } : {}),
+          }
+        : undefined;
+
+    const rows = await getPrisma().usageEvent.findMany({
+      where: {
+        tenantId,
+        ...(createdAt ? { createdAt } : {}),
+        ...(environmentId ? { environmentId } : {}),
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    // Map each run (executionId = Temporal workflowId) to its workflowKey for the per-workflow rollup.
+    const execIds = [...new Set(rows.map((r) => r.executionId))];
+    const execs = execIds.length
+      ? await getPrisma().execution.findMany({
+          where: { workflowId: { in: execIds } },
+          select: { workflowId: true, workflowKey: true },
+        })
+      : [];
+    const workflowKeyByExec = new Map<string, string | null>(
+      execs.map((e) => [e.workflowId, e.workflowKey]),
+    );
+
+    return aggregateInsights(
+      rows.map((r) => ({
+        executionId: r.executionId,
+        environmentId: r.environmentId,
+        provider: r.provider,
+        model: r.model,
+        totalTokens: r.totalTokens,
+        costUsd: Number(r.costUsd),
+        createdAt: r.createdAt,
+      })),
+      workflowKeyByExec,
+      { from: from ?? null, to: to ?? null },
+    );
   }
 }
