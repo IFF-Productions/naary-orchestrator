@@ -69,7 +69,11 @@ beforeAll(async () => {
 afterAll(async () => {
   await env?.teardown();
   await container?.stop();
-  await new Promise<void>((resolve) => server?.close(() => resolve()));
+  // Resolve even if `server` was never assigned (a beforeAll failure before listen) — otherwise
+  // `server?.close(...)` is skipped and the Promise never settles, turning a setup failure into a hang.
+  await new Promise<void>((resolve) =>
+    server ? server.close(() => resolve()) : resolve(),
+  );
 });
 
 function makeWorker(): Promise<Worker> {
@@ -151,7 +155,7 @@ function conditionalGraph(pathName: string, table: string): GraphDef {
       {
         from: "create",
         to: "insDown",
-        condition: { path: "http.status", op: "gt", value: 399 },
+        condition: { path: "http.status", op: "gte", value: 400 },
       },
       { from: "insOk", to: "q" },
       { from: "insDown", to: "q" },
