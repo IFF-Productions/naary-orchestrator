@@ -64,16 +64,24 @@ export async function runsList(
   argv: string[],
   ctx: CommandContext,
 ): Promise<number> {
-  const args = parseCommand(argv, { limit: { type: "string" } });
+  const args = parseCommand(argv, {
+    limit: { type: "string" },
+    cursor: { type: "string" },
+  });
   if (args.help) {
     ctx.io.out(GROUP_HELP.runs);
     return 0;
   }
   const limit = int(args.values.limit);
+  const cursor = str(args.values.cursor);
   const { client } = ctx.makeClient(args.configFlags);
-  const runs = await client.request<RunListItem[]>("/runs", {
-    query: { limit },
-  });
+  // New servers return a cursor-paged envelope; a pre-pagination server returns a bare
+  // array (no cursor to print). Accept both so the CLI works against either.
+  const res = await client.request<
+    RunListItem[] | { items: RunListItem[]; nextCursor: string | null }
+  >("/runs", { query: { limit, cursor } });
+  const runs = Array.isArray(res) ? res : (res.items ?? []);
+  const nextCursor = Array.isArray(res) ? null : res.nextCursor;
   if (!runs.length) {
     ctx.io.out("No runs.");
     return 0;
@@ -98,6 +106,9 @@ export async function runsList(
       ],
     ),
   );
+  if (nextCursor) {
+    ctx.io.out(`More runs — next page: naary runs list --cursor ${nextCursor}`);
+  }
   return 0;
 }
 

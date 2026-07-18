@@ -27,7 +27,7 @@ describe("parseLimit (public ?limit= coercion)", () => {
 
 const executions = {
   start: vi.fn(),
-  list: vi.fn(),
+  listPage: vi.fn(),
   getState: vi.fn(),
   history: vi.fn(),
   cancel: vi.fn(),
@@ -67,45 +67,74 @@ describe("V1RunsController.start", () => {
 });
 
 describe("V1RunsController.list", () => {
-  it("maps RunSummary[] to the v1 shape (runId, no `archived`)", async () => {
-    executions.list.mockResolvedValue([
-      {
-        workflowId: "run-1",
-        workflowKey: "triage",
-        status: "completed",
-        costUsd: 0.02,
-        startedAt: "2026-07-04T12:00:00.000Z",
-        createdAt: "2026-07-04T12:00:00.000Z",
-        archived: false, // internal-only — must NOT appear in the v1 response
-        graphVersion: 3,
-      },
-    ]);
+  it("maps the RunPage to the v1 envelope (runId, no `archived`) + nextCursor", async () => {
+    executions.listPage.mockResolvedValue({
+      items: [
+        {
+          workflowId: "run-1",
+          workflowKey: "triage",
+          status: "completed",
+          costUsd: 0.02,
+          startedAt: "2026-07-04T12:00:00.000Z",
+          createdAt: "2026-07-04T12:00:00.000Z",
+          archived: false, // internal-only — must NOT appear in the v1 response
+          graphVersion: 3,
+        },
+      ],
+      nextCursor: "cur-next",
+    });
 
     const out = await ctrl.list("t-1", "10");
 
-    expect(executions.list).toHaveBeenCalledWith("t-1", 10);
-    expect(out).toEqual([
-      {
-        runId: "run-1",
-        workflowKey: "triage",
-        status: "completed",
-        costUsd: 0.02,
-        startedAt: "2026-07-04T12:00:00.000Z",
-        graphVersion: 3,
-      },
-    ]);
+    expect(executions.listPage).toHaveBeenCalledWith("t-1", {
+      limit: 10,
+      cursor: undefined,
+    });
+    expect(out).toEqual({
+      items: [
+        {
+          runId: "run-1",
+          workflowKey: "triage",
+          status: "completed",
+          costUsd: 0.02,
+          startedAt: "2026-07-04T12:00:00.000Z",
+          graphVersion: 3,
+        },
+      ],
+      nextCursor: "cur-next",
+    });
     // The internal-only field did not cross the boundary.
-    expect(out[0]).not.toHaveProperty("archived");
-    expect(out[0]).not.toHaveProperty("workflowId");
-    expect(out[0]).not.toHaveProperty("createdAt");
+    expect(out.items[0]).not.toHaveProperty("archived");
+    expect(out.items[0]).not.toHaveProperty("workflowId");
+    expect(out.items[0]).not.toHaveProperty("createdAt");
   });
 
   it("defaults limit to 50 when absent or non-numeric", async () => {
-    executions.list.mockResolvedValue([]);
+    executions.listPage.mockResolvedValue({ items: [], nextCursor: null });
     await ctrl.list("t-1", undefined);
-    expect(executions.list).toHaveBeenCalledWith("t-1", 50);
+    expect(executions.listPage).toHaveBeenCalledWith("t-1", {
+      limit: 50,
+      cursor: undefined,
+    });
     await ctrl.list("t-1", "abc");
-    expect(executions.list).toHaveBeenLastCalledWith("t-1", 50);
+    expect(executions.listPage).toHaveBeenLastCalledWith("t-1", {
+      limit: 50,
+      cursor: undefined,
+    });
+  });
+
+  it("passes ?cursor= through verbatim (opaque) and blanks to undefined", async () => {
+    executions.listPage.mockResolvedValue({ items: [], nextCursor: null });
+    await ctrl.list("t-1", "5", "abc123");
+    expect(executions.listPage).toHaveBeenCalledWith("t-1", {
+      limit: 5,
+      cursor: "abc123",
+    });
+    await ctrl.list("t-1", "5", "  ");
+    expect(executions.listPage).toHaveBeenLastCalledWith("t-1", {
+      limit: 5,
+      cursor: undefined,
+    });
   });
 });
 

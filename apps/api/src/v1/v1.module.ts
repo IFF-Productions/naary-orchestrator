@@ -2,7 +2,6 @@ import { Module } from "@nestjs/common";
 import { EnvSecretsModule } from "../env-secrets/env-secrets.module";
 import { EnvironmentsModule } from "../environments/environments.module";
 import { ExecutionsModule } from "../executions/executions.module";
-import { SchedulesModule } from "../schedules/schedules.module";
 import { UsageModule } from "../usage/usage.module";
 import { VariablesModule } from "../variables/variables.module";
 import { ApiTokenThrottlerGuard } from "./api-token-throttler.guard";
@@ -19,15 +18,15 @@ import { V1WorkflowsController } from "./v1-workflows.controller";
  * Slice 1: runs (start + read paths). Slice 2: run lifecycle (cancel/rerun/approve + awaiting).
  * Slice 3: workflows (CRUD + export/import + promote). Slice 4: config (variables + write-only
  * secrets + usage). Later slices add the CLI.
- * (GraphsService is @Global; SchedulesModule is imported for the workflows controller's default-env
- * schedule sync/teardown. Variables/EnvSecrets/Usage modules are imported so the config controller can
- * reuse the SAME services the SPA uses — they export those providers additively for v1.)
+ * (GraphsService + WorkflowLifecycleService are @Global via GraphsModule — the lifecycle service is
+ * the consolidated save/delete path owning the default-env schedule sync/teardown.
+ * Variables/EnvSecrets/Usage modules are imported so the config controller can reuse the SAME
+ * services the SPA uses — they export those providers additively for v1.)
  */
 @Module({
   imports: [
     ExecutionsModule,
     EnvironmentsModule,
-    SchedulesModule,
     VariablesModule,
     EnvSecretsModule,
     UsageModule,

@@ -44,6 +44,19 @@ export class RunListItemResponse {
   graphVersion!: number | null;
 }
 
+/** Cursor-paged run list envelope: `items` + the opaque `nextCursor` for the next page. */
+export class RunListResponse {
+  @ApiProperty({ type: [RunListItemResponse] })
+  items!: RunListItemResponse[];
+  @ApiProperty({
+    nullable: true,
+    example: "eyJ0IjoiMjAyNi0wNy0wNFQxMjowMDowMC4wMDBaIiwiaWQiOiJydW4tMSJ9",
+    description:
+      "Opaque cursor for the next page — pass it back as ?cursor=. null when there are no more runs.",
+  })
+  nextCursor!: string | null;
+}
+
 export class RunDetailResponse {
   @ApiProperty({ example: "run-8f3a1c2e" })
   runId!: string;

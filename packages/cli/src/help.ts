@@ -10,6 +10,7 @@ Groups:
   runs        Start, list, inspect, watch, cancel, rerun runs
   workflows   List, get, export, import, delete, promote workflows
   approvals   List and act on human-approval waits
+  config      Variables, write-only secrets, and usage
 
 Connection options (pass after <group> <command>):
   --api-url <url>   API base URL (default http://localhost:3000)
@@ -31,7 +32,7 @@ export const GROUP_HELP: Record<string, string> = {
   runs: `naary runs — manage runs
 
   naary runs start [--workflow KEY] [--input '<json>'] [--env ENV]   Start a run, print runId
-  naary runs list [--limit N]                                       List recent runs
+  naary runs list [--limit N] [--cursor C]                          List recent runs (paged)
   naary runs get <id>                                               Show status + current node + output
   naary runs watch <id> [--exit-code] [--interval SEC]              Poll until terminal
   naary runs cancel <id>                                            Request cancellation
@@ -51,4 +52,14 @@ export const GROUP_HELP: Record<string, string> = {
   naary approvals list                          List runs awaiting approval
   naary approvals approve <id> [--comment ...]  Approve
   naary approvals reject <id> [--comment ...]   Reject`,
+
+  config: `naary config — variables + secrets (per environment), usage (whole workspace)
+
+  naary config variables list                       List variables ($vars)
+  naary config variables set <key> <value>          Create/overwrite a variable
+  naary config variables delete <key>               Delete a variable
+  naary config secrets list                         List secret NAMES (values are write-only)
+  naary config secrets set <name> <value>           Create/replace a secret (value never echoed)
+  naary config secrets delete <name>                Delete a secret
+  naary config usage [--from ISO] [--to ISO]        Spend + tokens, workspace-wide (totals and by model)`,
 };

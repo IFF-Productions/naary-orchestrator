@@ -25,7 +25,7 @@ import {
   RunActionResponse,
   RunDetailResponse,
   RunHistoryEventResponse,
-  RunListItemResponse,
+  RunListResponse,
   RunRefResponse,
 } from "./v1-run.response";
 
@@ -88,26 +88,35 @@ export class V1RunsController {
 
   @ApiEndpoint({
     summary: "List runs",
-    description: "Most-recent runs for the token's tenant (newest first).",
-    ok: [RunListItemResponse],
+    description:
+      "Most-recent runs for the token's tenant (newest first), cursor-paged: pass the previous page's `nextCursor` as ?cursor= for the next page. 400 on a malformed cursor.",
+    ok: RunListResponse,
   })
   @Get()
   async list(
     @TenantId() tenantId: string,
     @Query("limit") limit?: string,
-  ): Promise<RunListItemResponse[]> {
+    @Query("cursor") cursor?: string,
+  ): Promise<RunListResponse> {
     // Coerce + clamp at the PUBLIC boundary so the API behaves predictably: a non-integer
     // ("10.5"), a negative, or garbage never reaches Prisma `take`. Default 50, bounded 1..100
-    // (the service clamps too, but the public contract shouldn't rely on that).
-    const rows = await this.executions.list(tenantId, parseLimit(limit));
-    return rows.map((r) => ({
-      runId: r.workflowId,
-      workflowKey: r.workflowKey,
-      status: r.status,
-      costUsd: r.costUsd,
-      startedAt: r.startedAt,
-      graphVersion: r.graphVersion,
-    }));
+    // (the service clamps too, but the public contract shouldn't rely on that). The cursor is
+    // opaque — passed through verbatim; the service 400s on a malformed one.
+    const page = await this.executions.listPage(tenantId, {
+      limit: parseLimit(limit),
+      cursor: cursor?.trim() || undefined,
+    });
+    return {
+      items: page.items.map((r) => ({
+        runId: r.workflowId,
+        workflowKey: r.workflowKey,
+        status: r.status,
+        costUsd: r.costUsd,
+        startedAt: r.startedAt,
+        graphVersion: r.graphVersion,
+      })),
+      nextCursor: page.nextCursor,
+    };
   }
 
   @ApiEndpoint({

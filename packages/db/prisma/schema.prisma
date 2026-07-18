@@ -506,28 +506,10 @@ model CompanyMembership {
   @@index([userId])
 }
 
-// Per-tenant notification settings. A run notifies (best-effort) via an outbound
-// webhook POST when an approval is pending or a run fails — so a HITL flow that can
-// pause for days actually reaches a human. One row per tenant; absence = off.
-// DORMANT — superseded by NotificationChannel (per-channel, independently configurable). Kept
-// (not dropped) for one release so an old worker mid-rolling-deploy can still read it; the
-// notification_channels migration BACKFILLS its rows into NotificationChannel. Drop in a later
-// migration once every worker/api replica reads NotificationChannel.
-model NotificationSettings {
-  tenantId          String   @id
-  webhookUrl        String? // POST target (Slack/Teams/generic incoming webhook)
-  // Which payload format to send to webhookUrl. "slack" = Block Kit (default, back-compat);
-  // "teams" = an Adaptive Card in the {type:"message",attachments:[…]} envelope that a Teams
-  // Workflows/Incoming-Webhook renders. The worker branches on this.
-  channel           String   @default("slack")
-  onApprovalPending Boolean  @default(true)
-  onRunFailed       Boolean  @default(true)
-  updatedAt         DateTime @default(now()) @updatedAt
-}
-
 // One row per (tenant, channel type) — Slack, Teams, and (later) email each configured and
 // toggled INDEPENDENTLY, so a run-failed alert can fan out to several at once rather than the
-// old either/or `NotificationSettings.channel`. The worker reads all `enabled` rows and POSTs
+// old either/or single-row NotificationSettings (dropped after the #294 two-release dance —
+// its rows were backfilled into this model). The worker reads all `enabled` rows and POSTs
 // each, formatting per `type`. Event routing is per-channel (send failures to Slack, approvals
 // to Teams, …). A tenant may have ANY NUMBER of channels per type (N Slack + N Teams
 // webhooks — e.g. #alerts and #oncall); each row is addressed by its `id` and the worker

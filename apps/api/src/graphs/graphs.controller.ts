@@ -27,7 +27,6 @@ import {
   TenantId,
 } from "../auth/tenant.decorator";
 import { EnvironmentsService } from "../environments/environments.service";
-import { SchedulesService } from "../schedules/schedules.service";
 import { ApiEndpoint, ApiStandardErrors } from "../swagger/api-decorators";
 import { GenerateGraphDto, PromoteGraphDto, SaveGraphDto } from "./graph.dto";
 import { GraphGeneratorService } from "./graph-generator.service";
@@ -42,6 +41,7 @@ import {
   SaveGraphResponse,
 } from "./graph.response";
 import { type GraphSummary, GraphsService } from "./graphs.service";
+import { WorkflowLifecycleService } from "./workflow-lifecycle.service";
 
 /** Generation ceiling for the SSE route — heartbeats keep the proxy alive, so the
  *  claude-code subprocess may run far past nginx's 60s default read timeout. */
@@ -86,7 +86,7 @@ export class GraphsController {
   constructor(
     private readonly graphs: GraphsService,
     private readonly generator: GraphGeneratorService,
-    private readonly schedules: SchedulesService,
+    private readonly lifecycle: WorkflowLifecycleService,
     private readonly environments: EnvironmentsService,
   ) {}
 
@@ -330,24 +330,15 @@ export class GraphsController {
   ): Promise<{ workflowKey: string; version: number; contentHash: string }> {
     const graph = toGraphDef(body.graph);
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    const snap = await this.graphs.upsert(
+    // Consolidated save path (shared with v1): upsert + the DEFAULT-ENV-ONLY, best-effort
+    // poll/cron schedule sync live in WorkflowLifecycleService.
+    const snap = await this.lifecycle.saveWorkflow(
       tenantId,
       envId,
       body.workflowKey,
       body.name,
       graph,
     );
-    // Temporal schedules aren't env-scoped yet (deferred), so ONLY (re)sync them when saving in
-    // the DEFAULT env — else a non-default (sandbox) save would reconfigure the default/prod env's
-    // cron/interval from the sandbox graph. Best-effort — a scheduling hiccup must not fail a save.
-    if (await this.environments.isDefaultEnv(tenantId, envId)) {
-      await this.schedules
-        .syncPollSchedule(tenantId, body.workflowKey, graph)
-        .catch(() => undefined);
-      await this.schedules
-        .syncCronSchedule(tenantId, body.workflowKey, graph)
-        .catch(() => undefined);
-    }
     return {
       workflowKey: body.workflowKey,
       version: snap.version,
@@ -415,20 +406,12 @@ export class GraphsController {
     @EnvironmentSel() envSel?: string,
   ): Promise<{ deleted: true }> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    const isDefault = await this.environments.isDefaultEnv(tenantId, envId);
-    // Schedules + the shared (not-yet-env-scoped) rows/triggers only belong to the default env's
-    // copy — tearing them down from a NON-default env would kill the default/prod copy's schedules
-    // and webhooks for the same workflowKey. So only do the tenant-wide teardown in the default env.
-    if (isDefault) {
-      await this.schedules
-        .teardownForWorkflow(tenantId, workflowKey)
-        .catch(() => undefined);
-    }
-    const deleted = await this.graphs.deleteWorkflow(
+    // Consolidated delete path (shared with v1): the DEFAULT-ENV-ONLY, best-effort schedule
+    // teardown + deleteShared gating live in WorkflowLifecycleService.
+    const deleted = await this.lifecycle.deleteWorkflow(
       tenantId,
       envId,
       workflowKey,
-      isDefault,
     );
     if (!deleted) {
       throw new NotFoundException(`No workflow '${workflowKey}'`);

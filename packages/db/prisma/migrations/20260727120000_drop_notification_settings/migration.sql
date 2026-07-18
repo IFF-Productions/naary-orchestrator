@@ -1,0 +1,11 @@
+-- Drop the legacy single-row NotificationSettings table — step 2 of the expand/contract
+-- ("two-release") dance for per-channel notifications:
+--
+--   Release 1 (#294, 20260725120000_multi_notification_channels): introduced
+--   NotificationChannel (one row per tenant+channel, independently configurable),
+--   BACKFILLED every NotificationSettings row into it, and left the old table DORMANT so
+--   an old worker/api replica mid-rolling-deploy could still read it.
+--
+--   Release 2 (this migration): every deployed worker/api replica has read
+--   NotificationChannel since release 1 shipped, so the dormant table can now be dropped.
+DROP TABLE "NotificationSettings";

@@ -20,7 +20,7 @@ import {
 } from "../auth/tenant.decorator";
 import { EnvironmentsService } from "../environments/environments.service";
 import { GraphsService } from "../graphs/graphs.service";
-import { SchedulesService } from "../schedules/schedules.service";
+import { WorkflowLifecycleService } from "../graphs/workflow-lifecycle.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { ApiTokenThrottlerGuard } from "./api-token-throttler.guard";
 import { ImportWorkflowDto, PromoteWorkflowDto } from "./v1-workflow.dto";
@@ -60,11 +60,11 @@ function toGraphDef(g: Record<string, unknown>): GraphDef {
  * Export/import are symmetric: `GET :key` returns { workflowKey, name, version, graph } and `PUT :key`
  * accepts { name, graph } — so `export > file.json` then `import < file.json` round-trips.
  *
- * NOTE (schedule side-effects): create (PUT) and delete mirror the SPA controller's DEFAULT-ENV-only
- * schedule sync/teardown — schedules aren't env-scoped yet, so doing it from a non-default env would
- * clobber the default/prod copy's triggers. Without this, a workflow imported via the API with a
- * poll/cron trigger would silently never fire. TODO(consolidate): move these side-effects into
- * GraphsService so this and graphs.controller share one path.
+ * NOTE (schedule side-effects): create (PUT) and delete go through WorkflowLifecycleService — the
+ * ONE consolidated save/delete path shared with graphs.controller — which owns the DEFAULT-ENV-only,
+ * best-effort schedule sync/teardown (schedules aren't env-scoped yet, so doing it from a
+ * non-default env would clobber the default/prod copy's triggers; without it, a workflow imported
+ * via the API with a poll/cron trigger would silently never fire).
  *
  * Mounted at v1/workflows; the `/api` prefix is stripped by the web proxy/nginx, so callers hit
  * /api/v1/workflows.
@@ -77,7 +77,7 @@ export class V1WorkflowsController {
   constructor(
     private readonly graphs: GraphsService,
     private readonly environments: EnvironmentsService,
-    private readonly schedules: SchedulesService,
+    private readonly lifecycle: WorkflowLifecycleService,
   ) {}
 
   @ApiEndpoint({
@@ -142,24 +142,15 @@ export class V1WorkflowsController {
   ): Promise<WorkflowSavedResponse> {
     const graph = toGraphDef(body.graph);
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    const snap = await this.graphs.upsert(
+    // Consolidated save path (shared with graphs.controller): upsert + the DEFAULT-ENV-ONLY,
+    // best-effort poll/cron schedule sync live in WorkflowLifecycleService.
+    const snap = await this.lifecycle.saveWorkflow(
       tenantId,
       envId,
       key,
       body.name,
       graph,
     );
-    // Schedules aren't env-scoped yet — only (re)sync in the DEFAULT env so a sandbox save can't
-    // reconfigure the default/prod env's cron/interval. Best-effort: a scheduling hiccup must not
-    // fail the save. (Mirrors graphs.controller.save.)
-    if (await this.environments.isDefaultEnv(tenantId, envId)) {
-      await this.schedules
-        .syncPollSchedule(tenantId, key, graph)
-        .catch(() => undefined);
-      await this.schedules
-        .syncCronSchedule(tenantId, key, graph)
-        .catch(() => undefined);
-    }
     return {
       workflowKey: key,
       version: snap.version,
@@ -181,21 +172,9 @@ export class V1WorkflowsController {
     @EnvironmentSel() envSel?: string,
   ): Promise<{ deleted: true }> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    const isDefault = await this.environments.isDefaultEnv(tenantId, envId);
-    // The shared (not-yet-env-scoped) schedules/triggers belong to the default env's copy — tearing
-    // them down from a NON-default env would kill the default/prod copy's triggers for this key.
-    // (Mirrors graphs.controller.remove.)
-    if (isDefault) {
-      await this.schedules
-        .teardownForWorkflow(tenantId, key)
-        .catch(() => undefined);
-    }
-    const deleted = await this.graphs.deleteWorkflow(
-      tenantId,
-      envId,
-      key,
-      isDefault,
-    );
+    // Consolidated delete path (shared with graphs.controller): the DEFAULT-ENV-ONLY, best-effort
+    // schedule teardown + deleteShared gating live in WorkflowLifecycleService.
+    const deleted = await this.lifecycle.deleteWorkflow(tenantId, envId, key);
     if (!deleted) throw new NotFoundException(`No workflow '${key}'`);
     return { deleted: true };
   }

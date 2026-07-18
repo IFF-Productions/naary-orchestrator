@@ -80,7 +80,7 @@ describe("runs commands", () => {
     expect(err.join("\n")).toContain("not valid JSON");
   });
 
-  it("runs list renders a table", async () => {
+  it("runs list renders a table (legacy bare-array response)", async () => {
     const { ctx, out } = makeCtx(() => [
       {
         runId: "r1",
@@ -96,12 +96,49 @@ describe("runs commands", () => {
     expect(text).toContain("RUN ID");
     expect(text).toContain("r1");
     expect(text).toContain("$0.0200");
+    expect(text).not.toContain("--cursor"); // a bare array carries no next page
   });
 
-  it("runs list passes the limit as a query param", async () => {
-    const { ctx, requests } = makeCtx(() => []);
-    await run(["runs", "list", "--limit", "7"], ctx);
-    expect(requests[0].opts.query).toEqual({ limit: 7 });
+  it("runs list renders the paged envelope and prints the next cursor", async () => {
+    const { ctx, out } = makeCtx(() => ({
+      items: [
+        {
+          runId: "r1",
+          workflowKey: "wf1",
+          status: "completed",
+          costUsd: 0.02,
+          graphVersion: 3,
+          startedAt: "2026-07-16T10:00:00.000Z",
+        },
+      ],
+      nextCursor: "cur-abc",
+    }));
+    expect(await run(["runs", "list"], ctx)).toBe(0);
+    const text = out.join("\n");
+    expect(text).toContain("r1");
+    expect(text).toContain("--cursor cur-abc");
+  });
+
+  it("runs list omits the cursor hint on the last page (nextCursor null)", async () => {
+    const { ctx, out } = makeCtx(() => ({
+      items: [
+        {
+          runId: "r1",
+          workflowKey: "wf1",
+          status: "completed",
+          startedAt: "2026-07-16T10:00:00.000Z",
+        },
+      ],
+      nextCursor: null,
+    }));
+    expect(await run(["runs", "list"], ctx)).toBe(0);
+    expect(out.join("\n")).not.toContain("--cursor");
+  });
+
+  it("runs list passes limit + cursor as query params", async () => {
+    const { ctx, requests } = makeCtx(() => ({ items: [], nextCursor: null }));
+    await run(["runs", "list", "--limit", "7", "--cursor", "cur-abc"], ctx);
+    expect(requests[0].opts.query).toEqual({ limit: 7, cursor: "cur-abc" });
   });
 
   it("runs get requires an id", async () => {
@@ -139,6 +176,144 @@ describe("auth status", () => {
     const text = out.join("\n");
     expect(text).toContain("nry_…9999");
     expect(text).not.toContain("supersecret");
+  });
+});
+
+describe("config variables", () => {
+  it("list renders a KEY/VALUE table", async () => {
+    const { ctx, out, requests } = makeCtx(() => [
+      { key: "greeting", value: "hello" },
+    ]);
+    expect(await run(["config", "variables", "list"], ctx)).toBe(0);
+    expect(requests[0].path).toBe("/config/variables");
+    const text = out.join("\n");
+    expect(text).toContain("KEY");
+    expect(text).toContain("greeting");
+    expect(text).toContain("hello");
+  });
+
+  it("set PUTs { value } to /config/variables/:key", async () => {
+    const { ctx, out, requests } = makeCtx(() => ({
+      key: "greeting",
+      value: "hi",
+    }));
+    expect(
+      await run(["config", "variables", "set", "greeting", "hi"], ctx),
+    ).toBe(0);
+    expect(requests[0].path).toBe("/config/variables/greeting");
+    expect(requests[0].opts.method).toBe("PUT");
+    expect(requests[0].opts.body).toEqual({ value: "hi" });
+    expect(out.join("\n")).toContain("Set greeting.");
+  });
+
+  it("set requires a key AND a value (no API call)", async () => {
+    const { ctx, err, requests } = makeCtx(() => ({}));
+    expect(await run(["config", "variables", "set", "greeting"], ctx)).toBe(1);
+    expect(requests.length).toBe(0);
+    expect(err.join("\n")).toContain("Usage");
+  });
+
+  it("delete DELETEs /config/variables/:key", async () => {
+    const { ctx, requests } = makeCtx(() => ({ deleted: true }));
+    expect(await run(["config", "variables", "delete", "greeting"], ctx)).toBe(
+      0,
+    );
+    expect(requests[0].path).toBe("/config/variables/greeting");
+    expect(requests[0].opts.method).toBe("DELETE");
+  });
+
+  it("unknown action → usage error, exit 1", async () => {
+    const { ctx, err, requests } = makeCtx(() => ({}));
+    expect(await run(["config", "variables", "frobnicate"], ctx)).toBe(1);
+    expect(requests.length).toBe(0);
+    expect(err.join("\n")).toContain("Unknown action");
+  });
+});
+
+describe("config secrets (write-only)", () => {
+  it("list shows NAMES only", async () => {
+    const { ctx, out, requests } = makeCtx(() => [{ name: "API_KEY" }]);
+    expect(await run(["config", "secrets", "list"], ctx)).toBe(0);
+    expect(requests[0].path).toBe("/config/secrets");
+    const text = out.join("\n");
+    expect(text).toContain("NAME");
+    expect(text).toContain("API_KEY");
+  });
+
+  it("set PUTs the value but NEVER echoes it back", async () => {
+    const { ctx, out, requests } = makeCtx(() => ({ ok: true }));
+    expect(
+      await run(["config", "secrets", "set", "API_KEY", "s3cr3t-value"], ctx),
+    ).toBe(0);
+    expect(requests[0].path).toBe("/config/secrets/API_KEY");
+    expect(requests[0].opts.method).toBe("PUT");
+    expect(requests[0].opts.body).toEqual({ value: "s3cr3t-value" });
+    const text = out.join("\n");
+    expect(text).toContain("Secret API_KEY set.");
+    expect(text).not.toContain("s3cr3t-value"); // write-only invariant
+  });
+
+  it("set requires a name AND a value (no API call)", async () => {
+    const { ctx, err, requests } = makeCtx(() => ({}));
+    expect(await run(["config", "secrets", "set", "API_KEY"], ctx)).toBe(1);
+    expect(requests.length).toBe(0);
+    expect(err.join("\n")).toContain("Usage");
+  });
+
+  it("delete DELETEs /config/secrets/:name", async () => {
+    const { ctx, requests } = makeCtx(() => ({ deleted: true }));
+    expect(await run(["config", "secrets", "delete", "API_KEY"], ctx)).toBe(0);
+    expect(requests[0].path).toBe("/config/secrets/API_KEY");
+    expect(requests[0].opts.method).toBe("DELETE");
+  });
+});
+
+describe("config usage", () => {
+  it("prints totals and a by-model table", async () => {
+    const { ctx, out, requests } = makeCtx(() => ({
+      totalCostUsd: 1.23,
+      totalTokens: 4567,
+      byModel: [
+        {
+          provider: "anthropic",
+          model: "claude-x",
+          calls: 3,
+          totalTokens: 4567,
+          costUsd: 1.23,
+        },
+      ],
+      events: [],
+    }));
+    expect(await run(["config", "usage"], ctx)).toBe(0);
+    expect(requests[0].path).toBe("/config/usage");
+    const text = out.join("\n");
+    expect(text).toContain("Total cost: $1.2300");
+    expect(text).toContain("Total tokens: 4567");
+    expect(text).toContain("claude-x");
+  });
+
+  it("passes --from/--to through as query params", async () => {
+    const { ctx, requests } = makeCtx(() => ({
+      totalCostUsd: 0,
+      totalTokens: 0,
+      byModel: [],
+      events: [],
+    }));
+    await run(
+      [
+        "config",
+        "usage",
+        "--from",
+        "2026-07-01T00:00:00Z",
+        "--to",
+        "2026-07-17T00:00:00Z",
+      ],
+      ctx,
+    );
+    expect(requests[0].opts.query).toEqual({
+      from: "2026-07-01T00:00:00Z",
+      to: "2026-07-17T00:00:00Z",
+    });
   });
 });
 
