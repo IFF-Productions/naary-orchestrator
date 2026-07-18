@@ -77,6 +77,12 @@ export interface RunSummary {
   graphVersion: number | null;
 }
 
+/** One page of runs plus the opaque cursor for the next page (null = no more). */
+export interface RunPage {
+  items: RunSummary[];
+  nextCursor: string | null;
+}
+
 /** Live run detail — like ExecutionState but with the widened status (a run can be
  *  Temporal-failed/terminated, which ExecutionStatus alone can't express). */
 export interface RunStateView {
@@ -209,6 +215,39 @@ function mapHistoryEvent(e: RawHistoryEvent): RunEvent | null {
   if (e.workflowExecutionContinuedAsNewEventAttributes)
     return { ...base, kind: "continued", label: "Continued as new" };
   return null; // workflow-task / marker / version noise — skip
+}
+
+/**
+ * Keyset cursor over the Runs list's (createdAt DESC, workflowId DESC) order — an opaque
+ * base64url of the last row's sort key. Offset-free, so a page boundary stays stable even
+ * as new runs are inserted at the top of the list.
+ */
+function encodeRunCursor(row: { createdAt: Date; workflowId: string }): string {
+  return Buffer.from(
+    JSON.stringify({ t: row.createdAt.toISOString(), id: row.workflowId }),
+    "utf8",
+  ).toString("base64url");
+}
+
+/** Decode + validate an opaque run cursor. A malformed/garbage cursor is a 400 (the
+ *  public v1 boundary passes it through verbatim), never a Prisma error. */
+function decodeRunCursor(cursor: string): {
+  createdAt: Date;
+  workflowId: string;
+} {
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(cursor, "base64url").toString("utf8"),
+    ) as { t?: unknown; id?: unknown };
+    if (typeof parsed.t !== "string" || typeof parsed.id !== "string") {
+      throw new Error("bad cursor");
+    }
+    const createdAt = new Date(parsed.t);
+    if (Number.isNaN(createdAt.getTime())) throw new Error("bad cursor");
+    return { createdAt, workflowId: parsed.id };
+  } catch {
+    throw new BadRequestException("Invalid cursor");
+  }
 }
 
 /** Run statuses that won't change again — the read-model is authoritative for these. */
@@ -1000,46 +1039,89 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     limit = 50,
     archived = false,
   ): Promise<RunSummary[]> {
+    const { items } = await this.listPage(tenantId, { limit, archived });
+    return items;
+  }
+
+  /**
+   * Cursor-paged variant of {@link list} (the public v1 GET /runs seam). Keyset
+   * pagination on (createdAt DESC, workflowId DESC): the returned `nextCursor`
+   * encodes the last row's sort key, so the next page picks up exactly after it
+   * even as new runs land at the top (an offset would drift). `nextCursor` is null
+   * when there is no further page. Same read-model + reconcile path as list().
+   */
+  async listPage(
+    tenantId: string,
+    opts: { limit?: number; cursor?: string; archived?: boolean } = {},
+  ): Promise<RunPage> {
+    const take = Math.min(Math.max(opts.limit ?? 50, 1), 100);
+    // Default view hides archived runs; `archived: true` shows only the archived ones.
+    const base = { tenantId, archivedAt: opts.archived ? { not: null } : null };
+    // Keyset filter: rows strictly AFTER the cursor row in the (DESC, DESC) order.
+    const where = opts.cursor
+      ? {
+          ...base,
+          OR: (({ createdAt, workflowId }) => [
+            { createdAt: { lt: createdAt } },
+            { createdAt, workflowId: { lt: workflowId } },
+          ])(decodeRunCursor(opts.cursor)),
+        }
+      : base;
     const rows = await getPrisma().execution.findMany({
-      // Default view hides archived runs; `archived: true` shows only the archived ones.
-      where: { tenantId, archivedAt: archived ? { not: null } : null },
-      orderBy: { createdAt: "desc" },
-      take: Math.min(Math.max(limit, 1), 100),
+      where,
+      // The workflowId tiebreak makes the order TOTAL, so a page boundary can't
+      // skip/duplicate rows that share a createdAt.
+      orderBy: [{ createdAt: "desc" }, { workflowId: "desc" }],
+      take: take + 1, // one extra row probes "is there a next page?"
     });
-    return Promise.all(
-      rows.map(async (r) => {
-        const createdAt = r.createdAt.toISOString();
-        const base = {
-          workflowId: r.workflowId,
-          workflowKey: r.workflowKey,
-          costUsd: r.costUsd !== null ? Number(r.costUsd) : null,
-          // startedAt currently mirrors the DB row time; createdAt reads the DB field
-          // directly (per its docstring) rather than aliasing startedAt, so a future
-          // real Temporal start time can diverge without silently moving createdAt.
-          startedAt: createdAt,
-          createdAt,
-          archived: r.archivedAt !== null,
-          graphVersion: r.graphVersion,
-        };
-        if (isTerminalStatus(r.status)) {
-          return { ...base, status: r.status as RunSummary["status"] };
-        }
-        // Non-terminal in PG → reconcile against Temporal (cheap describe only) so
-        // a workflow that threw (Temporal-FAILED) isn't shown as forever-running.
-        try {
-          const desc = await this.client.workflow
-            .getHandle(r.workflowId)
-            .describe();
-          const failed = TEMPORAL_FAILED_STATUS[desc.status.name];
-          return {
-            ...base,
-            status: failed ?? (r.status as RunSummary["status"]),
-          };
-        } catch {
-          return { ...base, status: r.status as RunSummary["status"] };
-        }
-      }),
-    );
+    const page = rows.slice(0, take);
+    const nextCursor =
+      rows.length > take ? encodeRunCursor(page[page.length - 1]) : null;
+    const items = await Promise.all(page.map((r) => this.toRunSummary(r)));
+    return { items, nextCursor };
+  }
+
+  /** Map one Execution read-model row to a RunSummary (with the non-terminal
+   *  Temporal-failure reconcile described on {@link list}). */
+  private async toRunSummary(r: {
+    workflowId: string;
+    workflowKey: string | null;
+    status: string;
+    costUsd: unknown;
+    createdAt: Date;
+    archivedAt: Date | null;
+    graphVersion: number | null;
+  }): Promise<RunSummary> {
+    const createdAt = r.createdAt.toISOString();
+    const base = {
+      workflowId: r.workflowId,
+      workflowKey: r.workflowKey,
+      costUsd: r.costUsd !== null ? Number(r.costUsd) : null,
+      // startedAt currently mirrors the DB row time; createdAt reads the DB field
+      // directly (per its docstring) rather than aliasing startedAt, so a future
+      // real Temporal start time can diverge without silently moving createdAt.
+      startedAt: createdAt,
+      createdAt,
+      archived: r.archivedAt !== null,
+      graphVersion: r.graphVersion,
+    };
+    if (isTerminalStatus(r.status)) {
+      return { ...base, status: r.status as RunSummary["status"] };
+    }
+    // Non-terminal in PG → reconcile against Temporal (cheap describe only) so
+    // a workflow that threw (Temporal-FAILED) isn't shown as forever-running.
+    try {
+      const desc = await this.client.workflow
+        .getHandle(r.workflowId)
+        .describe();
+      const failed = TEMPORAL_FAILED_STATUS[desc.status.name];
+      return {
+        ...base,
+        status: failed ?? (r.status as RunSummary["status"]),
+      };
+    } catch {
+      return { ...base, status: r.status as RunSummary["status"] };
+    }
   }
 
   /**

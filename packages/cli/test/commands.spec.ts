@@ -80,7 +80,7 @@ describe("runs commands", () => {
     expect(err.join("\n")).toContain("not valid JSON");
   });
 
-  it("runs list renders a table", async () => {
+  it("runs list renders a table (legacy bare-array response)", async () => {
     const { ctx, out } = makeCtx(() => [
       {
         runId: "r1",
@@ -96,12 +96,49 @@ describe("runs commands", () => {
     expect(text).toContain("RUN ID");
     expect(text).toContain("r1");
     expect(text).toContain("$0.0200");
+    expect(text).not.toContain("--cursor"); // a bare array carries no next page
   });
 
-  it("runs list passes the limit as a query param", async () => {
-    const { ctx, requests } = makeCtx(() => []);
-    await run(["runs", "list", "--limit", "7"], ctx);
-    expect(requests[0].opts.query).toEqual({ limit: 7 });
+  it("runs list renders the paged envelope and prints the next cursor", async () => {
+    const { ctx, out } = makeCtx(() => ({
+      items: [
+        {
+          runId: "r1",
+          workflowKey: "wf1",
+          status: "completed",
+          costUsd: 0.02,
+          graphVersion: 3,
+          startedAt: "2026-07-16T10:00:00.000Z",
+        },
+      ],
+      nextCursor: "cur-abc",
+    }));
+    expect(await run(["runs", "list"], ctx)).toBe(0);
+    const text = out.join("\n");
+    expect(text).toContain("r1");
+    expect(text).toContain("--cursor cur-abc");
+  });
+
+  it("runs list omits the cursor hint on the last page (nextCursor null)", async () => {
+    const { ctx, out } = makeCtx(() => ({
+      items: [
+        {
+          runId: "r1",
+          workflowKey: "wf1",
+          status: "completed",
+          startedAt: "2026-07-16T10:00:00.000Z",
+        },
+      ],
+      nextCursor: null,
+    }));
+    expect(await run(["runs", "list"], ctx)).toBe(0);
+    expect(out.join("\n")).not.toContain("--cursor");
+  });
+
+  it("runs list passes limit + cursor as query params", async () => {
+    const { ctx, requests } = makeCtx(() => ({ items: [], nextCursor: null }));
+    await run(["runs", "list", "--limit", "7", "--cursor", "cur-abc"], ctx);
+    expect(requests[0].opts.query).toEqual({ limit: 7, cursor: "cur-abc" });
   });
 
   it("runs get requires an id", async () => {

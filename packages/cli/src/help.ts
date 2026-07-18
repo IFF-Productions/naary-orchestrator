@@ -31,7 +31,7 @@ export const GROUP_HELP: Record<string, string> = {
   runs: `naary runs — manage runs
 
   naary runs start [--workflow KEY] [--input '<json>'] [--env ENV]   Start a run, print runId
-  naary runs list [--limit N]                                       List recent runs
+  naary runs list [--limit N] [--cursor C]                          List recent runs (paged)
   naary runs get <id>                                               Show status + current node + output
   naary runs watch <id> [--exit-code] [--interval SEC]              Poll until terminal
   naary runs cancel <id>                                            Request cancellation
