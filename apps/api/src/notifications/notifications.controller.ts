@@ -9,6 +9,8 @@ import {
   Post,
 } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
+import { EnvironmentSel } from "../auth/tenant.decorator";
+import { EnvironmentsService } from "../environments/environments.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import {
   CreateNotificationChannelDto,
@@ -23,39 +25,49 @@ import {
   NotificationsService,
 } from "./notifications.service";
 
-/** tenantId from the path; AuthGuard enforces path-tenant == token-tenant. A tenant may
- *  have ANY NUMBER of channels per type (N Slack + N Teams webhooks); each is addressed
- *  by its row id. */
+/** tenantId from the path; AuthGuard enforces path-tenant == token-tenant. Channels are
+ *  ENV-scoped (Slice 6b): every route resolves the ACTIVE environment (X-Environment-Id,
+ *  absent = tenant default) and only sees that env's channels. A tenant may have ANY
+ *  NUMBER of channels per type per env; each is addressed by its row id. */
 @ApiBearerAuth("bearer")
 @Controller("tenants/:id/notifications")
 export class NotificationsController {
-  constructor(private readonly notifications: NotificationsService) {}
+  constructor(
+    private readonly notifications: NotificationsService,
+    private readonly environments: EnvironmentsService,
+  ) {}
 
   @ApiEndpoint({
     summary: "List notification channels",
     description:
-      "Every configured channel (any number of Slack/Teams webhooks), in a stable order.",
+      "Every channel configured in the active environment (any number of Slack/Teams webhooks), in a stable order.",
     ok: [NotificationChannelResponse],
   })
   @Get()
-  list(@Param("id") tenantId: string): Promise<NotificationChannelView[]> {
-    return this.notifications.list(tenantId);
+  async list(
+    @Param("id") tenantId: string,
+    @EnvironmentSel() envSel?: string,
+  ): Promise<NotificationChannelView[]> {
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    return this.notifications.list(tenantId, envId);
   }
 
   @ApiEndpoint({
     summary: "Add a notification channel",
     description:
-      "Creates a new channel of the given type — a tenant can have several per type (e.g. two Slack webhooks for #alerts and #oncall).",
+      "Creates a new channel of the given type in the active environment — a tenant can have several per type (e.g. two Slack webhooks for #alerts and #oncall).",
     created: NotificationChannelResponse,
   })
   @Post()
   @HttpCode(201)
-  createChannel(
+  async createChannel(
     @Param("id") tenantId: string,
     @Body() body: CreateNotificationChannelDto,
+    @EnvironmentSel() envSel?: string,
   ): Promise<NotificationChannelView> {
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
     const { type, ...patch } = body;
-    return this.notifications.createChannel(tenantId, type, patch);
+    return this.notifications.createChannel(tenantId, envId, type, patch);
   }
 
   @ApiEndpoint({
@@ -65,12 +77,14 @@ export class NotificationsController {
     ok: NotificationChannelResponse,
   })
   @Patch(":channelId")
-  updateChannel(
+  async updateChannel(
     @Param("id") tenantId: string,
     @Param("channelId") channelId: string,
     @Body() body: UpdateNotificationChannelDto,
+    @EnvironmentSel() envSel?: string,
   ): Promise<NotificationChannelView> {
-    return this.notifications.updateChannel(tenantId, channelId, body);
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    return this.notifications.updateChannel(tenantId, envId, channelId, body);
   }
 
   @ApiEndpoint({
@@ -83,8 +97,10 @@ export class NotificationsController {
   async deleteChannel(
     @Param("id") tenantId: string,
     @Param("channelId") channelId: string,
+    @EnvironmentSel() envSel?: string,
   ): Promise<{ ok: true; status: number }> {
-    await this.notifications.deleteChannel(tenantId, channelId);
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    await this.notifications.deleteChannel(tenantId, envId, channelId);
     return { ok: true, status: 200 };
   }
 
@@ -99,10 +115,12 @@ export class NotificationsController {
   })
   @Post(":channelId/test")
   @HttpCode(200)
-  sendTest(
+  async sendTest(
     @Param("id") tenantId: string,
     @Param("channelId") channelId: string,
+    @EnvironmentSel() envSel?: string,
   ): Promise<{ ok: true; status: number }> {
-    return this.notifications.sendTest(tenantId, channelId);
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    return this.notifications.sendTest(tenantId, envId, channelId);
   }
 }

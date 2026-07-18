@@ -105,6 +105,16 @@ export function NotificationsSection({
         many webhooks as you need — e.g. Slack #alerts AND #oncall; alerts go to
         every enabled one.
       </div>
+      <div
+        style={{
+          fontSize: "var(--text-sm)",
+          color: "var(--ink-3)",
+          marginBottom: 12,
+        }}
+      >
+        Channels belong to the current environment — each environment routes its
+        own alerts, so a sandbox failure never pages production's channels.
+      </div>
       {channels.map((ch) => {
         const meta = CHANNEL_META[ch.type];
         const key = ch.localKey;

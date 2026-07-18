@@ -302,8 +302,9 @@ describe("GraphsService.deleteWorkflow", () => {
     expect(del.workflowActivation).toHaveBeenCalledWith({
       where: { tenantId: "t1", environmentId: "e1", workflowKey: "wf-1" },
     });
+    // Pins are env-scoped (6b): deleted for THIS env alongside the graph.
     expect(del.pinnedData).toHaveBeenCalledWith({
-      where: { tenantId: "t1", workflowKey: "wf-1" },
+      where: { tenantId: "t1", environmentId: "e1", workflowKey: "wf-1" },
     });
     expect(del.pollState).toHaveBeenCalledWith({
       where: { tenantId: "t1", workflowKey: "wf-1" },
@@ -347,8 +348,16 @@ describe("GraphsService.deleteWorkflow", () => {
       },
     });
     expect(del.workflowActivation).toHaveBeenCalledOnce();
+    // Pins are env-scoped (6b): the SANDBOX env's pins go with its copy — prod's pins survive
+    // because the where targets only this env.
+    expect(del.pinnedData).toHaveBeenCalledWith({
+      where: {
+        tenantId: "t1",
+        environmentId: "e-sandbox",
+        workflowKey: "wf-1",
+      },
+    });
     // …but the SHARED (tenant-wide) rows/triggers are left intact (prod's copy uses them).
-    expect(del.pinnedData).not.toHaveBeenCalled();
     expect(del.pollState).not.toHaveBeenCalled();
     expect(del.errorHandler).not.toHaveBeenCalled();
     expect(del.webhookEndpoint).not.toHaveBeenCalled();
@@ -385,8 +394,16 @@ describe("diffVersions", () => {
   };
 
   it("returns the structural diff between two versions", async () => {
-    findUnique.mockResolvedValueOnce(row(1, v1)).mockResolvedValueOnce(row(2, v2));
-    const d = await new GraphsService().diffVersions("t1", "e1", "refunds", 1, 2);
+    findUnique
+      .mockResolvedValueOnce(row(1, v1))
+      .mockResolvedValueOnce(row(2, v2));
+    const d = await new GraphsService().diffVersions(
+      "t1",
+      "e1",
+      "refunds",
+      1,
+      2,
+    );
     expect(d.fromVersion).toBe(1);
     expect(d.toVersion).toBe(2);
     expect(d.nodesAdded.map((n) => n.id)).toEqual(["c"]);

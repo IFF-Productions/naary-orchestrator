@@ -1106,6 +1106,7 @@ export async function runGraph(
           try {
             await sendNotification({
               tenantId: runCtx.tenantId,
+              environmentId: runCtx.environmentId,
               kind: "approval_pending",
               workflowId: wf.workflowInfo().workflowId,
               workflowKey: runCtx.workflowKey,
@@ -1683,6 +1684,7 @@ export async function runGraph(
     try {
       await sendNotification({
         tenantId: runCtx.tenantId,
+        environmentId: runCtx.environmentId,
         kind: "run_failed",
         workflowId: wf.workflowInfo().workflowId,
         workflowKey: runCtx.workflowKey,

@@ -449,9 +449,10 @@ export class GraphsService {
     environmentId: string,
     workflowKey: string,
     /** True only when deleting the DEFAULT env's copy. The shared (not-yet-env-scoped) rows —
-     *  pins/poll/error-handler/triggers, keyed by (tenant, workflowKey) — are removed ONLY then,
+     *  poll/error-handler/triggers, keyed by (tenant, workflowKey) — are removed ONLY then,
      *  so deleting a non-default (sandbox) copy of a key can't wipe the default/prod copy's
-     *  webhooks/pins. Those tables env-scope in later slices; this gate goes away with them. */
+     *  webhooks. Those tables env-scope in later slices; this gate goes away with them.
+     *  (Pins env-scoped in 6b and moved out of this gate.) */
     deleteShared: boolean,
   ): Promise<boolean> {
     const existed = await getPrisma().graphDefinition.findFirst({
@@ -461,7 +462,7 @@ export class GraphsService {
     if (!existed) return false;
 
     const p = getPrisma();
-    // Always delete THIS env's GraphDefinition + WorkflowActivation.
+    // Always delete THIS env's GraphDefinition + WorkflowActivation + pins (env-scoped, 6b).
     const ops = [
       p.graphDefinition.deleteMany({
         where: { tenantId, environmentId, workflowKey },
@@ -469,12 +470,14 @@ export class GraphsService {
       p.workflowActivation.deleteMany({
         where: { tenantId, environmentId, workflowKey },
       }),
+      p.pinnedData.deleteMany({
+        where: { tenantId, environmentId, workflowKey },
+      }),
     ];
     // The shared, tenant-wide rows/triggers belong to the default env's copy — only remove them
-    // when deleting THAT copy (else a sandbox delete kills prod's webhooks/pins for the same key).
+    // when deleting THAT copy (else a sandbox delete kills prod's webhooks for the same key).
     if (deleteShared) {
       ops.push(
-        p.pinnedData.deleteMany({ where: { tenantId, workflowKey } }),
         p.pollState.deleteMany({ where: { tenantId, workflowKey } }),
         // Error-handler bindings where this key is EITHER the failing workflow or the handler.
         p.errorHandler.deleteMany({

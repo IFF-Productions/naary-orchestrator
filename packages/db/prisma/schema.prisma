@@ -139,14 +139,20 @@ model Promotion {
  *  build downstream nodes against a saved output without re-running upstream. The interpreter NEVER
  *  reads this (a real run always executes upstream) — it's a dev aid, invisible to production. */
 model PinnedData {
-  tenantId    String
-  workflowKey String
-  nodeId      String
-  output      Json // the pinned sample (keep small; large blobs use the claim-check store)
-  updatedAt   DateTime @default(now()) @updatedAt
+  tenantId      String
+  environmentId String
+  workflowKey   String
+  nodeId        String
+  output        Json // the pinned sample (keep small; large blobs use the claim-check store)
+  updatedAt     DateTime @default(now()) @updatedAt
 
-  @@id([tenantId, workflowKey, nodeId])
-  @@index([tenantId, workflowKey])
+  // Cascade (NOT Restrict, unlike Connection/TenantCredential): pins are disposable authoring
+  // aids — deleting an environment takes its pins with it rather than 409-blocking the delete.
+  environment Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  // The PK's left prefix (tenantId, environmentId, workflowKey) also serves the pins-list and
+  // delete-workflow queries, so no secondary index is needed.
+  @@id([tenantId, environmentId, workflowKey, nodeId])
 }
 
 /** Per-workflow error-handler binding: when the run for `workflowKey` fails, the
@@ -401,6 +407,8 @@ model Environment {
   connections         Connection[]
   tenantCredentials   TenantCredential[]
   variables           Variable[]
+  notificationChannels NotificationChannel[]
+  pinnedData           PinnedData[]
 
   @@unique([tenantId, slug])
   @@index([tenantId])
@@ -527,6 +535,7 @@ model NotificationSettings {
 model NotificationChannel {
   id                String   @id @default(uuid())
   tenantId          String
+  environmentId     String // env-scoped (Slice 6b): a sandbox failure must not page prod's Slack
   type              String // "slack" | "teams" | (future: "email")
   label             String? // user-facing name (e.g. "#alerts"); null = unnamed
   enabled           Boolean  @default(true)
@@ -539,7 +548,11 @@ model NotificationChannel {
   createdAt         DateTime @default(now()) // stable list/fan-out order among same-type rows
   updatedAt         DateTime @default(now()) @updatedAt
 
-  @@index([tenantId])
+  // Cascade (NOT Restrict): channels are disposable config — deleting an environment removes
+  // its channels rather than 409-blocking the delete the way workflows/connections do.
+  environment Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, environmentId])
 }
 
 // Per-USER preferences — personal + cross-workspace, so they follow a user across
