@@ -89,7 +89,11 @@ export function initSentry(opts: { component: "api" | "worker" }): void {
   );
   Sentry.init({
     dsn,
-    environment: process.env.NODE_ENV ?? "development",
+    // Prefer an explicit SENTRY_ENVIRONMENT (the deploy sets it to "production"); fall back to
+    // NODE_ENV, then "development". Without this, prod containers (which don't set NODE_ENV=production)
+    // reported every event under "development".
+    environment:
+      process.env.SENTRY_ENVIRONMENT ?? process.env.NODE_ENV ?? "development",
     release: process.env.SENTRY_RELEASE,
     // Opt-in performance tracing; 0 (off) unless explicitly configured.
     tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? "0"),
