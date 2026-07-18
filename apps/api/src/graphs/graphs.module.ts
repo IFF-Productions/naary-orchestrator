@@ -6,6 +6,7 @@ import { SchedulesModule } from "../schedules/schedules.module";
 import { GraphGeneratorService } from "./graph-generator.service";
 import { GraphsController } from "./graphs.controller";
 import { GraphsService } from "./graphs.service";
+import { WorkflowLifecycleService } from "./workflow-lifecycle.service";
 
 /** Global so ExecutionsService and the webhook ingress can resolve graphs from DB. */
 @Global()
@@ -14,6 +15,7 @@ import { GraphsService } from "./graphs.service";
   controllers: [GraphsController],
   providers: [
     GraphsService,
+    WorkflowLifecycleService,
     GraphGeneratorService,
     // Plain class from @naary/secrets (reads ENCRYPTION_KEY at construction); the
     // generator decrypts the tenant's provider key in-request for the model call.
@@ -21,6 +23,6 @@ import { GraphsService } from "./graphs.service";
     // The generator lists the tenant's connections so it uses real connectionIds.
     { provide: ConnectionService, useFactory: () => new ConnectionService() },
   ],
-  exports: [GraphsService, GraphGeneratorService],
+  exports: [GraphsService, WorkflowLifecycleService, GraphGeneratorService],
 })
 export class GraphsModule {}

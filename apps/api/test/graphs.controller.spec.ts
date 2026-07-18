@@ -6,14 +6,12 @@ import { SaveGraphDto } from "../src/graphs/graph.dto";
 import { GraphsController } from "../src/graphs/graphs.controller";
 import type { GraphGeneratorService } from "../src/graphs/graph-generator.service";
 import type { GraphsService } from "../src/graphs/graphs.service";
-import type { SchedulesService } from "../src/schedules/schedules.service";
+import type { WorkflowLifecycleService } from "../src/graphs/workflow-lifecycle.service";
 
-// The save path calls schedules.syncPollSchedule(...) + syncCronSchedule(...).catch(...) —
-// stubs that resolve are enough for the non-trigger graphs these tests use.
-const schedulesStub = {
-  syncPollSchedule: vi.fn().mockResolvedValue(undefined),
-  syncCronSchedule: vi.fn().mockResolvedValue(undefined),
-} as unknown as SchedulesService;
+// Save/delete go through the consolidated WorkflowLifecycleService (upsert/delete + the
+// default-env-only schedule side-effects, tested in workflow-lifecycle.service.spec).
+// Routes that never save/delete get an empty stub.
+const lifecycleStub = {} as unknown as WorkflowLifecycleService;
 
 const envStub = {
   resolveEnvId: async () => "e1",
@@ -43,18 +41,16 @@ function dto(graph: unknown): SaveGraphDto {
 }
 
 describe("GraphsController", () => {
-  it("saves a well-formed graph and returns the version + hash", async () => {
-    const upsert = vi.fn().mockResolvedValue({
+  it("saves a well-formed graph via the consolidated lifecycle path and returns the version + hash", async () => {
+    const saveWorkflow = vi.fn().mockResolvedValue({
       graph: validGraph,
       version: 3,
       contentHash: "abc123",
     });
     const controller = new GraphsController(
-      {
-        upsert,
-      } as unknown as GraphsService,
+      {} as unknown as GraphsService,
       {} as unknown as GraphGeneratorService,
-      schedulesStub,
+      { saveWorkflow } as unknown as WorkflowLifecycleService,
       envStub,
     );
 
@@ -66,7 +62,7 @@ describe("GraphsController", () => {
       contentHash: "abc123",
     });
     // tenantId comes from the principal (arg 0), never the body.
-    expect(upsert).toHaveBeenCalledWith(
+    expect(saveWorkflow).toHaveBeenCalledWith(
       "t-1",
       "e1",
       "canvas",
@@ -76,20 +72,36 @@ describe("GraphsController", () => {
   });
 
   it("rejects a non-graph body with 400 (before touching the service)", async () => {
-    const upsert = vi.fn();
+    const saveWorkflow = vi.fn();
     const controller = new GraphsController(
-      {
-        upsert,
-      } as unknown as GraphsService,
+      {} as unknown as GraphsService,
       {} as unknown as GraphGeneratorService,
-      schedulesStub,
+      { saveWorkflow } as unknown as WorkflowLifecycleService,
       envStub,
     );
 
     await expect(
       controller.save("t-1", dto({ not: "a graph" })),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(upsert).not.toHaveBeenCalled();
+    expect(saveWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("deletes via the consolidated lifecycle path and 404s when nothing was deleted", async () => {
+    const deleteWorkflow = vi.fn().mockResolvedValue(true);
+    const controller = new GraphsController(
+      {} as unknown as GraphsService,
+      {} as unknown as GraphGeneratorService,
+      { deleteWorkflow } as unknown as WorkflowLifecycleService,
+      envStub,
+    );
+
+    expect(await controller.remove("t-1", "canvas")).toEqual({ deleted: true });
+    expect(deleteWorkflow).toHaveBeenCalledWith("t-1", "e1", "canvas");
+
+    deleteWorkflow.mockResolvedValue(false);
+    await expect(controller.remove("t-1", "gone")).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it("lists the tenant's workflows", async () => {
@@ -107,7 +119,7 @@ describe("GraphsController", () => {
         list,
       } as unknown as GraphsService,
       {} as unknown as GraphGeneratorService,
-      schedulesStub,
+      lifecycleStub,
       envStub,
     );
 
@@ -128,7 +140,7 @@ describe("GraphsController", () => {
         getLatestNamed,
       } as unknown as GraphsService,
       {} as unknown as GraphGeneratorService,
-      schedulesStub,
+      lifecycleStub,
       envStub,
     );
 
@@ -143,7 +155,7 @@ describe("GraphsController", () => {
         getLatestNamed,
       } as unknown as GraphsService,
       {} as unknown as GraphGeneratorService,
-      schedulesStub,
+      lifecycleStub,
       envStub,
     );
 
@@ -203,7 +215,7 @@ function streamController(generate: (...args: unknown[]) => unknown) {
   return new GraphsController(
     {} as unknown as GraphsService,
     { generate } as unknown as GraphGeneratorService,
-    schedulesStub,
+    lifecycleStub,
     envStub,
   );
 }
