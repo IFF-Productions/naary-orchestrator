@@ -16,6 +16,28 @@ export interface CompanyView {
   role: string;
 }
 
+/** The cost/tokens/calls totals shared by every company-usage bucket. */
+export interface CompanyUsageBucket {
+  costUsd: number;
+  totalTokens: number;
+  calls: number;
+}
+
+/** Company-wide usage rollup (COMPANIES.md §5, Slice 2). Tokens + cost only — never text. */
+export interface CompanyUsageRollup {
+  range: { from: string | null; to: string | null };
+  totals: CompanyUsageBucket;
+  byWorkspace: Array<
+    CompanyUsageBucket & {
+      tenantId: string;
+      displayName: string | null;
+      byEnvironment: Array<
+        CompanyUsageBucket & { environmentId: string | null }
+      >;
+    }
+  >;
+}
+
 /**
  * Companies foundation (COMPANIES.md Slice 1). A Company groups workspaces for a cross-workspace
  * admin/billing-rollup path; it is NOT an isolation boundary. Everything here is additive — no
@@ -156,6 +178,122 @@ export class CompanyService {
     });
   }
 
+  /**
+   * Company-wide billing/usage rollup (COMPANIES.md §5, Slice 2): total + per-workspace + nested
+   * per-environment spend across the company's member workspaces. Read-only — no change to the
+   * billing enforcement path (still one TenantBudget per workspace).
+   *
+   * AUTHZ (§4): `assertCompanyMember` is the ONLY thing authorizing this cross-workspace read —
+   * it runs FIRST, before any workspace enumeration or ledger read, and must never be skipped or
+   * reordered. It is safe because attach is owner-authorized (the §4 invariant).
+   *
+   * One IN-query over the ledger (backed by @@index([tenantId, createdAt])), then a single-pass JS
+   * rollup. Privacy: tokens + cost only — the ledger holds no prompt/completion text.
+   */
+  async getCompanyUsage(
+    userId: string,
+    companyId: string,
+    opts: { from?: string; to?: string } = {},
+  ): Promise<CompanyUsageRollup> {
+    await this.assertCompanyMember(userId, companyId);
+
+    const { from, to } = opts;
+    const range = { from: from ?? null, to: to ?? null };
+
+    // Member workspaces (indexed by @@index([companyId])). Every one is listed in the response,
+    // even with zero spend, so the company view shows all workspaces.
+    const workspaces = await getPrisma().tenantSettings.findMany({
+      where: { companyId },
+      select: { tenantId: true, displayName: true },
+    });
+    if (workspaces.length === 0) {
+      return {
+        range,
+        totals: { costUsd: 0, totalTokens: 0, calls: 0 },
+        byWorkspace: [],
+      };
+    }
+
+    const createdAt =
+      from || to
+        ? {
+            ...(from ? { gte: new Date(from) } : {}),
+            ...(to ? { lte: new Date(to) } : {}),
+          }
+        : undefined;
+
+    const rows = await getPrisma().usageEvent.findMany({
+      where: {
+        tenantId: { in: workspaces.map((w) => w.tenantId) },
+        ...(createdAt ? { createdAt } : {}),
+      },
+    });
+
+    type EnvBucket = CompanyUsageBucket & { environmentId: string | null };
+    const byTenant = new Map<
+      string,
+      CompanyUsageBucket & { byEnv: Map<string | null, EnvBucket> }
+    >();
+    for (const w of workspaces) {
+      byTenant.set(w.tenantId, {
+        costUsd: 0,
+        totalTokens: 0,
+        calls: 0,
+        byEnv: new Map(),
+      });
+    }
+
+    const totals = { costUsd: 0, totalTokens: 0, calls: 0 };
+    for (const r of rows) {
+      const ws = byTenant.get(r.tenantId);
+      if (!ws) continue; // can't happen — the IN-list is exactly byTenant's keys
+      const cost = Number(r.costUsd);
+      totals.costUsd += cost;
+      totals.totalTokens += r.totalTokens;
+      totals.calls += 1;
+      ws.costUsd += cost;
+      ws.totalTokens += r.totalTokens;
+      ws.calls += 1;
+      // null buckets rows recorded before env tagging (ENVIRONMENTS.md Slice 6a).
+      const envId = r.environmentId ?? null;
+      const env = ws.byEnv.get(envId) ?? {
+        environmentId: envId,
+        costUsd: 0,
+        totalTokens: 0,
+        calls: 0,
+      };
+      env.costUsd += cost;
+      env.totalTokens += r.totalTokens;
+      env.calls += 1;
+      ws.byEnv.set(envId, env);
+    }
+
+    return {
+      range,
+      totals: {
+        costUsd: round6(totals.costUsd),
+        totalTokens: totals.totalTokens,
+        calls: totals.calls,
+      },
+      byWorkspace: workspaces
+        .map((w) => {
+          // biome-ignore lint/style/noNonNullAssertion: seeded above from the same array
+          const agg = byTenant.get(w.tenantId)!;
+          return {
+            tenantId: w.tenantId,
+            displayName: w.displayName ?? null,
+            costUsd: round6(agg.costUsd),
+            totalTokens: agg.totalTokens,
+            calls: agg.calls,
+            byEnvironment: [...agg.byEnv.values()]
+              .map((e) => ({ ...e, costUsd: round6(e.costUsd) }))
+              .sort((a, b) => b.costUsd - a.costUsd),
+          };
+        })
+        .sort((a, b) => b.costUsd - a.costUsd),
+    };
+  }
+
   /** The caller's role in a company, or null if they're not a member. */
   private async companyRole(
     userId: string,
@@ -195,6 +333,9 @@ export class CompanyService {
     return ctx.activeTenantId === tenantId && ctx.activeRole === "owner";
   }
 }
+
+/** Same 6-dp rounding as usage.service.ts — Decimal(12,6) ledger, avoid float-noise digits. */
+const round6 = (n: number) => Number(n.toFixed(6));
 
 /** name → url-safe kebab slug (letters/digits, single dashes). Empty → "company". */
 function slugify(s: string): string {
