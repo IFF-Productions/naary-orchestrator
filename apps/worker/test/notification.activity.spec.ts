@@ -52,6 +52,24 @@ const BASE = {
 } as const;
 
 describe("sendNotification", () => {
+  it("reads the RUN'S env's channels; absent env (pre-6b run) is passed through as undefined", async () => {
+    // The default-env fallback lives in the real readChannels impl (DB-side), deliberately
+    // outside this seam — the activity just forwards what the run recorded.
+    const readChannels = vi.fn(async () => channels);
+    __notifyDeps.readChannels = readChannels as never;
+
+    await sendNotification({
+      ...BASE,
+      environmentId: "env-1",
+      kind: "approval_pending",
+      title: "Ship it?",
+    });
+    expect(readChannels).toHaveBeenCalledWith("t1", "env-1");
+
+    await sendNotification({ ...BASE, kind: "run_failed", detail: "failed" });
+    expect(readChannels).toHaveBeenCalledWith("t1", undefined);
+  });
+
   it("POSTs a Slack-friendly payload when a webhook is set + the event is enabled", async () => {
     await sendNotification({
       ...BASE,

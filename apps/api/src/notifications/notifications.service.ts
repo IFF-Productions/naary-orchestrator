@@ -17,9 +17,9 @@ export const NOTIFICATION_CHANNEL_TYPES = ["slack", "teams"] as const;
 export type NotificationChannelType =
   (typeof NOTIFICATION_CHANNEL_TYPES)[number];
 
-/** Per-tenant channel cap — plenty for real fan-out, a backstop against abuse (each
+/** Per-environment channel cap — plenty for real fan-out, a backstop against abuse (each
  *  enabled row is an outbound POST per event). */
-export const MAX_CHANNELS_PER_TENANT = 20;
+export const MAX_CHANNELS_PER_ENV = 20;
 
 function isChannelType(v: string): v is NotificationChannelType {
   return (NOTIFICATION_CHANNEL_TYPES as readonly string[]).includes(v);
@@ -74,26 +74,32 @@ function normalize(v: string | null | undefined): string | null | undefined {
 }
 
 /**
- * Per-tenant notification channels — any number of Slack/Teams webhooks (e.g. #alerts AND
- * #oncall), each configured and toggled on its own. An alert fans out to EVERY enabled
- * channel whose event toggle is on. Channels are addressed by row id; `label` tells
- * same-type channels apart in the UI.
+ * Per-environment notification channels — any number of Slack/Teams webhooks (e.g. #alerts
+ * AND #oncall), each configured and toggled on its own. An alert fans out to EVERY enabled
+ * channel of the RUN'S environment whose event toggle is on (Slice 6b: a sandbox failure
+ * must not page prod's Slack). Channels are addressed by row id; `label` tells same-type
+ * channels apart in the UI. `environmentId` arrives RESOLVED (controller boundary calls
+ * resolveEnvId), matching the pins/graphs pattern.
  */
 @Injectable()
 export class NotificationsService {
-  /** All of the tenant's channels, in a stable order (type, then creation order). */
-  async list(tenantId: string): Promise<NotificationChannelView[]> {
+  /** The env's channels, in a stable order (type, then creation order). */
+  async list(
+    tenantId: string,
+    environmentId: string,
+  ): Promise<NotificationChannelView[]> {
     const rows = await getPrisma().notificationChannel.findMany({
-      where: { tenantId },
+      where: { tenantId, environmentId },
       orderBy: [{ type: "asc" }, { createdAt: "asc" }, { id: "asc" }],
     });
     return rows.map(toView);
   }
 
-  /** Create a new channel of the given type. Enabled by default — creating one is an
-   *  explicit user action, unlike the old implicit per-type rows. */
+  /** Create a new channel of the given type in this env. Enabled by default — creating one
+   *  is an explicit user action, unlike the old implicit per-type rows. */
   async createChannel(
     tenantId: string,
+    environmentId: string,
     type: string,
     patch: ChannelPatch,
   ): Promise<NotificationChannelView> {
@@ -101,16 +107,17 @@ export class NotificationsService {
       throw new BadRequestException(`Unknown notification channel '${type}'.`);
     }
     const count = await getPrisma().notificationChannel.count({
-      where: { tenantId },
+      where: { tenantId, environmentId },
     });
-    if (count >= MAX_CHANNELS_PER_TENANT) {
+    if (count >= MAX_CHANNELS_PER_ENV) {
       throw new BadRequestException(
-        `Channel limit reached (${MAX_CHANNELS_PER_TENANT}). Delete one before adding another.`,
+        `Channel limit reached (${MAX_CHANNELS_PER_ENV}). Delete one before adding another.`,
       );
     }
     const row = await getPrisma().notificationChannel.create({
       data: {
         tenantId,
+        environmentId,
         type,
         label: normalize(patch.label) ?? null,
         enabled: patch.enabled ?? true,
@@ -122,15 +129,17 @@ export class NotificationsService {
     return toView(row);
   }
 
-  /** Update ONE channel by id (tenant-scoped — can't touch another tenant's). 404 if absent. */
+  /** Update ONE channel by id (tenant+env-scoped — can't touch another tenant's or another
+   *  env's). 404 if absent. */
   async updateChannel(
     tenantId: string,
+    environmentId: string,
     channelId: string,
     patch: ChannelPatch,
   ): Promise<NotificationChannelView> {
-    // Tenant-scoped existence check first: `update` alone would key on the global id.
+    // Scoped existence check first: `update` alone would key on the global id.
     const existing = await getPrisma().notificationChannel.findFirst({
-      where: { id: channelId, tenantId },
+      where: { id: channelId, tenantId, environmentId },
       select: { id: true },
     });
     if (!existing) {
@@ -149,10 +158,14 @@ export class NotificationsService {
     return toView(row);
   }
 
-  /** Delete ONE channel by id (tenant-scoped; idempotent). */
-  async deleteChannel(tenantId: string, channelId: string): Promise<void> {
+  /** Delete ONE channel by id (tenant+env-scoped; idempotent). */
+  async deleteChannel(
+    tenantId: string,
+    environmentId: string,
+    channelId: string,
+  ): Promise<void> {
     await getPrisma().notificationChannel.deleteMany({
-      where: { id: channelId, tenantId },
+      where: { id: channelId, tenantId, environmentId },
     });
   }
 
@@ -166,10 +179,11 @@ export class NotificationsService {
    */
   async sendTest(
     tenantId: string,
+    environmentId: string,
     channelId: string,
   ): Promise<{ ok: true; status: number }> {
     const row = await getPrisma().notificationChannel.findFirst({
-      where: { id: channelId, tenantId },
+      where: { id: channelId, tenantId, environmentId },
     });
     if (!row) {
       throw new NotFoundException("Unknown notification channel.");

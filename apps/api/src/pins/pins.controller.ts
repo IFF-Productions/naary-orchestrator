@@ -12,7 +12,7 @@ import {
 import { ApiBearerAuth } from "@nestjs/swagger";
 import type { GraphDef, NodeDef } from "@naary/dsl";
 import { isPureNode, runPureNode } from "@naary/dsl";
-import { TenantId } from "../auth/tenant.decorator";
+import { EnvironmentSel, TenantId } from "../auth/tenant.decorator";
 import { ExecutionsService } from "../executions/executions.service";
 import { EnvironmentsService } from "../environments/environments.service";
 import { GraphsService } from "../graphs/graphs.service";
@@ -75,14 +75,13 @@ export class PinsController {
        *  (ancestor) nodes so a deep node is testable without pinning each one by hand. */
       autofillUpstream?: boolean;
     },
+    @EnvironmentSel() envSel?: string,
   ): Promise<
     { pure: true; output: unknown } | { pure: false; message: string }
   > {
-    // Pins (PinnedData) aren't env-scoped yet — they're stored/read by (tenant, workflowKey). To
-    // avoid cross-env contamination (sandbox pins affecting a prod node test), the node-test reads
-    // the graph from the DEFAULT env too, so the read + the pins it uses are in the same space.
-    // Env-scope PinnedData in a later slice to make this the active env.
-    const envId = await this.environments.defaultEnvId(tenantId);
+    // ACTIVE env throughout (Slice 6b): the graph read, the pins, and the creds/connections the
+    // activity fetches all live in the env the caller selected (absent header = tenant default).
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
     const found = await this.graphs.getLatestNamed(
       tenantId,
       envId,
@@ -101,9 +100,9 @@ export class PinsController {
         message: `"${node.type}" can't be tested in isolation — run the full flow.`,
       };
     }
-    // mini-ctx: the workflow's pinned outputs, overridden by any manual inputs.
+    // mini-ctx: this env's pinned outputs, overridden by any manual inputs.
     const ctx = {
-      ...(await this.pins.list(tenantId, workflowKey)),
+      ...(await this.pins.list(tenantId, envId, workflowKey)),
       ...(body?.inputs ?? {}),
     };
     // Optionally run + pin un-pinned ancestors first (opt-in — can fan out into a partial run).
@@ -128,10 +127,8 @@ export class PinsController {
         );
       }
     }
-    // Activity node: run the REAL activity via a short-lived test-mode Temporal exec. Pass the SAME
-    // env used for the graph + pins read above (Slice 5b) so the node test — graph, pins, AND the
-    // creds/connections the activity fetches — all live in ONE env; when PinnedData is env-scoped this
-    // line's `envId` becomes the active env and everything follows together.
+    // Activity node: run the REAL activity via a short-lived test-mode Temporal exec, in the
+    // same (active) env as the graph + pins reads above.
     try {
       const output = await this.executions.testNode(
         tenantId,
@@ -207,7 +204,7 @@ export class PinsController {
           ctx,
         );
         ctx[predId] = out;
-        await this.pins.set(tenantId, workflowKey, predId, out);
+        await this.pins.set(tenantId, environmentId, workflowKey, predId, out);
       } catch {
         /* a failing ancestor stays absent — don't abort the whole fill */
       }
@@ -219,11 +216,13 @@ export class PinsController {
     description: "Returns `{ [nodeId]: output }` for the canvas to overlay.",
   })
   @Get("pins")
-  list(
+  async list(
     @TenantId() tenantId: string,
     @Param("workflowKey") workflowKey: string,
+    @EnvironmentSel() envSel?: string,
   ): Promise<Record<string, unknown>> {
-    return this.pins.list(tenantId, workflowKey);
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    return this.pins.list(tenantId, envId, workflowKey);
   }
 
   @ApiEndpoint({ summary: "Pin (or replace) a node's sample output" })
@@ -233,8 +232,10 @@ export class PinsController {
     @Param("workflowKey") workflowKey: string,
     @Param("nodeId") nodeId: string,
     @Body() body: { output: unknown },
+    @EnvironmentSel() envSel?: string,
   ): Promise<{ pinned: true }> {
-    await this.pins.set(tenantId, workflowKey, nodeId, body?.output);
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    await this.pins.set(tenantId, envId, workflowKey, nodeId, body?.output);
     return { pinned: true };
   }
 
@@ -244,7 +245,11 @@ export class PinsController {
     @TenantId() tenantId: string,
     @Param("workflowKey") workflowKey: string,
     @Param("nodeId") nodeId: string,
+    @EnvironmentSel() envSel?: string,
   ): Promise<{ cleared: boolean }> {
-    return { cleared: await this.pins.clear(tenantId, workflowKey, nodeId) };
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    return {
+      cleared: await this.pins.clear(tenantId, envId, workflowKey, nodeId),
+    };
   }
 }

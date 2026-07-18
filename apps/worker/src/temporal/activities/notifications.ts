@@ -1,7 +1,7 @@
 // Tenant notification fan-out (Slack/Teams webhooks) + deep-link minting.
 import { createHmac } from "node:crypto";
 import { assertEgressAllowed, safeFetch } from "@naary/connections";
-import { getPrisma } from "@naary/db";
+import { getDefaultEnvironmentId, getPrisma } from "@naary/db";
 import {
   type NotificationInput as FormatterNotificationInput,
   type NotificationKind,
@@ -17,6 +17,10 @@ import { activityRuns } from "../../metrics";
 export type { NotificationKind };
 export interface NotificationInput extends FormatterNotificationInput {
   tenantId: string;
+  /** The run's environment (Slice 6b) — only ITS channels are paged. Optional because
+   *  pre-6b in-flight runs recorded no env in ctx; those resolve to the tenant default
+   *  (the 5b makeSecretResolver precedent). */
+  environmentId?: string;
 }
 
 /** One enabled channel the worker will POST to (subset of the NotificationChannel row). */
@@ -28,11 +32,18 @@ export interface NotificationChannelRow {
 }
 
 // Test seam: channel read + egress fetch, swappable so tests need no DB/network. Reads only the
-// ENABLED channels — a disabled channel never sends, regardless of its saved URL/flags.
+// ENABLED channels of the RUN'S ENVIRONMENT (6b) — a disabled channel never sends, and a sandbox
+// run never pages prod's channels. The default-env fallback lives HERE (inside the real deps
+// impl, not sendNotification) so specs that swap readChannels stay DB-free and can assert the
+// env argument they were handed.
 export const __notifyDeps = {
-  readChannels: (tenantId: string): Promise<NotificationChannelRow[]> =>
-    getPrisma().notificationChannel.findMany({
-      where: { tenantId, enabled: true },
+  readChannels: async (
+    tenantId: string,
+    environmentId?: string,
+  ): Promise<NotificationChannelRow[]> => {
+    const envId = environmentId ?? (await getDefaultEnvironmentId(tenantId));
+    return getPrisma().notificationChannel.findMany({
+      where: { tenantId, environmentId: envId, enabled: true },
       // Deterministic order (findMany has no default order — Postgres would return physical
       // row order), so the fan-out is stable and testable. A tenant can have SEVERAL rows
       // per type (N Slack + N Teams webhooks) — each enabled row gets its own POST.
@@ -43,7 +54,8 @@ export const __notifyDeps = {
         onApprovalPending: true,
         onRunFailed: true,
       },
-    }),
+    });
+  },
   fetch: (url: string, init?: RequestInit) =>
     safeFetch(url, init as never) as unknown as Promise<Response>,
   assertEgressAllowed,
@@ -141,7 +153,10 @@ export async function sendNotification(
 ): Promise<void> {
   let channels: NotificationChannelRow[];
   try {
-    channels = await __notifyDeps.readChannels(input.tenantId);
+    channels = await __notifyDeps.readChannels(
+      input.tenantId,
+      input.environmentId,
+    );
   } catch {
     // Couldn't read settings — nothing we can do; a notification failure must not affect the run.
     activityRuns.inc({ activity: "sendNotification", outcome: "error" });
