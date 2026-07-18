@@ -78,13 +78,13 @@ export function EnvironmentSwitcher() {
   }, [tenantId]);
 
   function switchTo(slug: string) {
-    if (slug === activeSlug) {
-      setOpen(false);
-      return;
-    }
+    setOpen(false);
+    if (slug === activeSlug) return;
+    // Publish the new env — subscribers re-render and the routed screen remounts (AppShell keys the
+    // Outlet by the active env), so every screen re-fetches under the new X-Environment-Id WITHOUT a
+    // full page reload.
     setActiveEnvironment(slug);
-    // Reload so every screen re-fetches under the new environment header.
-    window.location.reload();
+    setActiveSlug(slug);
   }
 
   async function onCreate() {
@@ -106,8 +106,9 @@ export function EnvironmentSwitcher() {
       const env = await api.createEnvironment(tenantId, { name, slug });
       setNewName("");
       setCreating(false);
-      setActiveEnvironment(env.slug);
-      window.location.reload();
+      setEnvs((prev) => [...prev, env]);
+      setActiveEnvironment(env.slug); // switch to the new env live (no reload)
+      setActiveSlug(env.slug);
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "Could not create environment.",
@@ -163,8 +164,11 @@ export function EnvironmentSwitcher() {
       // picks the workspace default (`find(isDefault) ?? list[0]`). No fallback to compute here, so
       // no stale-list pitfall.
       if (env.slug === activeSlug) {
-        setActiveEnvironment(null);
-        window.location.reload();
+        // Deleted the active env → clear it (server falls back to the default). Re-resolve the
+        // default from the remaining list and switch to it live (no reload).
+        const fallback = envs.find((e) => e.isDefault && e.id !== env.id);
+        setActiveEnvironment(fallback?.slug ?? null);
+        setActiveSlug(fallback?.slug ?? null);
       }
     } catch (e) {
       // The server refuses to delete the default env or a non-empty one (409/400) — surface it.

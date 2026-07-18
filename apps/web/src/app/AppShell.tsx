@@ -16,6 +16,8 @@ import {
   PHONE_QUERY,
   useMediaQuery,
 } from "../lib/useMediaQuery";
+import { useActiveEnvironment } from "../lib/useActiveEnvironment";
+import { type Environment, api } from "../lib/api";
 import { PAGE_META } from "../lib/mock";
 import { useMode } from "../mode";
 import { useTheme } from "../theme";
@@ -115,6 +117,27 @@ export function AppShell() {
   const { mode } = useMode();
   const { logout } = useAuth();
   const { activeId, workspaces } = useWorkspace();
+
+  // Active environment for the app-bar pill. `activeEnv` (slug/id) updates live on switch via the
+  // env store; the list resolves its display name. Per-workspace, so re-resolve when the workspace
+  // changes. Falls back to the slug/id if the name hasn't resolved yet, and the pill hides when the
+  // workspace has no environments.
+  const activeEnv = useActiveEnvironment();
+  const [envs, setEnvs] = useState<Environment[]>([]);
+  useEffect(() => {
+    if (!activeId) return;
+    let live = true;
+    api
+      .listEnvironments(activeId)
+      .then((list) => live && setEnvs(list))
+      .catch(() => live && setEnvs([]));
+    return () => {
+      live = false;
+    };
+  }, [activeId]);
+  const activeEnvName =
+    envs.find((e) => e.slug === activeEnv || e.id === activeEnv)?.name ??
+    (activeEnv && envs.length === 0 ? activeEnv : undefined);
   const activeWs = workspaces.find((w) => w.tenantId === activeId);
   const wsLabel = activeId
     ? workspaceLabel(activeId, activeWs?.name)
@@ -431,8 +454,9 @@ export function AppShell() {
           >
             {title}
           </div>
-          {/* Env badge — hidden on phone to save the row. */}
-          {!phone && (
+          {/* Env badge — reflects the active environment; hidden on phone (row space) and when the
+              workspace has no environments. */}
+          {!phone && activeEnvName && (
             <span
               className="mono"
               style={{
@@ -457,7 +481,7 @@ export function AppShell() {
                   background: "var(--brand)",
                 }}
               />
-              Production
+              {activeEnvName}
             </span>
           )}
 
@@ -513,7 +537,10 @@ export function AppShell() {
             background: "var(--bg)",
           }}
         >
-          <Outlet />
+          {/* Key the routed screen by the active environment: switching envs remounts the current
+              screen so it re-fetches under the new X-Environment-Id — a fast client-side remount
+              instead of a full page reload. The shell (nav, providers) stays mounted. */}
+          <Outlet key={activeEnv ?? "default"} />
         </main>
       </div>
     </div>
