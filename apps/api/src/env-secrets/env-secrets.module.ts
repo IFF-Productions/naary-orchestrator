@@ -13,5 +13,6 @@ import { EnvSecretsService } from "./env-secrets.service";
     { provide: SecretStore, useFactory: () => new SecretStore() },
     EnvSecretsService,
   ],
+  exports: [EnvSecretsService],
 })
 export class EnvSecretsModule {}
