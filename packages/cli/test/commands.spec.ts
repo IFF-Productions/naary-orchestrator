@@ -337,3 +337,59 @@ describe("workflows promote", () => {
     expect(requests[0].opts.body).toEqual({ toEnv: "prod", fromVersion: 2 });
   });
 });
+
+describe("config insights", () => {
+  const INSIGHTS = {
+    range: { from: "2026-07-01", to: null },
+    totals: { costUsd: 0.36, totalTokens: 360, calls: 4 },
+    byDay: [{ date: "2026-07-16", costUsd: 0.15, totalTokens: 150, calls: 2 }],
+    byEnvironment: [
+      { environmentId: "env-prod", costUsd: 0.2, totalTokens: 200, calls: 1 },
+      { environmentId: null, costUsd: 0.16, totalTokens: 160, calls: 3 },
+    ],
+    byWorkflow: [
+      { workflowKey: "triage", costUsd: 0.2, totalTokens: 200, calls: 1 },
+    ],
+    byModel: [
+      {
+        provider: "anthropic",
+        model: "sonnet",
+        costUsd: 0.36,
+        totalTokens: 360,
+        calls: 4,
+      },
+    ],
+  };
+
+  it("hits /config/insights with the ?environmentId query (not the --env header)", async () => {
+    const { ctx, out, requests } = makeCtx(() => INSIGHTS);
+    const code = await run(
+      [
+        "config",
+        "insights",
+        "--environment",
+        "env-prod",
+        "--from",
+        "2026-07-01",
+      ],
+      ctx,
+    );
+    expect(code).toBe(0);
+    expect(requests[0].path).toBe("/config/insights");
+    // --environment → ?environmentId query; from passed through; to omitted (undefined).
+    expect(requests[0].opts.query).toEqual({
+      from: "2026-07-01",
+      environmentId: "env-prod",
+    });
+    const text = out.join("\n");
+    expect(text).toContain("By environment");
+    expect(text).toContain("By workflow");
+    expect(text).toContain("(untagged)"); // null env bucket is labeled, not dropped
+  });
+
+  it("--json prints the raw payload", async () => {
+    const { ctx, out } = makeCtx(() => INSIGHTS);
+    await run(["config", "insights", "--json"], ctx);
+    expect(out.join("\n")).toContain('"byEnvironment"');
+  });
+});

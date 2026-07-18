@@ -9,9 +9,9 @@
  * server never returns values) and `secrets set` never echoes the value back.
  */
 
-import { parseCommand, str } from "../args";
+import { bool, parseCommand, str } from "../args";
 import type { CommandContext } from "../context";
-import { table, usd } from "../format";
+import { prettyJson, table, usd } from "../format";
 import { GROUP_HELP } from "../help";
 
 interface UsageResponse {
@@ -200,6 +200,118 @@ export async function configUsage(
   return 0;
 }
 
+interface Bucket {
+  costUsd: number;
+  totalTokens: number;
+  calls: number;
+}
+interface Insights {
+  range: { from: string | null; to: string | null };
+  totals: Bucket;
+  byDay: (Bucket & { date: string })[];
+  byEnvironment: (Bucket & { environmentId: string | null })[];
+  byWorkflow: (Bucket & { workflowKey: string | null })[];
+  byModel: (Bucket & { provider: string; model: string })[];
+}
+
+const num = (n: number): string => n.toLocaleString();
+
+const bucketTable = (
+  title: string,
+  label: string,
+  rows: Array<{ name: string } & Bucket>,
+  ctx: CommandContext,
+): void => {
+  ctx.io.out(`${title}:`);
+  ctx.io.out(
+    table(
+      rows.map((r) => ({
+        name: r.name,
+        cost: usd(r.costUsd),
+        tokens: num(r.totalTokens),
+        calls: num(r.calls),
+      })),
+      [
+        [label, "name"],
+        ["COST", "cost"],
+        ["TOKENS", "tokens"],
+        ["CALLS", "calls"],
+      ],
+    ),
+  );
+  ctx.io.out("");
+};
+
+/**
+ * `naary config insights` — spend rolled up by environment, workflow, and model over an optional
+ * window. NOTE: `--environment` filters via the endpoint's `?environmentId` query — distinct from the
+ * global `--env` (X-Environment-Id header), which this cross-environment rollup intentionally ignores.
+ */
+export async function configInsights(
+  argv: string[],
+  ctx: CommandContext,
+): Promise<number> {
+  const args = parseCommand(argv, {
+    from: { type: "string" },
+    to: { type: "string" },
+    environment: { type: "string" },
+    json: { type: "boolean" },
+  });
+  if (args.help) {
+    ctx.io.out(GROUP_HELP.config);
+    return 0;
+  }
+  const { client } = ctx.makeClient(args.configFlags);
+  const data = await client.request<Insights>("/config/insights", {
+    query: {
+      from: str(args.values.from),
+      to: str(args.values.to),
+      environmentId: str(args.values.environment),
+    },
+  });
+
+  if (bool(args.values.json)) {
+    ctx.io.out(prettyJson(data));
+    return 0;
+  }
+
+  const window =
+    data.range.from || data.range.to
+      ? `${data.range.from ?? "…"} → ${data.range.to ?? "now"}`
+      : "all time";
+  ctx.io.out(
+    `Total: ${usd(data.totals.costUsd)} · ${num(data.totals.totalTokens)} tokens · ${num(
+      data.totals.calls,
+    )} calls (${window})`,
+  );
+  ctx.io.out("");
+  bucketTable(
+    "By environment",
+    "ENVIRONMENT",
+    data.byEnvironment.map((e) => ({
+      name: e.environmentId ?? "(untagged)",
+      ...e,
+    })),
+    ctx,
+  );
+  bucketTable(
+    "By workflow",
+    "WORKFLOW",
+    data.byWorkflow.map((w) => ({ name: w.workflowKey ?? "(no key)", ...w })),
+    ctx,
+  );
+  bucketTable(
+    "By model",
+    "MODEL",
+    data.byModel.map((m) => ({ name: `${m.provider}/${m.model}`, ...m })),
+    ctx,
+  );
+  ctx.io.out(
+    `${data.byDay.length} day${data.byDay.length === 1 ? "" : "s"} with activity — use --json for the daily series.`,
+  );
+  return 0;
+}
+
 export const CONFIG_COMMANDS: Record<
   string,
   (argv: string[], ctx: CommandContext) => Promise<number>
@@ -207,4 +319,5 @@ export const CONFIG_COMMANDS: Record<
   variables: configVariables,
   secrets: configSecrets,
   usage: configUsage,
+  insights: configInsights,
 };
