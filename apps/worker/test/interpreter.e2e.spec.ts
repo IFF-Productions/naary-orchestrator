@@ -189,6 +189,60 @@ const mockActivities = {
     ];
     return { status: "ok", items, count: items.length, costUsd: 0 };
   },
+  // Per-node matrix (Part 2): activity-backed transform nodes. Deterministic stubs so the e2e stays
+  // hermetic (the real parse/crypto/Buffer work is unit-tested); each captures its resolved request so
+  // a test can prove the interpreter threaded config + upstream bindings into the activity.
+  callCsv: async (
+    cfg: activities.CsvConfig,
+    input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.CsvResult> => {
+    csvCalls.push({ cfg, input });
+    // Echo a deterministic parse result so ctx.<node> === res.result (interpreter unwraps .result).
+    return {
+      status: "ok",
+      result: [{ id: "1", name: "Ada" }],
+      costUsd: 0,
+    };
+  },
+  callEncode: async (
+    cfg: activities.EncodeConfig,
+    input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.EncodeResult> => {
+    encodeCalls.push({ cfg, input });
+    return { status: "ok", result: `enc(${String(input)})`, costUsd: 0 };
+  },
+  callHash: async (
+    cfg: activities.ResolvedHash,
+    _input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.HashResult> => {
+    hashCalls.push(cfg);
+    return { status: "ok", digest: "deadbeef", costUsd: 0 };
+  },
+  callRandom: async (
+    cfg: activities.RandomConfig,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.RandomResult> => {
+    randomCalls.push(cfg);
+    return { status: "ok", value: "r4nd0mhex", costUsd: 0 };
+  },
+  callHtmlExtract: async (
+    cfg: activities.HtmlExtractConfig,
+    input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.HtmlExtractResult> => {
+    htmlExtractCalls.push({ cfg, input });
+    return { status: "ok", result: { title: "Hello" }, costUsd: 0 };
+  },
+  callMarkdown: async (
+    input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.MarkdownResult> => {
+    markdownCalls.push(input);
+    return { status: "ok", result: { markdown: "# Hi" }, costUsd: 0 };
+  },
   callCode: async (
     cfg: activities.CodeNodeConfig,
     input: activities.CodeInput,
@@ -282,6 +336,16 @@ const codeCalls: {
   input: activities.CodeInput;
 }[] = [];
 const totpCalls: activities.TotpConfig[] = [];
+// Per-node matrix (Part 2) capture arrays.
+const csvCalls: { cfg: activities.CsvConfig; input: unknown }[] = [];
+const encodeCalls: { cfg: activities.EncodeConfig; input: unknown }[] = [];
+const hashCalls: activities.ResolvedHash[] = [];
+const randomCalls: activities.RandomConfig[] = [];
+const htmlExtractCalls: {
+  cfg: activities.HtmlExtractConfig;
+  input: unknown;
+}[] = [];
+const markdownCalls: unknown[] = [];
 const xmlCalls: { cfg: activities.XmlConfig; input: unknown }[] = [];
 const rssCalls: activities.ResolvedRss[] = [];
 const emailCalls: activities.ResolvedSendEmail[] = [];
@@ -3139,4 +3203,247 @@ describe("runGraph interpreter — conditional & multi-path routing", () => {
     expect(r.ctx.hitOther).toBeUndefined();
     expect(r.ctx.neg).toBeUndefined();
   });
+});
+
+
+/**
+ * Per-node execution matrix (Part 2): prove every remaining node type actually RUNS through the real
+ * interpreter and produces its documented output. Part 1 covered the conditional/routing nodes and the
+ * I/O nodes above; this block fills the gaps — the pure transforms (noOp/number), the activity-backed
+ * transforms (csv/encode/hash/htmlExtract/markdown/random), and the three passthrough entry triggers
+ * (chatTrigger/formTrigger/scheduleTrigger). Config shapes + output shapes are taken from the DSL
+ * schema (packages/dsl/src/registry.ts) and the interpreter's own dispatch (workflow/run-graph.ts).
+ *
+ * Note: `regex`, `group`, and `summary` are NOT node types — `regex` is a ConditionOp and
+ * group/summary are catalog metadata fields. The intent is already covered: `text` (regexExtract) and
+ * `aggregate` are tested elsewhere in this file.
+ */
+describe("runGraph interpreter — per-node execution matrix", () => {
+  // Local run helper: start the graph, await the terminal result, return { status, ctx }.
+  async function runFlow(
+    graph: GraphDef,
+    input: unknown,
+    workflowId: string,
+    tenantId = "t-matrix",
+  ): Promise<{ status: string; ctx: Record<string, unknown> }> {
+    const worker = await makeWorker();
+    return worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [graph, input, { tenantId }],
+        taskQueue: TASK_QUEUE,
+        workflowId,
+      });
+      return (await handle.result()) as {
+        status: string;
+        ctx: Record<string, unknown>;
+      };
+    });
+  }
+
+  // Build a linear `webhookTrigger → <node> → end` graph feeding the node the run input.
+  function oneNodeGraph(id: string, type: string, config?: unknown): GraphDef {
+    return {
+      startNodeId: "trigger",
+      nodes: [
+        { id: "trigger", type: "webhookTrigger" },
+        { id, type, ...(config ? { config } : {}) },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "trigger", to: id },
+        { from: id, to: "end" },
+      ],
+    } as GraphDef;
+  }
+
+  // ── A. Pure transform nodes ────────────────────────────────────────────────
+
+  it("noOp: emits {} and passes control through (structural placeholder)", async () => {
+    const result = await runFlow(
+      oneNodeGraph("nop", "noOp"),
+      { anything: 1 },
+      "e2e-matrix-noop",
+    );
+    expect(result.status).toBe("completed");
+    expect(result.ctx.nop).toEqual({});
+  });
+
+  it("number: runs the arithmetic op on static + bound operands → { result } (pure)", async () => {
+    // a is static (6); b binds from the trigger (7) → multiply = 42. Proves both operand paths.
+    const result = await runFlow(
+      oneNodeGraph("calc", "number", {
+        operation: "multiply",
+        a: 6,
+        bBinding: { from: "trigger", path: "factor" },
+      }),
+      { factor: 7 },
+      "e2e-matrix-number",
+    );
+    expect(result.status).toBe("completed");
+    expect(result.ctx.calc).toEqual({ result: 42 });
+  });
+
+  it("csv: passes {operation,header,delimiter} + resolved input to the activity; stores res.result", async () => {
+    csvCalls.length = 0;
+    const result = await runFlow(
+      oneNodeGraph("parse", "csv", {
+        operation: "parse",
+        from: "trigger",
+        path: "raw",
+        header: true,
+        delimiter: ",",
+      }),
+      { raw: "id,name\n1,Ada" },
+      "e2e-matrix-csv",
+    );
+    expect(result.status).toBe("completed");
+    // ctx.<node> IS the activity's `result` (interpreter unwraps .result for csv)
+    expect(result.ctx.parse).toEqual([{ id: "1", name: "Ada" }]);
+    // the interpreter resolved the input value from the trigger + threaded the parse options
+    expect(csvCalls[0].input).toBe("id,name\n1,Ada");
+    expect(csvCalls[0].cfg).toEqual({
+      operation: "parse",
+      header: true,
+      delimiter: ",",
+    });
+  });
+
+  it("encode: resolves input + operation, stores { result } (wrapped)", async () => {
+    encodeCalls.length = 0;
+    const result = await runFlow(
+      oneNodeGraph("enc", "encode", {
+        operation: "base64Encode",
+        from: "trigger",
+        path: "text",
+      }),
+      { text: "hi" },
+      "e2e-matrix-encode",
+    );
+    expect(result.status).toBe("completed");
+    // encode WRAPS: ctx.<node> = { result: res.result }
+    expect(result.ctx.enc).toEqual({ result: "enc(hi)" });
+    expect(encodeCalls[0].input).toBe("hi");
+    expect(encodeCalls[0].cfg).toEqual({ operation: "base64Encode" });
+  });
+
+  it("hash: resolves the bound input in-workflow, hashes in-activity → { digest }", async () => {
+    hashCalls.length = 0;
+    const result = await runFlow(
+      oneNodeGraph("h", "hash", {
+        algorithm: "sha256",
+        inputBinding: { from: "trigger", path: "body" },
+        encoding: "hex",
+      }),
+      { body: { amount: 5 } },
+      "e2e-matrix-hash",
+    );
+    expect(result.status).toBe("completed");
+    expect(result.ctx.h).toEqual({ digest: "deadbeef" });
+    // resolveHash threaded the bound value + algorithm/encoding into the activity (key never here)
+    expect(hashCalls[0]).toEqual({
+      algorithm: "sha256",
+      input: { amount: 5 },
+      encoding: "hex",
+    });
+  });
+
+  it("htmlExtract: passes selectors + resolved HTML to the activity; stores res.result", async () => {
+    htmlExtractCalls.length = 0;
+    const result = await runFlow(
+      oneNodeGraph("x", "htmlExtract", {
+        from: "trigger",
+        path: "html",
+        extractions: [{ key: "title", selector: "h1" }],
+      }),
+      { html: "<h1>Hello</h1>" },
+      "e2e-matrix-html",
+    );
+    expect(result.status).toBe("completed");
+    expect(result.ctx.x).toEqual({ title: "Hello" });
+    expect(htmlExtractCalls[0].input).toBe("<h1>Hello</h1>");
+    expect(htmlExtractCalls[0].cfg).toEqual({
+      extractions: [{ key: "title", selector: "h1" }],
+    });
+  });
+
+  it("markdown: passes the resolved HTML to the activity; stores res.result", async () => {
+    markdownCalls.length = 0;
+    const result = await runFlow(
+      oneNodeGraph("md", "markdown", { from: "trigger", path: "html" }),
+      { html: "<h1>Hi</h1>" },
+      "e2e-matrix-markdown",
+    );
+    expect(result.status).toBe("completed");
+    expect(result.ctx.md).toEqual({ markdown: "# Hi" });
+    // callMarkdown's first positional arg is the INPUT (no cfg param) — proves the resolved value
+    expect(markdownCalls[0]).toBe("<h1>Hi</h1>");
+  });
+
+  // ── C. random (activity — Math.random is banned in workflow code) ──────────
+
+  it("random: runs in an activity and threads its value downstream", async () => {
+    randomCalls.length = 0;
+    // trigger → rnd(random) → capture(set binds from rnd.value) → end. Proves the node runs AND its
+    // value flows into a downstream node's output (not just sits in ctx).
+    const graph: GraphDef = {
+      startNodeId: "trigger",
+      nodes: [
+        { id: "trigger", type: "webhookTrigger" },
+        {
+          id: "rnd",
+          type: "random",
+          config: { operation: "hex", length: 16 },
+        },
+        {
+          id: "capture",
+          type: "set",
+          config: { fieldBindings: { token: { from: "rnd", path: "value" } } },
+        },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "trigger", to: "rnd" },
+        { from: "rnd", to: "capture" },
+        { from: "capture", to: "end" },
+      ],
+    };
+    const result = await runFlow(graph, {}, "e2e-matrix-random");
+    expect(result.status).toBe("completed");
+    // output is { value } (the activity generates it — no input)
+    expect(result.ctx.rnd).toEqual({ value: "r4nd0mhex" });
+    // the config (operation + length) reached the activity
+    expect(randomCalls[0]).toEqual({
+      operation: "hex",
+      length: 16,
+      min: undefined,
+      max: undefined,
+    });
+    // …and the value threaded into the downstream set node
+    expect(result.ctx.capture).toEqual({ token: "r4nd0mhex" });
+  });
+
+  // ── B. Entry trigger nodes (output == the trigger event/fields) ────────────
+
+  it.each([
+    ["scheduleTrigger", { cron: "0 0 * * *" }],
+    ["formTrigger", { title: "Contact" }],
+    ["chatTrigger", {}],
+  ] as const)(
+    "%s: entry passthrough — the run input becomes the trigger node's output",
+    async (type, config) => {
+      const event = { message: "hello", sessionId: "s-1", n: 3 };
+      const graph: GraphDef = {
+        startNodeId: "trig",
+        nodes: [
+          { id: "trig", type, config },
+          { id: "end", type: "end" },
+        ],
+        edges: [{ from: "trig", to: "end" }],
+      } as GraphDef;
+      const result = await runFlow(graph, event, `e2e-matrix-${type}`);
+      expect(result.status).toBe("completed");
+      // the inbound event IS the entry node's output (like webhookTrigger)
+      expect(result.ctx.trig).toEqual(event);
+    },
+  );
 });
