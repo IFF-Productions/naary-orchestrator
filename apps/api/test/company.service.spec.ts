@@ -22,7 +22,11 @@ vi.mock("@naary/db", () => ({
 
 import { CompanyService } from "../src/companies/company.service";
 
-const svc = new CompanyService();
+const svc = new CompanyService(
+  {} as never, // ExecutionsService — not exercised in this spec
+  {} as never, // GraphsService
+  {} as never, // EnvironmentsService
+);
 
 // Membership roles keyed cheaply: companyMembership.findUnique returns { role } or null;
 // membership.findUnique returns the user's workspace role or null.

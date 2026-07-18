@@ -7,6 +7,12 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
+import { EnvironmentsService } from "../environments/environments.service";
+import {
+  ExecutionsService,
+  type RunPage,
+} from "../executions/executions.service";
+import { GraphsService, type GraphSummary } from "../graphs/graphs.service";
 
 export interface CompanyView {
   id: string;
@@ -50,6 +56,12 @@ export interface CompanyUsageRollup {
  */
 @Injectable()
 export class CompanyService {
+  constructor(
+    private readonly executions: ExecutionsService,
+    private readonly graphs: GraphsService,
+    private readonly environments: EnvironmentsService,
+  ) {}
+
   /** Companies the user is a member of (powers a future "my companies" switcher). */
   async listForUser(userId: string): Promise<CompanyView[]> {
     const rows = await getPrisma().companyMembership.findMany({
@@ -292,6 +304,62 @@ export class CompanyService {
         })
         .sort((a, b) => b.costUsd - a.costUsd),
     };
+  }
+
+  // ---- Slice 3: cross-workspace data VISIBILITY (§7.3) --------------------------------------
+
+  /**
+   * §4 gate for every company-path read INTO a workspace: company membership FIRST (the sole
+   * cross-workspace authorization), then verify the target workspace is attached to THIS
+   * company. Order is non-negotiable; the equality check stops a member of company A reading
+   * company B's workspaces by mixing ids.
+   */
+  private async assertCompanyWorkspace(
+    userId: string,
+    companyId: string,
+    tenantId: string,
+  ): Promise<void> {
+    await this.assertCompanyMember(userId, companyId);
+    const row = await getPrisma().tenantSettings.findUnique({
+      where: { tenantId },
+      select: { companyId: true },
+    });
+    if (row?.companyId !== companyId) {
+      throw new NotFoundException(
+        "That workspace is not attached to this company.",
+      );
+    }
+  }
+
+  /**
+   * READ-ONLY page of a member workspace's runs for the company console. Delegates to the
+   * tenant-parameterized ExecutionsService.listPage with the TARGET tenant — safe because the
+   * §4 gate above ran first (this is the only sanctioned cross-workspace path). Run DETAIL
+   * (state/history/graph) stays workspace-gated and is deliberately NOT exposed here.
+   */
+  async listWorkspaceRuns(
+    userId: string,
+    companyId: string,
+    tenantId: string,
+    opts: { limit?: number; cursor?: string } = {},
+  ): Promise<RunPage> {
+    await this.assertCompanyWorkspace(userId, companyId, tenantId);
+    return this.executions.listPage(tenantId, opts);
+  }
+
+  /**
+   * READ-ONLY workflow summaries (names/keys/versions — never graph bodies) of a member
+   * workspace, from its DEFAULT environment. NB: defaultEnvId lazily CREATES the default env
+   * row on a never-touched workspace — idempotent and identical to any tenant-scoped read.
+   */
+  async listWorkspaceWorkflows(
+    userId: string,
+    companyId: string,
+    tenantId: string,
+  ): Promise<GraphSummary[]> {
+    await this.assertCompanyWorkspace(userId, companyId, tenantId);
+    const envId = await this.environments.defaultEnvId(tenantId);
+    return this.graphs.list(tenantId, envId);
   }
 
   /** The caller's role in a company, or null if they're not a member. */

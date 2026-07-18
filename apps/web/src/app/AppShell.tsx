@@ -65,6 +65,7 @@ const GROUPS: { heading: string; items: NavItemDef[] }[] = [
     items: [
       { to: "/app/observability", label: "Observability", icon: "chart" },
       { to: "/app/billing", label: "Billing & usage", icon: "card" },
+      { to: "/app/company", label: "Company", icon: "users" },
     ],
   },
 ];

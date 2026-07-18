@@ -650,6 +650,57 @@ export const api = {
       body: JSON.stringify(name?.trim() ? { name: name.trim() } : {}),
     });
   },
+  // --- Companies (COMPANIES.md): user-scoped (uid-keyed) — the workspace header is ignored. ---
+  getMyCompanies(): Promise<Company[]> {
+    return http("/me/companies");
+  },
+  createCompany(name: string): Promise<Company> {
+    return http("/companies", {
+      method: "POST",
+      body: JSON.stringify({ name: name.trim() }),
+    });
+  },
+  // Owner-authorized attach (§4): the caller must be a company member AND the workspace owner.
+  attachWorkspaceToCompany(companyId: string, tenantId: string): Promise<void> {
+    return http(
+      `/companies/${encodeURIComponent(companyId)}/workspaces/${encodeURIComponent(tenantId)}`,
+      { method: "POST" },
+    );
+  },
+  getCompanyUsage(
+    companyId: string,
+    opts: { from?: string; to?: string } = {},
+  ): Promise<CompanyUsage> {
+    const q = new URLSearchParams();
+    if (opts.from) q.set("from", opts.from);
+    if (opts.to) q.set("to", opts.to);
+    const qs = q.toString();
+    return http(
+      `/companies/${encodeURIComponent(companyId)}/usage${qs ? `?${qs}` : ""}`,
+    );
+  },
+  // READ-ONLY console drill-downs (§7.3) — summaries only, never run detail or graph bodies.
+  listCompanyWorkspaceRuns(
+    companyId: string,
+    tenantId: string,
+    opts: { limit?: number; cursor?: string } = {},
+  ): Promise<CompanyWorkspaceRuns> {
+    const q = new URLSearchParams();
+    if (opts.limit) q.set("limit", String(opts.limit));
+    if (opts.cursor) q.set("cursor", opts.cursor);
+    const qs = q.toString();
+    return http(
+      `/companies/${encodeURIComponent(companyId)}/workspaces/${encodeURIComponent(tenantId)}/runs${qs ? `?${qs}` : ""}`,
+    );
+  },
+  listCompanyWorkspaceWorkflows(
+    companyId: string,
+    tenantId: string,
+  ): Promise<CompanyWorkspaceWorkflow[]> {
+    return http(
+      `/companies/${encodeURIComponent(companyId)}/workspaces/${encodeURIComponent(tenantId)}/workflows`,
+    );
+  },
   // --- API tokens (for the MCP server + CLI/CI). Workspace-scoped via X-Workspace-Id. ---
   listApiTokens(): Promise<ApiTokenRow[]> {
     return http("/tokens");
@@ -1332,6 +1383,55 @@ export interface Workspace {
   role: string;
   /** Display name (TenantSettings.displayName); may be unset for un-named workspaces. */
   name?: string;
+}
+
+/** A company the caller belongs to (COMPANIES.md — the admin/rollup layer above workspaces). */
+export interface Company {
+  id: string;
+  name: string;
+  slug: string;
+  /** The caller's company role. */
+  role: "owner" | "admin";
+}
+
+export interface CompanyUsageBucket {
+  costUsd: number;
+  totalTokens: number;
+  calls: number;
+}
+
+/** Company-wide usage rollup — totals + per-workspace (+ nested per-environment). */
+export interface CompanyUsage {
+  range: { from: string | null; to: string | null };
+  totals: CompanyUsageBucket;
+  byWorkspace: Array<
+    CompanyUsageBucket & {
+      tenantId: string;
+      displayName: string | null;
+      byEnvironment: Array<
+        CompanyUsageBucket & { environmentId: string | null }
+      >;
+    }
+  >;
+}
+
+/** READ-ONLY run summaries of a member workspace (company console drill-down). */
+export interface CompanyWorkspaceRuns {
+  items: Array<{
+    workflowId: string;
+    workflowKey: string | null;
+    status: string;
+    createdAt: string;
+  }>;
+  nextCursor: string | null;
+}
+
+export interface CompanyWorkspaceWorkflow {
+  workflowKey: string;
+  name: string;
+  version: number;
+  updatedAt: string;
+  active: boolean;
 }
 
 /** One entry in the activity feed (who did what, when). */
