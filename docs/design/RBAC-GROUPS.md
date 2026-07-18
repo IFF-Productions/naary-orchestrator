@@ -1,6 +1,6 @@
 # RBAC-GROUPS — per-workspace permission groups, real user management, workflow tags
 
-Status: DESIGN (slices T1/U1 may start immediately; G1 blocked on §8 sign-off).
+Status: DESIGN — **§8 CONFIRMED (user, Jul 18 2026); G1 unblocked.** T1 shipped (#387).
 Related: COMPANIES.md §9 (company roles compose above), ENVIRONMENTS.md §9 (env-scoped RBAC seam).
 Invitations: PROVISIONING-MULTIUSER.md §6–§7 designed a token-based flow
 (`tokenHash`/`expiresAt` + `POST /invitations/:token/accept`) that was never built. **This doc
@@ -10,16 +10,17 @@ for invitations.
 
 ## 0. Premise (state this first — if it's wrong, everything below is)
 
-**Groups gate the `member` tier only; `owner`/`admin` — and API-token principals, and trigger-fired
-runs — always bypass.** A workspace with zero grants behaves exactly as today. Grants target
-workflows by `workflowKey` **tenant-wide across environments** (env-scoped grants are a §9 seam,
-not v1). If you want to gate admins, or env-/company-scoped grants now, stop — that is a different
-design.
+**Groups gate the `member` tier AND API tokens; `owner`/`admin` users and trigger-fired runs
+bypass.** A workspace with zero grants behaves exactly as today — for members AND tokens — and
+the FIRST grant flips both to deny-by-default (§4, §4a). Grants target workflows by `workflowKey`
+and are **environment-scoped**: a grant applies to all environments (null) or exactly one. If you
+want to gate admins, or company-scoped grants now, stop — that is a different design.
 
-Confirmed product decisions (user, Jul 2026): groups are per-workspace; a grant carries the FULL
-matrix (`view` / `run` / `edit` / `delete` / `share`); tags are organizational metadata only —
-grants never reference tags in v1 (the schema deliberately does not preclude tag-scoped grants
-later).
+Confirmed product decisions (user, Jul 2026 — full list §8): groups are per-workspace; a grant
+carries a SIX-verb matrix (`view` / `run` / `edit` / `delete` / `share`=promote /
+`create`); grants are env-scoped from v1; tags are organizational metadata only — grants never
+reference tags in v1 (the schema deliberately does not preclude tag-scoped grants later);
+**API tokens are RBAC subjects, restricted by default** under the same first-grant cliff (§4a).
 
 ## 1. Motivation
 
@@ -38,10 +39,10 @@ later).
 the workflow surfaces; Groups + Tags UI.
 
 **Out (with seams):** tag-scoped grants (later `TagGrant {grantId, tagId}` join beside
-`WorkflowGrantKey`, union semantics — nothing in v1 blocks it); env-scoped grants (reserved shape:
-`WorkflowGrant.environmentId String?`; composes with ENVIRONMENTS §9); company-level groups/roles
+`WorkflowGrantKey`, union semantics — nothing in v1 blocks it); company-level groups/roles
 (COMPANIES §9: company-owner ⊃ workspace-owner/admin ⊃ group grants — designed together when
 company RBAC lands); permissions on non-workflow resources (credentials, variables, budgets).
+(Env-scoped grants were originally a seam here — §8.5 pulled them INTO v1.)
 
 ## 3. Data model (all additive)
 
@@ -106,18 +107,40 @@ model GroupMember {
   @@index([userId])
 }
 
-// A group may hold several grants (e.g. view-all + edit-selected); effective = union.
-model WorkflowGrant {
-  id        String  @id @default(uuid())
-  tenantId  String  // denormalized: "does ANY grant exist in tenant?" is THE restriction switch
+// API tokens as grant subjects (§4a). A SEPARATE join (not a polymorphic subject column on
+// GroupMember): both FKs stay honest and Cascade — deleting a token or a group cleans its rows.
+// Under §8.6 the workspace's first-grant cliff restricts tokens too; these rows are how a
+// restricted token gets its access BACK (union of its groups' grants).
+model GroupTokenMember {
   groupId   String
   group     PermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  scope     String  // 'all' | 'selected'
-  canView   Boolean @default(false)
-  canRun    Boolean @default(false)
-  canEdit   Boolean @default(false)
-  canDelete Boolean @default(false)
-  canShare  Boolean @default(false)
+  tokenId   String
+  token     ApiToken        @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@id([groupId, tokenId])
+  @@index([tokenId])
+}
+
+// A group may hold several grants (e.g. view-all + edit-selected); effective = union.
+model WorkflowGrant {
+  id            String  @id @default(uuid())
+  tenantId      String  // denormalized: "does ANY grant exist in tenant?" is THE restriction switch
+  groupId       String
+  group         PermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  // Env-scoped (§8.5 CONFIRMED — tenant-wide-only was rejected): null = every environment,
+  // set = that environment only. Cascade FK: a grant naming a deleted env should vanish.
+  environmentId String?
+  environment   Environment? @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  scope         String  // 'all' | 'selected'
+  canView       Boolean @default(false)
+  canRun        Boolean @default(false)
+  canEdit       Boolean @default(false)
+  canDelete     Boolean @default(false)
+  canShare      Boolean @default(false) // share = PROMOTE only (§8.2)
+  // §8.3 (user-proposed): creation is its OWN permission, never inferred from edit. Valid ONLY
+  // on scope='all' grants (400 otherwise) — a 'selected'-scope creator would immediately lose
+  // sight of their own new workflow, which is incoherent.
+  canCreate     Boolean @default(false)
   workflows WorkflowGrantKey[] // only for scope='selected'
   @@index([tenantId])
   @@index([groupId])
@@ -131,7 +154,8 @@ model WorkflowGrantKey {
 }
 ```
 
-Five booleans over a string-set column: queryable, typo-proof, and the matrix is fixed at five.
+Six booleans over a string-set column: queryable, typo-proof, and the matrix is fixed at six
+(view/run/edit/delete/share/create).
 
 ## 4. Authorization semantics (the crux)
 
@@ -144,20 +168,27 @@ changes; (b) no hidden toggle state; (c) per-workflow default-allow is incoheren
 prominent "this restricts all members" warning before the first grant saves. (Alternative — an
 explicit `enforceGroups` toggle — is §8 decision 1.)
 
-- **Bypass / precedence:** `principal.role !== 'member'` ⇒ bypass. That covers workspace owners
-  and admins, API tokens (the guard stamps `role: "owner"` on `nry_` principals — workspace-scoped
-  secrets keep full access, env-binding already constrains them), and there is no principal at all
-  on trigger-fired/scheduled runs (workspace-level automation — unaffected). Company admins reach
-  data only via the `/companies` path (COMPANIES §4), which is untouched. Grants are purely
-  additive — no deny rules; effective = union across all the user's groups' grants.
+- **Bypass / precedence:** owner/admin USERS bypass; `member` users are gated per THE RULE;
+  API tokens are gated per §4a below; there is no principal at all on trigger-fired/scheduled
+  runs (workspace-level automation — unaffected). Company admins reach data only via the
+  `/companies` path (COMPANIES §4), which is untouched. Grants are purely additive — no deny
+  rules; effective = union across all of the subject's groups' grants.
 - **Implication:** any of run/edit/delete/share **implies view** (operating on an invisible
   workflow is incoherent). Nothing else is implied — run does not imply edit.
-- **Create:** saving a NEW `workflowKey` requires an `'all'`-scope grant with `canEdit` (a
-  `'selected'`-scope editor cannot mint keys outside their list).
-- **Share =** `promote` (copying the workflow toward another env) **+** adding/removing that
-  `workflowKey` in EXISTING `'selected'` grant key-lists. Share does NOT include creating groups,
-  changing permission booleans, or managing group membership — that stays owner/admin. Tag editing
-  is **edit**, not share (metadata, no access consequence).
+- **Env-scoped resolution (§8.5):** every permission check carries the request's RESOLVED
+  environment (the same `resolveEnvId` boundary every env-scoped feature uses). A grant matches
+  when its `environmentId` is null (all envs) or equals the request's env. So "run in prod only"
+  is one grant with `environmentId = prod`; the UI's grant editor gains an environment selector
+  defaulting to "All environments".
+- **Create (§8.3, user-proposed):** saving a NEW `workflowKey` requires a grant with
+  **`canCreate`** — its own permission, never inferred from edit. `canCreate` is valid only on
+  `'all'`-scope grants (400 otherwise): a `'selected'`-scope creator would immediately lose sight
+  of their own new workflow. Env-scoping applies: `canCreate` in sandbox lets you create in
+  sandbox only.
+- **Share = `promote` only (§8.2):** the permission to copy the workflow toward another
+  environment. Share does NOT include editing grant key-lists, creating groups, changing
+  permission booleans, or managing group membership — all of that stays owner/admin. The share
+  grant must match the promote's SOURCE environment. Tag editing is **edit**, not share.
 - **Action → surface matrix** (enforced in services; list endpoints FILTER, single-resource
   endpoints 403):
 
@@ -182,6 +213,35 @@ explicit `enforceGroups` toggle — is §8 decision 1.)
   removed nor demoted. Group/grant CRUD requires `owner|admin`. NOTE: today the members routes
   have NO role checks — harmless while the table is inert, a real hole once membership is real;
   U1 ships the gates in the same slice.
+
+### 4a. API tokens as RBAC subjects (confirmed Jul 18)
+
+- **Today's mechanics to change:** the AuthGuard stamps `role: "owner"` on every `nry_` principal
+  (auth.guard.ts:148) and `ApiTokenService.verify` deliberately returns `{tenantId,
+  environmentId}` with NO token id — there is currently no identity to hang a grant on. G1 makes
+  `verify` additionally return the token's row id (additive) and `Principal` gains `tokenId?`.
+- **Default (§8.6 CONFIRMED — restricted by default): tokens fall under the SAME first-grant
+  cliff as members.** Zero grants in the workspace ⇒ tokens work exactly as today (migration is
+  still a no-op). The moment the first grant exists, UNGROUPED tokens are deny-by-default too —
+  the workspace has opted into enforcement, and a secret that bypasses it would be the weakest
+  link. Consequence the UI must own: the first-grant warning says it restricts **all members AND
+  all API tokens**, and the grant editor's token picker sits right there so CI/MCP tokens get
+  grouped in the same gesture. Grouped tokens get exactly the union of their groups' grants
+  (same math as users: implies-view, canCreate on 'all'-scope, share=promote, env matching).
+- **Guard/enforcement mechanics:** the guard already reads the token row to verify it — it
+  additionally learns "is restricted?" (a `_count` on the join in the same lookup) and stamps
+  `role: "member"` + `tokenId` for restricted tokens instead of `"owner"`.
+  `PermissionsService` resolves grants by `tokenId` when set, by `userId` otherwise; nothing else
+  changes, so the v1 public API, MCP server, and CLI callers inherit enforcement automatically
+  (they all authenticate with `nry_` tokens through the same services).
+- **Composition with env-binding:** unchanged and orthogonal — env-binding restricts WHERE a
+  token may act (which environment); grants restrict WHAT it may touch (which workflows, which
+  verbs). Both apply.
+- **Managing token groups** is owner/admin-only, on the same Groups surface (G2 adds a token
+  picker beside the member picker; the API-tokens screen shows a "restricted" badge listing the
+  token's groups).
+- Trigger-fired and scheduled runs remain workspace-level automation with no principal —
+  unaffected.
 
 ## 5. User management (Member → Membership + Invitation, slice U1)
 
@@ -209,9 +269,11 @@ explicit `enforceGroups` toggle — is §8 decision 1.)
 ## 6. Migration / rollout
 
 Everything additive and behavior-neutral at every step: new tables only; no existing keys change;
-zero grants ⇒ §4 keeps every member fully functional until an admin opts in; API tokens, triggers,
-and v1 token callers unchanged. The two deliberate behavior changes are U1's members-route role
-gates (a security fix, flagged in its PR) and the Member→Invitation seed.
+zero grants ⇒ §4/§4a keep every member AND every token fully functional until an admin opts in by
+creating the first grant (existing CI/MCP/v1 callers are unchanged at deploy — the cliff only
+moves when a workspace adopts groups, and the first-grant warning + token picker make the token
+impact explicit in that flow); triggers unaffected. The two deliberate behavior changes are U1's
+members-route role gates (a security fix, flagged in its PR) and the Member→Invitation seed.
 
 ## 7. Slice plan
 
@@ -219,26 +281,32 @@ gates (a security fix, flagged in its PR) and the Member→Invitation seed.
   filter, editor dialog. *Shippable immediately.*
 - **U1 — Real user/role management**: Invitation + accept-on-login + Membership-backed Team +
   role gates + Member seed. *Prerequisite for G1 (groups reference real uids).*
-- **G1 — Groups + grants + enforcement (API-only)**: schema + PermissionsService + asserts on the
-  §4 matrix surfaces + groups CRUD API + `GET /me/permissions`. *Blocked on §8 sign-off.*
-- **G2 — Groups UI + grant matrix**: Groups screen (create, member picker, scope toggle ×
-  five-checkbox matrix, first-grant warning); SPA affordance gating from `/me/permissions`.
+- **G1 — Groups + grants + enforcement (API-only)**: schema (incl. `GroupTokenMember`) +
+  PermissionsService + asserts on the §4 matrix surfaces + groups CRUD API (member AND token
+  attachment) + `GET /me/permissions` + the §4a guard/verify changes (`tokenId` in the principal;
+  restricted tokens stamped `member`). *Blocked on §8 sign-off.*
+- **G2 — Groups UI + grant matrix**: Groups screen (create, member picker + TOKEN picker, scope
+  toggle × five-checkbox matrix, first-grant warning); SPA affordance gating from
+  `/me/permissions`; "restricted" badge + group list on the API-tokens screen.
 - **G3 — Long tail**: v1 coverage specs; execution-read scoping to viewable keys (widest blast
   radius — Runs/insights screens); audit labels for group/grant/member mutations; retire `Member`.
 
-## 8. Decisions (OPEN — confirm before G1; recommendations bolded)
+## 8. Decisions (CONFIRMED — user, Jul 18 2026)
 
-1. **Default-access cliff**: **first grant flips members to deny-by-default** (recommended) vs an
-   explicit `enforceGroups` workspace toggle. The cliff is toggle-free and migration-neutral; the
-   toggle is more discoverable but adds state.
-2. **Share semantics**: **promote + `'selected'` grant key-listing** (recommended) vs promote-only.
-3. **Create rule**: **members need an `'all'`-scope `canEdit` grant to create workflows**
-   (recommended) vs any-edit-anywhere vs owner/admin-only.
-4. **Run-read visibility deferred to G3**: until then a restricted member can see run ROWS (names,
-   statuses, costs) of workflows they cannot open. **Accept the interim leak** (recommended) or
-   pull G3's read-scoping into G1.
-5. **Grants are tenant-wide across envs in v1** (a member with edit can edit in any env they can
-   select). Env-scoped grants (incl. a future `promote:prod`) are §9 seams. **Accept for v1.**
+1. **Default access: the first-grant cliff.** Zero grants = today's behavior; the first grant in
+   a workspace flips `member` users (and, per 6, ungrouped tokens) to deny-by-default. No toggle.
+2. **Share = promote only.** No grant-key-listing power for members; all grant editing stays
+   owner/admin.
+3. **Create is its OWN permission** (user-proposed): a sixth `canCreate` boolean, valid only on
+   `'all'`-scope grants — never inferred from edit.
+4. **Run-read scoping deferred to G3 accepted** — interim: restricted subjects can see run rows
+   (names/statuses/costs) of workflows they cannot open.
+5. **Grants are ENV-SCOPED from v1** (tenant-wide-only rejected): `WorkflowGrant.environmentId`
+   nullable — null = all environments, set = that one. Every check resolves against the request's
+   env; "edit in sandbox, run-only in prod" is expressible on day one.
+6. **Tokens are restricted by default**: same first-grant cliff as members — once a workspace
+   opts into enforcement, an ungrouped token is denied like an ungrouped member. The first-grant
+   UI warning covers tokens explicitly and the token picker sits in the same flow.
 
 ## 9. Seams
 
