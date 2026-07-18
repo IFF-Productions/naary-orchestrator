@@ -7,6 +7,7 @@ import {
   HttpCode,
   Param,
   Post,
+  Put,
   Query,
 } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
@@ -16,16 +17,21 @@ import { ApiEndpoint } from "../swagger/api-decorators";
 import type { RunPage } from "../executions/executions.service";
 import type { GraphSummary } from "../graphs/graphs.service";
 import {
+  type CompanyBudgetConfig,
+  type CompanyBudgetView,
   type CompanyUsageRollup,
   type CompanyView,
   CompanyService,
 } from "./company.service";
 import {
+  CompanyBudgetConfigResponse,
+  CompanyBudgetViewResponse,
   CompanyUsageResponse,
   CompanyViewResponse,
   CompanyWorkspaceRunsResponse,
   CompanyWorkspaceWorkflowResponse,
 } from "./company.response";
+import { SetCompanyBudgetDto } from "./set-company-budget.dto";
 
 /**
  * Companies (COMPANIES.md Slices 1–3). All routes are `@UserScoped()` and keyed by the caller's
@@ -131,6 +137,41 @@ export class CompaniesController {
   ): Promise<GraphSummary[]> {
     const userId = this.requireUser(principal);
     return this.companies.listWorkspaceWorkflows(userId, companyId, tenantId);
+  }
+
+  @ApiEndpoint({
+    summary: "Get the company's budget",
+    description:
+      "Company-wide monthly cap (COMPANIES.md §8, Slice 5) + live company-wide month-to-date " +
+      "spend. Company members only. `budget` is null when no cap is configured.",
+    ok: CompanyBudgetViewResponse,
+  })
+  @Get("companies/:id/budget")
+  @UserScoped()
+  async getBudget(
+    @CurrentPrincipal() principal: Principal,
+    @Param("id") companyId: string,
+  ): Promise<CompanyBudgetView> {
+    const userId = this.requireUser(principal);
+    return this.companies.getCompanyBudget(userId, companyId);
+  }
+
+  @ApiEndpoint({
+    summary: "Set the company's budget",
+    description:
+      "Company OWNER only — the cap gates run starts across every member workspace " +
+      "(an OUTER gate above per-workspace budgets; both must pass).",
+    ok: CompanyBudgetConfigResponse,
+  })
+  @Put("companies/:id/budget")
+  @UserScoped()
+  async setBudget(
+    @CurrentPrincipal() principal: Principal,
+    @Param("id") companyId: string,
+    @Body() body: SetCompanyBudgetDto,
+  ): Promise<CompanyBudgetConfig> {
+    const userId = this.requireUser(principal);
+    return this.companies.setCompanyBudget(userId, companyId, body);
   }
 
   @ApiEndpoint({

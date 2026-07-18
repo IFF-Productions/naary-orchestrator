@@ -1,8 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// start() only reaches getPrisma inside startGraph, which we stub out below — so a
-// minimal mock is enough (no query is actually issued in these tests).
-vi.mock("@naary/db", () => ({ getPrisma: () => ({}) }));
+// The version-resolution tests stub startGraph out entirely; the budget-gate tests below run the
+// REAL startGraph, which reaches execution.create + both budget guards + getBudget — mock those.
+const { executionCreate, tenantGate, companyGate } = vi.hoisted(() => ({
+  executionCreate: vi.fn(),
+  tenantGate: vi.fn(),
+  companyGate: vi.fn(),
+}));
+vi.mock("@naary/db", () => ({
+  getPrisma: () => ({ execution: { create: executionCreate } }),
+}));
+vi.mock("@naary/usage", () => ({
+  getBudget: vi.fn().mockResolvedValue(null),
+}));
+vi.mock("../src/budget/budget-guard", () => ({
+  assertWithinMonthlyBudget: tenantGate,
+}));
+vi.mock("../src/budget/company-budget-guard", () => ({
+  assertWithinCompanyMonthlyBudget: companyGate,
+}));
 
 import { ExecutionsService } from "../src/executions/executions.service";
 
@@ -47,6 +63,65 @@ function makeService() {
     }));
   return { service, getLatest, getVersion, startGraph };
 }
+
+// The REAL startGraph (no stub) with only its collaborators mocked, to cover the run-start
+// budget gating: the per-tenant gate, then the company-wide OUTER gate (both must pass).
+function makeGatedService() {
+  const service = new ExecutionsService(
+    {} as never,
+    {
+      defaultEnvId: async () => "env-test",
+      resolveEnvId: async () => "env-test",
+    } as never,
+  );
+  (service as unknown as { graphs: unknown }).graphs = {
+    getLatest: vi.fn().mockResolvedValue(SNAP_LATEST),
+    getErrorHandler: vi.fn().mockResolvedValue(null),
+  };
+  const workflowStart = vi.fn().mockResolvedValue({});
+  (service as unknown as { client: unknown }).client = {
+    workflow: { start: workflowStart },
+  };
+  return { service, workflowStart };
+}
+
+describe("startGraph (budget gates)", () => {
+  beforeEach(() => {
+    executionCreate.mockReset().mockResolvedValue({});
+    tenantGate.mockReset();
+    companyGate.mockReset();
+  });
+
+  it("runs the TENANT gate first, then the company OUTER gate — both before the workflow starts", async () => {
+    const order: string[] = [];
+    tenantGate.mockImplementation(async () => {
+      order.push("tenant");
+    });
+    companyGate.mockImplementation(async () => {
+      order.push("company");
+    });
+    const { service, workflowStart } = makeGatedService();
+
+    await service.start("t1", "e1", { x: 1 }, "refunds");
+
+    expect(order).toEqual(["tenant", "company"]); // tenant gate first, company gate second
+    expect(companyGate).toHaveBeenCalledWith("t1");
+    expect(workflowStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates the company gate's 402 and does NOT start the workflow", async () => {
+    tenantGate.mockResolvedValue(undefined); // tenant cap passes…
+    const err = new Error("company cap exceeded (402)");
+    companyGate.mockRejectedValue(err); // …but the company OUTER gate rejects
+    const { service, workflowStart } = makeGatedService();
+
+    await expect(service.start("t1", "e1", { x: 1 }, "refunds")).rejects.toBe(
+      err,
+    );
+    expect(workflowStart).not.toHaveBeenCalled();
+    expect(executionCreate).not.toHaveBeenCalled();
+  });
+});
 
 describe("start (version resolution)", () => {
   it("uses the LATEST graph when no version is given", async () => {

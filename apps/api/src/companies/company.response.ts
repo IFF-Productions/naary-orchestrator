@@ -13,6 +13,42 @@ export class CompanyViewResponse {
   role!: string;
 }
 
+// ---- Company budget (COMPANIES.md §8, Slice 5) --------------------------------------------------
+
+/** The persisted company-wide budget config. */
+export class CompanyBudgetConfigResponse {
+  @ApiProperty({
+    example: 500,
+    description:
+      "Company-wide monthly spend cap, USD, summed across all member workspaces.",
+  })
+  monthlyCapUsd!: number;
+  @ApiProperty({
+    example: "reject",
+    enum: ["reject"],
+    description: "Action when the company cap is exceeded.",
+  })
+  onBudgetExceeded!: string;
+}
+
+/** Company budget config (null when unset) + live company-wide month-to-date spend. */
+export class CompanyBudgetViewResponse {
+  @ApiProperty({ type: CompanyBudgetConfigResponse, nullable: true })
+  budget!: CompanyBudgetConfigResponse | null;
+  @ApiProperty({
+    example: 42.5,
+    description: "Company-wide month-to-date spend, USD.",
+  })
+  mtdSpendUsd!: number;
+  @ApiProperty({
+    nullable: true,
+    example: 457.5,
+    description:
+      "monthlyCapUsd − mtdSpendUsd (may be negative); null when no budget is configured.",
+  })
+  remainingUsd!: number | null;
+}
+
 // ---- Company usage rollup (COMPANIES.md §5, Slice 2) --------------------------------------------
 
 /** The cost/tokens/calls totals shared by every company-usage bucket. Tokens + cost only. */
