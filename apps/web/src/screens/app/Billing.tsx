@@ -6,6 +6,7 @@ import {
   type BudgetView,
   type UsageReport,
 } from "../../lib/api";
+import { InsightsSection } from "./insights";
 
 /* ------------------------------------------------------------------
  * Billing & usage — wired to the control plane. On mount we resolve the
@@ -139,16 +140,22 @@ export function Billing() {
       )}
 
       {state.kind === "ready" && (
-        <Ready usage={state.usage} budget={state.budget} />
+        <Ready
+          tenantId={state.tenantId}
+          usage={state.usage}
+          budget={state.budget}
+        />
       )}
     </div>
   );
 }
 
 function Ready({
+  tenantId,
   usage,
   budget,
 }: {
+  tenantId: string;
   usage: UsageReport;
   budget: BudgetView | null;
 }) {
@@ -190,6 +197,8 @@ function Ready({
           hasUsage={hasUsage}
         />
       </div>
+
+      <InsightsSection tenantId={tenantId} />
     </>
   );
 }

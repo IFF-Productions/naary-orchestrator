@@ -672,6 +672,21 @@ export const api = {
   getUsage(tenantId: string): Promise<UsageReport> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/usage`);
   },
+  // Usage rolled up by day / environment / workflow / model — the Insights dashboard.
+  // Optional from/to (ISO date) window + environmentId filter.
+  getInsights(
+    tenantId: string,
+    opts: { from?: string; to?: string; environmentId?: string } = {},
+  ): Promise<InsightsReport> {
+    const q = new URLSearchParams();
+    if (opts.from) q.set("from", opts.from);
+    if (opts.to) q.set("to", opts.to);
+    if (opts.environmentId) q.set("environmentId", opts.environmentId);
+    const qs = q.toString();
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/usage/insights${qs ? `?${qs}` : ""}`,
+    );
+  },
   // --- Team (members) ---
   listMembers(tenantId: string): Promise<Member[]> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/members`);
@@ -1260,6 +1275,23 @@ export interface UsageReport {
     costUsd: number;
   }[];
   events: unknown[];
+}
+
+/** Cost/tokens/calls shared by every insights bucket. */
+export interface InsightsBucket {
+  costUsd: number;
+  totalTokens: number;
+  calls: number;
+}
+
+/** Usage rolled up by day, environment, workflow, and model (GET /tenants/:id/usage/insights). */
+export interface InsightsReport {
+  range: { from: string | null; to: string | null };
+  totals: InsightsBucket;
+  byDay: (InsightsBucket & { date: string })[];
+  byEnvironment: (InsightsBucket & { environmentId: string | null })[];
+  byWorkflow: (InsightsBucket & { workflowKey: string | null })[];
+  byModel: (InsightsBucket & { provider: string; model: string })[];
 }
 export interface Member {
   id: string;
