@@ -297,10 +297,16 @@ export interface InsightsReport {
   byWorkflow: (InsightsBucket & { workflowKey: string | null })[];
   byModel: (InsightsBucket & { provider: string; model: string })[];
 }
+/** One Team-screen row: an ACTIVE member (a real Membership) or a PENDING invitation
+ *  (RBAC U1). `id` is the Firebase uid for active rows (the role-change/remove key) and
+ *  the invitation id for invited rows (the revoke key). */
 export interface Member {
   id: string;
+  /** Firebase uid — present on active rows only. */
+  userId?: string;
   email: string;
   role: string;
+  status: "active" | "invited";
   createdAt: string;
 }
 export interface TenantSettings {

@@ -1,61 +1,319 @@
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const findMany = vi.fn();
-const upsert = vi.fn();
-const deleteMany = vi.fn();
+const membership = {
+  findMany: vi.fn(),
+  findFirst: vi.fn(),
+  findUnique: vi.fn(),
+  update: vi.fn(),
+  deleteMany: vi.fn(),
+  count: vi.fn(),
+};
+const invitation = {
+  findMany: vi.fn(),
+  findFirst: vi.fn(),
+  findUnique: vi.fn(),
+  create: vi.fn(),
+  update: vi.fn(),
+  deleteMany: vi.fn(),
+};
 vi.mock("@naary/db", () => ({
-  getPrisma: () => ({ member: { findMany, upsert, deleteMany } }),
+  getPrisma: () => ({ membership, invitation }),
 }));
 
+import type { Principal } from "../src/auth/tenant.decorator";
+import type { MembershipService } from "../src/membership/membership.service";
 import { MembersService } from "../src/members/members.service";
 
-const svc = new MembersService();
+const invalidate = vi.fn();
+const svc = new MembersService({
+  invalidate,
+} as unknown as MembershipService);
+
 const now = new Date("2026-01-01T00:00:00.000Z");
+const asOwner: Principal = { tenantId: "t-1", userId: "u-own", role: "owner" };
+const asAdmin: Principal = { tenantId: "t-1", userId: "u-adm", role: "admin" };
+const asMember: Principal = {
+  tenantId: "t-1",
+  userId: "u-mem",
+  role: "member",
+};
 
 beforeEach(() => {
-  findMany.mockReset();
-  upsert.mockReset();
-  deleteMany.mockReset();
+  for (const m of [
+    ...Object.values(membership),
+    ...Object.values(invitation),
+    invalidate,
+  ]) {
+    m.mockReset();
+  }
+  membership.findMany.mockResolvedValue([]);
+  membership.findFirst.mockResolvedValue(null);
+  membership.findUnique.mockResolvedValue(null);
+  membership.count.mockResolvedValue(2); // two owners by default — last-owner guard quiet
+  membership.deleteMany.mockResolvedValue({ count: 1 });
+  invitation.findMany.mockResolvedValue([]);
+  invitation.findFirst.mockResolvedValue(null);
+  invitation.findUnique.mockResolvedValue(null);
+  invitation.deleteMany.mockResolvedValue({ count: 1 });
 });
 
-describe("MembersService", () => {
-  it("lists the tenant's members as views", async () => {
-    findMany.mockResolvedValue([
-      { id: "m1", email: "a@x.com", role: "owner", createdAt: now },
+describe("MembersService.list", () => {
+  it("returns Membership rows ∪ pending invitations with a status discriminator", async () => {
+    membership.findMany.mockResolvedValue([
+      { userId: "u-1", email: "a@x.com", role: "owner", createdAt: now },
+    ]);
+    invitation.findMany.mockResolvedValue([
+      { id: "inv-1", email: "b@x.com", role: "member", createdAt: now },
     ]);
     expect(await svc.list("t-1")).toEqual([
       {
-        id: "m1",
+        id: "u-1",
+        userId: "u-1",
         email: "a@x.com",
         role: "owner",
+        status: "active",
+        createdAt: now.toISOString(),
+      },
+      {
+        id: "inv-1",
+        email: "b@x.com",
+        role: "member",
+        status: "invited",
         createdAt: now.toISOString(),
       },
     ]);
-    expect(findMany).toHaveBeenCalledWith({
-      where: { tenantId: "t-1" },
-      orderBy: { createdAt: "asc" },
+    // Only PENDING invitations appear (accepted ones are represented by their Membership).
+    expect(invitation.findMany.mock.calls[0][0].where).toEqual({
+      tenantId: "t-1",
+      acceptedAt: null,
+    });
+  });
+});
+
+describe("MembersService.invite", () => {
+  it("creates a pending Invitation (lowercased email) — NOT a Membership", async () => {
+    invitation.create.mockResolvedValue({
+      id: "inv-1",
+      email: "new@x.com",
+      role: "member",
+      createdAt: now,
+    });
+    const v = await svc.invite("t-1", asOwner, "  New@X.com ", "member");
+    expect(v).toMatchObject({ id: "inv-1", status: "invited" });
+    expect(invitation.create.mock.calls[0][0].data).toEqual({
+      tenantId: "t-1",
+      email: "new@x.com",
+      role: "member",
+      invitedBy: "u-own",
     });
   });
 
-  it("upserts by (tenantId, email) on add", async () => {
-    upsert.mockResolvedValue({
-      id: "m2",
+  it("409s when the email already belongs to an active member", async () => {
+    membership.findFirst.mockResolvedValue({ userId: "u-9" });
+    await expect(
+      svc.invite("t-1", asOwner, "a@x.com", "member"),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(invitation.create).not.toHaveBeenCalled();
+  });
+
+  it("409s when an invitation for the email is already pending", async () => {
+    invitation.findUnique.mockResolvedValue({ id: "inv-1", acceptedAt: null });
+    await expect(
+      svc.invite("t-1", asOwner, "b@x.com", "member"),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it("re-opens a previously ACCEPTED invitation when the membership is gone", async () => {
+    invitation.findUnique.mockResolvedValue({ id: "inv-1", acceptedAt: now });
+    invitation.update.mockResolvedValue({
+      id: "inv-1",
       email: "b@x.com",
       role: "admin",
       createdAt: now,
     });
-    const v = await svc.add("t-1", "b@x.com", "admin");
-    expect(v.role).toBe("admin");
-    expect(upsert.mock.calls[0][0].where).toEqual({
-      tenantId_email: { tenantId: "t-1", email: "b@x.com" },
+    const v = await svc.invite("t-1", asOwner, "b@x.com", "admin");
+    expect(v.status).toBe("invited");
+    expect(invitation.update.mock.calls[0][0].data).toMatchObject({
+      role: "admin",
+      acceptedAt: null,
+    });
+    expect(invitation.create).not.toHaveBeenCalled();
+  });
+
+  it("maps a P2002 create race to 409, not 500", async () => {
+    invitation.create.mockRejectedValue(
+      Object.assign(new Error("unique"), { code: "P2002" }),
+    );
+    await expect(
+      svc.invite("t-1", asOwner, "c@x.com", "member"),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  // --- §4 role gates ---
+
+  it("403s a plain member trying to invite", async () => {
+    await expect(
+      svc.invite("t-1", asMember, "x@x.com", "member"),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(invitation.create).not.toHaveBeenCalled();
+  });
+
+  it("lets an admin invite a MEMBER", async () => {
+    invitation.create.mockResolvedValue({
+      id: "inv-2",
+      email: "x@x.com",
+      role: "member",
+      createdAt: now,
+    });
+    await expect(
+      svc.invite("t-1", asAdmin, "x@x.com", "member"),
+    ).resolves.toMatchObject({ status: "invited" });
+  });
+
+  it("403s an admin inviting as ADMIN (elevated grants are owner-only)", async () => {
+    await expect(
+      svc.invite("t-1", asAdmin, "x@x.com", "admin"),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("lets the owner invite as admin", async () => {
+    invitation.create.mockResolvedValue({
+      id: "inv-3",
+      email: "x@x.com",
+      role: "admin",
+      createdAt: now,
+    });
+    await expect(
+      svc.invite("t-1", asOwner, "x@x.com", "admin"),
+    ).resolves.toMatchObject({ role: "admin" });
+  });
+});
+
+describe("MembersService.changeRole", () => {
+  it("updates the role and INVALIDATES the target's membership cache", async () => {
+    membership.findUnique.mockResolvedValue({ userId: "u-2", role: "member" });
+    membership.update.mockResolvedValue({
+      userId: "u-2",
+      email: "b@x.com",
+      role: "admin",
+      createdAt: now,
+    });
+    const v = await svc.changeRole("t-1", asOwner, "u-2", "admin");
+    expect(v).toMatchObject({ role: "admin", status: "active" });
+    expect(invalidate).toHaveBeenCalledWith("u-2");
+  });
+
+  it("404s on an unknown member", async () => {
+    await expect(
+      svc.changeRole("t-1", asOwner, "u-ghost", "admin"),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("403s a member caller", async () => {
+    await expect(
+      svc.changeRole("t-1", asMember, "u-2", "member"),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("403s an admin GRANTING admin (owner-only)", async () => {
+    membership.findUnique.mockResolvedValue({ userId: "u-2", role: "member" });
+    await expect(
+      svc.changeRole("t-1", asAdmin, "u-2", "admin"),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("403s an admin DEMOTING an admin (revoking elevated is owner-only)", async () => {
+    membership.findUnique.mockResolvedValue({ userId: "u-2", role: "admin" });
+    await expect(
+      svc.changeRole("t-1", asAdmin, "u-2", "member"),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("409s demoting the LAST owner", async () => {
+    membership.findUnique.mockResolvedValue({ userId: "u-own", role: "owner" });
+    membership.count.mockResolvedValue(1);
+    await expect(
+      svc.changeRole("t-1", asOwner, "u-own", "member"),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(membership.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("MembersService.removeMember", () => {
+  it("deletes tenant-scoped and INVALIDATES the removed user's cache", async () => {
+    membership.findUnique.mockResolvedValue({ userId: "u-2", role: "member" });
+    await svc.removeMember("t-1", asAdmin, "u-2");
+    expect(membership.deleteMany).toHaveBeenCalledWith({
+      where: { tenantId: "t-1", userId: "u-2" },
+    });
+    expect(invalidate).toHaveBeenCalledWith("u-2");
+  });
+
+  it("is a no-op on an unknown uid (never a cross-tenant delete or a 500)", async () => {
+    await svc.removeMember("t-1", asOwner, "u-ghost");
+    expect(membership.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("403s a member caller", async () => {
+    await expect(
+      svc.removeMember("t-1", asMember, "u-2"),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("403s an admin removing an ADMIN (owner-only)", async () => {
+    membership.findUnique.mockResolvedValue({ userId: "u-2", role: "admin" });
+    await expect(
+      svc.removeMember("t-1", asAdmin, "u-2"),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("409s removing the LAST owner", async () => {
+    membership.findUnique.mockResolvedValue({ userId: "u-own", role: "owner" });
+    membership.count.mockResolvedValue(1);
+    await expect(
+      svc.removeMember("t-1", asOwner, "u-own"),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(membership.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("allows removing an owner when ANOTHER owner remains", async () => {
+    membership.findUnique.mockResolvedValue({ userId: "u-2", role: "owner" });
+    membership.count.mockResolvedValue(2);
+    await svc.removeMember("t-1", asOwner, "u-2");
+    expect(membership.deleteMany).toHaveBeenCalled();
+  });
+});
+
+describe("MembersService.revokeInvitation", () => {
+  it("revokes a pending invitation (tenant-scoped)", async () => {
+    invitation.findFirst.mockResolvedValue({ id: "inv-1", role: "member" });
+    await svc.revokeInvitation("t-1", asAdmin, "inv-1");
+    expect(invitation.deleteMany).toHaveBeenCalledWith({
+      where: { id: "inv-1", tenantId: "t-1", acceptedAt: null },
     });
   });
 
-  it("scopes removal to the tenant (deleteMany, never cross-tenant)", async () => {
-    deleteMany.mockResolvedValue({ count: 1 });
-    await svc.remove("t-1", "m9");
-    expect(deleteMany).toHaveBeenCalledWith({
-      where: { tenantId: "t-1", id: "m9" },
-    });
+  it("is a no-op on an unknown/accepted invitation", async () => {
+    await svc.revokeInvitation("t-1", asOwner, "inv-ghost");
+    expect(invitation.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("403s a member caller", async () => {
+    await expect(
+      svc.revokeInvitation("t-1", asMember, "inv-1"),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("403s an admin revoking an ADMIN invitation (owner-only)", async () => {
+    invitation.findFirst.mockResolvedValue({ id: "inv-1", role: "admin" });
+    await expect(
+      svc.revokeInvitation("t-1", asAdmin, "inv-1"),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(invitation.deleteMany).not.toHaveBeenCalled();
   });
 });

@@ -1,29 +1,46 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Card, Icon } from "../../components";
-import { api, type Member, UnauthorizedError } from "../../lib/api";
+import { api, HttpError, type Member, UnauthorizedError } from "../../lib/api";
 
-const ROLES = ["owner", "admin", "member"];
 const ROLE_COLOR: Record<string, string> = {
   owner: "var(--brand)",
   admin: "var(--ink)",
   member: "var(--ink-2)",
 };
 
+/**
+ * Team (RBAC U1): Membership-backed members + pending invitations. Adding a teammate
+ * creates an INVITATION — they join when they sign in with that email verified. Roles are
+ * ENFORCED: owner/admin manage the team; only owners grant admin/owner.
+ */
 export function Team() {
   const navigate = useNavigate();
   const [tenant, setTenant] = useState<string | null>(null);
+  const [myRole, setMyRole] = useState<string | null>(null);
   const [members, setMembers] = useState<Member[] | null>(null);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("member");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Only owners may grant/revoke admin/owner (server-enforced) — gate the select to match.
+  const roleOptions =
+    myRole === "owner" ? ["owner", "admin", "member"] : ["member"];
+  const canManage = myRole === "owner" || myRole === "admin";
+
   async function load() {
     try {
       const me = await api.getMe();
       setTenant(me.tenantId);
-      setMembers(await api.listMembers(me.tenantId));
+      const [rows, workspaces] = await Promise.all([
+        api.listMembers(me.tenantId),
+        api.getMyWorkspaces().catch(() => []),
+      ]);
+      setMembers(rows);
+      setMyRole(
+        workspaces.find((w) => w.tenantId === me.tenantId)?.role ?? null,
+      );
       setError(null);
     } catch (e) {
       if (e instanceof UnauthorizedError) {
@@ -38,34 +55,78 @@ export function Team() {
     void load();
   }, []);
 
+  function describe(e: unknown, fallback: string): string {
+    if (e instanceof UnauthorizedError) return "Sign in to manage your team.";
+    if (e instanceof HttpError) {
+      if (e.status === 409) {
+        return (
+          e.serverMessage ??
+          "That email is already a member or already invited."
+        );
+      }
+      if (e.status === 403) {
+        return e.serverMessage ?? "Your role doesn't allow that.";
+      }
+      return e.serverMessage ?? fallback;
+    }
+    return fallback;
+  }
+
   async function invite() {
     if (!tenant || !email.trim()) return;
     setBusy(true);
     setError(null);
     try {
-      await api.addMember(tenant, email.trim(), role);
+      await api.inviteMember(tenant, email.trim(), role);
       setEmail("");
       setMembers(await api.listMembers(tenant));
     } catch (e) {
       setError(
-        e instanceof UnauthorizedError
-          ? "Sign in to manage your team."
-          : "Could not add member (is the email valid?).",
+        describe(e, "Could not send the invitation (is the email valid?)."),
       );
     } finally {
       setBusy(false);
     }
   }
 
-  async function remove(id: string) {
+  async function remove(row: Member) {
     if (!tenant) return;
+    setError(null);
     try {
-      await api.removeMember(tenant, id);
-      setMembers((ms) => (ms ?? []).filter((m) => m.id !== id));
-    } catch {
-      setError("Could not remove member.");
+      if (row.status === "invited") {
+        await api.revokeInvitation(tenant, row.id);
+      } else {
+        await api.removeMember(tenant, row.id);
+      }
+      setMembers((ms) => (ms ?? []).filter((m) => m.id !== row.id));
+    } catch (e) {
+      setError(
+        describe(
+          e,
+          row.status === "invited"
+            ? "Could not revoke the invitation."
+            : "Could not remove member.",
+        ),
+      );
     }
   }
+
+  async function changeRole(row: Member, newRole: string) {
+    if (!tenant || newRole === row.role) return;
+    setError(null);
+    try {
+      const updated = await api.changeMemberRole(tenant, row.id, newRole);
+      setMembers((ms) =>
+        (ms ?? []).map((m) => (m.id === row.id ? updated : m)),
+      );
+    } catch (e) {
+      setError(describe(e, "Could not change the role."));
+    }
+  }
+
+  const activeCount = members?.filter((m) => m.status === "active").length ?? 0;
+  const invitedCount =
+    members?.filter((m) => m.status === "invited").length ?? 0;
 
   return (
     <div style={{ padding: "22px 28px 40px", maxWidth: 920 }}>
@@ -87,8 +148,12 @@ export function Team() {
             marginTop: 2,
           }}
         >
-          {members ? `${members.length} members · ` : ""}roles are advisory
-          metadata (auth itself is Firebase / API tokens).
+          {members
+            ? `${activeCount} member${activeCount === 1 ? "" : "s"}${
+                invitedCount ? ` · ${invitedCount} invited` : ""
+              } · `
+            : ""}
+          invitees join when they sign in with a verified matching email.
         </div>
       </div>
 
@@ -107,39 +172,41 @@ export function Team() {
         </div>
       )}
 
-      {/* invite form */}
-      <Card style={{ padding: 14, marginBottom: 16 }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="teammate@company.com"
-            style={inputStyle}
-            type="email"
-          />
-          <select
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-            style={{ ...inputStyle, width: 120, flex: "none" }}
-          >
-            {ROLES.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-          <Button
-            variant="primary"
-            icon="plus"
-            disabled={busy || !email.trim()}
-            onClick={() => void invite()}
-          >
-            {busy ? "Adding…" : "Invite"}
-          </Button>
-        </div>
-      </Card>
+      {/* invite form — owner/admin only (server-enforced; hidden for members) */}
+      {canManage && (
+        <Card style={{ padding: 14, marginBottom: 16 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="teammate@company.com"
+              style={inputStyle}
+              type="email"
+            />
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              style={{ ...inputStyle, width: 120, flex: "none" }}
+            >
+              {roleOptions.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+            <Button
+              variant="primary"
+              icon="plus"
+              disabled={busy || !email.trim()}
+              onClick={() => void invite()}
+            >
+              {busy ? "Inviting…" : "Invite"}
+            </Button>
+          </div>
+        </Card>
+      )}
 
-      {/* members list */}
+      {/* members + pending invitations */}
       <Card style={{ padding: 0, overflow: "hidden" }}>
         {members === null && !error && (
           <div
@@ -182,31 +249,72 @@ export function Team() {
                   color: "var(--ink)",
                 }}
               >
-                {m.email}
+                {m.email || m.userId}
               </div>
             </div>
-            <span
-              style={{
-                fontSize: "var(--text-xs)",
-                fontWeight: "var(--weight-semibold)",
-                color: ROLE_COLOR[m.role] ?? "var(--ink-2)",
-              }}
-            >
-              {m.role}
-            </span>
-            <button
-              type="button"
-              aria-label="Remove member"
-              onClick={() => void remove(m.id)}
-              style={{
-                border: "none",
-                background: "transparent",
-                cursor: "pointer",
-                color: "var(--ink-3)",
-              }}
-            >
-              <Icon name="trash" size={15} />
-            </button>
+            {m.status === "invited" && (
+              <span
+                style={{
+                  fontSize: "var(--text-xs)",
+                  fontWeight: "var(--weight-semibold)",
+                  color: "var(--ink-3)",
+                  border: "1px solid var(--line-2)",
+                  borderRadius: 999,
+                  padding: "2px 8px",
+                }}
+              >
+                Invited
+              </span>
+            )}
+            {m.status === "active" && myRole === "owner" ? (
+              <select
+                value={m.role}
+                aria-label="Change role"
+                onChange={(e) => void changeRole(m, e.target.value)}
+                style={{
+                  ...inputStyle,
+                  flex: "none",
+                  width: 104,
+                  padding: "4px 6px",
+                  fontSize: "var(--text-xs)",
+                  fontWeight: "var(--weight-semibold)",
+                  color: ROLE_COLOR[m.role] ?? "var(--ink-2)",
+                }}
+              >
+                {["owner", "admin", "member"].map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span
+                style={{
+                  fontSize: "var(--text-xs)",
+                  fontWeight: "var(--weight-semibold)",
+                  color: ROLE_COLOR[m.role] ?? "var(--ink-2)",
+                }}
+              >
+                {m.role}
+              </span>
+            )}
+            {canManage && (
+              <button
+                type="button"
+                aria-label={
+                  m.status === "invited" ? "Revoke invitation" : "Remove member"
+                }
+                onClick={() => void remove(m)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  color: "var(--ink-3)",
+                }}
+              >
+                <Icon name="trash" size={15} />
+              </button>
+            )}
           </div>
         ))}
       </Card>

@@ -169,6 +169,26 @@ export class AuthGuard implements CanActivate {
       }
     }
 
+    // Accept-on-login (RBAC-GROUPS.md §5, slice U1): convert pending Invitations matching
+    // the user's VERIFIED email into Memberships BEFORE the membership read below, so an
+    // invited user's first request already sees the workspace. Strictly gated on
+    // `emailVerified === true` — an unverified account must never claim an invited address.
+    // NON-authorizing (it only converts invitations; access still resolves from the
+    // Membership table) and fail-quiet, same posture as the claim backfill below: a DB
+    // error here must not 500 an authenticated user. Runs AFTER authentication (and the
+    // allowlist) — it never widens who may sign in.
+    if (user.emailVerified === true && user.email) {
+      await this.memberships
+        .acceptPendingInvitations(user.userId, user.email, user.emailVerified)
+        .catch((err) =>
+          this.logger.warn(
+            `invitation accept-on-login failed for user=${user.userId}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          ),
+        );
+    }
+
     // Tenants this user may reach = their memberships ∪ {legacy claim tenant}. The claim is
     // a TRANSITIONAL owner grant (existing single-tenant users); migrate it to a Membership
     // on first sight so enforcement moves fully onto the table. (Slice 3's member-removal

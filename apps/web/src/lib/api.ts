@@ -31,6 +31,7 @@ export {
   AccessNotAllowedError,
   getActiveEnvironment,
   getActiveWorkspace,
+  HttpError,
   setActiveEnvironment,
   setActiveWorkspace,
   subscribeActiveEnvironment,

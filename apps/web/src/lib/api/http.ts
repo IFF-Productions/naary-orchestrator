@@ -20,6 +20,20 @@ export class UnauthorizedError extends Error {
   }
 }
 
+/** Thrown on any other non-2xx: carries the HTTP `status` (e.g. 409 conflict on an
+ *  already-invited email) and the server's `message` when the body had one, so screens
+ *  can branch on status / surface the server's wording instead of a generic error. */
+export class HttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly serverMessage?: string,
+  ) {
+    super(message);
+    this.name = "HttpError";
+  }
+}
+
 /** Thrown when the server's access allowlist rejects this (authenticated) user — the SPA
  *  shows a "not available yet" screen. Distinct from a generic 403 (membership/tenant). */
 export class AccessNotAllowedError extends Error {
@@ -120,18 +134,26 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (res.status === 401) throw new UnauthorizedError();
   if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as {
+      code?: string;
+      message?: string | string[];
+    } | null;
     // A 403 carrying the access-allowlist marker → a specific error (the NotAvailable screen).
     // Only this exact code, so an ordinary 403 (membership/tenant) still surfaces generically.
-    if (res.status === 403) {
-      const body = (await res.json().catch(() => null)) as {
-        code?: string;
-        message?: string;
-      } | null;
-      if (body?.code === "access_not_allowed") {
-        throw new AccessNotAllowedError(body.message);
-      }
+    if (res.status === 403 && body?.code === "access_not_allowed") {
+      throw new AccessNotAllowedError(
+        typeof body.message === "string" ? body.message : undefined,
+      );
     }
-    throw new Error(`${init?.method ?? "GET"} ${path} → ${res.status}`);
+    // Nest's message can be a string or a class-validator string[] — take the first.
+    const serverMessage = Array.isArray(body?.message)
+      ? body?.message[0]
+      : body?.message;
+    throw new HttpError(
+      `${init?.method ?? "GET"} ${path} → ${res.status}`,
+      res.status,
+      typeof serverMessage === "string" ? serverMessage : undefined,
+    );
   }
   // 204 / empty body (e.g. DELETE) — nothing to parse.
   if (res.status === 204 || res.headers.get("content-length") === "0") {
