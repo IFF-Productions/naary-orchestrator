@@ -206,6 +206,24 @@ export interface GraphSummary {
   updatedAt: string;
   /** Whether the workflow's automatic triggers fire (n8n parity). Default true. */
   active: boolean;
+  /** Organizational tags (tenant-wide per workflowKey — same chips in every environment). */
+  tags: TagRef[];
+}
+
+/** A workspace tag + how many workflows carry it (manage/list UI). Tags are organizational
+ *  metadata only — they never carry permissions. */
+export interface Tag {
+  id: string;
+  name: string;
+  color: string | null;
+  workflowCount: number;
+}
+
+/** The tag identity a workflow row renders as a chip. */
+export interface TagRef {
+  id: string;
+  name: string;
+  color: string | null;
 }
 /** One widget's placement on the customizable Overview (order = array position). */
 export interface DashboardItem {
@@ -277,6 +295,35 @@ export const api = {
   // List the tenant's workflows (latest version per key).
   listGraphs(): Promise<GraphSummary[]> {
     return http("/graphs");
+  },
+  // --- Workflow tags (organizational metadata; tenant-wide per workflowKey) ---
+  listTags(): Promise<Tag[]> {
+    return http("/tags");
+  },
+  createTag(name: string, color?: string): Promise<Tag> {
+    return http("/tags", {
+      method: "POST",
+      body: JSON.stringify({ name, ...(color ? { color } : {}) }),
+    });
+  },
+  updateTag(
+    tagId: string,
+    patch: { name?: string; color?: string },
+  ): Promise<TagRef> {
+    return http(`/tags/${encodeURIComponent(tagId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  },
+  deleteTag(tagId: string): Promise<{ deleted: true }> {
+    return http(`/tags/${encodeURIComponent(tagId)}`, { method: "DELETE" });
+  },
+  // REPLACE-SET: the workflow ends up with exactly these tag ids (empty clears all).
+  setWorkflowTags(workflowKey: string, tagIds: string[]): Promise<TagRef[]> {
+    return http(`/graphs/${encodeURIComponent(workflowKey)}/tags`, {
+      method: "PUT",
+      body: JSON.stringify({ tagIds }),
+    });
   },
   // Fetch one workflow's latest graph (to open in the canvas).
   getGraph(workflowKey: string): Promise<NamedGraph> {

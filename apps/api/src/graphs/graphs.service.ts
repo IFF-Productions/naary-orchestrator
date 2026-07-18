@@ -39,6 +39,8 @@ export interface GraphSummary {
   updatedAt: string;
   /** Whether the workflow's automatic triggers fire (n8n parity). Default true. */
   active: boolean;
+  /** Organizational tags (tenant-wide per workflowKey — NOT env-scoped). Never permissions. */
+  tags: { id: string; name: string; color: string | null }[];
 }
 
 /**
@@ -143,6 +145,24 @@ export class GraphsService {
           version: r.version,
           updatedAt: r.createdAt.toISOString(),
           active: !inactive.has(r.workflowKey),
+          tags: [],
+        });
+      }
+    }
+    // Attach tags in ONE batched query (no N+1). Tags are TENANT-WIDE per workflowKey (not
+    // env-scoped) — authoring metadata like the name, so every env shows the same chips.
+    const keys = [...latest.keys()];
+    if (keys.length > 0) {
+      const tagRows = await getPrisma().workflowTag.findMany({
+        where: { tenantId, workflowKey: { in: keys } },
+        include: { tag: true },
+        orderBy: { tag: { name: "asc" } },
+      });
+      for (const wt of tagRows) {
+        latest.get(wt.workflowKey)?.tags.push({
+          id: wt.tag.id,
+          name: wt.tag.name,
+          color: wt.tag.color,
         });
       }
     }

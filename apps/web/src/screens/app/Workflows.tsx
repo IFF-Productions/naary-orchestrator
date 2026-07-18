@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Button,
   Card,
+  Checkbox,
   Dialog,
   Icon,
   LoadingBlock,
   SearchInput,
+  Select,
   StatusPill,
   Switch,
+  Tag,
 } from "../../components";
 import {
   api,
@@ -16,9 +19,11 @@ import {
   getActiveEnvironment,
   type GraphSummary,
   type RunSummary,
+  type Tag as TagRow,
 } from "../../lib/api";
 import { runStatusUi, successRate } from "../../lib/run-status";
 import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
+import { WorkflowTagsDialog } from "./WorkflowTagsDialog";
 
 /**
  * Workflows — the tenant's saved graphs (from POST /graphs via the canvas), each
@@ -44,6 +49,34 @@ export function Workflows() {
   const [tenant, setTenant] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  // Tags: the workspace's tag list (filter menu + edit dialog), the ids the list is
+  // filtered by (AND semantics — a row must carry every selected tag), and the workflow
+  // whose tags are being edited.
+  const [allTags, setAllTags] = useState<TagRow[]>([]);
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
+  const tagMenuRef = useRef<HTMLSpanElement>(null);
+  const [editTags, setEditTags] = useState<{
+    key: string;
+    name: string;
+  } | null>(null);
+
+  // Close the tag-filter menu on an outside click / Escape (the RerunMenu pattern).
+  useEffect(() => {
+    if (!tagMenuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (tagMenuRef.current && !tagMenuRef.current.contains(e.target as Node))
+        setTagMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) =>
+      e.key === "Escape" && setTagMenuOpen(false);
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [tagMenuOpen]);
   // Promote flow: the workflow being promoted (source = the ACTIVE env, via the header), the
   // candidate target envs (all but the active one), and progress/result.
   const [promoteFor, setPromoteFor] = useState<string | null>(null);
@@ -110,12 +143,14 @@ export function Workflows() {
         .getMe()
         .then((m) => m.tenantId)
         .catch(() => null),
+      api.listTags().catch(() => []),
     ])
-      .then(([gs, rs, t]) => {
+      .then(([gs, rs, t, ts]) => {
         if (!live) return;
         setGraphs(gs);
         setRuns(rs);
         setTenant(t);
+        setAllTags(ts);
       })
       .catch((e) => live && setErr(e instanceof Error ? e.message : "failed"));
     return () => {
@@ -191,9 +226,11 @@ export function Workflows() {
 
   const filtered = rows.filter(
     (r) =>
-      !query ||
-      r.graph.name.toLowerCase().includes(query.toLowerCase()) ||
-      r.graph.workflowKey.includes(query),
+      (!query ||
+        r.graph.name.toLowerCase().includes(query.toLowerCase()) ||
+        r.graph.workflowKey.includes(query)) &&
+      // Tag filter: AND semantics — the row must carry EVERY selected tag.
+      tagFilter.every((id) => (r.graph.tags ?? []).some((t) => t.id === id)),
   );
 
   return (
@@ -237,7 +274,15 @@ export function Workflows() {
         </Button>
       </div>
 
-      <div style={{ marginBottom: 14 }}>
+      <div
+        style={{
+          marginBottom: 14,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
         <SearchInput
           placeholder="Filter by name…"
           kbd=""
@@ -245,6 +290,99 @@ export function Workflows() {
           onChange={setQuery}
           style={{ width: 240 }}
         />
+        {/* Tag filter — multi-select of existing tags; filters client-side (AND). */}
+        <span
+          ref={tagMenuRef}
+          style={{ position: "relative", display: "inline-flex" }}
+        >
+          <Select
+            value={
+              tagFilter.length
+                ? `${tagFilter.length} tag${tagFilter.length === 1 ? "" : "s"}`
+                : undefined
+            }
+            placeholder="All tags"
+            onClick={() => setTagMenuOpen((o) => !o)}
+          />
+          {tagMenuOpen && (
+            <div
+              role="menu"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                left: 0,
+                zIndex: 30,
+                minWidth: 200,
+                maxHeight: 260,
+                overflowY: "auto",
+                background: "var(--surface)",
+                border: "1px solid var(--line)",
+                borderRadius: 10,
+                boxShadow: "0 8px 28px rgba(0,0,0,0.18)",
+                padding: 6,
+              }}
+            >
+              {allTags.length === 0 && (
+                <div
+                  style={{
+                    fontSize: "var(--text-xs)",
+                    color: "var(--ink-3)",
+                    padding: "6px 8px",
+                  }}
+                >
+                  No tags yet — add one from a workflow row.
+                </div>
+              )}
+              {allTags.map((t) => {
+                const on = tagFilter.includes(t.id);
+                return (
+                  <div
+                    key={t.id}
+                    role="menuitemcheckbox"
+                    aria-checked={on}
+                    onClick={() =>
+                      setTagFilter((prev) =>
+                        on ? prev.filter((id) => id !== t.id) : [...prev, t.id],
+                      )
+                    }
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "6px 8px",
+                      borderRadius: 7,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Checkbox checked={on} />
+                    <Tag color={t.color ?? undefined}>{t.name}</Tag>
+                    <span
+                      style={{
+                        marginLeft: "auto",
+                        fontSize: "var(--text-xs)",
+                        color: "var(--ink-3)",
+                      }}
+                    >
+                      {t.workflowCount}
+                    </span>
+                  </div>
+                );
+              })}
+              {tagFilter.length > 0 && (
+                <div style={{ padding: 6 }}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setTagFilter([])}
+                  >
+                    Clear filter
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </span>
       </div>
 
       <Card pad={false} style={{ overflow: "hidden" }}>
@@ -373,6 +511,37 @@ export function Workflows() {
                 style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
               >
                 {r.graph.workflowKey} · v{r.graph.version}
+              </div>
+              {/* Tag chips + the edit affordance (a "+" chip keeps the actions column intact). */}
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: 4,
+                  marginTop: 5,
+                }}
+              >
+                {(r.graph.tags ?? []).map((t) => (
+                  <Tag key={t.id} color={t.color ?? undefined}>
+                    {t.name}
+                  </Tag>
+                ))}
+                <button
+                  type="button"
+                  className="tag"
+                  title="Edit tags"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEditTags({
+                      key: r.graph.workflowKey,
+                      name: r.graph.name,
+                    });
+                  }}
+                  style={{ cursor: "pointer", background: "transparent" }}
+                >
+                  {(r.graph.tags ?? []).length ? "+" : "+ tag"}
+                </button>
               </div>
             </div>
           );
@@ -543,6 +712,29 @@ export function Workflows() {
           </div>
         )}
       </Dialog>
+
+      {/* Edit one workflow's tags — replace-set save; a tag created inline joins the list. */}
+      <WorkflowTagsDialog
+        workflowKey={editTags?.key ?? null}
+        workflowName={editTags?.name ?? ""}
+        current={
+          graphs?.find((g) => g.workflowKey === editTags?.key)?.tags ?? []
+        }
+        allTags={allTags}
+        onClose={() => setEditTags(null)}
+        onSaved={(key, tags) =>
+          setGraphs(
+            (gs) =>
+              gs?.map((g) => (g.workflowKey === key ? { ...g, tags } : g)) ??
+              gs,
+          )
+        }
+        onTagCreated={(t) =>
+          setAllTags((prev) =>
+            [...prev, t].sort((a, b) => a.name.localeCompare(b.name)),
+          )
+        }
+      />
     </div>
   );
 }

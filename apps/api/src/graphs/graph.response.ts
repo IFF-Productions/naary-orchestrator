@@ -1,5 +1,12 @@
 import { ApiProperty } from "@nestjs/swagger";
 
+/** One organizational tag chip on a workflow row (tags are never permissions). */
+export class GraphTagResponse {
+  @ApiProperty({ example: "9a8b7c6d-…" }) id!: string;
+  @ApiProperty({ example: "production" }) name!: string;
+  @ApiProperty({ nullable: true, example: "#6366f1" }) color!: string | null;
+}
+
 /** One row in the workflows list (latest version per key). */
 export class GraphSummaryResponse {
   @ApiProperty({ example: "support-triage" }) workflowKey!: string;
@@ -11,6 +18,12 @@ export class GraphSummaryResponse {
     description: "Whether automatic triggers fire.",
   })
   active!: boolean;
+  @ApiProperty({
+    type: [GraphTagResponse],
+    description:
+      "Organizational tags (tenant-wide per workflowKey, identical in every environment).",
+  })
+  tags!: GraphTagResponse[];
 }
 
 /** A generated draft graph (unsaved). */
@@ -75,7 +88,10 @@ export class PromotionResponse {
   @ApiProperty() toEnvId!: string;
   @ApiProperty({ example: 5 }) fromVersion!: number;
   @ApiProperty({ example: 3 }) toVersion!: number;
-  @ApiProperty({ example: "auth0|abc", description: "OIDC subject or 'api-token'." })
+  @ApiProperty({
+    example: "auth0|abc",
+    description: "OIDC subject or 'api-token'.",
+  })
   actor!: string;
   @ApiProperty({ format: "date-time" }) createdAt!: string;
 }

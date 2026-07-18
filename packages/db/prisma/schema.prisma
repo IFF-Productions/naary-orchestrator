@@ -191,6 +191,36 @@ model WorkflowActivation {
   @@id([tenantId, environmentId, workflowKey])
 }
 
+/** Workflow tag (n8n parity, RBAC program slice T1) — ORGANIZATIONAL metadata only. Tags are
+ *  NOT permission-bearing today; tag-scoped grants are a documented future seam in the upcoming
+ *  RBAC-GROUPS design. Name is unique per tenant; `color` is an optional hex the UI picks from
+ *  a fixed palette. */
+model Tag {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  color     String?  // optional hex; UI offers a fixed palette
+  createdAt DateTime @default(now())
+  workflows WorkflowTag[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+// Tags attach to (tenantId, workflowKey) TENANT-WIDE, not per env: authoring metadata like
+// the workflow's name — identical in every environment, promote carries them implicitly.
+// Soft reference (no FK to GraphDefinition — no single row identity across versions/envs).
+model WorkflowTag {
+  tagId       String
+  tag         Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  tenantId    String
+  workflowKey String
+  createdAt   DateTime @default(now())
+
+  @@id([tagId, tenantId, workflowKey])
+  @@index([tenantId, workflowKey])
+}
+
 // Slice #4 — external integrations.
 
 model WebhookEndpoint {
