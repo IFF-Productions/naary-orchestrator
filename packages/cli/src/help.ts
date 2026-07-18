@@ -10,7 +10,7 @@ Groups:
   runs        Start, list, inspect, watch, cancel, rerun runs
   workflows   List, get, export, import, delete, promote workflows
   approvals   List and act on human-approval waits
-  config      Variables, write-only secrets, and usage
+  config      Variables, write-only secrets, usage, and insights
 
 Connection options (pass after <group> <command>):
   --api-url <url>   API base URL (default http://localhost:3000)
@@ -53,7 +53,7 @@ export const GROUP_HELP: Record<string, string> = {
   naary approvals approve <id> [--comment ...]  Approve
   naary approvals reject <id> [--comment ...]   Reject`,
 
-  config: `naary config — variables + secrets (per environment), usage (whole workspace)
+  config: `naary config — variables + secrets (per environment), usage & insights (whole workspace)
 
   naary config variables list                       List variables ($vars)
   naary config variables set <key> <value>          Create/overwrite a variable
@@ -61,5 +61,8 @@ export const GROUP_HELP: Record<string, string> = {
   naary config secrets list                         List secret NAMES (values are write-only)
   naary config secrets set <name> <value>           Create/replace a secret (value never echoed)
   naary config secrets delete <name>                Delete a secret
-  naary config usage [--from ISO] [--to ISO]        Spend + tokens, workspace-wide (totals and by model)`,
+  naary config usage [--from ISO] [--to ISO]        Spend + tokens, workspace-wide (totals and by model)
+  naary config insights [--from ISO] [--to ISO] [--environment ID] [--json]
+                                                    Spend rolled up by environment, workflow, and model
+                                                    (--environment → ?environmentId query, not the --env header)`,
 };
