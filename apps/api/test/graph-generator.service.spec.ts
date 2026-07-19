@@ -1,4 +1,6 @@
 import "reflect-metadata";
+import { execFile } from "node:child_process";
+import * as path from "node:path";
 import {
   BadRequestException,
   ServiceUnavailableException,
@@ -417,4 +419,83 @@ describe("GraphGeneratorService (claude-code source)", () => {
       /Claude Code credential/,
     );
   });
+});
+
+// Regression: `claude` was blocking ~3s on an open, empty stdin (execFile leaves it open) then
+// exiting 1. The wrapper now closes the child's stdin. Prove it with a real stdin-reading command:
+// `cat` with no args reads stdin until EOF — with the fix it gets EOF at once and exits 0; without
+// it, cat blocks and the 2s timeout would kill it (reject).
+describe("__genDeps.exec closes the child's stdin (real subprocess)", () => {
+  it("a stdin-reading command returns immediately instead of hanging on stdin", async () => {
+    const res = await realExec("cat", [], {
+      env: process.env,
+      timeoutMs: 2000,
+    });
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toBe("");
+  }, 6000);
+});
+
+// End-to-end integration for the stdin bug: run the FULL generate() path against a fake `claude` CLI
+// (test/fixtures/fake-claude.mjs) that reproduces the real behavior — it emits its JSON envelope ONLY
+// after stdin reaches EOF, and otherwise warns + exits 1. So generation succeeds ONLY when the exec
+// wrapper closes the child's stdin. A control wrapper that leaves stdin open proves the bug is real.
+describe("claude-code generation: stdin close (integration, fake CLI)", () => {
+  const FAKE = path.join(__dirname, "fixtures/fake-claude.mjs");
+
+  // The real (fixed) wrapper, but pointed at `node <fake>` — closes stdin exactly like production.
+  const viaFixedWrapper = (_bin: string, args: string[], opts: never) =>
+    realExec("node", [FAKE, ...(args as string[])], opts);
+
+  // Control: same fake CLI, but this exec NEVER closes stdin (the pre-fix behavior).
+  const viaOpenStdin = (
+    _bin: string,
+    args: string[],
+    opts: { env: NodeJS.ProcessEnv; timeoutMs: number },
+  ): Promise<{ stdout: string; stderr?: string; exitCode: number }> =>
+    new Promise((resolve, reject) => {
+      execFile(
+        "node",
+        [FAKE, ...args],
+        { env: opts.env, timeout: opts.timeoutMs, maxBuffer: 1 << 20 },
+        (err, stdout, stderr) => {
+          if (err) {
+            const code = (err as NodeJS.ErrnoException).code;
+            if (typeof code === "string" || (err as { killed?: boolean }).killed)
+              return reject(err);
+            return resolve({
+              stdout: String(stdout),
+              stderr: String(stderr),
+              exitCode: typeof code === "number" ? code : 1,
+            });
+          }
+          resolve({ stdout: String(stdout), stderr: String(stderr), exitCode: 0 });
+        },
+      );
+      // Intentionally NO child.stdin.end() — reproduces the hang/exit-1.
+    });
+
+  beforeEach(() => {
+    listProviders
+      .mockReset()
+      .mockResolvedValue([{ provider: "claude-code", isValid: true }]);
+    getDecryptedKey.mockReset().mockResolvedValue("sk-ant-oat-fake");
+    listConnections.mockResolvedValue([]);
+  });
+  afterEach(() => {
+    __genDeps.exec = realExec;
+  });
+
+  it("SUCCEEDS: closing stdin lets the CLI reach EOF and emit the graph", async () => {
+    __genDeps.exec = viaFixedWrapper as typeof __genDeps.exec;
+    const res = await makeService().generate("t-1", "e-1", "make a flow");
+    expect(res.graph.nodes.length).toBeGreaterThan(0);
+  }, 8000);
+
+  it("proves the bug: leaving stdin open makes the SAME CLI fail generation", async () => {
+    __genDeps.exec = viaOpenStdin as typeof __genDeps.exec;
+    await expect(
+      makeService().generate("t-1", "e-1", "x"),
+    ).rejects.toBeTruthy();
+  }, 8000);
 });

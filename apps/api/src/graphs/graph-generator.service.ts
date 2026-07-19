@@ -129,7 +129,7 @@ export const __genDeps = {
     opts: { env: NodeJS.ProcessEnv; timeoutMs: number },
   ): Promise<{ stdout: string; stderr?: string; exitCode: number }> =>
     new Promise((resolve, reject) => {
-      execFile(
+      const child = execFile(
         binary,
         args,
         { env: opts.env, timeout: opts.timeoutMs, maxBuffer: 24 * 1024 * 1024 },
@@ -156,6 +156,10 @@ export const __genDeps = {
           });
         },
       );
+      // Close the child's stdin immediately. We pass the prompt via `-p`, not stdin, but execFile
+      // leaves stdin an OPEN empty pipe — so `claude` blocks ~3s waiting for stdin, warns, and can
+      // exit 1. Sending EOF (its own suggested `< /dev/null`) makes it proceed at once.
+      child.stdin?.end();
     }),
 };
 

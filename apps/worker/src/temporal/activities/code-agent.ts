@@ -70,7 +70,7 @@ export const __codeAgentDeps = {
     opts: { env: NodeJS.ProcessEnv; timeoutMs?: number },
   ): Promise<{ stdout: string; exitCode: number }> =>
     new Promise((resolve, reject) => {
-      execFile(
+      const child = execFile(
         binary,
         args,
         {
@@ -96,6 +96,9 @@ export const __codeAgentDeps = {
           resolve({ stdout: String(stdout), exitCode: 0 });
         },
       );
+      // Close stdin (EOF) so `claude` doesn't block ~3s waiting for it — the prompt is passed via
+      // args, not stdin (same fix as the graph-generator's CLI exec).
+      child.stdin?.end();
     }),
   /** Write-mode dispatch: clone (outside the sandbox) → sandbox-runner → diff. Seam so the
    *  activity's orchestration is tested without a real runner/git. */
