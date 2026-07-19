@@ -74,3 +74,50 @@ a {
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+/* ---- "Build with AI" live streaming (shared by Builder canvas + Simple mode) ---- */
+.naary-gen-spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid var(--line-2);
+  border-top-color: var(--brand);
+  animation: naarySpin 0.7s linear infinite;
+  flex: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .naary-gen-spinner {
+    animation-duration: 1.6s;
+  }
+}
+/* Cross-fade the rotating status copy (remounted via React key on each change). */
+.naary-gen-msg {
+  animation: naaryGenFade 0.4s ease;
+}
+@keyframes naaryGenFade {
+  from {
+    opacity: 0.3;
+  }
+  to {
+    opacity: 1;
+  }
+}
+/* A step fading/sliding in as it streams in Simple mode's live step list. */
+.naary-step-enter {
+  animation: naaryStepEnter 0.3s ease both;
+}
+@keyframes naaryStepEnter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .naary-step-enter {
+    animation: none;
+  }
+}

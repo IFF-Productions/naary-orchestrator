@@ -150,9 +150,21 @@ export const graphsApi = {
   // model runs (so long generations survive the 60s proxy read timeout) and ends
   // with an `event: result` or `event: error` frame. Same resolved value/throws as
   // generateGraph; falls back to it against an older API without the route.
+  //
+  // `hooks` (optional) receive the LIVE frames the API-model path emits as it streams:
+  // `onMeta(name)` once the workflow name is known, then `onNode`/`onEdge` per element as
+  // each completes — so the canvas can draw the workflow incrementally. The resolved value
+  // is always the authoritative validated graph (the `result` frame); reconcile to it. On
+  // the 404/non-SSE fallback paths the hooks simply don't fire (the whole graph arrives at
+  // once) — callers must handle that too.
   async generateGraphStream(
     prompt: string,
     provider?: string,
+    hooks?: {
+      onMeta?: (name: string) => void;
+      onNode?: (node: unknown) => void;
+      onEdge?: (edge: unknown) => void;
+    },
   ): Promise<{ name: string; graph: GraphDef }> {
     const token = await getBearerToken();
     const activeWorkspaceId = getActiveWorkspace();
@@ -205,6 +217,31 @@ export const graphsApi = {
         done ? decoder.decode() : decoder.decode(value, { stream: true }),
       );
       for (const frame of frames) {
+        if (frame.event === "meta") {
+          try {
+            const { name } = JSON.parse(frame.data) as { name?: string };
+            if (name && hooks?.onMeta) hooks.onMeta(name);
+          } catch {
+            /* ignore a malformed meta frame — the result frame is authoritative */
+          }
+          continue;
+        }
+        if (frame.event === "node") {
+          try {
+            hooks?.onNode?.(JSON.parse(frame.data));
+          } catch {
+            /* ignore a half/garbled node frame; result reconciles */
+          }
+          continue;
+        }
+        if (frame.event === "edge") {
+          try {
+            hooks?.onEdge?.(JSON.parse(frame.data));
+          } catch {
+            /* ignore a half/garbled edge frame; result reconciles */
+          }
+          continue;
+        }
         if (frame.event === "result") {
           return JSON.parse(frame.data) as { name: string; graph: GraphDef };
         }
