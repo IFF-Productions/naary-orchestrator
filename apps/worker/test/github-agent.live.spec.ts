@@ -47,26 +47,62 @@ const LIVE = Boolean(GH_TOKEN && GH_REPO && ANTHROPIC_KEY);
 
 const [OWNER, REPO] = (GH_REPO ?? "/").split("/");
 
+// Every issue this suite opens carries this exact title, so cleanup can find and close its own
+// leaks by title — even ones from an EARLIER run that failed downstream (e.g. the agent 401'd)
+// before the issue number could be captured. Kept identical across runs on purpose.
+const ISSUE_TITLE = `naary-e2e live test (${`${OWNER}-${REPO}`.replace(/[^a-z0-9-]/gi, "-")})`;
+
+const GH_HEADERS = {
+  Authorization: `Bearer ${GH_TOKEN}`,
+  Accept: "application/vnd.github+json",
+  "X-GitHub-Api-Version": "2022-11-28",
+};
+
 let env: TestWorkflowEnvironment;
 
-/** Directly close an issue for cleanup (no catalog action exists for it). Best-effort. */
+/** Directly close an issue (no catalog action exists for it). Best-effort. */
 async function closeIssue(issueNumber: number): Promise<void> {
   try {
     await fetch(
       `https://api.github.com/repos/${OWNER}/${REPO}/issues/${issueNumber}`,
       {
         method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${GH_TOKEN}`,
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-          "content-type": "application/json",
-        },
+        headers: { ...GH_HEADERS, "content-type": "application/json" },
         body: JSON.stringify({ state: "closed" }),
       },
     );
   } catch {
     // Cleanup is best-effort — a leaked open issue in a throwaway repo is not a test failure.
+  }
+}
+
+/**
+ * Close EVERY still-open issue this suite opened, matched by its exact marker title. Self-healing:
+ * recovers this run's issue even when the workflow failed after create_issue (so we never leak),
+ * and sweeps up any leak from a prior failed run. GitHub has no delete-issue API, so "closed" is
+ * the terminal state we can reach.
+ */
+async function sweepTestIssues(): Promise<void> {
+  if (!LIVE) return;
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${OWNER}/${REPO}/issues?state=open&per_page=100`,
+      { headers: GH_HEADERS },
+    );
+    if (!res.ok) return;
+    const issues = (await res.json()) as {
+      number: number;
+      title: string;
+      pull_request?: unknown;
+    }[];
+    for (const iss of issues) {
+      // Skip PRs (the issues endpoint returns them too) and non-marker issues.
+      if (!iss.pull_request && iss.title === ISSUE_TITLE) {
+        await closeIssue(iss.number);
+      }
+    }
+  } catch {
+    // best-effort
   }
 }
 
@@ -96,6 +132,8 @@ describe.skipIf(!LIVE)(
     }, 120_000);
 
     afterAll(async () => {
+      // Sweep any still-open marker issue (this run's, plus any prior-run leak) before teardown.
+      await sweepTestIssues();
       await env?.teardown();
     });
 
@@ -115,8 +153,7 @@ describe.skipIf(!LIVE)(
     }
 
     it("opens an issue, an agent triages it, and a second node comments the verdict", async () => {
-      const stamp = `${OWNER}-${REPO}`.replace(/[^a-z0-9-]/gi, "-");
-      const title = `naary-e2e live test (${stamp})`;
+      const title = ISSUE_TITLE;
       const graph: GraphDef = {
         startNodeId: "start",
         nodes: [
