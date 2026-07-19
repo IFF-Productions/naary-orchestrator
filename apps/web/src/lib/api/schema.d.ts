@@ -931,6 +931,27 @@ export interface paths {
      */
     get: operations["WorkersController_list"];
   };
+  "/builder/sessions": {
+    /** List open builder sessions (resume list, active environment) */
+    get: operations["BuilderSessionsController_listOpen"];
+    /** Open a builder session */
+    post: operations["BuilderSessionsController_open"];
+  };
+  "/builder/sessions/{id}": {
+    /** Get / resume a builder session */
+    get: operations["BuilderSessionsController_get"];
+  };
+  "/builder/sessions/{id}/turns": {
+    /**
+     * Send an edit turn (SSE)
+     * @description Applies the message to the working draft and streams the edited graph as text/event-stream: `event: meta` ({name}), then `event: node`/`event: edge` as each completes, ending in `event: result` ({name, graph}) or `event: error` ({status, message, code?}). 409 if the session is closed; 402 if the workspace is over its monthly budget.
+     */
+    post: operations["BuilderSessionsController_turn"];
+  };
+  "/builder/sessions/{id}/close": {
+    /** Close a builder session */
+    post: operations["BuilderSessionsController_close"];
+  };
 }
 
 export type webhooks = Record<string, never>;
@@ -2898,6 +2919,113 @@ export interface components {
        * @example 2026-08-02T12:00:00.000Z
        */
       lastSeen: string;
+    };
+    OpenSessionDto: {
+      /** @description Seed the working draft from this workflow's latest graph in the active environment. */
+      workflowKey?: string;
+      /** @description Short label for the resume list (defaults to the first prompt, Slice 2). */
+      title?: string;
+    };
+    BuilderTurnResponse: {
+      /** @example c0ffee00-0000-0000-0000-000000000000 */
+      id: string;
+      /**
+       * @example user
+       * @enum {string}
+       */
+      role: "user" | "assistant";
+      /**
+       * @description The user's prompt, or a short assistant summary of the change it made.
+       * @example Add a Slack notification after the approval step.
+       */
+      content: string;
+      /**
+       * @description Metered cost of an assistant turn (BYOK); null for user turns.
+       * @example 0.0123
+       */
+      costUsd?: number | null;
+      /**
+       * Format: date-time
+       * @example 2026-08-02T14:00:00.000Z
+       */
+      createdAt: string;
+    };
+    BuilderSessionResponse: {
+      /** @example 5f1e0000-0000-0000-0000-000000000000 */
+      id: string;
+      /**
+       * @example open
+       * @enum {string}
+       */
+      status: "open" | "closed";
+      /**
+       * @description Why the session closed; null while open.
+       * @enum {string|null}
+       */
+      closedReason?: "saved" | "done" | "abandoned" | null;
+      /**
+       * @description The workflow this session seeds from / saves to, when applicable.
+       * @example onboarding-flow
+       */
+      workflowKey?: string | null;
+      /** @description The environment the build targets. */
+      environmentId?: string | null;
+      /**
+       * @description Short label for the resume list.
+       * @example Slack approval flow
+       */
+      title?: string | null;
+      /** @description The latest validated working draft (graph JSON), or null before the first turn. */
+      currentGraph?: {
+        [key: string]: unknown;
+      } | null;
+      turns: components["schemas"]["BuilderTurnResponse"][];
+      /**
+       * Format: date-time
+       * @example 2026-08-02T14:00:00.000Z
+       */
+      createdAt: string;
+      /**
+       * Format: date-time
+       * @example 2026-08-02T14:05:00.000Z
+       */
+      updatedAt: string;
+      /** Format: date-time */
+      closedAt?: string | null;
+    };
+    BuilderSessionSummaryResponse: {
+      /** @example 5f1e0000-0000-0000-0000-000000000000 */
+      id: string;
+      /**
+       * @example open
+       * @enum {string}
+       */
+      status: "open" | "closed";
+      /** @example onboarding-flow */
+      workflowKey?: string | null;
+      /** @example Slack approval flow */
+      title?: string | null;
+      /**
+       * Format: date-time
+       * @example 2026-08-02T14:05:00.000Z
+       */
+      updatedAt: string;
+    };
+    SendTurnDto: {
+      /**
+       * @description The change to apply, in plain language.
+       * @example Add a Slack notification after the approval step.
+       */
+      message: string;
+      /** @description Model provider to generate with (anthropic|openai|google|claude-code). Defaults to the workspace's configured provider. */
+      provider?: string;
+    };
+    CloseSessionDto: {
+      /**
+       * @example done
+       * @enum {string}
+       */
+      reason: "saved" | "done";
     };
   };
   responses: never;
@@ -9774,6 +9902,244 @@ export interface operations {
       };
       /** @description Authenticated but not permitted for this workspace. */
       403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /** List open builder sessions (resume list, active environment) */
+  BuilderSessionsController_listOpen: {
+    responses: {
+      200: {
+        content: {
+          "application/json": components["schemas"]["BuilderSessionSummaryResponse"][];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Resource not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /** Open a builder session */
+  BuilderSessionsController_open: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OpenSessionDto"];
+      };
+    };
+    responses: {
+      201: {
+        content: {
+          "application/json": components["schemas"]["BuilderSessionResponse"];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Resource not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /** Get / resume a builder session */
+  BuilderSessionsController_get: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      200: {
+        content: {
+          "application/json": components["schemas"]["BuilderSessionResponse"];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Resource not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Send an edit turn (SSE)
+   * @description Applies the message to the working draft and streams the edited graph as text/event-stream: `event: meta` ({name}), then `event: node`/`event: edge` as each completes, ending in `event: result` ({name, graph}) or `event: error` ({status, message, code?}). 409 if the session is closed; 402 if the workspace is over its monthly budget.
+   */
+  BuilderSessionsController_turn: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SendTurnDto"];
+      };
+    };
+    responses: {
+      /** @description SSE stream ending in a `result` or `error` frame. */
+      200: {
+        content: never;
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "text/event-stream": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "text/event-stream": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "text/event-stream": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Resource not found. */
+      404: {
+        content: {
+          "text/event-stream": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description The resource is in a state that conflicts with the request. */
+      409: {
+        content: {
+          "text/event-stream": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "text/event-stream": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /** Close a builder session */
+  BuilderSessionsController_close: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CloseSessionDto"];
+      };
+    };
+    responses: {
+      200: {
+        content: {
+          "application/json": components["schemas"]["BuilderSessionResponse"];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Resource not found. */
+      404: {
         content: {
           "application/json": components["schemas"]["ErrorResponse"];
         };

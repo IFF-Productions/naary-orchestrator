@@ -13168,6 +13168,453 @@
           "Workers"
         ]
       }
+    },
+    "/builder/sessions": {
+      "post": {
+        "operationId": "BuilderSessionsController_open",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenSessionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuilderSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Open a builder session",
+        "tags": [
+          "BuilderSessions"
+        ]
+      },
+      "get": {
+        "operationId": "BuilderSessionsController_listOpen",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BuilderSessionSummaryResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List open builder sessions (resume list, active environment)",
+        "tags": [
+          "BuilderSessions"
+        ]
+      }
+    },
+    "/builder/sessions/{id}": {
+      "get": {
+        "operationId": "BuilderSessionsController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuilderSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get / resume a builder session",
+        "tags": [
+          "BuilderSessions"
+        ]
+      }
+    },
+    "/builder/sessions/{id}/turns": {
+      "post": {
+        "description": "Applies the message to the working draft and streams the edited graph as text/event-stream: `event: meta` ({name}), then `event: node`/`event: edge` as each completes, ending in `event: result` ({name, graph}) or `event: error` ({status, message, code?}). 409 if the session is closed; 402 if the workspace is over its monthly budget.",
+        "operationId": "BuilderSessionsController_turn",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendTurnDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "SSE stream ending in a `result` or `error` frame."
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The resource is in a state that conflicts with the request.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Send an edit turn (SSE)",
+        "tags": [
+          "BuilderSessions"
+        ]
+      }
+    },
+    "/builder/sessions/{id}/close": {
+      "post": {
+        "operationId": "BuilderSessionsController_close",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseSessionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuilderSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Close a builder session",
+        "tags": [
+          "BuilderSessions"
+        ]
+      }
     }
   },
   "info": {
@@ -17068,6 +17515,206 @@
           "maxActivities",
           "online",
           "lastSeen"
+        ]
+      },
+      "OpenSessionDto": {
+        "type": "object",
+        "properties": {
+          "workflowKey": {
+            "type": "string",
+            "description": "Seed the working draft from this workflow's latest graph in the active environment."
+          },
+          "title": {
+            "type": "string",
+            "description": "Short label for the resume list (defaults to the first prompt, Slice 2)."
+          }
+        }
+      },
+      "BuilderTurnResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "c0ffee00-0000-0000-0000-000000000000"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "example": "user"
+          },
+          "content": {
+            "type": "string",
+            "example": "Add a Slack notification after the approval step.",
+            "description": "The user's prompt, or a short assistant summary of the change it made."
+          },
+          "costUsd": {
+            "type": "number",
+            "nullable": true,
+            "example": 0.0123,
+            "description": "Metered cost of an assistant turn (BYOK); null for user turns."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-08-02T14:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "content",
+          "createdAt"
+        ]
+      },
+      "BuilderSessionResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "5f1e0000-0000-0000-0000-000000000000"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "example": "open"
+          },
+          "closedReason": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "saved",
+              "done",
+              "abandoned"
+            ],
+            "description": "Why the session closed; null while open."
+          },
+          "workflowKey": {
+            "type": "string",
+            "nullable": true,
+            "example": "onboarding-flow",
+            "description": "The workflow this session seeds from / saves to, when applicable."
+          },
+          "environmentId": {
+            "type": "string",
+            "nullable": true,
+            "description": "The environment the build targets."
+          },
+          "title": {
+            "type": "string",
+            "nullable": true,
+            "example": "Slack approval flow",
+            "description": "Short label for the resume list."
+          },
+          "currentGraph": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true,
+            "description": "The latest validated working draft (graph JSON), or null before the first turn."
+          },
+          "turns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BuilderTurnResponse"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-08-02T14:00:00.000Z"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-08-02T14:05:00.000Z"
+          },
+          "closedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "turns",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "BuilderSessionSummaryResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "5f1e0000-0000-0000-0000-000000000000"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "example": "open"
+          },
+          "workflowKey": {
+            "type": "string",
+            "nullable": true,
+            "example": "onboarding-flow"
+          },
+          "title": {
+            "type": "string",
+            "nullable": true,
+            "example": "Slack approval flow"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-08-02T14:05:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "updatedAt"
+        ]
+      },
+      "SendTurnDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "Add a Slack notification after the approval step.",
+            "description": "The change to apply, in plain language."
+          },
+          "provider": {
+            "type": "string",
+            "description": "Model provider to generate with (anthropic|openai|google|claude-code). Defaults to the workspace's configured provider."
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "CloseSessionDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "enum": [
+              "saved",
+              "done"
+            ],
+            "example": "done"
+          }
+        },
+        "required": [
+          "reason"
         ]
       }
     }
