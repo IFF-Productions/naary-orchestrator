@@ -15,6 +15,7 @@ export class BuilderTurnResponse {
   @ApiProperty({
     required: false,
     nullable: true,
+    type: Number,
     example: 0.0123,
     description:
       "Metered cost of an assistant turn (BYOK); null for user turns.",
@@ -41,6 +42,7 @@ export class BuilderSessionResponse {
   @ApiProperty({
     required: false,
     nullable: true,
+    type: String,
     example: "onboarding-flow",
     description:
       "The workflow this session seeds from / saves to, when applicable.",
@@ -49,12 +51,14 @@ export class BuilderSessionResponse {
   @ApiProperty({
     required: false,
     nullable: true,
+    type: String,
     description: "The environment the build targets.",
   })
   environmentId?: string | null;
   @ApiProperty({
     required: false,
     nullable: true,
+    type: String,
     example: "Slack approval flow",
     description: "Short label for the resume list.",
   })
@@ -74,7 +78,12 @@ export class BuilderSessionResponse {
   createdAt!: string;
   @ApiProperty({ format: "date-time", example: "2026-08-02T14:05:00.000Z" })
   updatedAt!: string;
-  @ApiProperty({ required: false, nullable: true, format: "date-time" })
+  @ApiProperty({
+    required: false,
+    nullable: true,
+    type: String,
+    format: "date-time",
+  })
   closedAt?: string | null;
 }
 
@@ -84,11 +93,17 @@ export class BuilderSessionSummaryResponse {
   id!: string;
   @ApiProperty({ enum: ["open", "closed"], example: "open" })
   status!: string;
-  @ApiProperty({ required: false, nullable: true, example: "onboarding-flow" })
+  @ApiProperty({
+    required: false,
+    nullable: true,
+    type: String,
+    example: "onboarding-flow",
+  })
   workflowKey?: string | null;
   @ApiProperty({
     required: false,
     nullable: true,
+    type: String,
     example: "Slack approval flow",
   })
   title?: string | null;

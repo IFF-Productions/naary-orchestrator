@@ -70,8 +70,13 @@ function toErrorFrame(e: unknown): {
 /**
  * Conversational AI builder — session lifecycle + edit turns (Slices 1–2). Open a session to
  * iteratively build a workflow via chat, send turns that stream the edited graph onto the canvas,
- * resume it later, and close it on save or when done. Every route is scoped to the caller's active
- * workspace + environment.
+ * resume it later, and close it on save or when done.
+ *
+ * Scoping: every route is workspace(tenant)-scoped. `open` and the resume list (`GET /`) are
+ * additionally scoped to the ACTIVE environment (a build targets one env). `GET /:id`, `close`,
+ * and `:id/turns` address a specific session by its unique id — the session carries its own
+ * `environmentId`, so they resolve env-agnostically (you can resume a build regardless of the
+ * env header you happen to send).
  */
 @ApiBearerAuth("bearer")
 @ApiStandardErrors({ notFound: true })
@@ -101,14 +106,16 @@ export class BuilderSessionsController {
   }
 
   @ApiEndpoint({
-    summary: "List open builder sessions (resume list)",
+    summary: "List open builder sessions (resume list, active environment)",
     ok: [BuilderSessionSummaryResponse],
   })
   @Get()
   async listOpen(
     @TenantId() tenantId: string,
+    @EnvironmentSel() envSel?: string,
   ): Promise<BuilderSessionSummaryResponse[]> {
-    return this.sessions.listOpen(tenantId);
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    return this.sessions.listOpen(tenantId, envId);
   }
 
   @ApiEndpoint({

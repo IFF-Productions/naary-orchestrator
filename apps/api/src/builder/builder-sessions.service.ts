@@ -175,12 +175,18 @@ export class BuilderSessionsService {
       // Guard on status inside the txn: if the session closed mid-stream, write nothing.
       const updated = await tx.builderSession.updateMany({
         where: { id, tenantId, status: "open" },
-        data: {
-          currentGraph: input.graph as unknown as Prisma.InputJsonValue,
-          ...(input.titleIfUnset ? { title: input.titleIfUnset } : {}),
-        },
+        data: { currentGraph: input.graph as unknown as Prisma.InputJsonValue },
       });
       if (updated.count === 0) return; // closed/gone — drop the turn rather than resurrect it
+      // Set the title ONLY if the row still has none — a separate guard on `title: null` so two
+      // near-simultaneous first turns can't clobber each other's title (the first to write wins),
+      // and a no-op when it's already set (never drops the turn on that account).
+      if (input.titleIfUnset) {
+        await tx.builderSession.updateMany({
+          where: { id, tenantId, title: null },
+          data: { title: input.titleIfUnset },
+        });
+      }
       await tx.builderTurn.create({
         data: { sessionId: id, role: "user", content: input.userMessage },
       });
@@ -221,10 +227,14 @@ export class BuilderSessionsService {
     return this.get(tenantId, id);
   }
 
-  /** Open sessions for the resume list, most-recently-touched first. */
-  async listOpen(tenantId: string): Promise<BuilderSessionSummaryResponse[]> {
+  /** Open sessions for the resume list — scoped to the ACTIVE environment (a build targets one
+   *  env, like variables/graphs), most-recently-touched first. */
+  async listOpen(
+    tenantId: string,
+    environmentId: string,
+  ): Promise<BuilderSessionSummaryResponse[]> {
     const rows = await getPrisma().builderSession.findMany({
-      where: { tenantId, status: "open" },
+      where: { tenantId, environmentId, status: "open" },
       orderBy: { updatedAt: "desc" },
       select: {
         id: true,

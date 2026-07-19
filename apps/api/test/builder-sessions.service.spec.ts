@@ -229,10 +229,10 @@ describe("BuilderSessionsService.listOpen", () => {
       },
     ]);
 
-    const out = await svc.listOpen("t-1");
+    const out = await svc.listOpen("t-1", "env-prod");
 
     expect(builderSession.findMany).toHaveBeenCalledWith({
-      where: { tenantId: "t-1", status: "open" },
+      where: { tenantId: "t-1", environmentId: "env-prod", status: "open" },
       orderBy: { updatedAt: "desc" },
       select: {
         id: true,
@@ -309,10 +309,15 @@ describe("BuilderSessionsService.applyTurn — atomic, status-guarded", () => {
     });
 
     expect($transaction).toHaveBeenCalledTimes(1);
-    // Draft + title updated only for an OPEN session.
-    expect(builderSession.updateMany).toHaveBeenCalledWith({
+    // Draft updated only for an OPEN session (the drop-guard).
+    expect(builderSession.updateMany).toHaveBeenNthCalledWith(1, {
       where: { id: "s-1", tenantId: "t-1", status: "open" },
-      data: { currentGraph: graph, title: "Add Slack" },
+      data: { currentGraph: graph },
+    });
+    // Title set via a SEPARATE guard on `title: null` so a concurrent first turn can't clobber it.
+    expect(builderSession.updateMany).toHaveBeenNthCalledWith(2, {
+      where: { id: "s-1", tenantId: "t-1", title: null },
+      data: { title: "Add Slack" },
     });
     // User turn then assistant turn (with a Decimal cost).
     expect(builderTurn.create).toHaveBeenCalledTimes(2);
@@ -335,6 +340,7 @@ describe("BuilderSessionsService.applyTurn — atomic, status-guarded", () => {
       costUsd: 0.01,
     });
 
+    expect(builderSession.updateMany).toHaveBeenCalledTimes(1); // no separate title update
     expect(builderSession.updateMany).toHaveBeenCalledWith({
       where: { id: "s-1", tenantId: "t-1", status: "open" },
       data: { currentGraph: graph }, // no title key
