@@ -1,5 +1,7 @@
-// Shared styles, URL helpers and copy button for the Integrations screen.
+// Shared styles, URL helpers, env chip, icon tile, kebab menu and copy button
+// for the Integrations screen.
 import { useState } from "react";
+import { Icon, type IconName } from "../../../components";
 
 export const monoLabel: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
@@ -46,6 +48,207 @@ export function UrlCopy({ url }: { url: string }) {
     </button>
   );
 }
+
+/* ===== Redesign shared pieces (env chip · icon tile · kebab menu · card shell) ===== */
+
+const ENV_ACCENT: Record<string, string> = {
+  sandbox: "var(--env-sandbox)",
+  uat: "var(--env-uat)",
+  prod: "var(--env-prod)",
+};
+
+/** Accent color for an environment slug (unknown/custom slugs render neutral). */
+export const envAccent = (slug: string | null): string =>
+  (slug && ENV_ACCENT[slug]) || "var(--ink-faint)";
+
+/**
+ * The environment pill every row echoes. All Integrations lists are env-scoped
+ * server-side (the X-Environment-Id header), so a row's real binding is the
+ * active environment — `slug` comes from useActiveEnvironment(); null renders
+ * as the workspace default env.
+ */
+export function EnvChip({ slug }: { slug: string | null }) {
+  const c = envAccent(slug);
+  return (
+    <span
+      className="mono"
+      style={{
+        fontSize: 10,
+        fontWeight: 600,
+        color: c,
+        border: `1px solid ${c}`,
+        borderRadius: "var(--radius-pill)",
+        padding: "2px 8px",
+        flex: "none",
+        lineHeight: 1.4,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {slug ?? "default"}
+    </span>
+  );
+}
+
+/** Square outlined icon tile (the design's provider/app type glyph). */
+export function IconTile({
+  name,
+  color,
+  size = 36,
+}: {
+  name: IconName;
+  color: string;
+  size?: number;
+}) {
+  return (
+    <span
+      style={{
+        width: size,
+        height: size,
+        flex: "none",
+        borderRadius: "var(--radius-md)",
+        border: `1px solid ${color}`,
+        color,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Icon name={name} size={Math.round(size / 2)} />
+    </span>
+  );
+}
+
+/** Letter tile for model providers (no brand glyphs in the icon set). */
+export function LetterTile({
+  letter,
+  color,
+  size = 36,
+}: {
+  letter: string;
+  color: string;
+  size?: number;
+}) {
+  return (
+    <span
+      style={{
+        width: size,
+        height: size,
+        flex: "none",
+        borderRadius: "var(--radius-md)",
+        border: `1px solid ${color}`,
+        color,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontWeight: "var(--weight-bold)",
+        fontSize: "var(--text-md)",
+      }}
+    >
+      {letter}
+    </span>
+  );
+}
+
+export interface KebabItem {
+  label: string;
+  danger?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}
+
+/** Row-level "⋮" actions menu (rotate / edit / remove …). */
+export function KebabMenu({ items }: { items: KebabItem[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ position: "relative", flex: "none" }}>
+      <button
+        type="button"
+        className="btn btn-sm btn-secondary btn-icon"
+        aria-label="Actions"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Icon name="more" size={14} />
+      </button>
+      {open && (
+        <>
+          <div
+            style={{ position: "fixed", inset: 0, zIndex: 30 }}
+            onClick={() => setOpen(false)}
+          />
+          <div
+            style={{
+              position: "absolute",
+              right: 0,
+              top: "calc(100% + 4px)",
+              zIndex: 31,
+              minWidth: 170,
+              background: "var(--card)",
+              border: "1px solid var(--line-mid)",
+              borderRadius: "var(--radius-md)",
+              boxShadow: "var(--shadow-card)",
+              padding: 4,
+            }}
+          >
+            {items.map((it) => (
+              <button
+                key={it.label}
+                type="button"
+                disabled={it.disabled}
+                onClick={() => {
+                  setOpen(false);
+                  it.onClick();
+                }}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "7px 10px",
+                  border: "none",
+                  background: "transparent",
+                  borderRadius: "var(--radius-sm)",
+                  cursor: it.disabled ? "default" : "pointer",
+                  fontFamily: "inherit",
+                  fontSize: "var(--text-sm)",
+                  fontWeight: "var(--weight-medium)",
+                  color: it.disabled
+                    ? "var(--ink-3)"
+                    : it.danger
+                      ? "var(--state-error)"
+                      : "var(--ink-soft)",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "var(--hover)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                }}
+              >
+                {it.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** The bordered panel every tab's list/card sits in. */
+export const cardShell: React.CSSProperties = {
+  background: "var(--card)",
+  border: "1px solid var(--line-mid)",
+  borderRadius: "var(--radius-xl)",
+  boxShadow: "var(--shadow-card)",
+  overflow: "hidden",
+};
+
+/** A tab's intro line under its section title. */
+export const introStyle: React.CSSProperties = {
+  fontSize: "var(--text-body)",
+  color: "var(--ink-2)",
+  lineHeight: "var(--leading-snug)",
+};
 
 export const fieldStyle: React.CSSProperties = {
   width: "100%",
