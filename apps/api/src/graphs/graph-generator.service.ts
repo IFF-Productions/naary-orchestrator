@@ -45,6 +45,41 @@ const GEN_DEFAULT_MODEL: Record<GenProvider, string> = {
   google: "gemini-2.5-pro",
 };
 
+/** Raw token counts a model call reported, normalized. `null` when the provider gave none
+ *  (the claude-code subprocess always; the AI-SDK v6 usage-undefined bug sometimes) — the
+ *  caller then ESTIMATES rather than recording zero (Tier-1 §6 billing fail-safe). */
+export interface GenTokens {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+}
+
+/** Per-turn meter for a metered generate/edit (the conversational builder). `provider`/`model`
+ *  are ALWAYS a real PRICED pair (claude-code maps to anthropic/opus) so a cost can be computed
+ *  even from an estimate; `tokens` is null when the provider reported no usage. */
+export interface GenMeter {
+  provider: GenProvider;
+  model: string;
+  tokens: GenTokens | null;
+}
+
+/** Normalize an AI-SDK usage object (v6 `inputTokens`/`outputTokens`, older
+ *  `promptTokens`/`completionTokens`) → GenTokens, or null when it's absent/empty (the v6
+ *  usage-undefined bug). Never throws — a metering read must not break a successful call. */
+function readGenTokens(raw: unknown): GenTokens | null {
+  if (!raw || typeof raw !== "object") return null;
+  const u = raw as Record<string, number | undefined>;
+  const inputTokens = u.inputTokens ?? u.promptTokens;
+  const outputTokens = u.outputTokens ?? u.completionTokens;
+  if (typeof inputTokens !== "number" && typeof outputTokens !== "number")
+    return null;
+  return {
+    inputTokens: inputTokens ?? 0,
+    outputTokens: outputTokens ?? 0,
+    cachedInputTokens: u.cachedInputTokens ?? 0,
+  };
+}
+
 /**
  * The Claude Code credential (its own BYOK slot since #296 — can be a subscription
  * setup-token, not just an API key) can ALSO power the builder: generation then runs
@@ -278,6 +313,113 @@ export class GraphGeneratorService {
       provider,
       opts,
     );
+  }
+
+  /**
+   * Conversational builder (AI-BUILDER-CONVERSATION.md §2): apply a natural-language change to a
+   * draft and stream the FULL updated graph — the metered generate/edit the builder uses. Same
+   * SYSTEM_PROMPT / resource grounding / validate-then-repair / SSE hooks as {@link generateStream},
+   * with two differences: (1) when `previous` is set the user prompt frames it as an EDIT ("here's
+   * the current graph, apply this change, return the whole graph") — NOT the repair prompt, which
+   * says the graph was *invalid*; with no `previous` (the first turn on a blank session) it's a
+   * plain create. (2) it returns a {@link GenMeter} so the caller can bill the turn (Tier-1 §6).
+   *
+   * PRIVACY (Tier-1 §4): the instruction is the user's own content — like the create path, this
+   * logs only draft SHAPE (counts) and redacted provider errors, never the instruction text.
+   */
+  async editStream(
+    tenantId: string,
+    environmentId: string,
+    edit: { previous?: GraphDef; instruction: string },
+    provider?: string,
+    opts?: {
+      timeoutMs?: number;
+      onMeta?: (name: string) => void;
+      onNode?: (node: unknown) => void;
+      onEdge?: (edge: unknown) => void;
+    },
+  ): Promise<{ name: string; graph: GraphDef; meter: GenMeter }> {
+    const instruction = edit.instruction?.trim();
+    if (!instruction)
+      throw new BadRequestException("A change description is required");
+    const timeoutMs = opts?.timeoutMs ?? CLAUDE_CODE_TIMEOUT_MS;
+    const hooks =
+      opts?.onMeta || opts?.onNode || opts?.onEdge
+        ? { onMeta: opts.onMeta, onNode: opts.onNode, onEdge: opts.onEdge }
+        : undefined;
+
+    const { provider: chosen, apiKey } = await this.resolveProvider(
+      tenantId,
+      environmentId,
+      provider,
+    );
+    const resources = await this.buildResourceContext(tenantId, environmentId);
+    // The instruction block: an EDIT framing when there's a draft to change, else a plain create.
+    const userPrompt = edit.previous
+      ? `You are EDITING an existing workflow. Here is the current graph (JSON):\n${JSON.stringify(edit.previous)}\n\nApply this change and return the COMPLETE updated workflow graph (the full graph, not a diff or a partial):\n${instruction}`
+      : instruction;
+
+    // First attempt (streamed for API models + hooks; claude-code + one-shot don't stream).
+    let out: GraphDraft;
+    let tokens: GenTokens | null = null;
+    if (chosen !== CLAUDE_CODE && hooks) {
+      ({ draft: out, tokens } = await this.callMeteredStreaming(
+        chosen,
+        apiKey,
+        userPrompt,
+        resources,
+        hooks,
+      ));
+    } else if (chosen === CLAUDE_CODE) {
+      out = await this.callClaudeCode(apiKey, userPrompt, resources, timeoutMs);
+    } else {
+      ({ draft: out, tokens } = await this.callMeteredOneShot(
+        chosen,
+        apiKey,
+        userPrompt,
+        resources,
+      ));
+    }
+    this.logDraftShape("edit", out);
+    let graph = toGraphDef(out);
+    let check = this.validate(graph);
+
+    // One repair retry (non-streamed, usage not re-metered — rare): feed the validator error back.
+    if (!check.valid) {
+      out = await this.callModel(
+        chosen,
+        apiKey,
+        userPrompt,
+        {
+          previous: JSON.stringify(out),
+          error: check.error ?? "invalid graph",
+        },
+        resources,
+        timeoutMs,
+      );
+      this.logDraftShape(`edit-repair(${check.error})`, out);
+      graph = toGraphDef(out);
+      check = this.validate(graph);
+      if (!check.valid) {
+        throw new UnprocessableEntityException(
+          `Couldn't apply the change (${check.error}). Try rephrasing it.`,
+        );
+      }
+    }
+
+    // Always a real PRICED pair (claude-code → anthropic/opus) so an estimate can still cost it.
+    const pricedProvider: GenProvider =
+      chosen === CLAUDE_CODE ? "anthropic" : chosen;
+    return {
+      name:
+        out.name?.trim() || (edit.previous ? "Workflow" : "Generated workflow"),
+      graph,
+      meter: {
+        provider: pricedProvider,
+        model: GEN_DEFAULT_MODEL[pricedProvider],
+        tokens,
+      },
+    };
   }
 
   /** Shared body for {@link generate} + {@link generateStream}. Hooks (when present) make
@@ -586,6 +728,103 @@ export class GraphGeneratorService {
       );
     }
     return parsed;
+  }
+
+  /**
+   * Metered one-shot (builder edit/create, API models): same free-form generate as
+   * {@link callModel}'s API branch, but takes a pre-built user prompt and RETURNS the reported
+   * usage (null when the provider gave none — the caller estimates, Tier-1 §6). No repair here.
+   */
+  private async callMeteredOneShot(
+    provider: GenProvider,
+    apiKey: string,
+    userPrompt: string,
+    resources: string,
+  ): Promise<{ draft: GraphDraft; tokens: GenTokens | null }> {
+    let text: string;
+    let rawUsage: unknown;
+    try {
+      const { generateText } = await aiSdk();
+      const result = await generateText({
+        model: await buildGenModel(provider, apiKey),
+        system: SYSTEM_PROMPT,
+        prompt: `${userPrompt}\n\n${resources}Respond with ONLY the JSON graph object — start at { and end at }. No prose, no markdown code fences.`,
+        maxOutputTokens: 16000,
+      });
+      text = result.text;
+      // totalUsage sums tool-loop steps (CLAUDE.md); no tools here, but prefer it for correctness.
+      rawUsage =
+        (result as { totalUsage?: unknown }).totalUsage ??
+        (result as { usage?: unknown }).usage;
+    } catch (e) {
+      this.logger.warn(
+        `graph edit failed (provider=${provider}): ${await describeProviderError(e)}`,
+      );
+      throw await mapProviderError(e, provider);
+    }
+    const parsed = parseGraphJson(text);
+    if (!parsed) {
+      this.logger.warn(
+        `graph edit: model returned unparseable JSON (head: ${text.slice(0, 120).replace(/\s+/g, " ")})`,
+      );
+      throw new UnprocessableEntityException(
+        "The model didn't return a valid workflow. Try rephrasing the change.",
+      );
+    }
+    return { draft: parsed, tokens: readGenTokens(rawUsage) };
+  }
+
+  /**
+   * Metered streamed first-draft (builder edit/create, API models): same streaming as
+   * {@link callModelStreaming} (per-element hooks over the growing buffer) but takes a pre-built
+   * user prompt and RETURNS the reported usage after the stream drains (null when absent).
+   */
+  private async callMeteredStreaming(
+    provider: GenProvider,
+    apiKey: string,
+    userPrompt: string,
+    resources: string,
+    hooks: StreamHooks,
+  ): Promise<{ draft: GraphDraft; tokens: GenTokens | null }> {
+    let text = "";
+    let rawUsage: unknown;
+    const extractor = createGraphStreamExtractor();
+    try {
+      const { streamText } = await aiSdk();
+      const result = streamText({
+        model: await buildGenModel(provider, apiKey),
+        system: SYSTEM_PROMPT,
+        prompt: `${userPrompt}\n\n${resources}Respond with ONLY the JSON graph object — start at { and end at }. No prose, no markdown code fences.`,
+        maxOutputTokens: 16000,
+        onError: () => {},
+      });
+      for await (const delta of result.textStream) {
+        text += delta;
+        const got = extractor.push(text);
+        if (got.name && hooks.onMeta) hooks.onMeta(got.name);
+        if (hooks.onNode) for (const n of got.nodes) hooks.onNode(n);
+        if (hooks.onEdge) for (const e of got.edges) hooks.onEdge(e);
+      }
+      // Usage resolves once the stream completes; never let a metering read throw.
+      rawUsage = await Promise.resolve(
+        (result as { totalUsage?: unknown }).totalUsage,
+      ).catch(() => undefined);
+    } catch (e) {
+      this.logger.warn(
+        `graph edit (stream) failed (provider=${provider}): ${await describeProviderError(e)}`,
+      );
+      throw await mapProviderError(e, provider);
+    }
+    const parsed = parseGraphJson(text);
+    if (!parsed) {
+      this.logger.warn(
+        `graph edit (stream): model returned unparseable JSON (head: ${text.slice(0, 120).replace(/\s+/g, " ")})`,
+      );
+      throw new UnprocessableEntityException(
+        "The model didn't return a valid workflow. Try rephrasing the change.",
+      );
+    }
+    return { draft: parsed, tokens: readGenTokens(rawUsage) };
   }
 
   /**
