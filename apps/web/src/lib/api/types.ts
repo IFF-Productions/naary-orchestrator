@@ -472,6 +472,29 @@ export interface BudgetView {
   remainingUsd: number;
 }
 
+/** PUT /tenants/:id/budget body (mirrors the server's SetBudgetDto). */
+export interface SetBudgetInput {
+  monthlyCapUsd: number;
+  perExecutionCapUsd: number;
+  maxStepsPerRun?: number;
+  onBudgetExceeded?: "reject" | "downgrade";
+  fallbackModel?: string | null;
+}
+
+/** One usage-ledger line item (UsageReport.events, narrowed — see parseUsageEvents). */
+export interface UsageEventItem {
+  id: string;
+  executionId: string;
+  nodeId: string;
+  provider: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  createdAt: string;
+}
+
 /** The persisted company-wide budget config (COMPANIES.md §8, Slice 5). */
 export interface CompanyBudgetConfig {
   monthlyCapUsd: number;
