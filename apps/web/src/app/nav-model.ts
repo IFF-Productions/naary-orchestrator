@@ -42,9 +42,9 @@ export const BUILDER_MODES: NavMode[] = [
         icon: "edit",
         external: true,
       },
+      { to: "/app/templates", label: "Templates", icon: "template" },
       { to: "/app/build-ai", label: "Build with AI", icon: "bolt" },
       { to: "/app/catalog", label: "Node catalog", icon: "router" },
-      { to: "/app/templates", label: "Templates", icon: "template" },
     ],
   },
   {

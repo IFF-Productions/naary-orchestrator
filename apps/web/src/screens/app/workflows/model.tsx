@@ -113,10 +113,12 @@ const TRIGGER_ICON: Partial<Record<NodeType, IconName>> = {
   chatTrigger: "agent",
 };
 
-/** The workflow's trigger, read from the graph's REAL entry node. */
-export function triggerInfo(graph: GraphDef): TriggerInfo {
-  const entry =
-    graph.nodes.find((n) => n.id === graph.startNodeId) ?? graph.nodes[0];
+/** The workflow's trigger, read from the graph's REAL entry node. A malformed
+ *  or partial API response (no graph/nodes) degrades to "Manual" instead of
+ *  white-screening the list. */
+export function triggerInfo(graph: GraphDef | undefined): TriggerInfo {
+  const nodes = graph?.nodes ?? [];
+  const entry = nodes.find((n) => n.id === graph?.startNodeId) ?? nodes[0];
   if (!entry) return { label: "Manual", icon: "play", accent: "var(--ink-3)" };
   const type = entry.type as NodeType;
   return {

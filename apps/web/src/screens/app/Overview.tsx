@@ -83,7 +83,8 @@ export function Overview() {
       try {
         const me = await api.getMe();
         const rows = await api.getAuditLog(me.tenantId);
-        if (liveRef.current) setAudit(rows);
+        // Defensive: an unexpected non-array response degrades like a failure.
+        if (liveRef.current) setAudit(Array.isArray(rows) ? rows : []);
       } catch {
         if (liveRef.current) setAuditErr(true); // card degrades to "—"
       }
