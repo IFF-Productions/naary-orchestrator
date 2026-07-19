@@ -74,7 +74,7 @@ export function NodeDetailDrawer({
         overflowY: "auto",
         zIndex: 8,
         boxShadow: "-22px 0 50px -26px rgba(0,0,0,.55)",
-        animation: "nccatSlideIn .22s ease",
+        animation: "naarySlideInRight .22s ease",
       }}
     >
       {/* header */}

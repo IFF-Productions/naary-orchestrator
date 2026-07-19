@@ -208,6 +208,7 @@ export function WebhookItem({
             marginTop: 12,
             paddingTop: 12,
             borderTop: "1px solid var(--line)",
+            animation: "naaryFadeUp .2s ease",
             display: "flex",
             flexWrap: "wrap",
             gap: 12,

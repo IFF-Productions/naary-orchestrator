@@ -419,7 +419,8 @@ export function McpApiTab({
         }
       >
         {minted ? (
-          <div>
+          // Form → one-time-token reveal fades in rather than snapping.
+          <div style={{ animation: "naaryFadeUp .2s ease" }}>
             <div
               style={{
                 fontSize: "var(--text-sm)",

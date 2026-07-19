@@ -181,7 +181,15 @@ export function Billing() {
       )}
 
       {ready && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
+            // Loading notice → real content swap fades in rather than popping.
+            animation: "naaryFadeUp .25s ease",
+          }}
+        >
           {/* row 1: hero + enforcement ladder */}
           <div
             style={{

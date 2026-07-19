@@ -323,7 +323,7 @@ export function ConversationPanel({
                   display: "flex",
                   alignItems: "flex-start",
                   gap: 9,
-                  animation: "bwaMsgIn .25s ease",
+                  animation: "naaryFadeUp .25s ease",
                 }}
               >
                 <EmberAvatar />
@@ -363,7 +363,7 @@ export function ConversationPanel({
                 style={{
                   display: "flex",
                   justifyContent: "flex-end",
-                  animation: "bwaMsgIn .25s ease",
+                  animation: "naaryFadeUp .25s ease",
                 }}
               >
                 <div
@@ -393,7 +393,7 @@ export function ConversationPanel({
                 display: "flex",
                 alignItems: "flex-start",
                 gap: 9,
-                animation: "bwaMsgIn .2s ease",
+                animation: "naaryFadeUp .2s ease",
               }}
             >
               <EmberAvatar />

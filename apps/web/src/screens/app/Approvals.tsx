@@ -50,6 +50,12 @@ function FilterChip({
         border: `1px solid ${active ? "var(--line-2)" : "transparent"}`,
         transition: "color .12s ease, background .12s ease",
       }}
+      onMouseEnter={(e) => {
+        if (!active) e.currentTarget.style.background = "var(--hover)";
+      }}
+      onMouseLeave={(e) => {
+        if (!active) e.currentTarget.style.background = "transparent";
+      }}
     >
       {children}
     </button>
@@ -432,19 +438,25 @@ export function Approvals() {
   );
 
   const detail = focused ? (
-    <DetailPanel
-      item={focused}
-      waiting={infoOf(focused)}
-      simple={simple}
-      comment={comments[focused.workflowId] ?? ""}
-      onCommentChange={(v) =>
-        setComments((c) => ({ ...c, [focused.workflowId]: v }))
-      }
-      onDecide={(approved) => void decide(focused, approved)}
-      onOpenRun={() => navigate(`/app/runs/${focused.workflowId}`)}
-      disabled={batchBusy || busy === focused.workflowId}
-      busy={busy === focused.workflowId}
-    />
+    // Keyed by the focused request so switching rows fades the new context in.
+    <div
+      key={focused.workflowId}
+      style={{ animation: "naaryFadeUp .25s ease" }}
+    >
+      <DetailPanel
+        item={focused}
+        waiting={infoOf(focused)}
+        simple={simple}
+        comment={comments[focused.workflowId] ?? ""}
+        onCommentChange={(v) =>
+          setComments((c) => ({ ...c, [focused.workflowId]: v }))
+        }
+        onDecide={(approved) => void decide(focused, approved)}
+        onOpenRun={() => navigate(`/app/runs/${focused.workflowId}`)}
+        disabled={batchBusy || busy === focused.workflowId}
+        busy={busy === focused.workflowId}
+      />
+    </div>
   ) : (
     <div
       style={{
@@ -474,8 +486,6 @@ export function Approvals() {
         minHeight: 0,
       }}
     >
-      <style>{`@keyframes apToastIn{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}`}</style>
-
       {/* header */}
       <div
         style={{
@@ -622,11 +632,9 @@ export function Approvals() {
           zIndex: 60,
         }}
       >
+        {/* the shared Toast primitive animates in (naaryToastIn) by itself */}
         {toasts.map((t) => (
-          <div
-            key={t.id}
-            style={{ animation: "apToastIn .28s cubic-bezier(.2,.9,.3,1.2)" }}
-          >
+          <div key={t.id}>
             <Toast
               kind={t.kind}
               onDismiss={() =>

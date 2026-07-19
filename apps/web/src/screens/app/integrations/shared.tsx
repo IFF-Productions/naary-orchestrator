@@ -177,6 +177,7 @@ export function KebabMenu({ items }: { items: KebabItem[] }) {
             onClick={() => setOpen(false)}
           />
           <div
+            className="menu-pop"
             style={{
               position: "absolute",
               right: 0,
@@ -208,6 +209,7 @@ export function KebabMenu({ items }: { items: KebabItem[] }) {
                   background: "transparent",
                   borderRadius: "var(--radius-sm)",
                   cursor: it.disabled ? "default" : "pointer",
+                  transition: "background .12s ease",
                   fontFamily: "inherit",
                   fontSize: "var(--text-sm)",
                   fontWeight: "var(--weight-medium)",

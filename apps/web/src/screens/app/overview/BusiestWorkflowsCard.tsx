@@ -38,6 +38,12 @@ export function BusiestWorkflowsCard({
         boxShadow: "var(--shadow-card)",
       }}
     >
+      {/* The tiles sit on --card-2, so the shared .run-row hover (also --card-2)
+          is invisible here — a scoped hover gives them real feedback. */}
+      <style>
+        {".ov-wf{transition:background .12s ease,border-color .12s ease;}" +
+          ".ov-wf:hover{background:var(--hover)!important;border-color:var(--line-2)!important;}"}
+      </style>
       <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
         <div
           style={{
@@ -92,7 +98,7 @@ export function BusiestWorkflowsCard({
               <button
                 key={w.key ?? w.label}
                 type="button"
-                className="run-row"
+                className="ov-wf"
                 onClick={() =>
                   navigate(
                     w.key

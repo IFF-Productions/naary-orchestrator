@@ -151,7 +151,7 @@ export function CodeAgentCard({
       </div>
 
       {open ? (
-        <div style={{ marginTop: 12 }}>
+        <div style={{ marginTop: 12, animation: "naaryFadeUp .2s ease" }}>
           <input
             type="password"
             value={token}

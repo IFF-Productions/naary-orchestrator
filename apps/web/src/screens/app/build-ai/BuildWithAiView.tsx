@@ -21,7 +21,6 @@ import { layoutEdges, layoutNodes, planFromStream } from "./model";
 const KEYFRAMES = `
 @keyframes bwaNodeIn{from{opacity:0;transform:scale(.85) translateY(6px)}to{opacity:1;transform:scale(1) translateY(0)}}
 @keyframes bwaGlowPulse{0%,100%{box-shadow:0 0 0 1px rgba(242,98,46,.3),0 10px 30px -14px rgba(242,98,46,.5)}50%{box-shadow:0 0 0 1px rgba(242,98,46,.5),0 14px 40px -12px rgba(242,98,46,.7)}}
-@keyframes bwaMsgIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 @keyframes bwaLineIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 @keyframes bwaDotp{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-2px)}}
 .bwa-chip{transition:border-color .14s,background .14s}

@@ -389,6 +389,7 @@ function FilterBar({
                 cursor: "pointer",
                 background: active ? "var(--card)" : "transparent",
                 color: active ? "var(--ink)" : "var(--ink-faint)",
+                transition: "background .14s ease, color .14s ease",
               }}
             >
               {p.label}
@@ -617,7 +618,10 @@ function ReadyBody({
       };
 
   return (
-    <div style={{ display: "grid", gap: 16 }}>
+    // Loading card → charts swap fades in (re-runs when the window/env changes).
+    <div
+      style={{ display: "grid", gap: 16, animation: "naaryFadeUp .25s ease" }}
+    >
       <Card pad={false} style={{ padding: "20px 22px" }}>
         <CardTitle
           title="Spend over time"

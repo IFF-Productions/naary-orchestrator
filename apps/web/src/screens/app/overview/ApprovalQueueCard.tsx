@@ -204,9 +204,20 @@ export function ApprovalQueueCard({
                     cursor: busy ? "default" : "pointer",
                     opacity: busy && busyId !== q.workflowId ? 0.55 : 1,
                     fontFamily: "var(--font-sans)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
                   }}
                 >
-                  {busyId === q.workflowId ? "…" : "Approve"}
+                  {busyId === q.workflowId ? (
+                    <span
+                      className="spinner"
+                      style={{ width: 12, height: 12 }}
+                      aria-label="Approving"
+                    />
+                  ) : (
+                    "Approve"
+                  )}
                 </button>
                 <button
                   type="button"

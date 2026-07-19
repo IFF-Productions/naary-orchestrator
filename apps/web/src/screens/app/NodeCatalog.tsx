@@ -30,16 +30,15 @@ const MAX_RECENTS = 4;
 /** Toast dwell before the deep link fires (the design's toastIn stays legible). */
 const NAVIGATE_DELAY_MS = 700;
 
-// Hover lift / focus ring / drawer + toast keyframes — inline styles can't
-// express :hover//:focus, so the screen carries its own scoped classes.
+// Hover lift / focus ring — inline styles can't express :hover//:focus, so the
+// screen carries its own scoped classes. Entrance keyframes (toast/drawer)
+// come from the shared tokens.css set (naaryToastIn / naarySlideInRight).
 const CSS = `
 .nccat-card{transition:border-color .14s,background .14s,transform .14s,box-shadow .14s;}
 .nccat-card:hover{background:var(--hover);border-color:var(--line-2);transform:translateY(-2px);box-shadow:0 10px 26px -16px rgba(0,0,0,.7);}
 .nccat-row{transition:background .12s,color .12s;}
 .nccat-row:hover{background:var(--hover);}
 .nccat-search:focus{border-color:var(--brand);box-shadow:var(--focus-ring);outline:none;}
-@keyframes nccatToastIn{from{opacity:0;transform:translateY(10px) scale(.97);}to{opacity:1;transform:translateY(0) scale(1);}}
-@keyframes nccatSlideIn{from{opacity:0;transform:translateX(12px);}to{opacity:1;transform:translateX(0);}}
 `;
 
 const MONO_LABEL: React.CSSProperties = {
@@ -491,10 +490,14 @@ export function NodeCatalog() {
 
             {results.length > 0 ? (
               <div
+                // Keyed by category (search keeps one key so typing doesn't
+                // re-trigger) — switching sections fades the grid in.
+                key={query ? "search" : cat}
                 style={{
                   display: "grid",
                   gridTemplateColumns: "repeat(auto-fill, minmax(196px, 1fr))",
                   gap: 11,
+                  animation: "naaryFadeUp .25s ease",
                 }}
               >
                 {results.map((n) => {
@@ -783,7 +786,7 @@ export function NodeCatalog() {
                   borderRadius: 11,
                   padding: "11px 16px",
                   boxShadow: "0 18px 40px -18px rgba(0,0,0,.6)",
-                  animation: "nccatToastIn .28s cubic-bezier(.2,.9,.3,1.2)",
+                  animation: "naaryToastIn .28s cubic-bezier(.2,.9,.3,1.2)",
                 }}
               >
                 <GlyphTile
