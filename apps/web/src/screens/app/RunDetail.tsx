@@ -1,18 +1,42 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+/**
+ * Run Detail (redesign, "Naary Run Detail.dc.html") — the run-observability
+ * screen inside the app shell's content region. Two panes: LEFT the executed-
+ * path graph (the run's snapshot graph with the actual route highlighted),
+ * RIGHT the status hero (paused-on-approval = calm amber with decide-in-place),
+ * the step timeline, and the selected-step detail card with the log panel.
+ * All data flow is the existing one: 1.5s state polling, graph snapshot fetch,
+ * approval signal, cancel, re-run-at-version, curated history.
+ */
+import "./run-detail/run-detail.css";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { GraphDef } from "@naary/dsl";
 import { Button, Card, Icon, LoadingBlock, StatusPill } from "../../components";
-import { RunDiagram } from "../../components/RunDiagram";
 import { api, type ExecutionState, UnauthorizedError } from "../../lib/api";
+import { ACCENT, nodeDisplayLabel, nodeSubtitle } from "../../lib/graph-model";
 import { canDo } from "../../lib/permissions-logic";
 import { isTerminal, runStatusUi } from "../../lib/run-status";
+import { useActiveEnvironment } from "../../lib/useActiveEnvironment";
 import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import { usePermissions } from "../../lib/usePermissions";
+import { envAccent } from "../../workspace/EnvironmentSwitcher";
 import { RerunMenu, VersionBadge } from "./RerunMenu";
 import { NodeOutputBody } from "./run-detail/NodeOutputBody";
 import { RegionTraceSection } from "./run-detail/RegionTraceSection";
-import { RunLog } from "./run-detail/RunLog";
-import { SectionTitle, SummaryRow } from "./run-detail/shared";
+import { RunGraph } from "./run-detail/RunGraph";
+import { LogPanel, useRunHistory } from "./run-detail/RunLog";
+import {
+  computeStepStates,
+  fmtAge,
+  fmtWhen,
+  historyTimes,
+  nodeIcon,
+  stepOrder,
+} from "./run-detail/run-view-model";
+import { SectionTitle } from "./run-detail/shared";
+import { type ApprovalInfo, StatusHero } from "./run-detail/StatusHero";
+import { type StepDetail, StepDetailCard } from "./run-detail/StepDetailCard";
+import { StepTimeline, type TimelineStep } from "./run-detail/StepTimeline";
 import { UnresolvedInputsSection } from "./run-detail/UnresolvedInputsSection";
 
 export function RunDetail() {
@@ -59,9 +83,38 @@ function isNodeOutputKey(key: string): boolean {
   return !key.startsWith("__");
 }
 
-function formatCost(ctx: Record<string, unknown>): string {
+function costText(ctx: Record<string, unknown>): string {
   const c = ctx.__costUsd;
   return typeof c === "number" ? `$${c.toFixed(4)}` : "—";
+}
+
+/** Mono uppercase stat (STEPS / ELAPSED / COST) for the top strip. */
+function TopStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div
+        className="mono"
+        style={{
+          fontSize: "var(--text-2xs)",
+          color: "var(--ink-3)",
+          letterSpacing: ".03em",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: "var(--text-body)",
+          color: "var(--ink-soft)",
+          fontWeight: "var(--weight-semibold)",
+          marginTop: 1,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
 }
 
 /* ------------- Real run: polls the control plane for live + closed runs ------------- */
@@ -73,19 +126,23 @@ function RunView({ id }: { id: string }) {
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [resumeUrl, setResumeUrl] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   // The graph SNAPSHOT this run executed (immutable → fetched once). null while loading or if
-  // the snapshot is unavailable (older runs) — the canvas section just doesn't render then.
+  // the snapshot is unavailable (older runs) — the graph pane just doesn't render then.
   const [graph, setGraph] = useState<GraphDef | null>(null);
-  // The executed graph's version + the run's workflowKey (for the re-run-at-version picker),
-  // fetched alongside the snapshot. null until loaded / for pre-snapshot runs.
   const [runVersion, setRunVersion] = useState<number | null>(null);
   const [runWorkflowKey, setRunWorkflowKey] = useState<string | null>(null);
+  // The step the user clicked; null → follow the run (current node / first step).
+  const [pickedStep, setPickedStep] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Affordance gating (RBAC-GROUPS G2): re-run needs `run` on the workflow. Unknown key
   // (older runs) → keep the affordance; the server still enforces on the request.
   const perms = usePermissions();
   const mayRerun = !runWorkflowKey || canDo(perms, "run", runWorkflowKey);
+  const env = useActiveEnvironment();
+
+  // Curated Temporal history — feeds the log panel AND the real timestamps
+  // (run start, paused-since, failure detail).
+  const events = useRunHistory(id);
 
   const poll = useCallback(async () => {
     try {
@@ -109,10 +166,11 @@ function RunView({ id }: { id: string }) {
   useEffect(() => {
     let cancelled = false;
     // Clear the previous run's graph immediately so navigating between runs (this screen
-    // isn't unmounted) never flashes — or keeps showing — the wrong run's canvas.
+    // isn't unmounted) never flashes — or keeps showing — the wrong run's graph.
     setGraph(null);
     setRunVersion(null);
     setRunWorkflowKey(null);
+    setPickedStep(null);
     api.getRunGraph(id).then(
       (r) => {
         if (!cancelled) {
@@ -122,10 +180,10 @@ function RunView({ id }: { id: string }) {
         }
       },
       (e) => {
-        // A 404 is expected for pre-snapshot runs — skip the canvas silently. Anything else
+        // A 404 is expected for pre-snapshot runs — skip the graph silently. Anything else
         // (500, auth/routing) is unexpected: log it so a real failure is detectable, not hidden.
         if (!(e instanceof Error) || !/→ 404$/.test(e.message)) {
-          console.warn("run-detail canvas: graph fetch failed", e);
+          console.warn("run-detail graph: fetch failed", e);
         }
       },
     );
@@ -206,123 +264,299 @@ function RunView({ id }: { id: string }) {
   const awaiting = status === "awaiting_approval";
   const awaitingWebhook = status === "awaiting_webhook";
   const running = status === "running";
+  const active = awaiting || awaitingWebhook || running;
   const ui = status ? runStatusUi(status) : null;
+
+  /* ---------- Derived view-model (all from real run data) ---------- */
+
+  const states = useMemo(
+    () =>
+      state && graph
+        ? computeStepStates(graph, state.ctx, state.currentNodeId, state.status)
+        : {},
+    [state, graph],
+  );
+  const order = useMemo(() => (graph ? stepOrder(graph) : []), [graph]);
+  const nodeById = useMemo(
+    () => new Map((graph?.nodes ?? []).map((n) => [n.id, n])),
+    [graph],
+  );
+
+  const { startedAt, lastAt, errorDetail } = historyTimes(events);
+  // "Suspended since": the moment the history went idle (its last recorded event).
+  const sinceIso = awaiting || awaitingWebhook ? lastAt : null;
+  const waitingAge = sinceIso
+    ? fmtAge(Date.now() - new Date(sinceIso).getTime())
+    : null;
+
+  // Steps that RAN (the entry trigger counts — computeStepStates marks it done).
+  const executedCount = order.filter((nid) => states[nid] === "done").length;
+  const elapsed = startedAt
+    ? fmtAge(
+        (status && isTerminal(status) && lastAt
+          ? new Date(lastAt).getTime()
+          : Date.now()) - new Date(startedAt).getTime(),
+      )
+    : null;
+
+  const currentNode = state ? nodeById.get(state.currentNodeId) : undefined;
+  const currentNodeLabel = currentNode
+    ? nodeDisplayLabel(currentNode.type, currentNode.config)
+    : null;
+  const approval: ApprovalInfo | null =
+    awaiting && currentNode?.type === "humanApproval"
+      ? ((currentNode.config ?? {}) as ApprovalInfo)
+      : null;
+
+  // Trigger line: the snapshot's entry node names how this run started.
+  const entryNode = graph ? nodeById.get(graph.startNodeId) : undefined;
+  const triggerLabel = entryNode
+    ? nodeDisplayLabel(entryNode.type, entryNode.config)
+    : null;
+
+  // Selection: follow the run until the user picks a step.
+  const selectedId =
+    pickedStep && nodeById.has(pickedStep)
+      ? pickedStep
+      : state && nodeById.has(state.currentNodeId)
+        ? state.currentNodeId
+        : (order[0] ?? null);
+
+  const timelineSteps: TimelineStep[] = useMemo(
+    () =>
+      order.map((nid) => {
+        const n = nodeById.get(nid);
+        const st = states[nid] ?? "pending";
+        return {
+          id: nid,
+          label: n ? nodeDisplayLabel(n.type, n.config) : nid,
+          icon: n ? nodeIcon(n.type) : "workflow",
+          accent: n ? ACCENT[n.type] : "var(--ink-3)",
+          state: st,
+          // Data honesty: the platform records no per-step duration/cost — only
+          // the waiting step's age is real (derived from the durable history).
+          duration: st === "waiting" ? waitingAge : null,
+          cost: null,
+        };
+      }),
+    [order, nodeById, states, waitingAge],
+  );
+
+  const detail: StepDetail | null = useMemo(() => {
+    if (!state || !selectedId) return null;
+    const n = nodeById.get(selectedId);
+    if (!n) return null;
+    const st = states[selectedId] ?? "pending";
+    const sub = nodeSubtitle(n.type, n.config);
+    const hasOwnOutput = selectedId in state.ctx;
+    const isTriggerInput =
+      !hasOwnOutput &&
+      selectedId === graph?.startNodeId &&
+      state.ctx.__input !== undefined;
+    return {
+      id: selectedId,
+      label: nodeDisplayLabel(n.type, n.config),
+      typeLine: sub ? `${n.type} · ${sub}` : n.type,
+      icon: nodeIcon(n.type),
+      accent: ACCENT[n.type],
+      state: st,
+      duration: st === "waiting" ? waitingAge : null,
+      output: hasOwnOutput
+        ? state.ctx[selectedId]
+        : isTriggerInput
+          ? state.ctx.__input
+          : undefined,
+      isTriggerInput,
+    };
+  }, [state, selectedId, nodeById, states, graph, waitingAge]);
 
   const nodeOutputs = state
     ? Object.entries(state.ctx).filter(([k]) => isNodeOutputKey(k))
     : [];
 
+  /* ---------- Render ---------- */
+
+  const hero = state && (
+    <StatusHero
+      status={state.status}
+      currentNodeLabel={currentNodeLabel ?? (state.currentNodeId || null)}
+      sinceIso={sinceIso}
+      approval={approval}
+      acting={acting}
+      onDecide={(a) => void decide(a)}
+      resumeUrl={resumeUrl}
+      errorDetail={errorDetail}
+      executedCount={executedCount}
+      totalCount={graph?.nodes.length ?? 0}
+    />
+  );
+
+  const rightColumn = state && (
+    <div
+      style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}
+    >
+      {hero}
+      <UnresolvedInputsSection ctx={state.ctx} />
+      {graph && (
+        <StepTimeline
+          steps={timelineSteps}
+          selectedId={selectedId}
+          onSelect={setPickedStep}
+        />
+      )}
+      {detail && <StepDetailCard step={detail} events={events} />}
+      <RegionTraceSection ctx={state.ctx} />
+    </div>
+  );
+
   return (
     <>
+      {/* ===== Top strip: run identity · status · stats · actions ===== */}
       <div
         style={{
           display: "flex",
-          // Phone: stack the run identity over its action buttons (they'd overflow side-by-side).
           flexDirection: phone ? "column" : "row",
           alignItems: phone ? "stretch" : "flex-start",
           justifyContent: "space-between",
-          gap: phone ? 12 : 0,
+          gap: phone ? 12 : 18,
           marginBottom: 18,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <span
+        <div style={{ minWidth: 0 }}>
+          <div
             style={{
-              width: 42,
-              height: 42,
-              borderRadius: "var(--radius-lg)",
-              background: "var(--brand-soft)",
-              border:
-                "1px solid color-mix(in srgb, var(--brand) 40%, transparent)",
               display: "flex",
               alignItems: "center",
-              justifyContent: "center",
-              flex: "none",
-              color: "var(--brand)",
+              gap: 10,
+              flexWrap: "wrap",
             }}
           >
-            <Icon name="bolt" size={20} />
-          </span>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span
-                style={{
-                  fontSize: "var(--text-title)",
-                  fontWeight: "var(--weight-bold)",
-                }}
-              >
-                Execution
-              </span>
+            <span
+              style={{
+                fontSize: "var(--text-lg)",
+                fontWeight: "var(--weight-bold)",
+                letterSpacing: "var(--tracking-tight)",
+              }}
+            >
+              {runWorkflowKey ?? "Execution"}
+            </span>
+            <span
+              className="mono"
+              style={{
+                fontSize: "var(--text-xs)",
+                color: "var(--ink-2)",
+                background: "var(--surface)",
+                border: "1px solid var(--line)",
+                padding: "2px 8px",
+                borderRadius: "var(--radius-xs)",
+              }}
+            >
+              {id}
+            </span>
+            {env && (
               <span
                 className="mono"
                 style={{
-                  fontSize: "var(--text-xs)",
-                  color: "var(--ink-2)",
-                  background: "var(--surface)",
-                  border: "1px solid var(--line)",
+                  fontSize: "var(--text-2xs)",
+                  color: envAccent({ slug: env, name: env }),
+                  border: `1px solid color-mix(in srgb, ${envAccent({ slug: env, name: env })} 50%, transparent)`,
+                  background: `color-mix(in srgb, ${envAccent({ slug: env, name: env })} 12%, transparent)`,
+                  borderRadius: "var(--radius-pill)",
                   padding: "2px 8px",
-                  borderRadius: "var(--radius-xs)",
                 }}
               >
-                {id}
+                {env}
               </span>
-              {ui && <StatusPill state={ui.state} label={ui.label} />}
-            </div>
-            <div
-              style={{
-                fontSize: "var(--text-sm)",
-                color: "var(--ink-2)",
-                marginTop: 4,
-              }}
-            >
-              {running || awaiting || awaitingWebhook
-                ? "Polling GET /executions/:id every 1.5s"
-                : "Final state · GET /executions/:id"}
-            </div>
+            )}
+            <VersionBadge version={runVersion} />
+            {ui && <StatusPill state={ui.state} label={ui.label} />}
+          </div>
+          <div
+            style={{
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-faint)",
+              marginTop: 4,
+            }}
+          >
+            {triggerLabel ? (
+              <>
+                Triggered by{" "}
+                <span style={{ color: "var(--ink-2)" }}>{triggerLabel}</span>
+              </>
+            ) : (
+              "Run"
+            )}
+            {startedAt && <> · {fmtWhen(startedAt)}</>}
+            {active && (
+              <span
+                className="mono"
+                style={{
+                  color: "var(--ink-3)",
+                  marginLeft: 8,
+                  fontSize: "var(--text-2xs)",
+                }}
+              >
+                live · polling 1.5s
+              </span>
+            )}
           </div>
         </div>
-        {(awaiting || running || awaitingWebhook) && (
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 18,
+            flexWrap: "wrap",
+          }}
+        >
+          {state && (
+            <div style={{ display: "flex", gap: 18 }}>
+              <TopStat
+                label="STEPS"
+                value={graph ? `${executedCount} / ${graph.nodes.length}` : "—"}
+              />
+              <TopStat label="ELAPSED" value={elapsed ?? "—"} />
+              <TopStat label="COST" value={costText(state.ctx)} />
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {awaiting && (
-              <>
-                <Button
-                  variant="positive"
-                  icon="check"
-                  disabled={acting}
-                  onClick={() => decide(true)}
-                >
-                  Approve
-                </Button>
-                <Button
-                  variant="danger"
-                  disabled={acting}
-                  onClick={() => decide(false)}
-                >
-                  Reject
-                </Button>
-              </>
+            {runWorkflowKey && (
+              <Button
+                variant="secondary"
+                icon="workflow"
+                onClick={() =>
+                  navigate(
+                    `/app/canvas?key=${encodeURIComponent(runWorkflowKey)}`,
+                  )
+                }
+              >
+                Open in canvas
+              </Button>
             )}
-            <Button
-              variant="secondary"
-              icon="x"
-              disabled={acting}
-              onClick={cancelRun}
-            >
-              Cancel run
-            </Button>
+            {active && (
+              <Button
+                variant="secondary"
+                icon="x"
+                disabled={acting}
+                onClick={() => void cancelRun()}
+              >
+                Cancel run
+              </Button>
+            )}
+            {status && isTerminal(status) && mayRerun && (
+              <RerunMenu
+                runId={id}
+                workflowKey={runWorkflowKey}
+                currentVersion={runVersion}
+                size="md"
+                label="Re-run"
+                onRerun={(newId) => navigate(`/app/runs/${newId}`)}
+                onError={setError}
+              />
+            )}
           </div>
-        )}
-        {status && isTerminal(status) && mayRerun && (
-          <RerunMenu
-            runId={id}
-            workflowKey={runWorkflowKey}
-            currentVersion={runVersion}
-            size="md"
-            label="Re-run"
-            onRerun={(newId) => navigate(`/app/runs/${newId}`)}
-            onError={setError}
-          />
-        )}
+        </div>
       </div>
 
       {error && (
@@ -330,6 +564,7 @@ function RunView({ id }: { id: string }) {
           style={{
             borderColor:
               "color-mix(in srgb, var(--state-error) 40%, transparent)",
+            marginBottom: 16,
           }}
         >
           <span
@@ -343,137 +578,64 @@ function RunView({ id }: { id: string }) {
         </Card>
       )}
 
-      {awaitingWebhook && (
-        <Card
-          style={{
-            borderColor: "color-mix(in srgb, var(--brand) 40%, transparent)",
-            marginBottom: 16,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Icon name="bolt" size={16} />
-            <span
-              style={{
-                fontSize: "var(--text-body)",
-                fontWeight: "var(--weight-bold)",
-              }}
-            >
-              Waiting for a webhook
-            </span>
-          </div>
-          <p
-            style={{
-              fontSize: "var(--text-sm)",
-              color: "var(--ink-2)",
-              margin: "8px 0 12px",
-            }}
-          >
-            This run is paused until an external system POSTs to its resume URL.
-            The URL contains a signed token — anyone with it can resume the run,
-            so treat it like a secret.
-          </p>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <code
-              className="mono"
-              style={{
-                flex: 1,
-                overflowX: "auto",
-                whiteSpace: "nowrap",
-                fontSize: "var(--text-xs)",
-                background: "var(--surface)",
-                border: "1px solid var(--line)",
-                borderRadius: "var(--radius-xs)",
-                padding: "8px 10px",
-                color: "var(--ink-1)",
-              }}
-            >
-              {resumeUrl ?? "Loading resume URL…"}
-            </code>
-            <Button
-              variant="secondary"
-              icon={copied ? "check" : "copy"}
-              disabled={!resumeUrl}
-              onClick={() => {
-                if (!resumeUrl) return;
-                void navigator.clipboard?.writeText(resumeUrl);
-                setCopied(true);
-                window.setTimeout(() => setCopied(false), 1500);
-              }}
-            >
-              {copied ? "Copied" : "Copy"}
-            </Button>
-          </div>
-        </Card>
-      )}
-
       {!error && loading && !state && (
         <Card>
           <LoadingBlock label="Loading run…" />
         </Card>
       )}
 
-      {/* Workflow canvas — the graph this run executed, with the path it took highlighted.
-          Green = ran, ember/amber = the current step, dim = not reached. */}
+      {/* ===== Two-pane body: executed-path graph · hero + timeline + detail ===== */}
       {!error && state && graph && (
-        <Card style={{ padding: "16px 18px 14px", marginBottom: 16 }}>
-          <SectionTitle>Workflow canvas</SectionTitle>
-          <div
-            style={{
-              fontSize: "var(--text-2xs)",
-              color: "var(--ink-3)",
-              marginBottom: 10,
-            }}
-          >
-            The graph this run executed — green nodes ran; the highlighted node
-            is the current step; dimmed nodes weren't reached.
-          </div>
-          {/* The diagram lays out horizontally; scroll it on a narrow screen rather than clip. */}
-          <div style={{ overflowX: "auto", maxWidth: "100%" }}>
-            <RunDiagram
-              graph={graph}
-              ctx={state.ctx}
-              currentNodeId={state.currentNodeId}
-              status={state.status}
-            />
-          </div>
-        </Card>
-      )}
-
-      {/* Run input — the payload that STARTED the run (webhook event, form submission,
-          or manual input), held in ctx.__input. Hidden from Node outputs (which drops __*). */}
-      {!error && state && state.ctx.__input !== undefined && (
-        <Card style={{ padding: "18px 20px", marginBottom: 16 }}>
-          <SectionTitle>Run input</SectionTitle>
-          <div
-            style={{
-              fontSize: "var(--text-2xs)",
-              color: "var(--ink-3)",
-              marginBottom: 8,
-            }}
-          >
-            The payload that started this run (trigger event / manual input).
-          </div>
-          <NodeOutputBody output={state.ctx.__input} />
-        </Card>
-      )}
-
-      {!error && state && <UnresolvedInputsSection ctx={state.ctx} />}
-
-      {!error && state && (
         <div
           style={{
             display: "grid",
-            // Phone: stack "Node outputs" over the details column instead of squeezing two.
-            // minmax(0, …) — NOT plain fr — so a track can shrink below its content's min-content.
-            // Without it, a very long unbroken JSON line in a node output's <pre> forces the track
-            // (and the page) wide instead of scrolling inside the code block.
             gridTemplateColumns: phone
               ? "minmax(0, 1fr)"
-              : "minmax(0, 1.6fr) minmax(0, 1fr)",
-            gap: 16,
+              : "minmax(320px, 42fr) minmax(360px, 58fr)",
+            gap: 18,
+            alignItems: "start",
           }}
         >
-          {/* Node outputs — the real "what each node produced" view. */}
+          {/* Phone: status first — the graph pane follows the right column. */}
+          {phone ? (
+            <>
+              {rightColumn}
+              <RunGraph
+                graph={graph}
+                states={states}
+                waitingAge={waitingAge}
+                selectedId={selectedId}
+                onSelect={setPickedStep}
+                height={360}
+              />
+            </>
+          ) : (
+            <>
+              <RunGraph
+                graph={graph}
+                states={states}
+                waitingAge={waitingAge}
+                selectedId={selectedId}
+                onSelect={setPickedStep}
+                height={470}
+              />
+              {rightColumn}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ===== Fallback for pre-snapshot runs (no graph): hero + raw outputs + log ===== */}
+      {!error && state && !graph && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {hero}
+          <UnresolvedInputsSection ctx={state.ctx} />
+          {state.ctx.__input !== undefined && (
+            <Card style={{ padding: "18px 20px" }}>
+              <SectionTitle>Run input</SectionTitle>
+              <NodeOutputBody output={state.ctx.__input} />
+            </Card>
+          )}
           <Card style={{ padding: "18px 20px" }}>
             <SectionTitle>Node outputs</SectionTitle>
             {nodeOutputs.length === 0 ? (
@@ -514,78 +676,14 @@ function RunView({ id }: { id: string }) {
                 ))}
               </div>
             )}
-            <div
-              className="mono"
-              style={{
-                marginTop: 14,
-                paddingTop: 12,
-                borderTop: "1px solid var(--line)",
-                fontSize: "var(--text-2xs)",
-                color: "var(--ink-3)",
-              }}
-            >
-              live node outputs (ctx) · full event history below
-            </div>
           </Card>
-
-          {/* Run summary */}
-          <Card>
-            <SectionTitle>Run summary</SectionTitle>
-            <SummaryRow label="Status">
-              {ui ? <StatusPill state={ui.state} label={ui.label} /> : "—"}
-            </SummaryRow>
-            <SummaryRow label="Graph version">
-              <VersionBadge version={runVersion} />
-            </SummaryRow>
-            {running && (
-              <SummaryRow label="Current node">
-                <span className="mono" style={{ fontSize: "var(--text-body)" }}>
-                  {state.currentNodeId || "—"}
-                </span>
-              </SummaryRow>
-            )}
-            <SummaryRow label="Accumulated cost">
-              <span
-                className="mono"
-                style={{
-                  fontSize: "var(--text-body)",
-                  color: "var(--state-done)",
-                }}
-              >
-                {formatCost(state.ctx)}
-              </span>
-            </SummaryRow>
-            <div
-              style={{
-                marginTop: 14,
-                paddingTop: 13,
-                borderTop: "1px solid var(--line)",
-                display: "flex",
-                alignItems: "center",
-                gap: 7,
-              }}
-            >
-              <span
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: "50%",
-                  background: "var(--state-done)",
-                }}
-              />
-              <span
-                className="mono"
-                style={{ fontSize: "var(--text-2xs)", color: "var(--ink-3)" }}
-              >
-                durable · state checkpointed · resumable for 30d
-              </span>
-            </div>
+          <RegionTraceSection ctx={state.ctx} />
+          <Card style={{ padding: "18px 20px" }}>
+            <SectionTitle>Execution log</SectionTitle>
+            <LogPanel events={events} />
           </Card>
         </div>
       )}
-
-      {!error && state && <RegionTraceSection ctx={state.ctx} />}
-      {!error && state && <RunLog id={id} />}
     </>
   );
 }

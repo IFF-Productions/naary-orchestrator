@@ -1,10 +1,12 @@
-// Execution log section (curated Temporal history) for the RunDetail screen.
+// Execution log (curated Temporal history) for the RunDetail screen: the
+// polling hook + the design's mono, timestamped log panel. The screen owns the
+// hook (it also derives start/paused-since times from the events) and feeds the
+// panel wherever the log renders.
 import { useEffect, useState } from "react";
-import { Card, LoadingBlock } from "../../../components";
+import { LoadingBlock } from "../../../components";
 import { api, type RunEvent } from "../../../lib/api";
-import { SectionTitle } from "./shared";
 
-/* ---- Execution log: the run's curated Temporal history (durable record). ---- */
+/* ---- kind → row colour (durable record; waiting reads calm, never error). ---- */
 const LOG_KIND_COLOR: Record<string, string> = {
   started: "var(--state-info)",
   activity: "var(--node-agent)",
@@ -15,16 +17,17 @@ const LOG_KIND_COLOR: Record<string, string> = {
   continued: "var(--ink-3)",
 };
 
-export function RunLog({ id }: { id: string }) {
-  const [events, setEvents] = useState<Awaited<
-    ReturnType<typeof api.getRunHistory>
-  > | null>(null);
+/**
+ * Poll the run's curated history until a terminal event appears (the closing
+ * event can lag the status flip, so a single fetch can miss it).
+ */
+export function useRunHistory(id: string): RunEvent[] | null {
+  const [events, setEvents] = useState<RunEvent[] | null>(null);
 
-  // Poll the history until a terminal event appears — the closing event can lag
-  // the status flip, so a single fetch can miss it.
   useEffect(() => {
     let live = true;
     let t: ReturnType<typeof setTimeout>;
+    setEvents(null); // navigating between runs must not show the old run's log
     const done = (evs: RunEvent[]) =>
       evs.some((e) => ["completed", "error", "continued"].includes(e.kind));
     const tick = async () => {
@@ -44,73 +47,52 @@ export function RunLog({ id }: { id: string }) {
     };
   }, [id]);
 
+  return events;
+}
+
+/** The design's log panel: dark mono well, timestamped rows coloured by kind. */
+export function LogPanel({ events }: { events: RunEvent[] | null }) {
   return (
-    <Card style={{ padding: "18px 20px", marginTop: 16 }}>
-      <SectionTitle>Execution log</SectionTitle>
+    <div
+      style={{
+        border: "1px solid var(--line-mid)",
+        background: "var(--bg)",
+        borderRadius: 10,
+        padding: "12px 14px",
+        fontFamily: "var(--font-mono)",
+        fontSize: 11.5,
+        lineHeight: 1.85,
+        maxHeight: 320,
+        overflowY: "auto",
+      }}
+    >
       {!events ? (
         <LoadingBlock label="Loading log…" />
       ) : events.length === 0 ? (
-        <div style={{ color: "var(--ink-3)", fontSize: "var(--text-body)" }}>
-          No events yet.
-        </div>
+        <span style={{ color: "var(--ink-3)" }}>No events yet.</span>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-          {events.map((ev) => (
-            <div
-              key={ev.id}
+        events.map((ev) => (
+          <div key={ev.id} style={{ display: "flex", gap: 10 }}>
+            <span style={{ color: "var(--ink-3)", flex: "none" }}>
+              {ev.at ? new Date(ev.at).toLocaleTimeString() : "—"}
+            </span>
+            <span
               style={{
-                display: "flex",
-                alignItems: "baseline",
-                gap: 10,
-                padding: "6px 0",
-                borderTop: "1px solid var(--line)",
+                color: LOG_KIND_COLOR[ev.kind] ?? "var(--ink-2)",
+                minWidth: 0,
+                overflowWrap: "anywhere",
               }}
             >
-              <span
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: "50%",
-                  flex: "none",
-                  marginTop: 5,
-                  background: LOG_KIND_COLOR[ev.kind] ?? "var(--ink-3)",
-                }}
-              />
-              <span
-                style={{
-                  flex: 1,
-                  fontSize: "var(--text-body)",
-                  color: "var(--ink)",
-                }}
-              >
-                {ev.label}
-                {ev.detail && (
-                  <span
-                    className="mono"
-                    style={{
-                      color: "var(--ink-3)",
-                      marginLeft: 8,
-                      fontSize: "var(--text-xs)",
-                    }}
-                  >
-                    {ev.detail}
-                  </span>
-                )}
-              </span>
-              <span
-                className="mono"
-                style={{
-                  fontSize: "var(--text-2xs)",
-                  color: "var(--ink-3)",
-                  flex: "none",
-                }}
-              >
-                {ev.at ? new Date(ev.at).toLocaleTimeString() : ""}
-              </span>
-            </div>
-          ))}
-        </div>
+              {ev.label}
+              {ev.detail && (
+                <span style={{ color: "var(--ink-3)", marginLeft: 8 }}>
+                  {ev.detail}
+                </span>
+              )}
+            </span>
+          </div>
+        ))
       )}
-    </Card>
+    </div>
   );
 }
