@@ -115,7 +115,9 @@
   /* --- Effects --- */
   --shadow-card: 0 10px 30px -18px rgba(0, 0, 0, 0.75);
   --shadow-raised: 0 16px 32px -14px rgba(0, 0, 0, 0.85);
-  --shadow-node: 0 10px 26px -14px rgba(0, 0, 0, 0.7);
+  /* Layered (contact + ambient) so canvas nodes read as clearly raised — the old single tight
+     shadow was nearly invisible on the dark canvas. */
+  --shadow-node: 0 1px 2px rgba(0, 0, 0, 0.55), 0 8px 24px -6px rgba(0, 0, 0, 0.6);
   --shadow-brand: 0 2px 12px -3px rgba(242, 98, 46, 0.55);
   --glow-brand: 0 0 16px -2px rgba(242, 98, 46, 0.6);
   --focus-ring: 0 0 0 3px rgba(242, 98, 46, 0.13);
@@ -146,7 +148,7 @@
 
   --shadow-card: 0 6px 22px -16px rgba(20, 30, 50, 0.4);
   --shadow-raised: 0 10px 26px -14px rgba(20, 30, 50, 0.45);
-  --shadow-node: 0 6px 18px -12px rgba(20, 30, 50, 0.35);
+  --shadow-node: 0 1px 2px rgba(20, 30, 50, 0.14), 0 8px 22px -8px rgba(20, 30, 50, 0.4);
 }
 
 /* ---- Motion (calm, slow — never bouncy) ---- */
