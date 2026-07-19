@@ -1,0 +1,46 @@
+/* Auth screen (dark-only by design — the comp has no light variant).
+   Keyframes for the browser-only workflow simulation + input placeholder tint.
+   Everything is auth-prefixed; shared tokens.css stays untouched. */
+
+@keyframes authDash {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+
+@keyframes authSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes authCardPulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.018);
+  }
+}
+
+@keyframes authPing {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  70%,
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+/* Flowing bezier edges: dashed march toward the target node. */
+.authEdgeFlow {
+  animation: authDash 1s linear infinite;
+}
+
+.authInput::placeholder {
+  color: #5c6573;
+}
