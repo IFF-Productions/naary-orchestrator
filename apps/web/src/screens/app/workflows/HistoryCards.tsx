@@ -180,11 +180,15 @@ export function RecentRunsCard({ runs }: { runs: RunSummary[] }) {
                 e.key === "Enter" &&
                 navigate(`/app/runs/${encodeURIComponent(r.workflowId)}`)
               }
+              className="run-row"
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: 10,
                 cursor: "pointer",
+                borderRadius: 7,
+                padding: "4px 6px",
+                margin: "-4px -6px",
               }}
             >
               <span

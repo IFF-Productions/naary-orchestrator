@@ -101,6 +101,7 @@ function KebabMenu({ items, label }: { items: MenuItem[]; label: string }) {
       {open && (
         <div
           role="menu"
+          className="menu-pop"
           style={{
             position: "absolute",
             top: 34,

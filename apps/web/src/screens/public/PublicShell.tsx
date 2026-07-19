@@ -11,7 +11,6 @@ import { Icon, type IconName, Logo } from "../../components";
 
 /* Page-scoped keyframes + the one thing inline styles can't do: focus border tint. */
 const PUBLIC_CSS = `
-@keyframes naaryPubMsgIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes naaryPubDot { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
 @keyframes naaryPubPop { 0% { transform: scale(.4); opacity: 0; } 60% { transform: scale(1.15); } 100% { transform: scale(1); opacity: 1; } }
 .naary-public input:focus, .naary-public textarea:focus { border-color: var(--brand) !important; outline: none; }

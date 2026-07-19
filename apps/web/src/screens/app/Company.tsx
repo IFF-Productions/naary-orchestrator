@@ -175,7 +175,13 @@ export function Company() {
   }
 
   return (
-    <div style={{ padding: "22px 28px 40px", maxWidth: 1080 }}>
+    <div
+      style={{
+        padding: "22px 28px 40px",
+        maxWidth: 1080,
+        animation: "naaryFadeUp .25s ease",
+      }}
+    >
       <div
         style={{
           display: "flex",
@@ -527,10 +533,11 @@ function MembersCard({
           </select>
           <Button
             variant="primary"
-            disabled={busy || !email.trim()}
+            loading={busy}
+            disabled={!email.trim()}
             onClick={() => void add()}
           >
-            {busy ? "Adding…" : "Add"}
+            Add
           </Button>
         </div>
       )}

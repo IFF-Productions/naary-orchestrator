@@ -24,7 +24,13 @@ export function Automations() {
   }, []);
 
   return (
-    <div style={{ padding: "22px 28px 40px", maxWidth: 720 }}>
+    <div
+      style={{
+        padding: "22px 28px 40px",
+        maxWidth: 720,
+        animation: "naaryFadeUp .25s ease",
+      }}
+    >
       <div
         style={{
           display: "flex",
@@ -121,6 +127,15 @@ export function Automations() {
               border: "1px solid var(--line)",
               borderRadius: "var(--radius-lg)",
               boxShadow: "var(--shadow-card)",
+              transition: "background .12s ease, border-color .12s ease",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "var(--card-2)";
+              e.currentTarget.style.borderColor = "var(--line-2)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "var(--card)";
+              e.currentTarget.style.borderColor = "var(--line)";
             }}
           >
             <span

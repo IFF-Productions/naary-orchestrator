@@ -285,7 +285,9 @@ export function Workflows() {
   ];
 
   return (
-    <div style={{ padding: "22px 28px 40px" }}>
+    <div
+      style={{ padding: "22px 28px 40px", animation: "naaryFadeUp .25s ease" }}
+    >
       <div
         style={{
           display: "flex",
@@ -371,6 +373,7 @@ export function Workflows() {
           {tagMenuOpen && (
             <div
               role="menu"
+              className="menu-pop"
               onClick={(e) => e.stopPropagation()}
               style={{
                 position: "absolute",
@@ -404,6 +407,7 @@ export function Workflows() {
                   <div
                     key={t.id}
                     role="menuitemcheckbox"
+                    className="run-row"
                     aria-checked={on}
                     onClick={() =>
                       setTagFilter((prev) =>

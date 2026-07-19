@@ -199,7 +199,7 @@ export function ChatPage() {
                     display: "flex",
                     alignItems: "flex-start",
                     gap: 9,
-                    animation: "naaryPubMsgIn .25s ease",
+                    animation: "naaryFadeUp .25s ease",
                   }}
                 >
                   <Logo size={26} glow={false} />
@@ -227,7 +227,7 @@ export function ChatPage() {
                   style={{
                     display: "flex",
                     justifyContent: "flex-end",
-                    animation: "naaryPubMsgIn .25s ease",
+                    animation: "naaryFadeUp .25s ease",
                   }}
                 >
                   <div
@@ -258,7 +258,7 @@ export function ChatPage() {
                   display: "flex",
                   alignItems: "flex-start",
                   gap: 9,
-                  animation: "naaryPubMsgIn .2s ease",
+                  animation: "naaryFadeUp .2s ease",
                 }}
               >
                 <Logo size={26} glow={false} />

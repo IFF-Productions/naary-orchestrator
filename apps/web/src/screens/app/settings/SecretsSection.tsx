@@ -333,6 +333,7 @@ export function SecretsSection({ envs }: { envs: Environment[] }) {
                         onClick={() => setMenuFor(null)}
                       />
                       <div
+                        className="menu-pop"
                         style={{
                           position: "absolute",
                           right: 0,
@@ -380,6 +381,7 @@ export function SecretsSection({ envs }: { envs: Environment[] }) {
                     gap: 8,
                     alignItems: "center",
                     padding: "0 18px 13px 47px",
+                    animation: "naaryFadeUp .2s ease",
                   }}
                 >
                   <TextInput

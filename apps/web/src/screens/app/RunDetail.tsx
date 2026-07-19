@@ -43,7 +43,12 @@ export function RunDetail() {
   const { id = "" } = useParams();
   const phone = useMediaQuery(PHONE_QUERY);
   return (
-    <div style={{ padding: phone ? "14px 14px 32px" : "20px 28px 40px" }}>
+    <div
+      style={{
+        padding: phone ? "14px 14px 32px" : "20px 28px 40px",
+        animation: "naaryFadeUp .25s ease",
+      }}
+    >
       <BackLink />
       <RunView id={id} />
     </div>
@@ -404,7 +409,10 @@ function RunView({ id }: { id: string }) {
           onSelect={setPickedStep}
         />
       )}
-      {detail && <StepDetailCard step={detail} events={events} />}
+      {detail && (
+        // Keyed by step so picking a different step fades the swapped detail in.
+        <StepDetailCard key={detail.id} step={detail} events={events} />
+      )}
       <RegionTraceSection ctx={state.ctx} />
     </div>
   );
@@ -538,7 +546,7 @@ function RunView({ id }: { id: string }) {
               <Button
                 variant="secondary"
                 icon="x"
-                disabled={acting}
+                loading={acting}
                 onClick={() => void cancelRun()}
               >
                 Cancel run

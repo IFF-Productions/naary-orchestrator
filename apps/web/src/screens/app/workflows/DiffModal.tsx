@@ -299,6 +299,7 @@ export function DiffModal({
           borderRadius: 18,
           boxShadow: "0 40px 100px -40px rgba(0,0,0,.8)",
           overflow: "hidden",
+          animation: "naaryPopIn .22s ease",
         }}
       >
         {/* header */}

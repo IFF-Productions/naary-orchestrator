@@ -420,6 +420,7 @@ export function NotificationsSection({
                     padding: "4px 18px 16px 58px",
                     display: "grid",
                     gap: 12,
+                    animation: "naaryFadeUp .2s ease",
                   }}
                 >
                   {meta.hint && (

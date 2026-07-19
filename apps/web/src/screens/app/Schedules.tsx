@@ -244,7 +244,12 @@ export function Schedules() {
 
   return (
     <div
-      style={{ padding: "24px 28px 40px", maxWidth: 1200, margin: "0 auto" }}
+      style={{
+        padding: "24px 28px 40px",
+        maxWidth: 1200,
+        margin: "0 auto",
+        animation: "naaryFadeUp .25s ease",
+      }}
     >
       {/* header */}
       <div
@@ -756,13 +761,9 @@ export function Schedules() {
             zIndex: 60,
           }}
         >
+          {/* the shared Toast (.toast) animates its own entrance */}
           {toasts.map((t) => (
-            <div
-              key={t.id}
-              style={{
-                animation: "naaryFadeUp 280ms cubic-bezier(.2,.9,.3,1.2)",
-              }}
-            >
+            <div key={t.id}>
               <Toast
                 kind={t.kind}
                 onDismiss={() =>

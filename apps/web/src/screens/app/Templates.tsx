@@ -163,10 +163,8 @@ export function Templates() {
   return (
     <div ref={rootRef}>
       <style>{`
-        @keyframes tplFadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
         @keyframes tplPop{0%{transform:scale(.4);opacity:0}60%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
         @keyframes tplStepIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-        @keyframes tplToastIn{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
         .tpl-card{transition:border-color .14s,transform .14s,box-shadow .14s}
         .tpl-card:hover{border-color:var(--line-2) !important;transform:translateY(-3px);box-shadow:0 16px 36px -22px rgba(0,0,0,.55)}
         .tpl-card:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
@@ -187,7 +185,7 @@ export function Templates() {
           onBack={() => setInstalled(null)}
         />
       ) : (
-        <>
+        <div style={{ animation: "naaryFadeUp .25s ease" }}>
           <TeachingHero
             onGenerate={() => navigate(generateTo)}
             onStartBlank={() => navigate(blankTo)}
@@ -266,6 +264,8 @@ export function Templates() {
                         color: active ? "var(--ink)" : "var(--ink-faint)",
                         background: active ? "var(--card)" : "transparent",
                         border: `1px solid ${active ? "var(--line-2)" : "var(--line-mid)"}`,
+                        transition:
+                          "color .14s ease, background .14s ease, border-color .14s ease",
                       }}
                     >
                       {c.name} <span style={{ opacity: 0.6 }}>{c.count}</span>
@@ -338,7 +338,7 @@ export function Templates() {
               </div>
             )}
           </div>
-        </>
+        </div>
       )}
 
       {preview && (
@@ -363,13 +363,9 @@ export function Templates() {
           zIndex: 70,
         }}
       >
+        {/* the shared Toast (.toast) animates its own entrance */}
         {toasts.map((t) => (
-          <div
-            key={t.id}
-            style={{
-              animation: "tplToastIn .28s cubic-bezier(.2,.9,.3,1.2)",
-            }}
-          >
+          <div key={t.id}>
             <Toast
               kind={t.kind}
               onDismiss={() =>

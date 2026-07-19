@@ -139,6 +139,7 @@ export function RerunMenu({
       {open && (
         <div
           role="menu"
+          className="menu-pop"
           onClick={(e) => e.stopPropagation()}
           style={{
             position: "absolute",

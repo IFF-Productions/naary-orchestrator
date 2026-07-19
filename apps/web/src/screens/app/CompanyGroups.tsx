@@ -135,10 +135,11 @@ export function CompanyGroupsCard({ companyId }: { companyId: string }) {
         />
         <Button
           variant="primary"
-          disabled={busy || !newName.trim()}
+          loading={busy}
+          disabled={!newName.trim()}
           onClick={() => void create()}
         >
-          {busy ? "Creating…" : "New group"}
+          New group
         </Button>
       </div>
       {groups === null ? (
@@ -268,7 +269,13 @@ function GroupRow({
       </div>
 
       {open && (
-        <div style={{ marginTop: 10, paddingLeft: 2 }}>
+        <div
+          style={{
+            marginTop: 10,
+            paddingLeft: 2,
+            animation: "naaryFadeUp .2s ease",
+          }}
+        >
           {/* rename */}
           <div
             style={{

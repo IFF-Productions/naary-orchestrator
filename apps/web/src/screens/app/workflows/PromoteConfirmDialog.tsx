@@ -46,6 +46,7 @@ export function PromoteConfirmDialog({
           borderRadius: 16,
           boxShadow: "0 40px 100px -40px rgba(0,0,0,.8)",
           overflow: "hidden",
+          animation: "naaryPopIn .22s ease",
         }}
       >
         <div style={{ padding: "22px 24px" }}>

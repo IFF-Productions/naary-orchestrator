@@ -34,7 +34,9 @@ export function InstallSuccess({
       }}
     >
       <div style={{ width: 720, maxWidth: "100%" }}>
-        <div style={{ textAlign: "center", animation: "tplFadeUp 0.3s ease" }}>
+        <div
+          style={{ textAlign: "center", animation: "naaryFadeUp 0.3s ease" }}
+        >
           <div
             style={{
               width: 56,

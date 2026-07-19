@@ -47,12 +47,13 @@ export function PreviewModal({
         alignItems: "center",
         justifyContent: "center",
         padding: 24,
-        animation: "tplFadeUp 0.18s ease",
+        animation: "naaryOverlayIn 0.18s ease",
       }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
+          animation: "naaryPopIn 0.22s ease",
           width: 560,
           maxWidth: "100%",
           maxHeight: "100%",

@@ -263,6 +263,7 @@ export function GrantEditorDialog({
                   <div
                     key={w.workflowKey}
                     role="menuitemcheckbox"
+                    className="run-row"
                     aria-checked={on}
                     onClick={() =>
                       setDraft({
@@ -338,6 +339,7 @@ export function GrantEditorDialog({
                       <div
                         key={t.id}
                         role="menuitemcheckbox"
+                        className="run-row"
                         aria-checked={on}
                         onClick={() =>
                           setDraft({

@@ -94,7 +94,13 @@ export function NewAutomation() {
   }
 
   return (
-    <div style={{ padding: "22px 28px 40px", maxWidth: 720 }}>
+    <div
+      style={{
+        padding: "22px 28px 40px",
+        maxWidth: 720,
+        animation: "naaryFadeUp .25s ease",
+      }}
+    >
       <button
         type="button"
         onClick={() => navigate("/app/automations")}
@@ -202,6 +208,15 @@ export function NewAutomation() {
                   background: "var(--card)",
                   color: "var(--ink-2)",
                   fontSize: "var(--text-sm)",
+                  transition: "background .12s ease, border-color .12s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "var(--card-2)";
+                  e.currentTarget.style.borderColor = "var(--line-2)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "var(--card)";
+                  e.currentTarget.style.borderColor = "var(--line)";
                 }}
               >
                 {ex}

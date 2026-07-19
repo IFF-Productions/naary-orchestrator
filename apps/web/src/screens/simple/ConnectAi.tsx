@@ -47,7 +47,13 @@ export function ConnectAi() {
   }
 
   return (
-    <div style={{ padding: "22px 28px 40px", maxWidth: 560 }}>
+    <div
+      style={{
+        padding: "22px 28px 40px",
+        maxWidth: 560,
+        animation: "naaryFadeUp .25s ease",
+      }}
+    >
       <div
         style={{
           fontSize: "var(--text-title)",

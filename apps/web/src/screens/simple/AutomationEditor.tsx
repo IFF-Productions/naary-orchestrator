@@ -99,7 +99,13 @@ export function AutomationEditor({
   const steps = orderedNodes(graph);
 
   return (
-    <div style={{ padding: "22px 28px 40px", maxWidth: 720 }}>
+    <div
+      style={{
+        padding: "22px 28px 40px",
+        maxWidth: 720,
+        animation: "naaryFadeUp .25s ease",
+      }}
+    >
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}

@@ -70,6 +70,7 @@ export function StepDetailCard({
         background: "var(--panel)",
         borderRadius: 14,
         overflow: "hidden",
+        animation: "naaryFadeUp .2s ease",
       }}
     >
       {/* Header */}

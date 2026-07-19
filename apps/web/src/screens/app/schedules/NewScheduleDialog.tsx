@@ -164,7 +164,8 @@ export function NewScheduleDialog({
                     background: active ? "var(--brand-soft)" : "var(--card)",
                     padding: "4px 10px",
                     borderRadius: 20,
-                    transition: "border-color 140ms ease, color 140ms ease",
+                    transition:
+                      "border-color 140ms ease, color 140ms ease, background 140ms ease",
                   }}
                 >
                   {p.label}

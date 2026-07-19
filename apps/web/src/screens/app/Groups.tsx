@@ -363,7 +363,13 @@ export function Groups() {
   }
 
   return (
-    <div style={{ padding: "22px 28px 40px", maxWidth: 1080 }}>
+    <div
+      style={{
+        padding: "22px 28px 40px",
+        maxWidth: 1080,
+        animation: "naaryFadeUp .25s ease",
+      }}
+    >
       <div style={{ marginBottom: 16 }}>
         <div
           style={{
@@ -426,10 +432,11 @@ export function Groups() {
             <Button
               variant="primary"
               icon="plus"
-              disabled={busy || !newName.trim()}
+              loading={busy}
+              disabled={!newName.trim()}
               onClick={() => void createGroup()}
             >
-              {busy ? "Creating…" : "Create group"}
+              Create group
             </Button>
           </div>
         </Card>
@@ -460,12 +467,17 @@ export function Groups() {
             {/* header row */}
             <div
               onClick={() => setExpanded(open ? null : g.id)}
+              className="run-row"
               style={{
                 display: "flex",
                 alignItems: "center",
                 gap: 12,
                 padding: "13px 16px",
                 cursor: "pointer",
+                // Keep the hover tint inside the Card's rounded corners.
+                borderRadius: open
+                  ? "var(--radius-lg) var(--radius-lg) 0 0"
+                  : "var(--radius-lg)",
               }}
             >
               <Icon
@@ -559,7 +571,13 @@ export function Groups() {
             </div>
 
             {open && (
-              <div style={{ borderTop: "1px solid var(--line)", padding: 16 }}>
+              <div
+                style={{
+                  borderTop: "1px solid var(--line)",
+                  padding: 16,
+                  animation: "naaryFadeUp .2s ease",
+                }}
+              >
                 {/* -------- members -------- */}
                 <div style={sectionLabelStyle}>Members</div>
                 {g.members.length === 0 && (

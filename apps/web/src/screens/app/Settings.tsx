@@ -41,8 +41,7 @@ function isSectionId(v: string | null): v is SectionId {
 
 /** Screen-local styles inline styles can't express (hover rows, fade-in, matrix cells). */
 const LOCAL_CSS = `
-.naary-set-fade{animation:naarySetFade .25s ease;}
-@keyframes naarySetFade{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+.naary-set-fade{animation:naaryFadeUp .25s ease;}
 .naary-set-row{transition:background .12s;}
 .naary-set-row:hover{background:var(--hover);}
 .naary-set-menu-item{display:block;width:100%;text-align:left;border:none;background:transparent;color:var(--ink);font-family:var(--font-sans);font-size:12.5px;padding:8px 10px;border-radius:7px;cursor:pointer;}
@@ -140,6 +139,7 @@ export function Settings() {
               color: active ? "var(--ink)" : "var(--ink-2)",
               background: active ? "var(--card-2)" : "transparent",
               boxShadow: active ? "inset 2px 0 0 var(--brand)" : "none",
+              transition: "background .12s ease, color .12s ease",
               width: phone ? "auto" : "100%",
               flex: phone ? "none" : undefined,
             }}

@@ -296,7 +296,12 @@ export function WorkflowDetail() {
 
   return (
     <div
-      style={{ padding: "22px 28px 40px", maxWidth: 1120, margin: "0 auto" }}
+      style={{
+        padding: "22px 28px 40px",
+        maxWidth: 1120,
+        margin: "0 auto",
+        animation: "naaryFadeUp .25s ease",
+      }}
     >
       <button
         type="button"
@@ -393,10 +398,10 @@ export function WorkflowDetail() {
             <Button
               variant="secondary"
               icon="trash"
-              disabled={deleting}
+              loading={deleting}
               onClick={() => void remove()}
             >
-              {deleting ? "Deleting…" : "Delete"}
+              Delete
             </Button>
           )}
         </div>
