@@ -1,6 +1,7 @@
 /* ============================================================
-   Naary — design tokens (ported verbatim from the Naary Design
-   System: colors, typography, spacing, effects, motion).
+   Naary — design tokens (redesign handoff: design project
+   design_handoff_naary_redesign — surfaces, ink, brand ember,
+   run states, env + nav-mode accents, typography, effects).
    Dark-first; light theme via [data-theme="light"].
    ============================================================ */
 
@@ -9,18 +10,27 @@
 :root {
   /* --- Base neutrals (dark) --- */
   --bg: #0a0c11;
-  --bg-2: #0e1117;
-  --surface: #12151c;
-  --card: #151922;
-  --card-2: #1a1f29;
-  --line: #222834;
+  --bg-2: #0c0f15;
+  --panel: #0c0f15;
+  --surface: #10141b;
+  --card: #12161e;
+  --card-2: #10141b;
+  --line: #171d29;
+  --line-mid: #1c2230;
   --line-2: #2c3542;
+  --hover: #141a24;
+  --grid: #1c2431;
+  --scroll: #222a38;
+  /* Ambient warm wash anchor (content region radial gradient). */
+  --grad-a: #160f0b;
   /* Avatar / initials chip — theme-aware (was a hardcoded dark gradient). */
   --avatar-bg: linear-gradient(140deg, #3a4252, #252b36);
 
   /* --- Content --- */
   --ink: #e8ebf1;
+  --ink-soft: #cdd4e1;
   --ink-2: #98a2b3;
+  --ink-faint: #7c8798;
   --ink-3: #5c6573;
 
   /* --- Brand: ember fire --- */
@@ -32,30 +42,44 @@
   --brand-gradient: linear-gradient(90deg, #ffb347, #f2622e 50%, #c8331f);
   --brand-radial: radial-gradient(120% 120% at 50% 120%, #ffb347, #f2622e 55%, #c8331f);
 
-  /* --- Run / status states (running ADOPTS the brand ember) --- */
-  --state-idle: #7b8493;
+  /* --- Run / status states (running ADOPTS the brand ember; paused is calm amber,
+         never confusable with failed) --- */
+  --state-idle: #5c6573;
   --state-running: var(--brand);
-  --state-paused: #e2a844;
-  --state-done: #46b06a;
-  --state-error: #e5484d;
-  --state-info: #5793ef;
+  --state-paused: #f5b544;
+  --state-done: #35c47a;
+  --state-error: #e07a6a;
+  --state-info: #4a9dff;
 
-  --idle-soft: rgba(123, 132, 147, 0.14);
+  --idle-soft: rgba(92, 101, 115, 0.14);
   --running-soft: var(--brand-soft);
-  --paused-soft: rgba(226, 168, 68, 0.14);
-  --done-soft: rgba(70, 176, 106, 0.14);
-  --error-soft: rgba(229, 72, 77, 0.14);
-  --info-soft: rgba(87, 147, 239, 0.14);
+  --paused-soft: rgba(245, 181, 68, 0.14);
+  --done-soft: rgba(53, 196, 122, 0.14);
+  --error-soft: rgba(224, 122, 106, 0.14);
+  --info-soft: rgba(74, 157, 255, 0.14);
 
-  /* --- Node type accents --- */
-  --node-trigger: #48b9c4;
-  --node-agent: #8d7cf2;
-  --node-mcp: #5793ef;
-  --node-router: #e2a844;
-  --node-approval: #e8825a;
-  --node-http: #52b56b;
-  --node-graphql: #e535ab;
-  --node-end: #7b8493;
+  /* --- Environment accents (color-coded everywhere they appear; prod runs hot
+         ember as a standing warning) --- */
+  --env-sandbox: #4a9dff;
+  --env-uat: #f5b544;
+  --env-prod: #f2622e;
+
+  /* --- Five-mode nav accents --- */
+  --mode-build: #f2622e;
+  --mode-operate: #2fb8c9;
+  --mode-observe: #c07bff;
+  --mode-connect: #4a9dff;
+  --mode-admin: #7c8798;
+
+  /* --- Node type accents (category accents: trigger / ai / data / control / human / action) --- */
+  --node-trigger: #f2622e;
+  --node-agent: #c07bff;
+  --node-mcp: #4a9dff;
+  --node-router: #f5b544;
+  --node-approval: #2fb8c9;
+  --node-http: #ff8a4c;
+  --node-graphql: #4a9dff;
+  --node-end: #5c6573;
 
   /* --- Semantic action colors --- */
   --positive: #2bbd66;
@@ -125,26 +149,59 @@
 }
 
 :root[data-theme="light"] {
-  --bg: #f4f6f9;
+  --bg: #eaeef3;
   --bg-2: #ffffff;
-  --surface: #ffffff;
+  --panel: #ffffff;
+  --surface: #eef1f5;
   --card: #ffffff;
-  --card-2: #f5f7fa;
-  --line: #e6e9ef;
-  --line-2: #d6dbe3;
+  --card-2: #eef1f5;
+  --line: #e0e4ea;
+  --line-mid: #dbe0e7;
+  --line-2: #c3cad5;
+  --hover: #f4f6f9;
+  --grid: #cdd4de;
+  --scroll: #cfd5df;
+  --grad-a: #f7efe7;
 
-  --ink: #15191f;
-  --ink-2: #5a6472;
-  --ink-3: #9099a8;
+  --ink: #1a2130;
+  --ink-soft: #2b3444;
+  --ink-2: #5c6675;
+  --ink-faint: #6c7684;
+  --ink-3: #98a1ae;
 
   --avatar-bg: linear-gradient(140deg, #dfe4ec, #eef1f6);
 
+  --brand-2: #c24a17;
   --brand-soft: rgba(242, 98, 46, 0.1);
-  --idle-soft: rgba(123, 132, 147, 0.12);
-  --paused-soft: rgba(226, 168, 68, 0.14);
-  --done-soft: rgba(70, 176, 106, 0.12);
-  --error-soft: rgba(229, 72, 77, 0.1);
-  --info-soft: rgba(87, 147, 239, 0.1);
+
+  --state-idle: #98a1ae;
+  --state-paused: #a9791a;
+  --state-done: #1e9a5c;
+  --state-error: #c0483a;
+  --state-info: #2f76d0;
+
+  --idle-soft: rgba(152, 161, 174, 0.16);
+  --paused-soft: rgba(169, 121, 26, 0.14);
+  --done-soft: rgba(30, 154, 92, 0.12);
+  --error-soft: rgba(192, 72, 58, 0.1);
+  --info-soft: rgba(47, 118, 208, 0.1);
+
+  --env-sandbox: #2f76d0;
+  --env-uat: #b07d12;
+  --env-prod: #d24d1f;
+
+  --mode-build: #d24d1f;
+  --mode-operate: #157f8c;
+  --mode-observe: #8a44d0;
+  --mode-connect: #2f76d0;
+  --mode-admin: #6c7684;
+
+  --node-agent: #8a44d0;
+  --node-mcp: #2f76d0;
+  --node-router: #b07d12;
+  --node-approval: #157f8c;
+  --node-graphql: #2f76d0;
+  --node-end: #98a1ae;
 
   --shadow-card: 0 6px 22px -16px rgba(20, 30, 50, 0.4);
   --shadow-raised: 0 10px 26px -14px rgba(20, 30, 50, 0.45);
@@ -160,9 +217,9 @@
   to { stroke-dashoffset: -20; }
 }
 @keyframes naaryPulseRing {
-  0% { box-shadow: 0 0 0 0 rgba(226, 168, 68, 0.4); }
-  70% { box-shadow: 0 0 0 9px rgba(226, 168, 68, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(226, 168, 68, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(245, 181, 68, 0.4); }
+  70% { box-shadow: 0 0 0 9px rgba(245, 181, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(245, 181, 68, 0); }
 }
 @keyframes naaryShimmer {
   0% { background-position: 100% 0; }
@@ -170,4 +227,9 @@
 }
 @keyframes naarySpin {
   to { transform: rotate(360deg); }
+}
+/* Content fade-in on navigation (shell swaps screens in place). */
+@keyframes naaryFadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
