@@ -12,10 +12,24 @@ import { GraphGeneratorService } from "../src/graphs/graph-generator.service";
 // (no key, no LLM); like agent.activity.spec, the live model call is deferred. `ai` is ESM-only,
 // so `orig()` is left untyped and APICallError is loaded via dynamic import where used.
 const generateText = vi.fn();
+const streamText = vi.fn();
 vi.mock("ai", async (orig) => ({
   ...((await orig()) as Record<string, unknown>),
   generateText: (...args: unknown[]) => generateText(...args),
+  streamText: (...args: unknown[]) => streamText(...args),
 }));
+
+/** A streamText stub: a StreamTextResult whose `textStream` yields the given deltas.
+ *  Mirrors the real shape (textStream is an async-iterable of string deltas; it rethrows
+ *  on error) closely enough for the generator's streaming path. */
+function fakeStream(deltas: string[], err?: unknown) {
+  return {
+    textStream: (async function* () {
+      for (const d of deltas) yield d;
+      if (err) throw err;
+    })(),
+  };
+}
 
 const getDecryptedKey = vi.fn();
 const listProviders = vi.fn();
@@ -47,6 +61,7 @@ const invalidOut = {
 
 beforeEach(() => {
   generateText.mockReset();
+  streamText.mockReset();
   getDecryptedKey.mockReset().mockResolvedValue("sk-ant-test");
   // Default: the tenant has a valid Anthropic key, so auto-select resolves to anthropic
   // (preserving the historical default when the caller names no provider).
@@ -196,6 +211,88 @@ describe("GraphGeneratorService", () => {
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(getDecryptedKey).not.toHaveBeenCalled();
     expect(generateText).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateStream: same validated result as generate(), but for API-model providers it
+// uses streamText and fires onMeta/onNode/onEdge as each element is parsed out of the
+// growing free-form buffer (so the canvas draws live).
+// ---------------------------------------------------------------------------
+describe("GraphGeneratorService.generateStream (API-model path)", () => {
+  const validForStream = {
+    name: "Feed to email",
+    startNodeId: "start",
+    nodes: [
+      { id: "start", type: "start" },
+      { id: "agent", type: "agent", config: { provider: "anthropic" } },
+      { id: "end", type: "end" },
+    ],
+    edges: [
+      { from: "start", to: "agent" },
+      { from: "agent", to: "end" },
+    ],
+  };
+
+  it("streams the name, each node, then each edge — and returns the validated graph", async () => {
+    // Split the JSON into small deltas so elements complete across chunk boundaries.
+    const full = JSON.stringify(validForStream);
+    const deltas: string[] = [];
+    for (let i = 0; i < full.length; i += 11)
+      deltas.push(full.slice(i, i + 11));
+    streamText.mockReturnValue(fakeStream(deltas));
+
+    const names: string[] = [];
+    const nodes: unknown[] = [];
+    const edges: unknown[] = [];
+    const res = await makeService().generateStream(
+      "t-1",
+      "e-1",
+      "email me a digest",
+      undefined,
+      {
+        onMeta: (n) => names.push(n),
+        onNode: (n) => nodes.push(n),
+        onEdge: (e) => edges.push(e),
+      },
+    );
+
+    expect(names).toEqual(["Feed to email"]); // once, no repeat
+    expect(nodes).toEqual(validForStream.nodes); // exactly once each, in order
+    expect(edges).toEqual(validForStream.edges);
+    expect(streamText).toHaveBeenCalledOnce();
+    expect(generateText).not.toHaveBeenCalled();
+    // The returned graph is the authoritative validated one.
+    expect(res.name).toBe("Feed to email");
+    expect(res.graph.nodes).toHaveLength(3);
+  });
+
+  it("maps a mid-stream provider error the same way as the one-shot call", async () => {
+    const { APICallError } = await import("ai");
+    streamText.mockReturnValue(
+      fakeStream(
+        ['{"name":"x","startNodeId":"a","nodes":['],
+        new APICallError({
+          message: "unauthorized",
+          url: "https://api.anthropic.com/v1/messages",
+          requestBodyValues: {},
+          statusCode: 401,
+        }),
+      ),
+    );
+    await expect(
+      makeService().generateStream("t-1", "e-1", "x", undefined, {
+        onNode: () => {},
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("without hooks, generateStream behaves like generate (no streaming)", async () => {
+    generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
+    const res = await makeService().generateStream("t-1", "e-1", "x");
+    expect(res.graph.nodes).toHaveLength(2);
+    expect(streamText).not.toHaveBeenCalled();
+    expect(generateText).toHaveBeenCalledOnce();
   });
 });
 

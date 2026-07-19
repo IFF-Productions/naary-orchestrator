@@ -143,8 +143,11 @@ export class GraphsController {
     summary: "Generate a draft workflow from a description (SSE)",
     description:
       "Same as POST /graphs/generate, delivered as text/event-stream with `: ping` " +
-      "heartbeats. Terminal frames: `event: result` ({name, graph}) or " +
-      "`event: error` ({status, message, code?}).",
+      "heartbeats. For the API-model providers the graph streams live: `event: meta` " +
+      "({name}) once known, then `event: node` (a node) + `event: edge` (an edge) as each " +
+      "completes. Terminal frames: `event: result` ({name, graph} — the authoritative " +
+      "validated graph) or `event: error` ({status, message, code?}). Clients that only " +
+      "handle result/error stay compatible (node/edge/meta are ignored).",
   })
   @ApiProduces("text/event-stream")
   @ApiOkResponse({
@@ -185,13 +188,31 @@ export class GraphsController {
       // Inside try (unlike the JSON route): headers are already sent, so even
       // resolveEnvId failures must become error frames, not thrown responses.
       const envId = await this.environments.resolveEnvId(tenantId, envSel);
-      const result = await this.generator.generate(
+      // Live frames as the model streams (API-model path): `meta` (name), then a `node`
+      // per node and an `edge` per edge as each completes. Old clients that only handle
+      // `result`/`error` ignore these. The claude-code path emits none — just the result.
+      const result = await this.generator.generateStream(
         tenantId,
         envId,
         body.prompt,
         body.provider,
-        { timeoutMs: STREAM_GENERATE_TIMEOUT_MS },
+        {
+          timeoutMs: STREAM_GENERATE_TIMEOUT_MS,
+          onMeta: (name) => {
+            if (canWrite())
+              res.write(`event: meta\ndata: ${JSON.stringify({ name })}\n\n`);
+          },
+          onNode: (node) => {
+            if (canWrite())
+              res.write(`event: node\ndata: ${JSON.stringify(node)}\n\n`);
+          },
+          onEdge: (edge) => {
+            if (canWrite())
+              res.write(`event: edge\ndata: ${JSON.stringify(edge)}\n\n`);
+          },
+        },
       );
+      // Authoritative terminal frame — the client reconciles its live canvas to this.
       if (canWrite())
         res.write(`event: result\ndata: ${JSON.stringify(result)}\n\n`);
     } catch (e) {
