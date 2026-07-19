@@ -134,6 +134,7 @@ export function NotificationsBell() {
       {open && (
         <div
           role="menu"
+          className="menu-pop"
           style={{
             position: "absolute",
             top: "calc(100% + 8px)",

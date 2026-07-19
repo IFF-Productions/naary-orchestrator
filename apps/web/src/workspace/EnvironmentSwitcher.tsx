@@ -341,6 +341,7 @@ export function EnvironmentSwitcher() {
             // A menu (not a listbox) because each row holds multiple controls (switch + rename +
             // delete); listbox options may not contain nested interactive elements.
             role="menu"
+            className="menu-pop"
             style={{
               position: "absolute",
               top: "calc(100% + 6px)",

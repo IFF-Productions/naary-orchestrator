@@ -150,6 +150,7 @@ function AvatarMenu() {
           />
           <div
             role="menu"
+            className="menu-pop"
             style={{
               position: "absolute",
               top: "calc(100% + 8px)",

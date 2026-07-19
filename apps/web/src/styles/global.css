@@ -26,6 +26,8 @@ body {
   line-height: var(--leading-body);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* Theme toggle glides instead of snapping (design: root background .3s). */
+  transition: background 0.3s ease, color 0.3s ease;
 }
 
 button {

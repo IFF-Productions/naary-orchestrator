@@ -233,3 +233,39 @@
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
+/* Toast entrance — slide + scale with the design's springy curve. */
+@keyframes naaryToastIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* Dialog entrance — gentle pop. */
+@keyframes naaryPopIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* Drawer entrance — slide from the right edge. */
+@keyframes naarySlideInRight {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+/* Popover/menu entrance — quick drop-settle. */
+@keyframes naaryMenuIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* Overlay backdrop fade. */
+@keyframes naaryOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Calm by preference: strip decorative motion for reduced-motion users. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
