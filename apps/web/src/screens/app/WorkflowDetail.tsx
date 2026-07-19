@@ -1,3 +1,14 @@
+/**
+ * Workflow detail (redesign "Naary Workflows.dc.html") — trigger + activation
+ * surfaced up top, environments + promote folded in, version history with
+ * live-env badges, recent runs, and the read-only graph preview.
+ *
+ * Data honesty: the trigger comes from the graph's entry node; env tiles /
+ * drift / badges come from per-env graph + version data (content-hash
+ * comparison); "who" is only shown where the backend records it (promotion
+ * lineage); there is no stored description, so the sub-line is derived from
+ * real facts (trigger · node count · version).
+ */
 import "@xyflow/react/dist/style.css";
 import {
   Background,
@@ -8,19 +19,28 @@ import {
   Position,
   ReactFlow,
 } from "@xyflow/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { GraphDef, NodeType } from "@naary/dsl";
-import { Button, Card, Icon } from "../../components";
+import { Button, Card, Icon, Toast } from "../../components";
 import {
   api,
+  type GraphVersion,
   type NamedGraph,
+  type RunSummary,
   UnauthorizedError,
   type WebhookRow,
 } from "../../lib/api";
 import { decompileGraph } from "../../lib/decompile-graph";
 import { ACCENT, nodeDisplayLabel, nodeSubtitle } from "../../lib/graph-model";
-import { WorkflowDiffPanel } from "./WorkflowDiffPanel";
+import { canDo } from "../../lib/permissions-logic";
+import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
+import { usePermissions } from "../../lib/usePermissions";
+import { DiffModal, type DiffPreset } from "./workflows/DiffModal";
+import { EnvironmentsCard } from "./workflows/EnvironmentsCard";
+import { RecentRunsCard, VersionHistoryCard } from "./workflows/HistoryCards";
+import { envRank, triggerInfo, useEnvOverview } from "./workflows/model";
+import { PromoteConfirmDialog } from "./workflows/PromoteConfirmDialog";
 
 interface ViewData extends Record<string, unknown> {
   kind: NodeType;
@@ -91,11 +111,41 @@ function edgeLabel(c?: {
 export function WorkflowDetail() {
   const { key = "" } = useParams();
   const navigate = useNavigate();
+  const phone = useMediaQuery(PHONE_QUERY);
+  const perms = usePermissions();
   const [g, setG] = useState<NamedGraph | null>(null);
   const [webhooks, setWebhooks] = useState<WebhookRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [workflows, setWorkflows] = useState<{ workflowKey: string }[]>([]);
   const [errWk, setErrWk] = useState<string | null>(null);
+  const [runs, setRuns] = useState<RunSummary[]>([]);
+  // ACTIVE-env version history (the diff pickers + the history card).
+  const [versions, setVersions] = useState<GraphVersion[]>([]);
+  const { overview, reload: reloadOverview } = useEnvOverview(key);
+  // Promote/diff target (a non-active env) — defaults to the highest-ranked one.
+  const [targetEnvId, setTargetEnvId] = useState<string | null>(null);
+  const [diffOpen, setDiffOpen] = useState<{
+    preset: DiffPreset | null;
+    note?: string;
+    withPromote: boolean;
+  } | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [promoteBusy, setPromoteBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function showToast(text: string): void {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(text);
+    toastTimer.current = setTimeout(() => setToast(null), 2600);
+  }
+  useEffect(
+    () => () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     let live = true;
@@ -111,6 +161,14 @@ export function WorkflowDetail() {
               : `Couldn't load workflow '${key}'.`,
           ),
       );
+    api
+      .listGraphVersions(key)
+      .then((vs) => live && setVersions(vs))
+      .catch(() => undefined);
+    api
+      .listRuns()
+      .then((rs) => live && setRuns(rs.filter((r) => r.workflowKey === key)))
+      .catch(() => undefined);
     api
       .getMe()
       .then((me) => api.listWebhooks(me.tenantId))
@@ -129,6 +187,15 @@ export function WorkflowDetail() {
     };
   }, [key]);
 
+  // Default promote target: the highest-ranked env that isn't the active one.
+  useEffect(() => {
+    if (!overview || targetEnvId) return;
+    const candidates = overview.envs
+      .filter((s) => s.env.id !== overview.activeEnv?.id)
+      .sort((a, b) => envRank(b.env) - envRank(a.env));
+    if (candidates[0]) setTargetEnvId(candidates[0].env.id);
+  }, [overview, targetEnvId]);
+
   async function bindErrorHandler(value: string | null): Promise<void> {
     setErrWk(value);
     await api.setErrorHandler(key, value).catch(() => undefined);
@@ -140,6 +207,83 @@ export function WorkflowDetail() {
   const hookUrls = webhooks
     .filter((w) => w.workflowId === key)
     .map((w) => `/hooks/${w.id}`);
+  const trigger = g ? triggerInfo(g.graph) : null;
+
+  const mayPromote = canDo(perms, "share", key);
+  const mayDelete = canDo(perms, "delete", key);
+
+  const activeEnv = overview?.activeEnv ?? null;
+  const activeSlot =
+    overview?.envs.find((s) => s.env.id === activeEnv?.id) ?? null;
+  const targetSlot =
+    overview?.envs.find((s) => s.env.id === targetEnvId) ?? null;
+
+  /** Cross-env diff: resolve the target's latest CONTENT to a version in the
+   *  active env's history; if found, diff that version → the active latest
+   *  (exactly what a promote would apply to the target). */
+  function openCrossEnvDiff(): void {
+    if (!activeEnv || !targetSlot || versions.length === 0) {
+      setDiffOpen({ preset: null, withPromote: mayPromote });
+      return;
+    }
+    const targetHash = targetSlot.versions[0]?.contentHash;
+    const idx = targetHash
+      ? versions.findIndex((v) => v.contentHash === targetHash)
+      : -1;
+    if (idx >= 0) {
+      const tv = targetSlot.summary?.version;
+      setDiffOpen({
+        preset: {
+          from: versions[idx].version,
+          to: versions[0].version,
+          title: `${targetSlot.env.name}${tv != null ? ` v${tv}` : ""} → ${activeEnv.name} v${versions[0].version} · what promote applies`,
+        },
+        withPromote: mayPromote,
+      });
+    } else {
+      setDiffOpen({
+        preset: null,
+        note: targetHash
+          ? `${targetSlot.env.name}'s current content isn't in ${activeEnv.name}'s history — comparing ${activeEnv.name} versions instead.`
+          : `This workflow isn't deployed in ${targetSlot.env.name} yet — promote will make its first deploy.`,
+        withPromote: mayPromote,
+      });
+    }
+  }
+
+  async function doPromote(): Promise<void> {
+    if (!targetSlot || promoteBusy) return;
+    setPromoteBusy(true);
+    try {
+      const res = await api.promoteWorkflow(key, targetSlot.env.slug);
+      setConfirmOpen(false);
+      showToast(`Promoted to ${targetSlot.env.name} (v${res.toVersion})`);
+      reloadOverview();
+    } catch {
+      showToast(`Could not promote to ${targetSlot.env.name}.`);
+    } finally {
+      setPromoteBusy(false);
+    }
+  }
+
+  async function remove(): Promise<void> {
+    if (deleting || !g) return;
+    if (
+      !window.confirm(
+        `Delete workflow "${g.name}"? This removes the workflow and its webhooks, forms, chats, and schedules. Run history is kept. This can't be undone.`,
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await api.deleteGraph(key);
+      navigate("/app/workflows");
+    } catch {
+      setError("Could not delete the workflow — try again.");
+      setDeleting(false);
+    }
+  }
 
   async function run(): Promise<void> {
     try {
@@ -151,32 +295,55 @@ export function WorkflowDetail() {
   }
 
   return (
-    <div style={{ padding: "22px 28px 40px" }}>
+    <div
+      style={{ padding: "22px 28px 40px", maxWidth: 1120, margin: "0 auto" }}
+    >
       <button
         type="button"
         onClick={() => navigate("/app/workflows")}
         style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
           background: "none",
           border: "none",
           cursor: "pointer",
           color: "var(--ink-2)",
-          fontSize: "var(--text-body)",
+          fontSize: "var(--text-sm)",
           padding: 0,
-          marginBottom: 12,
-        }}
-      >
-        ← Workflows
-      </button>
-
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
           marginBottom: 16,
         }}
       >
-        <div>
+        <Icon name="arrow-left" size={13} />
+        All workflows
+      </button>
+
+      {/* header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 15,
+          marginBottom: 20,
+          flexWrap: "wrap",
+        }}
+      >
+        <span
+          style={{
+            width: 46,
+            height: 46,
+            flex: "none",
+            borderRadius: 12,
+            border: `1px solid ${trigger?.accent ?? "var(--line-2)"}`,
+            color: trigger?.accent ?? "var(--ink-3)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Icon name={trigger?.icon ?? "workflow"} size={22} />
+        </span>
+        <div style={{ flex: 1, minWidth: 200 }}>
           <div
             style={{
               fontSize: "var(--text-title)",
@@ -188,18 +355,28 @@ export function WorkflowDetail() {
             {g?.name ?? key}
           </div>
           <div
-            className="mono"
             style={{
-              fontSize: "var(--text-xs)",
-              color: "var(--ink-3)",
-              marginTop: 4,
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-2)",
+              marginTop: 3,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              flexWrap: "wrap",
             }}
           >
-            {key}
-            {g ? ` · v${g.version}` : ""}
+            <span className="mono" style={{ color: "var(--ink-3)" }}>
+              {key}
+              {g ? ` · v${g.version}` : ""}
+            </span>
+            {trigger && (
+              <span>
+                · {trigger.label} trigger · {g?.graph.nodes.length} nodes
+              </span>
+            )}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 9 }}>
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
           <Button icon="play" onClick={run}>
             Run now
           </Button>
@@ -210,8 +387,18 @@ export function WorkflowDetail() {
               navigate(`/app/canvas?key=${encodeURIComponent(key)}`)
             }
           >
-            Open in canvas
+            Edit in canvas
           </Button>
+          {mayDelete && (
+            <Button
+              variant="secondary"
+              icon="trash"
+              disabled={deleting}
+              onClick={() => void remove()}
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -227,10 +414,43 @@ export function WorkflowDetail() {
         </div>
       )}
 
+      {/* environments + promote (only when the env picture loaded) */}
+      {overview && overview.envs.length > 0 && (
+        <EnvironmentsCard
+          overview={overview}
+          target={targetSlot?.env ?? null}
+          onTargetChange={setTargetEnvId}
+          mayPromote={mayPromote}
+          onViewDiff={openCrossEnvDiff}
+          onPromote={() => setConfirmOpen(true)}
+        />
+      )}
+
+      {/* versions + recent runs */}
       <div
-        style={{ display: "grid", gridTemplateColumns: "1.7fr 1fr", gap: 16 }}
+        style={{
+          display: "grid",
+          gridTemplateColumns: phone ? "1fr" : "1.3fr 1fr",
+          gap: 16,
+          marginBottom: 16,
+        }}
       >
-        {/* the decision tree */}
+        <VersionHistoryCard
+          versions={versions}
+          overview={overview}
+          onCompare={() => setDiffOpen({ preset: null, withPromote: false })}
+        />
+        <RecentRunsCard runs={runs.slice(0, 8)} />
+      </div>
+
+      {/* the decision tree + how it runs */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: phone ? "1fr" : "1.7fr 1fr",
+          gap: 16,
+        }}
+      >
         <Card pad={false} style={{ height: 460, overflow: "hidden" }}>
           {flow && (
             <ReactFlow
@@ -248,7 +468,6 @@ export function WorkflowDetail() {
           )}
         </Card>
 
-        {/* how it runs */}
         <Card style={{ padding: 18 }}>
           <div
             style={{
@@ -410,8 +629,59 @@ export function WorkflowDetail() {
         </Card>
       </div>
 
-      {/* Compare two saved versions — review structural changes before promoting. */}
-      <WorkflowDiffPanel workflowKey={key} />
+      {/* diff modal (cross-env preset or manual pickers) */}
+      <DiffModal
+        workflowKey={key}
+        open={!!diffOpen}
+        onClose={() => setDiffOpen(null)}
+        versions={versions}
+        preset={diffOpen?.preset ?? null}
+        note={diffOpen?.note}
+        promoteCta={
+          diffOpen?.withPromote && targetSlot
+            ? {
+                label: `Promote to ${targetSlot.env.name}`,
+                onClick: () => {
+                  setDiffOpen(null);
+                  setConfirmOpen(true);
+                },
+              }
+            : null
+        }
+      />
+
+      {/* promote confirm */}
+      <PromoteConfirmDialog
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={() => void doPromote()}
+        busy={promoteBusy}
+        source={
+          activeEnv && activeSlot?.summary
+            ? { env: activeEnv, version: activeSlot.summary.version }
+            : activeEnv && g
+              ? { env: activeEnv, version: g.version }
+              : null
+        }
+        target={targetSlot?.env ?? null}
+        targetVersion={targetSlot?.summary?.version ?? null}
+      />
+
+      {/* toast (bottom-right, auto-dismiss) */}
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            right: 24,
+            bottom: 22,
+            zIndex: 120,
+          }}
+        >
+          <Toast kind="done" onDismiss={() => setToast(null)}>
+            {toast}
+          </Toast>
+        </div>
+      )}
     </div>
   );
 }
