@@ -178,8 +178,9 @@ describe.skipIf(!LIVE)(
             type: "agent",
             config: {
               provider: "anthropic",
-              // Cheapest current model — one tiny structured call.
-              model: "claude-haiku-4-5-20251001",
+              // Cheapest priced model — one tiny structured call. Short-form id is both the
+              // canonical Anthropic API id (like claude-opus-4-8) AND the @naary/usage pricing key.
+              model: "claude-haiku-4-5",
               systemPrompt:
                 "You are a support triage bot. Categorize the following GitHub issue and rate its " +
                 'urgency from 1 (trivial) to 5 (critical). Issue title: "{{ createIssue.body.title }}". ' +
