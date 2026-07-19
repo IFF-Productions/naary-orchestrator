@@ -47,33 +47,132 @@
 }
 
 /* Background dots: CSS wins over react-flow's SVG presentation attribute, so the grid
-   tracks the theme instead of a fixed gray. */
+   tracks the theme instead of a fixed gray (design: circle var(--grid) 1.1px / 26px). */
 .react-flow__background circle {
-  fill: var(--line-2);
+  fill: var(--grid);
 }
 .react-flow__background path {
-  stroke: var(--line-2);
+  stroke: var(--grid);
+}
+
+/* ---- Redesigned node cards (Canvas Authoring Loop) ---- */
+
+/* Running: brand ember glow-pulse. Waiting: the same pulse in calm amber. */
+@keyframes naary-card-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(242, 98, 46, 0.25),
+      0 10px 34px -14px rgba(242, 98, 46, 0.5);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(242, 98, 46, 0.45),
+      0 14px 40px -12px rgba(242, 98, 46, 0.7);
+  }
+}
+@keyframes naary-card-pulse-amber {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(245, 181, 68, 0.3),
+      0 10px 30px -14px rgba(245, 181, 68, 0.5);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(245, 181, 68, 0.5),
+      0 14px 36px -12px rgba(245, 181, 68, 0.7);
+  }
+}
+/* Expanding ping ring behind a waiting node's icon tile. */
+@keyframes naary-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  70%,
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+/* Hover affordance on the floating per-node ▶ run button. */
+.naary-node-run:not(:disabled):hover {
+  border-color: var(--brand);
+  color: var(--brand);
+  transition:
+    border-color 0.14s ease,
+    color 0.14s ease;
+}
+
+/* ---- Output inspector drawer + drag-to-map ---- */
+
+.naary-output-row {
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+.naary-output-row:hover {
+  background: var(--hover);
+}
+.naary-output-row:active {
+  cursor: grabbing;
+}
+
+/* While a field row is being dragged, highlight the eligible drop targets — the
+   expression inputs inside the node config panel (CodeMirror editors + the plain
+   text fallbacks). Selects/checkboxes/numbers are not drop targets. */
+body.naary-dragging .naary-drop-scope .cm-editor,
+body.naary-dragging .naary-drop-scope textarea,
+body.naary-dragging
+  .naary-drop-scope
+  input:not([type]):not([readonly]),
+body.naary-dragging
+  .naary-drop-scope
+  input[type="text"]:not([readonly]) {
+  border-color: var(--brand) !important;
+  box-shadow: 0 0 0 3px var(--brand-soft);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 /* ---- "Build with AI" live streaming ---- */
 
-/* Each node fades + scales in ONCE as it's streamed onto the canvas. React Flow keys
-   nodes by id, so already-mounted nodes never replay this. Calm, no bounce. */
+/* Each node fades + scales in ONCE as it's added (palette drop or AI streaming) —
+   design: scale(.85) + translateY(6px) → 1 with a brief ember glow-pulse. React Flow
+   keys nodes by id, so already-mounted nodes never replay this. */
 @keyframes naaryNodeEnter {
   from {
     opacity: 0;
-    transform: scale(0.9);
+    transform: scale(0.85) translateY(6px);
   }
   to {
     opacity: 1;
-    transform: scale(1);
+    transform: scale(1) translateY(0);
+  }
+}
+@keyframes naaryNodeGlow {
+  0% {
+    box-shadow:
+      0 0 0 1px rgba(242, 98, 46, 0.45),
+      0 12px 34px -12px rgba(242, 98, 46, 0.65);
+  }
+  100% {
+    box-shadow: var(--shadow-node);
   }
 }
 .react-flow__node.naary-node-enter {
   animation: naaryNodeEnter 0.32s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
+/* The glow rides the card itself (the wrapper has no border-radius). */
+.react-flow__node.naary-node-enter .naary-node-card {
+  animation: naaryNodeGlow 0.9s ease-out both;
+}
 @media (prefers-reduced-motion: reduce) {
-  .react-flow__node.naary-node-enter {
+  .react-flow__node.naary-node-enter,
+  .react-flow__node.naary-node-enter .naary-node-card {
     animation: none;
   }
 }

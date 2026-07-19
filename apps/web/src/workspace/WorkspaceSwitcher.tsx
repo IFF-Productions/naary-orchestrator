@@ -103,6 +103,7 @@ export function WorkspaceSwitcher({ labelOp = 1 }: { labelOp?: number }) {
           />
           <div
             role="listbox"
+            className="menu-pop"
             style={{
               position: "absolute",
               top: "calc(100% + 6px)",

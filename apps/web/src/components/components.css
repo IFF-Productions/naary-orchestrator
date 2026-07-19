@@ -22,6 +22,9 @@
     color 0.14s ease;
   text-decoration: none;
 }
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -630,11 +633,18 @@
   box-shadow: var(--shadow-raised);
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transform: translateX(-50%) translateY(2px);
+  transition: opacity 0.14s ease, transform 0.14s ease;
   z-index: 50;
 }
 .tooltip-wrap:hover .tooltip {
   opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ---------- Popover menus (avatar / env / bell / kebabs) ---------- */
+.menu-pop {
+  animation: naaryMenuIn 0.16s ease;
 }
 
 /* ---------- Dialog / Drawer overlay ---------- */
@@ -645,6 +655,7 @@
   backdrop-filter: blur(2px);
   display: flex;
   z-index: 100;
+  animation: naaryOverlayIn 0.18s ease;
 }
 .dialog {
   background: var(--card);
@@ -654,6 +665,7 @@
   width: 440px;
   max-width: calc(100vw - 32px);
   margin: auto;
+  animation: naaryPopIn 0.22s ease;
 }
 .drawer {
   background: var(--bg-2);
@@ -664,6 +676,7 @@
   margin-left: auto;
   height: 100%;
   overflow-y: auto;
+  animation: naarySlideInRight 0.22s ease;
 }
 
 /* ---------- Toast ---------- */
@@ -679,6 +692,7 @@
   font-size: 12.5px;
   color: var(--ink);
   min-width: 280px;
+  animation: naaryToastIn 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.2);
 }
 
 /* ---------- StatCard ---------- */

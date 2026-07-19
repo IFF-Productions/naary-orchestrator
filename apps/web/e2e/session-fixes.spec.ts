@@ -9,7 +9,7 @@ import { expect, test } from "@playwright/test";
  *  2. The canvas surfaces a "missing resource" warning when a node references a
  *     connection/config that isn't set (e.g. an integration node with no connection).
  *  3. The run-detail view shows the "Run input" payload that started the run.
- *  4. A workflow can be deleted from the Workflows list (button + confirm + removal).
+ *  4. A workflow can be deleted from its detail screen (row click → Delete + confirm).
  *
  * Runs against the live stack (docker compose up); auth + seeds come from global-setup.
  */
@@ -145,12 +145,16 @@ test("workflows list: a workflow can be deleted", async ({ page }) => {
   // The Delete button pops a window.confirm — auto-accept it.
   page.on("dialog", (d) => d.accept());
 
+  // Redesign: Delete lives on the DETAIL screen (row click opens it).
   await page.goto("/app/workflows");
   const row = page.locator(".run-row", { hasText: name });
   await expect(row).toBeVisible();
-  await row.getByRole("button", { name: "Delete", exact: true }).click();
+  await row.click();
+  await expect(page).toHaveURL(new RegExp(`/app/workflows/${key}$`));
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
 
-  // The row disappears (optimistic removal), and it's gone after a reload too.
+  // Deleting navigates back to the list, where the row is gone (reload too).
+  await expect(page).toHaveURL(/\/app\/workflows$/);
   await expect(page.locator(".run-row", { hasText: name })).toHaveCount(0);
   await page.reload();
   await expect(page.locator(".run-row", { hasText: name })).toHaveCount(0);

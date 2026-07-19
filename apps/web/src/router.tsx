@@ -115,6 +115,13 @@ export const router = createRouter([
                 ),
               },
               {
+                path: "build-ai",
+                ...lazy(
+                  () => import("./screens/app/BuildWithAi"),
+                  "BuildWithAi",
+                ),
+              },
+              {
                 path: "workflows",
                 ...lazy(() => import("./screens/app/Workflows"), "Workflows"),
               },
@@ -148,6 +155,13 @@ export const router = createRouter([
               {
                 path: "templates",
                 ...lazy(() => import("./screens/app/Templates"), "Templates"),
+              },
+              {
+                path: "catalog",
+                ...lazy(
+                  () => import("./screens/app/NodeCatalog"),
+                  "NodeCatalog",
+                ),
               },
               {
                 path: "integrations",

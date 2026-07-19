@@ -1,116 +1,117 @@
 /**
- * Observability — real-data analytics for the tenant.
- * Driven by the control plane: recent runs (api.listRuns) + the usage ledger
- * (api.getUsage, tenant-scoped via api.getMe). The ledger stores tokens + cost
- * only, so we surface run counts, token/cost totals, the recent run list, and a
- * per-model usage breakdown — no fabricated latency/error charts or per-run
- * statuses (run status lives in Temporal, only on the run-detail view).
+ * Observe — the unified "what happened" surface (redesign IA): the old Runs /
+ * Observability / Activity trio collapsed into one screen with three tabs:
+ *
+ *   Insights    — KPIs + charts from the run list and the usage-insights
+ *                 rollups (GET /tenants/:id/usage/insights, range-scoped).
+ *   Runs & logs — the recent-runs table (GET /executions); row → run detail.
+ *   Audit       — the tenant audit log (GET /tenants/:id/audit), filterable.
+ *
+ * Tab state lives in the URL (?tab=insights|runs|audit) so views deep-link;
+ * /app/activity now redirects here with ?tab=audit. Environment scoping comes
+ * from the shell's env switcher (screens remount on env change) — no local env
+ * selector. The 24h/7d/30d control rescopes the Insights tab.
  */
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Icon, ProgressBar } from "../../components";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   api,
+  type AuditEvent,
+  type InsightsReport,
   type RunSummary,
-  type UsageReport,
   UnauthorizedError,
 } from "../../lib/api";
-import { RunVolumeChart, SpendChart } from "./charts";
+import { windowFromDate } from "./insights.logic";
+import { AuditTab } from "./observe/AuditTab";
+import { InsightsTab } from "./observe/InsightsTab";
+import type { AuditFilterId, RangeId } from "./observe/observe-model";
+import { RANGES, rangeById } from "./observe/observe-model";
+import { RunsTab } from "./observe/RunsTab";
+import { Seg } from "./observe/ui";
 
-const cardStyle: React.CSSProperties = {
-  background: "var(--card)",
-  border: "1px solid var(--line)",
-  borderRadius: "var(--radius-lg)",
-  boxShadow: "var(--shadow-card)",
-};
+type TabId = "insights" | "runs" | "audit";
 
-/** Compact relative time from an ISO timestamp (no date lib). */
-function ago(iso: string): string {
-  const then = new Date(iso).getTime();
-  const s = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (s < 60) return `${s}s ago`;
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.round(h / 24)}d ago`;
-}
+const TABS: { id: TabId; label: string }[] = [
+  { id: "insights", label: "Insights" },
+  { id: "runs", label: "Runs & logs" },
+  { id: "audit", label: "Audit" },
+];
 
-function fmtUsd(n: number): string {
-  return `$${n.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: n > 0 && n < 1 ? 4 : 2,
-  })}`;
-}
-
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return `${n}`;
+function tabFromParam(v: string | null): TabId {
+  return v === "runs" || v === "audit" ? v : "insights";
 }
 
 export function Observability() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = tabFromParam(searchParams.get("tab"));
+  const setTab = (t: TabId) =>
+    setSearchParams(t === "insights" ? {} : { tab: t }, { replace: true });
+
+  // Snapshot the clock once per mount so range windows and relative times are
+  // stable across renders (screens remount on env change anyway).
+  const [now0] = useState(() => Date.now());
+  const [range, setRange] = useState<RangeId>("7d");
+  const [auditFilter, setAuditFilter] = useState<AuditFilterId>("all");
+
+  const [tenantId, setTenantId] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
-  const [usage, setUsage] = useState<UsageReport | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [audit, setAudit] = useState<AuditEvent[] | null>(null);
+  const [insights, setInsights] = useState<InsightsReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Runs + audit load once per mount (both env-scoped server-side via headers).
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
+    let live = true;
+    (async () => {
       try {
-        const { tenantId } = await api.getMe();
-        const [r, u] = await Promise.all([
+        const me = await api.getMe();
+        if (!live) return;
+        setTenantId(me.tenantId);
+        const [r, a] = await Promise.all([
           api.listRuns(),
-          api.getUsage(tenantId),
+          api.getAuditLog(me.tenantId),
         ]);
-        if (cancelled) return;
+        if (!live) return;
         setRuns(r);
-        setUsage(u);
+        setAudit(a);
         setError(null);
       } catch (e) {
-        if (cancelled) return;
+        if (!live) return;
         setError(
           e instanceof UnauthorizedError
             ? "Sign in to view observability."
             : "Could not reach the control plane (apps/api on :3000).",
         );
-      } finally {
-        if (!cancelled) setLoading(false);
       }
-    }
-    void load();
+    })();
     return () => {
-      cancelled = true;
+      live = false;
     };
   }, []);
 
-  const stats = [
-    { label: "Recent runs", value: runs ? `${runs.length}` : "—", mono: false },
-    {
-      label: "Tokens used",
-      value: usage ? fmtTokens(usage.totalTokens) : "—",
-      mono: true,
-    },
-    {
-      label: "Total cost",
-      value: usage ? fmtUsd(usage.totalCostUsd) : "—",
-      mono: true,
-    },
-  ];
-
-  const byModel = usage?.byModel ?? [];
-  const maxModelTokens = byModel.reduce(
-    (m, r) => Math.max(m, r.totalTokens),
-    0,
-  );
+  // Insights rollups re-fetch when the range changes (the API takes a from date).
+  const spendFrom = windowFromDate(now0, rangeById(range).days);
+  useEffect(() => {
+    if (!tenantId) return;
+    let live = true;
+    setInsights(null);
+    api
+      .getInsights(tenantId, { from: spendFrom })
+      .then((data) => live && setInsights(data))
+      .catch(() => live && setInsights(null));
+    return () => {
+      live = false;
+    };
+  }, [tenantId, spendFrom]);
 
   return (
-    <div style={{ padding: "22px 28px 40px", maxWidth: 1300 }}>
+    <div style={{ padding: "22px 28px 48px", maxWidth: 1360 }}>
+      {/* keyframes the design's charts use (drawLine); scoped by name prefix */}
+      <style>{`@keyframes obDrawLine{from{stroke-dashoffset:900;}to{stroke-dashoffset:0;}}`}</style>
+
       {/* heading */}
-      <div style={{ marginBottom: 18 }}>
+      <div style={{ marginBottom: 16 }}>
         <div
           style={{
             fontSize: "var(--text-title)",
@@ -119,7 +120,7 @@ export function Observability() {
             letterSpacing: "var(--tracking-tight)",
           }}
         >
-          Observability
+          Observe
         </div>
         <div
           style={{
@@ -128,8 +129,37 @@ export function Observability() {
             marginTop: 4,
           }}
         >
-          Runs and token/cost usage for your tenant.
+          What happened — insights, runs &amp; logs, and the audit trail.
         </div>
+      </div>
+
+      {/* tabs + range */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 16,
+          flexWrap: "wrap",
+        }}
+      >
+        <Seg
+          options={TABS.map((t) => ({ id: t.id, label: t.label }))}
+          value={tab}
+          onChange={setTab}
+          ariaLabel="Observe tabs"
+        />
+        {tab === "insights" && (
+          <div style={{ marginLeft: "auto" }}>
+            <Seg
+              options={RANGES.map((r) => ({ id: r.id, label: r.label }))}
+              value={range}
+              onChange={setRange}
+              small
+              ariaLabel="Time range"
+            />
+          </div>
+        )}
       </div>
 
       {error && (
@@ -149,264 +179,46 @@ export function Observability() {
         </div>
       )}
 
-      {/* ===== real charts (bucketed from runs + usage) ===== */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 14,
-          marginBottom: 16,
-        }}
-      >
-        <RunVolumeChart days={14} />
-        <SpendChart days={14} />
-      </div>
-
-      {/* ===== stat row ===== */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: 14,
-          marginBottom: 16,
-        }}
-      >
-        {stats.map((s) => (
-          <div key={s.label} style={{ ...cardStyle, padding: 16 }}>
-            <div
-              className="mono"
-              style={{
-                fontSize: "var(--text-2xs)",
-                fontWeight: "var(--weight-semibold)",
-                letterSpacing: "var(--tracking-label)",
-                textTransform: "uppercase",
-                color: "var(--ink-3)",
-              }}
-            >
-              {s.label}
-            </div>
-            <div
-              className={s.mono ? "mono" : undefined}
-              style={{
-                fontSize: "var(--text-xl)",
-                fontWeight: "var(--weight-bold)",
-                color: "var(--ink)",
-                marginTop: 8,
-                letterSpacing: "var(--tracking-tight)",
-              }}
-            >
-              {loading ? "…" : s.value}
-            </div>
+      {tab === "insights" &&
+        (runs === null && !error ? (
+          <div
+            style={{
+              border: "1px solid var(--line-mid)",
+              background: "var(--panel)",
+              borderRadius: 14,
+              padding: 28,
+              display: "grid",
+              placeItems: "center",
+            }}
+          >
+            <span style={{ fontSize: "var(--text-sm)", color: "var(--ink-3)" }}>
+              Loading insights…
+            </span>
           </div>
+        ) : (
+          <InsightsTab
+            runs={runs ?? []}
+            insights={insights}
+            spendFrom={spendFrom}
+            range={range}
+            now={now0}
+          />
         ))}
-      </div>
-
-      {/* ===== recent runs + per-model usage ===== */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 16,
-        }}
-      >
-        {/* recent runs */}
-        <div style={{ ...cardStyle, overflow: "hidden" }}>
-          <div
-            style={{
-              padding: "16px 18px 12px",
-              fontSize: "var(--text-body)",
-              fontWeight: "var(--weight-semibold)",
-              color: "var(--ink)",
-            }}
-          >
-            Recent runs
-          </div>
-          <div
-            className="mono-label"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1.6fr 1fr 0.4fr",
-              gap: 10,
-              padding: "8px 18px",
-              borderTop: "1px solid var(--line)",
-              borderBottom: "1px solid var(--line)",
-            }}
-          >
-            <span>Run</span>
-            <span>Started</span>
-            <span />
-          </div>
-
-          {loading && (
-            <div
-              style={{
-                padding: 18,
-                fontSize: "var(--text-body)",
-                color: "var(--ink-3)",
-              }}
-            >
-              Loading…
-            </div>
-          )}
-          {!loading && !error && runs?.length === 0 && (
-            <div
-              style={{
-                padding: 18,
-                fontSize: "var(--text-body)",
-                color: "var(--ink-3)",
-              }}
-            >
-              No runs yet — start one from the Runs screen.
-            </div>
-          )}
-          {!loading &&
-            (runs ?? []).map((r, i, arr) => (
-              <div
-                key={r.workflowId}
-                className="run-row"
-                onClick={() =>
-                  navigate(`/app/runs/${encodeURIComponent(r.workflowId)}`)
-                }
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1.6fr 1fr 0.4fr",
-                  gap: 10,
-                  padding: "12px 18px",
-                  borderBottom:
-                    i < arr.length - 1 ? "1px solid var(--line)" : undefined,
-                  alignItems: "center",
-                  cursor: "pointer",
-                }}
-              >
-                <span
-                  className="mono"
-                  style={{ fontSize: "var(--text-xs)", color: "var(--brand)" }}
-                >
-                  {r.workflowId}
-                </span>
-                <span
-                  className="mono"
-                  style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
-                >
-                  {ago(r.createdAt)}
-                </span>
-                <span style={{ textAlign: "right" }}>
-                  <Icon
-                    name="chevron-right"
-                    size={14}
-                    style={{ color: "var(--ink-3)" }}
-                  />
-                </span>
-              </div>
-            ))}
-        </div>
-
-        {/* per-model usage */}
-        <div style={{ ...cardStyle, overflow: "hidden" }}>
-          <div
-            style={{
-              padding: "16px 18px 12px",
-              fontSize: "var(--text-body)",
-              fontWeight: "var(--weight-semibold)",
-              color: "var(--ink)",
-            }}
-          >
-            Usage by model
-          </div>
-          <div
-            className="mono-label"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "2fr 1fr 1fr",
-              gap: 10,
-              padding: "8px 18px",
-              borderTop: "1px solid var(--line)",
-              borderBottom: "1px solid var(--line)",
-            }}
-          >
-            <span>Model</span>
-            <span>Tokens</span>
-            <span>Cost</span>
-          </div>
-
-          {loading && (
-            <div
-              style={{
-                padding: 18,
-                fontSize: "var(--text-body)",
-                color: "var(--ink-3)",
-              }}
-            >
-              Loading…
-            </div>
-          )}
-          {!loading && !error && byModel.length === 0 && (
-            <div
-              style={{
-                padding: 18,
-                fontSize: "var(--text-body)",
-                color: "var(--ink-3)",
-              }}
-            >
-              No usage recorded yet.
-            </div>
-          )}
-          {!loading &&
-            byModel.map((m, i) => (
-              <div
-                key={m.model}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "2fr 1fr 1fr",
-                  gap: 10,
-                  padding: "12px 18px",
-                  borderBottom:
-                    i < byModel.length - 1
-                      ? "1px solid var(--line)"
-                      : undefined,
-                  alignItems: "center",
-                }}
-              >
-                <span style={{ minWidth: 0 }}>
-                  <span
-                    style={{
-                      fontSize: "var(--text-body)",
-                      color: "var(--ink)",
-                      fontWeight: "var(--weight-medium)",
-                      display: "block",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {m.model}
-                  </span>
-                  <div style={{ marginTop: 6 }}>
-                    <ProgressBar
-                      value={
-                        maxModelTokens > 0
-                          ? (m.totalTokens / maxModelTokens) * 100
-                          : 0
-                      }
-                    />
-                  </div>
-                </span>
-                <span
-                  className="mono"
-                  style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
-                >
-                  {fmtTokens(m.totalTokens)}
-                </span>
-                <span
-                  className="mono"
-                  style={{ fontSize: "var(--text-xs)", color: "var(--ink)" }}
-                >
-                  {fmtUsd(m.costUsd)}
-                </span>
-              </div>
-            ))}
-        </div>
-      </div>
+      {tab === "runs" && (
+        <RunsTab
+          runs={runs}
+          now={now0}
+          onOpen={(id) => navigate(`/app/runs/${encodeURIComponent(id)}`)}
+        />
+      )}
+      {tab === "audit" && (
+        <AuditTab
+          events={audit}
+          filter={auditFilter}
+          onFilter={setAuditFilter}
+          now={now0}
+        />
+      )}
     </div>
   );
 }

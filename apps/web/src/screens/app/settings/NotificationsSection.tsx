@@ -1,12 +1,29 @@
-// Notification channels (Slack/Teams) section of the Settings screen. A workspace can
-// have ANY NUMBER of channels per type (e.g. two Slack webhooks for #alerts and #oncall) —
-// each is its own card, saved/tested/deleted independently.
-import { Button, Card } from "../../../components";
-import type {
-  NotificationChannel,
-  NotificationChannelType,
+// Notifications section (redesign). REAL model: a workspace has ANY NUMBER of
+// webhook channels per type (Slack / Microsoft Teams) — there are no per-event
+// email/webhook toggles. Channels belong to the ACTIVE environment (env-scoped
+// routing: a sandbox failure never pages prod's channels). Each row = one channel
+// with its type glyph, env chip, event flags and the teal "decide-in-place" chip
+// when it carries approval Approve/Reject buttons; expanding a row edits, tests
+// (send-test) or deletes it.
+import { useEffect, useState } from "react";
+import { Button, Checkbox, Icon, Switch, TextInput } from "../../../components";
+import {
+  api,
+  type Environment,
+  type NotificationChannel,
+  type NotificationChannelType,
+  UnauthorizedError,
 } from "../../../lib/api";
-import { Field, inputStyle } from "./shared";
+import { useActiveEnvironment } from "../../../lib/useActiveEnvironment";
+import {
+  ChannelGlyph,
+  DecideInPlaceChip,
+  EnvChip,
+  ErrorLine,
+  panelStyle,
+  SectionHeader,
+  SectionIntro,
+} from "./shared";
 
 /** Per-type display metadata. Adding email later = one more entry here + the server-side type. */
 export const CHANNEL_META: Record<
@@ -52,303 +69,551 @@ export function draftChannel(type: NotificationChannelType): EditableChannel {
 }
 
 export function NotificationsSection({
-  channels,
-  loaded,
-  notifBusy,
-  notifStatus,
-  notifTestBusy,
-  notifTest,
-  patchChannel,
-  addChannel,
-  saveChannel,
-  deleteChannel,
-  testChannel,
+  tenantId,
+  envs,
 }: {
-  channels: EditableChannel[];
-  loaded: boolean;
-  notifBusy: Record<string, boolean>;
-  notifStatus: Record<string, string>;
-  notifTestBusy: Record<string, boolean>;
-  notifTest: Record<string, { ok: boolean; message?: string }>;
-  patchChannel: (localKey: string, patch: Partial<EditableChannel>) => void;
-  addChannel: (type: NotificationChannelType) => void;
-  saveChannel: (localKey: string) => Promise<void>;
-  deleteChannel: (localKey: string) => Promise<void>;
-  testChannel: (localKey: string) => Promise<void>;
+  tenantId: string | null;
+  envs: Environment[];
 }) {
+  const activeEnvSel = useActiveEnvironment();
+  const activeEnv =
+    envs.find((e) => e.slug === activeEnvSel || e.id === activeEnvSel) ??
+    envs.find((e) => e.isDefault) ??
+    envs[0];
+
+  const [channels, setChannels] = useState<EditableChannel[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // Per-channel transient UI state (keyed by localKey).
+  const [rowBusy, setRowBusy] = useState<Record<string, boolean>>({});
+  const [rowStatus, setRowStatus] = useState<Record<string, string>>({});
+  const [testBusy, setTestBusy] = useState<Record<string, boolean>>({});
+  const [testResult, setTestResult] = useState<
+    Record<string, { ok: boolean; message?: string }>
+  >({});
+
+  useEffect(() => {
+    if (!tenantId) return;
+    let live = true;
+    (async () => {
+      try {
+        const list = await api.listNotificationChannels(tenantId);
+        if (!live) return;
+        setChannels(
+          list.map((c) => ({
+            ...c,
+            localKey: c.id,
+            label: c.label ?? "",
+            webhookUrl: c.webhookUrl ?? "",
+          })),
+        );
+        setLoaded(true);
+        setError(null);
+      } catch (e) {
+        if (live)
+          setError(
+            e instanceof UnauthorizedError
+              ? "Sign in to view notification channels."
+              : "Could not load notification channels.",
+          );
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [tenantId]);
+
+  function patchChannel(localKey: string, patch: Partial<EditableChannel>) {
+    setChannels((prev) =>
+      prev.map((c) => (c.localKey === localKey ? { ...c, ...patch } : c)),
+    );
+  }
+
+  function addChannel(type: NotificationChannelType) {
+    const draft = draftChannel(type);
+    setChannels((prev) => [...prev, draft]);
+    setExpanded((x) => ({ ...x, [draft.localKey]: true }));
+  }
+
+  async function saveChannel(localKey: string) {
+    if (!tenantId) return;
+    const ch = channels.find((c) => c.localKey === localKey);
+    if (!ch) return;
+    setRowBusy((b) => ({ ...b, [localKey]: true }));
+    setRowStatus((s) => ({ ...s, [localKey]: "" }));
+    setError(null);
+    try {
+      const patch = {
+        label: ch.label.trim() || null,
+        enabled: ch.enabled,
+        webhookUrl: ch.webhookUrl.trim() || null,
+        onApprovalPending: ch.onApprovalPending,
+        onRunFailed: ch.onRunFailed,
+      };
+      // A draft has no server id yet → create; afterwards it patches in place. The
+      // localKey stays put so transient UI state (busy/status) survives the first save.
+      const saved = ch.id
+        ? await api.saveNotificationChannel(tenantId, ch.id, patch)
+        : await api.createNotificationChannel(tenantId, {
+            type: ch.type,
+            ...patch,
+          });
+      patchChannel(localKey, {
+        ...saved,
+        localKey,
+        label: saved.label ?? "",
+        webhookUrl: saved.webhookUrl ?? "",
+      });
+      setRowStatus((s) => ({ ...s, [localKey]: "Saved." }));
+    } catch (e) {
+      setError(
+        e instanceof UnauthorizedError
+          ? "Sign in to save notifications."
+          : "Could not save the channel.",
+      );
+    } finally {
+      setRowBusy((b) => ({ ...b, [localKey]: false }));
+    }
+  }
+
+  async function deleteChannel(localKey: string) {
+    if (!tenantId) return;
+    const ch = channels.find((c) => c.localKey === localKey);
+    if (!ch) return;
+    setRowBusy((b) => ({ ...b, [localKey]: true }));
+    setError(null);
+    try {
+      // A draft only exists locally — just drop it; a saved row is deleted server-side.
+      if (ch.id) await api.deleteNotificationChannel(tenantId, ch.id);
+      setChannels((prev) => prev.filter((c) => c.localKey !== localKey));
+    } catch (e) {
+      setError(
+        e instanceof UnauthorizedError
+          ? "Sign in to edit notifications."
+          : "Could not delete the channel.",
+      );
+    } finally {
+      setRowBusy((b) => ({ ...b, [localKey]: false }));
+    }
+  }
+
+  async function testChannel(localKey: string) {
+    if (!tenantId) return;
+    const ch = channels.find((c) => c.localKey === localKey);
+    if (!ch?.id) return; // drafts have nothing saved to test
+    setTestBusy((b) => ({ ...b, [localKey]: true }));
+    setTestResult((t) => {
+      const { [localKey]: _drop, ...rest } = t;
+      return rest;
+    });
+    try {
+      // Tests the SAVED webhook for this channel — save an edited URL first.
+      const res = await api.testNotificationChannel(tenantId, ch.id);
+      setTestResult((t) => ({ ...t, [localKey]: res }));
+    } catch {
+      setTestResult((t) => ({
+        ...t,
+        [localKey]: { ok: false, message: "Could not send the test." },
+      }));
+    } finally {
+      setTestBusy((b) => ({ ...b, [localKey]: false }));
+    }
+  }
+
   return (
-    <>
-      <div
-        className="mono"
-        style={{
-          fontSize: "var(--text-2xs)",
-          fontWeight: "var(--weight-semibold)",
-          letterSpacing: "var(--tracking-label)",
-          textTransform: "uppercase",
-          color: "var(--ink-3)",
-          margin: "24px 0 12px",
-        }}
-      >
-        Notifications
-      </div>
-      <div
-        style={{
-          fontSize: "var(--text-body)",
-          lineHeight: "var(--leading-snug)",
-          color: "var(--ink-2)",
-          marginBottom: 12,
-        }}
-      >
-        Get pinged when a run needs a human — an approval can wait for days, so
-        it shouldn't rely on someone watching the inbox. We POST a formatted
-        message (with Approve / Reject / View-run buttons) on each event. Add as
-        many webhooks as you need — e.g. Slack #alerts AND #oncall; alerts go to
-        every enabled one.
-      </div>
-      <div
-        style={{
-          fontSize: "var(--text-sm)",
-          color: "var(--ink-3)",
-          marginBottom: 12,
-        }}
-      >
-        Channels belong to the current environment — each environment routes its
-        own alerts, so a sandbox failure never pages production's channels.
-      </div>
-      {channels.map((ch) => {
-        const meta = CHANNEL_META[ch.type];
-        const key = ch.localKey;
-        const busy = !!notifBusy[key];
-        const testBusy = !!notifTestBusy[key];
-        const chStatus = notifStatus[key];
-        const chTest = notifTest[key];
-        return (
-          <Card
-            key={key}
+    <div>
+      <SectionHeader
+        title="Notifications"
+        action={
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {(Object.keys(CHANNEL_META) as NotificationChannelType[]).map(
+              (type) => (
+                <Button
+                  key={type}
+                  variant={type === "slack" ? "primary" : "secondary"}
+                  icon="plus"
+                  disabled={!loaded}
+                  onClick={() => addChannel(type)}
+                >
+                  {CHANNEL_META[type].title}
+                </Button>
+              ),
+            )}
+          </div>
+        }
+      />
+      <SectionIntro>
+        Webhook channels for the moments a run needs a human — we POST a
+        formatted message when an approval is waiting or a run fails. Approval
+        messages carry{" "}
+        <strong style={{ color: "var(--ink-soft)" }}>decide-in-place</strong>{" "}
+        Approve / Reject buttons, so approvers act without leaving Slack or
+        Teams. Channels belong to{" "}
+        {activeEnv ? (
+          <>
+            the <EnvChip env={activeEnv} /> environment
+          </>
+        ) : (
+          "the active environment"
+        )}{" "}
+        — each environment routes its own alerts, so a sandbox failure never
+        pages production's channels.
+      </SectionIntro>
+
+      {error && <ErrorLine>{error}</ErrorLine>}
+
+      <div style={panelStyle}>
+        {!loaded && !error && (
+          <div
             style={{
-              padding: 18,
-              marginBottom: 12,
-              opacity: ch.enabled ? 1 : 0.72,
+              padding: "13px 18px",
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-3)",
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 14,
-                gap: 12,
-              }}
-            >
+            Loading channels…
+          </div>
+        )}
+        {loaded && channels.length === 0 && (
+          <div
+            style={{
+              padding: "16px 18px",
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-3)",
+            }}
+          >
+            No channels in this environment yet — add a Slack or Teams webhook;
+            alerts go to every enabled one.
+          </div>
+        )}
+        {channels.map((ch) => {
+          const key = ch.localKey;
+          const meta = CHANNEL_META[ch.type];
+          const open = !!expanded[key];
+          const busy = !!rowBusy[key];
+          const tBusy = !!testBusy[key];
+          const status = rowStatus[key];
+          const test = testResult[key];
+          return (
+            <div key={key} style={{ borderBottom: "1px solid var(--line)" }}>
               <div
-                style={{
-                  fontSize: "var(--text-body)",
-                  fontWeight: "var(--weight-semibold)",
-                  color: "var(--ink)",
-                  whiteSpace: "nowrap",
+                className="naary-set-row"
+                role="button"
+                tabIndex={0}
+                onClick={() => setExpanded((x) => ({ ...x, [key]: !open }))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setExpanded((x) => ({ ...x, [key]: !open }));
+                  }
                 }}
-              >
-                {meta.title}
-                {!ch.id && (
-                  <span
-                    style={{
-                      marginLeft: 8,
-                      fontSize: "var(--text-2xs)",
-                      color: "var(--ink-3)",
-                      fontWeight: "var(--weight-regular)",
-                    }}
-                  >
-                    (not saved yet)
-                  </span>
-                )}
-              </div>
-              <label
                 style={{
                   display: "flex",
-                  gap: 8,
                   alignItems: "center",
-                  cursor: loaded ? "pointer" : "default",
-                }}
-                title={`Turn this ${meta.title} webhook on or off`}
-              >
-                <input
-                  type="checkbox"
-                  checked={ch.enabled}
-                  onChange={(e) =>
-                    patchChannel(key, { enabled: e.target.checked })
-                  }
-                  disabled={!loaded}
-                />
-                <span
-                  style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}
-                >
-                  {ch.enabled ? "Enabled" : "Disabled"}
-                </span>
-              </label>
-            </div>
-            {meta.hint && (
-              <div
-                style={{
-                  fontSize: "var(--text-sm)",
-                  color: "var(--ink-3)",
-                  margin: "0 0 12px",
-                  lineHeight: "var(--leading-snug)",
+                  gap: 12,
+                  padding: "13px 18px",
+                  cursor: "pointer",
+                  opacity: ch.enabled ? 1 : 0.6,
                 }}
               >
-                {meta.hint}
-              </div>
-            )}
-            <Field label="Label">
-              <input
-                value={ch.label}
-                onChange={(e) => patchChannel(key, { label: e.target.value })}
-                placeholder={
-                  ch.type === "slack" ? "#alerts (optional)" : "Ops (optional)"
-                }
-                style={inputStyle}
-                disabled={!loaded}
-              />
-            </Field>
-            <Field label="Webhook URL">
-              <input
-                value={ch.webhookUrl}
-                onChange={(e) =>
-                  patchChannel(key, { webhookUrl: e.target.value })
-                }
-                placeholder={meta.placeholder}
-                style={inputStyle}
-                disabled={!loaded}
-              />
-            </Field>
-            <label
-              style={{
-                display: "flex",
-                gap: 8,
-                alignItems: "center",
-                marginBottom: 10,
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={ch.onApprovalPending}
-                onChange={(e) =>
-                  patchChannel(key, { onApprovalPending: e.target.checked })
-                }
-                disabled={!loaded}
-              />
-              <span
-                style={{ fontSize: "var(--text-body)", color: "var(--ink)" }}
-              >
-                When an approval is waiting
-              </span>
-            </label>
-            <label
-              style={{
-                display: "flex",
-                gap: 8,
-                alignItems: "center",
-                marginBottom: 14,
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={ch.onRunFailed}
-                onChange={(e) =>
-                  patchChannel(key, { onRunFailed: e.target.checked })
-                }
-                disabled={!loaded}
-              />
-              <span
-                style={{ fontSize: "var(--text-body)", color: "var(--ink)" }}
-              >
-                When a run fails
-              </span>
-            </label>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                flexWrap: "wrap",
-              }}
-            >
-              <Button
-                variant="primary"
-                loading={busy}
-                disabled={!loaded}
-                onClick={() => void saveChannel(key)}
-              >
-                {busy ? "Saving…" : "Save"}
-              </Button>
-              <Button
-                variant="secondary"
-                icon="bell"
-                disabled={
-                  testBusy || !loaded || !ch.id || !ch.webhookUrl.trim()
-                }
-                onClick={() => void testChannel(key)}
-                title={
-                  !ch.id
-                    ? "Save the channel first"
-                    : ch.webhookUrl.trim()
-                      ? `POST a sample message to this ${meta.title} webhook`
-                      : "Add a webhook URL first"
-                }
-              >
-                {testBusy ? "Sending…" : "Send test"}
-              </Button>
-              <Button
-                variant="secondary"
-                icon="trash"
-                disabled={busy || !loaded}
-                onClick={() => void deleteChannel(key)}
-                title={ch.id ? "Delete this webhook" : "Discard this draft"}
-              >
-                {ch.id ? "Delete" : "Discard"}
-              </Button>
-              {chStatus && (
                 <span
                   style={{
-                    fontSize: "var(--text-sm)",
-                    color: "var(--state-done)",
+                    width: 28,
+                    height: 28,
+                    flex: "none",
+                    borderRadius: 8,
+                    border: "1px solid var(--line-2)",
+                    background: "var(--card)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "var(--ink-2)",
                   }}
                 >
-                  {chStatus}
+                  <ChannelGlyph type={ch.type} size={14} />
                 </span>
-              )}
-              {chTest && (
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 12.5,
+                      fontWeight: "var(--weight-semibold)",
+                      color: "var(--ink)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    {ch.label || `${meta.title} webhook`}
+                    {!ch.id && (
+                      <span
+                        style={{
+                          fontSize: "var(--text-2xs)",
+                          color: "var(--ink-3)",
+                          fontWeight: "var(--weight-regular)",
+                        }}
+                      >
+                        (not saved yet)
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    className="mono"
+                    style={{
+                      fontSize: 11,
+                      color: "var(--ink-faint)",
+                      marginTop: 1,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {meta.title}
+                    {" · "}
+                    {ch.webhookUrl
+                      ? ch.webhookUrl.replace(/^https?:\/\//, "")
+                      : "no webhook URL yet"}
+                  </div>
+                </div>
+                {ch.onApprovalPending && <DecideInPlaceChip />}
+                {ch.onRunFailed && (
+                  <span
+                    className="mono"
+                    title="Notifies when a run errors or times out"
+                    style={{
+                      fontSize: 10,
+                      fontWeight: "var(--weight-semibold)",
+                      color: "var(--ink-3)",
+                      border: "1px solid var(--line-2)",
+                      borderRadius: 20,
+                      padding: "3px 9px",
+                      flex: "none",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    run-failed
+                  </span>
+                )}
+                {activeEnv && <EnvChip env={activeEnv} />}
                 <span
+                  title={ch.enabled ? "Enabled" : "Disabled"}
                   style={{
-                    fontSize: "var(--text-sm)",
-                    color: chTest.ok
+                    width: 7,
+                    height: 7,
+                    flex: "none",
+                    borderRadius: "50%",
+                    background: ch.enabled
                       ? "var(--state-done)"
-                      : "var(--state-error)",
+                      : "var(--state-idle)",
+                  }}
+                />
+                <Icon
+                  name={open ? "chevron-down" : "chevron-right"}
+                  size={14}
+                  style={{ color: "var(--ink-3)", flex: "none" }}
+                />
+              </div>
+
+              {open && (
+                <div
+                  style={{
+                    padding: "4px 18px 16px 58px",
+                    display: "grid",
+                    gap: 12,
+                    animation: "naaryFadeUp .2s ease",
                   }}
                 >
-                  {chTest.ok
-                    ? "✓ Test sent — check your channel."
-                    : chTest.message}
-                </span>
+                  {meta.hint && (
+                    <div
+                      style={{
+                        fontSize: "var(--text-sm)",
+                        color: "var(--ink-3)",
+                        lineHeight: "var(--leading-snug)",
+                        maxWidth: 560,
+                      }}
+                    >
+                      {meta.hint}
+                    </div>
+                  )}
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <TextInput
+                      value={ch.label}
+                      onChange={(e) =>
+                        patchChannel(key, { label: e.target.value })
+                      }
+                      placeholder={
+                        ch.type === "slack"
+                          ? "#alerts (label, optional)"
+                          : "Ops (label, optional)"
+                      }
+                      style={{ flex: "1 1 160px", maxWidth: 220 }}
+                      disabled={!loaded}
+                    />
+                    <TextInput
+                      value={ch.webhookUrl}
+                      onChange={(e) =>
+                        patchChannel(key, { webhookUrl: e.target.value })
+                      }
+                      placeholder={meta.placeholder}
+                      style={{ flex: "2 1 240px" }}
+                      disabled={!loaded}
+                    />
+                  </div>
+                  <label
+                    style={{
+                      display: "flex",
+                      gap: 9,
+                      alignItems: "center",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Checkbox
+                      checked={ch.onApprovalPending}
+                      onChange={(v) =>
+                        patchChannel(key, { onApprovalPending: v })
+                      }
+                    />
+                    <span
+                      style={{
+                        fontSize: "var(--text-body)",
+                        color: "var(--ink)",
+                      }}
+                    >
+                      When an approval is waiting{" "}
+                      <span style={{ color: "var(--ink-3)", fontSize: 11.5 }}>
+                        — the message carries Approve / Reject buttons
+                      </span>
+                    </span>
+                  </label>
+                  <label
+                    style={{
+                      display: "flex",
+                      gap: 9,
+                      alignItems: "center",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Checkbox
+                      checked={ch.onRunFailed}
+                      onChange={(v) => patchChannel(key, { onRunFailed: v })}
+                    />
+                    <span
+                      style={{
+                        fontSize: "var(--text-body)",
+                        color: "var(--ink)",
+                      }}
+                    >
+                      When a run fails
+                    </span>
+                  </label>
+                  <label
+                    style={{
+                      display: "flex",
+                      gap: 9,
+                      alignItems: "center",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Switch
+                      checked={ch.enabled}
+                      onChange={(v) => patchChannel(key, { enabled: v })}
+                    />
+                    <span
+                      style={{
+                        fontSize: "var(--text-body)",
+                        color: "var(--ink)",
+                      }}
+                    >
+                      {ch.enabled
+                        ? "Channel enabled"
+                        : "Channel disabled — the worker skips it entirely"}
+                    </span>
+                  </label>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      loading={busy}
+                      disabled={!loaded}
+                      onClick={() => void saveChannel(key)}
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon="bell"
+                      disabled={
+                        tBusy || !loaded || !ch.id || !ch.webhookUrl.trim()
+                      }
+                      loading={tBusy}
+                      onClick={() => void testChannel(key)}
+                      title={
+                        !ch.id
+                          ? "Save the channel first"
+                          : ch.webhookUrl.trim()
+                            ? `POST a sample message to this ${meta.title} webhook`
+                            : "Add a webhook URL first"
+                      }
+                    >
+                      Send test
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      icon="trash"
+                      disabled={busy || !loaded}
+                      onClick={() => void deleteChannel(key)}
+                      title={
+                        ch.id ? "Delete this webhook" : "Discard this draft"
+                      }
+                    >
+                      {ch.id ? "Delete" : "Discard"}
+                    </Button>
+                    {status && (
+                      <span
+                        style={{
+                          fontSize: "var(--text-sm)",
+                          color: "var(--state-done)",
+                        }}
+                      >
+                        {status}
+                      </span>
+                    )}
+                    {test && (
+                      <span
+                        style={{
+                          fontSize: "var(--text-sm)",
+                          color: test.ok
+                            ? "var(--state-done)"
+                            : "var(--state-error)",
+                        }}
+                      >
+                        {test.ok
+                          ? "✓ Test sent — check your channel."
+                          : test.message}
+                      </span>
+                    )}
+                  </div>
+                </div>
               )}
             </div>
-          </Card>
-        );
-      })}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        {(Object.keys(CHANNEL_META) as NotificationChannelType[]).map(
-          (type) => (
-            <Button
-              key={type}
-              variant="secondary"
-              icon="plus"
-              disabled={!loaded}
-              onClick={() => addChannel(type)}
-            >
-              Add {CHANNEL_META[type].title} webhook
-            </Button>
-          ),
-        )}
+          );
+        })}
       </div>
-    </>
+    </div>
   );
 }

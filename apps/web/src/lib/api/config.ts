@@ -7,6 +7,7 @@ import type {
   BudgetView,
   Environment,
   InsightsReport,
+  SetBudgetInput,
   TenantSettings,
   UsageReport,
   Variable,
@@ -14,8 +15,18 @@ import type {
 
 export const configApi = {
   // Usage ledger (tokens + cost only). Tenant-scoped — pass the tenantId from getMe().
-  getUsage(tenantId: string): Promise<UsageReport> {
-    return http(`/tenants/${encodeURIComponent(tenantId)}/usage`);
+  // Optional from/to (ISO date) window — the server filters events by createdAt.
+  getUsage(
+    tenantId: string,
+    opts: { from?: string; to?: string } = {},
+  ): Promise<UsageReport> {
+    const q = new URLSearchParams();
+    if (opts.from) q.set("from", opts.from);
+    if (opts.to) q.set("to", opts.to);
+    const qs = q.toString();
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/usage${qs ? `?${qs}` : ""}`,
+    );
   },
   // Usage rolled up by day / environment / workflow / model — the Insights dashboard.
   // Optional from/to (ISO date) window + environmentId filter.
@@ -121,5 +132,16 @@ export const configApi = {
   // (→ generic Error, not UnauthorizedError) when no budget is configured.
   getBudget(tenantId: string): Promise<BudgetView> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/budget`);
+  },
+  // Create/replace the tenant's budget config (PUT /tenants/:id/budget — SetBudgetDto).
+  // Returns the persisted config (no live-spend fields); callers refetch getBudget for the view.
+  setBudget(
+    tenantId: string,
+    input: SetBudgetInput,
+  ): Promise<Omit<BudgetView, "mtdSpendUsd" | "remainingUsd">> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/budget`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
   },
 };

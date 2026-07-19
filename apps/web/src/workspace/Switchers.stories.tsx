@@ -69,6 +69,7 @@ export const WorkspaceOpen: Story = {
   },
 };
 
+/** Segmented control (≤4 envs) — active segment carries the env accent + glow dot. */
 export const Environment: Story = {
   render: () => (
     <Frame>
@@ -77,8 +78,38 @@ export const Environment: Story = {
   ),
 };
 
-/** The environment menu open — Production (default) / UAT / Sandbox. */
+/** The management menu (switch / rename / delete / create) behind the "…" trigger. */
 export const EnvironmentOpen: Story = {
+  render: () => (
+    <Frame>
+      <EnvironmentSwitcher />
+    </Frame>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      await canvas.findByRole("button", { name: "Manage environments" }),
+    );
+    await canvas.findByRole("menu");
+  },
+};
+
+/** Many environments (>4) collapse the segments into a compact trigger + the same menu. */
+export const EnvironmentMany: Story = {
+  parameters: {
+    msw: {
+      handlers: [
+        http.get("*/api/me/workspaces", () => HttpResponse.json(WORKSPACES)),
+        http.get("*/api/tenants/:t/environments", () =>
+          HttpResponse.json([
+            ...ENVIRONMENTS,
+            { id: "e-qa", name: "QA", slug: "qa", isDefault: false },
+            { id: "e-demo", name: "Demo", slug: "demo", isDefault: false },
+          ]),
+        ),
+      ],
+    },
+  },
   render: () => (
     <Frame>
       <EnvironmentSwitcher />

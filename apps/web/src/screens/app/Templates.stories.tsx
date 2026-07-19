@@ -1,0 +1,281 @@
+import type { Meta, StoryObj } from "@storybook/react-vite";
+import { delay, http, HttpResponse } from "msw";
+import { expect, userEvent, waitFor, within } from "storybook/test";
+import type { GraphDef } from "@naary/dsl";
+import { ModeProvider } from "../../mode";
+import { Templates } from "./Templates";
+
+/**
+ * Fixture graphs shaped exactly like the API's built-in templates (the DSL seed
+ * graphs) — the screen derives chains, categories, approval badges, and the
+ * teaching copy from these, so they must be structurally real.
+ */
+const webhookTriage: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "agent",
+      type: "agent",
+      config: { provider: "anthropic", model: "claude-opus-4-8" },
+    },
+    { id: "approval", type: "humanApproval" },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "agent" },
+    { from: "agent", to: "approval" },
+    { from: "approval", to: "end" },
+  ],
+};
+
+const githubReview: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "diff",
+      type: "integration",
+      config: {
+        provider: "github",
+        action: "get_pull_request",
+        connectionId: "github",
+      },
+    },
+    {
+      id: "review",
+      type: "agent",
+      config: { provider: "anthropic", model: "claude-opus-4-8" },
+    },
+    {
+      id: "comment",
+      type: "integration",
+      config: {
+        provider: "github",
+        action: "comment_issue",
+        connectionId: "github",
+      },
+    },
+    { id: "approval", type: "humanApproval" },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "diff" },
+    { from: "diff", to: "review" },
+    { from: "review", to: "comment" },
+    { from: "comment", to: "approval" },
+    { from: "approval", to: "end" },
+  ],
+};
+
+const dbReport: GraphDef = {
+  startNodeId: "start",
+  nodes: [
+    { id: "start", type: "start" },
+    {
+      id: "query",
+      type: "sqlQuery",
+      config: { connectionId: "app-db", sql: "SELECT 1" },
+    },
+    {
+      id: "summarize",
+      type: "agent",
+      config: { provider: "anthropic", model: "claude-opus-4-8" },
+    },
+    {
+      id: "email",
+      type: "sendEmail",
+      config: { connectionId: "smtp", subject: "Daily report" },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "start", to: "query" },
+    { from: "query", to: "summarize" },
+    { from: "summarize", to: "email" },
+    { from: "email", to: "end" },
+  ],
+};
+
+const feedDigest: GraphDef = {
+  startNodeId: "start",
+  nodes: [
+    { id: "start", type: "start" },
+    { id: "feed", type: "rssRead", config: { url: "https://example.com/rss" } },
+    {
+      id: "digest",
+      type: "agent",
+      config: { provider: "anthropic", model: "claude-opus-4-8" },
+    },
+    {
+      id: "email",
+      type: "sendEmail",
+      config: { connectionId: "smtp", subject: "Digest" },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "start", to: "feed" },
+    { from: "feed", to: "digest" },
+    { from: "digest", to: "email" },
+    { from: "email", to: "end" },
+  ],
+};
+
+const TEMPLATES: {
+  key: string;
+  name: string;
+  description: string;
+  graph: GraphDef;
+}[] = [
+  {
+    key: "wf-default",
+    name: "Webhook triage",
+    description:
+      "Webhook-triggered agent that summarizes the inbound event, then waits for approval.",
+    graph: webhookTriage,
+  },
+  {
+    key: "github-review",
+    name: "GitHub PR review",
+    description:
+      "When a PR opens, fetch its diff, let an agent review the changes, post the review back, then a human sign-off.",
+    graph: githubReview,
+  },
+  {
+    key: "db-report",
+    name: "Scheduled database report",
+    description:
+      "Run a read-only query against your database, turn the rows into a plain-language summary, and email it.",
+    graph: dbReport,
+  },
+  {
+    key: "feed-digest",
+    name: "Feed digest by email",
+    description:
+      "Pull an RSS/Atom feed, let an agent write a skimmable digest, and email it.",
+    graph: feedDigest,
+  },
+];
+
+const summaries = TEMPLATES.map(({ key, name, description, graph }) => ({
+  key,
+  name,
+  description,
+  nodeCount: graph.nodes.length,
+}));
+
+const handlers = [
+  http.get("*/api/templates", () => HttpResponse.json(summaries)),
+  http.get("*/api/templates/:key", ({ params }) => {
+    const t = TEMPLATES.find((x) => x.key === params.key);
+    if (!t) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json({ ...t, nodeCount: t.graph.nodes.length });
+  }),
+  // Install flow: no existing workflows → slug(name) is free; echo the saved key.
+  http.get("*/api/graphs", () => HttpResponse.json([])),
+  http.post("*/api/graphs", async ({ request }) => {
+    const body = (await request.json()) as { workflowKey: string };
+    return HttpResponse.json({
+      workflowKey: body.workflowKey,
+      version: 1,
+      contentHash: "sb-hash",
+    });
+  }),
+];
+
+const meta: Meta<typeof Templates> = {
+  title: "Screens/Templates",
+  component: Templates,
+  parameters: {
+    layout: "fullscreen",
+    msw: { handlers },
+    router: { initialEntries: ["/app/templates"] },
+  },
+  decorators: [
+    (Story) => (
+      <ModeProvider>
+        <div style={{ background: "var(--bg)", minHeight: "100vh" }}>
+          <Story />
+        </div>
+      </ModeProvider>
+    ),
+  ],
+};
+export default meta;
+type Story = StoryObj<typeof Templates>;
+
+/** The gallery: teaching hero, derived category chips with counts, chain strips. */
+export const Gallery: Story = {};
+
+/** Shimmer skeletons while the template graphs load. */
+export const Loading: Story = {
+  parameters: {
+    msw: {
+      handlers: [
+        http.get("*/api/templates", async () => {
+          await delay("infinite");
+          return HttpResponse.json([]);
+        }),
+      ],
+    },
+  },
+};
+
+/** The preview modal — flow list + derived "what you'll learn" + honest install CTA. */
+export const Preview: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const card = await canvas.findByRole("button", {
+      name: /Preview GitHub PR review/,
+    });
+    await userEvent.click(card);
+    // Portal-free modal renders inside the story root.
+    const dialog = await canvas.findByRole("dialog");
+    await waitFor(() =>
+      expect(within(dialog).getByText(/What you.ll learn/)).toBeTruthy(),
+    );
+    await expect(
+      within(dialog).getByRole("button", { name: /Install template/ }),
+    ).toBeTruthy();
+  },
+};
+
+/** Full install: preview → Install template → the staggered success walkthrough. */
+export const InstalledSuccess: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const card = await canvas.findByRole("button", {
+      name: /Preview Webhook triage/,
+    });
+    await userEvent.click(card);
+    const dialog = await canvas.findByRole("dialog");
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /Install template/ }),
+    );
+    await canvas.findByText(/Webhook triage installed/);
+    // The four-beat walkthrough (this template has an approval, so all beats show).
+    await expect(canvas.getByText("TRIGGER")).toBeTruthy();
+    await expect(canvas.getByText("APPROVAL")).toBeTruthy();
+    await expect(
+      canvas.getByRole("button", { name: /Open in canvas/ }),
+    ).toBeTruthy();
+  },
+};
+
+/** A template without an approval node — the APPROVAL beat collapses away. */
+export const InstalledNoApproval: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const card = await canvas.findByRole("button", {
+      name: /Preview Scheduled database report/,
+    });
+    await userEvent.click(card);
+    const dialog = await canvas.findByRole("dialog");
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /Install template/ }),
+    );
+    await canvas.findByText(/Scheduled database report installed/);
+    await waitFor(() => expect(canvas.queryByText("APPROVAL")).toBeNull());
+  },
+};

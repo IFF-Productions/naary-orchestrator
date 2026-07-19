@@ -16,6 +16,11 @@ const config: StorybookConfig = {
       resolve: {
         alias: {
           "@": fileURLToPath(new URL("../src", import.meta.url)),
+          // Keep in sync with vite.config.ts: the registry subpath must come
+          // before the bare "@naary/dsl" prefix alias.
+          "@naary/dsl/dist/registry": fileURLToPath(
+            new URL("../../../packages/dsl/src/registry.ts", import.meta.url),
+          ),
           "@naary/dsl": fileURLToPath(
             new URL("../../../packages/dsl/src/index.ts", import.meta.url),
           ),

@@ -18,6 +18,6 @@ test("workflow detail renders the diagram and how-it-runs", async ({
   await expect(page.getByText("How it runs")).toBeVisible();
   await expect(page.getByRole("button", { name: "Run now" })).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Open in canvas" }),
+    page.getByRole("button", { name: "Edit in canvas" }),
   ).toBeVisible();
 });

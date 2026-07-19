@@ -13,6 +13,13 @@ export default defineConfig({
       // bundle (runtime "exports is not defined"). It's pure/platform-agnostic, so
       // bundle it from TS SOURCE as ESM instead — no CJS interop needed. (Types
       // still resolve via the package's dist .d.ts for tsc.)
+      // The zod registry layer (deliberately NOT re-exported from the dsl index;
+      // the Node catalog screen derives node metadata from it). Must be listed
+      // BEFORE the bare "@naary/dsl" alias — that one is a prefix match and
+      // would otherwise mangle this subpath into ".../index.ts/dist/registry".
+      "@naary/dsl/dist/registry": fileURLToPath(
+        new URL("../../packages/dsl/src/registry.ts", import.meta.url),
+      ),
       "@naary/dsl": fileURLToPath(
         new URL("../../packages/dsl/src/index.ts", import.meta.url),
       ),

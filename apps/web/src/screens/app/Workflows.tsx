@@ -1,46 +1,70 @@
+/**
+ * Workflows list (redesign "Naary Workflows.dc.html") — surfaces TRIGGER and
+ * ACTIVATION prominently: each row shows a trigger icon tile + label read from
+ * the graph's REAL entry node, where the workflow is live (per-env presence +
+ * activation), the last run (real runs data), and a 30-day run count.
+ *
+ * Data honesty:
+ * - "Live in" = per-environment GET /graphs (env-header override per env) +
+ *   the activation flag in that env;
+ * - "Trigger" = the entry node of each workflow's latest graph (active env);
+ * - "Last run" / "30d runs" = derived from the recent-runs list (footnoted —
+ *   the list is recency-limited, so 30d counts are a floor, not a census).
+ *
+ * Kept from the previous screen: ?q search (topbar deep-link), tag filtering +
+ * the tags edit dialog, the activation toggle, RBAC affordance gating, and the
+ * phone card layout. Promote/delete moved into the detail screen (the redesign
+ * folds environments + promote into detail).
+ */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Button,
   Card,
   Checkbox,
-  Dialog,
   Icon,
   LoadingBlock,
   SearchInput,
+  SegmentedToggle,
   Select,
-  StatusPill,
   Switch,
   Tag,
 } from "../../components";
 import {
   api,
   type Environment,
-  getActiveEnvironment,
   type GraphSummary,
   type RunSummary,
   type Tag as TagRow,
 } from "../../lib/api";
 import { canCreateWorkflow, canDo } from "../../lib/permissions-logic";
-import { runStatusUi, successRate } from "../../lib/run-status";
+import { runStatusUi } from "../../lib/run-status";
 import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import { usePermissions } from "../../lib/usePermissions";
+import {
+  ago,
+  type EnvPresence,
+  envRank,
+  isProdLike,
+  liveIn,
+  listGraphsInEnv,
+  STATE_DOT,
+  triggerInfo,
+  type TriggerInfo,
+} from "./workflows/model";
 import { WorkflowTagsDialog } from "./WorkflowTagsDialog";
 
-/**
- * Workflows — the tenant's saved graphs (from POST /graphs via the canvas), each
- * with REAL recent-run stats derived from the runs list (run count, success rate,
- * last status). Open one to edit it on the canvas, or create a new one.
- */
-// Actions column is a FIXED width wide enough for Open/Promote/Delete (a too-narrow 90px overflowed
-// into the Active toggle; `auto` mis-aligns the header vs data since each row is its own grid).
-const GRID = "2.2fr 1fr 0.8fr 1fr 84px 230px";
+// Workflow · Live in · Trigger · Last run · 30d runs · Active
+const GRID = "2.2fr 1fr 1.1fr 1.2fr 0.7fr 64px";
+
+type Filter = "all" | "prod" | "active" | "draft";
 
 interface Row {
   graph: GraphSummary;
-  runs: number;
-  success: number | null;
-  lastStatus: string | null;
+  presences: EnvPresence[];
+  trigger: TriggerInfo | null;
+  lastRun: RunSummary | null;
+  runs30: number;
 }
 
 export function Workflows() {
@@ -53,7 +77,14 @@ export function Workflows() {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [tenant, setTenant] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
+  // Cross-env presence: env list + which envs each workflowKey exists in.
+  const [envs, setEnvs] = useState<Environment[] | null>(null);
+  const [presence, setPresence] = useState<Map<string, EnvPresence[]>>(
+    new Map(),
+  );
+  // Trigger info per workflowKey, read from each graph's entry node.
+  const [triggers, setTriggers] = useState<Map<string, TriggerInfo>>(new Map());
+  const [filter, setFilter] = useState<Filter>("all");
   // Tags: the workspace's tag list (filter menu + edit dialog), the ids the list is
   // filtered by (AND semantics — a row must carry every selected tag), and the workflow
   // whose tags are being edited.
@@ -82,51 +113,7 @@ export function Workflows() {
       document.removeEventListener("keydown", onKey);
     };
   }, [tagMenuOpen]);
-  // Promote flow: the workflow being promoted (source = the ACTIVE env, via the header), the
-  // candidate target envs (all but the active one), and progress/result.
-  const [promoteFor, setPromoteFor] = useState<string | null>(null);
-  const [promoteEnvs, setPromoteEnvs] = useState<Environment[]>([]);
-  const [promoteBusy, setPromoteBusy] = useState<string | null>(null);
-  const [promoteMsg, setPromoteMsg] = useState<string | null>(null);
 
-  async function openPromote(workflowKey: string): Promise<void> {
-    if (!tenant) return;
-    setPromoteFor(workflowKey);
-    setPromoteMsg(null);
-    setPromoteEnvs([]);
-    let envs: Environment[];
-    try {
-      envs = await api.listEnvironments(tenant);
-    } catch {
-      // Distinguish a load failure from "no other environments".
-      setPromoteMsg("Couldn't load environments — try again.");
-      return;
-    }
-    const active = getActiveEnvironment();
-    // Exclude the SOURCE env from the targets. When no env is selected (header omitted), the
-    // server uses the DEFAULT env as the source — so filter THAT out, not just a matching slug.
-    setPromoteEnvs(
-      envs.filter((e) =>
-        active ? e.slug !== active && e.id !== active : !e.isDefault,
-      ),
-    );
-  }
-
-  async function doPromote(
-    workflowKey: string,
-    target: Environment,
-  ): Promise<void> {
-    setPromoteBusy(target.id);
-    setPromoteMsg(null);
-    try {
-      const res = await api.promoteWorkflow(workflowKey, target.slug);
-      setPromoteMsg(`Promoted to ${target.name} (v${res.toVersion}).`);
-    } catch {
-      setPromoteMsg(`Could not promote to ${target.name}.`);
-    } finally {
-      setPromoteBusy(null);
-    }
-  }
   // Seed the filter from ?q= so the global topbar search lands here pre-filtered.
   const [searchParams] = useSearchParams();
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
@@ -163,6 +150,54 @@ export function Workflows() {
     };
   }, []);
 
+  // Per-env presence — one GET /graphs per environment (envs are few).
+  useEffect(() => {
+    if (!tenant) return;
+    let live = true;
+    (async () => {
+      const es = await api.listEnvironments(tenant).catch(() => []);
+      const lists = await Promise.all(
+        es.map((e) => listGraphsInEnv(e.id).catch(() => [] as GraphSummary[])),
+      );
+      if (!live) return;
+      const map = new Map<string, EnvPresence[]>();
+      es.forEach((env, i) => {
+        for (const summary of lists[i]) {
+          const arr = map.get(summary.workflowKey) ?? [];
+          arr.push({ env, summary });
+          map.set(summary.workflowKey, arr);
+        }
+      });
+      setEnvs(es);
+      setPresence(map);
+    })().catch(() => live && setEnvs([]));
+    return () => {
+      live = false;
+    };
+  }, [tenant]);
+
+  // Trigger column — read each workflow's graph once (entry node → trigger).
+  useEffect(() => {
+    if (!graphs || graphs.length === 0) return;
+    let live = true;
+    (async () => {
+      const results = await Promise.allSettled(
+        graphs.map((g) => api.getGraph(g.workflowKey)),
+      );
+      if (!live) return;
+      const map = new Map<string, TriggerInfo>();
+      results.forEach((r, i) => {
+        if (r.status === "fulfilled" && r.value) {
+          map.set(graphs[i].workflowKey, triggerInfo(r.value.graph));
+        }
+      });
+      setTriggers(map);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [graphs]);
+
   async function toggleActive(workflowKey: string, next: boolean) {
     if (!tenant || toggling) return;
     setToggling(workflowKey);
@@ -188,27 +223,6 @@ export function Workflows() {
     }
   }
 
-  async function remove(workflowKey: string, name: string) {
-    if (deleting) return;
-    if (
-      !window.confirm(
-        `Delete workflow "${name}"? This removes the workflow and its webhooks, forms, chats, and schedules. Run history is kept. This can't be undone.`,
-      )
-    ) {
-      return;
-    }
-    setDeleting(workflowKey);
-    setErr(null);
-    try {
-      await api.deleteGraph(workflowKey);
-      setGraphs((gs) => gs?.filter((g) => g.workflowKey !== workflowKey) ?? gs);
-    } catch {
-      setErr("Could not delete the workflow — try again.");
-    } finally {
-      setDeleting(null);
-    }
-  }
-
   // Per-workflow stats from the runs list (newest-first), keyed by workflowKey.
   const rows = useMemo<Row[]>(() => {
     const byKey = new Map<string, RunSummary[]>();
@@ -218,19 +232,44 @@ export function Workflows() {
       arr.push(r);
       byKey.set(r.workflowKey, arr);
     }
+    const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
     return (graphs ?? []).map((g) => {
       const wr = byKey.get(g.workflowKey) ?? [];
       return {
         graph: g,
-        runs: wr.length,
-        success: successRate(wr.map((r) => r.status)),
-        lastStatus: wr[0]?.status ?? null,
+        presences: presence.get(g.workflowKey) ?? [],
+        trigger: triggers.get(g.workflowKey) ?? null,
+        lastRun: wr[0] ?? null,
+        runs30: wr.filter((r) => new Date(r.startedAt).getTime() >= cutoff)
+          .length,
       };
     });
-  }, [graphs, runs]);
+  }, [graphs, runs, presence, triggers]);
+
+  const prodExists = (envs ?? []).some(isProdLike);
+  const inProd = rows.filter((r) =>
+    r.presences.some((p) => isProdLike(p.env) && p.summary.active),
+  ).length;
+
+  const matchesFilter = (r: Row): boolean => {
+    switch (filter) {
+      case "all":
+        return true;
+      // Production: the workflow exists in a prod-like env.
+      case "prod":
+        return r.presences.some((p) => isProdLike(p.env));
+      // Active: automatic triggers fire in the CURRENT env (the toggle's fact).
+      case "active":
+        return r.graph.active;
+      // Draft: never deployed above a sandbox-rank env, or switched off here.
+      case "draft":
+        return !r.graph.active || !r.presences.some((p) => envRank(p.env) >= 2);
+    }
+  };
 
   const filtered = rows.filter(
     (r) =>
+      matchesFilter(r) &&
       (!query ||
         r.graph.name.toLowerCase().includes(query.toLowerCase()) ||
         r.graph.workflowKey.includes(query)) &&
@@ -238,14 +277,25 @@ export function Workflows() {
       tagFilter.every((id) => (r.graph.tags ?? []).some((t) => t.id === id)),
   );
 
+  const filterOptions: { value: Filter; label: string }[] = [
+    { value: "all", label: "All" },
+    ...(prodExists ? [{ value: "prod" as Filter, label: "Production" }] : []),
+    { value: "active", label: "Active" },
+    { value: "draft", label: "Draft" },
+  ];
+
   return (
-    <div style={{ padding: "22px 28px 40px" }}>
+    <div
+      style={{ padding: "22px 28px 40px", animation: "naaryFadeUp .25s ease" }}
+    >
       <div
         style={{
           display: "flex",
-          alignItems: "center",
+          alignItems: "flex-end",
           justifyContent: "space-between",
           marginBottom: 16,
+          gap: 12,
+          flexWrap: "wrap",
         }}
       >
         <div>
@@ -266,19 +316,28 @@ export function Workflows() {
               marginTop: 4,
             }}
           >
-            {graphs ? `${graphs.length} saved` : "…"}
-            {runs.length ? ` · ${runs.length} recent runs` : ""}
+            {graphs
+              ? `${graphs.length} workflow${graphs.length === 1 ? "" : "s"}` +
+                (prodExists ? ` · ${inProd} in production` : "")
+              : "…"}
           </div>
         </div>
-        {canCreateWorkflow(perms) && (
-          <Button
-            variant="primary"
-            icon="plus"
-            onClick={() => navigate("/app/canvas")}
-          >
-            New workflow
-          </Button>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <SegmentedToggle
+            options={filterOptions}
+            value={filter}
+            onChange={setFilter}
+          />
+          {canCreateWorkflow(perms) && (
+            <Button
+              variant="primary"
+              icon="plus"
+              onClick={() => navigate("/app/canvas")}
+            >
+              New workflow
+            </Button>
+          )}
+        </div>
       </div>
 
       <div
@@ -314,6 +373,7 @@ export function Workflows() {
           {tagMenuOpen && (
             <div
               role="menu"
+              className="menu-pop"
               onClick={(e) => e.stopPropagation()}
               style={{
                 position: "absolute",
@@ -347,6 +407,7 @@ export function Workflows() {
                   <div
                     key={t.id}
                     role="menuitemcheckbox"
+                    className="run-row"
                     aria-checked={on}
                     onClick={() =>
                       setTagFilter((prev) =>
@@ -402,14 +463,15 @@ export function Workflows() {
               gap: 10,
               padding: "10px 18px",
               borderBottom: "1px solid var(--line)",
+              background: "var(--card-2)",
             }}
           >
             <span>Workflow</span>
+            <span>Live in</span>
+            <span>Trigger</span>
             <span>Last run</span>
-            <span>Runs</span>
-            <span>Success</span>
+            <span style={{ textAlign: "right" }}>30d runs</span>
             <span>Active</span>
-            <span />
           </div>
         )}
 
@@ -438,22 +500,107 @@ export function Workflows() {
         )}
 
         {filtered.map((r) => {
-          // Per-row affordances mirror the effective matrix; "Open" stays — the row
-          // being listed means it's viewable (the graphs list is server-filtered).
+          // Per-row affordances mirror the effective matrix (tags PUT + the
+          // activation toggle are edit-gated).
           const mayEdit = canDo(perms, "edit", r.graph.workflowKey);
-          const mayDelete = canDo(perms, "delete", r.graph.workflowKey);
-          const mayPromote = canDo(perms, "share", r.graph.workflowKey);
           const go = () =>
             navigate(
               `/app/workflows/${encodeURIComponent(r.graph.workflowKey)}`,
             );
-          const lastRun = r.lastStatus ? (
-            <StatusPill {...runStatusUi(r.lastStatus)} />
+
+          const live = liveIn(r.presences);
+          const liveCell = live ? (
+            <span
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  flex: "none",
+                  background: live.dot,
+                  boxShadow: `0 0 7px ${live.dot}`,
+                }}
+              />
+              <span
+                style={{
+                  fontSize: "var(--text-xs)",
+                  fontWeight: "var(--weight-semibold)",
+                  color: live.color,
+                }}
+              >
+                {live.label}
+              </span>
+            </span>
+          ) : (
+            // Env picture unavailable (older API / load failure) — fall back to
+            // the activation fact we DO have.
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
+              {envs === null ? "…" : r.graph.active ? "Active" : "Inactive"}
+            </span>
+          );
+
+          const triggerCell = r.trigger ? (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: "var(--text-sm)",
+                color: "var(--ink-2)",
+                minWidth: 0,
+              }}
+            >
+              <Icon
+                name={r.trigger.icon}
+                size={13}
+                style={{ color: r.trigger.accent, flex: "none" }}
+              />
+              <span
+                style={{
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {r.trigger.label}
+              </span>
+            </span>
+          ) : (
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
+              …
+            </span>
+          );
+
+          const lastRunCell = r.lastRun ? (
+            <span
+              title={runStatusUi(r.lastRun.status).label}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: "var(--text-sm)",
+                color: "var(--ink-2)",
+              }}
+            >
+              <span
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: "50%",
+                  flex: "none",
+                  background: STATE_DOT[runStatusUi(r.lastRun.status).state],
+                }}
+              />
+              {ago(r.lastRun.startedAt)}
+            </span>
           ) : (
             <span style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
               No runs
             </span>
           );
+
           const activeSwitch = mayEdit ? (
             <span
               onClick={(e) => e.stopPropagation()}
@@ -479,95 +626,89 @@ export function Workflows() {
               {r.graph.active ? "Active" : "Inactive"}
             </span>
           );
-          const actions = (
-            <>
-              <Button
-                variant="secondary"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  navigate(
-                    `/app/canvas?key=${encodeURIComponent(r.graph.workflowKey)}`,
-                  );
-                }}
-              >
-                Open
-              </Button>
-              {mayPromote && (
-                <Button
-                  variant="secondary"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void openPromote(r.graph.workflowKey);
-                  }}
-                  title="Copy this workflow into another environment"
-                >
-                  Promote
-                </Button>
-              )}
-              {mayDelete && (
-                <Button
-                  variant="secondary"
-                  disabled={deleting === r.graph.workflowKey}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void remove(r.graph.workflowKey, r.graph.name);
-                  }}
-                >
-                  {deleting === r.graph.workflowKey ? "Deleting…" : "Delete"}
-                </Button>
-              )}
-            </>
-          );
+
           const title = (
-            <div style={{ minWidth: 0 }}>
-              <div
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                minWidth: 0,
+              }}
+            >
+              <span
                 style={{
-                  fontSize: "var(--text-body)",
-                  fontWeight: "var(--weight-semibold)",
-                  color: "var(--ink)",
-                }}
-              >
-                {r.graph.name}
-              </div>
-              <div
-                className="mono"
-                style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
-              >
-                {r.graph.workflowKey} · v{r.graph.version}
-              </div>
-              {/* Tag chips + the edit affordance (a "+" chip keeps the actions column intact). */}
-              <div
-                style={{
+                  width: 34,
+                  height: 34,
+                  flex: "none",
+                  borderRadius: 9,
+                  border: `1px solid ${r.trigger?.accent ?? "var(--line-2)"}`,
+                  color: r.trigger?.accent ?? "var(--ink-3)",
                   display: "flex",
-                  flexWrap: "wrap",
                   alignItems: "center",
-                  gap: 4,
-                  marginTop: 5,
+                  justifyContent: "center",
                 }}
               >
-                {(r.graph.tags ?? []).map((t) => (
-                  <Tag key={t.id} color={t.color ?? undefined}>
-                    {t.name}
-                  </Tag>
-                ))}
-                {/* Tag editing is `edit` (§4 — tags PUT is edit-gated), so hide the
-                    affordance without it. */}
-                {mayEdit && (
-                  <button
-                    type="button"
-                    className="tag"
-                    title="Edit tags"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditTags({
-                        key: r.graph.workflowKey,
-                        name: r.graph.name,
-                      });
+                <Icon name={r.trigger?.icon ?? "workflow"} size={16} />
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: "var(--text-body)",
+                    fontWeight: "var(--weight-semibold)",
+                    color: "var(--ink)",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {r.graph.name}
+                </div>
+                <div
+                  className="mono"
+                  style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
+                >
+                  {r.graph.workflowKey} · v{r.graph.version}
+                </div>
+                {/* Tag chips + the edit affordance (a "+" chip keeps the row compact). */}
+                {((r.graph.tags ?? []).length > 0 || mayEdit) && (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      alignItems: "center",
+                      gap: 4,
+                      marginTop: 5,
                     }}
-                    style={{ cursor: "pointer", background: "transparent" }}
                   >
-                    {(r.graph.tags ?? []).length ? "+" : "+ tag"}
-                  </button>
+                    {(r.graph.tags ?? []).map((t) => (
+                      <Tag key={t.id} color={t.color ?? undefined}>
+                        {t.name}
+                      </Tag>
+                    ))}
+                    {/* Tag editing is `edit` (§4 — tags PUT is edit-gated), so hide the
+                        affordance without it. */}
+                    {mayEdit && (
+                      <button
+                        type="button"
+                        className="tag"
+                        title="Edit tags"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditTags({
+                            key: r.graph.workflowKey,
+                            name: r.graph.name,
+                          });
+                        }}
+                        style={{
+                          cursor: "pointer",
+                          background: "transparent",
+                        }}
+                      >
+                        {(r.graph.tags ?? []).length ? "+" : "+ tag"}
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -600,23 +741,19 @@ export function Workflows() {
                   {activeSwitch}
                 </div>
                 <div
-                  className="mono"
                   style={{
                     display: "flex",
                     alignItems: "center",
                     gap: 12,
                     fontSize: "var(--text-xs)",
                     color: "var(--ink-2)",
+                    flexWrap: "wrap",
                   }}
                 >
-                  {lastRun}
-                  <span>{r.runs} runs</span>
-                  <span>
-                    {r.success === null ? "—" : `${Math.round(r.success)}% ok`}
-                  </span>
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {actions}
+                  {liveCell}
+                  {triggerCell}
+                  {lastRunCell}
+                  <span className="mono">{r.runs30} runs/30d</span>
                 </div>
               </div>
             );
@@ -638,30 +775,21 @@ export function Workflows() {
               }}
             >
               {title}
-              <span>{lastRun}</span>
+              <span>{liveCell}</span>
+              {triggerCell}
+              <span>{lastRunCell}</span>
               <span
                 className="mono"
-                style={{ fontSize: "var(--text-sm)", color: "var(--ink)" }}
-              >
-                {r.runs}
-              </span>
-              <span
-                className="mono"
-                style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
-              >
-                {r.success === null ? "—" : `${Math.round(r.success)}%`}
-              </span>
-              {activeSwitch}
-              <span
                 style={{
                   textAlign: "right",
-                  display: "inline-flex",
-                  gap: 8,
-                  justifyContent: "flex-end",
+                  fontSize: "var(--text-sm)",
+                  fontWeight: "var(--weight-semibold)",
+                  color: "var(--ink)",
                 }}
               >
-                {actions}
+                {r.runs30}
               </span>
+              {activeSwitch}
             </div>
           );
         })}
@@ -681,64 +809,6 @@ export function Workflows() {
         />
         Run stats are computed from the {runs.length} most recent runs.
       </div>
-
-      {/* Promote picker — copy the workflow from the active env into a target env. Uses the shared
-          Dialog (consistent overlay/close behaviour + styling). */}
-      <Dialog
-        open={!!promoteFor}
-        onClose={() => setPromoteFor(null)}
-        title={`Promote “${promoteFor ?? ""}”`}
-        footer={
-          <Button variant="ghost" onClick={() => setPromoteFor(null)}>
-            Close
-          </Button>
-        }
-      >
-        <div
-          style={{
-            fontSize: "var(--text-sm)",
-            color: "var(--ink-3)",
-            marginBottom: 14,
-            lineHeight: "var(--leading-snug)",
-          }}
-        >
-          Copies this workflow’s current graph from the <strong>active</strong>{" "}
-          environment into the target as a new version. Credentials &
-          connections are not copied — the target env uses its own.
-        </div>
-        {promoteEnvs.length === 0 ? (
-          <div style={{ fontSize: "var(--text-sm)", color: "var(--ink-3)" }}>
-            {promoteMsg ??
-              "No other environments to promote to. Create one from the sidebar switcher."}
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {promoteEnvs.map((e) => (
-              <Button
-                key={e.id}
-                variant="secondary"
-                loading={promoteBusy === e.id}
-                disabled={!!promoteBusy}
-                onClick={() => promoteFor && void doPromote(promoteFor, e)}
-              >
-                Promote to {e.name}
-                {e.isDefault ? " (default)" : ""}
-              </Button>
-            ))}
-          </div>
-        )}
-        {promoteEnvs.length > 0 && promoteMsg && (
-          <div
-            style={{
-              marginTop: 12,
-              fontSize: "var(--text-sm)",
-              color: "var(--ink-2)",
-            }}
-          >
-            {promoteMsg}
-          </div>
-        )}
-      </Dialog>
 
       {/* Edit one workflow's tags — replace-set save; a tag created inline joins the list. */}
       <WorkflowTagsDialog

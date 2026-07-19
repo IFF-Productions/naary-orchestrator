@@ -218,6 +218,7 @@ export function WorkflowTagsDialog({
                   newColor === c
                     ? "2px solid var(--ink)"
                     : "2px solid transparent",
+                transition: "border-color .12s ease",
               }}
             />
           ))}

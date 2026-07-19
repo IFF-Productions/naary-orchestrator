@@ -1,10 +1,12 @@
 /**
- * Environment switcher (design docs/design/ENVIRONMENTS.md) — picks the active per-workspace
- * environment (sandbox/UAT/prod), which the API client sends as `X-Environment-Id`. Self-contained
- * (no context yet): it resolves the workspace's environments, publishes the active one, and on
- * switch reloads so every screen re-fetches under the new env. Environments are per-workspace, so it
- * re-resolves whenever the active workspace changes (a persisted env not in the new workspace falls
- * back to that workspace's default). Sits next to the workspace switcher in the sidebar.
+ * Environment switcher (design docs/design/ENVIRONMENTS.md + redesign shell) — picks the active
+ * per-workspace environment (sandbox/UAT/prod), which the API client sends as `X-Environment-Id`.
+ * Redesign: a color-coded segmented control in the context bar — the active segment carries the
+ * env accent + a glowing dot (prod runs hot ember as a standing warning). Management (create /
+ * rename / delete) lives behind the trailing "…" menu; workspaces with many envs collapse to a
+ * compact trigger + the same menu. Self-contained: it resolves the workspace's environments,
+ * publishes the active one, and re-resolves whenever the active workspace changes (a persisted
+ * env not in the new workspace falls back to that workspace's default).
  */
 import { useEffect, useState } from "react";
 import { Icon } from "../components";
@@ -25,6 +27,17 @@ function toSlug(name: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 32);
 }
+
+/** Env accent by slug/name convention: prod = ember, uat/staging/test = amber, rest = blue. */
+export function envAccent(env: Pick<Environment, "slug" | "name">): string {
+  const key = `${env.slug} ${env.name}`.toLowerCase();
+  if (/prod/.test(key)) return "var(--env-prod)";
+  if (/uat|stag|test|qa/.test(key)) return "var(--env-uat)";
+  return "var(--env-sandbox)";
+}
+
+/** Above this many environments the segmented control would crowd the bar — collapse to a trigger. */
+const MAX_SEGMENTS = 4;
 
 export function EnvironmentSwitcher() {
   const { activeId: tenantId } = useWorkspace();
@@ -160,9 +173,6 @@ export function EnvironmentSwitcher() {
       await api.deleteEnvironment(tenantId, env.id);
       // Functional update so a concurrent rename/create isn't clobbered by this render's stale list.
       setEnvs((prev) => prev.filter((e) => e.id !== env.id));
-      // If we deleted the ACTIVE env, just CLEAR it and reload — the load effect re-resolves and
-      // picks the workspace default (`find(isDefault) ?? list[0]`). No fallback to compute here, so
-      // no stale-list pitfall.
       if (env.slug === activeSlug) {
         // Deleted the active env → clear it (server falls back to the default). Re-resolve the
         // default from the remaining list and switch to it live (no reload).
@@ -183,62 +193,143 @@ export function EnvironmentSwitcher() {
   // Nothing to show until the workspace's environments resolve.
   if (!tenantId || envs.length === 0) return null;
   const active = envs.find((e) => e.slug === activeSlug) ?? envs[0];
+  const segmented = envs.length <= MAX_SEGMENTS;
 
   return (
-    <div style={{ position: "relative" }}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Switch environment"
-        style={{
-          all: "unset",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          gap: 5,
-          padding: "3px 8px",
-          borderRadius: 6,
-          border: "1px solid var(--line)",
-          background: "var(--bg-2)",
-          maxWidth: "100%",
-          minWidth: 0,
-        }}
-      >
-        <span
+    <div
+      style={{ position: "relative", display: "flex", alignItems: "center" }}
+    >
+      {segmented ? (
+        <div
+          role="group"
+          aria-label="Environment"
           style={{
-            fontSize: 9,
-            fontWeight: 700,
-            letterSpacing: 0.5,
-            textTransform: "uppercase",
-            color: "var(--ink-3)",
-            flex: "none",
+            display: "flex",
+            gap: 3,
+            background: "var(--bg)",
+            border: "1px solid var(--line-2)",
+            borderRadius: "var(--radius-md)",
+            padding: 3,
           }}
         >
-          env
-        </span>
-        <span
+          {envs.map((e) => {
+            const isActive = e.slug === active.slug;
+            const accent = envAccent(e);
+            return (
+              <button
+                key={e.id}
+                type="button"
+                aria-pressed={isActive}
+                title={`Switch to ${e.name}`}
+                onClick={() => switchTo(e.slug)}
+                style={{
+                  all: "unset",
+                  display: "flex",
+                  alignItems: "center",
+                  fontSize: 11.5,
+                  padding: "4px 11px",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  fontWeight: 600,
+                  whiteSpace: "nowrap",
+                  color: isActive ? accent : "var(--ink-faint)",
+                  background: isActive ? "var(--card)" : "transparent",
+                }}
+              >
+                {isActive && (
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: accent,
+                      boxShadow: `0 0 8px ${accent}`,
+                      display: "inline-block",
+                      marginRight: 5,
+                      flex: "none",
+                    }}
+                  />
+                )}
+                {e.name}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          title="Switch environment"
           style={{
-            fontSize: 11.5,
-            fontWeight: 600,
-            color: "var(--ink)",
-            // Ellipsize a long env name so it can't push the chevron out of view (mirrors
-            // WorkspaceSwitcher's active label).
+            all: "unset",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "5px 10px",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--line-2)",
+            background: "var(--bg)",
+            maxWidth: "100%",
             minWidth: 0,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
           }}
         >
-          {active.name}
-        </span>
-        <Icon
-          name="chevron-up-down"
-          size={12}
-          style={{ color: "var(--ink-3)", flex: "none" }}
-        />
-      </button>
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: envAccent(active),
+              boxShadow: `0 0 8px ${envAccent(active)}`,
+              flex: "none",
+            }}
+          />
+          <span
+            style={{
+              fontSize: 11.5,
+              fontWeight: 600,
+              color: envAccent(active),
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {active.name}
+          </span>
+          <Icon
+            name="chevron-up-down"
+            size={12}
+            style={{ color: "var(--ink-3)", flex: "none" }}
+          />
+        </button>
+      )}
+
+      {/* Manage (create / rename / delete / switch) — the segmented control handles fast
+          switching, so this menu is the low-traffic management surface. */}
+      {segmented && (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          title="Manage environments"
+          aria-label="Manage environments"
+          style={{
+            all: "unset",
+            cursor: "pointer",
+            padding: 4,
+            marginLeft: 2,
+            borderRadius: 6,
+            color: "var(--ink-3)",
+            display: "flex",
+          }}
+        >
+          <Icon name="more" size={13} />
+        </button>
+      )}
 
       {open && (
         <>
@@ -250,16 +341,17 @@ export function EnvironmentSwitcher() {
             // A menu (not a listbox) because each row holds multiple controls (switch + rename +
             // delete); listbox options may not contain nested interactive elements.
             role="menu"
+            className="menu-pop"
             style={{
               position: "absolute",
               top: "calc(100% + 6px)",
               left: 0,
-              minWidth: 200,
+              minWidth: 220,
               zIndex: 41,
-              background: "var(--bg-2)",
-              border: "1px solid var(--line)",
+              background: "var(--panel)",
+              border: "1px solid var(--line-mid)",
               borderRadius: 10,
-              boxShadow: "0 8px 28px rgba(0,0,0,.28)",
+              boxShadow: "var(--shadow-raised)",
               padding: 6,
             }}
           >
@@ -343,9 +435,7 @@ export function EnvironmentSwitcher() {
                     boxSizing: "border-box",
                     padding: "3px 5px 3px 9px",
                     borderRadius: 7,
-                    background: isActive
-                      ? "var(--bg-3, rgba(255,255,255,.05))"
-                      : "transparent",
+                    background: isActive ? "var(--hover)" : "transparent",
                   }}
                 >
                   <button
@@ -365,6 +455,15 @@ export function EnvironmentSwitcher() {
                       padding: "4px 0",
                     }}
                   >
+                    <span
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: "50%",
+                        background: envAccent(e),
+                        flex: "none",
+                      }}
+                    />
                     <span
                       style={{
                         flex: 1,

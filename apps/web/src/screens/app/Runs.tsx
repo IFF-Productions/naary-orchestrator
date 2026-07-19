@@ -239,7 +239,12 @@ export function Runs() {
   }
 
   return (
-    <div style={{ padding: phone ? "16px 14px 32px" : "24px 28px 40px" }}>
+    <div
+      style={{
+        padding: phone ? "16px 14px 32px" : "24px 28px 40px",
+        animation: "naaryFadeUp .25s ease",
+      }}
+    >
       <div
         style={{
           display: "flex",

@@ -57,7 +57,12 @@ export type IconName =
   | "sidebar-expand"
   | "refresh"
   | "key"
-  | "logout";
+  | "logout"
+  | "mode-build"
+  | "mode-operate"
+  | "mode-observe"
+  | "mode-connect"
+  | "mode-admin";
 
 // Each entry is the inner markup of a 24x24 SVG. Stroke icons use currentColor;
 // `fill` glyphs set fill explicitly.
@@ -142,6 +147,17 @@ const PATHS: Record<IconName, string> = {
   key: '<circle cx="8" cy="8" r="4"/><path d="M11 11l9 9M17 17l2-2M14 14l2-2" stroke-linecap="round"/>',
   logout:
     '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 12h10M16 8l4 4-4 4M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4" stroke-linecap="round" stroke-linejoin="round"/>',
+  // Five-mode nav rail glyphs (redesign shell).
+  "mode-build":
+    '<path d="M4 5h7v6H4zM13 13h7v6h-7zM11 8h4a2 2 0 0 1 2 2v3" stroke-linecap="round" stroke-linejoin="round"/>',
+  "mode-operate":
+    '<path d="M12 8v4l3 2M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0z" stroke-linecap="round" stroke-linejoin="round"/>',
+  "mode-observe":
+    '<path d="M4 19V5M4 19h16M8 15l3-4 3 2 4-6" stroke-linecap="round" stroke-linejoin="round"/>',
+  "mode-connect":
+    '<path d="M9 3v5M15 3v5M7 8h10v3a5 5 0 0 1-10 0zM12 16v5" stroke-linecap="round" stroke-linejoin="round"/>',
+  "mode-admin":
+    '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4 3.6-6 8-6s8 2 8 6" stroke-linecap="round" stroke-linejoin="round"/>',
 };
 
 interface IconProps {

@@ -10,22 +10,22 @@ test("create, pause, and delete a schedule", async ({ page }) => {
 
   await page.goto("/app/schedules");
 
-  // Create for the seeded "default" workflow.
+  // Create for the seeded "default" workflow (the create flow lives in a dialog).
+  await page.getByRole("button", { name: "New schedule" }).click();
   await page.getByRole("combobox").selectOption("default");
   await page.getByPlaceholder("0 9 * * 1-5").fill(cron);
-  await page.getByRole("button", { name: "Create" }).click();
+  await page.getByRole("button", { name: "Create schedule" }).click();
 
   // The new row shows up (scoped by the unique cron).
   const row = page.getByTestId("schedule-row").filter({ hasText: cron });
   await expect(row).toBeVisible();
-  await expect(row).toContainText("Active");
 
-  // Pause → the row flips to Paused.
-  await row.getByRole("button", { name: "Pause" }).click();
-  await expect(row).toContainText("Paused");
+  // Pause via the pill switch → the row shows the paused state.
+  await row.getByRole("switch").click();
+  await expect(row).toContainText("paused");
 
   // Delete → the row is gone.
-  await row.getByRole("button", { name: "Delete schedule" }).click();
+  await row.getByRole("button", { name: /Delete the .* schedule/ }).click();
   await expect(
     page.getByTestId("schedule-row").filter({ hasText: cron }),
   ).toHaveCount(0);

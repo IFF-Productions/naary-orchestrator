@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { Icon, StatusPill } from "../../../components";
 import { api, type GraphSummary, type WebhookRow } from "../../../lib/api";
-import { fieldLabel, fieldStyle, UrlCopy } from "./shared";
+import { EnvChip, fieldLabel, fieldStyle, UrlCopy } from "./shared";
 
 /**
  * One registered webhook row — view + INLINE EDIT. View shows the URL + "POST · provider ·
@@ -11,6 +11,7 @@ import { fieldLabel, fieldStyle, UrlCopy } from "./shared";
  */
 export function WebhookItem({
   w,
+  env,
   tenant,
   isLast,
   webhookUrl,
@@ -18,6 +19,8 @@ export function WebhookItem({
   onError,
 }: {
   w: WebhookRow;
+  /** Active environment slug — the endpoint's real env binding (lists are env-scoped). */
+  env: string | null;
   tenant: string | null;
   isLast: boolean;
   webhookUrl: (id: string) => string;
@@ -143,11 +146,15 @@ export function WebhookItem({
           </div>
           <div
             style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
               fontSize: "var(--text-xs)",
               color: "var(--ink-3)",
-              marginTop: 2,
+              marginTop: 3,
             }}
           >
+            <EnvChip slug={env} />
             POST · {w.provider} · {w.workflowId}
           </div>
         </div>
@@ -201,6 +208,7 @@ export function WebhookItem({
             marginTop: 12,
             paddingTop: 12,
             borderTop: "1px solid var(--line)",
+            animation: "naaryFadeUp .2s ease",
             display: "flex",
             flexWrap: "wrap",
             gap: 12,

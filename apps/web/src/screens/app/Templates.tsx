@@ -1,31 +1,81 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Card, Icon, NODE_ACCENT, type NodeType } from "../../components";
-import { api, type TemplateSummary, UnauthorizedError } from "../../lib/api";
+import { SearchInput, Skeleton, Toast } from "../../components";
+import { api, UnauthorizedError } from "../../lib/api";
+import { useMode } from "../../mode";
+import { InstallSuccess } from "./templates/InstallSuccess";
+import {
+  deriveCategoryChips,
+  deriveTemplateView,
+  uniqueWorkflowKey,
+  type TemplateView,
+} from "./templates/model";
+import { PreviewModal } from "./templates/PreviewModal";
+import { TeachingHero } from "./templates/TeachingHero";
+import { TemplateCard } from "./templates/TemplateCard";
 
-// The API payload carries no presentation accent, so cycle the node palette by
-// index (mirrors the old mock) to keep each card visually distinct.
-const ACCENTS: NodeType[] = [
-  "trigger",
-  "agent",
-  "mcp",
-  "router",
-  "http",
-  "approval",
-];
+/**
+ * Templates — the front door / onboarding path. Teaches the trigger → run →
+ * approval → done loop (hero), then a searchable, category-filtered gallery of
+ * the built-in templates. Every chain/badge/category derives from each
+ * template's REAL graph (GET /templates/:key).
+ *
+ * Install = the real fork flow made one-click: the template's graph is saved as
+ * a workflow in the active workspace via POST /graphs, under slug(name) (the
+ * same fork naming the canvas uses on Save), uniquified if the key is taken.
+ * The success view then opens the actually-created workflowKey in the canvas.
+ */
+
+interface ToastItem {
+  id: number;
+  kind: "done" | "error";
+  text: string;
+}
+
+interface Installed {
+  view: TemplateView;
+  workflowKey: string;
+}
 
 export function Templates() {
   const navigate = useNavigate();
-  const [templates, setTemplates] = useState<TemplateSummary[] | null>(null);
+  const { mode } = useMode();
+  const [views, setViews] = useState<TemplateView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [q, setQ] = useState("");
+  const [cat, setCat] = useState("all");
+  const [previewKey, setPreviewKey] = useState<string | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [installed, setInstalled] = useState<Installed | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const toastIdRef = useRef(0);
 
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
+  // Load the catalog, then each template's graph — chains, categories, approval
+  // badges, and the teaching copy all derive from the real graphs.
   useEffect(() => {
     let alive = true;
     api
       .listTemplates()
-      .then((rows) => {
+      .then((rows) =>
+        Promise.allSettled(rows.map((r) => api.getTemplate(r.key))),
+      )
+      .then((settled) => {
         if (!alive) return;
-        setTemplates(rows);
+        const ok = settled.flatMap((s) =>
+          s.status === "fulfilled" ? [deriveTemplateView(s.value)] : [],
+        );
+        if (ok.length === 0 && settled.length > 0) {
+          setError("Could not load the template graphs. Try again.");
+          return;
+        }
+        setViews(ok);
         setError(null);
       })
       .catch((e) => {
@@ -41,203 +91,333 @@ export function Templates() {
     };
   }, []);
 
+  const chips = useMemo(
+    () => (views ? deriveCategoryChips(views) : []),
+    [views],
+  );
+
+  const filtered = useMemo(() => {
+    if (!views) return [];
+    const needle = q.trim().toLowerCase();
+    return views.filter(
+      (v) =>
+        (cat === "all" || v.category.id === cat) &&
+        (!needle ||
+          `${v.name} ${v.description} ${v.category.name}`
+            .toLowerCase()
+            .includes(needle)),
+    );
+  }, [views, cat, q]);
+
+  const preview = previewKey
+    ? (views?.find((v) => v.key === previewKey) ?? null)
+    : null;
+
+  function pushToast(kind: ToastItem["kind"], text: string) {
+    const id = ++toastIdRef.current;
+    setToasts((ts) => [...ts, { id, kind, text }]);
+    timersRef.current.push(
+      setTimeout(() => setToasts((ts) => ts.filter((t) => t.id !== id)), 2600),
+    );
+  }
+
+  // The REAL install: save the template's graph as a workflow (the same call the
+  // canvas's Save issues after forking), under a fresh slug(name)-derived key so
+  // an existing workflow is never silently versioned over.
+  async function install(view: TemplateView) {
+    setInstalling(true);
+    try {
+      const existing = await api.listGraphs().catch(() => []);
+      const key = uniqueWorkflowKey(
+        view.name,
+        new Set(existing.map((g) => g.workflowKey)),
+      );
+      const saved = await api.saveGraph(key, view.name, view.graph);
+      setPreviewKey(null);
+      setInstalled({ view, workflowKey: saved.workflowKey });
+      pushToast("done", `${view.name} installed`);
+    } catch (e) {
+      pushToast(
+        "error",
+        e instanceof UnauthorizedError
+          ? "Sign in to install templates."
+          : "Couldn't install the template — is the control plane up?",
+      );
+    } finally {
+      setInstalling(false);
+    }
+  }
+
+  // Bring the success view (or restored gallery) back into view inside the
+  // shell's scrolling content region.
+  useEffect(() => {
+    rootRef.current?.scrollIntoView({ block: "start" });
+  }, [installed]);
+
+  const simple = mode === "simple";
+  // Closest real AI-generation entry point per variant: the canvas hosts the
+  // Build-with-AI panel (Builder); Simple's describe-it flow is /app/automations/new.
+  const generateTo = simple ? "/app/automations/new" : "/app/canvas";
+  const blankTo = simple ? "/app/automations/new" : "/app/canvas";
+
   return (
-    <div style={{ padding: "22px 28px 40px" }}>
-      {/* header */}
-      <div style={{ marginBottom: 18 }}>
-        <div
-          style={{
-            fontSize: "var(--text-title)",
-            fontWeight: "var(--weight-bold)",
-            color: "var(--ink)",
-            letterSpacing: "var(--tracking-tight)",
-          }}
-        >
-          Templates
-        </div>
-        <div
-          style={{
-            fontSize: "var(--text-body)",
-            color: "var(--ink-2)",
-            marginTop: 4,
-          }}
-        >
-          Production-ready agent workflows — fork in one click.
-        </div>
-      </div>
+    <div ref={rootRef}>
+      <style>{`
+        @keyframes tplPop{0%{transform:scale(.4);opacity:0}60%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
+        @keyframes tplStepIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+        .tpl-card{transition:border-color .14s,transform .14s,box-shadow .14s}
+        .tpl-card:hover{border-color:var(--line-2) !important;transform:translateY(-3px);box-shadow:0 16px 36px -22px rgba(0,0,0,.55)}
+        .tpl-card:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+      `}</style>
 
-      {error && (
-        <div
-          style={{
-            marginBottom: 14,
-            padding: "9px 12px",
-            borderRadius: "var(--radius-sm)",
-            background: "var(--error-soft)",
-            border:
-              "1px solid color-mix(in srgb, var(--state-error) 40%, transparent)",
-            color: "var(--state-error)",
-            fontSize: "var(--text-sm)",
-          }}
-        >
-          {error}
+      {installed ? (
+        <InstallSuccess
+          view={installed.view}
+          workflowKey={installed.workflowKey}
+          openLabel={simple ? "Open automation" : "Open in canvas"}
+          onOpen={() =>
+            navigate(
+              simple
+                ? `/app/automations/${encodeURIComponent(installed.workflowKey)}`
+                : `/app/canvas?key=${encodeURIComponent(installed.workflowKey)}`,
+            )
+          }
+          onBack={() => setInstalled(null)}
+        />
+      ) : (
+        <div style={{ animation: "naaryFadeUp .25s ease" }}>
+          <TeachingHero
+            onGenerate={() => navigate(generateTo)}
+            onStartBlank={() => navigate(blankTo)}
+          />
+
+          {/* gallery */}
+          <div style={{ padding: "26px 28px 40px" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                marginBottom: 18,
+                flexWrap: "wrap",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 17,
+                  fontWeight: "var(--weight-bold)",
+                  color: "var(--ink)",
+                }}
+              >
+                Start from a template
+              </div>
+              <SearchInput
+                placeholder="Search templates…"
+                kbd=""
+                value={q}
+                onChange={setQ}
+                style={{ marginLeft: "auto", width: 240 }}
+              />
+            </div>
+
+            {error && (
+              <div
+                style={{
+                  marginBottom: 14,
+                  padding: "9px 12px",
+                  borderRadius: "var(--radius-sm)",
+                  background: "var(--error-soft)",
+                  border:
+                    "1px solid color-mix(in srgb, var(--state-error) 40%, transparent)",
+                  color: "var(--state-error)",
+                  fontSize: "var(--text-sm)",
+                }}
+              >
+                {error}
+              </div>
+            )}
+
+            {/* category chips — derived from the real template set, with counts */}
+            {views && views.length > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  flexWrap: "wrap",
+                  marginBottom: 20,
+                }}
+              >
+                {chips.map((c) => {
+                  const active = cat === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setCat(c.id)}
+                      style={{
+                        fontSize: "var(--text-xs)",
+                        padding: "6px 13px",
+                        borderRadius: "var(--radius-pill)",
+                        cursor: "pointer",
+                        fontWeight: "var(--weight-medium)",
+                        fontFamily: "inherit",
+                        color: active ? "var(--ink)" : "var(--ink-faint)",
+                        background: active ? "var(--card)" : "transparent",
+                        border: `1px solid ${active ? "var(--line-2)" : "var(--line-mid)"}`,
+                        transition:
+                          "color .14s ease, background .14s ease, border-color .14s ease",
+                      }}
+                    >
+                      {c.name} <span style={{ opacity: 0.6 }}>{c.count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {views === null && !error && <GallerySkeleton />}
+
+            {views?.length === 0 && (
+              <div
+                style={{
+                  fontSize: "var(--text-body)",
+                  color: "var(--ink-3)",
+                }}
+              >
+                No templates available.
+              </div>
+            )}
+
+            {views && views.length > 0 && filtered.length > 0 && (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+                  gap: 14,
+                }}
+              >
+                {filtered.map((v) => (
+                  <TemplateCard
+                    key={v.key}
+                    view={v}
+                    onPreview={() => setPreviewKey(v.key)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {views && views.length > 0 && filtered.length === 0 && (
+              <div
+                style={{
+                  textAlign: "center",
+                  padding: 60,
+                  color: "var(--ink-faint)",
+                  fontSize: "var(--text-body)",
+                }}
+              >
+                No templates match —{" "}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQ("");
+                    setCat("all");
+                  }}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    padding: 0,
+                    color: "var(--brand)",
+                    cursor: "pointer",
+                    font: "inherit",
+                    fontWeight: "var(--weight-semibold)",
+                  }}
+                >
+                  reset filters
+                </button>
+                .
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {templates === null && !error && (
-        <div style={{ fontSize: "var(--text-body)", color: "var(--ink-3)" }}>
-          Loading…
-        </div>
+      {preview && (
+        <PreviewModal
+          view={preview}
+          installing={installing}
+          onInstall={() => void install(preview)}
+          onClose={() => setPreviewKey(null)}
+        />
       )}
 
-      {templates?.length === 0 && (
-        <div style={{ fontSize: "var(--text-body)", color: "var(--ink-3)" }}>
-          No templates available.
-        </div>
-      )}
-
-      {/* grid */}
-      {templates && templates.length > 0 && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-            gap: 14,
-          }}
-        >
-          {templates.map((t, i) => (
-            <TemplateCard
-              key={t.key}
-              t={t}
-              accent={ACCENTS[i % ACCENTS.length]}
-              onUse={() =>
-                navigate(`/app/canvas?template=${encodeURIComponent(t.key)}`)
+      {/* toasts — bottom-right, slide+scale in, auto-dismiss */}
+      <div
+        style={{
+          position: "fixed",
+          right: 24,
+          bottom: 22,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "flex-end",
+          gap: 9,
+          zIndex: 70,
+        }}
+      >
+        {/* the shared Toast (.toast) animates its own entrance */}
+        {toasts.map((t) => (
+          <div key={t.id}>
+            <Toast
+              kind={t.kind}
+              onDismiss={() =>
+                setToasts((ts) => ts.filter((x) => x.id !== t.id))
               }
-            />
-          ))}
-        </div>
-      )}
+            >
+              <span style={{ fontWeight: "var(--weight-medium)" }}>
+                {t.text}
+              </span>
+            </Toast>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-function TemplateCard({
-  t,
-  accent: accentType,
-  onUse,
-}: {
-  t: TemplateSummary;
-  accent: NodeType;
-  onUse: () => void;
-}) {
-  const accent = NODE_ACCENT[accentType];
+/** Shimmer placeholders shaped like the gallery grid while the graphs load. */
+function GallerySkeleton() {
   return (
-    <Card
-      onClick={onUse}
+    <div
       style={{
-        padding: 17,
-        display: "flex",
-        flexDirection: "column",
-        cursor: "pointer",
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+        gap: 14,
       }}
     >
-      {/* icon + node count */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 12,
-        }}
-      >
-        <span
+      {Array.from({ length: 6 }, (_, i) => (
+        <div
+          key={i}
           style={{
-            width: 38,
-            height: 38,
-            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--line-mid)",
+            background: "var(--card)",
+            borderRadius: "var(--radius-xl)",
+            padding: 18,
             display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flex: "none",
-            background: `color-mix(in srgb, ${accent} 16%, transparent)`,
-            color: accent,
+            flexDirection: "column",
+            gap: 13,
           }}
         >
-          <Icon name="workflow" size={19} />
-        </span>
-        <span
-          className="mono"
-          style={{
-            fontSize: "var(--text-2xs)",
-            color: "var(--ink-3)",
-            background: "var(--surface)",
-            border: "1px solid var(--line)",
-            padding: "2px 7px",
-            borderRadius: "var(--radius-xs)",
-          }}
-        >
-          {t.nodeCount} nodes
-        </span>
-      </div>
-
-      <div
-        style={{
-          fontSize: "var(--text-md)",
-          fontWeight: "var(--weight-semibold)",
-          color: "var(--ink)",
-        }}
-      >
-        {t.name}
-      </div>
-      <div
-        style={{
-          fontSize: "var(--text-sm)",
-          color: "var(--ink-2)",
-          marginTop: 5,
-          lineHeight: 1.5,
-          flex: 1,
-        }}
-      >
-        {t.description}
-      </div>
-
-      {/* footer */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginTop: 14,
-        }}
-      >
-        <span
-          className="mono"
-          style={{ fontSize: "var(--text-2xs)", color: "var(--ink-3)" }}
-        >
-          {t.key}
-        </span>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onUse();
-          }}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            border: "none",
-            background: "transparent",
-            cursor: "pointer",
-            padding: 0,
-            fontSize: "var(--text-xs)",
-            fontWeight: "var(--weight-semibold)",
-            color: "var(--brand)",
-          }}
-        >
-          Use template
-          <Icon name="chevron-right" size={13} strokeWidth={2} />
-        </button>
-      </div>
-    </Card>
+          <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+            <Skeleton width={38} height={38} radius={10} />
+            <div style={{ flex: 1 }}>
+              <Skeleton width="55%" height={14} />
+              <Skeleton width="30%" height={10} style={{ marginTop: 6 }} />
+            </div>
+          </div>
+          <Skeleton width="100%" height={12} />
+          <Skeleton width="80%" height={12} />
+          <Skeleton width="60%" height={24} />
+        </div>
+      ))}
+    </div>
   );
 }
