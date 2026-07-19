@@ -42,6 +42,7 @@ export const BUILDER_MODES: NavMode[] = [
         icon: "edit",
         external: true,
       },
+      { to: "/app/catalog", label: "Node catalog", icon: "router" },
       { to: "/app/templates", label: "Templates", icon: "template" },
     ],
   },
@@ -71,7 +72,6 @@ export const BUILDER_MODES: NavMode[] = [
     tagline: "what happened",
     items: [
       { to: "/app/observability", label: "Insights & logs", icon: "chart" },
-      { to: "/app/activity", label: "Activity", icon: "clock" },
       { to: "/app/billing", label: "Usage & budgets", icon: "card" },
     ],
   },
