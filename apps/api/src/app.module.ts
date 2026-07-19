@@ -20,6 +20,7 @@ import { HealthModule } from "./health/health.module";
 import { McpModule } from "./mcp/mcp.module";
 import { MembersModule } from "./members/members.module";
 import { V1Module } from "./v1/v1.module";
+import { WorkersModule } from "./workers/workers.module";
 import { MembershipModule } from "./membership/membership.module";
 import { CompaniesModule } from "./companies/companies.module";
 import { VariablesModule } from "./variables/variables.module";
@@ -72,6 +73,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     SchedulesModule,
     McpModule,
     V1Module,
+    WorkersModule,
   ],
   controllers: [MetricsController],
   providers: [
