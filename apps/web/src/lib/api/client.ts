@@ -18,6 +18,7 @@
  *    401, AccessNotAllowedError on a 403 access_not_allowed, HttpError otherwise — so call
  *    sites that `try/catch` (or expect the unwrapped value) behave identically.
  */
+import * as Sentry from "@sentry/react";
 import createClient, { type Middleware } from "openapi-fetch";
 import { getBearerToken } from "../firebase";
 import {
@@ -47,6 +48,15 @@ export const authMiddleware: Middleware = {
     if (workspaceId) request.headers.set("x-workspace-id", workspaceId);
     const environmentId = getActiveEnvironment();
     if (environmentId) request.headers.set("x-environment-id", environmentId);
+    // Propagate the active Sentry trace to the API so a browser action links to the API request
+    // → workflow → activity as ONE distributed trace (the backend continues it). We set the headers
+    // explicitly rather than relying on Sentry's fetch auto-instrumentation reaching openapi-fetch's
+    // internal fetch. Only OUR API is called here (baseUrl "/api"), so there's no cross-origin leak.
+    // getTraceData() returns {} when Sentry is off (no DSN), so this is a no-op then.
+    const trace = Sentry.getTraceData();
+    if (trace["sentry-trace"])
+      request.headers.set("sentry-trace", trace["sentry-trace"]);
+    if (trace.baggage) request.headers.set("baggage", trace.baggage);
     return request;
   },
 };

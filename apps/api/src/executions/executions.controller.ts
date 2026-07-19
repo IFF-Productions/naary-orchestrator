@@ -7,7 +7,7 @@ import {
   Post,
   Query,
 } from "@nestjs/common";
-import { ApiBearerAuth } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiQuery } from "@nestjs/swagger";
 import {
   CurrentPrincipal,
   EnvironmentSel,
@@ -101,6 +101,9 @@ export class ExecutionsController {
       "Recent runs for the tenant (newest first). `archived=true` shows the archived runs instead.",
     ok: [RunListItemResponse],
   })
+  // OPTIONAL: without this the Nest plugin marks `archived` required+string in the spec, forcing every
+  // generated client to send it. It's optional — omit for the default (active) list.
+  @ApiQuery({ name: "archived", required: false, type: Boolean })
   @Get()
   listRuns(
     @TenantId() tenantId: string,

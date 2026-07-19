@@ -169,13 +169,12 @@ export const runsApi = {
       }),
     );
   },
-  // Recent runs for the tenant. `archived` returns the hidden runs instead of the default list.
-  // The spec requires the `archived` query param; the server treats anything but "true" as false,
-  // so an explicit "false" reproduces the old (unset) default-list behaviour.
+  // Recent runs for the tenant. `archived` returns the hidden runs instead of the default list;
+  // the query param is optional (omit it for the default list).
   async listRuns(archived = false): Promise<RunListItem[]> {
     return unwrap(
       await client.GET("/executions", {
-        params: { query: { archived: archived ? "true" : "false" } },
+        params: { query: archived ? { archived: true } : {} },
       }),
     );
   },

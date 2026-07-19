@@ -4602,8 +4602,8 @@ export interface operations {
    */
   ExecutionsController_listRuns: {
     parameters: {
-      query: {
-        archived: string;
+      query?: {
+        archived?: boolean;
       };
     };
     responses: {

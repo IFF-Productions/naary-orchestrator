@@ -7,9 +7,9 @@
  * instantiated or resolved — so nothing connects to Postgres or Temporal. That
  * makes this safe to run in CI (and offline) purely to snapshot the API surface.
  *
- * The config below is kept in lock-step with apps/api/src/main.ts's Swagger block:
- * if that DocumentBuilder changes, mirror it here (the drift check will catch a
- * stale spec, not a stale builder — keep them aligned by hand).
+ * The DocumentBuilder config is SHARED with apps/api/src/main.ts via
+ * `buildOpenApiConfig()` (./swagger/openapi-config), so the served docs and this
+ * emitted spec can't drift — there's nothing to keep aligned by hand.
  *
  * Run: `pnpm --filter @naary/api gen:openapi` (see package.json).
  */
@@ -54,7 +54,7 @@ async function emit(): Promise<void> {
     await app.close();
     throw new Error(
       "OpenAPI document has zero paths — the controller scan produced nothing. " +
-        "Preview mode may not have registered routes; check the fallback in emit-openapi.ts.",
+        "Preview mode may not have registered routes (check the @nestjs/core version supports it).",
     );
   }
 
