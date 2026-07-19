@@ -31,3 +31,23 @@ export class CloseSessionDto {
   @IsIn(["saved", "done"])
   reason!: "saved" | "done";
 }
+
+/** Send a conversation turn — a natural-language change to apply to the working draft. */
+export class SendTurnDto {
+  @ApiProperty({
+    example: "Add a Slack notification after the approval step.",
+    description: "The change to apply, in plain language.",
+  })
+  @IsString()
+  @MaxLength(4000)
+  message!: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      "Model provider to generate with (anthropic|openai|google|claude-code). Defaults to the workspace's configured provider.",
+  })
+  @IsOptional()
+  @IsString()
+  provider?: string;
+}

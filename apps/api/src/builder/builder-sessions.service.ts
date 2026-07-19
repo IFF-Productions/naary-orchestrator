@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { getPrisma } from "@naary/db";
+import { getPrisma, Prisma } from "@naary/db";
+import type { GraphDef } from "@naary/dsl";
 import { GraphsService } from "../graphs/graphs.service";
 import type {
   BuilderSessionResponse,
@@ -115,6 +116,84 @@ export class BuilderSessionsService {
       throw new NotFoundException("Builder session not found.");
     }
     return toSession(row as unknown as SessionRow);
+  }
+
+  /** Lean load for the turn endpoint — status + working draft + env + title only (no turns).
+   *  Tenant-scoped; 404 if it isn't this workspace's (the owner check before we stream). */
+  async getForTurn(
+    tenantId: string,
+    id: string,
+  ): Promise<{
+    id: string;
+    status: string;
+    environmentId: string | null;
+    title: string | null;
+    currentGraph: GraphDef | null;
+  }> {
+    const row = await getPrisma().builderSession.findFirst({
+      where: { id, tenantId },
+      select: {
+        id: true,
+        status: true,
+        environmentId: true,
+        title: true,
+        currentGraph: true,
+      },
+    });
+    if (!row) {
+      throw new NotFoundException("Builder session not found.");
+    }
+    return {
+      id: row.id,
+      status: row.status,
+      environmentId: row.environmentId,
+      title: row.title,
+      currentGraph: (row.currentGraph as GraphDef | null) ?? null,
+    };
+  }
+
+  /**
+   * Persist a completed edit turn ATOMICALLY (Slice 2): the user message + the assistant
+   * change-summary as two BuilderTurns, and the new working draft on the session — in one
+   * transaction, so a partial write can't leave a turn without its graph (or vice-versa). Only
+   * writes to an OPEN session (a close that raced the stream wins; the turn is dropped). Sets the
+   * title from the first message when it's still unset. Called only after generation SUCCEEDS —
+   * on failure nothing is written and the user simply retries.
+   */
+  async applyTurn(
+    tenantId: string,
+    id: string,
+    input: {
+      userMessage: string;
+      graph: GraphDef;
+      assistantSummary: string;
+      costUsd: number;
+      titleIfUnset?: string;
+    },
+  ): Promise<void> {
+    await getPrisma().$transaction(async (tx) => {
+      // Guard on status inside the txn: if the session closed mid-stream, write nothing.
+      const updated = await tx.builderSession.updateMany({
+        where: { id, tenantId, status: "open" },
+        data: {
+          currentGraph: input.graph as unknown as Prisma.InputJsonValue,
+          ...(input.titleIfUnset ? { title: input.titleIfUnset } : {}),
+        },
+      });
+      if (updated.count === 0) return; // closed/gone — drop the turn rather than resurrect it
+      await tx.builderTurn.create({
+        data: { sessionId: id, role: "user", content: input.userMessage },
+      });
+      await tx.builderTurn.create({
+        data: {
+          sessionId: id,
+          role: "assistant",
+          content: input.assistantSummary,
+          // Decimal(12,6) — fix to 6 places so we never lose sub-cent precision to float.
+          costUsd: new Prisma.Decimal(input.costUsd.toFixed(6)),
+        },
+      });
+    });
   }
 
   /** Close a session. Idempotent: closing an already-closed session returns it unchanged (the

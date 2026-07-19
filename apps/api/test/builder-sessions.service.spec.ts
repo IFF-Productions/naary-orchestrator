@@ -7,9 +7,22 @@ const builderSession = {
   findMany: vi.fn(),
   updateMany: vi.fn(),
 };
+const builderTurn = { create: vi.fn() };
+// $transaction runs the callback with a tx client exposing the same models.
+const tx = { builderSession, builderTurn };
+const $transaction = vi.fn(async (cb: (t: typeof tx) => unknown) => cb(tx));
 
 vi.mock("@naary/db", () => ({
-  getPrisma: () => ({ builderSession }),
+  getPrisma: () => ({ builderSession, builderTurn, $transaction }),
+  // Minimal Prisma.Decimal stub — records the value + supports toNumber() for round-trips.
+  Prisma: {
+    Decimal: class {
+      constructor(public value: string) {}
+      toNumber() {
+        return Number(this.value);
+      }
+    },
+  },
 }));
 
 import { BuilderSessionsService } from "../src/builder/builder-sessions.service";
@@ -46,9 +59,13 @@ beforeEach(() => {
     builderSession.findFirst,
     builderSession.findMany,
     builderSession.updateMany,
+    builderTurn.create,
+    $transaction,
     getLatest,
   ])
     m.mockReset();
+  // Default: $transaction re-invokes the callback with the tx client.
+  $transaction.mockImplementation(async (cb) => cb(tx));
 });
 
 describe("BuilderSessionsService.open", () => {
@@ -234,5 +251,106 @@ describe("BuilderSessionsService.listOpen", () => {
         updatedAt: NOW.toISOString(),
       },
     ]);
+  });
+});
+
+describe("BuilderSessionsService.getForTurn — lean, tenant-scoped", () => {
+  it("returns status + draft + env + title (no turns)", async () => {
+    const graph = { startNodeId: "n1", nodes: [{ id: "n1" }], edges: [] };
+    builderSession.findFirst.mockResolvedValue({
+      id: "s-1",
+      status: "open",
+      environmentId: "env-prod",
+      title: null,
+      currentGraph: graph,
+    });
+
+    const out = await svc.getForTurn("t-1", "s-1");
+
+    expect(builderSession.findFirst).toHaveBeenCalledWith({
+      where: { id: "s-1", tenantId: "t-1" },
+      select: {
+        id: true,
+        status: true,
+        environmentId: true,
+        title: true,
+        currentGraph: true,
+      },
+    });
+    expect(out).toEqual({
+      id: "s-1",
+      status: "open",
+      environmentId: "env-prod",
+      title: null,
+      currentGraph: graph,
+    });
+  });
+
+  it("404s for a cross-tenant id", async () => {
+    builderSession.findFirst.mockResolvedValue(null);
+    await expect(svc.getForTurn("t-1", "s-other")).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+});
+
+describe("BuilderSessionsService.applyTurn — atomic, status-guarded", () => {
+  const graph = { startNodeId: "n1", nodes: [{ id: "n1" }], edges: [] };
+
+  it("writes the draft + both turns in one transaction (title set when unset)", async () => {
+    builderSession.updateMany.mockResolvedValue({ count: 1 });
+
+    await svc.applyTurn("t-1", "s-1", {
+      userMessage: "Add Slack",
+      graph: graph as never,
+      assistantSummary: "Updated — 1 node, 0 edges.",
+      costUsd: 0.0123,
+      titleIfUnset: "Add Slack",
+    });
+
+    expect($transaction).toHaveBeenCalledTimes(1);
+    // Draft + title updated only for an OPEN session.
+    expect(builderSession.updateMany).toHaveBeenCalledWith({
+      where: { id: "s-1", tenantId: "t-1", status: "open" },
+      data: { currentGraph: graph, title: "Add Slack" },
+    });
+    // User turn then assistant turn (with a Decimal cost).
+    expect(builderTurn.create).toHaveBeenCalledTimes(2);
+    expect(builderTurn.create).toHaveBeenNthCalledWith(1, {
+      data: { sessionId: "s-1", role: "user", content: "Add Slack" },
+    });
+    const assistant = builderTurn.create.mock.calls[1][0];
+    expect(assistant.data.role).toBe("assistant");
+    expect(assistant.data.content).toBe("Updated — 1 node, 0 edges.");
+    expect(assistant.data.costUsd.toNumber()).toBeCloseTo(0.0123, 6);
+  });
+
+  it("omits the title when already set (titleIfUnset undefined)", async () => {
+    builderSession.updateMany.mockResolvedValue({ count: 1 });
+
+    await svc.applyTurn("t-1", "s-1", {
+      userMessage: "tweak",
+      graph: graph as never,
+      assistantSummary: "…",
+      costUsd: 0.01,
+    });
+
+    expect(builderSession.updateMany).toHaveBeenCalledWith({
+      where: { id: "s-1", tenantId: "t-1", status: "open" },
+      data: { currentGraph: graph }, // no title key
+    });
+  });
+
+  it("drops the turn (writes NO turns) when the session closed mid-stream", async () => {
+    builderSession.updateMany.mockResolvedValue({ count: 0 }); // status guard matched nothing
+
+    await svc.applyTurn("t-1", "s-1", {
+      userMessage: "late",
+      graph: graph as never,
+      assistantSummary: "…",
+      costUsd: 0.01,
+    });
+
+    expect(builderTurn.create).not.toHaveBeenCalled();
   });
 });
