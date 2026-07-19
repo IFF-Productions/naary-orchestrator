@@ -1,43 +1,62 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Button, Card, Icon } from "../../components";
-import { api, HttpError, type Member, UnauthorizedError } from "../../lib/api";
+import { Button, Dialog, Skeleton, Tabs, TextInput } from "../../components";
+import {
+  api,
+  HttpError,
+  type Member,
+  type PermissionGroup,
+  UnauthorizedError,
+} from "../../lib/api";
+import { workspaceHasAnyGrant } from "../../lib/permissions-logic";
+import { MembersTable } from "./team/MembersTable";
+import { roleCounts } from "./team/model";
+import { RolesAccess } from "./team/RolesAccess";
 
-const ROLE_COLOR: Record<string, string> = {
-  owner: "var(--brand)",
-  admin: "var(--ink)",
-  member: "var(--ink-2)",
-};
+type Tab = "members" | "roles";
 
 /**
- * Team (RBAC U1): Membership-backed members + pending invitations. Adding a teammate
- * creates an INVITATION — they join when they sign in with that email verified. Roles are
- * ENFORCED: owner/admin manage the team; only owners grant admin/owner.
+ * Team (redesign, RBAC U1 data): Membership-backed members + pending invitations,
+ * with the honest capability/approval story. Two tabs — Members (legend chips,
+ * table, pending-invite footer rows, invite dialog) and Roles & access (real
+ * owner/admin/member capabilities + the permission-groups bridge to /app/groups).
+ *
+ * Roles are ENFORCED server-side: owner/admin manage the team; only owners grant
+ * admin/owner. The UI mirrors those gates — it never invents an affordance the
+ * API would 403.
  */
-export function Team() {
-  const navigate = useNavigate();
+export function Team({ initialTab = "members" }: { initialTab?: Tab }) {
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [tenant, setTenant] = useState<string | null>(null);
   const [myRole, setMyRole] = useState<string | null>(null);
   const [members, setMembers] = useState<Member[] | null>(null);
+  // null = not fetchable for this caller (GET groups is owner/admin-only).
+  const [groups, setGroups] = useState<PermissionGroup[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // invite dialog
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("member");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
 
-  // Only owners may grant/revoke admin/owner (server-enforced) — gate the select to match.
+  const canManage = myRole === "owner" || myRole === "admin";
+  // Only owners may grant/revoke admin/owner (server-enforced) — gate the select.
   const roleOptions =
     myRole === "owner" ? ["owner", "admin", "member"] : ["member"];
-  const canManage = myRole === "owner" || myRole === "admin";
 
   async function load() {
     try {
       const me = await api.getMe();
       setTenant(me.tenantId);
-      const [rows, workspaces] = await Promise.all([
+      const [rows, workspaces, grps] = await Promise.all([
         api.listMembers(me.tenantId),
         api.getMyWorkspaces().catch(() => []),
+        // Owner/admin-only endpoint — members get the honest fallback copy.
+        api.listGroups(me.tenantId).catch(() => null),
       ]);
       setMembers(rows);
+      setGroups(grps);
       setMyRole(
         workspaces.find((w) => w.tenantId === me.tenantId)?.role ?? null,
       );
@@ -53,6 +72,7 @@ export function Team() {
 
   useEffect(() => {
     void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function describe(e: unknown, fallback: string): string {
@@ -75,13 +95,14 @@ export function Team() {
   async function invite() {
     if (!tenant || !email.trim()) return;
     setBusy(true);
-    setError(null);
+    setInviteError(null);
     try {
       await api.inviteMember(tenant, email.trim(), role);
       setEmail("");
+      setInviteOpen(false);
       setMembers(await api.listMembers(tenant));
     } catch (e) {
-      setError(
+      setInviteError(
         describe(e, "Could not send the invitation (is the email valid?)."),
       );
     } finally {
@@ -127,34 +148,68 @@ export function Team() {
   const activeCount = members?.filter((m) => m.status === "active").length ?? 0;
   const invitedCount =
     members?.filter((m) => m.status === "invited").length ?? 0;
+  const restricted = groups ? workspaceHasAnyGrant(groups) : null;
 
   return (
-    <div style={{ padding: "22px 28px 40px", maxWidth: 920 }}>
-      <div style={{ marginBottom: 16 }}>
-        <div
-          style={{
-            fontSize: "var(--text-title)",
-            fontWeight: "var(--weight-bold)",
-            letterSpacing: "var(--tracking-tight)",
-            color: "var(--ink)",
-          }}
-        >
-          Team
+    <div style={{ padding: "22px 28px 40px", maxWidth: 1180 }}>
+      {/* header: title + summary · tabs · Invite CTA */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 12,
+          marginBottom: 18,
+        }}
+      >
+        <div style={{ marginRight: "auto" }}>
+          <h1
+            style={{
+              fontSize: "var(--text-title)",
+              fontWeight: "var(--weight-bold)",
+              letterSpacing: "var(--tracking-tight)",
+              color: "var(--ink)",
+              margin: 0,
+            }}
+          >
+            Team
+          </h1>
+          <div
+            style={{
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-2)",
+              marginTop: 2,
+            }}
+          >
+            {members
+              ? `${activeCount} member${activeCount === 1 ? "" : "s"}` +
+                (invitedCount
+                  ? ` · ${invitedCount} pending invite${invitedCount === 1 ? "" : "s"}`
+                  : "") +
+                " · roles gate who can approve"
+              : "Invitees join when they sign in with a verified matching email."}
+          </div>
         </div>
-        <div
-          style={{
-            fontSize: "var(--text-sm)",
-            color: "var(--ink-2)",
-            marginTop: 2,
-          }}
-        >
-          {members
-            ? `${activeCount} member${activeCount === 1 ? "" : "s"}${
-                invitedCount ? ` · ${invitedCount} invited` : ""
-              } · `
-            : ""}
-          invitees join when they sign in with a verified matching email.
-        </div>
+        <Tabs<Tab>
+          tabs={[
+            { value: "members", label: "Members" },
+            { value: "roles", label: "Roles & access" },
+          ]}
+          active={tab}
+          onChange={setTab}
+        />
+        {canManage && (
+          <Button
+            variant="primary"
+            icon="plus"
+            onClick={() => {
+              setInviteError(null);
+              setInviteOpen(true);
+            }}
+          >
+            Invite
+          </Button>
+        )}
       </div>
 
       {error && (
@@ -172,21 +227,96 @@ export function Team() {
         </div>
       )}
 
-      {/* invite form — owner/admin only (server-enforced; hidden for members) */}
-      {canManage && (
-        <Card style={{ padding: 14, marginBottom: 16 }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="teammate@company.com"
-              style={inputStyle}
-              type="email"
-            />
+      {members === null && !error && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <Skeleton height={30} width={340} radius={20} />
+          <Skeleton height={220} radius={14} />
+        </div>
+      )}
+
+      {members !== null && tab === "members" && (
+        <div style={{ animation: "naaryFadeUp .25s ease" }}>
+          <MembersTable
+            members={members}
+            groups={groups}
+            restricted={restricted}
+            myRole={myRole}
+            onChangeRole={(m, r) => void changeRole(m, r)}
+            onRemove={(m) => void remove(m)}
+            onRevoke={(m) => void remove(m)}
+          />
+        </div>
+      )}
+
+      {members !== null && tab === "roles" && (
+        <div style={{ animation: "naaryFadeUp .25s ease" }}>
+          <RolesAccess groups={groups} counts={roleCounts(members)} />
+        </div>
+      )}
+
+      {/* invite dialog (the existing invite flow, restyled) */}
+      <Dialog
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        title="Invite a teammate"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setInviteOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              icon="plus"
+              loading={busy}
+              disabled={!email.trim()}
+              onClick={() => void invite()}
+            >
+              Send invite
+            </Button>
+          </>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div
+            style={{
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-2)",
+              lineHeight: 1.5,
+            }}
+          >
+            They join the moment they sign in with this email verified — no
+            email is sent by Naary.
+          </div>
+          <TextInput
+            type="email"
+            placeholder="teammate@company.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoFocus
+          />
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-2)",
+            }}
+          >
+            Role
             <select
               value={role}
               onChange={(e) => setRole(e.target.value)}
-              style={{ ...inputStyle, width: 120, flex: "none" }}
+              style={{
+                flex: 1,
+                padding: "8px 10px",
+                borderRadius: "var(--radius-sm)",
+                border: "1px solid var(--line-2)",
+                background: "var(--card)",
+                color: "var(--ink)",
+                fontSize: "var(--text-body)",
+                fontFamily: "var(--font-sans)",
+              }}
             >
               {roleOptions.map((r) => (
                 <option key={r} value={r}>
@@ -194,146 +324,27 @@ export function Team() {
                 </option>
               ))}
             </select>
-            <Button
-              variant="primary"
-              icon="plus"
-              disabled={busy || !email.trim()}
-              onClick={() => void invite()}
-            >
-              {busy ? "Inviting…" : "Invite"}
-            </Button>
-          </div>
-        </Card>
-      )}
-
-      {/* members + pending invitations */}
-      <Card style={{ padding: 0, overflow: "hidden" }}>
-        {members === null && !error && (
-          <div
-            style={{
-              padding: 16,
-              fontSize: "var(--text-sm)",
-              color: "var(--ink-3)",
-            }}
-          >
-            Loading…
-          </div>
-        )}
-        {members?.length === 0 && (
-          <div
-            style={{
-              padding: 16,
-              fontSize: "var(--text-sm)",
-              color: "var(--ink-3)",
-            }}
-          >
-            No members yet — invite your first teammate above.
-          </div>
-        )}
-        {members?.map((m) => (
-          <div
-            key={m.id}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              padding: "11px 16px",
-              borderTop: "1px solid var(--line)",
-            }}
-          >
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  fontSize: "var(--text-body)",
-                  fontWeight: "var(--weight-medium)",
-                  color: "var(--ink)",
-                }}
-              >
-                {m.email || m.userId}
-              </div>
+          </label>
+          {myRole !== "owner" && (
+            <div style={{ fontSize: "var(--text-2xs)", color: "var(--ink-3)" }}>
+              Only the workspace owner can invite admins or owners.
             </div>
-            {m.status === "invited" && (
-              <span
-                style={{
-                  fontSize: "var(--text-xs)",
-                  fontWeight: "var(--weight-semibold)",
-                  color: "var(--ink-3)",
-                  border: "1px solid var(--line-2)",
-                  borderRadius: 999,
-                  padding: "2px 8px",
-                }}
-              >
-                Invited
-              </span>
-            )}
-            {m.status === "active" && myRole === "owner" ? (
-              <select
-                value={m.role}
-                aria-label="Change role"
-                onChange={(e) => void changeRole(m, e.target.value)}
-                style={{
-                  ...inputStyle,
-                  flex: "none",
-                  width: 104,
-                  padding: "4px 6px",
-                  fontSize: "var(--text-xs)",
-                  fontWeight: "var(--weight-semibold)",
-                  color: ROLE_COLOR[m.role] ?? "var(--ink-2)",
-                }}
-              >
-                {["owner", "admin", "member"].map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <span
-                style={{
-                  fontSize: "var(--text-xs)",
-                  fontWeight: "var(--weight-semibold)",
-                  color: ROLE_COLOR[m.role] ?? "var(--ink-2)",
-                }}
-              >
-                {m.role}
-              </span>
-            )}
-            {canManage && (
-              <button
-                type="button"
-                aria-label={
-                  m.status === "invited" ? "Revoke invitation" : "Remove member"
-                }
-                onClick={() => void remove(m)}
-                style={{
-                  border: "none",
-                  background: "transparent",
-                  cursor: "pointer",
-                  color: "var(--ink-3)",
-                }}
-              >
-                <Icon name="trash" size={15} />
-              </button>
-            )}
-          </div>
-        ))}
-      </Card>
-
-      <div style={{ marginTop: 14 }}>
-        <Button variant="secondary" onClick={() => navigate("/app/settings")}>
-          Workspace settings →
-        </Button>
-      </div>
+          )}
+          {inviteError && (
+            <div
+              style={{
+                padding: "8px 11px",
+                borderRadius: "var(--radius-sm)",
+                background: "var(--error-soft)",
+                color: "var(--state-error)",
+                fontSize: "var(--text-sm)",
+              }}
+            >
+              {inviteError}
+            </div>
+          )}
+        </div>
+      </Dialog>
     </div>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  flex: 1,
-  padding: "8px 10px",
-  borderRadius: "var(--radius-sm)",
-  border: "1px solid var(--line-2)",
-  background: "var(--card)",
-  color: "var(--ink)",
-  fontSize: "var(--text-body)",
-};
