@@ -705,6 +705,7 @@ export function Schedules() {
                 >
                   <Switch
                     checked={!r.paused}
+                    aria-label={`${r.paused ? "Resume" : "Pause"} the ${nameOf(r.workflowKey)} schedule`}
                     onChange={() => void togglePause(r)}
                   />
                 </span>

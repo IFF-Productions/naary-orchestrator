@@ -13,20 +13,21 @@ test("start a run, approve it, and see it complete", async ({ page }) => {
   // Lands on the run-detail view.
   await expect(page).toHaveURL(/\/app\/runs\/.+/);
 
-  // The run pauses at the approval node → Approve button appears (polled state).
-  const approve = page.getByRole("button", { name: "Approve", exact: true });
+  // The run pauses at the approval node → the calm paused hero's decide-in-place
+  // button appears (polled state).
+  const approve = page.getByRole("button", { name: "Approve & resume" });
   await expect(approve).toBeVisible({ timeout: 15_000 });
 
   await approve.click();
 
   // After approval the run completes; the status reflects it and Approve is gone.
-  await expect(page.getByText("Completed").first()).toBeVisible({
+  await expect(page.getByText("Run completed").first()).toBeVisible({
     timeout: 15_000,
   });
   await expect(approve).toBeHidden();
 
-  // The execution log (curated Temporal history) shows the run's events.
-  await expect(page.getByText("Execution log")).toBeVisible();
+  // The log panel (curated Temporal history) shows the run's events.
+  await expect(page.getByText("Logs")).toBeVisible();
   await expect(page.getByText("Run started")).toBeVisible();
   await expect(page.getByText("Run completed")).toBeVisible();
   await expect(page.getByText("Signal: approval")).toBeVisible();

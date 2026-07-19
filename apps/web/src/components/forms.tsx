@@ -148,15 +148,18 @@ export function Select({
 export function Switch({
   checked,
   onChange,
+  "aria-label": ariaLabel,
 }: {
   checked: boolean;
   onChange?: (v: boolean) => void;
+  "aria-label"?: string;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-label={ariaLabel}
       className={`switch${checked ? " on" : ""}`}
       onClick={() => onChange?.(!checked)}
     >

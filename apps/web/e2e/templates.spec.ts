@@ -1,16 +1,26 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Using a template loads its graph into the canvas as a NEW draft (forked) —
- * previously this 404'd because the canvas tried to open it as a saved workflow.
+ * Installing a template saves it as a real workflow (unique key) and the
+ * success view's "Open in canvas" opens that saved workflow.
  */
-test("use a template forks it into the canvas", async ({ page }) => {
+test("install a template and open it in the canvas", async ({ page }) => {
   await page.goto("/app/templates");
 
-  await page.getByRole("button", { name: "Use template" }).first().click();
+  // Open the first template's preview, then install it.
+  await page
+    .getByRole("button", { name: /^Preview / })
+    .first()
+    .click();
+  await page.getByRole("button", { name: "Install template" }).click();
 
-  await expect(page).toHaveURL(/\/app\/canvas\?template=/);
-  // The template graph loaded (nodes rendered) + the forked status shows.
-  await expect(page.getByText(/Forked from template/)).toBeVisible();
+  // The install-success walkthrough appears.
+  await expect(page.getByText(/installed/i).first()).toBeVisible({
+    timeout: 15_000,
+  });
+
+  // Open in canvas → the SAVED workflow (?key=…), nodes render.
+  await page.getByRole("button", { name: "Open in canvas" }).click();
+  await expect(page).toHaveURL(/\/app\/canvas\?key=/);
   await expect(page.locator(".react-flow__node").first()).toBeVisible();
 });

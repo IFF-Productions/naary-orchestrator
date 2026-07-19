@@ -10,11 +10,12 @@ test("authenticated app shell renders", async ({ page }) => {
   // Not bounced to the sign-in screen.
   await expect(page).toHaveURL(/\/app$/);
 
-  // The shell chrome: nav links + the sign-out control. (The brand is a flame
-  // Icon with no text, so we anchor on the nav + sign-out instead of brand text.)
+  // The shell chrome: nav links + the sign-out control (now inside the avatar
+  // menu in the context bar).
   await expect(page.getByRole("link", { name: "Overview" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Workflows" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await page.getByRole("button", { name: "Account" }).click();
+  await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
 });
 
 test("unauthenticated visit redirects to /auth", async ({ browser }) => {
