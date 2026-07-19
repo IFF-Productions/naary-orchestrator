@@ -139,7 +139,7 @@ export interface paths {
   "/graphs/generate/stream": {
     /**
      * Generate a draft workflow from a description (SSE)
-     * @description Same as POST /graphs/generate, delivered as text/event-stream with `: ping` heartbeats. Terminal frames: `event: result` ({name, graph}) or `event: error` ({status, message, code?}).
+     * @description Same as POST /graphs/generate, delivered as text/event-stream with `: ping` heartbeats. For the API-model providers the graph streams live: `event: meta` ({name}) once known, then `event: node` (a node) + `event: edge` (an edge) as each completes. Terminal frames: `event: result` ({name, graph} — the authoritative validated graph) or `event: error` ({status, message, code?}). Clients that only handle result/error stay compatible (node/edge/meta are ignored).
      */
     post: operations["GraphsController_generateStream"];
   };
@@ -189,12 +189,12 @@ export interface paths {
   "/tenants/{id}/schedules": {
     /**
      * List schedules
-     * @description The tenant's recurring schedules.
+     * @description The active environment's recurring schedules.
      */
     get: operations["SchedulesController_list"];
     /**
      * Create a schedule
-     * @description Creates a cron-backed recurring run for a workflow.
+     * @description Creates a cron-backed recurring run for a workflow in the active environment.
      */
     post: operations["SchedulesController_create"];
   };
@@ -355,14 +355,14 @@ export interface paths {
   "/tenants/{id}/usage": {
     /**
      * Get usage & spend
-     * @description Aggregated + line-item spend from the usage ledger. Optional from/to (ISO date) window.
+     * @description Aggregated + line-item spend from the usage ledger. Optional from/to (ISO date) window. Restricted members see only events of workflows they can view.
      */
     get: operations["UsageController_get"];
   };
   "/tenants/{id}/usage/insights": {
     /**
      * Get usage insights
-     * @description Spend & tokens rolled up by day (time-series), environment, workflow, and model. Optional from/to (ISO date) window and environmentId filter.
+     * @description Spend & tokens rolled up by day (time-series), environment, workflow, and model. Optional from/to (ISO date) window and environmentId filter. Restricted members see only events of workflows they can view.
      */
     get: operations["UsageController_insights"];
   };
@@ -635,6 +635,43 @@ export interface paths {
      */
     delete: operations["CompaniesController_removeMember"];
   };
+  "/companies/{id}/groups": {
+    /**
+     * List the company's permission groups
+     * @description Every group with its members and grant. Company owner only.
+     */
+    get: operations["CompanyGroupsController_list"];
+    /**
+     * Create a company permission group
+     * @description Name is unique per company (409). Company owner only.
+     */
+    post: operations["CompanyGroupsController_create"];
+  };
+  "/companies/{id}/groups/{groupId}": {
+    /**
+     * Delete a company permission group
+     * @description Removes the group with its members and grant — revoking that access in every attached workspace where the members were restricted.
+     */
+    delete: operations["CompanyGroupsController_remove"];
+    /** Rename a company permission group */
+    patch: operations["CompanyGroupsController_rename"];
+  };
+  "/companies/{id}/groups/{groupId}/members/{userId}": {
+    /**
+     * Add a company member to a group
+     * @description The target (by Firebase uid) must hold a CompanyMembership in this company — 400 otherwise. Idempotent. Company owner only.
+     */
+    post: operations["CompanyGroupsController_addMember"];
+    /** Remove a member from a company group */
+    delete: operations["CompanyGroupsController_removeMember"];
+  };
+  "/companies/{id}/groups/{groupId}/grant": {
+    /**
+     * Set the group's company-wide grant
+     * @description Upserts the group's single grant row (PUT replace semantics — absent verbs become false). Applies to ALL workflows in ALL attached workspaces, every environment (v1). Only ADDS access back for members a workspace has already restricted; never restricts anyone.
+     */
+    put: operations["CompanyGroupsController_setGrant"];
+  };
   "/variables": {
     /** List variables (active environment) */
     get: operations["VariablesController_list"];
@@ -817,7 +854,7 @@ export interface paths {
     put: operations["V1WorkflowsController_put"];
     /**
      * Delete a workflow
-     * @description Removes this workflow's definition (and its schedules/triggers when deleting the default env's copy) in the active env.
+     * @description Removes this workflow's definition, schedules, and triggers in the active env.
      */
     delete: operations["V1WorkflowsController_remove"];
   };
@@ -886,6 +923,13 @@ export interface paths {
      * @description Spend & tokens (tokens + cost only) rolled up by day, environment, workflow, and model for the token's tenant. Optional ISO ?from & ?to window and ?environmentId filter (all environments if omitted).
      */
     get: operations["V1ConfigController_getInsights"];
+  };
+  "/workers": {
+    /**
+     * List worker replicas
+     * @description The connected worker fleet with live slot usage (activeActivities/maxActivities), version, and online/stale. Owner/admin only.
+     */
+    get: operations["WorkersController_list"];
   };
 }
 
@@ -958,6 +1002,8 @@ export interface components {
       canShare: boolean;
       canCreate: boolean;
       workflowKeys: string[];
+      /** @description Tag ids carried by this 'selected' grant (effective keys = workflowKeys ∪ keys tagged with any of these). Empty for scope 'all'. */
+      tagIds: string[];
     };
     GroupResponse: {
       id: string;
@@ -1017,6 +1063,13 @@ export interface components {
        * ]
        */
       workflowKeys?: string[];
+      /**
+       * @description Tag ids for scope 'selected' (replace-set on update; must belong to the workspace). Effective keys = workflowKeys ∪ every key carrying ANY of these tags (§9 tag-scoped grants). NOTE: the workspace's first TagGrant makes tags access-bearing — tag edits then require the Promote permission. Ignored for scope 'all'.
+       * @example [
+       *   "tag-id-1"
+       * ]
+       */
+      tagIds?: string[];
     };
     VerbAccessResponse: {
       /** @description true = every workflow (keys is then empty). */
@@ -2226,6 +2279,63 @@ export interface components {
        */
       role: "owner" | "admin";
     };
+    CompanyGroupMemberResponse: {
+      /** @description Firebase uid — must be a company member. */
+      userId: string;
+      createdAt: string;
+    };
+    CompanyGrantResponse: {
+      /** @example d41b… */
+      id: string;
+      canView: boolean;
+      canRun: boolean;
+      canEdit: boolean;
+      canDelete: boolean;
+      /** @description share = promote to another environment. */
+      canShare: boolean;
+      canCreate: boolean;
+      createdAt: string;
+    };
+    CompanyGroupResponse: {
+      id: string;
+      /** @example Platform admins */
+      name: string;
+      createdAt: string;
+      members: components["schemas"]["CompanyGroupMemberResponse"][];
+      /** @description The group's single grant; null while none is set. */
+      grant: components["schemas"]["CompanyGrantResponse"] | null;
+    };
+    CreateCompanyGroupDto: {
+      /**
+       * @description Group name — unique per company.
+       * @example Platform admins
+       */
+      name: string;
+    };
+    RenameCompanyGroupDto: {
+      /** @example Platform admins (EU) */
+      name: string;
+    };
+    CompanyGrantDto: {
+      /** @example true */
+      canView?: boolean;
+      /** @example true */
+      canRun?: boolean;
+      /** @example false */
+      canEdit?: boolean;
+      /** @example false */
+      canDelete?: boolean;
+      /**
+       * @description share = promote to another environment, nothing more.
+       * @example false
+       */
+      canShare?: boolean;
+      /**
+       * @description Create NEW workflows. Always coherent here — company grants are 'all'-scope.
+       * @example false
+       */
+      canCreate?: boolean;
+    };
     VariableResponse: {
       /**
        * @description The `$vars.` key.
@@ -2755,6 +2865,39 @@ export interface components {
       byModel: components["schemas"]["UsageByModelResponse"][];
       /** @description Per-call line items (newest first). Tokens + cost only. */
       events: components["schemas"]["UsageEventResponse"][];
+    };
+    WorkerResponse: {
+      /**
+       * @description Stable identity `<host>/<pid>/<version>`.
+       * @example worker-7f3a/12/v0.0.10
+       */
+      identity: string;
+      /** @example worker-7f3a */
+      host: string;
+      /** @example v0.0.10 */
+      version: string;
+      /** @example orchestrator */
+      taskQueue: string;
+      /**
+       * @description Activities executing on this replica right now (live slot usage).
+       * @example 3
+       */
+      activeActivities: number;
+      /**
+       * @description Configured activity-slot capacity for this replica.
+       * @example 100
+       */
+      maxActivities: number;
+      /**
+       * @description Whether the replica is heartbeating (last seen within the staleness window).
+       * @example true
+       */
+      online: boolean;
+      /**
+       * Format: date-time
+       * @example 2026-08-02T12:00:00.000Z
+       */
+      lastSeen: string;
     };
   };
   responses: never;
@@ -3792,7 +3935,7 @@ export interface operations {
   };
   /**
    * Generate a draft workflow from a description (SSE)
-   * @description Same as POST /graphs/generate, delivered as text/event-stream with `: ping` heartbeats. Terminal frames: `event: result` ({name, graph}) or `event: error` ({status, message, code?}).
+   * @description Same as POST /graphs/generate, delivered as text/event-stream with `: ping` heartbeats. For the API-model providers the graph streams live: `event: meta` ({name}) once known, then `event: node` (a node) + `event: edge` (an edge) as each completes. Terminal frames: `event: result` ({name, graph} — the authoritative validated graph) or `event: error` ({status, message, code?}). Clients that only handle result/error stay compatible (node/edge/meta are ignored).
    */
   GraphsController_generateStream: {
     requestBody: {
@@ -4177,7 +4320,7 @@ export interface operations {
   };
   /**
    * List schedules
-   * @description The tenant's recurring schedules.
+   * @description The active environment's recurring schedules.
    */
   SchedulesController_list: {
     parameters: {
@@ -4219,7 +4362,7 @@ export interface operations {
   };
   /**
    * Create a schedule
-   * @description Creates a cron-backed recurring run for a workflow.
+   * @description Creates a cron-backed recurring run for a workflow in the active environment.
    */
   SchedulesController_create: {
     parameters: {
@@ -5401,7 +5544,7 @@ export interface operations {
   };
   /**
    * Get usage & spend
-   * @description Aggregated + line-item spend from the usage ledger. Optional from/to (ISO date) window.
+   * @description Aggregated + line-item spend from the usage ledger. Optional from/to (ISO date) window. Restricted members see only events of workflows they can view.
    */
   UsageController_get: {
     parameters: {
@@ -5447,7 +5590,7 @@ export interface operations {
   };
   /**
    * Get usage insights
-   * @description Spend & tokens rolled up by day (time-series), environment, workflow, and model. Optional from/to (ISO date) window and environmentId filter.
+   * @description Spend & tokens rolled up by day (time-series), environment, workflow, and model. Optional from/to (ISO date) window and environmentId filter. Restricted members see only events of workflows they can view.
    */
   UsageController_insights: {
     parameters: {
@@ -7367,6 +7510,343 @@ export interface operations {
       };
     };
   };
+  /**
+   * List the company's permission groups
+   * @description Every group with its members and grant. Company owner only.
+   */
+  CompanyGroupsController_list: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompanyGroupResponse"][];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Create a company permission group
+   * @description Name is unique per company (409). Company owner only.
+   */
+  CompanyGroupsController_create: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateCompanyGroupDto"];
+      };
+    };
+    responses: {
+      201: {
+        content: {
+          "application/json": components["schemas"]["CompanyGroupResponse"];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description The resource is in a state that conflicts with the request. */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete a company permission group
+   * @description Removes the group with its members and grant — revoking that access in every attached workspace where the members were restricted.
+   */
+  CompanyGroupsController_remove: {
+    parameters: {
+      path: {
+        id: string;
+        groupId: string;
+      };
+    };
+    responses: {
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Resource not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /** Rename a company permission group */
+  CompanyGroupsController_rename: {
+    parameters: {
+      path: {
+        id: string;
+        groupId: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RenameCompanyGroupDto"];
+      };
+    };
+    responses: {
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompanyGroupResponse"];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Resource not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description The resource is in a state that conflicts with the request. */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Add a company member to a group
+   * @description The target (by Firebase uid) must hold a CompanyMembership in this company — 400 otherwise. Idempotent. Company owner only.
+   */
+  CompanyGroupsController_addMember: {
+    parameters: {
+      path: {
+        id: string;
+        groupId: string;
+        userId: string;
+      };
+    };
+    responses: {
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Resource not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /** Remove a member from a company group */
+  CompanyGroupsController_removeMember: {
+    parameters: {
+      path: {
+        id: string;
+        groupId: string;
+        userId: string;
+      };
+    };
+    responses: {
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Resource not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Set the group's company-wide grant
+   * @description Upserts the group's single grant row (PUT replace semantics — absent verbs become false). Applies to ALL workflows in ALL attached workspaces, every environment (v1). Only ADDS access back for members a workspace has already restricted; never restricts anyone.
+   */
+  CompanyGroupsController_setGrant: {
+    parameters: {
+      path: {
+        id: string;
+        groupId: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CompanyGrantDto"];
+      };
+    };
+    responses: {
+      200: {
+        content: {
+          "application/json": components["schemas"]["CompanyGrantResponse"];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Resource not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   /** List variables (active environment) */
   VariablesController_list: {
     responses: {
@@ -8789,7 +9269,7 @@ export interface operations {
   };
   /**
    * Delete a workflow
-   * @description Removes this workflow's definition (and its schedules/triggers when deleting the default env's copy) in the active env.
+   * @description Removes this workflow's definition, schedules, and triggers in the active env.
    */
   V1WorkflowsController_remove: {
     parameters: {
@@ -9241,6 +9721,43 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["InsightsResponse"];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * List worker replicas
+   * @description The connected worker fleet with live slot usage (activeActivities/maxActivities), version, and online/stale. Owner/admin only.
+   */
+  WorkersController_list: {
+    responses: {
+      200: {
+        content: {
+          "application/json": components["schemas"]["WorkerResponse"][];
         };
       };
       /** @description Validation error / malformed request. */

@@ -1995,7 +1995,7 @@
     },
     "/graphs/generate/stream": {
       "post": {
-        "description": "Same as POST /graphs/generate, delivered as text/event-stream with `: ping` heartbeats. Terminal frames: `event: result` ({name, graph}) or `event: error` ({status, message, code?}).",
+        "description": "Same as POST /graphs/generate, delivered as text/event-stream with `: ping` heartbeats. For the API-model providers the graph streams live: `event: meta` ({name}) once known, then `event: node` (a node) + `event: edge` (an edge) as each completes. Terminal frames: `event: result` ({name, graph} — the authoritative validated graph) or `event: error` ({status, message, code?}). Clients that only handle result/error stay compatible (node/edge/meta are ignored).",
         "operationId": "GraphsController_generateStream",
         "parameters": [],
         "requestBody": {
@@ -2717,7 +2717,7 @@
     },
     "/tenants/{id}/schedules": {
       "get": {
-        "description": "The tenant's recurring schedules.",
+        "description": "The active environment's recurring schedules.",
         "operationId": "SchedulesController_list",
         "parameters": [
           {
@@ -2795,7 +2795,7 @@
         ]
       },
       "post": {
-        "description": "Creates a cron-backed recurring run for a workflow.",
+        "description": "Creates a cron-backed recurring run for a workflow in the active environment.",
         "operationId": "SchedulesController_create",
         "parameters": [
           {
@@ -5051,7 +5051,7 @@
     },
     "/tenants/{id}/usage": {
       "get": {
-        "description": "Aggregated + line-item spend from the usage ledger. Optional from/to (ISO date) window.",
+        "description": "Aggregated + line-item spend from the usage ledger. Optional from/to (ISO date) window. Restricted members see only events of workflows they can view.",
         "operationId": "UsageController_get",
         "parameters": [
           {
@@ -5144,7 +5144,7 @@
     },
     "/tenants/{id}/usage/insights": {
       "get": {
-        "description": "Spend & tokens rolled up by day (time-series), environment, workflow, and model. Optional from/to (ISO date) window and environmentId filter.",
+        "description": "Spend & tokens rolled up by day (time-series), environment, workflow, and model. Optional from/to (ISO date) window and environmentId filter. Restricted members see only events of workflows they can view.",
         "operationId": "UsageController_insights",
         "parameters": [
           {
@@ -8849,6 +8849,666 @@
         ]
       }
     },
+    "/companies/{id}/groups": {
+      "get": {
+        "description": "Every group with its members and grant. Company owner only.",
+        "operationId": "CompanyGroupsController_list",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CompanyGroupResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the company's permission groups",
+        "tags": [
+          "CompanyGroups"
+        ]
+      },
+      "post": {
+        "description": "Name is unique per company (409). Company owner only.",
+        "operationId": "CompanyGroupsController_create",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCompanyGroupDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyGroupResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The resource is in a state that conflicts with the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a company permission group",
+        "tags": [
+          "CompanyGroups"
+        ]
+      }
+    },
+    "/companies/{id}/groups/{groupId}": {
+      "patch": {
+        "operationId": "CompanyGroupsController_rename",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "groupId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameCompanyGroupDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyGroupResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The resource is in a state that conflicts with the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rename a company permission group",
+        "tags": [
+          "CompanyGroups"
+        ]
+      },
+      "delete": {
+        "description": "Removes the group with its members and grant — revoking that access in every attached workspace where the members were restricted.",
+        "operationId": "CompanyGroupsController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "groupId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a company permission group",
+        "tags": [
+          "CompanyGroups"
+        ]
+      }
+    },
+    "/companies/{id}/groups/{groupId}/members/{userId}": {
+      "post": {
+        "description": "The target (by Firebase uid) must hold a CompanyMembership in this company — 400 otherwise. Idempotent. Company owner only.",
+        "operationId": "CompanyGroupsController_addMember",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "groupId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add a company member to a group",
+        "tags": [
+          "CompanyGroups"
+        ]
+      },
+      "delete": {
+        "operationId": "CompanyGroupsController_removeMember",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "groupId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove a member from a company group",
+        "tags": [
+          "CompanyGroups"
+        ]
+      }
+    },
+    "/companies/{id}/groups/{groupId}/grant": {
+      "put": {
+        "description": "Upserts the group's single grant row (PUT replace semantics — absent verbs become false). Applies to ALL workflows in ALL attached workspaces, every environment (v1). Only ADDS access back for members a workspace has already restricted; never restricts anyone.",
+        "operationId": "CompanyGroupsController_setGrant",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "groupId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompanyGrantDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyGrantResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set the group's company-wide grant",
+        "tags": [
+          "CompanyGroups"
+        ]
+      }
+    },
     "/variables": {
       "get": {
         "operationId": "VariablesController_list",
@@ -11532,7 +12192,7 @@
         ]
       },
       "delete": {
-        "description": "Removes this workflow's definition (and its schedules/triggers when deleting the default env's copy) in the active env.",
+        "description": "Removes this workflow's definition, schedules, and triggers in the active env.",
         "operationId": "V1WorkflowsController_remove",
         "parameters": [
           {
@@ -12437,6 +13097,77 @@
           "v1"
         ]
       }
+    },
+    "/workers": {
+      "get": {
+        "description": "The connected worker fleet with live slot usage (activeActivities/maxActivities), version, and online/stale. Owner/admin only.",
+        "operationId": "WorkersController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WorkerResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List worker replicas",
+        "tags": [
+          "Workers"
+        ]
+      }
     }
   },
   "info": {
@@ -12603,6 +13334,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "tagIds": {
+            "description": "Tag ids carried by this 'selected' grant (effective keys = workflowKeys ∪ keys tagged with any of these). Empty for scope 'all'.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -12614,7 +13352,8 @@
           "canDelete",
           "canShare",
           "canCreate",
-          "workflowKeys"
+          "workflowKeys",
+          "tagIds"
         ]
       },
       "GroupResponse": {
@@ -12733,6 +13472,16 @@
               "billing-digest"
             ],
             "description": "Workflow keys for scope 'selected' (replace-set on update). Ignored for scope 'all'.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tagIds": {
+            "example": [
+              "tag-id-1"
+            ],
+            "description": "Tag ids for scope 'selected' (replace-set on update; must belong to the workspace). Effective keys = workflowKeys ∪ every key carrying ANY of these tags (§9 tag-scoped grants). NOTE: the workspace's first TagGrant makes tags access-bearing — tag edits then require the Promote permission. Ignored for scope 'all'.",
             "type": "array",
             "items": {
               "type": "string"
@@ -15176,6 +15925,157 @@
           "role"
         ]
       },
+      "CompanyGroupMemberResponse": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "description": "Firebase uid — must be a company member."
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "createdAt"
+        ]
+      },
+      "CompanyGrantResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "d41b…"
+          },
+          "canView": {
+            "type": "boolean"
+          },
+          "canRun": {
+            "type": "boolean"
+          },
+          "canEdit": {
+            "type": "boolean"
+          },
+          "canDelete": {
+            "type": "boolean"
+          },
+          "canShare": {
+            "type": "boolean",
+            "description": "share = promote to another environment."
+          },
+          "canCreate": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "canView",
+          "canRun",
+          "canEdit",
+          "canDelete",
+          "canShare",
+          "canCreate",
+          "createdAt"
+        ]
+      },
+      "CompanyGroupResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Platform admins"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompanyGroupMemberResponse"
+            }
+          },
+          "grant": {
+            "nullable": true,
+            "description": "The group's single grant; null while none is set.",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CompanyGrantResponse"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "createdAt",
+          "members",
+          "grant"
+        ]
+      },
+      "CreateCompanyGroupDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Platform admins",
+            "description": "Group name — unique per company."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "RenameCompanyGroupDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Platform admins (EU)"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "CompanyGrantDto": {
+        "type": "object",
+        "properties": {
+          "canView": {
+            "type": "boolean",
+            "example": true
+          },
+          "canRun": {
+            "type": "boolean",
+            "example": true
+          },
+          "canEdit": {
+            "type": "boolean",
+            "example": false
+          },
+          "canDelete": {
+            "type": "boolean",
+            "example": false
+          },
+          "canShare": {
+            "type": "boolean",
+            "example": false,
+            "description": "share = promote to another environment, nothing more."
+          },
+          "canCreate": {
+            "type": "boolean",
+            "example": false,
+            "description": "Create NEW workflows. Always coherent here — company grants are 'all'-scope."
+          }
+        }
+      },
       "VariableResponse": {
         "type": "object",
         "properties": {
@@ -16116,6 +17016,58 @@
           "totalTokens",
           "byModel",
           "events"
+        ]
+      },
+      "WorkerResponse": {
+        "type": "object",
+        "properties": {
+          "identity": {
+            "type": "string",
+            "example": "worker-7f3a/12/v0.0.10",
+            "description": "Stable identity `<host>/<pid>/<version>`."
+          },
+          "host": {
+            "type": "string",
+            "example": "worker-7f3a"
+          },
+          "version": {
+            "type": "string",
+            "example": "v0.0.10"
+          },
+          "taskQueue": {
+            "type": "string",
+            "example": "orchestrator"
+          },
+          "activeActivities": {
+            "type": "number",
+            "example": 3,
+            "description": "Activities executing on this replica right now (live slot usage)."
+          },
+          "maxActivities": {
+            "type": "number",
+            "example": 100,
+            "description": "Configured activity-slot capacity for this replica."
+          },
+          "online": {
+            "type": "boolean",
+            "example": true,
+            "description": "Whether the replica is heartbeating (last seen within the staleness window)."
+          },
+          "lastSeen": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-08-02T12:00:00.000Z"
+          }
+        },
+        "required": [
+          "identity",
+          "host",
+          "version",
+          "taskQueue",
+          "activeActivities",
+          "maxActivities",
+          "online",
+          "lastSeen"
         ]
       }
     }
