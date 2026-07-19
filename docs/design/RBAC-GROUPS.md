@@ -18,8 +18,9 @@ want to gate admins, or company-scoped grants now, stop — that is a different 
 
 Confirmed product decisions (user, Jul 2026 — full list §8): groups are per-workspace; a grant
 carries a SIX-verb matrix (`view` / `run` / `edit` / `delete` / `share`=promote /
-`create`); grants are env-scoped from v1; tags are organizational metadata only — grants never
-reference tags in v1 (the schema deliberately does not preclude tag-scoped grants later);
+`create`); grants are env-scoped from v1; tags were organizational metadata only in v1 — the
+tag-scoped-grant seam has since SHIPPED (`TagGrant`, §3/§9: 'selected' grants may name tags,
+union semantics, tag edits share-gated once a tenant adopts them);
 **API tokens are RBAC subjects, restricted by default** under the same first-grant cliff (§4a).
 
 ## 1. Motivation
@@ -152,6 +153,22 @@ model WorkflowGrantKey {
   workflowKey String
   @@id([grantId, workflowKey])
 }
+
+// Tag-scoped grants (§9 seam, SHIPPED): a 'selected'-scope grant may also name TAGS — its
+// effective keys = its WorkflowGrantKey list ∪ the workflowKeys carrying ANY of its tags
+// (union semantics, resolved at read time from WorkflowTag and baked into the cached
+// flattened keys, so downstream matching is unchanged). Both FKs Cascade: deleting a grant
+// or a tag cleans its rows (a deleted tag simply stops carrying access). Because tag
+// MEMBERSHIP then carries access, tag edits are share-gated in adopting tenants — see §4.
+model TagGrant {
+  grantId   String
+  grant     WorkflowGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+  tagId     String
+  tag       Tag           @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  createdAt DateTime      @default(now())
+  @@id([grantId, tagId])
+  @@index([tagId])
+}
 ```
 
 Six booleans over a string-set column: queryable, typo-proof, and the matrix is fixed at six
@@ -188,7 +205,14 @@ explicit `enforceGroups` toggle — is §8 decision 1.)
 - **Share = `promote` only (§8.2):** the permission to copy the workflow toward another
   environment. Share does NOT include editing grant key-lists, creating groups, changing
   permission booleans, or managing group membership — all of that stays owner/admin. The share
-  grant must match the promote's SOURCE environment. Tag editing is **edit**, not share.
+  grant must match the promote's SOURCE environment.
+- **Tag editing is CONDITIONALLY gated (user-confirmed, with tag-scoped grants):** while the
+  tenant has ZERO `TagGrant` rows, `tags PUT` is the **edit** verb (v1 behavior —
+  migration-neutral). The moment the workspace has ≥1 `TagGrant`, tag membership carries
+  access, so `tags PUT` requires **share** (promote) on that workflow instead — otherwise an
+  edit-only member could grant themselves (or others) access just by tagging a workflow. The
+  403 explains why ("tags carry permissions in this workspace — promoting rights are required
+  to change them"). The switch is a cheap cached existence check beside the first-grant cliff.
 - **Action → surface matrix** (enforced in services; list endpoints FILTER, single-resource
   endpoints 403):
 
@@ -196,9 +220,9 @@ explicit `enforceGroups` toggle — is §8 decision 1.)
 |---|---|
 | view | graphs list (filter)/get/versions/diff/promotions/error-handler GET; pins GET; G3: execution reads scoped to viewable keys (SPA + v1) |
 | run | manual start + rerun (SPA + v1); single-node test |
-| edit | save (via `WorkflowLifecycleService.saveWorkflow` — covers SPA + v1), activation toggle, error-handler PUT, pins PUT/DELETE, tags PUT |
+| edit | save (via `WorkflowLifecycleService.saveWorkflow` — covers SPA + v1), activation toggle, error-handler PUT, pins PUT/DELETE, tags PUT *while the tenant has zero TagGrants* |
 | delete | `WorkflowLifecycleService.deleteWorkflow` (SPA + v1) |
-| share | `GraphsService.promote` (SPA + v1) + `'selected'` grant key-listing |
+| share | `GraphsService.promote` (SPA + v1) + `'selected'` grant key-listing + tags PUT *once the tenant has ≥1 TagGrant* (tags are then access-bearing) |
 | ungated | `POST /graphs/generate` (draft only — the save is gated) |
 
 - **Mechanism:** new `apps/api/src/permissions/permissions.service.ts` —
@@ -310,6 +334,9 @@ members-route role gates (a security fix, flagged in its PR) and the Member→In
 
 ## 9. Seams
 
-Tag-scoped grants (`TagGrant` beside `WorkflowGrantKey`, union semantics); env-scoped grants
-(`WorkflowGrant.environmentId?`); company-role composition (COMPANIES §9); `Promotion` rows remain
-the promote audit substrate (ENVIRONMENTS §6).
+Tag-scoped grants (`TagGrant` beside `WorkflowGrantKey`, union semantics) — **SHIPPED** (§3
+model; grantsFor expands tag-carried keys into the cached flattened list; tag edits become
+share-gated in adopting tenants per §4; cost insights/usage are filtered to the subject's
+viewable workflows via the shared view-terms helper). Env-scoped grants
+(`WorkflowGrant.environmentId?`) — shipped in v1 (§8.5). Still open: company-role composition
+(COMPANIES §9); `Promotion` rows remain the promote audit substrate (ENVIRONMENTS §6).

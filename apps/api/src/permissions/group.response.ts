@@ -17,6 +17,13 @@ export class GrantResponse {
   @ApiProperty() canShare!: boolean;
   @ApiProperty() canCreate!: boolean;
   @ApiProperty({ type: [String] }) workflowKeys!: string[];
+  @ApiProperty({
+    type: [String],
+    description:
+      "Tag ids carried by this 'selected' grant (effective keys = workflowKeys ∪ keys " +
+      "tagged with any of these). Empty for scope 'all'.",
+  })
+  tagIds!: string[];
 }
 
 export class GroupMemberResponse {

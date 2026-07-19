@@ -33,9 +33,14 @@ import {
   draftToPayload,
   emptyGrantDraft,
   workspaceHasAnyGrant,
+  workspaceHasAnyTagGrant,
 } from "../../lib/permissions-logic";
 import { invalidateMyPermissions } from "../../lib/usePermissions";
-import { GrantEditorDialog, type WorkflowOption } from "./groups/GrantEditor";
+import {
+  GrantEditorDialog,
+  type TagOption,
+  type WorkflowOption,
+} from "./groups/GrantEditor";
 
 /** The grant-editor session: which group, and (edit flow) which grant. */
 interface EditorTarget {
@@ -52,6 +57,7 @@ export function Groups() {
   const [tokens, setTokens] = useState<ApiTokenRow[]>([]);
   const [envs, setEnvs] = useState<Environment[]>([]);
   const [workflows, setWorkflows] = useState<WorkflowOption[]>([]);
+  const [tags, setTags] = useState<TagOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notAllowed, setNotAllowed] = useState(false);
 
@@ -72,6 +78,7 @@ export function Groups() {
 
   const canManage = myRole === "owner" || myRole === "admin";
   const hasAnyGrant = workspaceHasAnyGrant(groups ?? []);
+  const hasAnyTagGrant = workspaceHasAnyTagGrant(groups ?? []);
   // uid → email for member rows (GroupView carries uids only).
   const emailByUid = useMemo(() => {
     const m = new Map<string, string>();
@@ -91,15 +98,23 @@ export function Groups() {
         const me = await api.getMe();
         if (!live) return;
         setTenant(me.tenantId);
-        const [workspaces, groupList, memberList, tokenList, envList, graphs] =
-          await Promise.all([
-            api.getMyWorkspaces().catch(() => []),
-            api.listGroups(me.tenantId),
-            api.listMembers(me.tenantId).catch(() => []),
-            api.listApiTokens().catch(() => []),
-            api.listEnvironments(me.tenantId).catch(() => []),
-            api.listGraphs().catch(() => []),
-          ]);
+        const [
+          workspaces,
+          groupList,
+          memberList,
+          tokenList,
+          envList,
+          graphs,
+          tagList,
+        ] = await Promise.all([
+          api.getMyWorkspaces().catch(() => []),
+          api.listGroups(me.tenantId),
+          api.listMembers(me.tenantId).catch(() => []),
+          api.listApiTokens().catch(() => []),
+          api.listEnvironments(me.tenantId).catch(() => []),
+          api.listGraphs().catch(() => []),
+          api.listTags().catch(() => []),
+        ]);
         if (!live) return;
         setMyRole(
           workspaces.find((w) => w.tenantId === me.tenantId)?.role ?? null,
@@ -110,6 +125,9 @@ export function Groups() {
         setEnvs(envList);
         setWorkflows(
           graphs.map((g) => ({ workflowKey: g.workflowKey, name: g.name })),
+        );
+        setTags(
+          tagList.map((t) => ({ id: t.id, name: t.name, color: t.color })),
         );
       } catch (e) {
         if (!live) return;
@@ -667,7 +685,10 @@ export function Groups() {
                     >
                       {grant.scope === "all"
                         ? "all workflows"
-                        : `${grant.workflowKeys.length} workflow${grant.workflowKeys.length === 1 ? "" : "s"}`}
+                        : `${grant.workflowKeys.length} workflow${grant.workflowKeys.length === 1 ? "" : "s"}` +
+                          ((grant.tagIds ?? []).length > 0
+                            ? ` + ${grant.tagIds.length} tag${grant.tagIds.length === 1 ? "" : "s"}`
+                            : "")}
                     </span>
                     <span
                       style={{
@@ -742,6 +763,8 @@ export function Groups() {
           initial={editor.initial}
           envs={envs}
           workflows={workflows}
+          tags={tags}
+          tagGrantsExist={hasAnyTagGrant}
           busy={editorBusy}
           error={editorError}
           onSave={requestSave}

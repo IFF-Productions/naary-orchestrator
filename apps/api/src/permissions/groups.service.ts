@@ -9,7 +9,7 @@ import { getPrisma } from "@naary/db";
 import type { Principal } from "../auth/tenant.decorator";
 import { PermissionsService } from "./permissions.service";
 
-/** A grant as the API returns it (env id + scope + the six verbs + key list). */
+/** A grant as the API returns it (env id + scope + the six verbs + key list + tag list). */
 export interface GrantView {
   id: string;
   environmentId: string | null;
@@ -21,6 +21,9 @@ export interface GrantView {
   canShare: boolean;
   canCreate: boolean;
   workflowKeys: string[];
+  /** Tag ids this 'selected' grant carries (§9 seam): effective keys = workflowKeys ∪ the
+   *  keys tagged with ANY of these. Empty for scope 'all'. */
+  tagIds: string[];
 }
 
 export interface GroupView {
@@ -43,6 +46,9 @@ export interface GrantInput {
   canShare?: boolean;
   canCreate?: boolean;
   workflowKeys?: string[];
+  /** Tag ids for scope 'selected' (replace-set on update; must belong to the tenant).
+   *  Ignored for scope 'all' — like workflowKeys. */
+  tagIds?: string[];
 }
 
 /** Group/grant CRUD requires owner|admin (RBAC-GROUPS.md §4 — same gate as member
@@ -57,9 +63,10 @@ function assertManager(caller: Principal): void {
 
 const GRANT_INCLUDE = {
   workflows: { select: { workflowKey: true } },
+  tagGrants: { select: { tagId: true } },
 } as const;
 
-/** The grant row shape the service reads back (with its key list included). */
+/** The grant row shape the service reads back (with its key + tag lists included). */
 interface GrantRow {
   id: string;
   environmentId: string | null;
@@ -71,6 +78,7 @@ interface GrantRow {
   canShare: boolean;
   canCreate: boolean;
   workflows: { workflowKey: string }[];
+  tagGrants?: { tagId: string }[];
 }
 
 /**
@@ -273,6 +281,10 @@ export class GroupsService {
     );
     const keys =
       scope === "selected" ? this.normalizeKeys(input.workflowKeys) : [];
+    const tagIds =
+      scope === "selected"
+        ? await this.validTagIds(tenantId, input.tagIds)
+        : [];
     const row = await getPrisma().workflowGrant.create({
       data: {
         tenantId,
@@ -286,6 +298,9 @@ export class GroupsService {
         canShare: input.canShare ?? false,
         canCreate: input.canCreate ?? false,
         workflows: { create: keys.map((workflowKey) => ({ workflowKey })) },
+        ...(tagIds.length > 0
+          ? { tagGrants: { create: tagIds.map((tagId) => ({ tagId })) } }
+          : {}),
       },
       include: GRANT_INCLUDE,
     });
@@ -330,6 +345,12 @@ export class GroupsService {
           ? this.normalizeKeys(input.workflowKeys)
           : undefined // keep the existing key list
         : []; // 'all' scope carries no key list
+    const tagIds =
+      scope === "selected"
+        ? input.tagIds !== undefined
+          ? await this.validTagIds(tenantId, input.tagIds)
+          : undefined // keep the existing tag list
+        : []; // 'all' scope carries no tag list
     const update = p.workflowGrant.update({
       where: { id: grantId },
       data: {
@@ -348,19 +369,29 @@ export class GroupsService {
               },
             }
           : {}),
+        ...(tagIds !== undefined && tagIds.length > 0
+          ? { tagGrants: { create: tagIds.map((tagId) => ({ tagId })) } }
+          : {}),
       },
       include: GRANT_INCLUDE,
     });
     let row: Awaited<typeof update>;
-    if (keys === undefined) {
-      // Key list untouched — a single update suffices.
+    if (keys === undefined && tagIds === undefined) {
+      // Neither list touched — a single update suffices.
       row = await update;
     } else {
-      // Replace-set: clear the old key list and write the new one atomically.
-      [, row] = await p.$transaction([
-        p.workflowGrantKey.deleteMany({ where: { grantId } }),
-        update,
-      ]);
+      // Replace-set: for each TOUCHED list, clear the old rows and write the new ones
+      // atomically alongside the update. An untouched list never costs a delete.
+      const clears = [
+        ...(keys !== undefined
+          ? [p.workflowGrantKey.deleteMany({ where: { grantId } })]
+          : []),
+        ...(tagIds !== undefined
+          ? [p.tagGrant.deleteMany({ where: { grantId } })]
+          : []),
+      ];
+      const results = await p.$transaction([...clears, update]);
+      row = results[results.length - 1] as Awaited<typeof update>;
     }
     this.permissions.invalidateTenant(tenantId);
     return this.grantView(row);
@@ -415,6 +446,26 @@ export class GroupsService {
     return [...new Set((keys ?? []).map((k) => k.trim()).filter(Boolean))];
   }
 
+  /** Dedupe + validate that every tag id belongs to the tenant (400 otherwise — never
+   *  reference a foreign tenant's tag from a grant). */
+  private async validTagIds(
+    tenantId: string,
+    tagIds: string[] | undefined,
+  ): Promise<string[]> {
+    const unique = [...new Set((tagIds ?? []).filter(Boolean))];
+    if (unique.length === 0) return [];
+    const owned = await getPrisma().tag.findMany({
+      where: { id: { in: unique }, tenantId },
+      select: { id: true },
+    });
+    if (owned.length !== unique.length) {
+      throw new BadRequestException(
+        "One or more tag ids are unknown for this workspace.",
+      );
+    }
+    return unique;
+  }
+
   /** The group, tenant-scoped — 404 when it isn't this workspace's (never cross-tenant). */
   private async getOwned(tenantId: string, groupId: string) {
     const row = await getPrisma().permissionGroup.findFirst({
@@ -461,6 +512,7 @@ export class GroupsService {
       canShare: r.canShare,
       canCreate: r.canCreate,
       workflowKeys: r.workflows.map((w) => w.workflowKey),
+      tagIds: (r.tagGrants ?? []).map((t) => t.tagId),
     };
   }
 }

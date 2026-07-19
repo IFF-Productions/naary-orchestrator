@@ -140,13 +140,21 @@ describe("V1ConfigController — usage", () => {
       ],
     });
 
-    const out = await ctrl.getUsage("t-1", "2026-07-01", "2026-07-15");
+    const principal = { tenantId: "t-1", role: "member", tokenId: "tok-1" };
+    const out = await ctrl.getUsage(
+      "t-1",
+      "2026-07-01",
+      "2026-07-15",
+      principal as never,
+    );
 
-    // tenant from the token; from/to passed straight through (usage is not env-scoped).
+    // tenant from the token; from/to passed straight through (usage is not env-scoped);
+    // the principal rides along so RESTRICTED tokens get the RBAC view filter.
     expect(usage.getUsage).toHaveBeenCalledWith(
       "t-1",
       "2026-07-01",
       "2026-07-15",
+      principal,
     );
     expect(out.totalCostUsd).toBe(1.2345);
     expect(out.totalTokens).toBe(123456);
@@ -181,9 +189,14 @@ describe("V1ConfigController — usage", () => {
       events: [],
     });
 
-    const out = await ctrl.getUsage("t-1", undefined, undefined);
+    const out = await ctrl.getUsage("t-1", undefined, undefined, undefined);
 
-    expect(usage.getUsage).toHaveBeenCalledWith("t-1", undefined, undefined);
+    expect(usage.getUsage).toHaveBeenCalledWith(
+      "t-1",
+      undefined,
+      undefined,
+      undefined,
+    );
     expect(out).toEqual({
       totalCostUsd: 0,
       totalTokens: 0,
@@ -220,19 +233,26 @@ describe("V1ConfigController — insights", () => {
   it("passes ?from&to&environmentId through and maps the rollup to the v1 shape", async () => {
     usage.getInsights.mockResolvedValue(INSIGHTS);
 
+    const principal = { tenantId: "t-1", role: "member", tokenId: "tok-1" };
     const out = await ctrl.getInsights(
       "t-1",
       "2026-07-01",
       "2026-07-31",
       "env-prod",
+      principal as never,
     );
 
-    // tenant from the token; the env filter is an explicit query param (cross-env rollup).
-    expect(usage.getInsights).toHaveBeenCalledWith("t-1", {
-      from: "2026-07-01",
-      to: "2026-07-31",
-      environmentId: "env-prod",
-    });
+    // tenant from the token; the env filter is an explicit query param (cross-env rollup);
+    // the principal rides along so RESTRICTED tokens get the RBAC view filter.
+    expect(usage.getInsights).toHaveBeenCalledWith(
+      "t-1",
+      {
+        from: "2026-07-01",
+        to: "2026-07-31",
+        environmentId: "env-prod",
+      },
+      principal,
+    );
     expect(out).toEqual(INSIGHTS);
     // null env/workflow buckets survive the mapping (not dropped).
     expect(out.byEnvironment[1].environmentId).toBeNull();
@@ -249,12 +269,16 @@ describe("V1ConfigController — insights", () => {
       byModel: [],
     });
 
-    await ctrl.getInsights("t-1", undefined, undefined, undefined);
+    await ctrl.getInsights("t-1", undefined, undefined, undefined, undefined);
 
-    expect(usage.getInsights).toHaveBeenCalledWith("t-1", {
-      from: undefined,
-      to: undefined,
-      environmentId: undefined,
-    });
+    expect(usage.getInsights).toHaveBeenCalledWith(
+      "t-1",
+      {
+        from: undefined,
+        to: undefined,
+        environmentId: undefined,
+      },
+      undefined,
+    );
   });
 });

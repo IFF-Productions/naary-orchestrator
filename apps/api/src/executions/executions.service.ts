@@ -36,7 +36,10 @@ import { TracedClass } from "@naary/observability";
 import { getBudget } from "@naary/usage";
 import type { Principal } from "../auth/tenant.decorator";
 import { assertWithinMonthlyBudget } from "../budget/budget-guard";
-import { PermissionsService } from "../permissions/permissions.service";
+import {
+  PermissionsService,
+  buildViewTerms,
+} from "../permissions/permissions.service";
 import { assertWithinCompanyMonthlyBudget } from "../budget/company-budget-guard";
 import { executionsStarted } from "../common/metrics";
 import { EnvironmentsService } from "../environments/environments.service";
@@ -376,24 +379,20 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
   ): Promise<Record<string, unknown> | null> {
     if (!actor) return null;
-    const perms = this.perms();
-    const eff = await perms.getEffective(actor);
-    if (!eff.restricted) return null;
-    const envs = await this.environments.list(tenantId);
-    const terms: Record<string, unknown>[] = [];
-    for (const env of envs) {
-      const effEnv = await perms.getEffective(actor, env.id);
-      const keyCond = effEnv.view.all
+    // The per-env terms come from the SHARED builder (permissions.service.ts) — the same
+    // semantics filter the usage/insights ledger, so the two surfaces can't drift.
+    const viewTerms = await buildViewTerms(this.perms(), actor, () =>
+      this.environments.list(tenantId),
+    );
+    if (viewTerms === null) return null;
+    const terms = viewTerms.map((t) => ({
+      ...(t.view.all
         ? { workflowKey: { not: null } }
-        : effEnv.view.keys.length > 0
-          ? { workflowKey: { in: effEnv.view.keys } }
-          : null;
-      if (!keyCond) continue; // nothing viewable in this env — no term
-      const envCond = env.isDefault
-        ? { OR: [{ environmentId: env.id }, { environmentId: null }] }
-        : { environmentId: env.id };
-      terms.push({ ...keyCond, ...envCond });
-    }
+        : { workflowKey: { in: t.view.keys } }),
+      ...(t.includesNullEnv
+        ? { OR: [{ environmentId: t.environmentId }, { environmentId: null }] }
+        : { environmentId: t.environmentId }),
+    }));
     // No terms ⇒ nothing viewable anywhere: `OR: []` matches no rows (deny-by-default).
     return { OR: terms };
   }

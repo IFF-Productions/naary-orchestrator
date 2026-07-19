@@ -8,13 +8,16 @@
  *  - `enforced`: tenantId → "does the tenant have ≥1 WorkflowGrant?" (THE restriction switch —
  *    checked by the AuthGuard per `nry_` request and by every permission resolution, so it must
  *    not cost a query on the hot path).
+ *  - `tagGranted`: tenantId → "does the tenant have ≥1 TagGrant?" (the tag-edit gate switch —
+ *    checked on every tags PUT to decide edit- vs share-gating, so it's cached the same way).
  *  - `grants`: `${tenantId}|u:<uid>` / `${tenantId}|t:<tokenId>` → the subject's effective
- *    grant rows (union across their groups).
+ *    grant rows (union across their groups, tag-carried keys already expanded).
  *
  * In-memory today (single API instance); a Redis impl slots in behind the same interface.
  */
 
-/** One effective grant row, flattened for matching (keys inlined from WorkflowGrantKey). */
+/** One effective grant row, flattened for matching (keys inlined from WorkflowGrantKey ∪ the
+ *  keys carried by the grant's TagGrant tags — downstream matching never sees tags). */
 export interface EffectiveGrant {
   /** null = every environment; otherwise the one env this grant applies to (§8.5). */
   environmentId: string | null;
@@ -25,7 +28,7 @@ export interface EffectiveGrant {
   canDelete: boolean;
   canShare: boolean;
   canCreate: boolean;
-  /** workflowKeys for scope='selected'; empty for scope='all'. */
+  /** workflowKeys for scope='selected' (direct list ∪ tag-carried); empty for scope='all'. */
   keys: string[];
 }
 
@@ -36,6 +39,7 @@ interface Entry<T> {
 
 export class PermissionsCache {
   private readonly enforced = new Map<string, Entry<boolean>>();
+  private readonly tagGranted = new Map<string, Entry<boolean>>();
   private readonly grants = new Map<string, Entry<EffectiveGrant[]>>();
 
   constructor(
@@ -50,6 +54,14 @@ export class PermissionsCache {
 
   setEnforced(tenantId: string, value: boolean): void {
     this.write(this.enforced, tenantId, value);
+  }
+
+  getTagGranted(tenantId: string): boolean | undefined {
+    return this.read(this.tagGranted, tenantId);
+  }
+
+  setTagGranted(tenantId: string, value: boolean): void {
+    this.write(this.tagGranted, tenantId, value);
   }
 
   getGrants(
@@ -67,10 +79,12 @@ export class PermissionsCache {
     this.write(this.grants, `${tenantId}|${subjectKey}`, value);
   }
 
-  /** Drop EVERYTHING cached for a tenant — called on every group/grant/member/token write so
-   *  a permission change (especially a revocation) is visible on the very next request. */
+  /** Drop EVERYTHING cached for a tenant — called on every group/grant/member/token write AND
+   *  every access-relevant tag write (tag membership now feeds effective grants) so a
+   *  permission change (especially a revocation) is visible on the very next request. */
   invalidateTenant(tenantId: string): void {
     this.enforced.delete(tenantId);
+    this.tagGranted.delete(tenantId);
     const prefix = `${tenantId}|`;
     for (const key of this.grants.keys()) {
       if (key.startsWith(prefix)) this.grants.delete(key);

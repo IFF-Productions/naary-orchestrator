@@ -9,7 +9,12 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
-import { EnvironmentSel, TenantId } from "../auth/tenant.decorator";
+import {
+  CurrentPrincipal,
+  EnvironmentSel,
+  type Principal,
+  TenantId,
+} from "../auth/tenant.decorator";
 import { EnvSecretsService } from "../env-secrets/env-secrets.service";
 import { EnvironmentsService } from "../environments/environments.service";
 import { UsageService } from "../usage/usage.service";
@@ -169,8 +174,11 @@ export class V1ConfigController {
     @TenantId() tenantId: string,
     @Query("from") from?: string,
     @Query("to") to?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<UsageResponse> {
-    const s = await this.usage.getUsage(tenantId, from, to);
+    // RESTRICTED tokens (RBAC §4a) see only events of workflows they can view — the same
+    // filter as the SPA; unrestricted tokens are byte-identical to before.
+    const s = await this.usage.getUsage(tenantId, from, to, principal);
     return {
       totalCostUsd: s.totalCostUsd,
       totalTokens: s.totalTokens,
@@ -209,14 +217,20 @@ export class V1ConfigController {
     @Query("from") from?: string,
     @Query("to") to?: string,
     @Query("environmentId") environmentId?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<InsightsResponse> {
     // Insights is a cross-environment rollup (it breaks spend down BY environment), so the env
-    // filter is an explicit optional ?environmentId — not the token's active env.
-    const r = await this.usage.getInsights(tenantId, {
-      from,
-      to,
-      environmentId,
-    });
+    // filter is an explicit optional ?environmentId — not the token's active env. Restricted
+    // tokens (RBAC §4a) get the rollup filtered to their viewable workflows.
+    const r = await this.usage.getInsights(
+      tenantId,
+      {
+        from,
+        to,
+        environmentId,
+      },
+      principal,
+    );
     return {
       range: r.range,
       totals: r.totals,

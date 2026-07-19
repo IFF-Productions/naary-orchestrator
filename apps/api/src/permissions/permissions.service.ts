@@ -44,6 +44,74 @@ const ACTION_LABEL: Record<WorkflowAction, string> = {
   share: "promote",
 };
 
+/**
+ * One per-environment VIEW term for a RESTRICTED subject — the shared shape behind the
+ * runs-list where-builder (ExecutionsService.runViewFilter) and the usage/insights filters
+ * (UsageService). Semantics both consumers must honor:
+ *  - a row belongs to the term whose `environmentId` matches; a row with a NULL
+ *    environmentId (pre-env rows) belongs to the term with `includesNullEnv` (the DEFAULT
+ *    env owns legacy env-less rows);
+ *  - within a matching term, `view.all` ⇒ every KEYED row; else the row's workflowKey must
+ *    be in `view.keys`. A row with NO workflowKey is NEVER visible to a restricted subject.
+ */
+export interface EnvViewTerm {
+  environmentId: string;
+  /** true when this env is the tenant default — rows with a NULL environmentId belong to it. */
+  includesNullEnv: boolean;
+  /** The subject's effective view in this env: everything, or exactly `keys`. */
+  view: VerbAccess;
+}
+
+/**
+ * Build the per-env view terms for `actor`, or null when the caller is unrestricted /
+ * absent (consumers then leave their query/filter byte-identical — the common path).
+ * Standalone (takes the perms + env sources as arguments) so ExecutionsService can keep
+ * feeding its own EnvironmentsService + mocked PermissionsService — the extraction is a
+ * pure refactor there, proven by its unchanged tests. `listEnvs` is lazy: it is only
+ * consulted for RESTRICTED subjects. An empty array = nothing viewable anywhere
+ * (deny-by-default), which is distinct from null (bypass).
+ */
+export async function buildViewTerms(
+  perms: Pick<PermissionsService, "getEffective">,
+  actor: Principal | undefined,
+  listEnvs: () => Promise<Array<{ id: string; isDefault: boolean }>>,
+): Promise<EnvViewTerm[] | null> {
+  if (!actor) return null;
+  const eff = await perms.getEffective(actor);
+  if (!eff.restricted) return null;
+  const terms: EnvViewTerm[] = [];
+  for (const env of await listEnvs()) {
+    const effEnv = await perms.getEffective(actor, env.id);
+    // Nothing viewable in this env — no term.
+    if (!effEnv.view.all && effEnv.view.keys.length === 0) continue;
+    terms.push({
+      environmentId: env.id,
+      includesNullEnv: env.isDefault,
+      view: effEnv.view,
+    });
+  }
+  return terms;
+}
+
+/** May a restricted subject (holding `terms`) see a row tagged (environmentId, workflowKey)?
+ *  Encodes the two EnvViewTerm edge rules: NULL environmentId rows belong to the default
+ *  env's term; NULL-workflowKey rows are visible only to UNRESTRICTED subjects (call this
+ *  only when terms !== null). */
+export function viewTermsAllow(
+  terms: EnvViewTerm[],
+  environmentId: string | null,
+  workflowKey: string | null,
+): boolean {
+  if (workflowKey === null) return false;
+  const term = terms.find((t) =>
+    environmentId === null
+      ? t.includesNullEnv
+      : t.environmentId === environmentId,
+  );
+  if (!term) return false;
+  return term.view.all || term.view.keys.includes(workflowKey);
+}
+
 /** Does this grant carry the verb? Any of run/edit/delete/share IMPLIES view (§4 —
  *  operating on an invisible workflow is incoherent). Nothing else is implied. */
 function allows(g: EffectiveGrant, action: WorkflowAction): boolean {
@@ -190,6 +258,46 @@ export class PermissionsService {
   }
 
   /**
+   * The per-env view terms for `actor` (see {@link EnvViewTerm}), or null for a bypassed /
+   * unrestricted caller. The env list comes straight from the Environment table (every
+   * request path has already ensured the default env exists via resolveEnvId), default
+   * first for stable output. Consumed by UsageService to filter the usage ledger to the
+   * subject's viewable workflows; ExecutionsService builds the same terms through
+   * {@link buildViewTerms} with its own EnvironmentsService.
+   */
+  async viewTerms(
+    actor: Principal | undefined,
+    tenantId: string,
+  ): Promise<EnvViewTerm[] | null> {
+    return buildViewTerms(this, actor, async () =>
+      getPrisma().environment.findMany({
+        where: { tenantId },
+        orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+        select: { id: true, isDefault: true },
+      }),
+    );
+  }
+
+  /**
+   * Does this tenant have ≥1 TagGrant row anywhere? THE tag-edit gate switch: with any
+   * TagGrant, tag membership carries access, so `setWorkflowTags` requires SHARE (promote)
+   * instead of edit (user-confirmed rule; zero rows keeps today's edit-gate). Cached
+   * beside {@link isTenantEnforced} (short TTL + explicit invalidation) — it sits on the
+   * tags PUT path.
+   */
+  async tenantHasTagGrants(tenantId: string): Promise<boolean> {
+    const cached = this.cache.getTagGranted(tenantId);
+    if (cached !== undefined) return cached;
+    const row = await getPrisma().tagGrant.findFirst({
+      where: { grant: { tenantId } },
+      select: { grantId: true },
+    });
+    const has = row !== null;
+    this.cache.setTagGranted(tenantId, has);
+    return has;
+  }
+
+  /**
    * Is this tenant under group enforcement (≥1 WorkflowGrant anywhere in the workspace)?
    * THE restriction switch (§4/§8.6): the AuthGuard calls this per `nry_` request to decide
    * whether to stamp the token `member`+tokenId, so it's cached (short TTL + explicit
@@ -236,8 +344,32 @@ export class PermissionsService {
             ? { tokenMembers: { some: { tokenId: subject.id } } }
             : { members: { some: { userId: subject.id } } },
       },
-      include: { workflows: { select: { workflowKey: true } } },
+      include: {
+        workflows: { select: { workflowKey: true } },
+        tagGrants: { select: { tagId: true } },
+      },
     });
+    // Tag expansion (§9 seam, shipped): a 'selected' grant's effective keys = its explicit
+    // key list ∪ the workflowKeys carrying ANY of its TagGrant tags — resolved here (ONE
+    // batched WorkflowTag lookup across every tag of every grant, grouped in JS) and baked
+    // into the cached flattened keys so downstream matching is unchanged. Cache
+    // correctness: tag membership now changes effective access, so every access-relevant
+    // tag write (attach/detach, tag delete) invalidates the tenant (TagsService).
+    const tagIds = [
+      ...new Set(rows.flatMap((r) => (r.tagGrants ?? []).map((t) => t.tagId))),
+    ];
+    const keysByTag = new Map<string, string[]>();
+    if (tagIds.length > 0) {
+      const tagged = await getPrisma().workflowTag.findMany({
+        where: { tenantId: principal.tenantId, tagId: { in: tagIds } },
+        select: { tagId: true, workflowKey: true },
+      });
+      for (const t of tagged) {
+        const list = keysByTag.get(t.tagId);
+        if (list) list.push(t.workflowKey);
+        else keysByTag.set(t.tagId, [t.workflowKey]);
+      }
+    }
     const grants: EffectiveGrant[] = rows.map((r) => ({
       environmentId: r.environmentId,
       scope: r.scope === "selected" ? "selected" : "all",
@@ -247,7 +379,12 @@ export class PermissionsService {
       canDelete: r.canDelete,
       canShare: r.canShare,
       canCreate: r.canCreate,
-      keys: r.workflows.map((w) => w.workflowKey),
+      keys: [
+        ...new Set([
+          ...r.workflows.map((w) => w.workflowKey),
+          ...(r.tagGrants ?? []).flatMap((t) => keysByTag.get(t.tagId) ?? []),
+        ]),
+      ],
     }));
     this.cache.setGrants(principal.tenantId, subject.key, grants);
     return grants;

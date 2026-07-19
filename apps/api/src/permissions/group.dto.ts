@@ -99,4 +99,18 @@ export class GrantDto {
   @IsArray()
   @IsString({ each: true })
   workflowKeys?: string[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ["tag-id-1"],
+    description:
+      "Tag ids for scope 'selected' (replace-set on update; must belong to the workspace). " +
+      "Effective keys = workflowKeys ∪ every key carrying ANY of these tags (§9 tag-scoped " +
+      "grants). NOTE: the workspace's first TagGrant makes tags access-bearing — tag edits " +
+      "then require the Promote permission. Ignored for scope 'all'.",
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  tagIds?: string[];
 }
