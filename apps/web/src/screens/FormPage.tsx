@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Button, Icon, Logo } from "../components";
 import { api, type FormDefinition, type FormFieldView } from "../lib/api";
+import {
+  ButtonSpinner,
+  EMBER_BUTTON,
+  EMBER_TINT_BG,
+  EmberBar,
+  PUBLIC_CARD,
+  PUBLIC_INPUT,
+  PublicFrame,
+  PublicNotice,
+  ResultBadge,
+  SecureFooter,
+  BrandRow,
+} from "./public/PublicShell";
 
 /**
  * PUBLIC hosted form (Form Trigger mini-program, slice 3). Reached at `/f/:formId`, OUTSIDE
@@ -10,6 +22,9 @@ import { api, type FormDefinition, type FormFieldView } from "../lib/api";
  * workflow identifiers are ever shown (the definition endpoint returns none). The server is the
  * source of truth for validation; the light client checks (required, type=number/email) are just
  * for a friendlier UX before the round-trip.
+ *
+ * Redesign: "Naary Public Pages" hosted-form card — 460px, ember top strip, brand tile header,
+ * chip-select for enum fields, ember gradient submit, lock footer, green pop success state.
  */
 export function FormPage() {
   const { formId } = useParams<{ formId: string }>();
@@ -75,157 +90,125 @@ export function FormPage() {
   }
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "var(--bg)",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        padding: "48px 20px",
-      }}
-    >
-      <div style={{ marginBottom: 28 }}>
-        <Logo />
-      </div>
-
-      <div
-        style={{
-          width: "100%",
-          maxWidth: 520,
-          background: "var(--card)",
-          border: "1px solid var(--line)",
-          borderRadius: "var(--radius-lg)",
-          boxShadow: "var(--shadow-card)",
-          padding: 28,
-        }}
-      >
+    <PublicFrame>
+      <div style={{ width: "100%", maxWidth: 460 }}>
         {state === "loading" && (
-          <div style={{ color: "var(--ink-3)", fontSize: "var(--text-body)" }}>
-            Loading…
+          <div style={{ ...PUBLIC_CARD, overflow: "hidden" }}>
+            <EmberBar />
+            <div
+              style={{
+                padding: "36px 28px",
+                fontSize: 13,
+                color: "var(--ink-3)",
+              }}
+            >
+              Loading…
+            </div>
           </div>
         )}
 
         {state === "notfound" && (
-          <div style={{ textAlign: "center", padding: "24px 8px" }}>
-            <div
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: "var(--radius-full)",
-                background: "var(--card-2)",
-                color: "var(--ink-3)",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                marginBottom: 14,
-              }}
-            >
-              <Icon name="alert" size={20} />
-            </div>
-            <div
-              style={{
-                fontSize: "var(--text-md)",
-                fontWeight: "var(--weight-semibold)",
-                color: "var(--ink)",
-                marginBottom: 6,
-              }}
-            >
-              Form not found
-            </div>
-            <div
-              style={{ fontSize: "var(--text-body)", color: "var(--ink-3)" }}
-            >
-              This form doesn't exist or is no longer available.
-            </div>
+          <div style={{ ...PUBLIC_CARD, padding: "36px 28px" }}>
+            <PublicNotice
+              icon="alert"
+              title="Form not found"
+              body="This form doesn't exist or is no longer available."
+            />
           </div>
         )}
 
         {state === "ready" && def && submitted && (
-          <div style={{ textAlign: "center", padding: "24px 8px" }}>
-            <div
-              style={{
-                width: 48,
-                height: 48,
-                borderRadius: "var(--radius-full)",
-                background:
-                  "color-mix(in srgb, var(--state-done) 18%, transparent)",
-                color: "var(--state-done)",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                marginBottom: 16,
-              }}
-            >
-              <Icon name="check" size={24} strokeWidth={3} />
+          <div
+            style={{
+              ...PUBLIC_CARD,
+              padding: "44px 32px",
+              textAlign: "center",
+            }}
+          >
+            <ResultBadge tone="ok" icon="check" />
+            <div style={{ fontSize: 20, fontWeight: 700, marginTop: 18 }}>
+              Request received
             </div>
             <div
               style={{
-                fontSize: "var(--text-md)",
-                fontWeight: "var(--weight-semibold)",
-                color: "var(--ink)",
-                marginBottom: 6,
+                fontSize: 13,
+                color: "var(--ink-2)",
+                marginTop: 8,
+                lineHeight: 1.6,
+                maxWidth: 340,
+                marginLeft: "auto",
+                marginRight: "auto",
               }}
             >
-              Thanks — we've got it.
+              {/* The submit response carries only `status: "started"` — the workflow is running
+                  (it may finish instantly or pause for a human), so the copy claims exactly that. */}
+              Your response was submitted and the workflow has started. If a
+              step needs a human decision, it will wait safely until someone
+              decides.
             </div>
-            <div
-              style={{
-                fontSize: "var(--text-body)",
-                color: "var(--ink-3)",
-                marginBottom: 20,
-              }}
-            >
-              Your response was submitted.
-            </div>
-            <Button
-              variant="secondary"
+            <button
               onClick={() => {
                 setValues({});
                 setSubmitted(false);
               }}
+              style={{
+                marginTop: 22,
+                height: 38,
+                padding: "0 18px",
+                borderRadius: 9,
+                border: "1px solid var(--line-2)",
+                background: "var(--card)",
+                color: "var(--ink-2)",
+                fontSize: 12.5,
+                fontFamily: "var(--font-sans)",
+                cursor: "pointer",
+              }}
             >
-              Submit another response
-            </Button>
+              Submit another
+            </button>
           </div>
         )}
 
         {state === "ready" && def && !submitted && (
-          <>
+          <div style={{ ...PUBLIC_CARD, overflow: "hidden" }}>
+            <EmberBar />
             <div
               style={{
-                fontSize: "var(--text-title)",
-                fontWeight: "var(--weight-bold)",
-                color: "var(--ink)",
-                letterSpacing: "var(--tracking-tight)",
+                padding: "26px 28px 20px",
+                borderBottom: "1px solid var(--line)",
               }}
             >
-              {def.title ?? "Form"}
-            </div>
-            {def.description && (
+              {/* The public definition carries no workspace/tenant name — brand tile only. */}
+              <BrandRow />
               <div
                 style={{
-                  fontSize: "var(--text-body)",
-                  color: "var(--ink-2)",
-                  marginTop: 6,
-                  lineHeight: "var(--leading-snug)",
+                  fontSize: 20,
+                  fontWeight: 700,
+                  letterSpacing: "-.01em",
                 }}
               >
-                {def.description}
+                {def.title ?? "Form"}
               </div>
-            )}
+              {def.description && (
+                <div
+                  style={{
+                    fontSize: 13,
+                    color: "var(--ink-2)",
+                    marginTop: 6,
+                    lineHeight: 1.55,
+                  }}
+                >
+                  {def.description}
+                </div>
+              )}
+            </div>
 
             <form
               onSubmit={(e) => {
                 e.preventDefault();
                 if (!submitting) void submit();
               }}
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 16,
-                marginTop: 22,
-              }}
+              style={{ padding: "22px 28px" }}
             >
               {def.fields.map((f) => (
                 <FormField
@@ -239,53 +222,58 @@ export function FormPage() {
               {error && (
                 <div
                   style={{
-                    fontSize: "var(--text-sm)",
+                    fontSize: 12,
                     color: "var(--state-error)",
+                    marginBottom: 14,
                   }}
                 >
                   {error}
                 </div>
               )}
 
-              <Button
+              <button
                 type="submit"
-                variant="primary"
                 disabled={submitting}
-                style={{ marginTop: 4 }}
+                style={{
+                  ...EMBER_BUTTON,
+                  width: "100%",
+                  height: 46,
+                  borderRadius: 11,
+                  fontSize: 14,
+                  fontWeight: 700,
+                  fontFamily: "var(--font-sans)",
+                  cursor: submitting ? "default" : "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                }}
               >
-                {submitting ? "Submitting…" : (def.submitLabel ?? "Submit")}
-              </Button>
+                {submitting && <ButtonSpinner />}
+                {submitting
+                  ? "Submitting…"
+                  : (def.submitLabel ?? "Submit request")}
+              </button>
+              <div style={{ marginTop: 14 }}>
+                <SecureFooter>Secure form · powered by Naary</SecureFooter>
+              </div>
             </form>
-          </>
+          </div>
         )}
       </div>
-
-      <div
-        style={{
-          marginTop: 20,
-          fontSize: "var(--text-2xs)",
-          color: "var(--ink-3)",
-        }}
-      >
-        Powered by Naary
-      </div>
-    </div>
+    </PublicFrame>
   );
 }
 
-const controlStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "9px 11px",
-  borderRadius: "var(--radius-sm)",
-  border: "1px solid var(--line-2)",
-  background: "var(--card)",
-  color: "var(--ink)",
-  fontSize: "var(--text-body)",
-  fontFamily: "inherit",
+const fieldLabelStyle: React.CSSProperties = {
+  display: "block",
+  fontSize: 11.5,
+  color: "var(--ink-2)",
+  marginBottom: 6,
 };
 
 /** One rendered form control keyed by the field's declared type. Native elements (styled) so the
- *  page stays accessible and dependency-free. */
+ *  page stays accessible and dependency-free; `select` renders as the design's chip picker. */
 function FormField({
   field,
   value,
@@ -296,14 +284,12 @@ function FormField({
   onChange: (v: string) => void;
 }) {
   const label = (
-    <label
-      className="field-label"
-      htmlFor={`f-${field.key}`}
-      style={{ display: "block", marginBottom: 6 }}
-    >
+    <label htmlFor={`f-${field.key}`} style={fieldLabelStyle}>
       {field.label}
-      {field.required && (
+      {field.required ? (
         <span style={{ color: "var(--state-error)" }}> *</span>
+      ) : (
+        <span style={{ color: "var(--ink-3)" }}> (optional)</span>
       )}
     </label>
   );
@@ -317,28 +303,48 @@ function FormField({
         required={field.required}
         placeholder={field.placeholder}
         onChange={(e) => onChange(e.target.value)}
-        rows={4}
-        style={{ ...controlStyle, resize: "vertical" }}
+        style={{
+          ...PUBLIC_INPUT,
+          height: 70,
+          padding: "10px 13px",
+          resize: "vertical",
+        }}
       />
     );
   } else if (field.type === "select") {
+    // Enum fields render as the design's chip picker (single choice; required is enforced
+    // by the shared light check + the server, same as before).
     control = (
-      <select
-        id={`f-${field.key}`}
-        value={value}
-        required={field.required}
-        onChange={(e) => onChange(e.target.value)}
-        style={controlStyle}
+      <div
+        role="group"
+        aria-label={field.label}
+        style={{ display: "flex", flexWrap: "wrap", gap: 7 }}
       >
-        <option value="" disabled>
-          {field.placeholder ?? "Select…"}
-        </option>
-        {(field.options ?? []).map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
+        {(field.options ?? []).map((o) => {
+          const on = value === o;
+          return (
+            <button
+              key={o}
+              type="button"
+              aria-pressed={on}
+              onClick={() => onChange(on ? "" : o)}
+              style={{
+                fontSize: 12,
+                padding: "7px 12px",
+                borderRadius: 20,
+                cursor: "pointer",
+                fontWeight: 500,
+                fontFamily: "var(--font-sans)",
+                color: on ? "var(--brand-2)" : "var(--ink-2)",
+                border: `1px solid ${on ? "var(--brand)" : "var(--line-2)"}`,
+                background: on ? EMBER_TINT_BG : "var(--card)",
+              }}
+            >
+              {o}
+            </button>
+          );
+        })}
+      </div>
     );
   } else {
     control = (
@@ -355,14 +361,25 @@ function FormField({
         required={field.required}
         placeholder={field.placeholder}
         onChange={(e) => onChange(e.target.value)}
-        style={controlStyle}
+        style={PUBLIC_INPUT}
       />
     );
   }
 
   return (
-    <div>
-      {label}
+    <div style={{ marginBottom: 14 }}>
+      {field.type === "select" ? (
+        <div style={fieldLabelStyle}>
+          {field.label}
+          {field.required ? (
+            <span style={{ color: "var(--state-error)" }}> *</span>
+          ) : (
+            <span style={{ color: "var(--ink-3)" }}> (optional)</span>
+          )}
+        </div>
+      ) : (
+        label
+      )}
       {control}
     </div>
   );

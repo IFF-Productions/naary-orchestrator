@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Button, Icon, Logo } from "../components";
+import { Icon, Logo } from "../components";
 import { api, type ChatDefinition } from "../lib/api";
+import {
+  EMBER_BUTTON,
+  EMBER_TINT_BD,
+  EMBER_TINT_BG,
+  PUBLIC_CARD,
+  PublicFrame,
+  PublicNotice,
+} from "./public/PublicShell";
 
 /**
  * PUBLIC hosted chat (Chat Trigger program). Reached at `/c/:chatId`, OUTSIDE RequireAuth — an
@@ -9,6 +17,12 @@ import { api, type ChatDefinition } from "../lib/api";
  * tenant's workflow with `{ message, sessionId }` and shows the graph's reply. No auth, no tenant
  * identifiers. Single-turn per message today (durable per-session memory is a later slice); the
  * client keeps a `sessionId` so a future durable session can thread the conversation.
+ *
+ * Redesign: "Naary Public Pages" hosted-chat card — 440px, brand tile + Online dot header,
+ * flame-avatar bot bubbles with a top-left notch, ember-tinted user bubbles, typing dots while
+ * the graph runs, ember send button. The chat response is `{ status, reply? }` only — it carries
+ * no citation/source data and the definition has no starter prompts, so those design elements
+ * are omitted rather than faked.
  */
 type Turn = { role: "user" | "assistant"; text: string };
 
@@ -46,7 +60,7 @@ export function ChatPage() {
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [turns]);
+  }, [turns, sending]);
 
   async function send() {
     const text = input.trim();
@@ -79,193 +93,277 @@ export function ChatPage() {
     }
   }
 
+  const canSend = input.trim().length > 0 && !sending;
+
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "var(--bg)",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        padding: "32px 20px",
-      }}
-    >
-      <div style={{ marginBottom: 18 }}>
-        <Logo />
-      </div>
-
-      <div
-        style={{
-          width: "100%",
-          maxWidth: 560,
-          height: "72vh",
-          display: "flex",
-          flexDirection: "column",
-          background: "var(--card)",
-          border: "1px solid var(--line)",
-          borderRadius: "var(--radius-lg)",
-          boxShadow: "var(--shadow-card)",
-          overflow: "hidden",
-        }}
-      >
-        {state === "loading" && (
-          <div style={{ padding: 24, color: "var(--ink-3)" }}>Loading…</div>
-        )}
-
-        {state === "notfound" && (
-          <div style={{ textAlign: "center", padding: 40 }}>
-            <div
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: "var(--radius-full)",
-                background: "var(--card-2)",
-                color: "var(--ink-3)",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                marginBottom: 14,
-              }}
-            >
-              <Icon name="alert" size={20} />
-            </div>
-            <div
-              style={{
-                fontSize: "var(--text-md)",
-                fontWeight: "var(--weight-semibold)",
-                color: "var(--ink)",
-              }}
-            >
-              Chat not found
-            </div>
+    <PublicFrame>
+      {state === "loading" && (
+        <div style={{ ...PUBLIC_CARD, width: "100%", maxWidth: 440 }}>
+          <div
+            style={{
+              padding: "28px 24px",
+              fontSize: 13,
+              color: "var(--ink-3)",
+            }}
+          >
+            Loading…
           </div>
-        )}
+        </div>
+      )}
 
-        {state === "ready" && def && (
-          <>
-            <div
-              style={{
-                padding: "14px 18px",
-                borderBottom: "1px solid var(--line)",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: "var(--text-md)",
-                  fontWeight: "var(--weight-bold)",
-                  color: "var(--ink)",
-                }}
-              >
+      {state === "notfound" && (
+        <div
+          style={{
+            ...PUBLIC_CARD,
+            width: "100%",
+            maxWidth: 440,
+            padding: "36px 28px",
+          }}
+        >
+          <PublicNotice
+            icon="alert"
+            title="Chat not found"
+            body="This chat doesn't exist or is no longer available."
+          />
+        </div>
+      )}
+
+      {state === "ready" && def && (
+        <div
+          style={{
+            ...PUBLIC_CARD,
+            width: "100%",
+            maxWidth: 440,
+            height: "min(600px, 80vh)",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
+          {/* header: brand tile · assistant name · Online dot */}
+          <div
+            style={{
+              flex: "none",
+              padding: "16px 20px",
+              borderBottom: "1px solid var(--line)",
+              display: "flex",
+              alignItems: "center",
+              gap: 11,
+            }}
+          >
+            <Logo size={34} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>
                 {def.title ?? "Chat"}
               </div>
-              {def.description && (
-                <div
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--state-done)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                }}
+              >
+                <span
                   style={{
-                    fontSize: "var(--text-xs)",
-                    color: "var(--ink-3)",
-                    marginTop: 2,
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: "var(--state-done)",
                   }}
-                >
-                  {def.description}
-                </div>
-              )}
+                />
+                Online
+                {def.description ? ` · ${def.description}` : ""}
+              </div>
             </div>
+          </div>
 
-            <div
-              ref={scrollRef}
-              style={{
-                flex: 1,
-                overflowY: "auto",
-                padding: 16,
-                display: "flex",
-                flexDirection: "column",
-                gap: 10,
-              }}
-            >
-              {turns.map((t, i) => (
+          {/* thread */}
+          <div
+            ref={scrollRef}
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              padding: "18px 18px 12px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
+            {turns.map((t, i) =>
+              t.role === "assistant" ? (
                 <div
                   key={i}
                   style={{
-                    alignSelf: t.role === "user" ? "flex-end" : "flex-start",
-                    maxWidth: "80%",
-                    padding: "8px 12px",
-                    borderRadius: "var(--radius-md)",
-                    fontSize: "var(--text-body)",
-                    lineHeight: "var(--leading-snug)",
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                    background:
-                      t.role === "user" ? "var(--brand)" : "var(--card-2)",
-                    color: t.role === "user" ? "#fff" : "var(--ink)",
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 9,
+                    animation: "naaryPubMsgIn .25s ease",
                   }}
                 >
-                  {t.text}
+                  <Logo size={26} glow={false} />
+                  <div
+                    style={{
+                      maxWidth: "76%",
+                      background: "var(--card)",
+                      border: "1px solid var(--line-mid)",
+                      borderRadius: 12,
+                      borderTopLeftRadius: 4,
+                      padding: "11px 14px",
+                      fontSize: 12.5,
+                      lineHeight: 1.55,
+                      color: "var(--ink-soft)",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {t.text}
+                  </div>
                 </div>
-              ))}
-              {sending && (
+              ) : (
+                <div
+                  key={i}
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    animation: "naaryPubMsgIn .25s ease",
+                  }}
+                >
+                  <div
+                    style={{
+                      maxWidth: "72%",
+                      background: EMBER_TINT_BG,
+                      border: `1px solid ${EMBER_TINT_BD}`,
+                      borderRadius: 12,
+                      borderTopRightRadius: 4,
+                      padding: "11px 14px",
+                      fontSize: 12.5,
+                      lineHeight: 1.55,
+                      color: "var(--ink)",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {t.text}
+                  </div>
+                </div>
+              ),
+            )}
+
+            {/* typing indicator while the graph runs */}
+            {sending && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 9,
+                  animation: "naaryPubMsgIn .2s ease",
+                }}
+              >
+                <Logo size={26} glow={false} />
                 <div
                   style={{
-                    alignSelf: "flex-start",
-                    fontSize: "var(--text-xs)",
-                    color: "var(--ink-3)",
-                    padding: "4px 8px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    background: "var(--card)",
+                    border: "1px solid var(--line-mid)",
+                    borderRadius: 12,
+                    borderTopLeftRadius: 4,
+                    padding: "12px 14px",
                   }}
                 >
-                  …
+                  {[0, 0.2, 0.4].map((delay) => (
+                    <span
+                      key={delay}
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: "50%",
+                        background: "var(--ink-faint)",
+                        animation: `naaryPubDot 1.2s infinite ${delay}s`,
+                      }}
+                    />
+                  ))}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+          </div>
 
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void send();
-              }}
+          {/* input row */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void send();
+            }}
+            style={{
+              flex: "none",
+              borderTop: "1px solid var(--line)",
+              padding: "12px 16px",
+            }}
+          >
+            <div
               style={{
+                border: "1px solid var(--line-2)",
+                background: "var(--card)",
+                borderRadius: 11,
                 display: "flex",
+                alignItems: "center",
                 gap: 8,
-                padding: 12,
-                borderTop: "1px solid var(--line)",
+                padding: "6px 6px 6px 13px",
               }}
             >
               <input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder={def.placeholder ?? "Type a message…"}
+                placeholder={def.placeholder ?? "Ask a question…"}
                 aria-label="Chat message"
                 disabled={sending}
                 style={{
                   flex: 1,
-                  padding: "9px 11px",
-                  borderRadius: "var(--radius-sm)",
-                  border: "1px solid var(--line-2)",
-                  background: "var(--card)",
+                  height: 34,
+                  background: "transparent",
+                  border: "none",
+                  fontSize: 12.5,
                   color: "var(--ink)",
-                  fontSize: "var(--text-body)",
-                  fontFamily: "inherit",
+                  fontFamily: "var(--font-sans)",
+                  outline: "none",
                 }}
               />
-              <Button
+              <button
                 type="submit"
-                variant="primary"
-                disabled={sending || !input.trim()}
+                aria-label="Send"
+                disabled={!canSend}
+                style={{
+                  width: 36,
+                  height: 36,
+                  flex: "none",
+                  borderRadius: 9,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: canSend ? "pointer" : "not-allowed",
+                  ...(canSend
+                    ? EMBER_BUTTON
+                    : {
+                        border: "1px solid var(--line-2)",
+                        background: "var(--card-2)",
+                        color: "var(--ink-3)",
+                        boxShadow: "none",
+                      }),
+                }}
               >
-                Send
-              </Button>
-            </form>
-          </>
-        )}
-      </div>
+                <Icon name="arrow-right" size={15} strokeWidth={2} />
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
-      <div
-        style={{
-          marginTop: 16,
-          fontSize: "var(--text-2xs)",
-          color: "var(--ink-3)",
-        }}
-      >
+      <div style={{ marginTop: 16, fontSize: 10, color: "var(--ink-3)" }}>
         Powered by Naary
       </div>
-    </div>
+    </PublicFrame>
   );
 }

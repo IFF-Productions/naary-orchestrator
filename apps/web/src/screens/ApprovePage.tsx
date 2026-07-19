@@ -1,13 +1,28 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { Button, Icon, Logo } from "../components";
+import { Icon, Logo } from "../components";
 import { api } from "../lib/api";
+import {
+  ButtonSpinner,
+  PUBLIC_CARD,
+  PUBLIC_INPUT,
+  PublicFrame,
+  PublicNotice,
+  ResultBadge,
+  SecureFooter,
+} from "./public/PublicShell";
 
 /**
  * PUBLIC approve/reject page (the notification-links gap). Reached at `/approve/:workflowId?token=…`,
  * OUTSIDE RequireAuth — a recipient of the pause notification decides WITHOUT opening the app. The
  * token in the URL is the credential (HMAC over the workflowId). A GET fetch is safe (idempotent);
  * the actual decision is a POST behind an explicit button click, so an email prefetch can't approve.
+ *
+ * Redesign: the Approvals design's public view — centered card with brand tile, review copy,
+ * the gate's instructions, optional comment, green-gradient Approve / Reject, secure-link footer,
+ * and pop-in Approved/Rejected decided states (from the server's recorded outcome). The prompt
+ * payload carries only `{ awaiting, title, instructions }` — no context-field table, workspace
+ * name, or link expiry — so those design elements are omitted rather than invented.
  */
 export function ApprovePage() {
   const { workflowId } = useParams<{ workflowId: string }>();
@@ -29,7 +44,7 @@ export function ApprovePage() {
     instructions?: string | null;
   }>({});
   const [comment, setComment] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [done, setDone] = useState<"approved" | "rejected" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,11 +72,17 @@ export function ApprovePage() {
 
   async function decide(decision: "approve" | "reject") {
     if (!workflowId || busy) return;
-    setBusy(true);
+    setBusy(decision);
     setError(null);
     try {
-      await api.decideApproval(workflowId, token, decision, comment.trim());
-      setDone(decision === "approve" ? "approved" : "rejected");
+      const res = await api.decideApproval(
+        workflowId,
+        token,
+        decision,
+        comment.trim(),
+      );
+      // Show the server's RECORDED outcome, not just the button we clicked.
+      setDone(res.status);
     } catch (e) {
       // A 409 = the run was already decided/closed between load and click.
       setError(
@@ -70,202 +91,237 @@ export function ApprovePage() {
           : "Could not record your decision. Try again.",
       );
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
-  const card = (children: React.ReactNode) => (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "var(--bg)",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        padding: "48px 20px",
-      }}
-    >
-      <div style={{ marginBottom: 28 }}>
-        <Logo />
+  const card = (children: React.ReactNode, style?: React.CSSProperties) => (
+    <PublicFrame>
+      <div style={{ width: "100%", maxWidth: 480 }}>
+        <div style={{ ...PUBLIC_CARD, ...style }}>{children}</div>
       </div>
-      <div
-        style={{
-          width: "100%",
-          maxWidth: 480,
-          background: "var(--card)",
-          border: "1px solid var(--line)",
-          borderRadius: "var(--radius-lg)",
-          boxShadow: "var(--shadow-card)",
-          padding: 28,
-        }}
-      >
-        {children}
-      </div>
-    </div>
+    </PublicFrame>
   );
 
   if (state === "loading")
-    return card(<div style={{ color: "var(--ink-3)" }}>Loading…</div>);
+    return card(
+      <div
+        style={{ padding: "36px 28px", fontSize: 13, color: "var(--ink-3)" }}
+      >
+        Loading…
+      </div>,
+    );
 
   if (state === "invalid")
     return card(
-      <Notice
-        icon="alert"
-        title="Invalid or expired link"
-        body="This approval link is missing or no longer valid."
-      />,
+      <div style={{ padding: "36px 28px" }}>
+        <PublicNotice
+          icon="alert"
+          title="Invalid or expired link"
+          body="This approval link is missing or no longer valid."
+        />
+      </div>,
     );
 
   if (state === "closed")
     return card(
-      <Notice
-        icon="check-circle"
-        title="Already decided"
-        body="This run is no longer awaiting approval."
-      />,
+      <div style={{ padding: "36px 28px" }}>
+        <PublicNotice
+          icon="check-circle"
+          tone="ok"
+          title="Already decided"
+          body="This run is no longer awaiting approval."
+        />
+      </div>,
     );
 
   if (done)
     return card(
-      <Notice
-        icon="check-circle"
-        title={done === "approved" ? "Approved ✓" : "Rejected"}
-        body={`Your decision was recorded. You can close this page.`}
-      />,
+      <div style={{ padding: "44px 32px", textAlign: "center" }}>
+        <ResultBadge
+          tone={done === "approved" ? "ok" : "bad"}
+          icon={done === "approved" ? "check" : "x"}
+          size={60}
+        />
+        <div style={{ fontSize: 20, fontWeight: 700, marginTop: 18 }}>
+          {done === "approved" ? "Approved — thank you" : "Rejected"}
+        </div>
+        <div
+          style={{
+            fontSize: 13,
+            color: "var(--ink-2)",
+            marginTop: 8,
+            lineHeight: 1.6,
+            maxWidth: 340,
+            marginLeft: "auto",
+            marginRight: "auto",
+          }}
+        >
+          {done === "approved"
+            ? "Your decision was recorded and the workflow has resumed. You can close this page."
+            : "Your decision was recorded and sent to the workflow. You can close this page."}
+        </div>
+      </div>,
     );
 
   return card(
-    <>
+    <div style={{ overflow: "hidden" }}>
+      {/* header */}
       <div
         style={{
-          fontSize: "var(--text-title)",
-          fontWeight: "var(--weight-bold)",
-          color: "var(--ink)",
-          letterSpacing: "var(--tracking-tight)",
+          padding: "26px 28px 22px",
+          borderBottom: "1px solid var(--line)",
+          textAlign: "center",
         }}
       >
-        {prompt.title ?? "Approval required"}
-      </div>
-      {prompt.instructions && (
+        <div style={{ display: "inline-flex", marginBottom: 14 }}>
+          <Logo size={38} />
+        </div>
+        <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: "-.01em" }}>
+          {prompt.title ?? "Approval required"}
+        </div>
         <div
           style={{
-            fontSize: "var(--text-body)",
+            fontSize: 13,
             color: "var(--ink-2)",
             marginTop: 6,
-            lineHeight: "var(--leading-snug)",
+            lineHeight: 1.55,
           }}
         >
-          {prompt.instructions}
+          You've been asked to review this request. Your decision resumes the
+          workflow immediately.
         </div>
-      )}
-      <textarea
-        value={comment}
-        onChange={(e) => setComment(e.target.value)}
-        placeholder="Reason (optional)"
-        rows={3}
-        aria-label="Reason"
-        style={{
-          width: "100%",
-          marginTop: 18,
-          padding: "9px 11px",
-          borderRadius: "var(--radius-sm)",
-          border: "1px solid var(--line-2)",
-          background: "var(--card)",
-          color: "var(--ink)",
-          fontSize: "var(--text-body)",
-          fontFamily: "inherit",
-          resize: "vertical",
-        }}
-      />
-      {intended && (
-        <div
-          style={{
-            fontSize: "var(--text-sm)",
-            color: "var(--ink-2)",
-            marginTop: 14,
-          }}
-        >
-          You chose to{" "}
-          <strong style={{ color: "var(--ink)" }}>
-            {intended === "approve" ? "approve" : "reject"}
-          </strong>{" "}
-          this run — add an optional reason and confirm below.
-        </div>
-      )}
-      {error && (
-        <div
-          style={{
-            fontSize: "var(--text-sm)",
-            color: "var(--state-error)",
-            marginTop: 10,
-          }}
-        >
-          {error}
-        </div>
-      )}
-      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-        <Button
-          variant="positive"
-          disabled={busy}
-          autoFocus={intended === "approve"}
-          onClick={() => void decide("approve")}
-          style={{ flex: 1, opacity: intended === "reject" ? 0.6 : 1 }}
-        >
-          {busy ? "…" : "Approve"}
-        </Button>
-        <Button
-          variant="danger"
-          disabled={busy}
-          autoFocus={intended === "reject"}
-          onClick={() => void decide("reject")}
-          style={{ flex: 1, opacity: intended === "approve" ? 0.6 : 1 }}
-        >
-          {busy ? "…" : "Reject"}
-        </Button>
       </div>
-    </>,
-  );
-}
 
-function Notice({
-  icon,
-  title,
-  body,
-}: {
-  icon: "alert" | "check-circle";
-  title: string;
-  body: string;
-}) {
-  return (
-    <div style={{ textAlign: "center", padding: "16px 8px" }}>
-      <div
-        style={{
-          width: 46,
-          height: 46,
-          borderRadius: "var(--radius-full)",
-          background: "var(--card-2)",
-          color: "var(--ink-2)",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          marginBottom: 14,
-        }}
-      >
-        <Icon name={icon} size={22} />
+      {/* context + decision */}
+      <div style={{ padding: "22px 28px" }}>
+        {prompt.instructions && (
+          <div
+            style={{
+              border: "1px solid var(--line-mid)",
+              background: "var(--card)",
+              borderRadius: 12,
+              padding: "13px 15px",
+              fontSize: 12.5,
+              color: "var(--ink-soft)",
+              lineHeight: 1.6,
+              marginBottom: 16,
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {prompt.instructions}
+          </div>
+        )}
+
+        {intended && (
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--ink-soft)",
+              marginBottom: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            You chose to{" "}
+            <strong style={{ color: "var(--ink)" }}>
+              {intended === "approve" ? "approve" : "reject"}
+            </strong>{" "}
+            this run — add an optional comment and confirm below.
+          </div>
+        )}
+
+        <textarea
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          placeholder="Add a comment (optional)…"
+          aria-label="Reason"
+          style={{
+            ...PUBLIC_INPUT,
+            height: 60,
+            padding: "10px 12px",
+            fontSize: 12.5,
+            resize: "none",
+            marginBottom: 12,
+          }}
+        />
+
+        {error && (
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--state-error)",
+              marginBottom: 12,
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 11 }}>
+          <button
+            disabled={!!busy}
+            autoFocus={intended === "approve"}
+            onClick={() => void decide("approve")}
+            style={{
+              flex: 1,
+              height: 46,
+              borderRadius: 11,
+              border:
+                "1px solid color-mix(in srgb, var(--state-done) 45%, transparent)",
+              background: "linear-gradient(180deg, #3fce86, #1f9a5c)",
+              color: "#04120b",
+              fontSize: 14,
+              fontWeight: 700,
+              fontFamily: "var(--font-sans)",
+              cursor: busy ? "default" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              boxShadow: "0 4px 14px -5px rgba(53, 196, 122, .5)",
+              opacity: intended === "reject" ? 0.6 : 1,
+            }}
+          >
+            {busy === "approve" ? (
+              <ButtonSpinner color="#04120b" />
+            ) : (
+              <Icon name="check" size={16} strokeWidth={2.4} />
+            )}
+            Approve
+          </button>
+          <button
+            disabled={!!busy}
+            autoFocus={intended === "reject"}
+            onClick={() => void decide("reject")}
+            style={{
+              flex: 1,
+              height: 46,
+              borderRadius: 11,
+              border:
+                "1px solid color-mix(in srgb, var(--state-error) 45%, transparent)",
+              background: "var(--error-soft)",
+              color: "var(--state-error)",
+              fontSize: 14,
+              fontWeight: 600,
+              fontFamily: "var(--font-sans)",
+              cursor: busy ? "default" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              opacity: intended === "approve" ? 0.6 : 1,
+            }}
+          >
+            {busy === "reject" && <ButtonSpinner color="var(--state-error)" />}
+            Reject
+          </button>
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          {/* The signed link carries no expiry in the prompt payload — footer omits it. */}
+          <SecureFooter>Secure decision link · powered by Naary</SecureFooter>
+        </div>
       </div>
-      <div
-        style={{
-          fontSize: "var(--text-md)",
-          fontWeight: "var(--weight-semibold)",
-          color: "var(--ink)",
-          marginBottom: 6,
-        }}
-      >
-        {title}
-      </div>
-      <div style={{ fontSize: "var(--text-body)", color: "var(--ink-3)" }}>
-        {body}
-      </div>
-    </div>
+    </div>,
   );
 }
