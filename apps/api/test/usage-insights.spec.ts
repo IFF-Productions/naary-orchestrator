@@ -87,16 +87,42 @@ describe("UsageService.getInsights", () => {
 });
 
 describe("UsageController.insights", () => {
-  it("delegates to the service with the parsed query params", async () => {
+  it("delegates to the service with the parsed query params AND the principal (RBAC filter)", async () => {
     const service = { getInsights: vi.fn().mockResolvedValue({ ok: true }) };
     const ctrl = new UsageController(service as never);
+    const principal = { tenantId: "t-1", userId: "u-1", role: "member" };
 
-    await ctrl.insights("t-1", "2026-07-01", "2026-07-31", "env-prod");
+    await ctrl.insights(
+      "t-1",
+      "2026-07-01",
+      "2026-07-31",
+      "env-prod",
+      principal as never,
+    );
 
-    expect(service.getInsights).toHaveBeenCalledWith("t-1", {
-      from: "2026-07-01",
-      to: "2026-07-31",
-      environmentId: "env-prod",
-    });
+    expect(service.getInsights).toHaveBeenCalledWith(
+      "t-1",
+      {
+        from: "2026-07-01",
+        to: "2026-07-31",
+        environmentId: "env-prod",
+      },
+      principal,
+    );
+  });
+
+  it("threads the principal into getUsage too (SPA usage screen)", async () => {
+    const service = { getUsage: vi.fn().mockResolvedValue({ ok: true }) };
+    const ctrl = new UsageController(service as never);
+    const principal = { tenantId: "t-1", userId: "u-1", role: "member" };
+
+    await ctrl.get("t-1", undefined, undefined, principal as never);
+
+    expect(service.getUsage).toHaveBeenCalledWith(
+      "t-1",
+      undefined,
+      undefined,
+      principal,
+    );
   });
 });

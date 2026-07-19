@@ -296,9 +296,19 @@ import type { PermissionsService } from "../src/permissions/permissions.service"
 describe("TagsService.setWorkflowTags G1 edit gate", () => {
   const member: Principal = { tenantId: "t-1", userId: "u-1", role: "member" };
 
+  /** A permissions mock for a tenant WITHOUT TagGrants (edit-gated — today's behavior). */
+  const permsMock = (over: Record<string, unknown> = {}) =>
+    ({
+      tenantHasTagGrants: vi.fn().mockResolvedValue(false),
+      assertCan: vi.fn().mockResolvedValue(undefined),
+      can: vi.fn().mockResolvedValue(true),
+      invalidateTenant: vi.fn(),
+      ...over,
+    }) as unknown as PermissionsService;
+
   it("asserts `edit` on the workflow and a denial replaces nothing", async () => {
     const assertCan = vi.fn().mockRejectedValue(new ForbiddenException("no"));
-    const s = new TagsService({ assertCan } as unknown as PermissionsService);
+    const s = new TagsService(permsMock({ assertCan }));
     await expect(
       s.setWorkflowTags("t-1", "wf-a", ["tag_1"], member, "env-1"),
     ).rejects.toBeInstanceOf(ForbiddenException);
@@ -306,18 +316,103 @@ describe("TagsService.setWorkflowTags G1 edit gate", () => {
     expect($transaction).not.toHaveBeenCalled();
   });
 
-  it("a granted member passes; an actor-less call never consults permissions", async () => {
+  it("a granted member passes; an actor-less call never consults the gate", async () => {
     const assertCan = vi.fn().mockResolvedValue(undefined);
-    const s = new TagsService({ assertCan } as unknown as PermissionsService);
-    tagFindMany.mockResolvedValue([
-      { id: "tag_1", name: "prod", color: null },
-    ]);
+    const tenantHasTagGrants = vi.fn().mockResolvedValue(false);
+    const s = new TagsService(permsMock({ assertCan, tenantHasTagGrants }));
+    tagFindMany.mockResolvedValue([{ id: "tag_1", name: "prod", color: null }]);
     await s.setWorkflowTags("t-1", "wf-a", ["tag_1"], member, "env-1");
     expect($transaction).toHaveBeenCalledTimes(1);
     assertCan.mockClear();
+    tenantHasTagGrants.mockClear();
     $transaction.mockClear();
     await s.setWorkflowTags("t-1", "wf-a", ["tag_1"]);
     expect(assertCan).not.toHaveBeenCalled();
+    expect(tenantHasTagGrants).not.toHaveBeenCalled();
+  });
+});
+
+// Tag-scoped grants (§9, SHIPPED): once the tenant has ≥1 TagGrant, tag membership carries
+// access — setWorkflowTags flips from edit- to SHARE-gating, and every access-relevant tag
+// write invalidates the permissions cache (tag-carried keys are baked into cached grants).
+describe("TagsService.setWorkflowTags conditional share gate (tag grants)", () => {
+  const member: Principal = { tenantId: "t-1", userId: "u-1", role: "member" };
+
+  const permsMock = (over: Record<string, unknown> = {}) =>
+    ({
+      tenantHasTagGrants: vi.fn().mockResolvedValue(true),
+      assertCan: vi.fn().mockResolvedValue(undefined),
+      can: vi.fn().mockResolvedValue(true),
+      invalidateTenant: vi.fn(),
+      ...over,
+    }) as unknown as PermissionsService;
+
+  it("with ≥1 TagGrant, requires SHARE — an edit-only member 403s with the friendly reason", async () => {
+    const can = vi.fn().mockResolvedValue(false); // no share on this workflow
+    const assertCan = vi.fn(); // the edit path must NOT run
+    const s = new TagsService(permsMock({ can, assertCan }));
+    await expect(
+      s.setWorkflowTags("t-1", "wf-a", ["tag_1"], member, "env-1"),
+    ).rejects.toThrow(/tags carry permissions in this workspace/i);
+    expect(can).toHaveBeenCalledWith(member, "share", "wf-a", "env-1");
+    expect(assertCan).not.toHaveBeenCalled();
+    expect($transaction).not.toHaveBeenCalled();
+  });
+
+  it("with ≥1 TagGrant, a member holding SHARE passes (edit alone is no longer consulted)", async () => {
+    const can = vi.fn().mockResolvedValue(true);
+    const assertCan = vi.fn();
+    const s = new TagsService(permsMock({ can, assertCan }));
+    tagFindMany.mockResolvedValue([{ id: "tag_1", name: "prod", color: null }]);
+    await s.setWorkflowTags("t-1", "wf-a", ["tag_1"], member, "env-1");
+    expect(can).toHaveBeenCalledWith(member, "share", "wf-a", "env-1");
+    expect(assertCan).not.toHaveBeenCalled();
+    expect($transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("with ZERO TagGrants the gate stays EDIT (migration-neutral)", async () => {
+    const assertCan = vi.fn().mockResolvedValue(undefined);
+    const can = vi.fn();
+    const s = new TagsService(
+      permsMock({
+        tenantHasTagGrants: vi.fn().mockResolvedValue(false),
+        assertCan,
+        can,
+      }),
+    );
+    tagFindMany.mockResolvedValue([{ id: "tag_1", name: "prod", color: null }]);
+    await s.setWorkflowTags("t-1", "wf-a", ["tag_1"], member, "env-1");
+    expect(assertCan).toHaveBeenCalledWith(member, "edit", "wf-a", "env-1");
+    expect(can).not.toHaveBeenCalled();
+  });
+
+  it("setWorkflowTags invalidates the tenant's permissions cache (tag membership feeds grants)", async () => {
+    const invalidateTenant = vi.fn();
+    const s = new TagsService(permsMock({ invalidateTenant }));
+    tagFindMany.mockResolvedValue([{ id: "tag_1", name: "prod", color: null }]);
+    await s.setWorkflowTags("t-1", "wf-a", ["tag_1"], member, "env-1");
+    expect(invalidateTenant).toHaveBeenCalledWith("t-1");
+  });
+
+  it("a denied set never invalidates (nothing changed)", async () => {
+    const invalidateTenant = vi.fn();
+    const s = new TagsService(
+      permsMock({ can: vi.fn().mockResolvedValue(false), invalidateTenant }),
+    );
+    await expect(
+      s.setWorkflowTags("t-1", "wf-a", ["tag_1"], member, "env-1"),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(invalidateTenant).not.toHaveBeenCalled();
+  });
+
+  it("tag DELETION invalidates (the cascade removes TagGrants → access may narrow or the gate may lift)", async () => {
+    const invalidateTenant = vi.fn();
+    const s = new TagsService(permsMock({ invalidateTenant }));
+    await s.remove("t-1", "tag_1");
+    expect(tagDeleteMany).toHaveBeenCalledWith({
+      where: { id: "tag_1", tenantId: "t-1" },
+    });
+    expect(invalidateTenant).toHaveBeenCalledWith("t-1");
   });
 });
 

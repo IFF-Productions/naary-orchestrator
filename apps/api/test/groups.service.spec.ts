@@ -22,6 +22,8 @@ const workflowGrant = {
   deleteMany: vi.fn(),
 };
 const workflowGrantKey = { deleteMany: vi.fn() };
+const tagGrant = { deleteMany: vi.fn() };
+const tag = { findMany: vi.fn() };
 const membership = { findUnique: vi.fn() };
 const apiToken = { findFirst: vi.fn() };
 const environment = { findFirst: vi.fn() };
@@ -33,6 +35,8 @@ vi.mock("@naary/db", () => ({
     groupTokenMember,
     workflowGrant,
     workflowGrantKey,
+    tagGrant,
+    tag,
     membership,
     apiToken,
     environment,
@@ -87,6 +91,8 @@ beforeEach(() => {
     groupTokenMember,
     workflowGrant,
     workflowGrantKey,
+    tagGrant,
+    tag,
     membership,
     apiToken,
     environment,
@@ -105,6 +111,8 @@ beforeEach(() => {
   groupMember.deleteMany.mockResolvedValue({ count: 1 });
   groupTokenMember.deleteMany.mockResolvedValue({ count: 1 });
   workflowGrantKey.deleteMany.mockResolvedValue({ count: 0 });
+  tagGrant.deleteMany.mockResolvedValue({ count: 0 });
+  tag.findMany.mockResolvedValue([]);
 });
 
 // ---- §4 role gates: group/grant CRUD is owner|admin ONLY (share grants no such power) ----
@@ -306,5 +314,127 @@ describe("GroupsService grants", () => {
   it("grant delete invalidates (removing the LAST grant lifts the cliff)", async () => {
     await svc.removeGrant("t-1", asOwner, "grp-1", "grant-1");
     expect(invalidateTenant).toHaveBeenCalledWith("t-1");
+  });
+});
+
+// ---- tag-scoped grants (§9, SHIPPED): tagIds on 'selected' grants ----
+describe("GroupsService tag-scoped grants", () => {
+  it("creates a 'selected' grant with validated + deduped tagIds and invalidates", async () => {
+    tag.findMany.mockResolvedValue([{ id: "tag-1" }, { id: "tag-2" }]);
+    workflowGrant.create.mockResolvedValue({
+      ...GRANT_ROW,
+      id: "grant-2",
+      scope: "selected",
+      canView: true,
+      workflows: [],
+      tagGrants: [{ tagId: "tag-1" }, { tagId: "tag-2" }],
+    });
+    const out = await svc.createGrant("t-1", asOwner, "grp-1", {
+      scope: "selected",
+      canView: true,
+      tagIds: ["tag-1", "tag-2", "tag-1"], // deduped
+    });
+    // Ownership check is tenant-scoped over exactly the (deduped) requested ids.
+    expect(tag.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["tag-1", "tag-2"] }, tenantId: "t-1" },
+      select: { id: true },
+    });
+    expect(workflowGrant.create.mock.calls[0][0].data).toMatchObject({
+      scope: "selected",
+      tagGrants: { create: [{ tagId: "tag-1" }, { tagId: "tag-2" }] },
+    });
+    expect(out.tagIds).toEqual(["tag-1", "tag-2"]);
+    expect(invalidateTenant).toHaveBeenCalledWith("t-1");
+  });
+
+  it("400s a tag id that belongs to another tenant — BEFORE writing", async () => {
+    tag.findMany.mockResolvedValue([{ id: "tag-1" }]); // tag-foreign missing
+    await expect(
+      svc.createGrant("t-1", asOwner, "grp-1", {
+        scope: "selected",
+        canView: true,
+        tagIds: ["tag-1", "tag-foreign"],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(workflowGrant.create).not.toHaveBeenCalled();
+  });
+
+  it("ignores tagIds for scope 'all' (like workflowKeys — no validation, none written)", async () => {
+    workflowGrant.create.mockResolvedValue({ ...GRANT_ROW, tagGrants: [] });
+    const out = await svc.createGrant("t-1", asOwner, "grp-1", {
+      scope: "all",
+      canView: true,
+      tagIds: ["tag-1"],
+    });
+    expect(tag.findMany).not.toHaveBeenCalled();
+    expect(
+      workflowGrant.create.mock.calls[0][0].data.tagGrants,
+    ).toBeUndefined();
+    expect(out.tagIds).toEqual([]);
+  });
+
+  it("update replace-sets the TAG list atomically (clears old TagGrants + writes new)", async () => {
+    workflowGrant.findFirst.mockResolvedValue({
+      ...GRANT_ROW,
+      scope: "selected",
+    });
+    tag.findMany.mockResolvedValue([{ id: "tag-2" }]);
+    workflowGrant.update.mockResolvedValue({
+      ...GRANT_ROW,
+      scope: "selected",
+      workflows: [],
+      tagGrants: [{ tagId: "tag-2" }],
+    });
+    const out = await svc.updateGrant("t-1", asOwner, "grp-1", "grant-1", {
+      tagIds: ["tag-2"],
+    });
+    expect(tagGrant.deleteMany).toHaveBeenCalledWith({
+      where: { grantId: "grant-1" },
+    });
+    // The UNTOUCHED key list costs no delete.
+    expect(workflowGrantKey.deleteMany).not.toHaveBeenCalled();
+    expect($transaction).toHaveBeenCalledTimes(1);
+    expect(out.tagIds).toEqual(["tag-2"]);
+    expect(invalidateTenant).toHaveBeenCalledWith("t-1");
+  });
+
+  it("an update leaving BOTH lists untouched runs a single update (no transaction)", async () => {
+    workflowGrant.findFirst.mockResolvedValue({
+      ...GRANT_ROW,
+      scope: "selected",
+    });
+    workflowGrant.update.mockResolvedValue({
+      ...GRANT_ROW,
+      scope: "selected",
+      tagGrants: [],
+    });
+    await svc.updateGrant("t-1", asOwner, "grp-1", "grant-1", {
+      canRun: true,
+    });
+    expect($transaction).not.toHaveBeenCalled();
+    expect(tagGrant.deleteMany).not.toHaveBeenCalled();
+    expect(workflowGrantKey.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("flipping scope to 'all' clears BOTH lists (keys and tags)", async () => {
+    workflowGrant.findFirst.mockResolvedValue({
+      ...GRANT_ROW,
+      scope: "selected",
+    });
+    workflowGrant.update.mockResolvedValue({
+      ...GRANT_ROW,
+      scope: "all",
+      workflows: [],
+      tagGrants: [],
+    });
+    await svc.updateGrant("t-1", asOwner, "grp-1", "grant-1", {
+      scope: "all",
+    });
+    expect(workflowGrantKey.deleteMany).toHaveBeenCalledWith({
+      where: { grantId: "grant-1" },
+    });
+    expect(tagGrant.deleteMany).toHaveBeenCalledWith({
+      where: { grantId: "grant-1" },
+    });
   });
 });

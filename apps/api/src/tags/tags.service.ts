@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   Optional,
@@ -28,10 +29,18 @@ export interface TagRef {
 }
 
 /**
- * Workflow tags (n8n parity, RBAC program slice T1) — ORGANIZATIONAL metadata only; tags carry
- * no permissions (tag-scoped grants are a future RBAC-GROUPS seam). Tags attach to
- * (tenantId, workflowKey) TENANT-WIDE, not per environment: they're authoring metadata like the
- * workflow's name — identical in every env, so promote carries them implicitly.
+ * Workflow tags (n8n parity, RBAC program slice T1) — organizational metadata that MAY carry
+ * permissions: a TagGrant (RBAC-GROUPS.md §9, shipped) makes a 'selected'-scope grant cover
+ * every workflow carrying the tag. Two consequences owned here:
+ *  - GATING: while the tenant has zero TagGrants, attaching tags is the EDIT verb (today's
+ *    behavior); the FIRST TagGrant makes tag membership access-bearing, so tag edits then
+ *    require SHARE (promote) — otherwise any editor could grant themselves (or others)
+ *    access by tagging a workflow.
+ *  - CACHE: tag membership feeds the flattened effective-grant keys, so every
+ *    access-relevant tag write invalidates the tenant's permissions cache.
+ * Tags attach to (tenantId, workflowKey) TENANT-WIDE, not per environment: they're authoring
+ * metadata like the workflow's name — identical in every env, so promote carries them
+ * implicitly.
  */
 @Injectable()
 export class TagsService {
@@ -105,9 +114,12 @@ export class TagsService {
   }
 
   /** Delete ONE tag by id (tenant-scoped deleteMany; idempotent). The FK cascade removes its
-   *  WorkflowTag rows — workflows just lose the chip. */
+   *  WorkflowTag rows — workflows just lose the chip — AND its TagGrant rows, so any grant
+   *  scoped to it silently narrows; the invalidation makes that visible immediately (and may
+   *  flip the tenant's tag-edit gate back to edit if it was the last TagGrant). */
   async remove(tenantId: string, tagId: string): Promise<void> {
     await getPrisma().tag.deleteMany({ where: { id: tagId, tenantId } });
+    this.permissions?.invalidateTenant(tenantId);
   }
 
   /**
@@ -119,7 +131,9 @@ export class TagsService {
     tenantId: string,
     workflowKey: string,
     tagIds: string[],
-    /** Tag editing is EDIT, not share (§8.2) — gated against the caller's active env. */
+    /** With zero TagGrants in the tenant, tag editing is EDIT (§8.2 — today's behavior);
+     *  with ≥1 TagGrant, tags carry access and it takes SHARE (promote) instead — gated
+     *  against the caller's active env either way. */
     actor?: Principal,
     environmentId?: string,
   ): Promise<TagRef[]> {
@@ -128,12 +142,29 @@ export class TagsService {
         // Fail CLOSED: an actor implies a user-facing call site — authz must run.
         throw new Error("TagsService: PermissionsService is not wired");
       }
-      await this.permissions.assertCan(
-        actor,
-        "edit",
-        workflowKey,
-        environmentId,
-      );
+      if (await this.permissions.tenantHasTagGrants(tenantId)) {
+        // Tags are access-bearing here: an edit-only member could otherwise grant
+        // themselves (or others) access just by tagging a workflow.
+        const allowed = await this.permissions.can(
+          actor,
+          "share",
+          workflowKey,
+          environmentId,
+        );
+        if (!allowed) {
+          throw new ForbiddenException(
+            "Tags carry permissions in this workspace — promoting rights (the Promote " +
+              "permission on this workflow) are required to change them.",
+          );
+        }
+      } else {
+        await this.permissions.assertCan(
+          actor,
+          "edit",
+          workflowKey,
+          environmentId,
+        );
+      }
     }
     const unique = [...new Set(tagIds)];
     const owned = unique.length
@@ -154,6 +185,9 @@ export class TagsService {
         data: unique.map((tagId) => ({ tagId, tenantId, workflowKey })),
       }),
     ]);
+    // Tag membership feeds the flattened effective-grant keys (TagGrant expansion) — drop
+    // the tenant's permissions cache so an access change is visible on the next request.
+    this.permissions?.invalidateTenant(tenantId);
     // Preserve the caller's order (the UI's checkbox order) in the response.
     const byId = new Map(owned.map((t) => [t.id, t]));
     return unique.map((id) => {

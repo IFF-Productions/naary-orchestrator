@@ -206,6 +206,7 @@ model Tag {
   color     String?  // optional hex; UI offers a fixed palette
   createdAt DateTime @default(now())
   workflows WorkflowTag[]
+  tagGrants TagGrant[]
 
   @@unique([tenantId, name])
   @@index([tenantId])
@@ -564,6 +565,7 @@ model WorkflowGrant {
   // own new workflow, which is incoherent.
   canCreate     Boolean @default(false)
   workflows WorkflowGrantKey[] // only for scope='selected'
+  tagGrants TagGrant[] // only for scope='selected' (RBAC-GROUPS.md §9 seam, shipped)
 
   @@index([tenantId])
   @@index([groupId])
@@ -575,6 +577,23 @@ model WorkflowGrantKey {
   workflowKey String
 
   @@id([grantId, workflowKey])
+}
+
+// Tag-scoped grants (RBAC-GROUPS.md §9 seam, SHIPPED): a 'selected'-scope grant may also name
+// TAGS — its effective keys = its WorkflowGrantKey list ∪ the workflowKeys carrying ANY of its
+// tags (union semantics, resolved at read time from WorkflowTag). Because tag MEMBERSHIP then
+// carries access, editing a workflow's tags is SHARE-gated (promote) the moment a tenant has
+// ≥1 TagGrant row — see TagsService.setWorkflowTags. Both FKs Cascade: deleting a grant or a
+// tag cleans its rows (a deleted tag simply stops carrying access).
+model TagGrant {
+  grantId   String
+  grant     WorkflowGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+  tagId     String
+  tag       Tag           @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  createdAt DateTime      @default(now())
+
+  @@id([grantId, tagId])
+  @@index([tagId])
 }
 
 /// Non-secret per-workspace config, ENV-SCOPED, referenced in string expressions as

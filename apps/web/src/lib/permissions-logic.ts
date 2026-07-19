@@ -27,6 +27,9 @@ export interface GrantDraft {
   canShare: boolean;
   canCreate: boolean;
   workflowKeys: string[];
+  /** Tag ids for 'selected' scope (§9 tag-scoped grants): effective coverage =
+   *  workflowKeys ∪ every key carrying any of these tags. */
+  tagIds: string[];
 }
 
 /** A fresh, empty draft: all environments, all workflows, no verbs. */
@@ -41,6 +44,7 @@ export function emptyGrantDraft(): GrantDraft {
     canShare: false,
     canCreate: false,
     workflowKeys: [],
+    tagIds: [],
   };
 }
 
@@ -56,13 +60,14 @@ export function draftFromGrant(g: GroupGrant): GrantDraft {
     canShare: g.canShare,
     canCreate: g.canCreate,
     workflowKeys: [...g.workflowKeys],
+    tagIds: [...(g.tagIds ?? [])],
   };
 }
 
 /**
  * Matrix → API payload. Mirrors the server's §8.3 rule client-side so a save can't 400:
  * `canCreate` is valid only on 'all'-scope grants (forced false otherwise), and
- * workflowKeys only travel for scope 'selected' (replace-set; cleared for 'all').
+ * workflowKeys/tagIds only travel for scope 'selected' (replace-set; cleared for 'all').
  */
 export function draftToPayload(d: GrantDraft): GrantInput {
   const selected = d.scope === "selected";
@@ -76,11 +81,12 @@ export function draftToPayload(d: GrantDraft): GrantInput {
     canShare: d.canShare,
     canCreate: selected ? false : d.canCreate,
     workflowKeys: selected ? d.workflowKeys : [],
+    tagIds: selected ? d.tagIds : [],
   };
 }
 
-/** A saveable draft carries at least one verb, and 'selected' scope at least one workflow.
- *  Returns the reason it isn't saveable, or null when it is. */
+/** A saveable draft carries at least one verb, and 'selected' scope at least one workflow
+ *  or tag. Returns the reason it isn't saveable, or null when it is. */
 export function draftProblem(d: GrantDraft): string | null {
   const anyVerb =
     d.canView ||
@@ -90,8 +96,12 @@ export function draftProblem(d: GrantDraft): string | null {
     d.canShare ||
     (d.scope === "all" && d.canCreate);
   if (!anyVerb) return "Select at least one permission.";
-  if (d.scope === "selected" && d.workflowKeys.length === 0)
-    return "Select at least one workflow (or switch the scope to all workflows).";
+  if (
+    d.scope === "selected" &&
+    d.workflowKeys.length === 0 &&
+    d.tagIds.length === 0
+  )
+    return "Select at least one workflow or tag (or switch the scope to all workflows).";
   return null;
 }
 
@@ -99,6 +109,15 @@ export function draftProblem(d: GrantDraft): string | null {
  *  false means the next saved grant is the FIRST — the UI must show the cliff warning. */
 export function workspaceHasAnyGrant(groups: PermissionGroup[]): boolean {
   return groups.some((g) => g.grants.length > 0);
+}
+
+/** Does ANY grant reference a TAG? False means the next tag-carrying grant is the
+ *  workspace's FIRST TagGrant — the editor shows the "tags become access-bearing" warning
+ *  (from then on, editing a workflow's tags requires the Promote permission). */
+export function workspaceHasAnyTagGrant(groups: PermissionGroup[]): boolean {
+  return groups.some((g) =>
+    g.grants.some((gr) => (gr.tagIds ?? []).length > 0),
+  );
 }
 
 /** Total grants across all groups (list header). */

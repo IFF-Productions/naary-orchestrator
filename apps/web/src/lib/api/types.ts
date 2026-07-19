@@ -490,6 +490,9 @@ export interface GroupGrant {
   /** Create NEW workflows — its own verb (§8.3); valid only with scope 'all'. */
   canCreate: boolean;
   workflowKeys: string[];
+  /** Tag ids this 'selected' grant carries (§9 tag-scoped grants): effective keys =
+   *  workflowKeys ∪ every key tagged with ANY of these. Empty for scope 'all'. */
+  tagIds: string[];
 }
 
 /** A permission group with its members, attached API tokens, and grants. */
@@ -513,6 +516,9 @@ export interface GrantInput {
   canShare?: boolean;
   canCreate?: boolean;
   workflowKeys?: string[];
+  /** Tag ids for scope 'selected' (replace-set on update). The workspace's FIRST TagGrant
+   *  makes tags access-bearing — tag edits then require the Promote permission. */
+  tagIds?: string[];
 }
 
 /** Effective access for one verb: everything, or an explicit key list. */

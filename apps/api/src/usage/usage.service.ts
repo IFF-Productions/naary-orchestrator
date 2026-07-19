@@ -1,6 +1,12 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
 import { type InsightsResult, aggregateInsights } from "@naary/usage";
+import type { Principal } from "../auth/tenant.decorator";
+import {
+  type EnvViewTerm,
+  PermissionsService,
+  viewTermsAllow,
+} from "../permissions/permissions.service";
 
 export interface UsageLineItem {
   id: string;
@@ -30,14 +36,30 @@ export interface UsageSummary {
 
 const round6 = (n: number) => Number(n.toFixed(6));
 
+/** The ledger fields the RBAC filter reads (a subset of Prisma's UsageEvent). */
+interface FilterableEvent {
+  executionId: string;
+  environmentId: string | null;
+}
+
 @Injectable()
 export class UsageService {
-  /** Aggregated + line-item spend for a tenant, from the usage ledger. */
+  constructor(
+    /** @Optional so bare test constructions keep working; when an ACTOR reaches getUsage/
+     *  getInsights the service must be wired (fail CLOSED, never skip the view filter). */
+    @Optional() private readonly permissions?: PermissionsService,
+  ) {}
+
+  /** Aggregated + line-item spend for a tenant, from the usage ledger. RESTRICTED actors
+   *  (RBAC G3 — gated insights) see only events of workflows they can VIEW; unrestricted /
+   *  absent actors keep the query and result byte-identical. */
   async getUsage(
     tenantId: string,
     from?: string,
     to?: string,
+    actor?: Principal,
   ): Promise<UsageSummary> {
+    const terms = await this.viewTermsFor(actor, tenantId);
     const createdAt =
       from || to
         ? {
@@ -46,10 +68,16 @@ export class UsageService {
           }
         : undefined;
 
-    const rows = await getPrisma().usageEvent.findMany({
+    let rows = await getPrisma().usageEvent.findMany({
       where: { tenantId, ...(createdAt ? { createdAt } : {}) },
       orderBy: { createdAt: "desc" },
     });
+    if (terms !== null) {
+      // Same execution→workflowKey join getInsights builds, here only for restricted
+      // subjects — the unrestricted path never pays it.
+      const keyByExec = await this.workflowKeyByExec(rows);
+      rows = rows.filter((r) => this.eventVisible(terms, r, keyByExec));
+    }
 
     let totalCostUsd = 0;
     let totalTokens = 0;
@@ -109,12 +137,16 @@ export class UsageService {
    * environment, by workflow, and by model. Same tenant-scoped ledger as getUsage; the per-workflow
    * breakdown joins each event's executionId to its Execution.workflowKey. `environmentId` filters to
    * a single env (Slice-6a tag). Fetch-then-aggregate mirrors getUsage; the pure rollup lives in
-   * @naary/usage `aggregateInsights`.
+   * @naary/usage `aggregateInsights`. RESTRICTED actors see only events of viewable workflows —
+   * filtered BEFORE the rollup, so every bucket (totals/byDay/byEnvironment/byWorkflow/byModel)
+   * reflects exactly their slice; unrestricted / absent actors are byte-identical to before.
    */
   async getInsights(
     tenantId: string,
     opts: { from?: string; to?: string; environmentId?: string } = {},
+    actor?: Principal,
   ): Promise<InsightsResult> {
+    const terms = await this.viewTermsFor(actor, tenantId);
     const { from, to, environmentId } = opts;
     const createdAt =
       from || to
@@ -124,7 +156,7 @@ export class UsageService {
           }
         : undefined;
 
-    const rows = await getPrisma().usageEvent.findMany({
+    let rows = await getPrisma().usageEvent.findMany({
       where: {
         tenantId,
         ...(createdAt ? { createdAt } : {}),
@@ -134,16 +166,10 @@ export class UsageService {
     });
 
     // Map each run (executionId = Temporal workflowId) to its workflowKey for the per-workflow rollup.
-    const execIds = [...new Set(rows.map((r) => r.executionId))];
-    const execs = execIds.length
-      ? await getPrisma().execution.findMany({
-          where: { workflowId: { in: execIds } },
-          select: { workflowId: true, workflowKey: true },
-        })
-      : [];
-    const workflowKeyByExec = new Map<string, string | null>(
-      execs.map((e) => [e.workflowId, e.workflowKey]),
-    );
+    const workflowKeyByExec = await this.workflowKeyByExec(rows);
+    if (terms !== null) {
+      rows = rows.filter((r) => this.eventVisible(terms, r, workflowKeyByExec));
+    }
 
     return aggregateInsights(
       rows.map((r) => ({
@@ -157,6 +183,51 @@ export class UsageService {
       })),
       workflowKeyByExec,
       { from: from ?? null, to: to ?? null },
+    );
+  }
+
+  /** executionId → workflowKey over the DISTINCT execIds of `rows` (one batched lookup). */
+  private async workflowKeyByExec(
+    rows: Array<{ executionId: string }>,
+  ): Promise<Map<string, string | null>> {
+    const execIds = [...new Set(rows.map((r) => r.executionId))];
+    const execs = execIds.length
+      ? await getPrisma().execution.findMany({
+          where: { workflowId: { in: execIds } },
+          select: { workflowId: true, workflowKey: true },
+        })
+      : [];
+    return new Map<string, string | null>(
+      execs.map((e) => [e.workflowId, e.workflowKey]),
+    );
+  }
+
+  /** The actor's per-env view terms, or null when unfiltered (no actor / unrestricted). */
+  private async viewTermsFor(
+    actor: Principal | undefined,
+    tenantId: string,
+  ): Promise<EnvViewTerm[] | null> {
+    if (!actor) return null;
+    if (!this.permissions) {
+      // Fail CLOSED: an actor implies a user-facing call site — the filter must run.
+      throw new Error("UsageService: PermissionsService is not wired");
+    }
+    return this.permissions.viewTerms(actor, tenantId);
+  }
+
+  /** RBAC visibility of one ledger row for a restricted subject: env term rules per
+   *  {@link viewTermsAllow} — a NULL environmentId row belongs to the DEFAULT env (same
+   *  rule as the runs-list filter), and an event whose executionId resolves to NO
+   *  workflowKey is visible only to UNRESTRICTED subjects. */
+  private eventVisible(
+    terms: EnvViewTerm[],
+    row: FilterableEvent,
+    keyByExec: Map<string, string | null>,
+  ): boolean {
+    return viewTermsAllow(
+      terms,
+      row.environmentId,
+      keyByExec.get(row.executionId) ?? null,
     );
   }
 }

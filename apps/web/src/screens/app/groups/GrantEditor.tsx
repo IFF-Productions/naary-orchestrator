@@ -22,6 +22,13 @@ export interface WorkflowOption {
   name: string;
 }
 
+/** A tag the 'selected' scope can pick (§9 tag-scoped grants). */
+export interface TagOption {
+  id: string;
+  name: string;
+  color: string | null;
+}
+
 const VERBS: {
   field: keyof Pick<
     GrantDraft,
@@ -146,6 +153,8 @@ export function GrantEditorDialog({
   initial,
   envs,
   workflows,
+  tags,
+  tagGrantsExist,
   busy,
   error,
   onSave,
@@ -156,6 +165,11 @@ export function GrantEditorDialog({
   initial: GrantDraft;
   envs: Environment[];
   workflows: WorkflowOption[];
+  /** The workspace's tags (pickable under 'selected' scope — §9 tag-scoped grants). */
+  tags: TagOption[];
+  /** Does ANY grant in the workspace already reference a tag? False + a tag picked here
+   *  ⇒ this save creates the FIRST TagGrant — show the access-bearing warning. */
+  tagGrantsExist: boolean;
   busy: boolean;
   error: string | null;
   onSave: (draft: GrantDraft) => void;
@@ -163,6 +177,8 @@ export function GrantEditorDialog({
 }) {
   const [draft, setDraft] = useState<GrantDraft>(initial);
   const problem = draftProblem(draft);
+  const firstTagGrant =
+    !tagGrantsExist && draft.scope === "selected" && draft.tagIds.length > 0;
 
   return (
     <Dialog
@@ -214,7 +230,7 @@ export function GrantEditorDialog({
           <SegmentedToggle
             options={[
               { value: "all", label: "All workflows" },
-              { value: "selected", label: "Selected" },
+              { value: "selected", label: "Selected workflows and/or tags" },
             ]}
             value={draft.scope}
             onChange={(scope) => setDraft({ ...draft, scope })}
@@ -288,6 +304,109 @@ export function GrantEditorDialog({
                   </div>
                 );
               })}
+            </div>
+          )}
+          {/* tag picker (§9 tag-scoped grants): coverage = selected workflows ∪ every
+              workflow carrying a selected tag — resolved live, so newly-tagged workflows
+              join the grant automatically */}
+          {draft.scope === "selected" && (
+            <div style={{ marginTop: 10 }}>
+              <div style={labelStyle}>Tags</div>
+              {tags.length === 0 ? (
+                <div
+                  style={{
+                    fontSize: "var(--text-xs)",
+                    color: "var(--ink-3)",
+                  }}
+                >
+                  No tags in this workspace yet — create them on the Workflows
+                  screen.
+                </div>
+              ) : (
+                <div
+                  style={{
+                    maxHeight: 140,
+                    overflowY: "auto",
+                    border: "1px solid var(--line-2)",
+                    borderRadius: "var(--radius-sm)",
+                    padding: 6,
+                  }}
+                >
+                  {tags.map((t) => {
+                    const on = draft.tagIds.includes(t.id);
+                    return (
+                      <div
+                        key={t.id}
+                        role="menuitemcheckbox"
+                        aria-checked={on}
+                        onClick={() =>
+                          setDraft({
+                            ...draft,
+                            tagIds: on
+                              ? draft.tagIds.filter((id) => id !== t.id)
+                              : [...draft.tagIds, t.id],
+                          })
+                        }
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          padding: "5px 6px",
+                          borderRadius: "var(--radius-sm)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <Checkbox checked={on} />
+                        <span
+                          style={{
+                            width: 9,
+                            height: 9,
+                            flex: "none",
+                            borderRadius: "50%",
+                            background: t.color ?? "var(--ink-3)",
+                          }}
+                        />
+                        <span
+                          style={{
+                            fontSize: "var(--text-sm)",
+                            color: "var(--ink)",
+                          }}
+                        >
+                          {t.name}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--ink-3)",
+                  marginTop: 4,
+                }}
+              >
+                A tag covers every workflow carrying it — now and in the future.
+              </div>
+            </div>
+          )}
+          {/* FIRST TagGrant in the workspace: tags flip from metadata to access-bearing */}
+          {firstTagGrant && (
+            <div
+              style={{
+                marginTop: 10,
+                padding: "8px 10px",
+                borderRadius: "var(--radius-sm)",
+                background: "var(--warning-soft, rgba(217,119,6,.12))",
+                color: "var(--state-warning, #b45309)",
+                fontSize: "var(--text-sm)",
+                lineHeight: "var(--leading-snug)",
+              }}
+            >
+              <strong>Tags become access-bearing</strong> — this is the
+              workspace&rsquo;s first tag-scoped grant. From now on, editing a
+              workflow&rsquo;s tags will require the Promote permission
+              (otherwise an editor could grant access just by tagging).
             </div>
           )}
         </div>

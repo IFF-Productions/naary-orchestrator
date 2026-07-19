@@ -14,6 +14,7 @@ import {
   emptyGrantDraft,
   totalGrantCount,
   workspaceHasAnyGrant,
+  workspaceHasAnyTagGrant,
 } from "../src/lib/permissions-logic";
 
 const grant = (over: Partial<GroupGrant> = {}): GroupGrant => ({
@@ -27,6 +28,7 @@ const grant = (over: Partial<GroupGrant> = {}): GroupGrant => ({
   canShare: false,
   canCreate: false,
   workflowKeys: [],
+  tagIds: [],
   ...over,
 });
 
@@ -61,6 +63,7 @@ describe("draftToPayload (matrix → API payload)", () => {
       canRun: true,
       canCreate: true,
       workflowKeys: ["stale-key"], // left over from a scope flip — must not travel
+      tagIds: ["stale-tag"], // ditto
     });
     expect(p).toEqual({
       environmentId: "env-prod",
@@ -72,6 +75,7 @@ describe("draftToPayload (matrix → API payload)", () => {
       canShare: false,
       canCreate: true,
       workflowKeys: [],
+      tagIds: [],
     });
   });
 
@@ -103,6 +107,7 @@ describe("draftFromGrant (edit-flow seeding)", () => {
       canView: true,
       canRun: true,
       workflowKeys: ["k1", "k2"],
+      tagIds: ["tag-1"],
     });
     const p = draftToPayload(draftFromGrant(g));
     expect(p).toEqual({
@@ -115,6 +120,7 @@ describe("draftFromGrant (edit-flow seeding)", () => {
       canShare: false,
       canCreate: false,
       workflowKeys: ["k1", "k2"],
+      tagIds: ["tag-1"],
     });
   });
 
@@ -142,10 +148,21 @@ describe("draftProblem (save gate)", () => {
     ).toMatch(/at least one permission/i);
   });
 
-  it("requires at least one workflow for 'selected' scope", () => {
+  it("requires at least one workflow OR tag for 'selected' scope", () => {
     expect(
       draftProblem({ ...emptyGrantDraft(), scope: "selected", canView: true }),
-    ).toMatch(/at least one workflow/i);
+    ).toMatch(/at least one workflow or tag/i);
+  });
+
+  it("accepts a tag-only 'selected' draft (§9 tag-scoped grants)", () => {
+    expect(
+      draftProblem({
+        ...emptyGrantDraft(),
+        scope: "selected",
+        canView: true,
+        tagIds: ["tag-1"],
+      }),
+    ).toBeNull();
   });
 
   it("accepts a create-only all-scope grant and a view-only selected grant", () => {
@@ -175,6 +192,22 @@ describe("first-grant detection (§4/§8.6 — the cliff)", () => {
     expect(totalGrantCount([group([grant()]), group([grant(), grant()])])).toBe(
       3,
     );
+  });
+});
+
+describe("first-TAG-grant detection (§9 — tags become access-bearing)", () => {
+  it("is false while no grant references a tag (plain grants don't count)", () => {
+    expect(workspaceHasAnyTagGrant([])).toBe(false);
+    expect(workspaceHasAnyTagGrant([group([grant()])])).toBe(false);
+  });
+
+  it("is true the moment ANY grant carries a tag id", () => {
+    expect(
+      workspaceHasAnyTagGrant([
+        group([grant()]),
+        group([grant({ scope: "selected", tagIds: ["tag-1"] })]),
+      ]),
+    ).toBe(true);
   });
 });
 
