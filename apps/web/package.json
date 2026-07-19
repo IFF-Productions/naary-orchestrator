@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.storybook.json",
     "typecheck:stories": "tsc --noEmit -p tsconfig.storybook.json",
     "test:e2e": "playwright test",
+    "gen:api-types": "openapi-typescript ../api/openapi.json -o src/lib/api/schema.d.ts",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
   },
@@ -28,6 +29,7 @@
     "@xyflow/react": "^12.11.2",
     "codemirror": "^6.0.2",
     "firebase": "^12.16.0",
+    "openapi-fetch": "^0.17.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.1"
@@ -41,6 +43,7 @@
     "@vitejs/plugin-react": "^6.0.3",
     "msw": "^2.15.0",
     "msw-storybook-addon": "^2.0.7",
+    "openapi-typescript": "6.7.6",
     "storybook": "^10.5.2",
     "typescript": "^7.0.2",
     "vite": "^8.1.5"

@@ -1,0 +1,5 @@
+# Generated API artifacts are byte-compared by the `check:api-types` drift gate, which
+# runs on a Windows CI runner. Pin them to LF so a runner with core.autocrlf=true can't
+# produce a spurious CRLF-vs-LF diff and fail the gate on a no-op.
+apps/api/openapi.json text eol=lf
+apps/web/src/lib/api/schema.d.ts text eol=lf

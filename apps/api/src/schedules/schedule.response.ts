@@ -13,6 +13,7 @@ export class ScheduleResponse {
   @ApiProperty({ format: "date-time", example: "2026-07-04T12:00:00.000Z" })
   createdAt!: string;
   @ApiProperty({
+    type: String,
     nullable: true,
     format: "date-time",
     example: "2026-07-07T09:00:00.000Z",

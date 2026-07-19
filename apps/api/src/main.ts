@@ -15,11 +15,12 @@ initFlags();
 
 import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
-import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
+import { SwaggerModule } from "@nestjs/swagger";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/all-exceptions.filter";
 import { AppLogger } from "./common/app-logger";
+import { buildOpenApiConfig } from "./swagger/openapi-config";
 
 /** Browser origins allowed to call the API (the web app). Comma-separated env,
  *  defaults to the Vite dev server. */
@@ -72,23 +73,9 @@ async function bootstrap(): Promise<void> {
   // token or a Firebase ID token), so we register one bearer scheme and mark it required for
   // all operations. Set SWAGGER_DISABLED=1 to omit it in a hardened deployment.
   if (process.env.SWAGGER_DISABLED !== "1") {
-    const config = new DocumentBuilder()
-      .setTitle("naary API")
-      .setDescription(
-        "Control plane for durable, human-in-the-loop AI-agent + webhook workflows. " +
-          "Authenticate every request with `Authorization: Bearer <token>` — an `nry_` API " +
-          "token (mint one in the app, or `POST /tokens`) or a Firebase ID token.",
-      )
-      .setVersion("0.1.0")
-      .addBearerAuth(
-        {
-          type: "http",
-          scheme: "bearer",
-          description: "An `nry_…` API token or a Firebase ID token.",
-        },
-        "bearer",
-      )
-      .build();
+    // Shared with the standalone spec emitter (emit-openapi.ts) so /docs-json and the
+    // generated web types can't drift on doc metadata.
+    const config = buildOpenApiConfig();
     const document = SwaggerModule.createDocument(app, config);
     // Apply the bearer requirement to every operation (avoids decorating each controller).
     document.security = [{ bearer: [] }];

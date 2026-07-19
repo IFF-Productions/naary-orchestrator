@@ -246,13 +246,6 @@ export interface AwaitingApproval {
   createdAt: string;
 }
 
-/** One run's outcome in a batch approve/reject — ok:false carries why it slipped. */
-export interface BatchDecisionResult {
-  workflowId: string;
-  ok: boolean;
-  error?: string;
-}
-
 export interface RunSummary {
   workflowId: string;
   workflowKey: string | null;
