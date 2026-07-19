@@ -29,6 +29,43 @@ export class CompanyMemberResponse {
   role!: string;
 }
 
+// ---- Company permission groups (RBAC-GROUPS §9 / COMPANIES §9) ----------------------------------
+
+/** The group's company-wide grant: six verbs, always 'all'-scope + all-environments (v1). */
+export class CompanyGrantResponse {
+  @ApiProperty({ example: "d41b…" }) id!: string;
+  @ApiProperty() canView!: boolean;
+  @ApiProperty() canRun!: boolean;
+  @ApiProperty() canEdit!: boolean;
+  @ApiProperty() canDelete!: boolean;
+  @ApiProperty({ description: "share = promote to another environment." })
+  canShare!: boolean;
+  @ApiProperty() canCreate!: boolean;
+  @ApiProperty() createdAt!: string;
+}
+
+export class CompanyGroupMemberResponse {
+  @ApiProperty({ description: "Firebase uid — must be a company member." })
+  userId!: string;
+  @ApiProperty() createdAt!: string;
+}
+
+/** A company-wide permission group: a second grant source unioned into workspace permission
+ *  resolution for its members, wherever a workspace has ALREADY restricted them. */
+export class CompanyGroupResponse {
+  @ApiProperty() id!: string;
+  @ApiProperty({ example: "Platform admins" }) name!: string;
+  @ApiProperty() createdAt!: string;
+  @ApiProperty({ type: [CompanyGroupMemberResponse] })
+  members!: CompanyGroupMemberResponse[];
+  @ApiProperty({
+    type: CompanyGrantResponse,
+    nullable: true,
+    description: "The group's single grant; null while none is set.",
+  })
+  grant!: CompanyGrantResponse | null;
+}
+
 // ---- Company budget (COMPANIES.md §8, Slice 5) --------------------------------------------------
 
 /** The persisted company-wide budget config. */

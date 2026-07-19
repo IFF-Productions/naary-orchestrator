@@ -338,5 +338,17 @@ Tag-scoped grants (`TagGrant` beside `WorkflowGrantKey`, union semantics) — **
 model; grantsFor expands tag-carried keys into the cached flattened list; tag edits become
 share-gated in adopting tenants per §4; cost insights/usage are filtered to the subject's
 viewable workflows via the shared view-terms helper). Env-scoped grants
-(`WorkflowGrant.environmentId?`) — shipped in v1 (§8.5). Still open: company-role composition
-(COMPANIES §9); `Promotion` rows remain the promote audit substrate (ENVIRONMENTS §6).
+(`WorkflowGrant.environmentId?`) — shipped in v1 (§8.5).
+
+**Company groups — SHIPPED** (COMPANIES §9 has the full contract): `CompanyPermissionGroup` /
+`CompanyGroupMember` / `CompanyWorkflowGrant` at COMPANY level, a SECOND grant source that
+`grantsFor` unions in AFTER the workspace's own resolution has decided the subject is
+restricted (tenant enforced + member-user). v1 bounds: company grants are `'all'`-scope +
+all-environments only (per-key/per-env don't compose across workspaces — the seam is nullable
+scope/env columns + a per-workspace key join later); **uid-keyed only, never tokens** (tokens
+are workspace-scoped subjects); **company grants never flip a workspace's cliff** — the
+enforcement switch remains `WorkflowGrant` existence in the workspace, and an unenforced
+workspace is byte-identically unaffected (pinned by test). CRUD is company-OWNER-gated;
+writes fan invalidation out to every attached tenant (`invalidateCompany`).
+
+Still open: `Promotion` rows remain the promote audit substrate (ENVIRONMENTS §6).

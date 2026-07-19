@@ -408,6 +408,30 @@ export interface CompanyWorkspaceWorkflow {
   active: boolean;
 }
 
+/** A company group's grant: six verbs, always all-workflows/all-environments (v1). */
+export interface CompanyGroupGrant {
+  id: string;
+  canView: boolean;
+  canRun: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  canShare: boolean;
+  canCreate: boolean;
+  createdAt: string;
+}
+
+/** A company-wide permission group (RBAC-GROUPS §9): a second grant source unioned into
+ *  workspace permission resolution for its members, only where a workspace has already
+ *  restricted them (never flips a workspace's cliff). Owner-managed; uid-keyed only. */
+export interface CompanyGroup {
+  id: string;
+  name: string;
+  createdAt: string;
+  members: Array<{ userId: string; createdAt: string }>;
+  /** The group's single grant; null while none is set. */
+  grant: CompanyGroupGrant | null;
+}
+
 /** One entry in the activity feed (who did what, when). */
 export interface AuditEvent {
   id: string;

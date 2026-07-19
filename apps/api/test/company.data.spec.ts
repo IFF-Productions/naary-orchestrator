@@ -21,6 +21,7 @@ function make(): CompanyService {
     { listPage } as unknown as ExecutionsService,
     { list: graphList } as unknown as GraphsService,
     { defaultEnvId } as unknown as EnvironmentsService,
+    {} as never, // PermissionsService — attach/detach fan-out, not exercised here
   );
 }
 

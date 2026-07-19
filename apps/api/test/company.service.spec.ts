@@ -22,10 +22,18 @@ vi.mock("@naary/db", () => ({
 
 import { CompanyService } from "../src/companies/company.service";
 
+// Attach/detach must fan cache invalidation out to the company's tenants (company grants
+// are part of every attached workspace's permission resolution).
+const permissions = {
+  invalidateCompany: vi.fn().mockResolvedValue(undefined),
+  invalidateTenant: vi.fn(),
+};
+
 const svc = new CompanyService(
   {} as never, // ExecutionsService — not exercised in this spec
   {} as never, // GraphsService
   {} as never, // EnvironmentsService
+  permissions as never, // PermissionsService — invalidation fan-out only
 );
 
 // Membership roles keyed cheaply: companyMembership.findUnique returns { role } or null;
@@ -42,6 +50,8 @@ beforeEach(() => {
     membership.findUnique,
   ])
     m.mockReset();
+  permissions.invalidateCompany.mockClear();
+  permissions.invalidateTenant.mockClear();
 });
 
 describe("attachWorkspace — the owner-authorized invariant (§4)", () => {
@@ -142,6 +152,56 @@ describe("detachWorkspace", () => {
     await expect(
       svc.detachWorkspace("u1", "co1", "wsX", {}),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+// Company grants are unioned into every attached workspace's permission resolution, so the
+// membership of the company (which workspaces are attached) is itself access-relevant:
+// attach/detach must drop the affected tenants' permission caches.
+describe("invalidation fan-out on attach/detach", () => {
+  it("attach fans out invalidateCompany after a successful claim", async () => {
+    companyMembership.findUnique.mockResolvedValue({ role: "owner" });
+    membership.findUnique.mockResolvedValue({ role: "owner" });
+    tenantSettings.updateMany.mockResolvedValue({ count: 1 });
+    await svc.attachWorkspace("u1", "co1", "wsX", {});
+    expect(permissions.invalidateCompany).toHaveBeenCalledWith("co1");
+  });
+
+  it("attach fans out on the create-row path too", async () => {
+    companyMembership.findUnique.mockResolvedValue({ role: "owner" });
+    membership.findUnique.mockResolvedValue({ role: "owner" });
+    tenantSettings.updateMany.mockResolvedValue({ count: 0 });
+    tenantSettings.create.mockResolvedValue({});
+    await svc.attachWorkspace("u1", "co1", "wsX", {});
+    expect(permissions.invalidateCompany).toHaveBeenCalledWith("co1");
+  });
+
+  it("a REJECTED attach invalidates nothing", async () => {
+    companyMembership.findUnique.mockResolvedValue({ role: "admin" });
+    membership.findUnique.mockResolvedValue({ role: "member" }); // not the owner
+    await expect(
+      svc.attachWorkspace("u1", "co1", "wsX", {}),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(permissions.invalidateCompany).not.toHaveBeenCalled();
+    expect(permissions.invalidateTenant).not.toHaveBeenCalled();
+  });
+
+  it("detach invalidates the DETACHED tenant explicitly (it's no longer enumerated) + the company", async () => {
+    tenantSettings.findUnique.mockResolvedValue({ companyId: "co1" });
+    companyMembership.findUnique.mockResolvedValue({ role: "admin" });
+    membership.findUnique.mockResolvedValue({ role: "member" });
+    await svc.detachWorkspace("u1", "co1", "wsX", {});
+    expect(permissions.invalidateTenant).toHaveBeenCalledWith("wsX");
+    expect(permissions.invalidateCompany).toHaveBeenCalledWith("co1");
+  });
+
+  it("a 404 detach (wrong company) invalidates nothing", async () => {
+    tenantSettings.findUnique.mockResolvedValue({ companyId: "otherCo" });
+    await expect(
+      svc.detachWorkspace("u1", "co1", "wsX", {}),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(permissions.invalidateCompany).not.toHaveBeenCalled();
+    expect(permissions.invalidateTenant).not.toHaveBeenCalled();
   });
 });
 

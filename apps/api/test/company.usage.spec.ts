@@ -16,6 +16,7 @@ const svc = new CompanyService(
   {} as never, // ExecutionsService — not exercised in this spec
   {} as never, // GraphsService
   {} as never, // EnvironmentsService
+  {} as never, // PermissionsService — attach/detach fan-out, not exercised here
 );
 
 // Ledger rows carry Decimal costUsd — fake it as the string Prisma's Decimal stringifies to

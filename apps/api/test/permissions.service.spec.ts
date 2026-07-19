@@ -1,13 +1,23 @@
 import { ForbiddenException } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// PermissionsService reads two things: "does the tenant have ANY grant?" (findFirst — THE
-// restriction switch) and the subject's effective grants (findMany through the group joins).
+// PermissionsService reads three things: "does the tenant have ANY grant?" (findFirst — THE
+// restriction switch), the subject's effective grants (findMany through the group joins),
+// and — for restricted USER subjects only — the tenant's companyId + company grants
+// (the second grant source; defaults here = standalone workspace, no company).
 const grantFindFirst = vi.fn();
 const grantFindMany = vi.fn();
+const tenantSettingsFindUnique = vi.fn();
+const tenantSettingsFindMany = vi.fn();
+const companyGrantFindMany = vi.fn();
 vi.mock("@naary/db", () => ({
   getPrisma: () => ({
     workflowGrant: { findFirst: grantFindFirst, findMany: grantFindMany },
+    tenantSettings: {
+      findUnique: tenantSettingsFindUnique,
+      findMany: tenantSettingsFindMany,
+    },
+    companyWorkflowGrant: { findMany: companyGrantFindMany },
   }),
 }));
 
@@ -56,6 +66,9 @@ function enforcedWith(rows: unknown[]): void {
 beforeEach(() => {
   grantFindFirst.mockReset().mockResolvedValue(null);
   grantFindMany.mockReset().mockResolvedValue([]);
+  tenantSettingsFindUnique.mockReset().mockResolvedValue(null); // standalone workspace
+  tenantSettingsFindMany.mockReset().mockResolvedValue([]);
+  companyGrantFindMany.mockReset().mockResolvedValue([]);
 });
 
 // ---------------------------------------------------------------------------

@@ -29,6 +29,7 @@ const svc = new CompanyService(
   {} as never, // ExecutionsService — not exercised here
   {} as never, // GraphsService
   {} as never, // EnvironmentsService
+  {} as never, // PermissionsService — attach/detach fan-out, not exercised here
 );
 
 beforeEach(() => {
