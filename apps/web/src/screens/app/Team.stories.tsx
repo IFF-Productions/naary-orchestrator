@@ -110,7 +110,7 @@ const GROUPS_RESTRICTED = [
   },
 ];
 
-const base = (groups: unknown) => [
+const base = (groups: "forbidden" | Record<string, unknown>[]) => [
   http.get("*/api/me", () => HttpResponse.json({ tenantId: "t1" })),
   http.get("*/api/me/workspaces", () =>
     HttpResponse.json([{ tenantId: "t1", role: "owner", name: "Northwind" }]),
