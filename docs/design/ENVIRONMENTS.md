@@ -185,13 +185,20 @@ Each slice is independently shippable behind the §5 shim.
    *(Shipped as 6a/6b + the slice-6 cleanup: `PinnedData` and `ErrorHandler` env-scoped too, and
    `deleteWorkflow` now deletes the env-scoped trigger endpoints per-env.)*
 7. **Cleanup** — drop the nullable/default fallback once all call sites are env-aware.
-   **Deferred to its own slice — env-scoped schedules:** `Schedule` + `PollState` stay tenant-wide
-   (and effectively default-env-only) because scoping them means putting the env into the schedule
-   IDENTITY — the Temporal schedule id (`poll-${tenantId}-${workflowKey}` →
-   `poll-${tenantId}-${environmentId}-${workflowKey}`), the startWorkflow action args (which carry
-   no env today, so scheduled runs start env-less), and the worker's `PollMeta` cursor key. Until
-   then `WorkflowLifecycleService` keeps schedule sync/teardown default-env-only, and PollState is
-   the last row behind `deleteWorkflow`'s `deleteShared` gate.
+   **Env-scoped schedules (SHIPPED — final slice; the environments program is COMPLETE):**
+   `Schedule` + `PollState` are env-scoped, with the env in the schedule IDENTITY on all three
+   surfaces — the Temporal schedule id (`poll-${tenantId}-${workflowKey}` →
+   `poll-${tenantId}-${environmentId}-${workflowKey}`, likewise `cron-`/`sched-` and the run ids),
+   the startWorkflow action args (scheduled runs now carry `environmentId`, reaching env-scoped
+   creds/secrets/notifications), and the worker's `PollMeta` cursor key (4-part, with an
+   in-activity default-env fallback for legacy in-flight runs). `WorkflowLifecycleService`
+   syncs/tears down per-env (the default-env-only gate is gone), `setActive` pauses/resumes the
+   caller's env's schedules, and `deleteWorkflow` lost its `deleteShared` gate — PollState deletes
+   are always env-scoped. Legacy no-env Temporal ids are migrated by a one-time boot reconcile
+   (`ScheduleReconcileService`) with ownership-guarded sync/teardown-time best-effort legacy
+   deletes as the safety net (only the env that owns the legacy row may clear it); mid-cutover runs from legacy ids land env-less and are absorbed by the worker's
+   default-env fallbacks (5b precedent). Non-default envs' `WorkflowActivation` rows were
+   backfilled to `active=false` (their schedules never fired before; re-enabling is explicit).
 
 ## 8. Decisions (confirmed — was "open before Slice 1")
 

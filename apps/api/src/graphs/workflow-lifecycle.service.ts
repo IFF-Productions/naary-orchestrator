@@ -2,7 +2,6 @@ import { Injectable, Optional } from "@nestjs/common";
 import type { GraphDef } from "@naary/dsl";
 import { TracedClass } from "@naary/observability";
 import type { Principal } from "../auth/tenant.decorator";
-import { EnvironmentsService } from "../environments/environments.service";
 import { PermissionsService } from "../permissions/permissions.service";
 import { SchedulesService } from "../schedules/schedules.service";
 import { type GraphSnapshot, GraphsService } from "./graphs.service";
@@ -19,9 +18,9 @@ import { type GraphSnapshot, GraphsService } from "./graphs.service";
  * both.
  *
  * Invariants preserved exactly:
- * - DEFAULT-ENV-ONLY gating: Temporal schedules aren't env-scoped yet, so sync/teardown
- *   only runs for the default env — a sandbox save/delete must never reconfigure or kill
- *   the default/prod copy's triggers.
+ * - ENV-SCOPED side-effects (env-scoped-schedules slice): schedules carry the env in their
+ *   identity now, so save syncs THIS env's schedules and delete tears down THIS env's ids —
+ *   a sandbox save/delete touches only sandbox's triggers, never the default/prod copy's.
  * - Best-effort side-effects: a scheduling hiccup must not fail the save/delete
  *   (`.catch(() => undefined)`).
  * - Permission asserts (RBAC-GROUPS.md §4, slice G1) run BEFORE any side effect: the save
@@ -35,13 +34,13 @@ export class WorkflowLifecycleService {
   constructor(
     private readonly graphs: GraphsService,
     private readonly schedules: SchedulesService,
-    private readonly environments: EnvironmentsService,
     @Optional() private readonly permissions?: PermissionsService,
   ) {}
 
-  /** Upsert (content-hash + version) the graph, then — default env only — (re)sync its
-   *  poll/cron schedules so a saved trigger graph actually fires. With an actor, the
-   *  upsert asserts `edit` (existing key) or `canCreate` (new key) before persisting. */
+  /** Upsert (content-hash + version) the graph, then (re)sync THIS env's poll/cron
+   *  schedules so a saved trigger graph actually fires — in its own environment. With an
+   *  actor, the upsert asserts `edit` (existing key) or `canCreate` (new key) before
+   *  persisting. */
   async saveWorkflow(
     tenantId: string,
     environmentId: string,
@@ -58,19 +57,17 @@ export class WorkflowLifecycleService {
       graph,
       actor,
     );
-    if (await this.environments.isDefaultEnv(tenantId, environmentId)) {
-      await this.schedules
-        .syncPollSchedule(tenantId, workflowKey, graph)
-        .catch(() => undefined);
-      await this.schedules
-        .syncCronSchedule(tenantId, workflowKey, graph)
-        .catch(() => undefined);
-    }
+    await this.schedules
+      .syncPollSchedule(tenantId, environmentId, workflowKey, graph)
+      .catch(() => undefined);
+    await this.schedules
+      .syncCronSchedule(tenantId, environmentId, workflowKey, graph)
+      .catch(() => undefined);
     return snap;
   }
 
-  /** Delete the workflow in this env; for the DEFAULT env's copy also tear down its
-   *  Temporal schedules and the shared (tenant-wide) rows/triggers (deleteShared).
+  /** Delete the workflow in this env, tearing down THIS env's Temporal schedules (and,
+   *  best-effort, any legacy no-env ids — see SchedulesService.teardownForWorkflow).
    *  Returns false when the key doesn't exist in the env (caller 404s). With an actor,
    *  asserts `delete` FIRST — before the teardown side effect can fire. */
   async deleteWorkflow(
@@ -93,20 +90,9 @@ export class WorkflowLifecycleService {
         environmentId,
       );
     }
-    const isDefault = await this.environments.isDefaultEnv(
-      tenantId,
-      environmentId,
-    );
-    if (isDefault) {
-      await this.schedules
-        .teardownForWorkflow(tenantId, workflowKey)
-        .catch(() => undefined);
-    }
-    return this.graphs.deleteWorkflow(
-      tenantId,
-      environmentId,
-      workflowKey,
-      isDefault,
-    );
+    await this.schedules
+      .teardownForWorkflow(tenantId, environmentId, workflowKey)
+      .catch(() => undefined);
+    return this.graphs.deleteWorkflow(tenantId, environmentId, workflowKey);
   }
 }

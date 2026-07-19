@@ -2439,7 +2439,15 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
     const worker = await makeWorker();
     await worker.runUntil(async () => {
       const handle = await env.client.workflow.start(runGraph, {
-        args: [pollGraph, {}, { tenantId: "t-poll", workflowKey: "poller" }],
+        args: [
+          pollGraph,
+          {},
+          {
+            tenantId: "t-poll",
+            environmentId: "env-poll",
+            workflowKey: "poller",
+          },
+        ],
         taskQueue: TASK_QUEUE,
         workflowId: "e2e-poll-changed",
       });
@@ -2448,9 +2456,11 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
       expect(result.ctx.poll).toEqual({ changed: true, body: { v: 1 } });
       // the "changed" branch reached the agent
       expect(agentCalls.some((m) => m.nodeId === "act")).toBe(true);
-      // the activity got the cross-run key (tenant + workflowKey + node)
+      // the activity got the cross-run cursor key (tenant + ENV + workflowKey + node) —
+      // env-scoped schedules: the run's env reaches the poll cursor
       expect(pollCalls[pollCalls.length - 1]).toMatchObject({
         tenantId: "t-poll",
+        environmentId: "env-poll",
         workflowKey: "poller",
         nodeId: "poll",
       });

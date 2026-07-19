@@ -267,28 +267,17 @@ describe("GraphsService.deleteWorkflow", () => {
   it("returns false (→ controller 404) and touches nothing when no graph exists", async () => {
     findFirst.mockResolvedValue(null);
 
-    const ok = await new GraphsService().deleteWorkflow(
-      "t1",
-      "e1",
-      "ghost",
-      true,
-    );
+    const ok = await new GraphsService().deleteWorkflow("t1", "e1", "ghost");
 
     expect(ok).toBe(false);
     expect($transaction).not.toHaveBeenCalled();
     expect(del.graphDefinition).not.toHaveBeenCalled();
   });
 
-  it("removes the graph + every dependent row in ONE transaction (default env), keeping run history", async () => {
+  it("removes the graph + every dependent row in ONE transaction, keeping run history", async () => {
     findFirst.mockResolvedValue({ workflowKey: "wf-1" });
 
-    // deleteShared=true → the default env's copy: also removes the tenant-wide shared rows.
-    const ok = await new GraphsService().deleteWorkflow(
-      "t1",
-      "e1",
-      "wf-1",
-      true,
-    );
+    const ok = await new GraphsService().deleteWorkflow("t1", "e1", "wf-1");
 
     expect(ok).toBe(true);
     // A single atomic transaction — not a series of loose deletes.
@@ -305,9 +294,9 @@ describe("GraphsService.deleteWorkflow", () => {
     expect(del.pinnedData).toHaveBeenCalledWith({
       where: { tenantId: "t1", environmentId: "e1", workflowKey: "wf-1" },
     });
-    // PollState is the LAST tenant-wide row (schedules are default-env-only) — still gated.
+    // PollState is env-scoped now (env-scoped-schedules slice) — always deleted for THIS env.
     expect(del.pollState).toHaveBeenCalledWith({
-      where: { tenantId: "t1", workflowKey: "wf-1" },
+      where: { tenantId: "t1", environmentId: "e1", workflowKey: "wf-1" },
     });
     // Error-handler bindings (env-scoped, slice-6 cleanup) are cleared whether this key is
     // the FAILING flow or the HANDLER — but only in THIS env.
@@ -330,14 +319,13 @@ describe("GraphsService.deleteWorkflow", () => {
     }
   });
 
-  it("NON-default env (deleteShared=false): removes THIS env's rows only; PollState survives", async () => {
+  it("NON-default env: removes THIS env's rows only (incl. its poll cursor)", async () => {
     findFirst.mockResolvedValue({ workflowKey: "wf-1" });
 
     const ok = await new GraphsService().deleteWorkflow(
       "t1",
       "e-sandbox",
       "wf-1",
-      false,
     );
 
     expect(ok).toBe(true);
@@ -372,8 +360,8 @@ describe("GraphsService.deleteWorkflow", () => {
         },
       });
     }
-    // PollState (default-env-only schedules) is untouched by a non-default delete.
-    expect(del.pollState).not.toHaveBeenCalled();
+    // The env's OWN poll cursor goes with it — scoped, so prod's cursor survives.
+    expect(del.pollState).toHaveBeenCalledWith({ where: sandboxScoped });
   });
 });
 

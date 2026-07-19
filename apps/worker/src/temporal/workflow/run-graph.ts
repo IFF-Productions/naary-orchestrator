@@ -314,6 +314,7 @@ export async function runGraph(
         const pollCfg = asNodeConfig(cfg, "pollTrigger");
         const r = await callPoll(pollCfg, {
           tenantId: runCtx.tenantId,
+          environmentId: runCtx.environmentId, // env-scoped cursor; absent = legacy run → default env (in-activity)
           workflowKey: runCtx.workflowKey ?? "",
           nodeId: node.id,
         });

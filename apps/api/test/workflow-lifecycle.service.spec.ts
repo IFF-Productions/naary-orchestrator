@@ -5,8 +5,9 @@ import { WorkflowLifecycleService } from "../src/graphs/workflow-lifecycle.servi
  * The consolidated save/delete path shared by graphs.controller and v1-workflows.controller
  * (was duplicated inline in both — the TODO(consolidate)). Pins the two invariants the
  * controllers used to carry each:
- * - DEFAULT-ENV-ONLY gating: schedules aren't env-scoped yet, so sync/teardown must never
- *   run for a non-default (sandbox) env — it would clobber the default/prod copy's triggers.
+ * - ENV-SCOPED side-effects (env-scoped-schedules slice): schedules carry the env in their
+ *   identity, so save syncs THIS env's schedules and delete tears down THIS env's ids —
+ *   for EVERY env, default or not (the old default-env-only gate is gone).
  * - Best-effort side-effects: a scheduling hiccup must not fail the save/delete.
  */
 
@@ -16,26 +17,20 @@ const schedules = {
   syncCronSchedule: vi.fn(),
   teardownForWorkflow: vi.fn(),
 };
-const environments = { isDefaultEnv: vi.fn() };
 
 const GRAPH = { nodes: [], edges: [], startNodeId: "start" } as never;
 
 let svc: WorkflowLifecycleService;
 beforeEach(() => {
   vi.clearAllMocks();
-  environments.isDefaultEnv.mockResolvedValue(true);
   schedules.syncPollSchedule.mockResolvedValue(undefined);
   schedules.syncCronSchedule.mockResolvedValue(undefined);
   schedules.teardownForWorkflow.mockResolvedValue(undefined);
-  svc = new WorkflowLifecycleService(
-    graphs as never,
-    schedules as never,
-    environments as never,
-  );
+  svc = new WorkflowLifecycleService(graphs as never, schedules as never);
 });
 
 describe("saveWorkflow", () => {
-  it("upserts, then syncs poll+cron schedules in the DEFAULT env", async () => {
+  it("upserts, then syncs poll+cron schedules IN THE SAVED ENV", async () => {
     graphs.upsert.mockResolvedValue({ version: 2, contentHash: "h" });
 
     const snap = await svc.saveWorkflow("t-1", "env-1", "k", "K", GRAPH);
@@ -49,20 +44,39 @@ describe("saveWorkflow", () => {
       GRAPH,
       undefined,
     );
-    expect(environments.isDefaultEnv).toHaveBeenCalledWith("t-1", "env-1");
-    expect(schedules.syncPollSchedule).toHaveBeenCalledWith("t-1", "k", GRAPH);
-    expect(schedules.syncCronSchedule).toHaveBeenCalledWith("t-1", "k", GRAPH);
+    expect(schedules.syncPollSchedule).toHaveBeenCalledWith(
+      "t-1",
+      "env-1",
+      "k",
+      GRAPH,
+    );
+    expect(schedules.syncCronSchedule).toHaveBeenCalledWith(
+      "t-1",
+      "env-1",
+      "k",
+      GRAPH,
+    );
     expect(snap).toEqual({ version: 2, contentHash: "h" });
   });
 
-  it("does NOT sync schedules for a non-default env (would clobber prod triggers)", async () => {
+  it("a NON-default env's save syncs THAT env's schedules (env-scoped identity — no gate)", async () => {
     graphs.upsert.mockResolvedValue({ version: 1, contentHash: "h" });
-    environments.isDefaultEnv.mockResolvedValue(false);
 
     await svc.saveWorkflow("t-1", "env-sandbox", "k", "K", GRAPH);
 
-    expect(schedules.syncPollSchedule).not.toHaveBeenCalled();
-    expect(schedules.syncCronSchedule).not.toHaveBeenCalled();
+    // Sandbox's schedules carry sandbox's env id — prod's triggers are untouched by identity.
+    expect(schedules.syncPollSchedule).toHaveBeenCalledWith(
+      "t-1",
+      "env-sandbox",
+      "k",
+      GRAPH,
+    );
+    expect(schedules.syncCronSchedule).toHaveBeenCalledWith(
+      "t-1",
+      "env-sandbox",
+      "k",
+      GRAPH,
+    );
   });
 
   it("schedule sync is best-effort — a scheduling failure never fails the save", async () => {
@@ -87,33 +101,34 @@ describe("saveWorkflow", () => {
 });
 
 describe("deleteWorkflow", () => {
-  it("default env: tears down schedules and passes deleteShared=true", async () => {
+  it("tears down THIS env's schedules and deletes env-scoped (no deleteShared param)", async () => {
     graphs.deleteWorkflow.mockResolvedValue(true);
 
     const out = await svc.deleteWorkflow("t-1", "env-1", "k");
 
-    expect(schedules.teardownForWorkflow).toHaveBeenCalledWith("t-1", "k");
-    expect(graphs.deleteWorkflow).toHaveBeenCalledWith(
+    expect(schedules.teardownForWorkflow).toHaveBeenCalledWith(
       "t-1",
       "env-1",
       "k",
-      true,
     );
+    expect(graphs.deleteWorkflow).toHaveBeenCalledWith("t-1", "env-1", "k");
     expect(out).toBe(true);
   });
 
-  it("non-default env: no teardown and deleteShared=false", async () => {
-    environments.isDefaultEnv.mockResolvedValue(false);
+  it("a NON-default env's delete tears down THAT env's ids too (gate removed)", async () => {
     graphs.deleteWorkflow.mockResolvedValue(true);
 
     await svc.deleteWorkflow("t-1", "env-sandbox", "k");
 
-    expect(schedules.teardownForWorkflow).not.toHaveBeenCalled();
+    expect(schedules.teardownForWorkflow).toHaveBeenCalledWith(
+      "t-1",
+      "env-sandbox",
+      "k",
+    );
     expect(graphs.deleteWorkflow).toHaveBeenCalledWith(
       "t-1",
       "env-sandbox",
       "k",
-      false,
     );
   });
 
@@ -145,7 +160,6 @@ describe("G1 permission gates", () => {
     return new WorkflowLifecycleService(
       graphs as never,
       schedules as never,
-      environments as never,
       { assertCan } as unknown as PermissionsService,
     );
   }
@@ -185,7 +199,11 @@ describe("G1 permission gates", () => {
     await expect(s.deleteWorkflow("t-1", "env-1", "k", member)).resolves.toBe(
       true,
     );
-    expect(schedules.teardownForWorkflow).toHaveBeenCalledWith("t-1", "k");
+    expect(schedules.teardownForWorkflow).toHaveBeenCalledWith(
+      "t-1",
+      "env-1",
+      "k",
+    );
   });
 
   it("an actor-less delete (internal caller) never consults permissions", async () => {
@@ -197,11 +215,7 @@ describe("G1 permission gates", () => {
   });
 
   it("an actor WITHOUT wired permissions fails CLOSED", async () => {
-    const s = new WorkflowLifecycleService(
-      graphs as never,
-      schedules as never,
-      environments as never,
-    );
+    const s = new WorkflowLifecycleService(graphs as never, schedules as never);
     await expect(s.deleteWorkflow("t-1", "env-1", "k", member)).rejects.toThrow(
       /PermissionsService is not wired/,
     );

@@ -151,7 +151,7 @@ export class V1WorkflowsController {
   ): Promise<WorkflowSavedResponse> {
     const graph = toGraphDef(body.graph);
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    // Consolidated save path (shared with graphs.controller): upsert + the DEFAULT-ENV-ONLY,
+    // Consolidated save path (shared with graphs.controller): upsert + the env-scoped,
     // best-effort poll/cron schedule sync live in WorkflowLifecycleService. The principal
     // gates the save (§4): existing key ⇒ edit, new key ⇒ canCreate.
     const snap = await this.lifecycle.saveWorkflow(
@@ -172,7 +172,7 @@ export class V1WorkflowsController {
   @ApiEndpoint({
     summary: "Delete a workflow",
     description:
-      "Removes this workflow's definition (and its schedules/triggers when deleting the default env's copy) in the active env.",
+      "Removes this workflow's definition, schedules, and triggers in the active env.",
     ok: WorkflowDeletedResponse,
     notFound: true,
   })
@@ -184,8 +184,8 @@ export class V1WorkflowsController {
     @CurrentPrincipal() principal?: Principal,
   ): Promise<{ deleted: true }> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    // Consolidated delete path (shared with graphs.controller): the DEFAULT-ENV-ONLY, best-effort
-    // schedule teardown + deleteShared gating live in WorkflowLifecycleService. The principal
+    // Consolidated delete path (shared with graphs.controller): the env-scoped, best-effort
+    // schedule teardown lives in WorkflowLifecycleService. The principal
     // gates the delete (§4) before any teardown side effect.
     const deleted = await this.lifecycle.deleteWorkflow(
       tenantId,
