@@ -54,3 +54,48 @@
 .react-flow__background path {
   stroke: var(--line-2);
 }
+
+/* ---- "Build with AI" live streaming ---- */
+
+/* Each node fades + scales in ONCE as it's streamed onto the canvas. React Flow keys
+   nodes by id, so already-mounted nodes never replay this. Calm, no bounce. */
+@keyframes naaryNodeEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.react-flow__node.naary-node-enter {
+  animation: naaryNodeEnter 0.32s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .react-flow__node.naary-node-enter {
+    animation: none;
+  }
+}
+
+/* Floating progress pill (top-center of the canvas) shown while the workflow streams.
+   The shared spinner/message styles live in global.css (Simple mode reuses them). */
+.naary-gen-pill {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 14px;
+  border-radius: var(--radius-pill, 999px);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-raised);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium, 500);
+  white-space: nowrap;
+}
+.naary-gen-count {
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}

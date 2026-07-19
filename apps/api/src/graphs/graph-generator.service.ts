@@ -25,6 +25,14 @@ import {
 import { ConnectionService } from "@naary/connections";
 import { redactString } from "@naary/observability";
 import { CredentialsService, MissingCredentialError } from "@naary/secrets";
+import { createGraphStreamExtractor } from "./graph-stream-extractor";
+
+/** Per-element hooks the streaming path fires as the free-form graph is parsed live. */
+interface StreamHooks {
+  onMeta?: (name: string) => void;
+  onNode?: (node: unknown) => void;
+  onEdge?: (edge: unknown) => void;
+}
 
 // Providers the generator can use, in preference order — when the caller doesn't pick one,
 // the first provider the tenant has a valid key for wins. Kept in sync with the worker's
@@ -230,10 +238,71 @@ export class GraphGeneratorService {
     provider?: string,
     opts?: { timeoutMs?: number },
   ): Promise<{ name: string; graph: GraphDef }> {
+    return this.generateInternal(
+      tenantId,
+      environmentId,
+      prompt,
+      provider,
+      opts,
+    );
+  }
+
+  /**
+   * Streaming variant of {@link generate}: identical prompt/quality/validation, but for
+   * the API-model providers (anthropic/openai/google) it uses the AI SDK `streamText` and
+   * surfaces each complete node/edge to the caller's hooks the moment it's parsed out of
+   * the accumulating text — so the canvas can draw the workflow live. The `claude-code`
+   * subprocess path CAN'T stream token-by-token, so it just produces the final graph (no
+   * per-element hooks); the caller still gets the authoritative graph either way.
+   *
+   * The final returned graph is always the validated (+ one-shot repaired) graph — the
+   * client reconciles its live canvas to it. Hooks fire only for the FIRST draft; a repair
+   * pass (rare, non-streaming) does not re-emit.
+   */
+  async generateStream(
+    tenantId: string,
+    environmentId: string,
+    prompt: string,
+    provider?: string,
+    opts?: {
+      timeoutMs?: number;
+      onMeta?: (name: string) => void;
+      onNode?: (node: unknown) => void;
+      onEdge?: (edge: unknown) => void;
+    },
+  ): Promise<{ name: string; graph: GraphDef }> {
+    return this.generateInternal(
+      tenantId,
+      environmentId,
+      prompt,
+      provider,
+      opts,
+    );
+  }
+
+  /** Shared body for {@link generate} + {@link generateStream}. Hooks (when present) make
+   *  the first API-model draft stream; everything else — provider resolution, resource
+   *  grounding, validate, one repair — is identical. */
+  private async generateInternal(
+    tenantId: string,
+    environmentId: string,
+    prompt: string,
+    provider?: string,
+    opts?: {
+      timeoutMs?: number;
+      onMeta?: (name: string) => void;
+      onNode?: (node: unknown) => void;
+      onEdge?: (edge: unknown) => void;
+    },
+  ): Promise<{ name: string; graph: GraphDef }> {
     const description = prompt?.trim();
     if (!description)
       throw new BadRequestException("A description is required");
     const timeoutMs = opts?.timeoutMs ?? CLAUDE_CODE_TIMEOUT_MS;
+    const hooks =
+      opts?.onMeta || opts?.onNode || opts?.onEdge
+        ? { onMeta: opts.onMeta, onNode: opts.onNode, onEdge: opts.onEdge }
+        : undefined;
 
     // Env-scoped (Slice 5): use THIS env's provider key + connections to ground generation.
     const { provider: chosen, apiKey } = await this.resolveProvider(
@@ -245,14 +314,14 @@ export class GraphGeneratorService {
     // Ground the model in this env's real connections + the integration action catalog.
     const resources = await this.buildResourceContext(tenantId, environmentId);
 
-    // First attempt.
-    let out = await this.callModel(
+    // First attempt (streamed when hooks are present AND the provider is an API model).
+    let out = await this.firstDraft(
       chosen,
       apiKey,
       description,
-      undefined,
       resources,
       timeoutMs,
+      hooks,
     );
     this.logDraftShape("first", out);
     let graph = toGraphDef(out);
@@ -282,6 +351,34 @@ export class GraphGeneratorService {
     }
 
     return { name: out.name?.trim() || "Generated workflow", graph };
+  }
+
+  /** First-draft dispatch: stream (API models + hooks) or the plain one-shot call. */
+  private async firstDraft(
+    chosen: GenSource,
+    apiKey: string,
+    description: string,
+    resources: string,
+    timeoutMs: number,
+    hooks?: StreamHooks,
+  ): Promise<GraphDraft> {
+    if (chosen !== CLAUDE_CODE && hooks) {
+      return this.callModelStreaming(
+        chosen,
+        apiKey,
+        description,
+        resources,
+        hooks,
+      );
+    }
+    return this.callModel(
+      chosen,
+      apiKey,
+      description,
+      undefined,
+      resources,
+      timeoutMs,
+    );
   }
 
   /** Structural validation + node-type check. Plain-text generation lost the schema's
@@ -427,6 +524,62 @@ export class GraphGeneratorService {
     if (!parsed) {
       this.logger.warn(
         `graph generate: model returned unparseable JSON (head: ${text.slice(0, 120).replace(/\s+/g, " ")})`,
+      );
+      throw new UnprocessableEntityException(
+        "The model didn't return a valid workflow. Try rephrasing the description.",
+      );
+    }
+    return parsed;
+  }
+
+  /**
+   * Streamed first-draft for the API-model providers (NOT claude-code, NOT the repair
+   * pass): same SYSTEM_PROMPT + user prompt as {@link callModel} (so generation quality is
+   * unchanged — still free-form JSON, never Output.object), but via `streamText`. As deltas
+   * arrive we accumulate them and run the incremental extractor over the growing buffer,
+   * invoking the hooks with each complete node/edge (and the name) the moment it parses.
+   * The full accumulated text is then parsed once at end-of-stream, exactly like the
+   * non-streaming path. `textStream` rethrows provider errors on iteration (per the AI SDK
+   * contract), so the catch below maps them the same way as the one-shot call.
+   */
+  private async callModelStreaming(
+    provider: GenSource,
+    apiKey: string,
+    description: string,
+    resources: string,
+    hooks: StreamHooks,
+  ): Promise<GraphDraft> {
+    let text = "";
+    const extractor = createGraphStreamExtractor();
+    try {
+      const { streamText } = await aiSdk();
+      const result = streamText({
+        model: await buildGenModel(provider as GenProvider, apiKey),
+        system: SYSTEM_PROMPT,
+        prompt: `${description}\n\n${resources}Respond with ONLY the JSON graph object — start at { and end at }. No prose, no markdown code fences.`,
+        maxOutputTokens: 16000,
+        // Never crash the request on a stream error — textStream rethrows it below; this
+        // just suppresses the SDK's default console.error (which could echo request detail).
+        onError: () => {},
+      });
+      for await (const delta of result.textStream) {
+        text += delta;
+        // Extract over the CUMULATIVE buffer; the wrapper yields only what's newly complete.
+        const got = extractor.push(text);
+        if (got.name && hooks.onMeta) hooks.onMeta(got.name);
+        if (hooks.onNode) for (const n of got.nodes) hooks.onNode(n);
+        if (hooks.onEdge) for (const e of got.edges) hooks.onEdge(e);
+      }
+    } catch (e) {
+      this.logger.warn(
+        `graph generate (stream) failed (provider=${provider}): ${await describeProviderError(e)}`,
+      );
+      throw await mapProviderError(e, provider);
+    }
+    const parsed = parseGraphJson(text);
+    if (!parsed) {
+      this.logger.warn(
+        `graph generate (stream): model returned unparseable JSON (head: ${text.slice(0, 120).replace(/\s+/g, " ")})`,
       );
       throw new UnprocessableEntityException(
         "The model didn't return a valid workflow. Try rephrasing the description.",

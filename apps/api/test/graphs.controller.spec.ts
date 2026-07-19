@@ -223,10 +223,10 @@ function genDto(prompt: string): GenerateGraphDto {
   return Object.assign(new GenerateGraphDto(), { prompt });
 }
 
-function streamController(generate: (...args: unknown[]) => unknown) {
+function streamController(generateStream: (...args: unknown[]) => unknown) {
   return new GraphsController(
     {} as unknown as GraphsService,
-    { generate } as unknown as GraphGeneratorService,
+    { generateStream } as unknown as GraphGeneratorService,
     lifecycleStub,
     envStub,
   );
@@ -264,7 +264,67 @@ describe("GraphsController POST /graphs/generate/stream", () => {
       "e1",
       "email me a digest",
       undefined,
-      { timeoutMs: 300_000 },
+      // opts now also carries the live-frame hooks; assert the ceiling + that hooks exist.
+      expect.objectContaining({
+        timeoutMs: 300_000,
+        onMeta: expect.any(Function),
+        onNode: expect.any(Function),
+        onEdge: expect.any(Function),
+      }),
+    );
+  });
+
+  it("emits meta/node/edge frames as the generator streams, then the result frame", async () => {
+    // A generateStream that drives the hooks (as the streaming service would) before resolving.
+    const generate = vi.fn().mockImplementation(
+      async (
+        _t: string,
+        _e: string,
+        _p: string,
+        _prov: unknown,
+        opts: {
+          onMeta?: (n: string) => void;
+          onNode?: (n: unknown) => void;
+          onEdge?: (e: unknown) => void;
+        },
+      ) => {
+        opts.onMeta?.("Flow");
+        opts.onNode?.({ id: "start", type: "start" });
+        opts.onNode?.({ id: "end", type: "end" });
+        opts.onEdge?.({ from: "start", to: "end" });
+        return { name: "Flow", graph: validGraph };
+      },
+    );
+    const res = fakeRes();
+
+    await streamController(generate).generateStream(
+      "t-1",
+      genDto("email me a digest"),
+      res as unknown as ServerResponse,
+    );
+
+    // Frames arrive in order: connected, meta, node, node, edge, result.
+    const events = res.chunks
+      .filter((c) => c.startsWith("event:"))
+      .map((c) => c.slice(0, c.indexOf("\n")));
+    expect(events).toEqual([
+      "event: meta",
+      "event: node",
+      "event: node",
+      "event: edge",
+      "event: result",
+    ]);
+    expect(res.chunks).toContain(
+      `event: meta\ndata: ${JSON.stringify({ name: "Flow" })}\n\n`,
+    );
+    expect(res.chunks).toContain(
+      `event: node\ndata: ${JSON.stringify({ id: "start", type: "start" })}\n\n`,
+    );
+    expect(res.chunks).toContain(
+      `event: edge\ndata: ${JSON.stringify({ from: "start", to: "end" })}\n\n`,
+    );
+    expect(res.chunks[res.chunks.length - 1]).toBe(
+      `event: result\ndata: ${JSON.stringify({ name: "Flow", graph: validGraph })}\n\n`,
     );
   });
 
