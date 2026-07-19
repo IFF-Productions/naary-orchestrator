@@ -656,6 +656,64 @@ model Company {
   memberships CompanyMembership[]
   workspaces  TenantSettings[]
   budget      CompanyBudget?
+  permissionGroups CompanyPermissionGroup[]
+}
+
+// ---- Company-wide permission groups (RBAC-GROUPS §9 / COMPANIES §9 composition) ----
+// A SECOND grant source unioned into workspace permission resolution: company grants ADD
+// access back for subjects a workspace has ALREADY restricted (its first-grant cliff).
+// They NEVER flip a workspace's cliff — enforcement stays workspace-local (WorkflowGrant
+// existence); an unenforced workspace is completely unaffected by company grants.
+
+/// A named group of company members carrying (at most) one company-wide grant. Company-OWNER
+/// managed. uid-keyed only — API tokens are workspace-scoped subjects and can never receive
+/// company grants.
+model CompanyPermissionGroup {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime @default(now())
+  members CompanyGroupMember[]
+  grants  CompanyWorkflowGrant[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
+/// uid-keyed membership; the user must hold a CompanyMembership in the group's company
+/// (service-enforced, 400 otherwise). NO token analog on purpose — tokens live in one
+/// workspace, and a cross-workspace secret would be the weakest link.
+model CompanyGroupMember {
+  groupId   String
+  group     CompanyPermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId    String // Firebase uid
+  createdAt DateTime @default(now())
+
+  @@id([groupId, userId])
+  @@index([userId])
+}
+
+/// A company-wide grant: the six verbs, nothing else. DELIBERATELY no scope/keys/environmentId
+/// columns in v1 — company grants are 'all'-scope + all-environments ONLY, because per-key and
+/// per-env selections don't compose across workspaces (workflowKeys and environment ids are
+/// workspace-local names; a key list picked in one workspace is meaningless in another). The
+/// future seam: add nullable scope/env columns + a per-workspace key join and widen the
+/// resolution mapping — nothing here blocks it. Resolution maps each row to an EffectiveGrant
+/// {scope:'all', environmentId:null} unioned with the subject's workspace grants.
+model CompanyWorkflowGrant {
+  id        String   @id @default(uuid())
+  groupId   String
+  group     CompanyPermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  canView   Boolean  @default(false)
+  canRun    Boolean  @default(false)
+  canEdit   Boolean  @default(false)
+  canDelete Boolean  @default(false)
+  canShare  Boolean  @default(false) // share = PROMOTE only, same as workspace grants
+  canCreate Boolean  @default(false) // coherent here: company grants are always 'all'-scope
+  createdAt DateTime @default(now())
+
+  @@index([groupId])
 }
 
 /// Company-wide monthly spend cap (COMPANIES.md §8, Slice 5): an OUTER start-time gate layered

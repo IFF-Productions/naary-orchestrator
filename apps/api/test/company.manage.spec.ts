@@ -24,7 +24,7 @@ import { CompaniesController } from "../src/companies/companies.controller";
 import { CompanyService } from "../src/companies/company.service";
 
 // The manage surface never touches these collaborators.
-const svc = new CompanyService({} as never, {} as never, {} as never);
+const svc = new CompanyService({} as never, {} as never, {} as never, {} as never);
 
 beforeEach(() => {
   for (const group of [companyMembership, tenantSettings, membership]) {

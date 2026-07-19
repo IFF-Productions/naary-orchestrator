@@ -23,6 +23,7 @@ import {
   type CompanyWorkspaceWorkflow,
 } from "../../lib/api";
 import { useWorkspace } from "../../workspace/WorkspaceProvider";
+import { CompanyGroupsCard } from "./CompanyGroups";
 import { workspaceLabel } from "../../workspace/WorkspaceSwitcher";
 import { usd } from "./insights.logic";
 
@@ -366,6 +367,8 @@ export function Company() {
           )}
 
           <MembersCard companyId={company.id} isOwner={isOwner} />
+          {/* Company-wide permission groups (RBAC-GROUPS §9) — owner-only management. */}
+          {isOwner && <CompanyGroupsCard companyId={company.id} />}
         </>
       )}
 

@@ -24,6 +24,9 @@ vi.mock("@naary/db", () => ({
     workflowActivation: { findMany: activationFindMany },
     workflowTag: { findMany: tagFindMany },
     execution: { findMany: execFindMany, findUnique: execFindUnique },
+    // Company second-source lookups (standalone workspace here — no company grants).
+    tenantSettings: { findUnique: vi.fn().mockResolvedValue(null) },
+    companyWorkflowGrant: { findMany: vi.fn().mockResolvedValue([]) },
   }),
 }));
 

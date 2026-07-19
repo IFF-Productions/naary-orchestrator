@@ -14,6 +14,7 @@ import {
   type RunPage,
 } from "../executions/executions.service";
 import { GraphsService, type GraphSummary } from "../graphs/graphs.service";
+import { PermissionsService } from "../permissions/permissions.service";
 
 export interface CompanyView {
   id: string;
@@ -84,6 +85,10 @@ export class CompanyService {
     private readonly executions: ExecutionsService,
     private readonly graphs: GraphsService,
     private readonly environments: EnvironmentsService,
+    // From the @Global PermissionsModule — no CompaniesModule↔PermissionsModule import edge,
+    // so no module cycle. Used for the attach/detach cache fan-out (company grants are part
+    // of every attached workspace's permission resolution).
+    private readonly permissions: PermissionsService,
   ) {}
 
   /** Companies the user is a member of (powers a future "my companies" switcher). */
@@ -156,17 +161,24 @@ export class CompanyService {
         "Only the workspace owner can attach it to a company.",
       );
     }
-    if (await this.claim(tenantId, companyId)) return;
+    if (await this.claim(tenantId, companyId)) {
+      await this.permissions.invalidateCompany(companyId);
+      return;
+    }
     // count 0 → the row is missing, or it's attached to another company. Try to create it; if a
     // concurrent create won the PK race, re-claim (it may now be ours or someone else's).
     try {
       await getPrisma().tenantSettings.create({
         data: { tenantId, companyId },
       });
+      await this.permissions.invalidateCompany(companyId);
       return;
     } catch (e) {
       if (!isUniqueViolation(e)) throw e;
-      if (await this.claim(tenantId, companyId)) return;
+      if (await this.claim(tenantId, companyId)) {
+        await this.permissions.invalidateCompany(companyId);
+        return;
+      }
     }
     throw new ConflictException(
       "That workspace is already attached to another company.",
@@ -212,6 +224,10 @@ export class CompanyService {
       where: { tenantId },
       data: { companyId: null },
     });
+    // Fan-out AFTER the write: the detached tenant is no longer enumerated by
+    // invalidateCompany, so drop it explicitly (its members just lost their company grants).
+    this.permissions.invalidateTenant(tenantId);
+    await this.permissions.invalidateCompany(companyId);
   }
 
   /**
@@ -657,12 +673,10 @@ export class CompanyService {
     }
   }
 
-  /** Company OWNER or 403 — for actions that affect every member workspace (budget) or the
-   *  company's own administration (member add/role changes). */
-  private async assertCompanyOwner(
-    userId: string,
-    companyId: string,
-  ): Promise<void> {
+  /** Company OWNER or 403 — for actions that affect every member workspace (budget,
+   *  permission groups — see CompanyGroupsService) or the company's own administration
+   *  (member add/role changes). Public so sibling company services reuse the same gate. */
+  async assertCompanyOwner(userId: string, companyId: string): Promise<void> {
     if ((await this.companyRole(userId, companyId)) !== "owner") {
       throw new ForbiddenException("Only the company owner can do that.");
     }

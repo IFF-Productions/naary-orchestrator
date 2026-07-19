@@ -182,8 +182,32 @@ Slices 3–5 are opt-in, not a committed path — confirm which you actually wan
 member AND the workspace owner (§4); detach is allowed from either side. Additive + behavior-neutral
 — no cross-workspace reads yet. API-token principals (no uid) can't hold a company membership.
 
-## 9. RBAC seam
+## 9. RBAC seam — company permission groups (SHIPPED)
 
 Company roles (`owner`/`admin`) layer on top of the existing per-workspace roles. The env-scoped
 RBAC seam (ENVIRONMENTS.md §9) and this compose: company-owner ⊃ workspace-owner ⊃ env-scoped
-permissions. Designed together when RBAC lands.
+permissions.
+
+**Company-wide permission groups are SHIPPED** (`CompanyPermissionGroup` / `CompanyGroupMember` /
+`CompanyWorkflowGrant` + `/companies/:id/groups` + the console's owner-only Groups card). They are
+a **second grant source unioned into workspace permission resolution** (RBAC-GROUPS §4): after a
+workspace's own resolution decides a member-user is RESTRICTED, that user's company grants (via
+`TenantSettings.companyId` → the company's groups they belong to) are mapped to
+`{scope:'all', env:all}` effective grants and unioned in.
+
+v1 bounds (deliberate):
+- **'all'-scope + all-environments only** — per-key/per-env selections are workspace-local names
+  that don't compose across workspaces. Seam: add nullable scope/env columns + a per-workspace
+  key join on `CompanyWorkflowGrant` and widen the resolution mapping.
+- **uid-keyed only** — members come from `CompanyMembership` (400 otherwise); API tokens are
+  workspace-scoped subjects and NEVER receive company grants.
+- **Cliff non-flip (the invariant):** company grants never flip a workspace's first-grant cliff.
+  The enforcement switch stays workspace-local (`WorkflowGrant` existence); company grants only
+  ADD access back for subjects already restricted by their workspace. An unenforced workspace is
+  byte-identically unaffected (pinned by test).
+- **Company-OWNER-gated CRUD** (same altitude as the company budget — these grants reach into
+  every member workspace). One grant per group (PUT upsert): at 'all'-scope, several rows would
+  just OR their booleans.
+- **Invalidation fan-out:** every company group/member/grant write and every workspace
+  attach/detach calls `PermissionsService.invalidateCompany(companyId)` (enumerates attached
+  tenants → `invalidateTenant` each); detach additionally invalidates the detached tenant.

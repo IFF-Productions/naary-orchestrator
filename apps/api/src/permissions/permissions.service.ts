@@ -322,6 +322,20 @@ export class PermissionsService {
   }
 
   /**
+   * Company-write fan-out: a company group/member/grant write (CompanyGroupsService) or a
+   * workspace attach/detach (CompanyService) changes the COMPANY term of every attached
+   * workspace's resolution, so every attached tenant's cache must drop — company grants are
+   * cached inside the same per-subject grants entries as workspace grants.
+   */
+  async invalidateCompany(companyId: string): Promise<void> {
+    const tenants = await getPrisma().tenantSettings.findMany({
+      where: { companyId },
+      select: { tenantId: true },
+    });
+    for (const t of tenants) this.cache.invalidateTenant(t.tenantId);
+  }
+
+  /**
    * The principal's effective grants, or null for a BYPASSED subject:
    *  - owner/admin USER principals (and any principal that isn't a gated subject);
    *  - restricted subjects in a workspace with ZERO grants (the cliff — full access);
@@ -386,8 +400,56 @@ export class PermissionsService {
         ]),
       ],
     }));
+    // Company union (RBAC-GROUPS §9 / COMPANIES §9): a SECOND grant source for subjects the
+    // workspace has ALREADY restricted. Placement is the cliff-non-flip invariant: this runs
+    // strictly AFTER the isTenantEnforced gate above, so a company grant can never restrict
+    // (or otherwise touch) an unenforced workspace — it only ADDS access back. uid-keyed
+    // USERS only: tokens are workspace-scoped subjects and never receive company grants.
+    if (subject.kind === "user") {
+      grants.push(
+        ...(await this.companyGrantsFor(principal.tenantId, subject.id)),
+      );
+    }
     this.cache.setGrants(principal.tenantId, subject.key, grants);
     return grants;
+  }
+
+  /**
+   * The RESTRICTED user's company grants, mapped to all-scope/all-env EffectiveGrants
+   * (v1 bounds: CompanyWorkflowGrant carries no scope/keys/env — per-key and per-env
+   * selections don't compose across workspaces; that's a documented future seam). The
+   * `companyId` equality inside the where is the cross-company isolation: only groups of
+   * THE company this workspace is attached to can contribute. Cached by the caller inside
+   * the same per-subject grants entry; company writes fan out via invalidateCompany.
+   */
+  private async companyGrantsFor(
+    tenantId: string,
+    userId: string,
+  ): Promise<EffectiveGrant[]> {
+    const settings = await getPrisma().tenantSettings.findUnique({
+      where: { tenantId },
+      select: { companyId: true },
+    });
+    if (!settings?.companyId) return [];
+    const rows = await getPrisma().companyWorkflowGrant.findMany({
+      where: {
+        group: {
+          companyId: settings.companyId,
+          members: { some: { userId } },
+        },
+      },
+    });
+    return rows.map((r) => ({
+      environmentId: null, // all environments (v1)
+      scope: "all" as const, // all workflows in the workspace (v1)
+      canView: r.canView,
+      canRun: r.canRun,
+      canEdit: r.canEdit,
+      canDelete: r.canDelete,
+      canShare: r.canShare,
+      canCreate: r.canCreate,
+      keys: [],
+    }));
   }
 
   /** The gated subject behind a principal, or null when it BYPASSES enforcement.

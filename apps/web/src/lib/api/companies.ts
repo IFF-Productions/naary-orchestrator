@@ -8,6 +8,8 @@ import type {
   Company,
   CompanyBudgetConfig,
   CompanyBudgetView,
+  CompanyGroup,
+  CompanyGroupGrant,
   CompanyMember,
   CompanyUsage,
   CompanyWorkspaceRuns,
@@ -109,6 +111,77 @@ export const companiesApi = {
     return http(
       `/companies/${encodeURIComponent(companyId)}/members/${encodeURIComponent(userId)}`,
       { method: "DELETE" },
+    );
+  },
+  // ---- Company permission groups (RBAC-GROUPS §9) — all company-OWNER only (403). ----
+  // A second grant source: the group's grant applies to ALL workflows in ALL attached
+  // workspaces, every environment — but only ADDS access back for members a workspace has
+  // already restricted (its own first-grant cliff); it never restricts anyone.
+  listCompanyGroups(companyId: string): Promise<CompanyGroup[]> {
+    return http(`/companies/${encodeURIComponent(companyId)}/groups`);
+  },
+  createCompanyGroup(companyId: string, name: string): Promise<CompanyGroup> {
+    return http(`/companies/${encodeURIComponent(companyId)}/groups`, {
+      method: "POST",
+      body: JSON.stringify({ name: name.trim() }),
+    });
+  },
+  renameCompanyGroup(
+    companyId: string,
+    groupId: string,
+    name: string,
+  ): Promise<CompanyGroup> {
+    return http(
+      `/companies/${encodeURIComponent(companyId)}/groups/${encodeURIComponent(groupId)}`,
+      { method: "PATCH", body: JSON.stringify({ name: name.trim() }) },
+    );
+  },
+  deleteCompanyGroup(companyId: string, groupId: string): Promise<void> {
+    return http(
+      `/companies/${encodeURIComponent(companyId)}/groups/${encodeURIComponent(groupId)}`,
+      { method: "DELETE" },
+    );
+  },
+  // 400 = the target isn't a company member yet (add them to the company first).
+  addCompanyGroupMember(
+    companyId: string,
+    groupId: string,
+    userId: string,
+  ): Promise<void> {
+    return http(
+      `/companies/${encodeURIComponent(companyId)}/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}`,
+      { method: "POST" },
+    );
+  },
+  removeCompanyGroupMember(
+    companyId: string,
+    groupId: string,
+    userId: string,
+  ): Promise<void> {
+    return http(
+      `/companies/${encodeURIComponent(companyId)}/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" },
+    );
+  },
+  // PUT replace semantics: absent verbs become false. Upserts the group's single grant row.
+  setCompanyGroupGrant(
+    companyId: string,
+    groupId: string,
+    verbs: Partial<
+      Pick<
+        CompanyGroupGrant,
+        | "canView"
+        | "canRun"
+        | "canEdit"
+        | "canDelete"
+        | "canShare"
+        | "canCreate"
+      >
+    >,
+  ): Promise<CompanyGroupGrant> {
+    return http(
+      `/companies/${encodeURIComponent(companyId)}/groups/${encodeURIComponent(groupId)}/grant`,
+      { method: "PUT", body: JSON.stringify(verbs) },
     );
   },
   // Company-wide budget (COMPANIES.md §8, Slice 5). Company members only; `budget`
