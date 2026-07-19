@@ -817,3 +817,39 @@ model WorkerHeartbeat {
 
   @@index([lastSeen])
 }
+
+// Conversational AI builder (AI-BUILDER-CONVERSATION.md): a persisted, resumable session in which the
+// user iteratively edits a workflow via chat. `currentGraph` is the authoritative working draft (each
+// turn reads it as the model's `previous` and writes the new validated graph back). Closes on save or
+// an explicit Done. Lives in the CONTROL PLANE (workers stay stateless). Slice 1 = lifecycle only
+// (turns are appended by the Slice-2 edit endpoint). PRIVACY: conversation stores user prompts —
+// tenant-scoped, never sent to telemetry.
+model BuilderSession {
+  id            String        @id @default(uuid())
+  tenantId      String
+  environmentId String? // the env the build targets
+  workflowKey   String? // seeded-from / saved-to workflow, when applicable
+  status        String        @default("open") // open | closed
+  closedReason  String? // saved | done | abandoned
+  currentGraph  Json? // the working draft (latest validated graph)
+  title         String? // short label for the resume list (first prompt, trimmed)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  closedAt      DateTime?
+  turns         BuilderTurn[]
+
+  @@index([tenantId, status, updatedAt])
+}
+
+model BuilderTurn {
+  id        String   @id @default(uuid())
+  sessionId String
+  role      String // user | assistant
+  content   String // user prompt, or a short assistant summary of the change
+  costUsd   Decimal? @db.Decimal(12, 6) // metered per assistant turn (BYOK)
+  createdAt DateTime @default(now())
+
+  session BuilderSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
