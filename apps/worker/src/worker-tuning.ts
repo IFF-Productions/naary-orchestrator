@@ -3,6 +3,23 @@
  * side-effect-free module so it's unit-testable — importing worker.ts runs the boot (`run()`).
  */
 import { hostname } from "node:os";
+import type { WorkerOptions } from "@temporalio/worker";
+
+/** Temporal's Duration, derived from WorkerOptions rather than imported from
+ *  @temporalio/common — common isn't a direct dep, and adding it would create a second
+ *  version pin to keep in lockstep (the @temporalio/* version-skew hazard). */
+type Duration = NonNullable<WorkerOptions["shutdownGraceTime"]>;
+
+/** Validate an env value against Temporal's Duration string shape ("30s", "500ms", "1.5m", …).
+ *  Invalid/absent → undefined, preserving the SDK's default rather than crashing boot on a typo
+ *  (a bad grace value must not take the worker down — it only tunes drain time). */
+function parseDuration(v: string | undefined): Duration | undefined {
+  const s = v?.trim();
+  if (!s) return undefined;
+  return /^\d+(\.\d+)?\s?(ms|s|m|h|d|w|y)$/.test(s)
+    ? (s as Duration)
+    : undefined;
+}
 
 /** The deployed version — the tag the deploy stamps (SENTRY_RELEASE), else a dev marker. */
 export const WORKER_VERSION =
@@ -29,7 +46,9 @@ export interface WorkerTuning {
   maxConcurrentActivityTaskExecutions?: number;
   maxConcurrentWorkflowTaskExecutions?: number;
   maxCachedWorkflows?: number;
-  shutdownGraceTime?: string;
+  /** Temporal Duration (e.g. "30s"). Typed as Duration, not string — Worker.create rejects the
+   *  wider type (the env value is validated to match Duration's template shape below). */
+  shutdownGraceTime?: Duration;
 }
 
 /**
@@ -40,7 +59,7 @@ export interface WorkerTuning {
 export function workerTuning(
   env: NodeJS.ProcessEnv = process.env,
 ): WorkerTuning {
-  const grace = env.WORKER_SHUTDOWN_GRACE?.trim();
+  const grace = parseDuration(env.WORKER_SHUTDOWN_GRACE);
   const activities = envInt("WORKER_MAX_ACTIVITIES", env);
   const workflowTasks = envInt("WORKER_MAX_WORKFLOW_TASKS", env);
   const cached = envInt("WORKER_MAX_CACHED_WORKFLOWS", env);
