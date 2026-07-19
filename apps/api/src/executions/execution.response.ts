@@ -13,7 +13,7 @@ export class StartExecutionResponse {
  *  live status/cost are projected onto the row, not just identity + time. */
 export class RunListItemResponse {
   @ApiProperty({ example: "run-8f3a1c2e" }) workflowId!: string;
-  @ApiProperty({ nullable: true, example: "support-triage" })
+  @ApiProperty({ type: String, nullable: true, example: "support-triage" })
   workflowKey!: string | null;
   @ApiProperty({
     example: "completed",
@@ -22,6 +22,7 @@ export class RunListItemResponse {
   })
   status!: string;
   @ApiProperty({
+    type: Number,
     nullable: true,
     example: 0.0142,
     description: "Run cost in USD.",
@@ -37,6 +38,7 @@ export class RunListItemResponse {
   })
   archived!: boolean;
   @ApiProperty({
+    type: Number,
     nullable: true,
     example: 3,
     description:
@@ -48,11 +50,12 @@ export class RunListItemResponse {
 /** A run paused for approval, enriched with the humanApproval node's prompt. */
 export class AwaitingApprovalResponse {
   @ApiProperty({ example: "run-8f3a1c2e" }) workflowId!: string;
-  @ApiProperty({ nullable: true, example: "support-triage" })
+  @ApiProperty({ type: String, nullable: true, example: "support-triage" })
   workflowKey!: string | null;
   @ApiProperty({ example: "approve-summary" }) nodeId!: string;
   @ApiProperty({ example: "Approve the drafted summary" }) title!: string;
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "Review the summary before it is emailed.",
   })
@@ -72,6 +75,7 @@ export class BatchDecisionItemResponse {
   @ApiProperty({ example: "run-8f3a1c2e" }) workflowId!: string;
   @ApiProperty({ example: true }) ok!: boolean;
   @ApiProperty({
+    type: String,
     required: false,
     nullable: true,
     example:
@@ -118,6 +122,7 @@ export class RunGraphResponse {
   })
   graph!: Record<string, unknown>;
   @ApiProperty({
+    type: Number,
     nullable: true,
     example: 3,
     description:
@@ -125,6 +130,7 @@ export class RunGraphResponse {
   })
   version!: number | null;
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "support-triage",
     description:
@@ -152,6 +158,7 @@ export class RunEventResponse {
   kind!: string;
   @ApiProperty({ example: "Activity: callAgent" }) label!: string;
   @ApiProperty({
+    type: String,
     nullable: true,
     format: "date-time",
     example: "2026-07-04T12:00:00.000Z",

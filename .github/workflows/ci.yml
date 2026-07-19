@@ -71,6 +71,12 @@ jobs:
       - name: Typecheck (tsc -b + per-package)
         run: pnpm typecheck
 
+      # Regenerate the OpenAPI spec + the web's typed-client schema from the API's
+      # controllers/DTOs and fail if they drift from what's committed. Keeps
+      # apps/web/src/lib/api/schema.d.ts (openapi-fetch types) honest against the API.
+      - name: Check API types drift (openapi spec + generated schema)
+        run: pnpm check:api-types
+
       - name: Test (build + vitest, incl. determinism replay + pause/resume)
         run: pnpm test
 

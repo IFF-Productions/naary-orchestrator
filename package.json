@@ -17,6 +17,8 @@
     "test:watch": "vitest",
     "test:integration": "pnpm build && vitest run --config vitest.integration.config.ts",
     "worker": "pnpm --filter @naary/worker start",
+    "gen:api": "pnpm --filter @naary/api gen:openapi && pnpm --filter @naary/web gen:api-types",
+    "check:api-types": "pnpm gen:api && git diff --exit-code -- apps/api/openapi.json apps/web/src/lib/api/schema.d.ts",
     "start": "pnpm --filter @naary/api start",
     "dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d",
     "dev:build": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build",

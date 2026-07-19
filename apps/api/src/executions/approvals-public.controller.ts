@@ -8,7 +8,7 @@ import {
   Query,
   UnauthorizedException,
 } from "@nestjs/common";
-import { ApiProperty } from "@nestjs/swagger";
+import { ApiOkResponse, ApiProperty, ApiResponse } from "@nestjs/swagger";
 import { IsIn, IsOptional, IsString } from "class-validator";
 import { Public } from "../auth/public.decorator";
 import { verifyApprovalToken } from "./approval-token";
@@ -29,6 +29,31 @@ export class DecideDto {
   comment?: string;
 }
 
+/** The prompt shown on the public decision page — only the node's title/instructions,
+ *  no tenant identifiers. `awaiting: false` if the run already decided / closed. */
+export class ApprovalPromptResponse {
+  @ApiProperty({
+    example: true,
+    description: "Whether the run is still awaiting a decision.",
+  })
+  awaiting!: boolean;
+  @ApiProperty({ required: false, example: "Approve the drafted summary" })
+  title?: string;
+  @ApiProperty({
+    type: String,
+    required: false,
+    nullable: true,
+    example: "Review the summary before it is emailed.",
+  })
+  instructions?: string | null;
+}
+
+/** The outcome of a public signed-link decision. */
+export class DecideResultResponse {
+  @ApiProperty({ enum: ["approved", "rejected"], example: "approved" })
+  status!: string;
+}
+
 /**
  * PUBLIC approval decision via a signed link (the notification-links gap). Both routes are
  * authenticated by the HMAC token over the workflowId (the link IS the credential), NOT a bearer —
@@ -42,11 +67,12 @@ export class ApprovalsPublicController {
 
   /** The prompt for the decision page (verified by token). `awaiting: false` if the run already
    *  decided / closed. Reveals only the node's title/instructions — no tenant identifiers. */
+  @ApiOkResponse({ type: ApprovalPromptResponse })
   @Get(":workflowId")
   async prompt(
     @Param("workflowId") workflowId: string,
     @Query("token") token: string,
-  ) {
+  ): Promise<ApprovalPromptResponse> {
     if (!verifyApprovalToken(workflowId, token)) {
       throw new UnauthorizedException("Invalid or missing approval token");
     }
@@ -54,12 +80,13 @@ export class ApprovalsPublicController {
   }
 
   /** Approve or reject the run. 202 on success; 409 if it's no longer awaiting approval. */
+  @ApiResponse({ status: 202, type: DecideResultResponse })
   @Post(":workflowId/decide")
   @HttpCode(202)
   async decide(
     @Param("workflowId") workflowId: string,
     @Body() body: DecideDto,
-  ): Promise<{ status: string }> {
+  ): Promise<DecideResultResponse> {
     if (!verifyApprovalToken(workflowId, body.token)) {
       throw new UnauthorizedException("Invalid or missing approval token");
     }
