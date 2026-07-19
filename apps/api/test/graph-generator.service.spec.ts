@@ -89,6 +89,83 @@ describe("GraphGeneratorService", () => {
     expect(generateText).toHaveBeenCalledOnce();
   });
 
+  // --- editStream (conversational builder Slice 2): metered generate/edit --------------------
+  describe("editStream (builder)", () => {
+    const previousGraph = {
+      startNodeId: "start",
+      nodes: [{ id: "start", type: "start" }],
+      edges: [],
+    } as never;
+
+    it("frames an EDIT (previous graph + instruction) and meters reported usage", async () => {
+      generateText.mockResolvedValue({
+        text: JSON.stringify(validOut),
+        totalUsage: { inputTokens: 100, outputTokens: 200 },
+      });
+
+      const res = await makeService().editStream("t-1", "e-1", {
+        previous: previousGraph,
+        instruction: "add an email step",
+      });
+
+      const prompt = generateText.mock.calls[0][0].prompt as string;
+      expect(prompt).toContain("You are EDITING an existing workflow");
+      expect(prompt).toContain(JSON.stringify(previousGraph)); // the current graph is threaded in
+      expect(prompt).toContain("add an email step");
+      // A real priced meter from the reported usage.
+      expect(res.meter).toEqual({
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        tokens: { inputTokens: 100, outputTokens: 200, cachedInputTokens: 0 },
+      });
+      expect(res.graph.nodes).toHaveLength(2);
+    });
+
+    it("with no `previous` it's a plain create (no edit framing)", async () => {
+      generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
+
+      await makeService().editStream("t-1", "e-1", {
+        instruction: "build an onboarding flow",
+      });
+
+      const prompt = generateText.mock.calls[0][0].prompt as string;
+      expect(prompt).not.toContain("You are EDITING");
+      expect(prompt).toContain("build an onboarding flow");
+    });
+
+    it("v6 usage-undefined bug → meter.tokens is null (caller estimates, never zero)", async () => {
+      generateText.mockResolvedValue({ text: JSON.stringify(validOut) }); // no usage field
+
+      const res = await makeService().editStream("t-1", "e-1", {
+        previous: previousGraph,
+        instruction: "tweak it",
+      });
+
+      expect(res.meter.tokens).toBeNull();
+      expect(res.meter.provider).toBe("anthropic");
+    });
+
+    it("streams per-element hooks when provided (API-model path)", async () => {
+      streamText.mockReturnValue(fakeStream([JSON.stringify(validOut)]));
+      const nodes: unknown[] = [];
+      const edges: unknown[] = [];
+
+      const res = await makeService().editStream(
+        "t-1",
+        "e-1",
+        { previous: previousGraph, instruction: "add a node" },
+        undefined,
+        { onNode: (n) => nodes.push(n), onEdge: (e) => edges.push(e) },
+      );
+
+      expect(streamText).toHaveBeenCalledOnce();
+      expect(nodes.length).toBeGreaterThan(0);
+      expect(res.graph.nodes).toHaveLength(2);
+      // No totalUsage on the fake stream → tokens null (fail-safe estimate downstream).
+      expect(res.meter.tokens).toBeNull();
+    });
+  });
+
   it("grounds the model in the tenant's real connections + the integration action catalog", async () => {
     listConnections.mockResolvedValue([
       {
@@ -379,6 +456,31 @@ describe("GraphGeneratorService (claude-code source)", () => {
     await expect(makeService().generate("t-1", "e-1", "flow")).rejects.toThrow(
       /couldn't generate a workflow right now/,
     );
+  });
+
+  it("editStream via claude-code maps to a PRICED meter with null tokens (subprocess has no usage)", async () => {
+    execMock.mockResolvedValue({
+      stdout: envelope(JSON.stringify(validOut)),
+      exitCode: 0,
+    });
+
+    const res = await makeService().editStream("t-1", "e-1", {
+      previous: {
+        startNodeId: "start",
+        nodes: [{ id: "start", type: "start" }],
+        edges: [],
+      } as never,
+      instruction: "add a step",
+    });
+
+    // The subprocess reports no tokens, but the meter still names a real priced pair so the
+    // caller's fail-safe estimate can produce a non-zero cost (Tier-1 §6).
+    expect(res.meter).toEqual({
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      tokens: null,
+    });
+    expect(res.graph.nodes).toHaveLength(2);
   });
 
   it("a setup-token goes to CLAUDE_CODE_OAUTH_TOKEN; an API key to ANTHROPIC_API_KEY — never both", async () => {
