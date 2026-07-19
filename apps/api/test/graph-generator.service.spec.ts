@@ -344,6 +344,41 @@ describe("GraphGeneratorService (claude-code source)", () => {
     expect(binary).toBe("claude");
     expect(args).toContain("--output-format");
     expect(args).toContain("plan");
+    // Turn budget > 1: with tools allowed, a single turn spent on a Read/Grep would end as
+    // error_max_turns with an EMPTY result (the prod empty-head incident).
+    const turnIdx = (args as string[]).indexOf("--max-turns");
+    expect(Number((args as string[])[turnIdx + 1])).toBeGreaterThan(1);
+  });
+
+  it("maps a turn-capped run (error_max_turns, empty result) to a retryable 503 with a clear message", async () => {
+    execMock.mockResolvedValue({
+      stdout: JSON.stringify({
+        type: "result",
+        subtype: "error_max_turns",
+        is_error: true,
+        result: "",
+      }),
+      exitCode: 1,
+    });
+    await expect(makeService().generate("t-1", "e-1", "flow")).rejects.toThrow(
+      /ran out of turns/,
+    );
+  });
+
+  it("includes the envelope subtype in the unknown-failure log path (empty result + stderr)", async () => {
+    execMock.mockResolvedValue({
+      stdout: JSON.stringify({
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        result: "",
+      }),
+      stderr: "",
+      exitCode: 1,
+    });
+    await expect(makeService().generate("t-1", "e-1", "flow")).rejects.toThrow(
+      /couldn't generate a workflow right now/,
+    );
   });
 
   it("a setup-token goes to CLAUDE_CODE_OAUTH_TOKEN; an API key to ANTHROPIC_API_KEY — never both", async () => {
@@ -558,7 +593,10 @@ describe("claude-code generation: stdin close (integration, fake CLI)", () => {
         (err, stdout, stderr) => {
           if (err) {
             const code = (err as NodeJS.ErrnoException).code;
-            if (typeof code === "string" || (err as { killed?: boolean }).killed)
+            if (
+              typeof code === "string" ||
+              (err as { killed?: boolean }).killed
+            )
               return reject(err);
             return resolve({
               stdout: String(stdout),
@@ -566,7 +604,11 @@ describe("claude-code generation: stdin close (integration, fake CLI)", () => {
               exitCode: typeof code === "number" ? code : 1,
             });
           }
-          resolve({ stdout: String(stdout), stderr: String(stderr), exitCode: 0 });
+          resolve({
+            stdout: String(stdout),
+            stderr: String(stderr),
+            exitCode: 0,
+          });
         },
       );
       // Intentionally NO child.stdin.end() — reproduces the hang/exit-1.

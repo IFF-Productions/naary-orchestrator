@@ -610,8 +610,12 @@ export class GraphGeneratorService {
       "plan",
       "--allowedTools",
       "Read,Grep,Glob",
+      // 4, not 1: with tools allowed, the model sometimes spends a turn on a Read/Grep before
+      // answering — at max-turns 1 that ends as an `error_max_turns` envelope with an EMPTY
+      // result (exit 1, nothing on stderr), which we shipped as an unexplainable generic 503.
+      // A small budget lets a tool digression complete while still bounding runaway loops.
       "--max-turns",
-      "1",
+      "4",
       "--append-system-prompt",
       SYSTEM_PROMPT,
     ];
@@ -650,12 +654,17 @@ export class GraphGeneratorService {
     // `claude -p --output-format json` emits one JSON envelope; is_error is checked
     // even on exit 0 (mirrors the codeAgent driver's parse).
     let result = "";
+    let subtype: string | undefined;
     let isError = exitCode !== 0;
     try {
       const envlp = JSON.parse(stdout.trim()) as {
         result?: string;
         is_error?: boolean;
+        /** The CLI's failure reason (e.g. "error_max_turns") — often the ONLY clue when
+         *  result and stderr are both empty. */
+        subtype?: string;
       };
+      subtype = typeof envlp.subtype === "string" ? envlp.subtype : undefined;
       result = typeof envlp.result === "string" ? envlp.result : "";
       isError = isError || envlp.is_error === true;
     } catch {
@@ -688,10 +697,22 @@ export class GraphGeneratorService {
           HttpStatus.TOO_MANY_REQUESTS,
         );
       }
+      // A turn-capped run (the model spent turns on tool calls without emitting the JSON) is a
+      // known, retryable shape — tell the user that instead of a generic failure. Kept at warn:
+      // it's a model-behavior hiccup, not an outage.
+      if (subtype === "error_max_turns") {
+        this.logger.warn(
+          `graph generate (claude-code): turn-capped without a result (exit=${exitCode})`,
+        );
+        throw new ServiceUnavailableException(
+          "Claude Code ran out of turns before producing the workflow. Try again — or rephrase with a shorter description.",
+        );
+      }
       // Unknown/unexpected failure — surface as an ERROR (a real problem worth an alert, not just a
-      // warn), and INCLUDE the stderr head so we can actually see why (stdout is usually empty here).
+      // warn), with the stderr head AND the envelope subtype (often the only clue when both
+      // streams are empty).
       this.logger.error(
-        `graph generate (claude-code): CLI reported failure (exit=${exitCode}, head: ${head})`,
+        `graph generate (claude-code): CLI reported failure (exit=${exitCode}, subtype=${subtype ?? "none"}, head: ${head})`,
       );
       throw new ServiceUnavailableException(
         "Claude Code couldn't generate a workflow right now. Try again.",
