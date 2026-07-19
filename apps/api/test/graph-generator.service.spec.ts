@@ -418,3 +418,18 @@ describe("GraphGeneratorService (claude-code source)", () => {
     );
   });
 });
+
+// Regression: `claude` was blocking ~3s on an open, empty stdin (execFile leaves it open) then
+// exiting 1. The wrapper now closes the child's stdin. Prove it with a real stdin-reading command:
+// `cat` with no args reads stdin until EOF — with the fix it gets EOF at once and exits 0; without
+// it, cat blocks and the 2s timeout would kill it (reject).
+describe("__genDeps.exec closes the child's stdin (real subprocess)", () => {
+  it("a stdin-reading command returns immediately instead of hanging on stdin", async () => {
+    const res = await realExec("cat", [], {
+      env: process.env,
+      timeoutMs: 2000,
+    });
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toBe("");
+  }, 6000);
+});
