@@ -44,6 +44,7 @@ import {
   api,
   type ConnectionRow,
   type GraphSummary,
+  type TestNodeResult,
   UnauthorizedError,
   type WebhookRow,
 } from "../lib/api";
@@ -62,6 +63,7 @@ import {
   type EdgeConditionDraft,
   NODE_GROUPS,
   NODE_KINDS,
+  nodeDisplayLabel,
 } from "../lib/graph-model";
 import { ConfigPanel } from "./canvas/ConfigPanel";
 import { EdgeConfigPanel } from "./canvas/EdgeConfigPanel";
@@ -69,7 +71,9 @@ import { CONNECTION_TYPES, headerInputStyle, PROVIDERS } from "./canvas/fields";
 import {
   DEFAULT_KEY,
   type FlowEdge,
+  isEntryKind,
   type NaaryData,
+  NodeActionsContext,
   nodeTypes,
   SEED_EDGES,
   SEED_NODES,
@@ -78,7 +82,37 @@ import {
   toFlowEdges,
   toFlowNodes,
 } from "./canvas/flow";
+import { edgeTypes, type EdgeRunState } from "./canvas/NaaryEdge";
+import type { NodeRunState } from "./canvas/NodeCard";
+import { OutputInspector } from "./canvas/OutputInspector";
 import { clampW, InspectorPanel, ResizeHandle } from "./canvas/InspectorPanel";
+
+/** Client-side record of a single-node test run (the EXISTING test machinery's result
+ *  + a measured wall-clock). `stale` marks outputs invalidated by later edits. */
+interface NodeTestRun {
+  status: "running" | "done" | "error";
+  output?: unknown;
+  message?: string;
+  /** Measured wall-clock of the test call (real, client-side). */
+  ms?: number;
+  stale?: boolean;
+}
+
+/** All node ids reachable downstream of `id` (for stale-marking after an edit). */
+function downstreamOf(
+  id: string,
+  edges: { source: string; target: string }[],
+): Set<string> {
+  const out = new Set<string>();
+  const queue = edges.filter((e) => e.source === id).map((e) => e.target);
+  while (queue.length) {
+    const n = queue.shift();
+    if (!n || out.has(n)) continue;
+    out.add(n);
+    for (const e of edges) if (e.source === n) queue.push(e.target);
+  }
+  return out;
+}
 
 export function CanvasPage() {
   const navigate = useNavigate();
@@ -135,6 +169,14 @@ export function CanvasPage() {
   const [connections, setConnections] = useState<ConnectionRow[]>([]);
   // Pinned node outputs (authoring samples) for the saved workflow, keyed by nodeId.
   const [pins, setPins] = useState<Record<string, unknown>>({});
+  // Single-node test-run state per nodeId — drives node card colours, the edge
+  // animation, and the output inspector. Client-side authoring state only.
+  const [nodeRuns, setNodeRuns] = useState<Record<string, NodeTestRun>>({});
+  // The most recent successful single-node test — the output drawer keeps showing it
+  // while a node WITHOUT output is selected (the drag-to-map flow).
+  const [lastTestedId, setLastTestedId] = useState<string | null>(null);
+  // The output inspector can be dismissed per selection; reopens on re-select/re-run.
+  const [outputClosed, setOutputClosed] = useState(false);
   // Optional per-run input (JSON) — overrides the Start node's sampleInput for the
   // next run. Blank ⇒ the server falls back to the sample (api.startExecution).
   const [showInput, setShowInput] = useState(false);
@@ -245,9 +287,88 @@ export function CanvasPage() {
     [workflowKey],
   );
 
+  // Single-node test runner — the ONE path both the config panel's "Test node" and the
+  // per-node ▶ use, so card state / measured duration / output inspector stay in sync.
+  // Wraps the existing api.testNode machinery; measures wall-clock client-side (the
+  // only duration we honestly have — testNode returns no usage/cost).
+  const runNodeTest = useCallback(
+    async (nodeId: string, autofill?: boolean): Promise<TestNodeResult> => {
+      if (!workflowKey) {
+        setStatus(
+          "Save the workflow first — node tests run against the saved graph.",
+        );
+        throw new Error("Workflow not saved yet.");
+      }
+      const t0 = performance.now();
+      setNodeRuns((r) => ({ ...r, [nodeId]: { status: "running" } }));
+      setOutputClosed(false);
+      try {
+        const res = await api.testNode(
+          workflowKey,
+          nodeId,
+          undefined,
+          autofill,
+        );
+        const ms = Math.round(performance.now() - t0);
+        setNodeRuns((r) => {
+          const next = { ...r };
+          if (res.pure) {
+            next[nodeId] = { status: "done", output: res.output, ms };
+          } else {
+            // Not actually executed (activity/control node) — back to idle; the
+            // message shows in the config panel, a green "done" would be a lie.
+            delete next[nodeId];
+          }
+          return next;
+        });
+        if (res.pure) setLastTestedId(nodeId);
+        if (!res.pure) setStatus(res.message);
+        // Autofill pins upstream nodes server-side — refresh so they show.
+        if (autofill) {
+          api
+            .listPins(workflowKey)
+            .then(setPins)
+            .catch(() => undefined);
+        }
+        return res;
+      } catch (e) {
+        setNodeRuns((r) => ({
+          ...r,
+          [nodeId]: {
+            status: "error",
+            message: e instanceof Error ? e.message : "Test failed.",
+            ms: Math.round(performance.now() - t0),
+          },
+        }));
+        throw e;
+      }
+    },
+    [workflowKey],
+  );
+
+  // The per-node ▶ (node card): run the test and select the node so its output
+  // drawer opens on completion. Errors surface on the card + status line.
+  const handleNodeRun = useCallback(
+    (id: string) => {
+      setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === id })));
+      setEdges((es) =>
+        es.map((e) => (e.selected ? { ...e, selected: false } : e)),
+      );
+      runNodeTest(id, false).catch(() => undefined);
+    },
+    [runNodeTest],
+  );
+  const nodeActions = useMemo(
+    () => ({ runNode: handleNodeRun }),
+    [handleNodeRun],
+  );
+
   // Load the workflow list (for the selector) + open ?key= if present.
   useEffect(() => {
     let live = true;
+    // A different workflow (or a template fork) invalidates all local test-run state.
+    setNodeRuns({});
+    setLastTestedId(null);
     api
       .listGraphs()
       .then((ws) => live && setWorkflows(ws))
@@ -267,6 +388,11 @@ export function CanvasPage() {
           setName(t.name);
           setWorkflowKey("");
           setStatus(`Forked from template "${t.name}" — Save to keep it.`);
+          // The initial fitView ran before the graph landed — refit to it.
+          setTimeout(
+            () => rfRef.current?.fitView({ duration: 250, padding: 0.2 }),
+            80,
+          );
         })
         .catch(
           () => live && setStatus(`Couldn't load template '${templateParam}'.`),
@@ -282,6 +408,11 @@ export function CanvasPage() {
           setName(g.name);
           setWorkflowKey(g.workflowKey);
           setStatus(null);
+          // The initial fitView ran before the graph landed — refit to it.
+          setTimeout(
+            () => rfRef.current?.fitView({ duration: 250, padding: 0.2 }),
+            80,
+          );
         })
         .catch(
           () => live && setStatus(`Couldn't open workflow '${keyParam}'.`),
@@ -419,15 +550,95 @@ export function CanvasPage() {
         const warning = generating
           ? undefined
           : issuesByNode.get(n.id)?.join("\n");
-        if ((n.data.pinned ?? false) === pinned && n.data.warning === warning) {
+        // Display run-state (design: card colour = run state). "no-input" (a non-entry
+        // node with no inbound edge) wins — it can't run; then live test-run state.
+        const run = nodeRuns[n.id];
+        const noInput =
+          !generating &&
+          !isEntryKind(n.data.kind) &&
+          !edges.some((e) => e.target === n.id);
+        const runState: NodeRunState | undefined = noInput
+          ? "no-input"
+          : run?.status === "running"
+            ? "running"
+            : run?.status === "error"
+              ? "error"
+              : run?.status === "done" && run.output !== undefined
+                ? run.stale
+                  ? "stale"
+                  : "done"
+                : undefined;
+        const runMs =
+          run?.status === "done" && run.output !== undefined
+            ? run.ms
+            : undefined;
+        if (
+          (n.data.pinned ?? false) === pinned &&
+          n.data.warning === warning &&
+          n.data.runState === runState &&
+          n.data.runMs === runMs
+        ) {
           return n;
         }
-        return { ...n, data: { ...n.data, pinned, warning } };
+        return { ...n, data: { ...n.data, pinned, warning, runState, runMs } };
       }),
-    [nodes, pins, issuesByNode, generating],
+    [nodes, pins, issuesByNode, generating, nodeRuns, edges],
+  );
+
+  // Edge display state derives from the endpoint nodes' test-run state: a running
+  // target animates the ember dashed march; two fresh outputs = a done (green) hop.
+  const flowEdges = useMemo(
+    () =>
+      edges.map((e) => {
+        const src = nodeRuns[e.source];
+        const tgt = nodeRuns[e.target];
+        const fresh = (r?: NodeTestRun) =>
+          r?.status === "done" && r.output !== undefined && !r.stale;
+        const runState: EdgeRunState =
+          tgt?.status === "running"
+            ? "active"
+            : fresh(src) && fresh(tgt)
+              ? "done"
+              : "idle";
+        if (e.type === "naary" && e.data?.runState === runState) return e;
+        return { ...e, type: "naary", data: { ...e.data, runState } };
+      }),
+    [edges, nodeRuns],
   );
 
   const selected = nodes.find((n) => n.selected);
+
+  // Output inspector (floating drawer over the canvas): the selected node's REAL
+  // output — its last test result, else its pinned sample. When the newly selected
+  // node has neither, the LAST test output stays up — that's the drag-to-map loop
+  // (test step A with ▷, select step B, drag A's fields into B's parameters).
+  const selectedId = selected?.id;
+  useEffect(() => {
+    setOutputClosed(false);
+  }, [selectedId]);
+  const freshOutput = (r?: NodeTestRun) =>
+    r?.status === "done" && r.output !== undefined;
+  let drawerId: string | undefined;
+  let drawerSource: "test" | "pin" | undefined;
+  if (selectedId && freshOutput(nodeRuns[selectedId])) {
+    drawerId = selectedId;
+    drawerSource = "test";
+  } else if (selectedId && Object.hasOwn(pins, selectedId)) {
+    drawerId = selectedId;
+    drawerSource = "pin";
+  } else if (
+    selectedId &&
+    lastTestedId &&
+    freshOutput(nodeRuns[lastTestedId])
+  ) {
+    drawerId = lastTestedId;
+    drawerSource = "test";
+  }
+  const drawerNode = drawerId
+    ? nodes.find((n) => n.id === drawerId)
+    : undefined;
+  const drawerRun = drawerId ? nodeRuns[drawerId] : undefined;
+  const showOutput = !!drawerNode && !!drawerSource && !outputClosed;
 
   // Jump to a node from the issues panel: select it (opens its inspector) and clear other selection.
   function selectNode(id: string): void {
@@ -456,13 +667,41 @@ export function CanvasPage() {
     );
   }
 
+  // Mark this node's + all downstream nodes' test outputs stale — their inputs
+  // changed, so a green "done" would misrepresent the graph (design: stale state).
+  function markStaleFrom(id: string, includeSelf: boolean): void {
+    const affected = downstreamOf(id, edges);
+    if (includeSelf) affected.add(id);
+    setNodeRuns((r) => {
+      let changed = false;
+      const next = { ...r };
+      for (const nid of affected) {
+        const run = next[nid];
+        if (run && run.status === "done" && !run.stale) {
+          next[nid] = { ...run, stale: true };
+          changed = true;
+        }
+      }
+      return changed ? next : r;
+    });
+  }
+
   // Remove a node + any edges touching it (the modal's Delete button). Removing the
   // node clears the selection, so the inspector modal closes on its own.
   function deleteNode(id: string): void {
+    markStaleFrom(id, false);
     setNodes((ns) => ns.filter((n) => n.id !== id));
     setEdges((es) => es.filter((e) => e.source !== id && e.target !== id));
+    setNodeRuns((r) => {
+      if (!(id in r)) return r;
+      const next = { ...r };
+      delete next[id];
+      return next;
+    });
   }
   function deleteEdge(id: string): void {
+    const edge = edges.find((e) => e.id === id);
+    if (edge) markStaleFrom(edge.target, true);
     setEdges((es) => es.filter((e) => e.id !== id));
   }
 
@@ -482,6 +721,9 @@ export function CanvasPage() {
           y: 300 + (ns.length % 3) * 30,
         },
         data: { kind, config },
+        // Appear animation: scale(.85)+translateY(6px)→1 + a brief ember glow
+        // (canvas.css). Mount-once — React Flow keys nodes by id.
+        className: "naary-node-enter",
       },
     ]);
   }
@@ -497,6 +739,8 @@ export function CanvasPage() {
           : n,
       ),
     );
+    // Editing config invalidates this node's + downstream test outputs.
+    markStaleFrom(nodeId, true);
   }
 
   function updateEdgeCondition(
@@ -856,9 +1100,9 @@ export function CanvasPage() {
           flexWrap: "wrap",
           gap: 10,
           rowGap: 8,
-          padding: "12px 18px",
+          padding: "10px 16px",
           borderBottom: "1px solid var(--line)",
-          background: "var(--surface)",
+          background: "var(--panel)",
         }}
       >
         <Button variant="secondary" onClick={() => navigate("/app")}>
@@ -888,8 +1132,32 @@ export function CanvasPage() {
           style={{ ...headerInputStyle, width: 170 }}
           aria-label="Workflow name"
         />
-        <span style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
-          key: {activeKey}
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "baseline",
+            gap: 6,
+            minWidth: 0,
+          }}
+        >
+          <span
+            className="mono"
+            style={{
+              fontSize: "var(--text-2xs)",
+              fontWeight: "var(--weight-semibold)",
+              letterSpacing: "var(--tracking-label)",
+              textTransform: "uppercase",
+              color: "var(--ink-3)",
+            }}
+          >
+            key
+          </span>
+          <span
+            className="mono"
+            style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
+          >
+            {activeKey}
+          </span>
         </span>
 
         {/* While streaming the graph is incomplete — showing "invalid/disconnected" (and
@@ -1206,7 +1474,8 @@ export function CanvasPage() {
             width: effPaletteWidth,
             flex: "none",
             padding: 14,
-            background: "var(--surface)",
+            background: "var(--panel)",
+            borderRight: "1px solid var(--line)",
             display: "flex",
             flexDirection: "column",
             gap: 8,
@@ -1214,13 +1483,17 @@ export function CanvasPage() {
           }}
         >
           <div
+            className="mono"
             style={{
-              fontSize: "var(--text-xs)",
+              fontSize: "var(--text-2xs)",
+              fontWeight: "var(--weight-semibold)",
+              letterSpacing: "var(--tracking-label)",
+              textTransform: "uppercase",
               color: "var(--ink-3)",
               marginBottom: 2,
             }}
           >
-            ADD NODE
+            Add node
           </div>
           <input
             value={paletteQuery}
@@ -1260,6 +1533,7 @@ export function CanvasPage() {
                   style={{ display: "flex", flexDirection: "column", gap: 6 }}
                 >
                   <div
+                    className="mono"
                     style={{
                       fontSize: "var(--text-2xs)",
                       fontWeight: "var(--weight-semibold)",
@@ -1332,7 +1606,7 @@ export function CanvasPage() {
           }}
         />
 
-        {/* canvas */}
+        {/* canvas — ambient warm wash + dotted grid; the output drawer floats over it */}
         <div
           style={
             canvasFullscreen
@@ -1340,60 +1614,97 @@ export function CanvasPage() {
                   position: "fixed",
                   inset: 0,
                   zIndex: 1000,
-                  background: "var(--bg)",
+                  background:
+                    "radial-gradient(120% 90% at 20% 0%, var(--grad-a), var(--bg) 60%)",
                 }
-              : { flex: 1, minWidth: 0 }
+              : {
+                  flex: 1,
+                  minWidth: 0,
+                  position: "relative",
+                  background:
+                    "radial-gradient(120% 90% at 20% 0%, var(--grad-a), var(--bg) 60%)",
+                }
           }
         >
-          <ReactFlow
-            nodes={flowNodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onInit={(inst) => {
-              rfRef.current = inst;
-            }}
-            fitView
-          >
-            <Background />
-            <Controls />
-            {generating && (
-              <Panel position="top-center">
-                <div
-                  className="naary-gen-pill"
-                  role="status"
-                  aria-live="polite"
-                >
-                  <span className="naary-gen-spinner" aria-hidden="true" />
-                  <span key={genMessage} className="naary-gen-msg">
-                    {genMessage}
-                  </span>
-                  {genNodeCount > 0 && (
-                    <span className="naary-gen-count">
-                      {genNodeCount} node{genNodeCount === 1 ? "" : "s"}
+          <NodeActionsContext.Provider value={nodeActions}>
+            <ReactFlow
+              nodes={flowNodes}
+              edges={flowEdges}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onInit={(inst) => {
+                rfRef.current = inst;
+              }}
+              fitView
+            >
+              <Background gap={26} size={1.1} />
+              <Controls />
+              {generating && (
+                <Panel position="top-center">
+                  <div
+                    className="naary-gen-pill"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <span className="naary-gen-spinner" aria-hidden="true" />
+                    <span key={genMessage} className="naary-gen-msg">
+                      {genMessage}
                     </span>
-                  )}
-                </div>
+                    {genNodeCount > 0 && (
+                      <span className="naary-gen-count">
+                        {genNodeCount} node{genNodeCount === 1 ? "" : "s"}
+                      </span>
+                    )}
+                  </div>
+                </Panel>
+              )}
+              <Panel position="top-right">
+                <button
+                  type="button"
+                  className="rf-fs-btn"
+                  onClick={() => setCanvasFullscreen((v) => !v)}
+                  aria-label={
+                    canvasFullscreen ? "Exit full screen" : "Full screen"
+                  }
+                  title={
+                    canvasFullscreen ? "Exit full screen (Esc)" : "Full screen"
+                  }
+                >
+                  <Icon name={canvasFullscreen ? "x" : "expand"} size={15} />
+                </button>
               </Panel>
-            )}
-            <Panel position="top-right">
-              <button
-                type="button"
-                className="rf-fs-btn"
-                onClick={() => setCanvasFullscreen((v) => !v)}
-                aria-label={
-                  canvasFullscreen ? "Exit full screen" : "Full screen"
-                }
-                title={
-                  canvasFullscreen ? "Exit full screen (Esc)" : "Full screen"
-                }
-              >
-                <Icon name={canvasFullscreen ? "x" : "expand"} size={15} />
-              </button>
-            </Panel>
-          </ReactFlow>
+            </ReactFlow>
+          </NodeActionsContext.Provider>
+
+          {/* floating output inspector — an absolute overlay, never pushes the canvas */}
+          {showOutput && drawerNode && drawerSource && (
+            <OutputInspector
+              key={drawerNode.id}
+              nodeId={drawerNode.id}
+              title={nodeDisplayLabel(
+                drawerNode.data.kind,
+                drawerNode.data.config,
+              )}
+              output={
+                drawerSource === "test"
+                  ? drawerRun?.output
+                  : pins[drawerNode.id]
+              }
+              source={drawerSource}
+              runMs={drawerSource === "test" ? drawerRun?.ms : undefined}
+              stale={drawerSource === "test" ? drawerRun?.stale : undefined}
+              canPin={!!workflowKey}
+              isPinned={Object.hasOwn(pins, drawerNode.id)}
+              onPin={() => {
+                if (drawerRun?.output !== undefined)
+                  void pinNode(drawerNode.id, drawerRun.output);
+              }}
+              onClose={() => setOutputClosed(true)}
+            />
+          )}
         </div>
 
         {/* node / edge editor — a docked, drag-resizable side panel (right) */}
@@ -1422,40 +1733,31 @@ export function CanvasPage() {
               deleteLabel={selected ? "Delete node" : "Delete edge"}
             >
               {selected ? (
-                <ConfigPanel
-                  key={selected.id}
-                  node={selected}
-                  upstreamIds={nodes
-                    .filter((n) => n.id !== selected.id)
-                    .map((n) => n.id)}
-                  edges={edges}
-                  nodeKinds={nodeKinds}
-                  hookUrls={hookUrls}
-                  connections={connections}
-                  pins={pins}
-                  canPin={!!workflowKey}
-                  pinnedOutput={pins[selected.id]}
-                  isPinned={Object.hasOwn(pins, selected.id)}
-                  onPin={(output) => pinNode(selected.id, output)}
-                  onUnpin={() => unpinNode(selected.id)}
-                  onTest={async (autofill) => {
-                    const r = await api.testNode(
-                      workflowKey,
-                      selected.id,
-                      undefined,
-                      autofill,
-                    );
-                    // auto-fill pins upstream nodes server-side — refresh so they show.
-                    if (autofill && workflowKey) {
-                      api
-                        .listPins(workflowKey)
-                        .then(setPins)
-                        .catch(() => undefined);
-                    }
-                    return r;
-                  }}
-                  onChange={(patch) => updateConfig(selected.id, patch)}
-                />
+                /* naary-drop-scope: while a field row is dragged from the output
+                   inspector, the expression inputs inside highlight (canvas.css). */
+                <div className="naary-drop-scope">
+                  <ConfigPanel
+                    key={selected.id}
+                    node={selected}
+                    upstreamIds={nodes
+                      .filter((n) => n.id !== selected.id)
+                      .map((n) => n.id)}
+                    edges={edges}
+                    nodeKinds={nodeKinds}
+                    hookUrls={hookUrls}
+                    connections={connections}
+                    pins={pins}
+                    canPin={!!workflowKey}
+                    pinnedOutput={pins[selected.id]}
+                    isPinned={Object.hasOwn(pins, selected.id)}
+                    onPin={(output) => pinNode(selected.id, output)}
+                    onUnpin={() => unpinNode(selected.id)}
+                    // The shared single-node test runner — also drives the node
+                    // card state + the floating output inspector.
+                    onTest={(autofill) => runNodeTest(selected.id, autofill)}
+                    onChange={(patch) => updateConfig(selected.id, patch)}
+                  />
+                </div>
               ) : selectedEdge ? (
                 <EdgeConfigPanel
                   key={selectedEdge.id}

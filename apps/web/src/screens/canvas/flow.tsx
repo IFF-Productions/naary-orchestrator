@@ -6,15 +6,17 @@ import {
   type NodeProps,
   Position,
 } from "@xyflow/react";
+import { createContext, useContext } from "react";
 import type { NodeType } from "@naary/dsl";
 import {
-  ACCENT,
   type CanvasEdge,
   type CanvasNode,
   type EdgeConditionDraft,
   nodeDisplayLabel,
   nodeSubtitle,
 } from "../../lib/graph-model";
+import type { EdgeRunState } from "./NaaryEdge";
+import { NodeCard, type NodeRunState } from "./NodeCard";
 
 export const DEFAULT_KEY = "canvas";
 
@@ -50,96 +52,81 @@ export function toFlowEdges(cs: CanvasEdge[]): FlowEdge[] {
 export interface NaaryData extends Record<string, unknown> {
   kind: NodeType;
   config?: Record<string, unknown>;
-  /** Injected for rendering: this node has a pinned authoring sample (📌 badge). */
+  /** Injected for rendering: this node has a pinned authoring sample (badge). */
   pinned?: boolean;
-  /** Injected for rendering: this node has lint issues (⚠ badge); text is the tooltip. */
+  /** Injected for rendering: this node has lint issues (amber badge); text is the tooltip. */
   warning?: string;
+  /** Injected for rendering: single-node test-run state (idle when absent). */
+  runState?: NodeRunState;
+  /** Injected for rendering: measured wall-clock (ms) of the last test run. */
+  runMs?: number;
 }
 
-/** A node on the canvas: accent bar, label, and connection handles. Entry nodes
- *  have no inbound handle; `end` has no outbound. */
-function NaaryNode({ data, selected }: NodeProps<Node<NaaryData>>) {
-  const kind = data.kind;
-  const accent = ACCENT[kind];
-  // Keep in sync with compile-graph's ENTRY_TYPES — every entry node has no inbound handle.
-  const isEntry =
+/** Keep in sync with compile-graph's ENTRY_TYPES — every entry node has no inbound handle. */
+export function isEntryKind(kind: NodeType): boolean {
+  return (
     kind === "start" ||
     kind === "webhookTrigger" ||
     kind === "scheduleTrigger" ||
     kind === "pollTrigger" ||
     kind === "errorTrigger" ||
     kind === "formTrigger" ||
-    kind === "chatTrigger";
+    kind === "chatTrigger"
+  );
+}
+
+/** Per-node actions the canvas provides to node renderers (stable via context so
+ *  injecting callbacks into node `data` doesn't churn react-flow renders). */
+export const NodeActionsContext = createContext<{
+  /** Run a single-node test for this node (wired to the existing test machinery). */
+  runNode?: (id: string) => void;
+}>({});
+
+/** Cost-cap / per-call cost chip — ONLY from real DSL config fields (codeAgent's
+ *  maxBudgetUsd hard stop; the metered flat costUsd on tool/action nodes). */
+export function costChipFor(
+  config: Record<string, unknown> | undefined,
+): string | undefined {
+  if (!config) return undefined;
+  const cap = config.maxBudgetUsd;
+  if (typeof cap === "number" && cap > 0) return `cap $${cap}`;
+  const perCall = config.costUsd;
+  if (typeof perCall === "number" && perCall > 0) return `$${perCall}/call`;
+  return undefined;
+}
+
+/** A node on the canvas: the redesigned state-driven card + connection handles.
+ *  Entry nodes have no inbound handle; `end` has no outbound. */
+function NaaryNode({ id, data, selected }: NodeProps<Node<NaaryData>>) {
+  const kind = data.kind;
+  const { runNode } = useContext(NodeActionsContext);
   const subtitle = nodeSubtitle(kind, data.config);
   // Provider-aware: an integration node reads "GitHub"/"Jira"/…, not the shared type
   // label "integration" (which collapses to the last-registered tile). See nodeDisplayLabel.
   const title = nodeDisplayLabel(kind, data.config);
+  const state = data.runState ?? "idle";
+  // No ▶ on terminal/no-input nodes — nothing runnable to test.
+  const onRun =
+    runNode && kind !== "end" && state !== "no-input"
+      ? () => runNode(id)
+      : undefined;
   return (
-    <div
-      style={{
-        minWidth: 132,
-        borderRadius: "var(--radius-md)",
-        border: data.warning
-          ? "1px solid var(--state-paused)"
-          : `1px solid ${accent}`,
-        outline: selected
-          ? `2px solid ${data.warning ? "var(--state-paused)" : accent}`
-          : "none",
-        background: "var(--card)",
-        color: "var(--ink)",
-        fontFamily: "var(--font-sans)",
-        fontSize: "var(--text-body)",
-        overflow: "hidden",
-        boxShadow: "var(--shadow-node)",
-      }}
-    >
-      {!isEntry && <Handle type="target" position={Position.Left} />}
-      <div style={{ height: 4, background: accent }} />
-      <div
-        style={{
-          padding: subtitle ? "9px 12px 4px" : "9px 12px",
-          fontWeight: "var(--weight-semibold)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 6,
-        }}
-      >
-        <span>{title}</span>
-        <span style={{ display: "flex", gap: 4 }}>
-          {data.warning && (
-            <span title={data.warning} style={{ fontSize: "var(--text-xs)" }}>
-              ⚠️
-            </span>
-          )}
-          {data.pinned && (
-            <span
-              title="Has a pinned sample output"
-              style={{ fontSize: "var(--text-xs)" }}
-            >
-              📌
-            </span>
-          )}
-        </span>
-      </div>
-      {subtitle && (
-        <div
-          className="mono"
-          style={{
-            padding: "0 12px 9px",
-            fontSize: "var(--text-2xs)",
-            color: "var(--ink-3)",
-            maxWidth: 180,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {subtitle}
-        </div>
-      )}
+    <>
+      {!isEntryKind(kind) && <Handle type="target" position={Position.Left} />}
+      <NodeCard
+        kind={kind}
+        title={title}
+        subtitle={subtitle}
+        state={state}
+        selected={selected}
+        pinned={data.pinned}
+        warning={data.warning}
+        runMs={data.runMs}
+        costChip={costChipFor(data.config)}
+        onRun={onRun}
+      />
       {kind !== "end" && <Handle type="source" position={Position.Right} />}
-    </div>
+    </>
   );
 }
 
@@ -147,6 +134,8 @@ export const nodeTypes = { naary: NaaryNode };
 
 interface EdgeData extends Record<string, unknown> {
   condition?: EdgeConditionDraft;
+  /** Injected for rendering: derived edge run-state (idle when absent). */
+  runState?: EdgeRunState;
 }
 export type FlowEdge = Edge<EdgeData>;
 

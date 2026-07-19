@@ -7,8 +7,10 @@
 import type { EdgeCondition, GraphDef } from "@naary/dsl";
 import type { CanvasEdge, CanvasNode, EdgeConditionDraft } from "./graph-model";
 
-const COL = 220;
-const ROW = 120;
+// Spacing sized for the redesigned node cards (min 176 / max 244 px wide, ~66 px
+// tall with a meta line) so auto-laid-out columns can't overlap.
+const COL = 300;
+const ROW = 132;
 
 export function decompileGraph(graph: GraphDef): {
   nodes: CanvasNode[];
