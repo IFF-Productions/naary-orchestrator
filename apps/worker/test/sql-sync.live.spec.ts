@@ -98,12 +98,12 @@ describe.skipIf(!LIVE)(
             config: {
               connectionId: "pg-live",
               sql: `INSERT INTO ${TABLE} (id, note) VALUES ($1, $2)`,
-              // paramBindings fill positional params from upstream outputs (never the SQL text):
-              // $1 ← tick.id, $2 ← tick.note (tick = the scheduleTrigger passthrough of the input).
+              // paramBindings fill positional params from upstream outputs (never the SQL text).
+              // Keys are 1-BASED ($1, $2), matching resolveSqlQuery's `Number(index) - 1`.
               params: [0, ""],
               paramBindings: {
-                "0": { from: "tick", path: "id" },
-                "1": { from: "tick", path: "note" },
+                "1": { from: "tick", path: "id" },
+                "2": { from: "tick", path: "note" },
               },
             } as never,
           },
@@ -114,7 +114,7 @@ describe.skipIf(!LIVE)(
               connectionId: "pg-live",
               sql: `SELECT id, note FROM ${TABLE} WHERE id = $1`,
               params: [0],
-              paramBindings: { "0": { from: "tick", path: "id" } },
+              paramBindings: { "1": { from: "tick", path: "id" } },
             } as never,
           },
           {

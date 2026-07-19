@@ -158,9 +158,10 @@ describe.skipIf(!LIVE)(
         expect(draft.output.reply.length).toBeGreaterThan(0);
         expect(draft.costUsd).toBeGreaterThan(0);
 
-        // The SMTP server really accepted the message (a messageId is proof of delivery to Ethereal).
-        const send = final.ctx.send as { status: string; messageId: string };
-        expect(send.status).toBe("ok");
+        // The SMTP server really accepted the message: the interpreter exposes the transport's
+        // messageId on the node output (proof the send round-tripped to Ethereal).
+        const send = final.ctx.send as { messageId: string };
+        expect(typeof send.messageId).toBe("string");
         expect(send.messageId.length).toBeGreaterThan(0);
       });
     });
