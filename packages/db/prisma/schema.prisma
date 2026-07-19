@@ -73,28 +73,37 @@ model Execution {
 // Recurring runs: a Temporal Schedule (cron) that starts a workflow. The row is
 // the tenant-scoped index/registry; Temporal owns the schedule + its firing.
 model Schedule {
-  id          String   @id // the Temporal scheduleId
+  id          String   @id // the Temporal scheduleId (env-scoped: poll-<tenant>-<env>-<wf> etc.)
   tenantId    String
+  // Env-scoped (ENVIRONMENTS.md §7, env-scoped-schedules slice): the env is part of the schedule
+  // IDENTITY — a sandbox poll schedule fires sandbox's graph, never prod's. Cascade: schedules are
+  // disposable trigger config and must not block env deletion (the Temporal handle is torn down
+  // best-effort by EnvironmentsService/sync — a missing row means nothing fires against the graph).
+  environmentId String
+  environment Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
   workflowKey String // which saved graph it runs
   cron        String // cron expression
   paused      Boolean  @default(false)
   createdAt   DateTime @default(now())
 
-  @@index([tenantId])
+  @@index([tenantId, environmentId])
 }
 
-// Change-detection cursor for a pollTrigger node. One row per (tenant, workflow,
+// Change-detection cursor for a pollTrigger node. One row per (tenant, env, workflow,
 // node): the last-seen change key. A poll run compares the freshly-fetched key to
 // this and only fires downstream when it differs, then upserts the new key. Keyed by
-// workflowKey (not executionId) so it persists ACROSS the scheduled runs.
+// workflowKey (not executionId) so it persists ACROSS the scheduled runs; env-scoped
+// so sandbox's poll cursor never suppresses (or double-fires) prod's.
 model PollState {
   tenantId    String
+  environmentId String
+  environment Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
   workflowKey String
   nodeId      String
   lastKey     String // sha256 of the change value (or the whole body)
   updatedAt   DateTime @updatedAt
 
-  @@id([tenantId, workflowKey, nodeId])
+  @@id([tenantId, environmentId, workflowKey, nodeId])
 }
 
 // Versioned graph definitions (Slice #5). Postgres owns graph DEFINITIONS; each
@@ -451,6 +460,8 @@ model Environment {
   pinnedData           PinnedData[]
   errorHandlers        ErrorHandler[]
   workflowGrants       WorkflowGrant[]
+  schedules            Schedule[]
+  pollStates           PollState[]
 
   @@unique([tenantId, slug])
   @@index([tenantId])

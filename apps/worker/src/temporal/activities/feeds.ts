@@ -9,7 +9,7 @@ import {
   assertEgressAllowed,
   safeFetch,
 } from "@naary/connections";
-import { getPrisma } from "@naary/db";
+import { getDefaultEnvironmentId, getPrisma } from "@naary/db";
 import { activityDuration, activityRuns, secondsSince } from "../../metrics";
 import { type AgentMeta, toSanitizedRetryable } from "./shared";
 
@@ -128,10 +128,13 @@ export async function callRssRead(
   }
 }
 
-/** Change-detection state for a pollTrigger, keyed by (tenant, workflow, node) so it
+/** Change-detection state for a pollTrigger, keyed by (tenant, env, workflow, node) so it
  *  persists across the scheduled runs (NOT executionId, which changes each run). */
 export interface PollMeta {
   tenantId: string;
+  /** Absent for a legacy in-flight run started before env-scoped schedules — the cursor
+   *  falls back to the tenant's default env (the 5b/6b precedent, see readChannels). */
+  environmentId?: string;
   workflowKey: string;
   nodeId: string;
 }
@@ -150,28 +153,43 @@ export const __pollDeps = {
   fetch: (url: string, init?: RequestInit) =>
     safeFetch(url, init as never) as unknown as Promise<Response>,
   assertEgressAllowed,
-  readCursor: (meta: PollMeta): Promise<string | null> =>
-    getPrisma()
+  readCursor: async (meta: PollMeta): Promise<string | null> => {
+    // Legacy in-flight runs (started pre-env-scoped-schedules) carry no env — resolve the
+    // default env IN THE ACTIVITY (workflow code stays deterministic; 6b readChannels precedent).
+    const environmentId =
+      meta.environmentId ?? (await getDefaultEnvironmentId(meta.tenantId));
+    return getPrisma()
       .pollState.findUnique({
         where: {
-          tenantId_workflowKey_nodeId: {
+          tenantId_environmentId_workflowKey_nodeId: {
             tenantId: meta.tenantId,
+            environmentId,
             workflowKey: meta.workflowKey,
             nodeId: meta.nodeId,
           },
         },
       })
-      .then((r) => r?.lastKey ?? null),
+      .then((r) => r?.lastKey ?? null);
+  },
   writeCursor: async (meta: PollMeta, lastKey: string): Promise<void> => {
+    const environmentId =
+      meta.environmentId ?? (await getDefaultEnvironmentId(meta.tenantId));
     await getPrisma().pollState.upsert({
       where: {
-        tenantId_workflowKey_nodeId: {
+        tenantId_environmentId_workflowKey_nodeId: {
           tenantId: meta.tenantId,
+          environmentId,
           workflowKey: meta.workflowKey,
           nodeId: meta.nodeId,
         },
       },
-      create: { ...meta, lastKey },
+      create: {
+        tenantId: meta.tenantId,
+        environmentId,
+        workflowKey: meta.workflowKey,
+        nodeId: meta.nodeId,
+        lastKey,
+      },
       update: { lastKey },
     });
   },

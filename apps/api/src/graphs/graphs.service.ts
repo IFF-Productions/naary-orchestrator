@@ -562,12 +562,6 @@ export class GraphsService {
     tenantId: string,
     environmentId: string,
     workflowKey: string,
-    /** True only when deleting the DEFAULT env's copy. The ONLY remaining tenant-wide row is
-     *  PollState (the poll cursor) — schedules (and so poll cursors) are default-env-only until
-     *  the env-scoped-schedules slice puts the env into the schedule identity (schedule id +
-     *  startWorkflow action args + PollMeta). Everything else is env-scoped and always deleted
-     *  for THIS env: pins (6b), error-handler bindings + trigger endpoints (slice-6 cleanup). */
-    deleteShared: boolean,
   ): Promise<boolean> {
     const existed = await getPrisma().graphDefinition.findFirst({
       where: { tenantId, environmentId, workflowKey },
@@ -607,12 +601,12 @@ export class GraphsService {
       p.chatEndpoint.deleteMany({
         where: { tenantId, environmentId, workflowId: workflowKey },
       }),
+      // Poll cursors are env-scoped now (env-scoped-schedules slice) — always deleted for
+      // THIS env, like every other row. The former deleteShared gate is gone with it.
+      p.pollState.deleteMany({
+        where: { tenantId, environmentId, workflowKey },
+      }),
     ];
-    // PollState is the last tenant-wide row — removed only with the default env's copy (its
-    // schedules are default-env-only; see the deleteShared doc above).
-    if (deleteShared) {
-      ops.push(p.pollState.deleteMany({ where: { tenantId, workflowKey } }));
-    }
     await p.$transaction(ops);
     return true;
   }

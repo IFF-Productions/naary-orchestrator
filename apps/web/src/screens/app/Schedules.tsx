@@ -111,7 +111,8 @@ export function Schedules() {
             marginTop: 4,
           }}
         >
-          Run a saved workflow on a recurring cron (durable Temporal Schedules).
+          Run a saved workflow on a recurring cron in the active environment
+          (durable Temporal Schedules).
         </div>
       </div>
 

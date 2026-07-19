@@ -357,7 +357,7 @@ export class GraphsController {
   ): Promise<{ workflowKey: string; version: number; contentHash: string }> {
     const graph = toGraphDef(body.graph);
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    // Consolidated save path (shared with v1): upsert + the DEFAULT-ENV-ONLY, best-effort
+    // Consolidated save path (shared with v1): upsert + the env-scoped, best-effort
     // poll/cron schedule sync live in WorkflowLifecycleService. The principal gates the
     // save (§4): existing key ⇒ edit, new key ⇒ canCreate.
     const snap = await this.lifecycle.saveWorkflow(
@@ -442,8 +442,8 @@ export class GraphsController {
     @CurrentPrincipal() principal?: Principal,
   ): Promise<{ deleted: true }> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    // Consolidated delete path (shared with v1): the DEFAULT-ENV-ONLY, best-effort schedule
-    // teardown + deleteShared gating live in WorkflowLifecycleService. The principal gates
+    // Consolidated delete path (shared with v1): the env-scoped, best-effort schedule
+    // teardown lives in WorkflowLifecycleService. The principal gates
     // the delete (§4) before any teardown side effect.
     const deleted = await this.lifecycle.deleteWorkflow(
       tenantId,
