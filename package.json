@@ -16,6 +16,7 @@
     "test": "pnpm build && vitest run",
     "test:watch": "vitest",
     "test:integration": "pnpm build && vitest run --config vitest.integration.config.ts",
+    "test:live": "pnpm build && vitest run --config vitest.live.config.ts",
     "worker": "pnpm --filter @naary/worker start",
     "gen:api": "pnpm --filter @naary/api gen:openapi && pnpm --filter @naary/web gen:api-types",
     "check:api-types": "pnpm gen:api && git diff --exit-code -- apps/api/openapi.json apps/web/src/lib/api/schema.d.ts",
