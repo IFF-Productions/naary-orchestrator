@@ -500,11 +500,11 @@ export interface AuditEvent {
   createdAt: string;
 }
 
-export type NotificationChannelType = "slack" | "teams";
+export type NotificationChannelType = "slack" | "teams" | "email";
 
 /** One notification channel row — a workspace can have ANY NUMBER per type (e.g. two
- *  Slack webhooks for #alerts and #oncall). Addressed by `id`; `label` tells same-type
- *  channels apart. */
+ *  Slack webhooks for #alerts and #oncall, plus an email list). Addressed by `id`;
+ *  `label` tells same-type channels apart. */
 export interface NotificationChannel {
   id: string;
   type: NotificationChannelType;
@@ -512,10 +512,17 @@ export interface NotificationChannel {
   /** Off = the worker skips this channel entirely, even with a URL set. */
   enabled: boolean;
   webhookUrl: string | null;
+  /** Email channels: the smtp connection this channel sends through (Slice 4).
+   *  Null for webhook channels / unconfigured. Credentials never leave the server. */
+  emailConnectionId: string | null;
+  /** Email channels: recipient addresses. Empty for webhook channels. */
+  emailTo: string[];
   onApprovalPending: boolean;
   onRunFailed: boolean;
   /** Budget alert-threshold opt-in (Slice 3). Default false. */
   onBudgetThreshold: boolean;
+  /** Promotion opt-in (Slice 4): a workflow promoted into this env. Default false. */
+  onPromotion: boolean;
 }
 
 /**

@@ -1,6 +1,7 @@
 # Redesign functionality gaps — backend roadmap
 
-**Status:** roadmap (living doc) · **Source:** the honest-data deviation log from the
+**Status:** slices 1–4 SHIPPED (#424, #425, #429, + the Slice 4 email/matrix PR); the
+long tail below is the remaining backlog · **Source:** the honest-data deviation log from the
 full product redesign (PRs #420/#421). Every screen was implemented against the design
 comps (`design_handoff_naary_redesign`, mirrored in `_design-reference/redesign/`) under
 one rule: *bind only to real APIs; omit or substitute what the backend can't back*.
@@ -13,7 +14,7 @@ change with the widest leverage, then budgets, then the long tail.
 
 ---
 
-## Slice 1 — Approval routing + SLA/escalation (HITL depth) ← **first**
+## Slice 1 — Approval routing + SLA/escalation (HITL depth) — **SHIPPED** (PR #424)
 
 The comps treat approvals as the hero surface; almost everything they show on a gate
 beyond title/instructions is missing. Today `ApprovalNodeConfig` =
@@ -35,7 +36,7 @@ approvals inbox chips/routing card, run-detail hero chips, Team routing card rea
 gates, public approve). Determinism: timers only via Temporal APIs; expression eval and
 notification sends live in activities (Tier-1 rules).
 
-## Slice 2 — Per-node timing + cost (observability leverage)
+## Slice 2 — Per-node timing + cost (observability leverage) — **SHIPPED** (PR #425)
 
 One recording change lights up omissions on four screens (Run detail durations/costs,
 Observe latency histogram + median KPI, Usage avg-duration widget, canvas cost chips).
@@ -52,7 +53,7 @@ Observe latency histogram + median KPI, Usage avg-duration widget, canvas cost c
 - `testNode` returns measured duration + usage (metered like any activity; billing
   fail-safe rules apply).
 
-## Slice 3 — Budget alert + pause-not-fail
+## Slice 3 — Budget alert + pause-not-fail — **SHIPPED** (PR #429)
 
 - `alertThresholdPct?: number` on budget policy → crossing it (checked at reservation
   time, fail-safe) emits a `budgetThreshold` notification event (see Slice 4 channels).
@@ -64,14 +65,14 @@ Observe latency histogram + median KPI, Usage avg-duration widget, canvas cost c
 - Live run spend: expose the run's reserved/spent-so-far in the state query so run
   detail (and later canvas run-watch) can show a real budget meter.
 
-## Slice 4 — Notification channels: email + event matrix
+## Slice 4 — Notification channels: email + event matrix — **SHIPPED** (this slice)
 
 - New `email` channel type (SMTP connection reuse) beside Slack/Teams webhooks.
 - Event flags grow beyond `onApprovalPending`/`onRunFailed`: `onBudgetThreshold`,
   `onPromotion` (+ reminder/escalation flavors from Slice 1).
 - Settings matrix then renders real per-event × channel toggles (the comp's grid).
 
-## Long tail (ordered, independent)
+## Long tail (ordered, independent) — the remaining backlog
 
 1. **Templates**: sample-data seeding on install (pre-pinned trigger inputs per
    template) + "Send a test event" action → the comp's teaching loop.

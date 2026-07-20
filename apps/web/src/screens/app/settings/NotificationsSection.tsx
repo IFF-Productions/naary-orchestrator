@@ -1,14 +1,16 @@
-// Notifications section (redesign). REAL model: a workspace has ANY NUMBER of
-// webhook channels per type (Slack / Microsoft Teams) — there are no per-event
-// email/webhook toggles. Channels belong to the ACTIVE environment (env-scoped
-// routing: a sandbox failure never pages prod's channels). Each row = one channel
-// with its type glyph, env chip, event flags and the teal "decide-in-place" chip
-// when it carries approval Approve/Reject buttons; expanding a row edits, tests
-// (send-test) or deletes it.
+// Notifications section (redesign — the comp's per-event × channel matrix,
+// _design-reference/redesign/Naary Settings.dc.html). REAL model: a workspace has
+// ANY NUMBER of channels (Slack / Microsoft Teams webhooks + SMTP email lists),
+// each a ROW of the matrix; the COLUMNS are the four real event flags (approval
+// pending / run failed / budget threshold / promotion), toggled per cell. Channels
+// belong to the ACTIVE environment (env-scoped routing: a sandbox failure never
+// pages prod's channels). Expanding a row edits its label + webhook URL or SMTP
+// config (connection + recipients), sends a test, or deletes it.
 import { useEffect, useState } from "react";
-import { Button, Checkbox, Icon, Switch, TextInput } from "../../../components";
+import { Button, Icon, Switch, TextInput } from "../../../components";
 import {
   api,
+  type ConnectionRow,
   type Environment,
   type NotificationChannel,
   type NotificationChannelType,
@@ -17,7 +19,6 @@ import {
 import { useActiveEnvironment } from "../../../lib/useActiveEnvironment";
 import {
   ChannelGlyph,
-  DecideInPlaceChip,
   EnvChip,
   ErrorLine,
   panelStyle,
@@ -25,10 +26,10 @@ import {
   SectionIntro,
 } from "./shared";
 
-/** Per-type display metadata. Adding email later = one more entry here + the server-side type. */
+/** Per-type display metadata. */
 export const CHANNEL_META: Record<
   NotificationChannelType,
-  { title: string; placeholder: string; hint?: string }
+  { title: string; placeholder?: string; hint?: string }
 > = {
   slack: {
     title: "Slack",
@@ -39,18 +40,57 @@ export const CHANNEL_META: Record<
     placeholder: "https://prod-00.westus.logic.azure.com/workflows/…",
     hint: "Paste a Teams Workflows (Power Automate) webhook URL — “When a Teams webhook request is received”. We send an Adaptive Card; the legacy Office 365 connector format isn’t supported.",
   },
+  email: {
+    title: "Email",
+    hint: "Sends through one of this environment's SMTP connections (the same connection the Send Email node uses — credentials stay server-side). Approval emails carry the same signed Approve / Reject links the Slack buttons do.",
+  },
 };
+
+/** The four REAL per-channel event flags — the matrix's columns. */
+export const EVENT_COLUMNS: {
+  key:
+    "onApprovalPending" | "onRunFailed" | "onBudgetThreshold" | "onPromotion";
+  title: string;
+  hint: string;
+  /** Approval messages carry decide-in-place Approve/Reject actions. */
+  decide?: boolean;
+}[] = [
+  {
+    key: "onApprovalPending",
+    title: "Approval",
+    hint: "When a run pauses for approval — the message carries Approve / Reject decide-in-place actions (buttons in Slack/Teams, signed links in email)",
+    decide: true,
+  },
+  {
+    key: "onRunFailed",
+    title: "Run failed",
+    hint: "When a run errors or times out",
+  },
+  {
+    key: "onBudgetThreshold",
+    title: "Budget",
+    hint: "When monthly spend crosses the budget alert threshold (at most once per calendar month; set the threshold in Usage & budgets)",
+  },
+  {
+    key: "onPromotion",
+    title: "Promotion",
+    hint: "When a workflow is promoted into this environment",
+  },
+];
 
 /** Channel config as held in edit state — strings ("" not null) for the inputs, plus a
  *  stable `localKey` (server id, or a draft key until the first save assigns one). */
 export type EditableChannel = Omit<
   NotificationChannel,
-  "id" | "label" | "webhookUrl"
+  "id" | "label" | "webhookUrl" | "emailConnectionId" | "emailTo"
 > & {
   localKey: string;
   id?: string;
   label: string;
   webhookUrl: string;
+  emailConnectionId: string;
+  /** Comma-separated in the input; split on save. */
+  emailTo: string;
 };
 
 let draftCounter = 0;
@@ -63,12 +103,101 @@ export function draftChannel(type: NotificationChannelType): EditableChannel {
     label: "",
     enabled: true,
     webhookUrl: "",
+    emailConnectionId: "",
+    emailTo: "",
     onApprovalPending: true,
     onRunFailed: true,
-    // Budget alerts are opt-in (Slice 3) — never surprise-enabled on a new channel.
+    // Budget alerts (Slice 3) + promotions (Slice 4) are opt-in — never
+    // surprise-enabled on a new channel.
     onBudgetThreshold: false,
+    onPromotion: false,
   };
 }
+
+function toEditable(c: NotificationChannel): Omit<EditableChannel, "localKey"> {
+  return {
+    ...c,
+    label: c.label ?? "",
+    webhookUrl: c.webhookUrl ?? "",
+    emailConnectionId: c.emailConnectionId ?? "",
+    emailTo: c.emailTo.join(", "),
+  };
+}
+
+/** The wire patch for a channel's CURRENT edit state (event flags + type-specific config). */
+function toPatch(ch: EditableChannel) {
+  return {
+    label: ch.label.trim() || null,
+    enabled: ch.enabled,
+    onApprovalPending: ch.onApprovalPending,
+    onRunFailed: ch.onRunFailed,
+    onBudgetThreshold: ch.onBudgetThreshold,
+    onPromotion: ch.onPromotion,
+    ...(ch.type === "email"
+      ? {
+          emailConnectionId: ch.emailConnectionId || null,
+          emailTo: ch.emailTo
+            .split(",")
+            .map((t) => t.trim())
+            .filter((t) => t !== ""),
+        }
+      : { webhookUrl: ch.webhookUrl.trim() || null }),
+  };
+}
+
+/** The comp's 22px checkmark/dash toggle tile — one matrix cell. */
+function EventTile({
+  on,
+  label,
+  onToggle,
+}: {
+  on: boolean;
+  label: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={on}
+      aria-label={label}
+      title={label}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      style={{
+        width: 22,
+        height: 22,
+        flex: "none",
+        padding: 0,
+        borderRadius: 7,
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        border: `1px solid ${on ? "var(--state-done)" : "var(--line-2)"}`,
+        background: on
+          ? "color-mix(in srgb, var(--state-done) 14%, transparent)"
+          : "var(--card)",
+        color: on ? "var(--state-done)" : "var(--ink-faint)",
+      }}
+    >
+      <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path
+          d={on ? "M5 12.5 10 17.5 19.5 7" : "M6 12h12"}
+          stroke="currentColor"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
+  );
+}
+
+/** Matrix grid: channel identity | 4 event columns | expand chevron. */
+const GRID_COLUMNS = "minmax(180px,1.6fr) repeat(4, minmax(70px,1fr)) 28px";
 
 export function NotificationsSection({
   tenantId,
@@ -87,6 +216,8 @@ export function NotificationsSection({
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // This environment's SMTP connections — the email channel's connection picker.
+  const [smtpConns, setSmtpConns] = useState<ConnectionRow[]>([]);
   // Per-channel transient UI state (keyed by localKey).
   const [rowBusy, setRowBusy] = useState<Record<string, boolean>>({});
   const [rowStatus, setRowStatus] = useState<Record<string, string>>({});
@@ -102,14 +233,7 @@ export function NotificationsSection({
       try {
         const list = await api.listNotificationChannels(tenantId);
         if (!live) return;
-        setChannels(
-          list.map((c) => ({
-            ...c,
-            localKey: c.id,
-            label: c.label ?? "",
-            webhookUrl: c.webhookUrl ?? "",
-          })),
-        );
+        setChannels(list.map((c) => ({ ...toEditable(c), localKey: c.id })));
         setLoaded(true);
         setError(null);
       } catch (e) {
@@ -119,6 +243,14 @@ export function NotificationsSection({
               ? "Sign in to view notification channels."
               : "Could not load notification channels.",
           );
+      }
+    })();
+    (async () => {
+      try {
+        const conns = await api.listConnections(tenantId);
+        if (live) setSmtpConns(conns.filter((c) => c.type === "smtp"));
+      } catch {
+        // Best-effort — the picker just shows the "no SMTP connections" hint.
       }
     })();
     return () => {
@@ -138,6 +270,29 @@ export function NotificationsSection({
     setExpanded((x) => ({ ...x, [draft.localKey]: true }));
   }
 
+  /** Matrix cell click: flip locally, and persist immediately for a SAVED row (a draft
+   *  keeps the flag locally until its first Save creates it). Reverts on failure. */
+  async function toggleFlag(
+    localKey: string,
+    key: (typeof EVENT_COLUMNS)[number]["key"],
+  ) {
+    const ch = channels.find((c) => c.localKey === localKey);
+    if (!ch || !tenantId) return;
+    const next = !ch[key];
+    patchChannel(localKey, { [key]: next });
+    if (!ch.id) return; // draft — persisted on first Save
+    try {
+      await api.saveNotificationChannel(tenantId, ch.id, { [key]: next });
+    } catch (e) {
+      patchChannel(localKey, { [key]: !next }); // revert — the server didn't take it
+      setError(
+        e instanceof UnauthorizedError
+          ? "Sign in to edit notifications."
+          : "Could not save the toggle.",
+      );
+    }
+  }
+
   async function saveChannel(localKey: string) {
     if (!tenantId) return;
     const ch = channels.find((c) => c.localKey === localKey);
@@ -146,14 +301,7 @@ export function NotificationsSection({
     setRowStatus((s) => ({ ...s, [localKey]: "" }));
     setError(null);
     try {
-      const patch = {
-        label: ch.label.trim() || null,
-        enabled: ch.enabled,
-        webhookUrl: ch.webhookUrl.trim() || null,
-        onApprovalPending: ch.onApprovalPending,
-        onRunFailed: ch.onRunFailed,
-        onBudgetThreshold: ch.onBudgetThreshold,
-      };
+      const patch = toPatch(ch);
       // A draft has no server id yet → create; afterwards it patches in place. The
       // localKey stays put so transient UI state (busy/status) survives the first save.
       const saved = ch.id
@@ -162,18 +310,15 @@ export function NotificationsSection({
             type: ch.type,
             ...patch,
           });
-      patchChannel(localKey, {
-        ...saved,
-        localKey,
-        label: saved.label ?? "",
-        webhookUrl: saved.webhookUrl ?? "",
-      });
+      patchChannel(localKey, { ...toEditable(saved), localKey, id: saved.id });
       setRowStatus((s) => ({ ...s, [localKey]: "Saved." }));
     } catch (e) {
       setError(
         e instanceof UnauthorizedError
           ? "Sign in to save notifications."
-          : "Could not save the channel.",
+          : e instanceof Error && e.message
+            ? e.message
+            : "Could not save the channel.",
       );
     } finally {
       setRowBusy((b) => ({ ...b, [localKey]: false }));
@@ -211,7 +356,7 @@ export function NotificationsSection({
       return rest;
     });
     try {
-      // Tests the SAVED webhook for this channel — save an edited URL first.
+      // Tests the SAVED config for this channel — save edits first.
       const res = await api.testNotificationChannel(tenantId, ch.id);
       setTestResult((t) => ({ ...t, [localKey]: res }));
     } catch {
@@ -222,6 +367,30 @@ export function NotificationsSection({
     } finally {
       setTestBusy((b) => ({ ...b, [localKey]: false }));
     }
+  }
+
+  /** One-line descriptor under the row label (type + destination). */
+  function rowSubtitle(ch: EditableChannel): string {
+    const meta = CHANNEL_META[ch.type];
+    if (ch.type === "email") {
+      return `${meta.title} · ${ch.emailTo.trim() || "no recipients yet"}`;
+    }
+    return `${meta.title} · ${
+      ch.webhookUrl
+        ? ch.webhookUrl.replace(/^https?:\/\//, "")
+        : "no webhook URL yet"
+    }`;
+  }
+
+  /** Whether Send test can work on the SAVED row. */
+  function testHint(ch: EditableChannel): string | null {
+    if (!ch.id) return "Save the channel first";
+    if (ch.type === "email") {
+      return ch.emailConnectionId && ch.emailTo.trim()
+        ? null
+        : "Pick an SMTP connection and recipients first";
+    }
+    return ch.webhookUrl.trim() ? null : "Add a webhook URL first";
   }
 
   return (
@@ -247,12 +416,13 @@ export function NotificationsSection({
         }
       />
       <SectionIntro>
-        Webhook channels for the moments a run needs a human — we POST a
-        formatted message when an approval is waiting or a run fails. Approval
-        messages carry{" "}
+        Per-event channels — each row is a channel (Slack, Teams or email), each
+        column a real event; a checked cell means that channel gets that event.
+        Approval messages carry{" "}
         <strong style={{ color: "var(--ink-soft)" }}>decide-in-place</strong>{" "}
-        Approve / Reject buttons, so approvers act without leaving Slack or
-        Teams. Channels belong to{" "}
+        Approve / Reject actions — buttons in Slack and Teams, the same signed
+        links in email — so approvers act without leaving their inbox or
+        channel. Channels belong to{" "}
         {activeEnv ? (
           <>
             the <EnvChip env={activeEnv} /> environment
@@ -267,382 +437,437 @@ export function NotificationsSection({
       {error && <ErrorLine>{error}</ErrorLine>}
 
       <div style={panelStyle}>
-        {!loaded && !error && (
-          <div
-            style={{
-              padding: "13px 18px",
-              fontSize: "var(--text-sm)",
-              color: "var(--ink-3)",
-            }}
-          >
-            Loading channels…
-          </div>
-        )}
-        {loaded && channels.length === 0 && (
-          <div
-            style={{
-              padding: "16px 18px",
-              fontSize: "var(--text-sm)",
-              color: "var(--ink-3)",
-            }}
-          >
-            No channels in this environment yet — add a Slack or Teams webhook;
-            alerts go to every enabled one.
-          </div>
-        )}
-        {channels.map((ch) => {
-          const key = ch.localKey;
-          const meta = CHANNEL_META[ch.type];
-          const open = !!expanded[key];
-          const busy = !!rowBusy[key];
-          const tBusy = !!testBusy[key];
-          const status = rowStatus[key];
-          const test = testResult[key];
-          return (
-            <div key={key} style={{ borderBottom: "1px solid var(--line)" }}>
+        <div style={{ overflowX: "auto" }}>
+          <div style={{ minWidth: 620 }}>
+            {/* Matrix header — mono uppercase, per the comp. */}
+            <div
+              className="mono"
+              style={{
+                display: "grid",
+                gridTemplateColumns: GRID_COLUMNS,
+                alignItems: "center",
+                gap: 8,
+                padding: "11px 18px",
+                borderBottom: "1px solid var(--line)",
+                background: "var(--card-2, var(--card))",
+                fontSize: 10.5,
+                letterSpacing: ".08em",
+                textTransform: "uppercase",
+                color: "var(--ink-faint)",
+              }}
+            >
+              <span>Channel</span>
+              {EVENT_COLUMNS.map((col) => (
+                <span
+                  key={col.key}
+                  title={col.hint}
+                  style={{ textAlign: "center" }}
+                >
+                  {col.title}
+                  {col.decide && (
+                    <span
+                      title="Carries Approve / Reject decide-in-place actions"
+                      style={{
+                        display: "block",
+                        textTransform: "none",
+                        letterSpacing: 0,
+                        fontSize: 9,
+                        color: "var(--node-approval)",
+                      }}
+                    >
+                      decide-in-place
+                    </span>
+                  )}
+                </span>
+              ))}
+              <span />
+            </div>
+
+            {!loaded && !error && (
               <div
-                className="naary-set-row"
-                role="button"
-                tabIndex={0}
-                onClick={() => setExpanded((x) => ({ ...x, [key]: !open }))}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setExpanded((x) => ({ ...x, [key]: !open }));
-                  }
-                }}
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
                   padding: "13px 18px",
-                  cursor: "pointer",
-                  opacity: ch.enabled ? 1 : 0.6,
+                  fontSize: "var(--text-sm)",
+                  color: "var(--ink-3)",
                 }}
               >
-                <span
-                  style={{
-                    width: 28,
-                    height: 28,
-                    flex: "none",
-                    borderRadius: 8,
-                    border: "1px solid var(--line-2)",
-                    background: "var(--card)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "var(--ink-2)",
-                  }}
+                Loading channels…
+              </div>
+            )}
+            {loaded && channels.length === 0 && (
+              <div
+                style={{
+                  padding: "16px 18px",
+                  fontSize: "var(--text-sm)",
+                  color: "var(--ink-3)",
+                }}
+              >
+                No channels in this environment yet — add a Slack or Teams
+                webhook, or an email list; each event goes to every enabled,
+                checked channel.
+              </div>
+            )}
+            {channels.map((ch) => {
+              const key = ch.localKey;
+              const meta = CHANNEL_META[ch.type];
+              const open = !!expanded[key];
+              const busy = !!rowBusy[key];
+              const tBusy = !!testBusy[key];
+              const status = rowStatus[key];
+              const test = testResult[key];
+              const tHint = testHint(ch);
+              return (
+                <div
+                  key={key}
+                  style={{ borderBottom: "1px solid var(--line)" }}
                 >
-                  <ChannelGlyph type={ch.type} size={14} />
-                </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
                   <div
+                    className="naary-set-row"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setExpanded((x) => ({ ...x, [key]: !open }))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setExpanded((x) => ({ ...x, [key]: !open }));
+                      }
+                    }}
                     style={{
-                      fontSize: 12.5,
-                      fontWeight: "var(--weight-semibold)",
-                      color: "var(--ink)",
-                      display: "flex",
+                      display: "grid",
+                      gridTemplateColumns: GRID_COLUMNS,
                       alignItems: "center",
                       gap: 8,
+                      padding: "13px 18px",
+                      cursor: "pointer",
+                      opacity: ch.enabled ? 1 : 0.6,
                     }}
                   >
-                    {ch.label || `${meta.title} webhook`}
-                    {!ch.id && (
-                      <span
-                        style={{
-                          fontSize: "var(--text-2xs)",
-                          color: "var(--ink-3)",
-                          fontWeight: "var(--weight-regular)",
-                        }}
-                      >
-                        (not saved yet)
-                      </span>
-                    )}
-                  </div>
-                  <div
-                    className="mono"
-                    style={{
-                      fontSize: 11,
-                      color: "var(--ink-faint)",
-                      marginTop: 1,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {meta.title}
-                    {" · "}
-                    {ch.webhookUrl
-                      ? ch.webhookUrl.replace(/^https?:\/\//, "")
-                      : "no webhook URL yet"}
-                  </div>
-                </div>
-                {ch.onApprovalPending && <DecideInPlaceChip />}
-                {ch.onRunFailed && (
-                  <span
-                    className="mono"
-                    title="Notifies when a run errors or times out"
-                    style={{
-                      fontSize: 10,
-                      fontWeight: "var(--weight-semibold)",
-                      color: "var(--ink-3)",
-                      border: "1px solid var(--line-2)",
-                      borderRadius: 20,
-                      padding: "3px 9px",
-                      flex: "none",
-                      lineHeight: 1.4,
-                    }}
-                  >
-                    run-failed
-                  </span>
-                )}
-                {activeEnv && <EnvChip env={activeEnv} />}
-                <span
-                  title={ch.enabled ? "Enabled" : "Disabled"}
-                  style={{
-                    width: 7,
-                    height: 7,
-                    flex: "none",
-                    borderRadius: "50%",
-                    background: ch.enabled
-                      ? "var(--state-done)"
-                      : "var(--state-idle)",
-                  }}
-                />
-                <Icon
-                  name={open ? "chevron-down" : "chevron-right"}
-                  size={14}
-                  style={{ color: "var(--ink-3)", flex: "none" }}
-                />
-              </div>
-
-              {open && (
-                <div
-                  style={{
-                    padding: "4px 18px 16px 58px",
-                    display: "grid",
-                    gap: 12,
-                    animation: "naaryFadeUp .2s ease",
-                  }}
-                >
-                  {meta.hint && (
                     <div
                       style={{
-                        fontSize: "var(--text-sm)",
-                        color: "var(--ink-3)",
-                        lineHeight: "var(--leading-snug)",
-                        maxWidth: 560,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        minWidth: 0,
                       }}
                     >
-                      {meta.hint}
+                      <span
+                        style={{
+                          width: 28,
+                          height: 28,
+                          flex: "none",
+                          borderRadius: 8,
+                          border: "1px solid var(--line-2)",
+                          background: "var(--card)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: "var(--ink-2)",
+                        }}
+                      >
+                        <ChannelGlyph type={ch.type} size={14} />
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: 12.5,
+                            fontWeight: "var(--weight-semibold)",
+                            color: "var(--ink)",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            minWidth: 0,
+                          }}
+                        >
+                          <span
+                            style={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {ch.label ||
+                              (ch.type === "email"
+                                ? "Email list"
+                                : `${meta.title} webhook`)}
+                          </span>
+                          {!ch.id && (
+                            <span
+                              style={{
+                                fontSize: "var(--text-2xs)",
+                                color: "var(--ink-3)",
+                                fontWeight: "var(--weight-regular)",
+                                flex: "none",
+                              }}
+                            >
+                              (not saved yet)
+                            </span>
+                          )}
+                          {activeEnv && <EnvChip env={activeEnv} />}
+                          <span
+                            title={ch.enabled ? "Enabled" : "Disabled"}
+                            style={{
+                              width: 7,
+                              height: 7,
+                              flex: "none",
+                              borderRadius: "50%",
+                              background: ch.enabled
+                                ? "var(--state-done)"
+                                : "var(--state-idle)",
+                            }}
+                          />
+                        </div>
+                        <div
+                          className="mono"
+                          style={{
+                            fontSize: 11,
+                            color: "var(--ink-faint)",
+                            marginTop: 1,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {rowSubtitle(ch)}
+                        </div>
+                      </div>
+                    </div>
+                    {EVENT_COLUMNS.map((col) => (
+                      <div
+                        key={col.key}
+                        style={{ display: "flex", justifyContent: "center" }}
+                      >
+                        <EventTile
+                          on={ch[col.key]}
+                          label={`${col.title} — ${
+                            ch.label || meta.title
+                          } (${ch[col.key] ? "on" : "off"})`}
+                          onToggle={() => void toggleFlag(key, col.key)}
+                        />
+                      </div>
+                    ))}
+                    <Icon
+                      name={open ? "chevron-down" : "chevron-right"}
+                      size={14}
+                      style={{
+                        color: "var(--ink-3)",
+                        flex: "none",
+                        justifySelf: "end",
+                      }}
+                    />
+                  </div>
+
+                  {open && (
+                    <div
+                      style={{
+                        padding: "4px 18px 16px 58px",
+                        display: "grid",
+                        gap: 12,
+                        animation: "naaryFadeUp .2s ease",
+                      }}
+                    >
+                      {meta.hint && (
+                        <div
+                          style={{
+                            fontSize: "var(--text-sm)",
+                            color: "var(--ink-3)",
+                            lineHeight: "var(--leading-snug)",
+                            maxWidth: 560,
+                          }}
+                        >
+                          {meta.hint}
+                        </div>
+                      )}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 10,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <TextInput
+                          value={ch.label}
+                          onChange={(e) =>
+                            patchChannel(key, { label: e.target.value })
+                          }
+                          placeholder={
+                            ch.type === "slack"
+                              ? "#alerts (label, optional)"
+                              : ch.type === "email"
+                                ? "Ops list (label, optional)"
+                                : "Ops (label, optional)"
+                          }
+                          style={{ flex: "1 1 160px", maxWidth: 220 }}
+                          disabled={!loaded}
+                        />
+                        {ch.type === "email" ? (
+                          <>
+                            <select
+                              aria-label="SMTP connection"
+                              value={ch.emailConnectionId}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) =>
+                                patchChannel(key, {
+                                  emailConnectionId: e.target.value,
+                                })
+                              }
+                              disabled={!loaded}
+                              style={{
+                                flex: "1 1 180px",
+                                maxWidth: 260,
+                                fontSize: "var(--text-sm)",
+                                padding: "5px 8px",
+                                borderRadius: "var(--radius-sm)",
+                                border: "1px solid var(--line-2)",
+                                background: "var(--card)",
+                                color: "var(--ink)",
+                              }}
+                            >
+                              <option value="">
+                                {smtpConns.length
+                                  ? "Pick an SMTP connection…"
+                                  : "No SMTP connections in this environment"}
+                              </option>
+                              {smtpConns.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.label || c.serverUrl || c.id}
+                                </option>
+                              ))}
+                            </select>
+                            <TextInput
+                              value={ch.emailTo}
+                              onChange={(e) =>
+                                patchChannel(key, { emailTo: e.target.value })
+                              }
+                              placeholder="ops@acme.io, oncall@acme.io (max 10)"
+                              style={{ flex: "2 1 240px" }}
+                              disabled={!loaded}
+                            />
+                          </>
+                        ) : (
+                          <TextInput
+                            value={ch.webhookUrl}
+                            onChange={(e) =>
+                              patchChannel(key, { webhookUrl: e.target.value })
+                            }
+                            placeholder={meta.placeholder}
+                            style={{ flex: "2 1 240px" }}
+                            disabled={!loaded}
+                          />
+                        )}
+                      </div>
+                      {ch.type === "email" && !smtpConns.length && (
+                        <div
+                          style={{
+                            fontSize: "var(--text-sm)",
+                            color: "var(--ink-3)",
+                          }}
+                        >
+                          Add an SMTP connection in Integrations first — email
+                          channels send through it.
+                        </div>
+                      )}
+                      <label
+                        style={{
+                          display: "flex",
+                          gap: 9,
+                          alignItems: "center",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <Switch
+                          checked={ch.enabled}
+                          onChange={(v) => patchChannel(key, { enabled: v })}
+                        />
+                        <span
+                          style={{
+                            fontSize: "var(--text-body)",
+                            color: "var(--ink)",
+                          }}
+                        >
+                          {ch.enabled
+                            ? "Channel enabled"
+                            : "Channel disabled — the worker skips it entirely"}
+                        </span>
+                      </label>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          loading={busy}
+                          disabled={!loaded}
+                          onClick={() => void saveChannel(key)}
+                        >
+                          Save
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon="bell"
+                          disabled={tBusy || !loaded || !!tHint}
+                          loading={tBusy}
+                          onClick={() => void testChannel(key)}
+                          title={
+                            tHint ??
+                            (ch.type === "email"
+                              ? "Send a sample email to the saved recipients"
+                              : `POST a sample message to this ${meta.title} webhook`)
+                          }
+                        >
+                          Send test
+                        </Button>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          icon="trash"
+                          disabled={busy || !loaded}
+                          onClick={() => void deleteChannel(key)}
+                          title={
+                            ch.id ? "Delete this channel" : "Discard this draft"
+                          }
+                        >
+                          {ch.id ? "Delete" : "Discard"}
+                        </Button>
+                        {status && (
+                          <span
+                            style={{
+                              fontSize: "var(--text-sm)",
+                              color: "var(--state-done)",
+                            }}
+                          >
+                            {status}
+                          </span>
+                        )}
+                        {test && (
+                          <span
+                            style={{
+                              fontSize: "var(--text-sm)",
+                              color: test.ok
+                                ? "var(--state-done)"
+                                : "var(--state-error)",
+                            }}
+                          >
+                            {test.ok
+                              ? ch.type === "email"
+                                ? "✓ Test sent — check the recipients' inboxes."
+                                : "✓ Test sent — check your channel."
+                              : test.message}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   )}
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 10,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <TextInput
-                      value={ch.label}
-                      onChange={(e) =>
-                        patchChannel(key, { label: e.target.value })
-                      }
-                      placeholder={
-                        ch.type === "slack"
-                          ? "#alerts (label, optional)"
-                          : "Ops (label, optional)"
-                      }
-                      style={{ flex: "1 1 160px", maxWidth: 220 }}
-                      disabled={!loaded}
-                    />
-                    <TextInput
-                      value={ch.webhookUrl}
-                      onChange={(e) =>
-                        patchChannel(key, { webhookUrl: e.target.value })
-                      }
-                      placeholder={meta.placeholder}
-                      style={{ flex: "2 1 240px" }}
-                      disabled={!loaded}
-                    />
-                  </div>
-                  <label
-                    style={{
-                      display: "flex",
-                      gap: 9,
-                      alignItems: "center",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <Checkbox
-                      checked={ch.onApprovalPending}
-                      onChange={(v) =>
-                        patchChannel(key, { onApprovalPending: v })
-                      }
-                    />
-                    <span
-                      style={{
-                        fontSize: "var(--text-body)",
-                        color: "var(--ink)",
-                      }}
-                    >
-                      When an approval is waiting{" "}
-                      <span style={{ color: "var(--ink-3)", fontSize: 11.5 }}>
-                        — the message carries Approve / Reject buttons
-                      </span>
-                    </span>
-                  </label>
-                  <label
-                    style={{
-                      display: "flex",
-                      gap: 9,
-                      alignItems: "center",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <Checkbox
-                      checked={ch.onRunFailed}
-                      onChange={(v) => patchChannel(key, { onRunFailed: v })}
-                    />
-                    <span
-                      style={{
-                        fontSize: "var(--text-body)",
-                        color: "var(--ink)",
-                      }}
-                    >
-                      When a run fails
-                    </span>
-                  </label>
-                  <label
-                    style={{
-                      display: "flex",
-                      gap: 9,
-                      alignItems: "center",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <Checkbox
-                      checked={ch.onBudgetThreshold}
-                      onChange={(v) =>
-                        patchChannel(key, { onBudgetThreshold: v })
-                      }
-                    />
-                    <span
-                      style={{
-                        fontSize: "var(--text-body)",
-                        color: "var(--ink)",
-                      }}
-                    >
-                      When monthly spend crosses the budget alert threshold{" "}
-                      <span style={{ color: "var(--ink-3)", fontSize: 11.5 }}>
-                        — at most once per calendar month; set the threshold in
-                        Usage &amp; budgets
-                      </span>
-                    </span>
-                  </label>
-                  <label
-                    style={{
-                      display: "flex",
-                      gap: 9,
-                      alignItems: "center",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <Switch
-                      checked={ch.enabled}
-                      onChange={(v) => patchChannel(key, { enabled: v })}
-                    />
-                    <span
-                      style={{
-                        fontSize: "var(--text-body)",
-                        color: "var(--ink)",
-                      }}
-                    >
-                      {ch.enabled
-                        ? "Channel enabled"
-                        : "Channel disabled — the worker skips it entirely"}
-                    </span>
-                  </label>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      loading={busy}
-                      disabled={!loaded}
-                      onClick={() => void saveChannel(key)}
-                    >
-                      Save
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      icon="bell"
-                      disabled={
-                        tBusy || !loaded || !ch.id || !ch.webhookUrl.trim()
-                      }
-                      loading={tBusy}
-                      onClick={() => void testChannel(key)}
-                      title={
-                        !ch.id
-                          ? "Save the channel first"
-                          : ch.webhookUrl.trim()
-                            ? `POST a sample message to this ${meta.title} webhook`
-                            : "Add a webhook URL first"
-                      }
-                    >
-                      Send test
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      icon="trash"
-                      disabled={busy || !loaded}
-                      onClick={() => void deleteChannel(key)}
-                      title={
-                        ch.id ? "Delete this webhook" : "Discard this draft"
-                      }
-                    >
-                      {ch.id ? "Delete" : "Discard"}
-                    </Button>
-                    {status && (
-                      <span
-                        style={{
-                          fontSize: "var(--text-sm)",
-                          color: "var(--state-done)",
-                        }}
-                      >
-                        {status}
-                      </span>
-                    )}
-                    {test && (
-                      <span
-                        style={{
-                          fontSize: "var(--text-sm)",
-                          color: test.ok
-                            ? "var(--state-done)"
-                            : "var(--state-error)",
-                        }}
-                      >
-                        {test.ok
-                          ? "✓ Test sent — check your channel."
-                          : test.message}
-                      </span>
-                    )}
-                  </div>
                 </div>
-              )}
-            </div>
-          );
-        })}
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );

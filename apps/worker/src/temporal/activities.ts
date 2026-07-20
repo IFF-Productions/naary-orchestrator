@@ -94,6 +94,7 @@ export type {
 export {
   __notifyDeps,
   normalizeBaseUrl,
+  parseEmailChannelConfig,
   prepareApproval,
   sendNotification,
 } from "./activities/notifications";

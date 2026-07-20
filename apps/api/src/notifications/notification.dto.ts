@@ -1,12 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsOptional,
   IsString,
   MaxLength,
 } from "class-validator";
-import { NOTIFICATION_CHANNEL_TYPES } from "./notifications.service";
+import {
+  MAX_EMAIL_RECIPIENTS,
+  NOTIFICATION_CHANNEL_TYPES,
+} from "./notifications.service";
 
 /** Patch for ONE notification channel (addressed by :channelId in the route). Every field is
  *  optional so the UI can toggle `enabled` alone, set only the URL, etc. */
@@ -43,6 +48,30 @@ export class UpdateNotificationChannelDto {
   webhookUrl?: string;
 
   @ApiPropertyOptional({
+    nullable: true,
+    example: "conn-9a8b7c6d",
+    description:
+      "Email channels: id of the smtp connection to send through (the same connection the Send Email node uses; credentials stay in the encrypted store). Null clears it.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  emailConnectionId?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    maxItems: MAX_EMAIL_RECIPIENTS,
+    example: ["ops@acme.io"],
+    description: `Email channels: recipient addresses (max ${MAX_EMAIL_RECIPIENTS}). Replaces the saved list.`,
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_EMAIL_RECIPIENTS)
+  @IsString({ each: true })
+  @MaxLength(320, { each: true })
+  emailTo?: string[];
+
+  @ApiPropertyOptional({
     example: true,
     description: "Notify this channel when a run pauses for approval.",
   })
@@ -66,6 +95,15 @@ export class UpdateNotificationChannelDto {
   @IsOptional()
   @IsBoolean()
   onBudgetThreshold?: boolean;
+
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      "Notify this channel when a workflow is promoted into this environment. Default off.",
+  })
+  @IsOptional()
+  @IsBoolean()
+  onPromotion?: boolean;
 }
 
 /** Create a new channel. Same patch fields plus the REQUIRED type — a tenant can hold any
