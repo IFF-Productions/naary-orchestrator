@@ -1,15 +1,25 @@
 // Company console (COMPANIES.md §7.3): a company admin's cross-workspace view — usage rollup
 // + READ-ONLY drill-down into each member workspace's runs/workflows. All reads go through the
 // company-authz path (§4); run detail stays workspace-gated, so drill-down rows are not links.
-import { useCallback, useEffect, useState } from "react";
+//
+// Layout "2a — stat band + workspaces table": a header (company mark + rollup summary + admin
+// pill), a KPI band from the REAL rollup/budget, and three tabs (Workspaces · Usage · Groups).
+// This is a RESTYLE over the existing logic — every API call + state is preserved. The console
+// only OBSERVES member workspaces (you don't edit their runs); the company-admin writes it keeps
+// (rename displayName, archive membership, attach, members) are company management, not workspace
+// content edits, and stay gated by the §4 company-authz path.
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  Avatar,
   Button,
   Card,
   Dialog,
   EmptyState,
+  Icon,
+  ProgressBar,
   Spinner,
-  StatCard,
+  StatusPill,
   Table,
   Tabs,
   TextInput,
@@ -17,22 +27,51 @@ import {
 import {
   api,
   type Company,
+  type CompanyBudgetView,
   type CompanyMember,
   type CompanyUsage,
   type CompanyWorkspaceRuns,
   type CompanyWorkspaceWorkflow,
 } from "../../lib/api";
+import { runStatusUi } from "../../lib/run-status";
 import { useWorkspace } from "../../workspace/WorkspaceProvider";
 import { CompanyGroupsCard } from "./CompanyGroups";
 import { workspaceLabel } from "../../workspace/WorkspaceSwitcher";
 import { usd } from "./insights.logic";
 
 type DrillTab = "runs" | "workflows";
+type ConsoleTab = "workspaces" | "usage" | "groups";
 
 interface Drill {
   tenantId: string;
   displayName: string | null;
   tab: DrillTab;
+}
+
+/** Initials for a workspace/company mark — first letters of up to two words. */
+function initialsOf(label: string): string {
+  const parts = label.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
+/** Format the rollup window (usage.range) as a human billing period. */
+function billingPeriod(range: CompanyUsage["range"]): string {
+  if (!range.from || !range.to) return "this month";
+  const fmt = (s: string) =>
+    new Date(s).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    });
+  return `${fmt(range.from)} – ${fmt(range.to)}`;
+}
+
+/** Threshold color for a budget ratio: red > 85%, warn amber > 70%, else success green. */
+function budgetColor(pct: number): string {
+  if (pct > 85) return "var(--state-error)";
+  if (pct > 70) return "var(--state-paused)";
+  return "var(--state-done)";
 }
 
 export function Company() {
@@ -41,6 +80,9 @@ export function Company() {
   const [companies, setCompanies] = useState<Company[] | null>(null);
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [usage, setUsage] = useState<CompanyUsage | null>(null);
+  const [budget, setBudget] = useState<CompanyBudgetView | null>(null);
+  const [seats, setSeats] = useState<number | null>(null);
+  const [tab, setTab] = useState<ConsoleTab>("workspaces");
   const [drill, setDrill] = useState<Drill | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
@@ -68,11 +110,25 @@ export function Company() {
     if (!companyId) return;
     let live = true;
     setUsage(null);
+    setBudget(null);
+    setSeats(null);
     setDrill(null);
+    setTab("workspaces");
     api
       .getCompanyUsage(companyId)
       .then((u) => live && setUsage(u))
       .catch(() => live && setErr("Couldn't load the company usage rollup."));
+    // Budget (§8) drives the "Spend of budget" KPI + the Usage-tab pooled-budget line.
+    // Read-only; best-effort — a missing budget just hides the of-budget framing.
+    api
+      .getCompanyBudget(companyId)
+      .then((b) => live && setBudget(b))
+      .catch(() => {});
+    // Seats KPI — a lightweight member count (MembersCard fetches its own list for management).
+    api
+      .listCompanyMembers(companyId)
+      .then((m) => live && setSeats(m.length))
+      .catch(() => {});
     return () => {
       live = false;
     };
@@ -174,6 +230,15 @@ export function Company() {
     }
   }
 
+  const consoleTabs: { value: ConsoleTab; label: string }[] = [
+    { value: "workspaces", label: "Workspaces" },
+    { value: "usage", label: "Usage" },
+    // Company-wide permission groups (RBAC-GROUPS §9) — owner-only management.
+    ...(isOwner ? [{ value: "groups" as const, label: "Groups" }] : []),
+  ];
+  const activeTab: ConsoleTab =
+    tab === "groups" && !isOwner ? "workspaces" : tab;
+
   return (
     <div
       style={{
@@ -182,37 +247,101 @@ export function Company() {
         animation: "naaryFadeUp .25s ease",
       }}
     >
+      {/* ---- Header: company mark + rollup summary + admin pill + company actions ---- */}
       <div
         style={{
           display: "flex",
-          alignItems: "center",
-          gap: 12,
-          marginBottom: 16,
+          alignItems: "flex-start",
+          gap: 14,
+          marginBottom: 18,
           flexWrap: "wrap",
         }}
       >
-        {companies.length > 1 && (
-          <select
-            value={company.id}
-            onChange={(e) => setCompanyId(e.target.value)}
-            style={{ padding: "8px 10px", borderRadius: "var(--radius-md)" }}
+        <Avatar initials={initialsOf(company.name)} size={44} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
           >
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        )}
-        <div style={{ flex: 1 }} />
-        <Button variant="secondary" onClick={() => setCreateOpen(true)}>
-          New company
-        </Button>
-        <AttachCurrentWorkspace
-          companyId={company.id}
-          onAttached={() => setCompanyId((id) => id)}
-          reload={() => api.getCompanyUsage(company.id).then(setUsage)}
-        />
+            <span
+              style={{
+                fontSize: "var(--text-lg, 20px)",
+                fontWeight: "var(--weight-semibold)",
+                color: "var(--ink)",
+              }}
+            >
+              {company.name}
+            </span>
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 11.5,
+                padding: "2px 9px",
+                borderRadius: 99,
+                color: "var(--brand)",
+                border:
+                  "1px solid color-mix(in srgb, var(--brand) 34%, transparent)",
+                background: "var(--brand-soft)",
+              }}
+            >
+              <Icon name="mode-admin" size={12} />
+              {isOwner ? "Company owner" : "Company admin"}
+            </span>
+            {companies.length > 1 && (
+              <select
+                value={company.id}
+                onChange={(e) => setCompanyId(e.target.value)}
+                style={{
+                  padding: "6px 8px",
+                  borderRadius: "var(--radius-md)",
+                  fontSize: "var(--text-sm)",
+                }}
+              >
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+          <div
+            style={{
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-2)",
+              marginTop: 4,
+            }}
+          >
+            Company console ·{" "}
+            {usage ? usage.byWorkspace.length : workspaces.length} workspace
+            {(usage?.byWorkspace.length ?? workspaces.length) === 1
+              ? ""
+              : "s"}{" "}
+            · billing {usage ? billingPeriod(usage.range) : "this month"}
+          </div>
+        </div>
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <Button variant="secondary" onClick={() => setCreateOpen(true)}>
+            New company
+          </Button>
+          <AttachCurrentWorkspace
+            companyId={company.id}
+            reload={() => api.getCompanyUsage(company.id).then(setUsage)}
+          />
+        </div>
       </div>
 
       {err && <ErrorLine text={err} />}
@@ -221,160 +350,57 @@ export function Company() {
         <Spinner />
       ) : (
         <>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-              gap: 12,
-              marginBottom: 16,
-            }}
-          >
-            <StatCard
-              label="Company spend (30d)"
-              value={usd(usage.totals.costUsd)}
-            />
-            <StatCard
-              label="Tokens"
-              value={usage.totals.totalTokens.toLocaleString()}
-            />
-            <StatCard
-              label="Metered calls"
-              value={String(usage.totals.calls)}
+          {/* ---- Rollup stat band: only KPIs the API actually provides ---- */}
+          <StatBand usage={usage} budget={budget} seats={seats} />
+
+          {/* ---- Tabs: Workspaces · Usage · Groups(owner) ---- */}
+          <div style={{ margin: "6px 0 14px" }}>
+            <Tabs<ConsoleTab>
+              tabs={consoleTabs}
+              active={activeTab}
+              onChange={setTab}
             />
           </div>
 
-          <Card>
-            <Table
-              columns={[
-                {
-                  key: "name",
-                  header: "Workspace",
-                  render: (w: CompanyUsage["byWorkspace"][number]) => (
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 8,
-                      }}
-                    >
-                      {workspaceLabel(w.tenantId, w.displayName ?? undefined)}
-                      {w.archived && (
-                        <span
-                          style={{
-                            fontSize: 10.5,
-                            padding: "1px 7px",
-                            borderRadius: 99,
-                            border: "1px solid var(--line)",
-                            color: "var(--ink-3)",
-                          }}
-                        >
-                          Archived
-                        </span>
-                      )}
-                    </span>
-                  ),
-                },
-                {
-                  key: "spend",
-                  header: "Spend",
-                  render: (w) => usd(w.costUsd),
-                },
-                {
-                  key: "tokens",
-                  header: "Tokens",
-                  render: (w) => w.totalTokens.toLocaleString(),
-                },
-                {
-                  key: "calls",
-                  header: "Calls",
-                  render: (w) => String(w.calls),
-                },
-                {
-                  key: "actions",
-                  header: "",
-                  render: (w) => (
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() =>
-                          setDrill({
-                            tenantId: w.tenantId,
-                            displayName: w.displayName,
-                            tab: "runs",
-                          })
-                        }
-                      >
-                        Runs
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() =>
-                          setDrill({
-                            tenantId: w.tenantId,
-                            displayName: w.displayName,
-                            tab: "workflows",
-                          })
-                        }
-                      >
-                        Workflows
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() =>
-                          setRename({
-                            tenantId: w.tenantId,
-                            name: w.displayName ?? "",
-                          })
-                        }
-                      >
-                        Rename
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        loading={rowBusy === w.tenantId}
-                        onClick={() =>
-                          void toggleArchive(w.tenantId, !w.archived)
-                        }
-                      >
-                        {w.archived ? "Unarchive" : "Archive"}
-                      </Button>
-                      {memberTenantIds.has(w.tenantId) && (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => {
-                            setActive(w.tenantId);
-                            navigate("/app/runs");
-                          }}
-                        >
-                          Open
-                        </Button>
-                      )}
-                    </div>
-                  ),
-                },
-              ]}
-              rows={usage.byWorkspace}
-              rowKey={(w) => w.tenantId}
+          {activeTab === "workspaces" && (
+            <WorkspacesTab
+              usage={usage}
+              rowBusy={rowBusy}
+              memberTenantIds={memberTenantIds}
+              onDrill={(w) =>
+                setDrill({
+                  tenantId: w.tenantId,
+                  displayName: w.displayName,
+                  tab: "runs",
+                })
+              }
+              onRename={(w) =>
+                setRename({ tenantId: w.tenantId, name: w.displayName ?? "" })
+              }
+              onArchive={(w) => void toggleArchive(w.tenantId, !w.archived)}
+              onOpen={(w) => {
+                setActive(w.tenantId);
+                navigate("/app/runs");
+              }}
             />
-          </Card>
+          )}
+
+          {activeTab === "usage" && <UsageTab usage={usage} budget={budget} />}
+
+          {activeTab === "groups" && isOwner && (
+            <CompanyGroupsCard companyId={company.id} />
+          )}
 
           {drill && (
             <DrillPanel
               companyId={company.id}
               drill={drill}
-              setTab={(tab) => setDrill({ ...drill, tab })}
+              setTab={(t) => setDrill({ ...drill, tab: t })}
               onClose={() => setDrill(null)}
             />
           )}
 
           <MembersCard companyId={company.id} isOwner={isOwner} />
-          {/* Company-wide permission groups (RBAC-GROUPS §9) — owner-only management. */}
-          {isOwner && <CompanyGroupsCard companyId={company.id} />}
         </>
       )}
 
@@ -417,6 +443,459 @@ export function Company() {
         onCreate={createCompany}
       />
     </div>
+  );
+}
+
+/* ---------------- Stat band ---------------- */
+
+/** One KPI tile — built inline (StatCard has no of-budget subtext / threshold bar). */
+function KpiTile({
+  label,
+  value,
+  accent,
+  sub,
+  bar,
+}: {
+  label: string;
+  value: ReactNode;
+  accent?: string;
+  sub?: ReactNode;
+  bar?: { pct: number; color: string };
+}) {
+  return (
+    <div
+      style={{
+        background: "var(--card)",
+        border: "1px solid var(--line)",
+        borderRadius: "var(--radius-lg, 12px)",
+        padding: "13px 15px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+        minWidth: 0,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11.5,
+          color: "var(--ink-2)",
+          textTransform: "uppercase",
+          letterSpacing: ".04em",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 22,
+          fontWeight: "var(--weight-semibold)",
+          color: accent ?? "var(--ink)",
+          lineHeight: 1.15,
+        }}
+      >
+        {value}
+      </div>
+      {sub && (
+        <div style={{ fontSize: "var(--text-sm)", color: "var(--ink-3)" }}>
+          {sub}
+        </div>
+      )}
+      {bar && (
+        <div style={{ marginTop: 2 }}>
+          <ProgressBar value={bar.pct} color={bar.color} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatBand({
+  usage,
+  budget,
+  seats,
+}: {
+  usage: CompanyUsage;
+  budget: CompanyBudgetView | null;
+  seats: number | null;
+}) {
+  // Spend-of-budget uses MTD spend / monthly cap (BOTH month-to-date). Never divide the
+  // range/30d rollup by the monthly cap — different windows. Falls back to the 30d rollup
+  // spend (no budget framing) when no company budget is configured.
+  const cap = budget?.budget?.monthlyCapUsd ?? null;
+  const mtd = budget?.mtdSpendUsd ?? null;
+  const hasBudget = cap != null && cap > 0 && mtd != null;
+  const pct = hasBudget ? (mtd / cap) * 100 : 0;
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+        gap: 12,
+        marginBottom: 8,
+      }}
+    >
+      {hasBudget ? (
+        <KpiTile
+          label="Spend · month to date"
+          value={usd(mtd)}
+          accent={budgetColor(pct)}
+          sub={`of ${usd(cap)} · ${Math.round(pct)}%`}
+          bar={{ pct, color: budgetColor(pct) }}
+        />
+      ) : (
+        <KpiTile
+          label="Company spend (30d)"
+          value={usd(usage.totals.costUsd)}
+        />
+      )}
+      <KpiTile
+        label="Tokens (30d)"
+        value={usage.totals.totalTokens.toLocaleString()}
+      />
+      <KpiTile label="Metered calls (30d)" value={String(usage.totals.calls)} />
+      <KpiTile label="Seats" value={seats == null ? "—" : String(seats)} />
+    </div>
+  );
+}
+
+/* ---------------- Workspaces tab ---------------- */
+
+type WorkspaceRow = CompanyUsage["byWorkspace"][number];
+
+/** Neutral environment dots — `byEnvironment` gives only opaque environmentIds, not a
+ *  prod/uat/sandbox KIND, so we can't legitimately use the --env-* accents. Show one
+ *  neutral dot per environment with activity (dim placeholder when none). */
+function EnvDots({ envs }: { envs: WorkspaceRow["byEnvironment"] }) {
+  if (envs.length === 0) {
+    return (
+      <span
+        style={{
+          display: "inline-block",
+          width: 8,
+          height: 8,
+          borderRadius: 99,
+          background: "var(--line-2)",
+        }}
+        title="No environment activity"
+      />
+    );
+  }
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      {envs.slice(0, 4).map((e, i) => (
+        <span
+          key={e.environmentId ?? `default-${i}`}
+          title={e.environmentId ?? "default"}
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: 99,
+            background: "var(--ink-2)",
+          }}
+        />
+      ))}
+      {envs.length > 4 && (
+        <span style={{ fontSize: 11, color: "var(--ink-3)" }}>
+          +{envs.length - 4}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function WorkspacesTab({
+  usage,
+  rowBusy,
+  memberTenantIds,
+  onDrill,
+  onRename,
+  onArchive,
+  onOpen,
+}: {
+  usage: CompanyUsage;
+  rowBusy: string | null;
+  memberTenantIds: Set<string>;
+  onDrill: (w: WorkspaceRow) => void;
+  onRename: (w: WorkspaceRow) => void;
+  onArchive: (w: WorkspaceRow) => void;
+  onOpen: (w: WorkspaceRow) => void;
+}) {
+  const total = usage.totals.costUsd;
+  // Secondary company-management actions live in their own cell; stop row-click propagation so
+  // interacting with them never triggers the drill-in (the row's read-only observe action).
+  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+
+  return (
+    <Card pad={false} style={{ overflow: "hidden" }}>
+      <div style={{ overflowX: "auto", maxWidth: "100%" }}>
+        <div style={{ minWidth: 680 }}>
+          <Table
+            columns={[
+              {
+                key: "name",
+                header: "Workspace",
+                render: (w: WorkspaceRow) => (
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 9,
+                    }}
+                  >
+                    <Avatar
+                      initials={initialsOf(
+                        workspaceLabel(w.tenantId, w.displayName ?? undefined),
+                      )}
+                      size={26}
+                    />
+                    <span style={{ color: "var(--ink)" }}>
+                      {workspaceLabel(w.tenantId, w.displayName ?? undefined)}
+                    </span>
+                    {w.archived && (
+                      <span
+                        style={{
+                          fontSize: 10.5,
+                          padding: "1px 7px",
+                          borderRadius: 99,
+                          border: "1px solid var(--line)",
+                          color: "var(--ink-3)",
+                        }}
+                      >
+                        Archived
+                      </span>
+                    )}
+                  </span>
+                ),
+              },
+              {
+                key: "envs",
+                header: "Environments",
+                render: (w) => <EnvDots envs={w.byEnvironment} />,
+              },
+              {
+                key: "spend",
+                header: "Spend",
+                render: (w) => (
+                  <div style={{ minWidth: 130 }}>
+                    <div style={{ color: "var(--ink)", marginBottom: 4 }}>
+                      {usd(w.costUsd)}
+                    </div>
+                    {/* No per-workspace budget exists in the company API — this bar shows the
+                        workspace's SHARE of company spend (not an of-budget gauge), so no
+                        red/warn thresholds. Budget thresholds live at the company level. */}
+                    <ProgressBar
+                      value={total > 0 ? (w.costUsd / total) * 100 : 0}
+                      color="var(--brand)"
+                    />
+                  </div>
+                ),
+              },
+              {
+                key: "tokens",
+                header: "Tokens",
+                render: (w) => w.totalTokens.toLocaleString(),
+              },
+              {
+                key: "calls",
+                header: "Calls",
+                render: (w) => String(w.calls),
+              },
+              {
+                key: "actions",
+                header: "",
+                render: (w) => (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 6,
+                      alignItems: "center",
+                      justifyContent: "flex-end",
+                    }}
+                  >
+                    {/* Secondary company-management actions — wrapped so their clicks never
+                        bubble up to the row's drill-in (read-only observe) action. */}
+                    <div
+                      onClick={stop}
+                      style={{ display: "flex", gap: 6, alignItems: "center" }}
+                    >
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onRename(w)}
+                      >
+                        Rename
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        loading={rowBusy === w.tenantId}
+                        onClick={() => onArchive(w)}
+                      >
+                        {w.archived ? "Unarchive" : "Archive"}
+                      </Button>
+                      {memberTenantIds.has(w.tenantId) && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => onOpen(w)}
+                        >
+                          Open
+                        </Button>
+                      )}
+                    </div>
+                    {/* Drill-in chevron — opens the READ-ONLY workspace observer (same as a
+                        row click; the row's onRowClick handles the actual open). */}
+                    <span
+                      aria-hidden
+                      style={{ display: "inline-flex", color: "var(--ink-3)" }}
+                    >
+                      <Icon name="chevron-right" size={16} />
+                    </span>
+                  </div>
+                ),
+              },
+            ]}
+            rows={usage.byWorkspace}
+            rowKey={(w) => w.tenantId}
+            onRowClick={onDrill}
+          />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/* ---------------- Usage tab ---------------- */
+
+function UsageTab({
+  usage,
+  budget,
+}: {
+  usage: CompanyUsage;
+  budget: CompanyBudgetView | null;
+}) {
+  const max = Math.max(0, ...usage.byWorkspace.map((w) => w.costUsd));
+  const rows = [...usage.byWorkspace].sort((a, b) => b.costUsd - a.costUsd);
+  const cap = budget?.budget?.monthlyCapUsd ?? null;
+  const mtd = budget?.mtdSpendUsd ?? null;
+  const hasBudget = cap != null && cap > 0 && mtd != null;
+  const remaining = budget?.remainingUsd ?? null;
+
+  return (
+    <Card>
+      <div
+        style={{
+          fontWeight: "var(--weight-semibold)",
+          marginBottom: 12,
+        }}
+      >
+        Spend by workspace (30d)
+      </div>
+      {rows.length === 0 ? (
+        <div style={{ fontSize: "var(--text-sm)", color: "var(--ink-3)" }}>
+          No usage yet.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {rows.map((w) => (
+            <div key={w.tenantId}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  fontSize: "var(--text-sm)",
+                  marginBottom: 4,
+                }}
+              >
+                <span
+                  style={{
+                    color: "var(--ink)",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {workspaceLabel(w.tenantId, w.displayName ?? undefined)}
+                </span>
+                <span style={{ color: "var(--ink-2)", flexShrink: 0 }}>
+                  {usd(w.costUsd)}
+                </span>
+              </div>
+              <ProgressBar
+                value={max > 0 ? (w.costUsd / max) * 100 : 0}
+                color="var(--brand)"
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Company total + pooled-budget line (§8) — the of-budget framing the differentiator asks
+          for, at the level the API actually provides a budget (company-wide, not per-workspace). */}
+      <div
+        style={{
+          borderTop: "1px solid var(--line)",
+          marginTop: 14,
+          paddingTop: 12,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            fontSize: "var(--text-body)",
+          }}
+        >
+          <span style={{ color: "var(--ink-2)" }}>Company total (30d)</span>
+          <span
+            style={{
+              color: "var(--ink)",
+              fontWeight: "var(--weight-semibold)",
+            }}
+          >
+            {usd(usage.totals.costUsd)}
+          </span>
+        </div>
+        {hasBudget ? (
+          <div style={{ marginTop: 10 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                fontSize: "var(--text-sm)",
+                marginBottom: 4,
+              }}
+            >
+              <span style={{ color: "var(--ink-2)" }}>
+                Pooled budget · month to date
+              </span>
+              <span style={{ color: "var(--ink-2)" }}>
+                {usd(mtd)} of {usd(cap)}
+                {remaining != null && ` · ${usd(Math.max(0, remaining))} left`}
+              </span>
+            </div>
+            <ProgressBar
+              value={(mtd / cap) * 100}
+              color={budgetColor((mtd / cap) * 100)}
+            />
+          </div>
+        ) : (
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-3)",
+            }}
+          >
+            No company budget cap configured.
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 
@@ -668,7 +1147,8 @@ function DrillPanel({
           display: "flex",
           alignItems: "center",
           gap: 12,
-          marginBottom: 12,
+          marginBottom: 6,
+          flexWrap: "wrap",
         }}
       >
         <div style={{ fontWeight: "var(--weight-semibold)" }}>
@@ -687,6 +1167,16 @@ function DrillPanel({
           Close
         </Button>
       </div>
+      {/* Observer boundary: run detail + graph bodies stay workspace-gated (§7.3). */}
+      <div
+        style={{
+          fontSize: "var(--text-sm)",
+          color: "var(--ink-3)",
+          marginBottom: 12,
+        }}
+      >
+        Read-only — you observe this workspace's activity, you don't edit it.
+      </div>
       {drill.tab === "runs" ? (
         runs === null ? (
           <Spinner />
@@ -700,7 +1190,17 @@ function DrillPanel({
                   render: (r: CompanyWorkspaceRuns["items"][number]) =>
                     r.workflowKey ?? "—",
                 },
-                { key: "status", header: "Status", render: (r) => r.status },
+                {
+                  key: "status",
+                  header: "Status",
+                  // runStatusUi keeps the differentiators legible: paused (awaiting_budget /
+                  // awaiting_approval) reads amber, NOT the red of a failure, and approvals-
+                  // waiting are visible as their own paused state — all from real run status.
+                  render: (r) => {
+                    const ui = runStatusUi(r.status);
+                    return <StatusPill state={ui.state} label={ui.label} />;
+                  },
+                },
                 {
                   key: "created",
                   header: "Started",
