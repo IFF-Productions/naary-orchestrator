@@ -478,7 +478,7 @@ export interface paths {
   "/oauth/callback": {
     /**
      * OAuth callback (provider redirect target)
-     * @description Public: the provider redirects here with a single-use `state` (its credential) and `code`; exchanges the code and persists the encrypted refresh token.
+     * @description Public: the provider redirects the BROWSER here with a single-use `state` and `code`; exchanges the code, persists the encrypted refresh token, then 302-redirects back to the SPA integrations page (`?connected=1` on success, `?connect_error=…` otherwise).
      */
     get: operations["OAuthController_callback"];
   };
@@ -492,7 +492,7 @@ export interface paths {
   "/github-app/callback": {
     /**
      * GitHub App install callback (provider redirect target)
-     * @description Public: GitHub redirects here with `installation_id`, `setup_action`, and the single-use `state` (its credential); creates the github_app connection and stores the installation grant.
+     * @description Public: GitHub redirects the BROWSER here with `installation_id`, `setup_action`, and the single-use `state`; creates the github_app connection, then 302-redirects back to the SPA integrations page (`?connected=1` on success, `?connect_error=…` otherwise).
      */
     get: operations["GithubAppController_callback"];
   };
@@ -2049,10 +2049,6 @@ export interface components {
        * @example https://provider.example.com/oauth/authorize?...
        */
       authorizeUrl: string;
-    };
-    OAuthCallbackResponse: {
-      /** @example conn_9f3ab2 */
-      connectionId: string;
     };
     GithubAppInstallStartDto: {
       /**
@@ -6616,7 +6612,7 @@ export interface operations {
   };
   /**
    * OAuth callback (provider redirect target)
-   * @description Public: the provider redirects here with a single-use `state` (its credential) and `code`; exchanges the code and persists the encrypted refresh token.
+   * @description Public: the provider redirects the BROWSER here with a single-use `state` and `code`; exchanges the code, persists the encrypted refresh token, then 302-redirects back to the SPA integrations page (`?connected=1` on success, `?connect_error=…` otherwise).
    */
   OAuthController_callback: {
     parameters: {
@@ -6627,10 +6623,9 @@ export interface operations {
       };
     };
     responses: {
-      200: {
-        content: {
-          "application/json": components["schemas"]["OAuthCallbackResponse"];
-        };
+      /** @description Redirect to the SPA integrations page. */
+      302: {
+        content: never;
       };
     };
   };
@@ -6683,7 +6678,7 @@ export interface operations {
   };
   /**
    * GitHub App install callback (provider redirect target)
-   * @description Public: GitHub redirects here with `installation_id`, `setup_action`, and the single-use `state` (its credential); creates the github_app connection and stores the installation grant.
+   * @description Public: GitHub redirects the BROWSER here with `installation_id`, `setup_action`, and the single-use `state`; creates the github_app connection, then 302-redirects back to the SPA integrations page (`?connected=1` on success, `?connect_error=…` otherwise).
    */
   GithubAppController_callback: {
     parameters: {
@@ -6694,10 +6689,9 @@ export interface operations {
       };
     };
     responses: {
-      200: {
-        content: {
-          "application/json": components["schemas"]["OAuthCallbackResponse"];
-        };
+      /** @description Redirect to the SPA integrations page. */
+      302: {
+        content: never;
       };
     };
   };

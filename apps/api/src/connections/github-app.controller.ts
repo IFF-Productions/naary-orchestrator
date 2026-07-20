@@ -1,17 +1,25 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
-import { ApiBearerAuth, ApiOkResponse, ApiOperation } from "@nestjs/swagger";
+import {
+  Body,
+  Controller,
+  Get,
+  Logger,
+  Param,
+  Post,
+  Query,
+  Res,
+} from "@nestjs/common";
+import { ApiBearerAuth, ApiOperation, ApiResponse } from "@nestjs/swagger";
 import {
   completeGithubAppInstall,
   startGithubAppInstall,
 } from "@naary/connections";
+import type { Response } from "express";
 import { Public } from "../auth/public.decorator";
 import { EnvironmentSel } from "../auth/tenant.decorator";
 import { EnvironmentsService } from "../environments/environments.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
-import {
-  GithubAppInstallStartResponse,
-  OAuthCallbackResponse,
-} from "./connection.response";
+import { connectReturnUrl } from "./connect-return";
+import { GithubAppInstallStartResponse } from "./connection.response";
 import { GithubAppInstallStartDto } from "./github-app-install.dto";
 
 /**
@@ -25,6 +33,7 @@ import { GithubAppInstallStartDto } from "./github-app-install.dto";
  */
 @Controller()
 export class GithubAppController {
+  private readonly logger = new Logger(GithubAppController.name);
   constructor(private readonly environments: EnvironmentsService) {}
 
   @ApiBearerAuth("bearer")
@@ -61,16 +70,36 @@ export class GithubAppController {
   @ApiOperation({
     summary: "GitHub App install callback (provider redirect target)",
     description:
-      "Public: GitHub redirects here with `installation_id`, `setup_action`, and the single-use `state` (its credential); creates the github_app connection and stores the installation grant.",
+      "Public: GitHub redirects the BROWSER here with `installation_id`, `setup_action`, and the " +
+      "single-use `state`; creates the github_app connection, then 302-redirects back to the SPA " +
+      "integrations page (`?connected=1` on success, `?connect_error=…` otherwise).",
   })
-  @ApiOkResponse({ type: OAuthCallbackResponse })
+  @ApiResponse({
+    status: 302,
+    description: "Redirect to the SPA integrations page.",
+  })
   @Public() // provider redirect target; the single-use `state` is its credential
   @Get("github-app/callback")
-  callback(
+  async callback(
+    @Res() res: Response,
     @Query("installation_id") installationId: string,
     @Query("state") state: string,
     @Query("setup_action") setupAction?: string,
-  ): Promise<{ connectionId: string }> {
-    return completeGithubAppInstall({ state, installationId, setupAction });
+  ): Promise<void> {
+    // Browser-facing redirect target: never render a raw JSON body or a 500. On success bounce to
+    // the integrations page; on failure do the same with an error flag and log the cause. The
+    // common failure (a single-use `state` replayed after a successful install, or the 10-min TTL
+    // expiring) is BENIGN — catching it here also keeps it out of Sentry as an unhandled 500.
+    try {
+      await completeGithubAppInstall({ state, installationId, setupAction });
+      res.redirect(connectReturnUrl({ ok: true, tab: "apps" }));
+    } catch (err) {
+      this.logger.warn(
+        `GitHub App install callback failed: ${(err as Error).message}`,
+      );
+      res.redirect(
+        connectReturnUrl({ ok: false, tab: "apps", error: "github_app" }),
+      );
+    }
   }
 }
