@@ -56,6 +56,10 @@ export interface NodeOutputMap {
        *  `{ __claimCheck, bytes }` when large (shape mirrors @naary/storage's ClaimCheck; inlined
        *  so the DSL stays dependency-free). Absent in read mode. */
       diff?: string | { __claimCheck: string; bytes: number };
+      /** Opened pull request (write mode + `openPr`): its number, html URL, and head branch.
+       *  Present only when the diff was non-empty and the PR was opened (or already existed).
+       *  Absent in read mode, when `openPr` is off, or when there were no changes to commit. */
+      pr?: { number: number; url: string; branch: string };
     };
     costUsd: number;
   };

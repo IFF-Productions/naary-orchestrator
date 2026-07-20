@@ -231,6 +231,13 @@ const CONFIG_SCHEMAS = {
     /** The GitHub App connection that authorizes the clone (write mode). The install token is
      *  resolved in-activity and used to clone OUTSIDE the sandbox — it never enters the sandbox. */
     connectionId: z.string().optional(),
+    /** Write mode + PR (#444): commit the sandbox's edits to a node-owned branch, push, open a PR. */
+    openPr: z.boolean().optional(),
+    prTitle: z.string().optional(),
+    prBody: z.string().optional(),
+    commitMessage: z.string().optional(),
+    /** Head branch to create/push (node-owned, force-pushed). Defaults to `naary/code-agent/<runId>`. */
+    headBranch: z.string().optional(),
     // Positive: a manual fallback cost only makes sense > 0 (a negative would REDUCE the
     // run's accumulated __costUsd; a 0 defeats the never-zero fallback intent).
     costUsd: z.number().positive().optional(),

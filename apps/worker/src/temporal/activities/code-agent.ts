@@ -38,6 +38,12 @@ export interface CodeAgentActivityConfig {
   repo?: string;
   branch?: string;
   connectionId?: string;
+  /** Write mode + PR (#444): commit the edits to a branch, push, open a PR. */
+  openPr?: boolean;
+  prTitle?: string;
+  prBody?: string;
+  commitMessage?: string;
+  headBranch?: string;
 }
 export interface CodeAgentResult {
   status: "ok";
@@ -49,6 +55,8 @@ export interface CodeAgentResult {
     tool: string;
     sessionId?: string;
     diff?: string | ClaimCheck;
+    /** Opened (or already-existing) PR when write mode + `openPr` produced changes (#444). */
+    pr?: { number: number; url: string; branch: string };
   };
   costUsd: number;
 }
@@ -142,6 +150,7 @@ export async function callCodeAgent(
     let stdout: string;
     let exitCode: number;
     let diff: string | undefined;
+    let pr: { number: number; url: string; branch: string } | undefined;
     if (write) {
       // WRITE (Slice 2c): dispatch to the isolated sandbox-runner. The activity (here) clones the
       // repo with the git token OUTSIDE the sandbox; the runner only ever gets the Claude Code
@@ -175,12 +184,19 @@ export async function callCodeAgent(
           authKey,
           keyEnvVar,
           timeoutMs: cfg.timeoutMs,
+          // Write + PR (#444): commit the edits to a branch, push, open a PR — all OUTSIDE the sandbox.
+          openPr: cfg.openPr,
+          prTitle: cfg.prTitle,
+          prBody: cfg.prBody,
+          commitMessage: cfg.commitMessage,
+          headBranch: cfg.headBranch,
         },
         codeAgentWriteEnv(),
       );
       stdout = w.stdout;
       exitCode = w.exitCode;
       diff = w.diff;
+      pr = w.pr;
     } else {
       // READ (default): run the CLI IN the worker (plan mode, no repo). MINIMAL env — PATH/HOME +
       // the driver's chosen auth var (exactly one, API key vs OAuth token). Never the git token.
@@ -288,6 +304,7 @@ export async function callCodeAgent(
         tool: driver.tool,
         sessionId: envlp.sessionId,
         ...(diffOut !== undefined ? { diff: diffOut } : {}),
+        ...(pr !== undefined ? { pr } : {}),
       },
       costUsd,
     };
