@@ -49,6 +49,13 @@ export class NotificationChannelResponse {
     description: "Notify this channel when a run fails.",
   })
   onRunFailed!: boolean;
+
+  @ApiProperty({
+    example: false,
+    description:
+      "Notify this channel when monthly spend crosses the budget's alert threshold (once per calendar month). Default off.",
+  })
+  onBudgetThreshold!: boolean;
 }
 
 /** Result of a successful test send (a failure surfaces as a 400 with a message). */

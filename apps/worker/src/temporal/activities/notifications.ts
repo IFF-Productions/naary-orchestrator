@@ -32,6 +32,9 @@ export interface NotificationChannelRow {
   webhookUrl: string | null;
   onApprovalPending: boolean;
   onRunFailed: boolean;
+  /** Budget alert-threshold opt-in (Slice 3). Optional so test seams/pre-migration rows
+   *  that omit it read as OFF — the alert is never surprise-enabled. */
+  onBudgetThreshold?: boolean;
 }
 
 // Test seam: channel read + egress fetch, swappable so tests need no DB/network. Reads only the
@@ -56,6 +59,7 @@ export const __notifyDeps = {
         webhookUrl: true,
         onApprovalPending: true,
         onRunFailed: true,
+        onBudgetThreshold: true,
       },
     });
   },
@@ -233,12 +237,18 @@ function runUrl(workflowId: string): string | undefined {
  * ENCRYPTION_KEY) is missing — the formatter then omits that link/button.
  */
 function notificationLinks(input: NotificationInput): NotificationLinks {
+  const base = resolveAppBaseUrl();
   return {
     approvalUrl:
       input.kind === "approval_pending"
         ? approvalUrl(input.workflowId)
         : undefined,
     runUrl: runUrl(input.workflowId),
+    // Budget alerts deep-link to the Usage & budgets page (the surface that fixes them).
+    usageUrl:
+      input.kind === "budget_threshold" && base
+        ? `${base}/app/billing`
+        : undefined,
   };
 }
 
@@ -273,6 +283,9 @@ export async function sendNotification(
     if (!ch.webhookUrl) continue;
     if (input.kind === "approval_pending" && !ch.onApprovalPending) continue;
     if (input.kind === "run_failed" && !ch.onRunFailed) continue;
+    // Budget alerts are opt-in (default false — a missing/legacy field reads as OFF).
+    if (input.kind === "budget_threshold" && ch.onBudgetThreshold !== true)
+      continue;
 
     // Isolate each channel: one bad URL / blocked egress / timeout / 5xx must not prevent the
     // remaining channels from being notified.

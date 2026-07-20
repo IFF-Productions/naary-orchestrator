@@ -65,6 +65,8 @@ export function draftChannel(type: NotificationChannelType): EditableChannel {
     webhookUrl: "",
     onApprovalPending: true,
     onRunFailed: true,
+    // Budget alerts are opt-in (Slice 3) — never surprise-enabled on a new channel.
+    onBudgetThreshold: false,
   };
 }
 
@@ -150,6 +152,7 @@ export function NotificationsSection({
         webhookUrl: ch.webhookUrl.trim() || null,
         onApprovalPending: ch.onApprovalPending,
         onRunFailed: ch.onRunFailed,
+        onBudgetThreshold: ch.onBudgetThreshold,
       };
       // A draft has no server id yet → create; afterwards it patches in place. The
       // localKey stays put so transient UI state (busy/status) survives the first save.
@@ -510,6 +513,33 @@ export function NotificationsSection({
                       }}
                     >
                       When a run fails
+                    </span>
+                  </label>
+                  <label
+                    style={{
+                      display: "flex",
+                      gap: 9,
+                      alignItems: "center",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Checkbox
+                      checked={ch.onBudgetThreshold}
+                      onChange={(v) =>
+                        patchChannel(key, { onBudgetThreshold: v })
+                      }
+                    />
+                    <span
+                      style={{
+                        fontSize: "var(--text-body)",
+                        color: "var(--ink)",
+                      }}
+                    >
+                      When monthly spend crosses the budget alert threshold{" "}
+                      <span style={{ color: "var(--ink-3)", fontSize: 11.5 }}>
+                        — at most once per calendar month; set the threshold in
+                        Usage &amp; budgets
+                      </span>
                     </span>
                   </label>
                   <label

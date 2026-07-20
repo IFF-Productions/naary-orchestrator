@@ -6,7 +6,13 @@
  * therefore never enters the browser bundle.
  */
 
-export type NotificationKind = "approval_pending" | "run_failed";
+export type NotificationKind =
+  | "approval_pending"
+  | "run_failed"
+  /** Monthly spend crossed the budget's alert threshold (redesign Slice 3). Tenant-scoped
+   *  (not a run outcome) — fired at most once per calendar month, from the reservation
+   *  path. Channels opt in via `onBudgetThreshold`. */
+  | "budget_threshold";
 
 /** Sub-flavor of an `approval_pending` notification (REDESIGN-FUNCTIONALITY-GAPS.md Slice 1):
  *  undefined = the initial pause; "reminder" = a scheduled (or manual "Remind now") nudge;
@@ -29,6 +35,17 @@ export interface NotificationInput {
   reminderIndex?: number;
   /** For flavor "escalation": who the escalation mentions (free-form, e.g. "@ops-oncall"). */
   escalateTo?: string;
+  /** budget_threshold only: the configured threshold (% of the monthly cap). */
+  thresholdPct?: number;
+  /** budget_threshold only: the monthly cap in USD. */
+  capUsd?: number;
+  /** budget_threshold only: month spend at the crossing (committed + reserved), USD. */
+  spendUsd?: number;
+}
+
+/** Compact USD for notification copy: cents for small figures, 2dp otherwise. */
+function usd(n: number): string {
+  return `$${n.toFixed(n > 0 && n < 1 ? 4 : 2)}`;
 }
 
 /**
@@ -41,6 +58,8 @@ export interface NotificationLinks {
   approvalUrl?: string;
   /** Deep link to the run detail page. */
   runUrl?: string;
+  /** Deep link to the Usage & budgets page (budget_threshold). */
+  usageUrl?: string;
 }
 
 export type NotificationAction = {
@@ -65,6 +84,11 @@ export function codeText(s: string): string {
 
 /** Short headline for the notification, shared by the Slack header + the Teams card. */
 export function notificationHeader(input: NotificationInput): string {
+  if (input.kind === "budget_threshold") {
+    return input.thresholdPct !== undefined
+      ? `📊 Budget alert — ${input.thresholdPct}% of the monthly cap`
+      : "📊 Budget alert";
+  }
   if (input.kind !== "approval_pending") return "❌ Run failed";
   if (input.flavor === "reminder") {
     return input.reminderIndex
@@ -98,6 +122,12 @@ export function notificationActions(
       style: "danger",
     });
   }
+  if (input.kind === "budget_threshold") {
+    // Budget alerts act on the BUDGET, not a run — the one action is the usage page.
+    if (links.usageUrl)
+      actions.push({ label: "View usage & budgets", url: links.usageUrl });
+    return actions;
+  }
   if (links.runUrl) actions.push({ label: "View run", url: links.runUrl });
   return actions;
 }
@@ -109,6 +139,22 @@ export function notificationText(
   input: NotificationInput,
   links: NotificationLinks,
 ): string {
+  if (input.kind === "budget_threshold") {
+    const pct =
+      input.thresholdPct !== undefined
+        ? `${input.thresholdPct}%`
+        : "the alert threshold";
+    const cap =
+      input.capUsd !== undefined
+        ? ` of the ${usd(input.capUsd)} monthly cap`
+        : "";
+    const spend =
+      input.spendUsd !== undefined
+        ? ` (${usd(input.spendUsd)} committed + reserved)`
+        : "";
+    const view = links.usageUrl ? ` View usage: ${links.usageUrl}` : "";
+    return `📊 Budget alert — workspace spend crossed ${pct}${cap}${spend}. Runs continue until the cap.${view}`;
+  }
   // Slack treats the top-level `text` as mrkdwn too (it's the fallback/notification line some
   // clients show), so escape the interpolated user values — NOT the URLs, which must stay intact.
   const wf = input.workflowKey
@@ -162,13 +208,27 @@ export function notificationBlocks(
   // are half-width-friendly. The free-text Awaiting/Reason (which can be a full sentence) gets its
   // own full-width `section` below instead of being crammed into a half-width grid column (which
   // also left the grid lopsided at an odd field count — the "looks odd" report).
-  const fields: { type: "mrkdwn"; text: string }[] = [
-    {
-      type: "mrkdwn",
-      text: `*Workflow*\n${input.workflowKey ? `\`${codeText(input.workflowKey)}\`` : "_unnamed_"}`,
-    },
-    { type: "mrkdwn", text: `*Run*\n${runField}` },
-  ];
+  // budget_threshold is TENANT-scoped: the grid shows cap + spend, not a workflow/run pair
+  // (the crossing reservation's run is incidental; the alert is about the monthly budget).
+  const fields: { type: "mrkdwn"; text: string }[] =
+    input.kind === "budget_threshold"
+      ? [
+          {
+            type: "mrkdwn",
+            text: `*Monthly cap*\n${input.capUsd !== undefined ? usd(input.capUsd) : "—"}`,
+          },
+          {
+            type: "mrkdwn",
+            text: `*Spend (incl. reserved)*\n${input.spendUsd !== undefined ? usd(input.spendUsd) : "—"}`,
+          },
+        ]
+      : [
+          {
+            type: "mrkdwn",
+            text: `*Workflow*\n${input.workflowKey ? `\`${codeText(input.workflowKey)}\`` : "_unnamed_"}`,
+          },
+          { type: "mrkdwn", text: `*Run*\n${runField}` },
+        ];
 
   const blocks: unknown[] = [
     {
@@ -236,10 +296,24 @@ export function notificationTeamsCard(
   links: NotificationLinks,
 ): unknown {
   const isApproval = input.kind === "approval_pending";
-  const facts: { title: string; value: string }[] = [
-    { title: "Workflow", value: input.workflowKey ?? "(unnamed)" },
-    { title: "Run", value: input.workflowId },
-  ];
+  // budget_threshold: tenant-scoped facts (cap/spend/threshold) — no workflow/run pair.
+  const facts: { title: string; value: string }[] =
+    input.kind === "budget_threshold"
+      ? [
+          ...(input.thresholdPct !== undefined
+            ? [{ title: "Threshold", value: `${input.thresholdPct}%` }]
+            : []),
+          ...(input.capUsd !== undefined
+            ? [{ title: "Monthly cap", value: usd(input.capUsd) }]
+            : []),
+          ...(input.spendUsd !== undefined
+            ? [{ title: "Spend (incl. reserved)", value: usd(input.spendUsd) }]
+            : []),
+        ]
+      : [
+          { title: "Workflow", value: input.workflowKey ?? "(unnamed)" },
+          { title: "Run", value: input.workflowId },
+        ];
   if (isApproval && input.title)
     facts.push({ title: "Awaiting", value: input.title });
   // Flavor facts (plain JSON strings — Adaptive Card facts are not mrkdwn).
@@ -321,6 +395,17 @@ export function notificationPayload(
             ? { reminderIndex: input.reminderIndex }
             : {}),
           ...(input.escalateTo ? { escalateTo: input.escalateTo } : {}),
+        }
+      : {}),
+    ...(input.kind === "budget_threshold"
+      ? {
+          // Generic hooks get the raw figures too (usageUrl mirrors runUrl's role).
+          ...(input.thresholdPct !== undefined
+            ? { thresholdPct: input.thresholdPct }
+            : {}),
+          ...(input.capUsd !== undefined ? { capUsd: input.capUsd } : {}),
+          ...(input.spendUsd !== undefined ? { spendUsd: input.spendUsd } : {}),
+          ...(links.usageUrl ? { usageUrl: links.usageUrl } : {}),
         }
       : {}),
   };

@@ -5,6 +5,7 @@ import { ApplicationFailure } from "@temporalio/activity";
 import { canonicalize } from "@naary/dsl";
 import type { GraphDef } from "@naary/dsl";
 import { getDefaultEnvironmentId, getPrisma } from "@naary/db";
+import { getBudget } from "@naary/usage";
 
 /**
  * Record run ownership (tenant + workflowKey) so EVERY run — manual, webhook, or
@@ -104,9 +105,41 @@ export async function setExecutionStatus(meta: {
         ...(meta.costUsd !== undefined ? { costUsd: meta.costUsd } : {}),
         ...(terminal ? { finishedAt: new Date() } : {}),
         ...(failureKind !== undefined ? { failureKind } : {}),
+        // Pause-not-fail (Slice 3): stamp when the run parks on budget; clear on any
+        // other status so the column always means "currently paused since". The
+        // month-rollover boot reconcile keys off it.
+        budgetPausedAt: meta.status === "awaiting_budget" ? new Date() : null,
       },
     })
     .catch(() => undefined);
+}
+
+/** The budget snapshot a paused run re-reads after a budgetResume Signal (Slice 3). */
+export interface BudgetSnapshot {
+  perExecutionCapUsd: number;
+  maxStepsPerRun: number;
+  onBudgetExceeded: string;
+}
+
+/**
+ * Re-read the tenant's budget policy/caps for a run resuming from `awaiting_budget`
+ * (Slice 3, pause-not-fail). The PUT that resumed the run likely RAISED the per-run cap
+ * — without this re-read the workflow would re-check its stale start-time snapshot and
+ * immediately re-park. DB read (I/O) → activity, per Tier-1 rule 3; the workflow only
+ * threads the returned numbers (never secrets). Null when the tenant has no budget row
+ * (caps removed) — the workflow then keeps its existing snapshot.
+ */
+export async function refreshBudget(meta: {
+  tenantId: string;
+}): Promise<BudgetSnapshot | null> {
+  const b = await getBudget(meta.tenantId);
+  return b
+    ? {
+        perExecutionCapUsd: b.perExecutionCapUsd,
+        maxStepsPerRun: b.maxStepsPerRun,
+        onBudgetExceeded: b.onBudgetExceeded,
+      }
+    : null;
 }
 
 /**

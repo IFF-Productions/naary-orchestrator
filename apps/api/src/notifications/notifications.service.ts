@@ -38,6 +38,8 @@ export interface NotificationChannelView {
   webhookUrl: string | null;
   onApprovalPending: boolean;
   onRunFailed: boolean;
+  /** Budget alert-threshold opt-in (Slice 3). Default false — never surprise-enabled. */
+  onBudgetThreshold: boolean;
 }
 
 export interface ChannelPatch {
@@ -46,6 +48,7 @@ export interface ChannelPatch {
   webhookUrl?: string | null;
   onApprovalPending?: boolean;
   onRunFailed?: boolean;
+  onBudgetThreshold?: boolean;
 }
 
 interface ChannelRow {
@@ -56,6 +59,7 @@ interface ChannelRow {
   webhookUrl: string | null;
   onApprovalPending: boolean;
   onRunFailed: boolean;
+  onBudgetThreshold: boolean;
 }
 
 function toView(row: ChannelRow): NotificationChannelView {
@@ -67,6 +71,7 @@ function toView(row: ChannelRow): NotificationChannelView {
     webhookUrl: row.webhookUrl,
     onApprovalPending: row.onApprovalPending,
     onRunFailed: row.onRunFailed,
+    onBudgetThreshold: row.onBudgetThreshold,
   };
 }
 
@@ -126,6 +131,8 @@ export class NotificationsService {
         webhookUrl: normalize(patch.webhookUrl) ?? null,
         onApprovalPending: patch.onApprovalPending ?? true,
         onRunFailed: patch.onRunFailed ?? true,
+        // Budget alerts are opt-in (Slice 3): default OFF even on a fresh channel.
+        onBudgetThreshold: patch.onBudgetThreshold ?? false,
       },
     });
     return toView(row);
@@ -155,6 +162,7 @@ export class NotificationsService {
         webhookUrl: normalize(patch.webhookUrl),
         onApprovalPending: patch.onApprovalPending,
         onRunFailed: patch.onRunFailed,
+        onBudgetThreshold: patch.onBudgetThreshold,
       },
     });
     return toView(row);

@@ -15029,13 +15029,27 @@
             "additionalProperties": true,
             "nullable": true,
             "description": "Per-node timing map (Slice 2): { [nodeId]: { s, f, n?, totalMs? } } — epoch-ms start/finish stamped with deterministic workflow time; n/totalMs aggregate repeated passes (loops). Null when the run predates the feature or its ctx is unavailable."
+          },
+          "spentUsd": {
+            "type": "number",
+            "nullable": true,
+            "example": 0.0123,
+            "description": "Live spend-so-far of this run in USD (the interpreter's metered cost accumulator). Null when unavailable (pre-feature worker or Temporal-level failure)."
+          },
+          "perExecutionCapUsd": {
+            "type": "number",
+            "nullable": true,
+            "example": 0.5,
+            "description": "The per-run budget cap this run enforces (snapshotted at start, refreshed after a budget-pause resume). Null when no cap is configured or the run is closed."
           }
         },
         "required": [
           "status",
           "currentNodeId",
           "ctx",
-          "nodeTimes"
+          "nodeTimes",
+          "spentUsd",
+          "perExecutionCapUsd"
         ]
       },
       "RunEventResponse": {
@@ -15221,6 +15235,11 @@
             "type": "boolean",
             "example": true,
             "description": "Notify this channel when a run fails."
+          },
+          "onBudgetThreshold": {
+            "type": "boolean",
+            "example": false,
+            "description": "Notify this channel when monthly spend crosses the budget's alert threshold (once per calendar month). Default off."
           }
         },
         "required": [
@@ -15230,7 +15249,8 @@
           "enabled",
           "webhookUrl",
           "onApprovalPending",
-          "onRunFailed"
+          "onRunFailed",
+          "onBudgetThreshold"
         ]
       },
       "CreateNotificationChannelDto": {
@@ -15262,6 +15282,11 @@
             "type": "boolean",
             "example": true,
             "description": "Notify this channel when a run fails."
+          },
+          "onBudgetThreshold": {
+            "type": "boolean",
+            "example": false,
+            "description": "Notify this channel when monthly spend crosses the budget's alert threshold (at most once per calendar month). Default off."
           },
           "type": {
             "type": "string",
@@ -15306,6 +15331,11 @@
             "type": "boolean",
             "example": true,
             "description": "Notify this channel when a run fails."
+          },
+          "onBudgetThreshold": {
+            "type": "boolean",
+            "example": false,
+            "description": "Notify this channel when monthly spend crosses the budget's alert threshold (at most once per calendar month). Default off."
           }
         }
       },
@@ -15853,15 +15883,22 @@
             "example": "reject",
             "enum": [
               "reject",
-              "downgrade"
+              "downgrade",
+              "pause"
             ],
-            "description": "Action when a budget is exceeded."
+            "description": "Action when the monthly cap is exceeded: reject (stop), downgrade (fallback model), or pause (park runs as awaiting_budget until the cap is raised or the month rolls over)."
           },
           "fallbackModel": {
             "type": "object",
             "nullable": true,
             "example": "claude-3-5-haiku",
             "description": "Model to downgrade to when onBudgetExceeded='downgrade'."
+          },
+          "alertThresholdPct": {
+            "type": "object",
+            "nullable": true,
+            "example": 80,
+            "description": "Alert threshold as % of the monthly cap; crossing it emits a budgetThreshold notification (once per calendar month). Null = no alert configured."
           },
           "mtdSpendUsd": {
             "type": "number",
@@ -15881,6 +15918,7 @@
           "maxStepsPerRun",
           "onBudgetExceeded",
           "fallbackModel",
+          "alertThresholdPct",
           "mtdSpendUsd",
           "remainingUsd"
         ]
@@ -15907,10 +15945,19 @@
             "type": "string",
             "enum": [
               "reject",
-              "downgrade"
+              "downgrade",
+              "pause"
             ],
             "example": "reject",
-            "description": "Action when a budget is exceeded."
+            "description": "Action when the monthly cap is exceeded: reject (stop), downgrade (fallback model), or pause (park runs as awaiting_budget; they resume on cap raise or month rollover)."
+          },
+          "alertThresholdPct": {
+            "type": "object",
+            "nullable": true,
+            "example": 80,
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Alert threshold as % of the monthly cap (1–100). Crossing it emits a budgetThreshold notification (at most once per calendar month). Omit/null = no alert."
           },
           "fallbackModel": {
             "type": "object",
@@ -15951,15 +15998,22 @@
             "example": "reject",
             "enum": [
               "reject",
-              "downgrade"
+              "downgrade",
+              "pause"
             ],
-            "description": "Action when a budget is exceeded."
+            "description": "Action when the monthly cap is exceeded: reject (stop), downgrade (fallback model), or pause (park runs as awaiting_budget until the cap is raised or the month rolls over)."
           },
           "fallbackModel": {
             "type": "object",
             "nullable": true,
             "example": "claude-3-5-haiku",
             "description": "Model to downgrade to when onBudgetExceeded='downgrade'."
+          },
+          "alertThresholdPct": {
+            "type": "object",
+            "nullable": true,
+            "example": 80,
+            "description": "Alert threshold as % of the monthly cap; crossing it emits a budgetThreshold notification (once per calendar month). Null = no alert configured."
           }
         },
         "required": [
@@ -15968,7 +16022,8 @@
           "perExecutionCapUsd",
           "maxStepsPerRun",
           "onBudgetExceeded",
-          "fallbackModel"
+          "fallbackModel",
+          "alertThresholdPct"
         ]
       },
       "RegisterWebhookDto": {

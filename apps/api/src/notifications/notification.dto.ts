@@ -57,6 +57,15 @@ export class UpdateNotificationChannelDto {
   @IsOptional()
   @IsBoolean()
   onRunFailed?: boolean;
+
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      "Notify this channel when monthly spend crosses the budget's alert threshold (at most once per calendar month). Default off.",
+  })
+  @IsOptional()
+  @IsBoolean()
+  onBudgetThreshold?: boolean;
 }
 
 /** Create a new channel. Same patch fields plus the REQUIRED type — a tenant can hold any

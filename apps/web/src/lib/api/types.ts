@@ -7,6 +7,8 @@ import type { GraphDef } from "@naary/dsl";
 export type ExecutionStatus =
   | "running"
   | "awaiting_approval"
+  | "awaiting_webhook"
+  | "awaiting_budget" // paused on budget (policy "pause") — resumes on cap raise / month rollover
   | "completed"
   | "rejected"
   | "budget_exceeded"
@@ -23,6 +25,10 @@ export interface ExecutionState {
    *  unknown-record (matches the generated schema); shape-checked at read time via
    *  run-view-model's nodeTimeOf. Null/absent for pre-feature runs → render "—". */
   nodeTimes?: Record<string, unknown> | null;
+  /** Live spend-so-far of this run in USD (Slice 3). Null/absent = unavailable — render "—". */
+  spentUsd?: number | null;
+  /** The per-run cap the run enforces; null/absent = no cap — never fabricate a meter. */
+  perExecutionCapUsd?: number | null;
 }
 
 /** One entry in a run's execution log (mirrors the API's RunEvent). */
@@ -508,6 +514,8 @@ export interface NotificationChannel {
   webhookUrl: string | null;
   onApprovalPending: boolean;
   onRunFailed: boolean;
+  /** Budget alert-threshold opt-in (Slice 3). Default false. */
+  onBudgetThreshold: boolean;
 }
 
 /**
@@ -522,8 +530,10 @@ export interface BudgetView {
   monthlyCapUsd: number;
   perExecutionCapUsd: number;
   maxStepsPerRun: number;
-  onBudgetExceeded: "reject" | "downgrade";
+  onBudgetExceeded: "reject" | "downgrade" | "pause";
   fallbackModel: string | null;
+  /** Alert threshold as % of the monthly cap; null = no alert configured (Slice 3). */
+  alertThresholdPct: number | null;
   /** Spend so far this calendar month, in USD. */
   mtdSpendUsd: number;
   /** monthlyCapUsd − mtdSpendUsd (may be negative if over cap). */
@@ -535,8 +545,9 @@ export interface SetBudgetInput {
   monthlyCapUsd: number;
   perExecutionCapUsd: number;
   maxStepsPerRun?: number;
-  onBudgetExceeded?: "reject" | "downgrade";
+  onBudgetExceeded?: "reject" | "downgrade" | "pause";
   fallbackModel?: string | null;
+  alertThresholdPct?: number | null;
 }
 
 /** One usage-ledger line item (UsageReport.events, narrowed — see parseUsageEvents). */
@@ -645,6 +656,9 @@ export function statusToRunState(
     case "running":
       return "running";
     case "awaiting_approval":
+    case "awaiting_webhook":
+    // Budget pause-not-fail (Slice 3): a durable pause, not an error.
+    case "awaiting_budget":
       return "paused";
     case "completed":
       return "done";

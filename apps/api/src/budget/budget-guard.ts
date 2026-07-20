@@ -21,6 +21,9 @@ export class BudgetExceededException extends HttpException {
  *  - No cap configured  ⇒ never gated (isOverMonthlyBudget returns false).
  *  - onBudgetExceeded="downgrade" ⇒ do NOT reject — let the run start; the per-call path
  *    downgrades to the fallback model. Only "reject" (the default) hard-stops at start.
+ *  - onBudgetExceeded="pause" (Slice 3) ⇒ do NOT reject — the promised semantic is that
+ *    runs PARK and resume when the cap is raised or the month rolls over, so a new run
+ *    starts and parks at its first reservation instead of 402-ing at the door.
  *  - Metering read fails ⇒ FAIL OPEN. Blocking every run because a `_sum` query hiccuped is
  *    worse than letting the run start and be caught by the reservation. Swallow + proceed.
  */
@@ -28,7 +31,12 @@ export async function assertWithinMonthlyBudget(
   tenantId: string,
   budget: TenantBudgetConfig | null,
 ): Promise<void> {
-  if (!budget || budget.onBudgetExceeded === "downgrade") return;
+  if (
+    !budget ||
+    budget.onBudgetExceeded === "downgrade" ||
+    budget.onBudgetExceeded === "pause"
+  )
+    return;
   let over = false;
   try {
     over = await isOverMonthlyBudget(tenantId, budget.monthlyCapUsd);

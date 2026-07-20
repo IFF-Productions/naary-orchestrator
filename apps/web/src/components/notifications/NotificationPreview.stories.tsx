@@ -15,6 +15,7 @@ const LINKS: NotificationLinks = {
   approvalUrl:
     "https://app.naary.io/approve/wh-t1-9a8b7c?token=deadbeefcafef00d",
   runUrl: "https://app.naary.io/app/runs/wh-t1-9a8b7c",
+  usageUrl: "https://app.naary.io/app/billing",
 };
 
 const APPROVAL: NotificationInput = {
@@ -42,6 +43,16 @@ const ESCALATION: NotificationInput = {
   ...APPROVAL,
   flavor: "escalation",
   escalateTo: "@ops-oncall",
+};
+
+// Slice 3: the monthly-spend alert — tenant-scoped (cap/spend facts, a usage link,
+// no run buttons). Fired at most once per calendar month from the reservation path.
+const BUDGET_THRESHOLD: NotificationInput = {
+  kind: "budget_threshold",
+  workflowId: "wh-t1-9a8b7c",
+  thresholdPct: 80,
+  capUsd: 400,
+  spendUsd: 321.4,
 };
 
 function Slack({
@@ -117,4 +128,13 @@ export const TeamsApprovalEscalation: Story = {
 
 export const TeamsRunFailed: Story = {
   render: () => <Teams input={FAILED} />,
+};
+
+/** Budget alert (Slice 3) — cap/spend facts + a "View usage & budgets" button. */
+export const SlackBudgetThreshold: Story = {
+  render: () => <Slack input={BUDGET_THRESHOLD} />,
+};
+
+export const TeamsBudgetThreshold: Story = {
+  render: () => <Teams input={BUDGET_THRESHOLD} />,
 };

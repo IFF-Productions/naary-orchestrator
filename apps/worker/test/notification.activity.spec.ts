@@ -475,6 +475,97 @@ describe("sendNotification", () => {
   });
 });
 
+describe("sendNotification — budget_threshold (Slice 3)", () => {
+  const BUDGET = {
+    tenantId: "t1",
+    workflowId: "wf-1",
+    kind: "budget_threshold" as const,
+    thresholdPct: 80,
+    capUsd: 400,
+    spendUsd: 321.4,
+  };
+
+  it("is OPT-IN: a channel without onBudgetThreshold (default/legacy) gets NO post", async () => {
+    // The default channel above has no onBudgetThreshold field at all (legacy row shape).
+    await sendNotification(BUDGET);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("POSTs to a channel that opted in, with the usage deep link + budget facts", async () => {
+    channels = [
+      {
+        type: "slack",
+        webhookUrl: "https://hooks.example.com/x",
+        onApprovalPending: false,
+        onRunFailed: false,
+        onBudgetThreshold: true,
+      },
+    ];
+    await sendNotification(BUDGET);
+    expect(fetch).toHaveBeenCalledOnce();
+    const body = JSON.parse(
+      (fetch.mock.calls[0][1] as { body: string }).body,
+    ) as {
+      text: string;
+      kind: string;
+      usageUrl?: string;
+      thresholdPct?: number;
+    };
+    expect(body.kind).toBe("budget_threshold");
+    expect(body.thresholdPct).toBe(80);
+    expect(body.text).toContain("80%");
+    expect(body.usageUrl).toBe("https://app.naary.test/app/billing");
+  });
+
+  it("routes per-channel: only the opted-in channel is posted", async () => {
+    channels = [
+      {
+        type: "slack",
+        webhookUrl: "https://hooks.example.com/alerts",
+        onApprovalPending: true,
+        onRunFailed: true,
+        onBudgetThreshold: false,
+      },
+      {
+        type: "teams",
+        webhookUrl: "https://hooks.example.com/finance",
+        onApprovalPending: false,
+        onRunFailed: false,
+        onBudgetThreshold: true,
+      },
+    ];
+    await sendNotification(BUDGET);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch.mock.calls[0][0]).toBe("https://hooks.example.com/finance");
+    // Teams channel → Adaptive Card envelope with the budget FactSet.
+    const body = JSON.parse(
+      (fetch.mock.calls[0][1] as { body: string }).body,
+    ) as { type: string; attachments: { content: { body: unknown[] } }[] };
+    expect(body.type).toBe("message");
+    expect(JSON.stringify(body)).toContain("Monthly cap");
+  });
+
+  it("omits the usage link when no base URL resolves (no fabricated buttons)", async () => {
+    delete process.env.APP_BASE_URL;
+    process.env.CORS_ORIGINS = "";
+    channels = [
+      {
+        type: "slack",
+        webhookUrl: "https://hooks.example.com/x",
+        onApprovalPending: false,
+        onRunFailed: false,
+        onBudgetThreshold: true,
+      },
+    ];
+    await sendNotification(BUDGET);
+    const body = JSON.parse(
+      (fetch.mock.calls[0][1] as { body: string }).body,
+    ) as { usageUrl?: string; actions: unknown[] };
+    expect(body.usageUrl).toBeUndefined();
+    expect(body.actions).toEqual([]);
+  });
+});
+
 describe("sendNotification — approval reminder/escalation flavors (Slice 1)", () => {
   it("reminder flavor: header + text say reminder #N; decision buttons stay", async () => {
     await sendNotification({

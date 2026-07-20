@@ -1600,6 +1600,16 @@ export interface components {
       nodeTimes: {
         [key: string]: unknown;
       } | null;
+      /**
+       * @description Live spend-so-far of this run in USD (the interpreter's metered cost accumulator). Null when unavailable (pre-feature worker or Temporal-level failure).
+       * @example 0.0123
+       */
+      spentUsd: number | null;
+      /**
+       * @description The per-run budget cap this run enforces (snapshotted at start, refreshed after a budget-pause resume). Null when no cap is configured or the run is closed.
+       * @example 0.5
+       */
+      perExecutionCapUsd: number | null;
     };
     RunEventResponse: {
       /** @example 12 */
@@ -1706,6 +1716,11 @@ export interface components {
        * @example true
        */
       onRunFailed: boolean;
+      /**
+       * @description Notify this channel when monthly spend crosses the budget's alert threshold (once per calendar month). Default off.
+       * @example false
+       */
+      onBudgetThreshold: boolean;
     };
     CreateNotificationChannelDto: {
       /**
@@ -1733,6 +1748,11 @@ export interface components {
        * @example true
        */
       onRunFailed?: boolean;
+      /**
+       * @description Notify this channel when monthly spend crosses the budget's alert threshold (at most once per calendar month). Default off.
+       * @example false
+       */
+      onBudgetThreshold?: boolean;
       /**
        * @description Channel type — determines the payload format.
        * @example slack
@@ -1766,6 +1786,11 @@ export interface components {
        * @example true
        */
       onRunFailed?: boolean;
+      /**
+       * @description Notify this channel when monthly spend crosses the budget's alert threshold (at most once per calendar month). Default off.
+       * @example false
+       */
+      onBudgetThreshold?: boolean;
     };
     TestNotificationResponse: {
       /** @example true */
@@ -2027,16 +2052,21 @@ export interface components {
        */
       maxStepsPerRun: number;
       /**
-       * @description Action when a budget is exceeded.
+       * @description Action when the monthly cap is exceeded: reject (stop), downgrade (fallback model), or pause (park runs as awaiting_budget until the cap is raised or the month rolls over).
        * @example reject
        * @enum {string}
        */
-      onBudgetExceeded: "reject" | "downgrade";
+      onBudgetExceeded: "reject" | "downgrade" | "pause";
       /**
        * @description Model to downgrade to when onBudgetExceeded='downgrade'.
        * @example claude-3-5-haiku
        */
       fallbackModel: Record<string, unknown> | null;
+      /**
+       * @description Alert threshold as % of the monthly cap; crossing it emits a budgetThreshold notification (once per calendar month). Null = no alert configured.
+       * @example 80
+       */
+      alertThresholdPct: Record<string, unknown> | null;
       /**
        * @description Month-to-date spend, USD.
        * @example 42.5
@@ -2065,11 +2095,16 @@ export interface components {
        */
       maxStepsPerRun?: number;
       /**
-       * @description Action when a budget is exceeded.
+       * @description Action when the monthly cap is exceeded: reject (stop), downgrade (fallback model), or pause (park runs as awaiting_budget; they resume on cap raise or month rollover).
        * @example reject
        * @enum {string}
        */
-      onBudgetExceeded?: "reject" | "downgrade";
+      onBudgetExceeded?: "reject" | "downgrade" | "pause";
+      /**
+       * @description Alert threshold as % of the monthly cap (1–100). Crossing it emits a budgetThreshold notification (at most once per calendar month). Omit/null = no alert.
+       * @example 80
+       */
+      alertThresholdPct?: Record<string, unknown> | null;
       /**
        * @description Model to downgrade to when onBudgetExceeded='downgrade'.
        * @example claude-3-5-haiku
@@ -2095,16 +2130,21 @@ export interface components {
        */
       maxStepsPerRun: number;
       /**
-       * @description Action when a budget is exceeded.
+       * @description Action when the monthly cap is exceeded: reject (stop), downgrade (fallback model), or pause (park runs as awaiting_budget until the cap is raised or the month rolls over).
        * @example reject
        * @enum {string}
        */
-      onBudgetExceeded: "reject" | "downgrade";
+      onBudgetExceeded: "reject" | "downgrade" | "pause";
       /**
        * @description Model to downgrade to when onBudgetExceeded='downgrade'.
        * @example claude-3-5-haiku
        */
       fallbackModel: Record<string, unknown> | null;
+      /**
+       * @description Alert threshold as % of the monthly cap; crossing it emits a budgetThreshold notification (once per calendar month). Null = no alert configured.
+       * @example 80
+       */
+      alertThresholdPct: Record<string, unknown> | null;
     };
     RegisterWebhookDto: {
       /**

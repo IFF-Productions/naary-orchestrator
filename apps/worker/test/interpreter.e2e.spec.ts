@@ -6,6 +6,7 @@ import { Worker } from "@temporalio/worker";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   approvalSignal,
+  budgetResumeSignal,
   stateQuery,
   TASK_QUEUE,
   webhookResponseQuery,
@@ -43,6 +44,17 @@ const mockActivities = {
       throw ApplicationFailure.nonRetryable(
         "Provider rate limit exhausted",
         "QUOTA",
+      );
+    }
+    // Slice 3 pause-not-fail probe: mirror agent.ts under a LIVE policy of "pause" —
+    // the monthly-cap reservation refuses N times (BUDGET_PAUSE), then succeeds
+    // (the cap was raised / the month rolled over between attempts).
+    if (pauseAgentFailures > 0) {
+      pauseAgentFailures -= 1;
+      throw ApplicationFailure.nonRetryable(
+        "Monthly budget exceeded — run paused until the cap is raised or the month rolls over",
+        "BUDGET_PAUSE",
+        { tenantId: meta.tenantId },
       );
     }
     return {
@@ -331,6 +343,14 @@ const mockActivities = {
     };
   },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
+  // Slice 3: the post-resume budget re-read. Mutable result so a test can model the
+  // PUT that raised the caps; captures calls to prove the re-read happens on resume.
+  refreshBudget: async (meta: {
+    tenantId: string;
+  }): Promise<activities.BudgetSnapshot | null> => {
+    refreshBudgetCalls.push(meta);
+    return refreshBudgetResult;
+  },
   // Read-model push — captured so Slice-2 tests can assert the terminal-failure
   // status + classified failureKind reach the Execution row.
   setExecutionStatus: async (meta: {
@@ -376,6 +396,10 @@ const loadVariablesCalls: { tenantId: string; environmentId?: string }[] = [];
 let loadVariablesResult: Record<string, string> = { slackChannel: "#alerts" };
 const pollCalls: activities.PollMeta[] = [];
 let pollChanged = true;
+// Slice 3 pause-not-fail probes (see the runAgent/refreshBudget mocks).
+let pauseAgentFailures = 0;
+const refreshBudgetCalls: { tenantId: string }[] = [];
+let refreshBudgetResult: activities.BudgetSnapshot | null = null;
 const notifyCalls: activities.NotificationInput[] = [];
 const prepareApprovalCalls: {
   tenantId: string;
@@ -4020,5 +4044,283 @@ describe("runGraph interpreter — Slice 2: per-node timing + failure classifica
     });
     // test-mode: no Execution read-model writes at all.
     expect(statusPushes.length).toBe(before);
+  });
+});
+
+describe("runGraph interpreter — budget pause-not-fail (Slice 3)", () => {
+  // start → agent → end. The agent mock throws BUDGET_PAUSE while
+  // pauseAgentFailures > 0 (the live-read monthly-cap policy is "pause").
+  const pauseGraph: GraphDef = {
+    startNodeId: "s",
+    nodes: [
+      { id: "s", type: "start" },
+      {
+        id: "act",
+        type: "agent",
+        config: {
+          provider: "anthropic",
+          model: "claude-opus-4-8",
+          systemPrompt: "x",
+        },
+      },
+      { id: "e", type: "end" },
+    ],
+    edges: [
+      { from: "s", to: "act" },
+      { from: "act", to: "e" },
+    ],
+  };
+
+  it("monthly-cap BUDGET_PAUSE parks the run; budgetResume RETRIES the node and the run completes — and the history replays", async () => {
+    pauseAgentFailures = 1; // first reservation refused under policy "pause"
+    refreshBudgetResult = {
+      perExecutionCapUsd: 5,
+      maxStepsPerRun: 50,
+      onBudgetExceeded: "pause",
+    };
+    refreshBudgetCalls.length = 0;
+    const worker = await makeWorker();
+    const history = await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [pauseGraph, {}, { tenantId: "t-pause-monthly" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-budget-pause",
+      });
+      await waitFor(
+        async () =>
+          (await handle.query(stateQuery)).status === "awaiting_budget",
+      );
+      // The pause reached the Runs read-model (where PUT-resume enumerates from).
+      expect(
+        statusPushes.some(
+          (p) =>
+            p.workflowId === "e2e-budget-pause" &&
+            p.status === "awaiting_budget",
+        ),
+      ).toBe(true);
+      // Live spend rides the state query while parked (Slice 3 item 4).
+      const parked = await handle.query(stateQuery);
+      expect(parked.spentUsd).toBe(0); // the refused call never billed
+      await handle.signal(budgetResumeSignal, { tenantId: "t-pause-monthly" });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(result.ctx.act).toMatchObject({ status: "ok" }); // the node RETRIED
+      return handle.fetchHistory();
+    });
+    // On resume the workflow re-read the caps in-activity (never in workflow code).
+    expect(
+      refreshBudgetCalls.some((c) => c.tenantId === "t-pause-monthly"),
+    ).toBe(true);
+    // The pause path (patched marker + condition + activities) replays deterministically.
+    await expect(
+      Worker.runReplayHistory(
+        { workflowsPath: WORKFLOWS_PATH },
+        history,
+        "e2e-budget-pause",
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("per-run cap under policy 'pause': parks instead of budget_exceeded; a resume with a RAISED cap completes — and replays", async () => {
+    pauseAgentFailures = 0;
+    refreshBudgetResult = {
+      perExecutionCapUsd: 5, // the "PUT raised the cap" the resume re-reads
+      maxStepsPerRun: 50,
+      onBudgetExceeded: "pause",
+    };
+    const worker = await makeWorker();
+    const history = await worker.runUntil(async () => {
+      // agent costs 0.01; cap 0.005 trips at the node AFTER the agent — but the
+      // snapshotted policy "pause" parks the run instead of the old terminal.
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          pauseGraph,
+          {},
+          {
+            tenantId: "t-pause-cap",
+            perExecutionCapUsd: 0.005,
+            maxStepsPerRun: 50,
+            onBudgetExceeded: "pause",
+          },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-budget-pause-cap",
+      });
+      await waitFor(
+        async () =>
+          (await handle.query(stateQuery)).status === "awaiting_budget",
+      );
+      // The meter shows the REAL figures while parked: spend + the run's own cap.
+      const parked = await handle.query(stateQuery);
+      expect(parked.spentUsd).toBe(0.01);
+      expect(parked.perExecutionCapUsd).toBe(0.005);
+      await handle.signal(budgetResumeSignal, { tenantId: "t-pause-cap" });
+      const result = await handle.result();
+      expect(result.status).toBe("completed"); // raised cap → the run finished
+      return handle.fetchHistory();
+    });
+    await expect(
+      Worker.runReplayHistory(
+        { workflowsPath: WORKFLOWS_PATH },
+        history,
+        "e2e-budget-pause-cap",
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("still over after resume: the run re-parks (each cycle consumes its own Signal), then completes after a real raise", async () => {
+    pauseAgentFailures = 0;
+    refreshBudgetResult = {
+      perExecutionCapUsd: 0.005, // resume does NOT clear the cap yet
+      maxStepsPerRun: 50,
+      onBudgetExceeded: "pause",
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          pauseGraph,
+          {},
+          {
+            tenantId: "t-pause-repark",
+            perExecutionCapUsd: 0.005,
+            maxStepsPerRun: 50,
+            onBudgetExceeded: "pause",
+          },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-budget-repark",
+      });
+      await waitFor(
+        async () =>
+          (await handle.query(stateQuery)).status === "awaiting_budget",
+      );
+      // First resume: the re-read cap is UNCHANGED → the run parks AGAIN. Await the
+      // SECOND awaiting_budget read-model push (the first park pushed once already) —
+      // querying the status alone could race the signal and see the FIRST park.
+      const parks = () =>
+        statusPushes.filter(
+          (p) =>
+            p.workflowId === "e2e-budget-repark" &&
+            p.status === "awaiting_budget",
+        ).length;
+      expect(parks()).toBe(1);
+      await handle.signal(budgetResumeSignal, { tenantId: "t-pause-repark" });
+      await waitFor(async () => parks() >= 2);
+      // Now the cap really rises; the next Signal completes the run.
+      refreshBudgetResult = {
+        perExecutionCapUsd: 5,
+        maxStepsPerRun: 50,
+        onBudgetExceeded: "pause",
+      };
+      await handle.signal(budgetResumeSignal, { tenantId: "t-pause-repark" });
+      expect((await handle.result()).status).toBe("completed");
+    });
+  });
+
+  it("ONE budgetResume Signal wakes ALL parked parallel branches (monotonic counter, not a flag)", async () => {
+    // start fans out to two agents; BOTH reservations refuse under "pause".
+    const parallelGraph: GraphDef = {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        {
+          id: "a1",
+          type: "agent",
+          config: {
+            provider: "anthropic",
+            model: "claude-opus-4-8",
+            systemPrompt: "x",
+          },
+        },
+        {
+          id: "a2",
+          type: "agent",
+          config: {
+            provider: "anthropic",
+            model: "claude-opus-4-8",
+            systemPrompt: "y",
+          },
+        },
+        { id: "e", type: "end" },
+      ],
+      edges: [
+        { from: "s", to: "a1" },
+        { from: "s", to: "a2" },
+        { from: "a1", to: "e" },
+        { from: "a2", to: "e" },
+      ],
+    };
+    pauseAgentFailures = 2; // one refusal per branch
+    refreshBudgetResult = {
+      perExecutionCapUsd: 5,
+      maxStepsPerRun: 50,
+      onBudgetExceeded: "pause",
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [parallelGraph, {}, { tenantId: "t-pause-parallel" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-budget-pause-parallel",
+      });
+      await waitFor(
+        async () =>
+          (await handle.query(stateQuery)).status === "awaiting_budget",
+      );
+      await handle.signal(budgetResumeSignal, { tenantId: "t-pause-parallel" });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(result.ctx.a1).toMatchObject({ status: "ok" });
+      expect(result.ctx.a2).toMatchObject({ status: "ok" });
+    });
+  });
+
+  it("Slice 3 invariant: a NON-pause run keeps the exact legacy terminal (budget_exceeded, no pause commands) and its history REPLAYS", async () => {
+    pauseAgentFailures = 0;
+    refreshBudgetCalls.length = 0;
+    const worker = await makeWorker();
+    const history = await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          pauseGraph,
+          {},
+          // No onBudgetExceeded in the snapshot — the pre-Slice-3 shape.
+          {
+            tenantId: "t-legacy-cap",
+            perExecutionCapUsd: 0.005,
+            maxStepsPerRun: 50,
+          },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-budget-legacy",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("budget_exceeded");
+      return handle.fetchHistory();
+    });
+    // No pause machinery ran: no budget re-read, no budgetResume wait.
+    expect(refreshBudgetCalls.length).toBe(0);
+    const events = (history.events ?? []) as {
+      activityTaskScheduledEventAttributes?: {
+        activityType?: { name?: string };
+      };
+    }[];
+    expect(
+      events.some(
+        (e) =>
+          e.activityTaskScheduledEventAttributes?.activityType?.name ===
+          "refreshBudget",
+      ),
+    ).toBe(false);
+    // The "old history" case: recorded WITHOUT the pause path/marker, replayed
+    // against the NEW interpreter — byte-identical commands, no nondeterminism.
+    await expect(
+      Worker.runReplayHistory(
+        { workflowsPath: WORKFLOWS_PATH },
+        history,
+        "e2e-budget-legacy",
+      ),
+    ).resolves.toBeUndefined();
   });
 });

@@ -8,6 +8,7 @@ import {
   APPROVAL_CTX_KEY,
   NODE_TIMES_CTX_KEY,
   approvalSignal,
+  budgetResumeSignal,
   resumeSignal,
   stateQuery,
   webhookResponseQuery,
@@ -102,6 +103,7 @@ import {
   callRssRead,
   callPoll,
   prepareApproval,
+  refreshBudget,
   sendNotification,
   callCode,
   retryOverride,
@@ -114,6 +116,7 @@ import {
   MAX_TRACE_ITEMS,
   MAX_TRACE_TOTAL_BYTES,
   classifyFailure,
+  isBudgetPauseFailure,
   traceCell,
   nodeErrorMessage,
 } from "./helpers";
@@ -139,6 +142,11 @@ export async function runGraph(
   let approval: ApprovalInput | undefined;
   // Set by resumeSignal when an external system calls the run's resume URL (wait/webhook mode).
   let webhookResume: ResumeInput | undefined;
+  // Budget pause-not-fail (redesign Slice 3): a MONOTONIC counter, not a flag — several
+  // parallel branches can park on budget simultaneously, and one budgetResume Signal must
+  // wake ALL of them (each waiter conditions on "count > what I saw when I parked"; a
+  // consumed flag would strand every waiter after the first).
+  let budgetResumeCount = 0;
   let status: ExecutionStatus = "running";
   let currentNodeId = resume?.startNodeId ?? graph.startNodeId;
   // The synchronous response a respondToWebhook node sets, exposed via a query for
@@ -215,10 +223,21 @@ export async function runGraph(
   wf.setHandler(resumeSignal, (s) => {
     webhookResume = s;
   });
+  // Registering a handler issues no command (replay-safe without patched()); only runs
+  // that actually PARK receive this signal — the API targets awaiting_budget rows only.
+  wf.setHandler(budgetResumeSignal, () => {
+    budgetResumeCount++;
+  });
   wf.setHandler(stateQuery, (): ExecutionState => ({
     status,
     currentNodeId,
     ctx,
+    // Live run spend (Slice 3): the deterministic cost accumulator + the per-run cap
+    // this run enforces. Query-handler-only data — queries never write history.
+    spentUsd: costUsd,
+    ...(runCtx.perExecutionCapUsd !== undefined
+      ? { perExecutionCapUsd: runCtx.perExecutionCapUsd }
+      : {}),
   }));
   wf.setHandler(webhookResponseQuery, () => webhookResponse);
 
@@ -263,6 +282,41 @@ export async function runGraph(
         costUsd,
       });
     }
+  }
+
+  /**
+   * Budget pause-not-fail (redesign Slice 3): park the run as `awaiting_budget` on a
+   * durable condition() until a `budgetResume` Signal (cap raise via PUT /tenants/:id/
+   * budget, or the month-rollover boot reconcile) — Signal + condition per Tier-1 rule 5,
+   * never a poll. On resume, RE-READ the tenant's caps/policy in-activity (the PUT that
+   * woke us likely raised the per-run cap; without the re-read a per-run-cap pause would
+   * re-park forever against its stale snapshot) and mutate them into runCtx so they also
+   * ride any later continueAsNew (runCtx is re-passed whole).
+   *
+   * REPLAY SAFETY: every call site is doubly gated — the live/snapshot policy value must
+   * be "pause" (a value no pre-Slice-3 run ever produced or snapshotted) AND
+   * wf.patched("budget-pause-v1") (the slice-1-style staged-deploy guard: histories
+   * recorded by this path fail FAST on a pre-Slice-3 worker instead of silently
+   * diverging; old histories replay the legacy terminal/thrown path byte-identically).
+   */
+  async function pauseOnBudget(): Promise<void> {
+    const seen = budgetResumeCount;
+    status = "awaiting_budget";
+    await syncStatus(); // surface the pause in the Runs list (+ stamps budgetPausedAt)
+    await wf.condition(() => budgetResumeCount > seen);
+    const fresh = await refreshBudget({ tenantId: runCtx.tenantId });
+    if (fresh) {
+      runCtx.perExecutionCapUsd = fresh.perExecutionCapUsd;
+      if (
+        fresh.onBudgetExceeded === "reject" ||
+        fresh.onBudgetExceeded === "downgrade" ||
+        fresh.onBudgetExceeded === "pause"
+      ) {
+        runCtx.onBudgetExceeded = fresh.onBudgetExceeded;
+      }
+    }
+    status = "running";
+    await syncStatus();
   }
 
   /**
@@ -1363,11 +1417,21 @@ export async function runGraph(
       ) {
         return "circuit_open";
       }
-      if (
+      // A while (not if): under policy "pause" the run parks and, once resumed with a
+      // refreshed cap, re-checks — still over (cap unchanged) parks again, each cycle
+      // consuming its own Signal. Non-pause policies short-circuit to the pre-existing
+      // terminal BEFORE wf.patched() is ever evaluated (see pauseOnBudget's replay note).
+      while (
         runCtx.perExecutionCapUsd !== undefined &&
         costUsd >= runCtx.perExecutionCapUsd
       ) {
-        return "budget_exceeded";
+        if (
+          runCtx.onBudgetExceeded !== "pause" ||
+          !wf.patched("budget-pause-v1")
+        ) {
+          return "budget_exceeded";
+        }
+        await pauseOnBudget();
       }
 
       const node = nodeById.get(current);
@@ -1768,12 +1832,26 @@ export async function runGraph(
       // records the activity failure in history and replays it identically. costUsd
       // accumulated before the failure is kept (already metered).
       let terminal: ExecutionStatus | null;
-      try {
-        terminal = await execNode(node);
-      } catch (err) {
-        if (node.onError !== "continue") throw err;
-        ctx[node.id] = { error: nodeErrorMessage(err) };
-        terminal = null;
+      for (;;) {
+        try {
+          terminal = await execNode(node);
+        } catch (err) {
+          // Budget pause-not-fail (Slice 3): the agent activity threw BUDGET_PAUSE —
+          // the tenant's LIVE-read monthly-cap policy is "pause" — so park the run and
+          // RETRY the same node after the resume Signal (the fresh reservation then
+          // re-checks against the raised cap / new month). Checked BEFORE onError:
+          // "continue" — a policy pause is not a node error. isBudgetPauseFailure is
+          // pure; old histories never contain the marker, and the new commands sit
+          // behind the same budget-pause-v1 gate as the per-run-cap path.
+          if (isBudgetPauseFailure(err) && wf.patched("budget-pause-v1")) {
+            await pauseOnBudget();
+            continue; // retry the SAME node
+          }
+          if (node.onError !== "continue") throw err;
+          ctx[node.id] = { error: nodeErrorMessage(err) };
+          terminal = null;
+        }
+        break;
       }
       if (terminal !== null) return terminal;
 

@@ -12,6 +12,9 @@ export const RUN_STATUS_UI: Record<string, { state: RunState; label: string }> =
     running: { state: "running", label: "Running" },
     awaiting_approval: { state: "paused", label: "Awaiting approval" },
     awaiting_webhook: { state: "paused", label: "Awaiting webhook" },
+    // Budget pause-not-fail (Slice 3): a durable PAUSE, not an error — the run
+    // resumes when the cap is raised or the month rolls over.
+    awaiting_budget: { state: "paused", label: "Paused on budget" },
     completed: { state: "done", label: "Completed" },
     rejected: { state: "error", label: "Rejected" },
     budget_exceeded: { state: "error", label: "Budget exceeded" },

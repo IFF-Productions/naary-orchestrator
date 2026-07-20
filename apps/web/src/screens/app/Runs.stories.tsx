@@ -73,6 +73,21 @@ const RUNS = [
     archived: false,
     graphVersion: 5,
   },
+  {
+    // Slice 3 pause-not-fail: parked on budget (policy "pause") — an amber PAUSED
+    // chip, not an error; it resumes on cap raise / month rollover.
+    workflowId: "wh-t1-b0dget",
+    workflowKey: "rag-support-bot",
+    status: "awaiting_budget",
+    costUsd: 0.31,
+    startedAt: new Date("2026-07-16T09:45:00Z").toISOString(),
+    createdAt: new Date("2026-07-16T09:45:00Z").toISOString(),
+    finishedAt: null,
+    durationMs: null,
+    failureKind: null,
+    archived: false,
+    graphVersion: 4,
+  },
 ];
 
 const meta: Meta<typeof Runs> = {

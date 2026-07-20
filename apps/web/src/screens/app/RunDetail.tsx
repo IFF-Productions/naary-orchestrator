@@ -97,6 +97,79 @@ function costText(ctx: Record<string, unknown>): string {
   return typeof c === "number" ? `$${c.toFixed(4)}` : "—";
 }
 
+/**
+ * Small REAL budget meter (Slice 3 — live run spend): the run's metered spend vs its
+ * own per-run cap. Rendered only when the run enforces a cap (never fabricated).
+ */
+function RunBudgetMeter({
+  spentUsd,
+  capUsd,
+}: {
+  spentUsd: number;
+  capUsd: number;
+}) {
+  const pct = Math.min(100, (spentUsd / capUsd) * 100);
+  const over = pct >= 100;
+  const near = pct >= 80;
+  const color = over
+    ? "var(--state-error)"
+    : near
+      ? "var(--state-paused)"
+      : "var(--state-done)";
+  return (
+    <div style={{ minWidth: 96 }}>
+      <div
+        className="mono"
+        style={{
+          fontSize: "var(--text-2xs)",
+          color: "var(--ink-3)",
+          letterSpacing: ".03em",
+        }}
+      >
+        RUN BUDGET
+      </div>
+      <div
+        style={{
+          fontSize: "var(--text-body)",
+          color: "var(--ink-soft)",
+          fontWeight: "var(--weight-semibold)",
+          marginTop: 1,
+          whiteSpace: "nowrap",
+        }}
+      >
+        ${spentUsd.toFixed(4)}{" "}
+        <span style={{ color: "var(--ink-3)", fontWeight: 400 }}>
+          / ${capUsd.toFixed(2)}
+        </span>
+      </div>
+      <div
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(pct)}
+        aria-label="Run spend vs per-run cap"
+        style={{
+          marginTop: 4,
+          height: 4,
+          borderRadius: 2,
+          background: "var(--card-2)",
+          border: "1px solid var(--line)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            width: `${pct}%`,
+            height: "100%",
+            background: color,
+            transition: "width .4s ease",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 /** Mono uppercase stat (STEPS / ELAPSED / COST) for the top strip. */
 function TopStat({ label, value }: { label: string; value: string }) {
   return (
@@ -272,8 +345,10 @@ function RunView({ id }: { id: string }) {
   const status = state?.status;
   const awaiting = status === "awaiting_approval";
   const awaitingWebhook = status === "awaiting_webhook";
+  // Budget pause-not-fail (Slice 3): a durable pause like the other awaiting states.
+  const awaitingBudget = status === "awaiting_budget";
   const running = status === "running";
-  const active = awaiting || awaitingWebhook || running;
+  const active = awaiting || awaitingWebhook || awaitingBudget || running;
   const ui = status ? runStatusUi(status) : null;
 
   /* ---------- Derived view-model (all from real run data) ---------- */
@@ -293,7 +368,8 @@ function RunView({ id }: { id: string }) {
 
   const { startedAt, lastAt, errorDetail } = historyTimes(events);
   // "Suspended since": the moment the history went idle (its last recorded event).
-  const sinceIso = awaiting || awaitingWebhook ? lastAt : null;
+  const sinceIso =
+    awaiting || awaitingWebhook || awaitingBudget ? lastAt : null;
   const waitingAge = sinceIso
     ? fmtAge(Date.now() - new Date(sinceIso).getTime())
     : null;
@@ -540,6 +616,18 @@ function RunView({ id }: { id: string }) {
               />
               <TopStat label="ELAPSED" value={elapsed ?? "—"} />
               <TopStat label="COST" value={costText(state.ctx)} />
+              {/* Real budget meter (Slice 3): only when the run enforces a per-run
+                  cap — spentUsd is the interpreter's metered accumulator, the cap
+                  is the run's own snapshot. Never fabricated without both. */}
+              {typeof state.perExecutionCapUsd === "number" &&
+                state.perExecutionCapUsd > 0 && (
+                  <RunBudgetMeter
+                    spentUsd={
+                      typeof state.spentUsd === "number" ? state.spentUsd : 0
+                    }
+                    capUsd={state.perExecutionCapUsd}
+                  />
+                )}
             </div>
           )}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

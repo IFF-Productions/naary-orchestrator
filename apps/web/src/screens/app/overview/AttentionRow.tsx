@@ -144,6 +144,7 @@ export function AttentionRow({
   oldestApprovalMs,
   breachedCount,
   budgetStoppedCount,
+  budgetPausedCount = 0,
   failureCount,
   failureHint,
   narrow,
@@ -158,6 +159,8 @@ export function AttentionRow({
   breachedCount: number;
   /** Runs the budget guardrail stopped in the last 24h. */
   budgetStoppedCount: number;
+  /** Runs currently PARKED as awaiting_budget (policy "pause", Slice 3). Default 0. */
+  budgetPausedCount?: number;
   /** failed / timed_out runs in the last 24h. */
   failureCount: number;
   /** Honest sub-line for the failures card (e.g. "3 timed out · 1 failed"). */
@@ -166,7 +169,8 @@ export function AttentionRow({
 }) {
   const navigate = useNavigate();
   const v = (n: number): ReactNode => (loading ? "…" : errored ? "—" : n);
-  const attention = approvalsCount + budgetStoppedCount + failureCount;
+  const attention =
+    approvalsCount + budgetStoppedCount + budgetPausedCount + failureCount;
 
   return (
     <>
@@ -248,23 +252,49 @@ export function AttentionRow({
           }}
         />
 
-        <AttentionCard
-          title="Stopped on budget · 24h"
-          tile={
-            <Tile color="var(--brand)" border="var(--brand)" icon="pause" />
-          }
-          value={v(budgetStoppedCount)}
-          sub={
-            loading || errored
-              ? " "
-              : budgetStoppedCount === 0
-                ? "Within budget"
-                : "hit the budget guardrail — raise the cap to re-run"
-          }
-          cta="Manage budget"
-          ctaColor="var(--brand)"
-          onClick={() => navigate("/app/billing")}
-        />
+        {/* Paused (policy "pause") takes over the budget card when present: those runs
+            RESUME on a cap raise (the billing editor's PUT signals them) — honest
+            "resume" language, vs the terminal stopped/rerun copy. */}
+        {budgetPausedCount > 0 ? (
+          <AttentionCard
+            title="Paused on budget"
+            tile={
+              <Tile
+                color="var(--state-paused)"
+                border="color-mix(in srgb, var(--state-paused) 55%, var(--line))"
+                icon="pause"
+                pulse
+              />
+            }
+            value={v(budgetPausedCount)}
+            sub={
+              loading || errored
+                ? " "
+                : "parked, not failed — they resume when the cap is raised or next month"
+            }
+            cta="Raise cap & resume"
+            ctaColor="var(--state-paused)"
+            onClick={() => navigate("/app/billing")}
+          />
+        ) : (
+          <AttentionCard
+            title="Stopped on budget · 24h"
+            tile={
+              <Tile color="var(--brand)" border="var(--brand)" icon="pause" />
+            }
+            value={v(budgetStoppedCount)}
+            sub={
+              loading || errored
+                ? " "
+                : budgetStoppedCount === 0
+                  ? "Within budget"
+                  : "hit the budget guardrail — raise the cap to re-run"
+            }
+            cta="Manage budget"
+            ctaColor="var(--brand)"
+            onClick={() => navigate("/app/billing")}
+          />
+        )}
 
         <AttentionCard
           title="Failures · 24h"

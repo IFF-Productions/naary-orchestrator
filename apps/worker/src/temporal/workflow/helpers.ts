@@ -101,6 +101,32 @@ export function nodeErrorMessage(err: unknown): string {
  * "rejected"/"budget" for RETURNED terminal statuses are mapped in the
  * setExecutionStatus activity from the status itself, not here.
  */
+/**
+ * True when a thrown failure chain carries the activity's BUDGET_PAUSE marker (Slice 3
+ * — pause-not-fail). PURE + DETERMINISTIC (same argument as {@link classifyFailure}):
+ * only inspects the error Temporal recorded, issues no command. The marker is thrown
+ * EXCLUSIVELY when the tenant's live-read policy is "pause" — a value no pre-existing
+ * run ever observed — so old histories can never contain it.
+ */
+export function isBudgetPauseFailure(err: unknown): boolean {
+  let e: unknown = err;
+  for (let i = 0; i < 6 && e; i++) {
+    if (e instanceof ApplicationFailure && e.type === "BUDGET_PAUSE") {
+      return true;
+    }
+    if (
+      typeof e === "object" &&
+      "cause" in e &&
+      (e as { cause?: unknown }).cause
+    ) {
+      e = (e as { cause: unknown }).cause;
+      continue;
+    }
+    break;
+  }
+  return false;
+}
+
 export function classifyFailure(err: unknown): FailureKind {
   // Walk the wrapped chain (ActivityFailure → cause → …) collecting evidence.
   let e: unknown = err;
@@ -109,7 +135,9 @@ export function classifyFailure(err: unknown): FailureKind {
     if (e instanceof ApplicationFailure) {
       const type = e.type ?? "";
       if (type === "QUOTA" || type === "RATE_LIMIT") return "rate_limit";
-      if (type === "BUDGET") return "budget";
+      // BUDGET_PAUSE normally parks the run (Slice 3); it only reaches a THROWN
+      // terminal when the patched pause path was unavailable — still a budget stop.
+      if (type === "BUDGET" || type === "BUDGET_PAUSE") return "budget";
       if (type.endsWith("_TIMEOUT") || type === "TIMEOUT") return "timeout";
       if (type === "HTTP_ERROR_STATUS" || type === "HTTP_5XX") {
         // http.ts throws "HTTP request returned status <n>" — a 5xx is an upstream

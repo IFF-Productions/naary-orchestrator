@@ -1,5 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { IsIn, IsNumber, IsOptional, IsString } from "class-validator";
+import {
+  IsIn,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from "class-validator";
 import type { SetBudgetInput } from "@naary/usage";
 
 export class SetBudgetDto implements SetBudgetInput {
@@ -17,13 +25,28 @@ export class SetBudgetDto implements SetBudgetInput {
   maxStepsPerRun?: number;
 
   @ApiPropertyOptional({
-    enum: ["reject", "downgrade"],
+    enum: ["reject", "downgrade", "pause"],
     example: "reject",
-    description: "Action when a budget is exceeded.",
+    description:
+      "Action when the monthly cap is exceeded: reject (stop), downgrade (fallback model), or pause (park runs as awaiting_budget; they resume on cap raise or month rollover).",
   })
   @IsOptional()
-  @IsIn(["reject", "downgrade"])
+  @IsIn(["reject", "downgrade", "pause"])
   onBudgetExceeded?: SetBudgetInput["onBudgetExceeded"];
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 80,
+    minimum: 1,
+    maximum: 100,
+    description:
+      "Alert threshold as % of the monthly cap (1–100). Crossing it emits a budgetThreshold notification (at most once per calendar month). Omit/null = no alert.",
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  alertThresholdPct?: number | null;
 
   @ApiPropertyOptional({
     nullable: true,

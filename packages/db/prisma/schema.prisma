@@ -67,6 +67,11 @@ model Execution {
   // NULL for successes, in-flight runs, and pre-feature rows — consumers fall back to the
   // close status.
   failureKind String?
+  // Slice 3 (budget pause-not-fail): when the run last entered `awaiting_budget` (stamped
+  // in-activity by setExecutionStatus, cleared on any other status push). The month-rollover
+  // boot reconcile signals `budgetResume` to awaiting_budget rows whose pause month < the
+  // current month. NULL = not currently paused on budget.
+  budgetPausedAt DateTime?
   // Soft-archive: a user hides a run from the Runs list without deleting it. NULL = active
   // (the default view); non-null = archived + when. Purely a read-model flag — no Temporal
   // interaction, and the worker's status/cost pushes never touch it.
@@ -368,8 +373,16 @@ model TenantBudget {
   monthlyCapUsd      Decimal @db.Decimal(12, 2)
   perExecutionCapUsd Decimal @db.Decimal(12, 2)
   maxStepsPerRun     Int     @default(50) // circuit breaker
-  onBudgetExceeded   String  @default("reject") // 'reject' | 'downgrade'
+  onBudgetExceeded   String  @default("reject") // 'reject' | 'downgrade' | 'pause' (Slice 3: park + resume via Signal)
   fallbackModel      String? // used when policy = 'downgrade'
+  // Slice 3 (REDESIGN-FUNCTIONALITY-GAPS.md) — budget alert threshold. When set (1–100),
+  // the reservation that first pushes month spend past monthlyCapUsd × pct/100 emits a
+  // `budgetThreshold` notification. NULL = no alert configured.
+  alertThresholdPct  Int?
+  // Exactly-once-per-calendar-month marker for that alert ("YYYY-MM", UTC). Claimed
+  // TRANSACTIONALLY with the crossing check inside reserveBudget (row-lock serializes
+  // concurrent reservations), so at most one reservation per month owns the alert.
+  lastAlertMonth     String?
 }
 
 model TenantCredential {
@@ -783,6 +796,9 @@ model NotificationChannel {
   config            Json?
   onApprovalPending Boolean  @default(true)
   onRunFailed       Boolean  @default(true)
+  // Slice 3: notify when monthly spend crosses the budget's alertThresholdPct. Default OFF —
+  // an existing channel must opt in (the alert is new traffic, never surprise-enabled).
+  onBudgetThreshold Boolean  @default(false)
   createdAt         DateTime @default(now()) // stable list/fan-out order among same-type rows
   updatedAt         DateTime @default(now()) @updatedAt
 

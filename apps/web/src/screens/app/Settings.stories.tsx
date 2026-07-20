@@ -52,6 +52,7 @@ const CHANNELS = [
     webhookUrl: "https://hooks.slack.com/services/T0/B0/xxx",
     onApprovalPending: true,
     onRunFailed: false,
+    onBudgetThreshold: true,
   },
   {
     id: "nc-2",
@@ -61,6 +62,7 @@ const CHANNELS = [
     webhookUrl: "https://hooks.slack.com/services/T0/B1/yyy",
     onApprovalPending: false,
     onRunFailed: true,
+    onBudgetThreshold: false,
   },
   {
     id: "nc-3",
@@ -70,6 +72,7 @@ const CHANNELS = [
     webhookUrl: "https://prod-00.westus.logic.azure.com/workflows/abc",
     onApprovalPending: true,
     onRunFailed: true,
+    onBudgetThreshold: false,
   },
 ];
 

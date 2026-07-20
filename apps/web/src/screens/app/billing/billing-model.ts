@@ -94,18 +94,36 @@ export interface LadderRung {
 }
 
 /**
- * The REAL enforcement ladder from the persisted policy. The backend has exactly
- * one monthly rung — `onBudgetExceeded` at 100% (reject OR downgrade, never both)
- * — plus two per-run guards (per-execution cap, step limit). There is no
- * server-side alert/notification rung, so none is shown here (the 80% marker on
- * the meter is a dashboard threshold only).
+ * The REAL enforcement ladder from the persisted policy: an optional ALERT rung
+ * (`alertThresholdPct` — a real server-side notification since Slice 3, rendered
+ * ONLY when configured), one monthly rung — `onBudgetExceeded` at 100% (reject,
+ * downgrade, or pause) — plus two per-run guards (per-execution cap, step limit).
+ * Without a configured alert, the 80% marker on the meter stays a dashboard-only
+ * threshold and no alert rung is invented.
  */
 export function enforcementLadder(
   budget: BudgetView,
   pct: number,
 ): LadderRung[] {
   const rungs: LadderRung[] = [];
-  if (budget.onBudgetExceeded === "downgrade") {
+  if (budget.alertThresholdPct != null) {
+    rungs.push({
+      at: `${budget.alertThresholdPct}%`,
+      title: "Alert",
+      desc: "A budget alert goes to your notification channels when monthly spend crosses this — at most once per calendar month.",
+      tone: "warn",
+      active: pct >= budget.alertThresholdPct,
+    });
+  }
+  if (budget.onBudgetExceeded === "pause") {
+    rungs.push({
+      at: "100%",
+      title: "Pause",
+      desc: "At the monthly cap, runs park as awaiting budget and resume automatically when you raise the cap or the month rolls over.",
+      tone: "warn",
+      active: pct >= 100,
+    });
+  } else if (budget.onBudgetExceeded === "downgrade") {
     rungs.push({
       at: "100%",
       title: "Downgrade",
@@ -156,6 +174,12 @@ export function budgetStoppedThisMonth(
     (r) =>
       r.status === "budget_exceeded" && new Date(r.createdAt).getTime() >= from,
   );
+}
+
+/** Runs currently PARKED on budget (status awaiting_budget, policy "pause" — Slice 3).
+ *  No month window: a paused run is live state, not history. */
+export function budgetPausedRuns(runs: RunSummary[]): RunSummary[] {
+  return runs.filter((r) => r.status === "awaiting_budget");
 }
 
 /* ---------------- stacked spend-over-time ---------------- */
