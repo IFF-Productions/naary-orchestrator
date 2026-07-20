@@ -6,7 +6,7 @@ import {
   type RunSummary,
   UnauthorizedError,
 } from "../../lib/api";
-import { useMediaQuery } from "../../lib/useMediaQuery";
+import { BELOW_RAIL_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import { ActivityCard } from "./overview/ActivityCard";
 import { ApprovalQueueCard } from "./overview/ApprovalQueueCard";
 import { AttentionRow } from "./overview/AttentionRow";
@@ -45,8 +45,10 @@ function failureHint(failures: RunSummary[]): string {
 }
 
 export function Overview() {
-  const narrow = useMediaQuery("(max-width: 1080px)");
-  const stacked = useMediaQuery("(max-width: 900px)");
+  // The asymmetric queue/health split collapses to one column at/below the
+  // tablet threshold (≤1024). The KPI + workflow card grids flow on their own
+  // via auto-fit — no JS breakpoint needed for those.
+  const belowRail = useMediaQuery(BELOW_RAIL_QUERY);
 
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
   const [awaiting, setAwaiting] = useState<AwaitingApproval[] | null>(null);
@@ -181,13 +183,13 @@ export function Overview() {
         budgetStoppedCount={budgetStopped.length}
         failureCount={failures.length}
         failureHint={failureHint(failures)}
-        narrow={stacked}
       />
 
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: stacked ? "1fr" : "1.5fr 1fr",
+          // ≤1024: single column, approval queue on top (human-in-the-loop first).
+          gridTemplateColumns: belowRail ? "1fr" : "1.5fr 1fr",
           gap: 16,
           alignItems: "start",
         }}
@@ -214,7 +216,6 @@ export function Overview() {
         loading={loading}
         errored={err !== null}
         workflows={busiestWorkflows(runList, now)}
-        narrow={narrow}
       />
     </div>
   );

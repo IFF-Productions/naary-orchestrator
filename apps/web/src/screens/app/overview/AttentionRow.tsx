@@ -146,7 +146,6 @@ export function AttentionRow({
   budgetStoppedCount,
   failureCount,
   failureHint,
-  narrow,
 }: {
   loading: boolean;
   errored: boolean;
@@ -162,7 +161,6 @@ export function AttentionRow({
   failureCount: number;
   /** Honest sub-line for the failures card (e.g. "3 timed out · 1 failed"). */
   failureHint: string;
-  narrow: boolean;
 }) {
   const navigate = useNavigate();
   const v = (n: number): ReactNode => (loading ? "…" : errored ? "—" : n);
@@ -211,8 +209,10 @@ export function AttentionRow({
 
       <div
         style={{
+          // Card grid: flows 3 → 2 → 1 with no hard breakpoint (auto-fit).
+          // minmax keeps each KPI legible; the budget-stopped cap must stay readable.
           display: "grid",
-          gridTemplateColumns: narrow ? "1fr" : "1fr 1fr 1fr",
+          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
           gap: 14,
           marginBottom: 28,
         }}

@@ -19,12 +19,10 @@ export function BusiestWorkflowsCard({
   loading,
   errored,
   workflows,
-  narrow,
 }: {
   loading: boolean;
   errored: boolean;
   workflows: BusyWorkflow[];
-  narrow: boolean;
 }) {
   const navigate = useNavigate();
   return (
@@ -85,10 +83,9 @@ export function BusiestWorkflowsCard({
       ) : (
         <div
           style={{
+            // Card grid: flows 4 → 3 → 2 → 1 with no hard breakpoint (auto-fit).
             display: "grid",
-            gridTemplateColumns: narrow
-              ? "1fr 1fr"
-              : `repeat(${Math.max(workflows.length, 2)}, 1fr)`,
+            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
             gap: 12,
           }}
         >
