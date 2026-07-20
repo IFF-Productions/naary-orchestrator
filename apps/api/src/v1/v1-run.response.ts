@@ -24,7 +24,7 @@ export class RunListItemResponse {
   @ApiProperty({
     example: "completed",
     description:
-      "Run status: running | awaiting_approval | completed | rejected | budget_exceeded | circuit_open | invalid_graph, or a Temporal close reason (failed | timed_out | terminated | canceled | unknown).",
+      "Run status: running | awaiting_approval | awaiting_webhook | awaiting_budget | completed | rejected | budget_exceeded | circuit_open | invalid_graph, or a Temporal close reason (failed | timed_out | terminated | canceled | unknown).",
   })
   status!: string;
   @ApiProperty({

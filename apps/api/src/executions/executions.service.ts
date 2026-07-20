@@ -65,9 +65,10 @@ const DEFAULT_WORKFLOW_KEY = "default";
 export interface RunSummary {
   workflowId: string;
   workflowKey: string | null;
-  /** App status (running | awaiting_approval | completed | rejected |
-   *  budget_exceeded | circuit_open | invalid_graph) or a Temporal close reason
-   *  (failed | timed_out | terminated | canceled) or "unknown" if unreachable. */
+  /** App status (running | awaiting_approval | awaiting_webhook | awaiting_budget |
+   *  completed | rejected | budget_exceeded | circuit_open | invalid_graph) or a
+   *  Temporal close reason (failed | timed_out | terminated | canceled) or "unknown"
+   *  if unreachable. */
   status:
     | ExecutionStatus
     | "failed"
@@ -113,6 +114,14 @@ export interface RunStateView {
    *  first-class field so consumers don't grope the opaque ctx. Null when the run
    *  predates the feature or the ctx is unavailable (Temporal-level failure). */
   nodeTimes: Record<string, NodeTimeEntry> | null;
+  /** Live spend-so-far of this run in USD (Slice 3 — the interpreter's deterministic
+   *  cost accumulator, via the state query; closed runs fall back to ctx.__costUsd).
+   *  Null when unavailable (pre-feature worker / Temporal-level failure). */
+  spentUsd: number | null;
+  /** The per-run cap this run enforces (start snapshot, refreshed after a budget-pause
+   *  resume). Null when no cap is configured / the run is closed — consumers must not
+   *  fabricate a budget meter without it. */
+  perExecutionCapUsd: number | null;
 }
 
 /** Pull the interpreter's per-node timing map out of a run ctx (Slice 2), or null when
@@ -123,6 +132,13 @@ function nodeTimesFrom(
   const raw = ctx[NODE_TIMES_CTX_KEY];
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   return raw as Record<string, NodeTimeEntry>;
+}
+
+/** The run's accumulated spend mirrored into ctx (__costUsd), or null when the run
+ *  metered nothing / predates the mirror. Shape-checked, never fabricated (Slice 3). */
+function costUsdFrom(ctx: Record<string, unknown>): number | null {
+  const c = ctx.__costUsd;
+  return typeof c === "number" && Number.isFinite(c) ? c : null;
 }
 
 /** Approver routing display summary on an awaiting row (Slice 1). */
@@ -735,6 +751,10 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
             workflowKey,
             perExecutionCapUsd: budget?.perExecutionCapUsd,
             maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
+            // Slice 3: same pause-only snapshot as startGraph (see its comment).
+            ...(budget?.onBudgetExceeded === "pause"
+              ? { onBudgetExceeded: "pause" as const }
+              : {}),
             graphContentHash: snapshot.contentHash,
             graphVersion: snapshot.version,
           },
@@ -863,6 +883,12 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           workflowKey,
           perExecutionCapUsd: budget?.perExecutionCapUsd,
           maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
+          // Slice 3 (pause-not-fail): snapshot the policy ONLY when it is "pause" — the
+          // value that activates the interpreter's park path. reject/downgrade behave
+          // identically to the pre-Slice-3 absent field, so old args stay byte-identical.
+          ...(budget?.onBudgetExceeded === "pause"
+            ? { onBudgetExceeded: "pause" as const }
+            : {}),
           graphContentHash: snapshot.contentHash,
           graphVersion: snapshot.version,
           ...(errorWorkflowKey ? { errorWorkflowKey } : {}),
@@ -934,6 +960,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           seededCtx,
           perExecutionCapUsd: budget?.perExecutionCapUsd,
           maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
+          // Slice 3: deliberately NO onBudgetExceeded here — a single-node test is
+          // awaited synchronously and must fail fast on budget, never park.
         },
       ],
       taskQueue: TASK_QUEUE,
@@ -1579,6 +1607,10 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
             currentNodeId: s.currentNodeId,
             ctx: s.ctx,
             nodeTimes: nodeTimesFrom(s.ctx),
+            // Slice 3 live spend: the query's first-class figure; a pre-feature worker
+            // omits it → fall back to the ctx mirror; null when neither exists.
+            spentUsd: s.spentUsd ?? costUsdFrom(s.ctx),
+            perExecutionCapUsd: s.perExecutionCapUsd ?? null,
           };
         } catch {
           return {
@@ -1586,6 +1618,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
             currentNodeId: "",
             ctx: {},
             nodeTimes: null,
+            spentUsd: null,
+            perExecutionCapUsd: null,
           };
         }
       }
@@ -1600,6 +1634,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
             currentNodeId: "",
             ctx: r.ctx,
             nodeTimes: nodeTimesFrom(r.ctx),
+            spentUsd: costUsdFrom(r.ctx),
+            perExecutionCapUsd: null, // closed — no live cap to meter against
           };
         } catch {
           return {
@@ -1607,6 +1643,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
             currentNodeId: "",
             ctx: {},
             nodeTimes: null,
+            spentUsd: null,
+            perExecutionCapUsd: null,
           };
         }
       }
@@ -1617,6 +1655,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         currentNodeId: "",
         ctx: {},
         nodeTimes: null,
+        spentUsd: null,
+        perExecutionCapUsd: null,
       };
     } catch (e) {
       if (e instanceof WorkflowNotFoundError) {

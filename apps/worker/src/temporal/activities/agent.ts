@@ -29,6 +29,7 @@ import {
   openaiSdk,
   toSanitizedRetryable,
 } from "./shared";
+import { sendNotification } from "./notifications";
 
 // Activities run in the worker PROCESS (a side-effect zone), so structured
 // logging is fine here — unlike workflows.ts, which must stay deterministic.
@@ -120,7 +121,54 @@ export const __agentDeps = {
   monthToDateSpend,
   reserveBudget,
   releaseReservation,
+  /** Budget alert-threshold notification (Slice 3). Routed through the same channel
+   *  fan-out as run notifications; swappable so specs can capture/fail the send. */
+  sendNotification,
 };
+
+/**
+ * Fire the budgetThreshold alert FIRE-AND-FORGET (Slice 3). FAIL-SAFE by construction
+ * (CLAUDE.md rule 6 posture): never awaited on the reservation path and every failure
+ * mode — sync throw, rejection — is caught and only logged, so a notification problem
+ * can never block the reservation or the run. A missed alert is the accepted trade.
+ */
+function fireBudgetThresholdAlert(
+  meta: AgentMeta,
+  crossed: { pct: number; spendUsd: number; capUsd: number },
+): void {
+  try {
+    void Promise.resolve(
+      __agentDeps.sendNotification({
+        tenantId: meta.tenantId,
+        environmentId: meta.environmentId,
+        kind: "budget_threshold",
+        workflowId: meta.executionId,
+        thresholdPct: crossed.pct,
+        capUsd: crossed.capUsd,
+        spendUsd: crossed.spendUsd,
+      }),
+    ).catch((e: unknown) => {
+      log.warn(
+        {
+          activity: "runAgent",
+          tenantId: meta.tenantId,
+          thresholdPct: crossed.pct,
+          error: e instanceof Error ? e.message : String(e),
+        },
+        "budget threshold alert failed (ignored — never blocks the run)",
+      );
+    });
+  } catch (e) {
+    log.warn(
+      {
+        activity: "runAgent",
+        tenantId: meta.tenantId,
+        error: e instanceof Error ? e.message : String(e),
+      },
+      "budget threshold alert failed (ignored — never blocks the run)",
+    );
+  }
+}
 
 /**
  * The real agent node. Fetches the tenant's key INSIDE the activity (never as a
@@ -176,8 +224,22 @@ export async function runAgent(
         meta.tenantId,
         estimateFor(model),
         budget.monthlyCapUsd,
+        undefined,
+        budget.alertThresholdPct,
       );
       if (!res.ok) {
+        // Pause-not-fail (Slice 3): the policy is read LIVE per reservation (this
+        // getBudget call), so the marker type — not workflow state — carries the
+        // decision. BUDGET_PAUSE is thrown ONLY under policy "pause" (a value no
+        // pre-Slice-3 tenant has); the interpreter parks the run on it (behind
+        // wf.patched("budget-pause-v1")) instead of failing terminally.
+        if (budget.onBudgetExceeded === "pause") {
+          throw ApplicationFailure.nonRetryable(
+            "Monthly budget exceeded — run paused until the cap is raised or the month rolls over",
+            "BUDGET_PAUSE",
+            { tenantId: meta.tenantId },
+          );
+        }
         if (budget.onBudgetExceeded === "downgrade" && budget.fallbackModel) {
           // Re-validate the cheaper model (QA#6): it must be priced AND its own
           // reservation must fit the cap — else reject.
@@ -195,6 +257,8 @@ export async function runAgent(
             meta.tenantId,
             fallbackEstimate,
             budget.monthlyCapUsd,
+            undefined,
+            budget.alertThresholdPct,
           );
           if (!res.ok) {
             throw ApplicationFailure.nonRetryable(
@@ -213,6 +277,11 @@ export async function runAgent(
         }
       }
       reservationId = res.id;
+      // Alert threshold crossed by THIS reservation (exactly-once-per-month, claimed
+      // transactionally inside reserveBudget). Fire-and-forget — see the helper.
+      if (res.thresholdCrossed) {
+        fireBudgetThresholdAlert(meta, res.thresholdCrossed);
+      }
     }
 
     // Opt-in Anthropic prompt caching (default off): mark the STABLE system prompt as an

@@ -1,6 +1,12 @@
-// Tenant notification fan-out (Slack/Teams webhooks) + deep-link minting.
+// Tenant notification fan-out (Slack/Teams webhooks + SMTP email) + deep-link minting.
 import { createHmac } from "node:crypto";
-import { assertEgressAllowed, safeFetch } from "@naary/connections";
+import {
+  assertEgressAllowed,
+  assertHostPublic,
+  resolveSmtpUri,
+  safeFetch,
+} from "@naary/connections";
+import nodemailer from "nodemailer";
 import type { ApprovalAwaitingRecord } from "@naary/contracts";
 import { getDefaultEnvironmentId, getPrisma } from "@naary/db";
 import { resolveTemplates } from "@naary/dsl";
@@ -9,6 +15,7 @@ import {
   type NotificationInput as FormatterNotificationInput,
   type NotificationKind,
   type NotificationLinks,
+  notificationEmail,
   notificationPayload,
 } from "@naary/notifications";
 import { activityRuns } from "../../metrics";
@@ -26,12 +33,40 @@ export interface NotificationInput extends FormatterNotificationInput {
   environmentId?: string;
 }
 
-/** One enabled channel the worker will POST to (subset of the NotificationChannel row). */
+/** One enabled channel the worker will deliver to (subset of the NotificationChannel row). */
 export interface NotificationChannelRow {
-  type: string; // "slack" | "teams" | (future) — worker formats per type; unknown → slack shape
+  type: string; // "slack" | "teams" | "email" — worker formats per type; unknown → slack shape
   webhookUrl: string | null;
+  /** Email channels (Slice 4): { connectionId, to[] } — the SMTP connection reference +
+   *  recipients. The URI/credentials are resolved from the encrypted store at send time
+   *  ONLY (never stored here, never in Temporal history/logs). */
+  config?: unknown;
   onApprovalPending: boolean;
   onRunFailed: boolean;
+  /** Budget alert-threshold opt-in (Slice 3). Optional so test seams/pre-migration rows
+   *  that omit it read as OFF — the alert is never surprise-enabled. */
+  onBudgetThreshold?: boolean;
+  /** Promotion opt-in (Slice 4). Optional for the same never-surprise-enabled reason —
+   *  though promotions are emitted API-side, the gate stays symmetric here. */
+  onPromotion?: boolean;
+}
+
+/** Parse an email channel's config into { connectionId, to[] } — null when the channel
+ *  isn't configured yet (no connection or no recipients → nothing to send). */
+export function parseEmailChannelConfig(
+  config: unknown,
+): { connectionId: string; to: string[] } | null {
+  if (!config || typeof config !== "object") return null;
+  const c = config as { connectionId?: unknown; to?: unknown };
+  const connectionId =
+    typeof c.connectionId === "string" && c.connectionId
+      ? c.connectionId
+      : null;
+  const to = Array.isArray(c.to)
+    ? c.to.filter((t): t is string => typeof t === "string" && t.trim() !== "")
+    : [];
+  if (!connectionId || to.length === 0) return null;
+  return { connectionId, to };
 }
 
 // Test seam: channel read + egress fetch, swappable so tests need no DB/network. Reads only the
@@ -54,14 +89,22 @@ export const __notifyDeps = {
       select: {
         type: true,
         webhookUrl: true,
+        config: true,
         onApprovalPending: true,
         onRunFailed: true,
+        onBudgetThreshold: true,
+        onPromotion: true,
       },
     });
   },
   fetch: (url: string, init?: RequestInit) =>
     safeFetch(url, init as never) as unknown as Promise<Response>,
   assertEgressAllowed,
+  // Email-channel seam (mirrors the sendEmail node's __emailDeps): the SMTP-URI resolver,
+  // the host SSRF check, and the transport factory — swapped in tests so no SMTP is touched.
+  resolveSmtpUri,
+  assertHostPublic,
+  createTransport: (uri: string) => nodemailer.createTransport(uri),
 };
 
 /** Coerce a resolved contextFields value for the display card (mirrors the template engine's
@@ -233,12 +276,18 @@ function runUrl(workflowId: string): string | undefined {
  * ENCRYPTION_KEY) is missing — the formatter then omits that link/button.
  */
 function notificationLinks(input: NotificationInput): NotificationLinks {
+  const base = resolveAppBaseUrl();
   return {
     approvalUrl:
       input.kind === "approval_pending"
         ? approvalUrl(input.workflowId)
         : undefined,
     runUrl: runUrl(input.workflowId),
+    // Budget alerts deep-link to the Usage & budgets page (the surface that fixes them).
+    usageUrl:
+      input.kind === "budget_threshold" && base
+        ? `${base}/app/billing`
+        : undefined,
   };
 }
 
@@ -269,30 +318,64 @@ export async function sendNotification(
   const links = notificationLinks(input);
 
   for (const ch of channels) {
-    // Per-channel gating: skip channels with no URL or with this event toggled off.
-    if (!ch.webhookUrl) continue;
+    // Per-channel event gating first (applies to every channel type).
     if (input.kind === "approval_pending" && !ch.onApprovalPending) continue;
     if (input.kind === "run_failed" && !ch.onRunFailed) continue;
+    // Budget alerts are opt-in (default false — a missing/legacy field reads as OFF).
+    if (input.kind === "budget_threshold" && ch.onBudgetThreshold !== true)
+      continue;
+    // Promotions are opt-in too (emitted API-side today; the gate stays symmetric here).
+    if (input.kind === "promotion" && ch.onPromotion !== true) continue;
 
-    // Isolate each channel: one bad URL / blocked egress / timeout / 5xx must not prevent the
-    // remaining channels from being notified.
+    // Isolate each channel: one bad URL / blocked egress / timeout / 5xx / SMTP failure must
+    // not prevent the remaining channels from being notified.
     try {
-      await __notifyDeps.assertEgressAllowed(ch.webhookUrl); // https + public
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 10_000);
-      try {
-        await __notifyDeps.fetch(ch.webhookUrl, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(notificationPayload(input, ch.type, links)),
-          signal: controller.signal,
+      if (ch.type === "email") {
+        // Email channel: resolve the SMTP connection AT SEND TIME (credentials never enter
+        // this activity's inputs/outputs, Temporal history, or logs) and send via the same
+        // transport the sendEmail node uses. Unconfigured → skip silently (like a null URL).
+        const cfg = parseEmailChannelConfig(ch.config);
+        if (!cfg) continue;
+        const uri = await __notifyDeps.resolveSmtpUri(
+          input.tenantId,
+          cfg.connectionId,
+        );
+        const parsed = new URL(uri);
+        // SSRF guard: reject a private/reserved SMTP host (checked at send time).
+        await __notifyDeps.assertHostPublic(parsed.hostname);
+        const from = parsed.username
+          ? decodeURIComponent(parsed.username)
+          : undefined;
+        const mail = notificationEmail(input, links);
+        const transport = __notifyDeps.createTransport(uri);
+        await transport.sendMail({
+          from,
+          to: cfg.to,
+          subject: mail.subject,
+          text: mail.text,
+          html: mail.html,
         });
-      } finally {
-        clearTimeout(timer);
+      } else {
+        // Webhook channel (slack/teams/unknown-legacy): skip when no URL is set.
+        if (!ch.webhookUrl) continue;
+        await __notifyDeps.assertEgressAllowed(ch.webhookUrl); // https + public
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10_000);
+        try {
+          await __notifyDeps.fetch(ch.webhookUrl, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(notificationPayload(input, ch.type, links)),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
       }
       activityRuns.inc({ activity: "sendNotification", outcome: "ok" });
     } catch {
-      // Best-effort per channel: swallow and continue to the next.
+      // Best-effort per channel: swallow and continue to the next. Never rethrow — an SMTP
+      // error object can embed the host/URI, so nothing from it is logged either.
       activityRuns.inc({ activity: "sendNotification", outcome: "error" });
     }
   }

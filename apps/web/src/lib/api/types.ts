@@ -7,6 +7,8 @@ import type { GraphDef } from "@naary/dsl";
 export type ExecutionStatus =
   | "running"
   | "awaiting_approval"
+  | "awaiting_webhook"
+  | "awaiting_budget" // paused on budget (policy "pause") — resumes on cap raise / month rollover
   | "completed"
   | "rejected"
   | "budget_exceeded"
@@ -23,6 +25,10 @@ export interface ExecutionState {
    *  unknown-record (matches the generated schema); shape-checked at read time via
    *  run-view-model's nodeTimeOf. Null/absent for pre-feature runs → render "—". */
   nodeTimes?: Record<string, unknown> | null;
+  /** Live spend-so-far of this run in USD (Slice 3). Null/absent = unavailable — render "—". */
+  spentUsd?: number | null;
+  /** The per-run cap the run enforces; null/absent = no cap — never fabricate a meter. */
+  perExecutionCapUsd?: number | null;
 }
 
 /** One entry in a run's execution log (mirrors the API's RunEvent). */
@@ -494,11 +500,11 @@ export interface AuditEvent {
   createdAt: string;
 }
 
-export type NotificationChannelType = "slack" | "teams";
+export type NotificationChannelType = "slack" | "teams" | "email";
 
 /** One notification channel row — a workspace can have ANY NUMBER per type (e.g. two
- *  Slack webhooks for #alerts and #oncall). Addressed by `id`; `label` tells same-type
- *  channels apart. */
+ *  Slack webhooks for #alerts and #oncall, plus an email list). Addressed by `id`;
+ *  `label` tells same-type channels apart. */
 export interface NotificationChannel {
   id: string;
   type: NotificationChannelType;
@@ -506,8 +512,17 @@ export interface NotificationChannel {
   /** Off = the worker skips this channel entirely, even with a URL set. */
   enabled: boolean;
   webhookUrl: string | null;
+  /** Email channels: the smtp connection this channel sends through (Slice 4).
+   *  Null for webhook channels / unconfigured. Credentials never leave the server. */
+  emailConnectionId: string | null;
+  /** Email channels: recipient addresses. Empty for webhook channels. */
+  emailTo: string[];
   onApprovalPending: boolean;
   onRunFailed: boolean;
+  /** Budget alert-threshold opt-in (Slice 3). Default false. */
+  onBudgetThreshold: boolean;
+  /** Promotion opt-in (Slice 4): a workflow promoted into this env. Default false. */
+  onPromotion: boolean;
 }
 
 /**
@@ -522,8 +537,10 @@ export interface BudgetView {
   monthlyCapUsd: number;
   perExecutionCapUsd: number;
   maxStepsPerRun: number;
-  onBudgetExceeded: "reject" | "downgrade";
+  onBudgetExceeded: "reject" | "downgrade" | "pause";
   fallbackModel: string | null;
+  /** Alert threshold as % of the monthly cap; null = no alert configured (Slice 3). */
+  alertThresholdPct: number | null;
   /** Spend so far this calendar month, in USD. */
   mtdSpendUsd: number;
   /** monthlyCapUsd − mtdSpendUsd (may be negative if over cap). */
@@ -535,8 +552,9 @@ export interface SetBudgetInput {
   monthlyCapUsd: number;
   perExecutionCapUsd: number;
   maxStepsPerRun?: number;
-  onBudgetExceeded?: "reject" | "downgrade";
+  onBudgetExceeded?: "reject" | "downgrade" | "pause";
   fallbackModel?: string | null;
+  alertThresholdPct?: number | null;
 }
 
 /** One usage-ledger line item (UsageReport.events, narrowed — see parseUsageEvents). */
@@ -645,6 +663,9 @@ export function statusToRunState(
     case "running":
       return "running";
     case "awaiting_approval":
+    case "awaiting_webhook":
+    // Budget pause-not-fail (Slice 3): a durable pause, not an error.
+    case "awaiting_budget":
       return "paused";
     case "completed":
       return "done";

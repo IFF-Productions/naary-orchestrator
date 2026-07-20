@@ -31,8 +31,11 @@ export function BudgetEditor({
   const [monthly, setMonthly] = useState("");
   const [perRun, setPerRun] = useState("");
   const [maxSteps, setMaxSteps] = useState("");
-  const [action, setAction] = useState<"reject" | "downgrade">("reject");
+  const [action, setAction] = useState<"reject" | "downgrade" | "pause">(
+    "reject",
+  );
   const [fallback, setFallback] = useState("");
+  const [alertPct, setAlertPct] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,13 +47,28 @@ export function BudgetEditor({
     setMaxSteps(budget ? String(budget.maxStepsPerRun) : "");
     setAction(budget?.onBudgetExceeded ?? "reject");
     setFallback(budget?.fallbackModel ?? "");
+    setAlertPct(
+      budget?.alertThresholdPct != null ? String(budget.alertThresholdPct) : "",
+    );
     setError(null);
   }, [open, budget]);
 
   const monthlyN = positive(monthly);
   const perRunN = positive(perRun);
   const maxStepsN = maxSteps.trim() === "" ? undefined : positive(maxSteps);
-  const valid = monthlyN !== null && perRunN !== null && maxStepsN !== null; // null only when non-empty AND invalid
+  // Alert threshold: blank = no alert; otherwise a whole percent 1-100.
+  const alertRaw = alertPct.trim() === "" ? undefined : positive(alertPct);
+  const alertN =
+    alertRaw === undefined
+      ? undefined
+      : alertRaw !== null && alertRaw <= 100
+        ? Math.round(alertRaw)
+        : null;
+  const valid =
+    monthlyN !== null &&
+    perRunN !== null &&
+    maxStepsN !== null &&
+    alertN !== null; // null only when non-empty AND invalid
 
   async function save(): Promise<void> {
     if (!valid || monthlyN === null || perRunN === null) return;
@@ -68,6 +86,7 @@ export function BudgetEditor({
           action === "downgrade" && fallback.trim() !== ""
             ? fallback.trim()
             : null,
+        alertThresholdPct: alertN ?? null,
       });
       await onSaved();
       onClose();
@@ -177,7 +196,13 @@ export function BudgetEditor({
             className="input"
             value={action}
             onChange={(e) =>
-              setAction(e.target.value === "downgrade" ? "downgrade" : "reject")
+              setAction(
+                e.target.value === "downgrade"
+                  ? "downgrade"
+                  : e.target.value === "pause"
+                    ? "pause"
+                    : "reject",
+              )
             }
             style={{ width: "100%", marginTop: 6 }}
           >
@@ -186,6 +211,9 @@ export function BudgetEditor({
             </option>
             <option value="downgrade">
               Downgrade — swap to a cheaper fallback model
+            </option>
+            <option value="pause">
+              Pause — park runs until the cap is raised or the month resets
             </option>
           </select>
         </div>
@@ -206,9 +234,41 @@ export function BudgetEditor({
           </div>
         )}
 
+        <div>
+          <label className="field-label" htmlFor="budget-alert">
+            Alert threshold (% of monthly cap)
+          </label>
+          <input
+            id="budget-alert"
+            className="input mono"
+            inputMode="numeric"
+            value={alertPct}
+            onChange={(e) => setAlertPct(e.target.value)}
+            placeholder="80 (blank = no alert)"
+            style={{ width: "100%", marginTop: 6 }}
+          />
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: 5,
+            }}
+          >
+            Crossing it notifies your channels that have the budget-alert event
+            enabled — at most once per calendar month.
+          </div>
+        </div>
+
         <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
-          Caps apply live, per run — the per-run cap and step limit stop a
-          single run; the monthly cap governs the workspace.
+          {action === "pause"
+            ? "Caps apply live, per run. Over the monthly cap, runs pause as " +
+              '"awaiting budget" and resume automatically when you raise the ' +
+              "cap or the month rolls over."
+            : action === "downgrade"
+              ? "Caps apply live, per run — over the monthly cap, agent calls " +
+                "swap to the fallback model instead of stopping."
+              : "Caps apply live, per run — the per-run cap and step limit stop " +
+                "a single run; the monthly cap governs the workspace."}
         </div>
       </div>
     </Dialog>

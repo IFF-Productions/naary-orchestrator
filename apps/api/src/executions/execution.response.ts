@@ -204,6 +204,22 @@ export class RunStateResponse {
       "Per-node timing map (Slice 2): { [nodeId]: { s, f, n?, totalMs? } } — epoch-ms start/finish stamped with deterministic workflow time; n/totalMs aggregate repeated passes (loops). Null when the run predates the feature or its ctx is unavailable.",
   })
   nodeTimes!: Record<string, unknown> | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 0.0123,
+    description:
+      "Live spend-so-far of this run in USD (the interpreter's metered cost accumulator). Null when unavailable (pre-feature worker or Temporal-level failure).",
+  })
+  spentUsd!: number | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 0.5,
+    description:
+      "The per-run budget cap this run enforces (snapshotted at start, refreshed after a budget-pause resume). Null when no cap is configured or the run is closed.",
+  })
+  perExecutionCapUsd!: number | null;
 }
 
 /** The graph snapshot a run executed — for the run-detail canvas (read-only). */

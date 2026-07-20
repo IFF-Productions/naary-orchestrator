@@ -10,6 +10,7 @@ import {
 } from "../../lib/api";
 import { AnalyticsSection } from "./billing/AnalyticsSection";
 import {
+  budgetPausedRuns,
   budgetStoppedThisMonth,
   monthWindow,
   spendPct,
@@ -142,6 +143,8 @@ export function Billing() {
   const ready = state.kind === "ready";
   const pct = budget ? spendPct(budget) : 0;
   const stoppedCount = budgetStoppedThisMonth(runs, win).length;
+  // Slice 3 (policy "pause"): runs currently parked as awaiting_budget.
+  const pausedCount = budgetPausedRuns(runs).length;
   const monthSpend = budget?.mtdSpendUsd ?? monthTotals?.costUsd ?? 0;
 
   return (
@@ -212,9 +215,11 @@ export function Billing() {
             />
           </div>
 
-          {/* row 2: only when runs really hit the guardrail this month */}
+          {/* row 2: only when runs really hit the guardrail this month (stopped)
+              or are parked on it right now (paused, Slice 3) */}
           <GuardrailBanner
             count={stoppedCount}
+            pausedCount={pausedCount}
             budget={budget}
             onRaiseBudget={() => setEditorOpen(true)}
           />
@@ -239,7 +244,16 @@ export function Billing() {
             onClose={() => setEditorOpen(false)}
             tenantId={state.tenantId}
             budget={budget}
-            onSaved={() => loadBudget(state.tenantId)}
+            onSaved={async () => {
+              await loadBudget(state.tenantId);
+              // A budget save also RESUMES paused runs (Slice 3) — refresh the
+              // runs list so the paused banner reflects the woken runs.
+              try {
+                setRuns(await api.listRuns());
+              } catch {
+                /* banner refresh is best-effort */
+              }
+            }}
           />
         </div>
       )}

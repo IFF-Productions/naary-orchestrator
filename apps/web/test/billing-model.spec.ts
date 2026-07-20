@@ -3,6 +3,7 @@ import type { BudgetView, UsageEventItem } from "../src/lib/api";
 import {
   ALERT_PCT,
   budgetHealth,
+  budgetPausedRuns,
   budgetStoppedThisMonth,
   earliestEventDate,
   enforcementLadder,
@@ -21,6 +22,7 @@ const budget = (over: Partial<BudgetView> = {}): BudgetView => ({
   maxStepsPerRun: 50,
   onBudgetExceeded: "reject",
   fallbackModel: null,
+  alertThresholdPct: null,
   mtdSpendUsd: 100,
   remainingUsd: 300,
   ...over,
@@ -78,6 +80,47 @@ describe("enforcementLadder", () => {
     expect(rungs[0].title).toBe("Downgrade");
     expect(rungs[0].desc).toContain("haiku");
     expect(rungs[0].active).toBe(true);
+  });
+  it("Slice 3: a configured alertThresholdPct prepends a REAL alert rung (lit past it)", () => {
+    const rungs = enforcementLadder(budget({ alertThresholdPct: 80 }), 85);
+    expect(rungs.map((r) => r.title)).toEqual([
+      "Alert",
+      "Reject over cap",
+      "Per-run cap",
+      "Step limit / run",
+    ]);
+    expect(rungs[0].at).toBe("80%");
+    expect(rungs[0].active).toBe(true);
+    // Below the threshold the rung exists but is unlit.
+    expect(enforcementLadder(budget({ alertThresholdPct: 80 }), 40)[0].active).toBe(
+      false,
+    );
+  });
+  it("Slice 3: NO alert rung is invented without a configured threshold", () => {
+    expect(
+      enforcementLadder(budget(), 85).some((r) => r.title === "Alert"),
+    ).toBe(false);
+  });
+  it("Slice 3: pause policy renders the pause rung with resume language", () => {
+    const rungs = enforcementLadder(budget({ onBudgetExceeded: "pause" }), 104);
+    expect(rungs[0].title).toBe("Pause");
+    expect(rungs[0].desc).toContain("resume");
+    expect(rungs[0].tone).toBe("warn");
+    expect(rungs[0].active).toBe(true);
+  });
+});
+
+describe("budgetPausedRuns (Slice 3)", () => {
+  it("selects awaiting_budget runs regardless of age (live state, no month window)", () => {
+    const mk = (status: string, createdAt: string) =>
+      ({ status, createdAt }) as never;
+    const rows = budgetPausedRuns([
+      mk("awaiting_budget", "2026-07-18T00:00:00Z"),
+      mk("awaiting_budget", "2026-05-01T00:00:00Z"), // old but still parked → counts
+      mk("budget_exceeded", "2026-07-18T00:00:00Z"),
+      mk("running", "2026-07-18T00:00:00Z"),
+    ]);
+    expect(rows).toHaveLength(2);
   });
 });
 

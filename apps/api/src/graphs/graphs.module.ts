@@ -2,6 +2,7 @@ import { Global, Module } from "@nestjs/common";
 import { ConnectionService } from "@naary/connections";
 import { CredentialsService } from "@naary/secrets";
 import { EnvironmentsModule } from "../environments/environments.module";
+import { NotificationsModule } from "../notifications/notifications.module";
 import { SchedulesModule } from "../schedules/schedules.module";
 import { GraphGeneratorService } from "./graph-generator.service";
 import { GraphsController } from "./graphs.controller";
@@ -11,7 +12,9 @@ import { WorkflowLifecycleService } from "./workflow-lifecycle.service";
 /** Global so ExecutionsService and the webhook ingress can resolve graphs from DB. */
 @Global()
 @Module({
-  imports: [EnvironmentsModule, SchedulesModule], // to sync a pollTrigger graph's interval schedule on save
+  // EnvironmentsModule/SchedulesModule: sync a pollTrigger graph's interval schedule on save.
+  // NotificationsModule: promote announces to the target env's channels (Slice 4).
+  imports: [EnvironmentsModule, SchedulesModule, NotificationsModule],
   controllers: [GraphsController],
   providers: [
     GraphsService,

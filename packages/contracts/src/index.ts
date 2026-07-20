@@ -21,6 +21,7 @@ export type ExecutionStatus =
   | "completed"
   | "rejected"
   | "awaiting_webhook" // paused on a wait(webhook) node until an external resume call
+  | "awaiting_budget" // paused on a budget rejection under onBudgetExceeded="pause" — resumes via budgetResumeSignal (redesign Slice 3)
   | "budget_exceeded" // per-execution cost cap hit (Slice #3)
   | "circuit_open" // max-step circuit breaker tripped (Slice #3)
   | "invalid_graph"; // malformed graph (dangling edge / unknown node) — terminal, not retried (Slice #6)
@@ -29,6 +30,14 @@ export interface ExecutionState {
   status: ExecutionStatus;
   currentNodeId: string;
   ctx: Record<string, unknown>;
+  /** Live spend-so-far of THIS run in USD (the interpreter's deterministic cost
+   *  accumulator — the same figure ctx.__costUsd mirrors). Optional: pre-feature
+   *  workers' query handlers don't return it (redesign Slice 3, live run spend). */
+  spentUsd?: number;
+  /** The per-run cap this run enforces (snapshotted at start, refreshed after a
+   *  budget-pause resume). Absent when no cap is configured — consumers must not
+   *  fabricate a meter without it. */
+  perExecutionCapUsd?: number;
 }
 
 export interface ApprovalInput {
@@ -112,6 +121,20 @@ export interface ResumeInput {
 /** Webhook resume: delivered as a Signal to a run paused on a wait(webhook) node,
  *  awaited via condition() in the workflow (mirrors approvalSignal). */
 export const resumeSignal = defineSignal<[ResumeInput]>("resume");
+
+/** Payload for {@link budgetResumeSignal}. tenantId-ONLY — informational (who triggered the
+ *  resume); never secrets, never budget figures (the workflow re-reads those in-activity). */
+export interface BudgetResumeInput {
+  tenantId: string;
+}
+
+/** Budget resume (redesign Slice 3, pause-not-fail): delivered to a run parked in
+ *  `awaiting_budget` (its budget policy is "pause" and a reservation / the per-run cap
+ *  refused). Sent by the API on PUT /tenants/:id/budget (cap raise / policy change) and by
+ *  the month-rollover boot reconcile. The workflow then RETRIES the refused reservation/
+ *  node — durable Signal + condition(), never a poll (CLAUDE.md Tier-1 rule 5). */
+export const budgetResumeSignal =
+  defineSignal<[BudgetResumeInput?]>("budgetResume");
 
 /** Live execution state, readable without disturbing the run. */
 export const stateQuery = defineQuery<ExecutionState>("state");
