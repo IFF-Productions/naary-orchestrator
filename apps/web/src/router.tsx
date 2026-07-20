@@ -108,6 +108,13 @@ export const router = createRouter([
                 ),
               },
               {
+                path: "automations/:key/edit",
+                ...lazy(
+                  () => import("./screens/simple/AutomationEditPage"),
+                  "AutomationEditPage",
+                ),
+              },
+              {
                 path: "connect-ai",
                 ...lazy(
                   () => import("./screens/simple/ConnectAi"),
