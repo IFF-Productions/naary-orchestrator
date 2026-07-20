@@ -66,6 +66,12 @@ export const handleCodeAgent: NodeHandler = async ({
       repo: caCfg.repo,
       branch: caCfg.branch,
       connectionId: caCfg.connectionId,
+      // Write + PR (#444): commit the sandbox's edits to a branch, push, open a PR.
+      openPr: caCfg.openPr,
+      prTitle: caCfg.prTitle,
+      prBody: caCfg.prBody,
+      commitMessage: caCfg.commitMessage,
+      headBranch: caCfg.headBranch,
     },
     ctx.__input,
     metaFor(node.id),

@@ -36,6 +36,7 @@ const PARAMS = {
 
 let exec: ReturnType<typeof vi.fn>;
 let fetchMock: ReturnType<typeof vi.fn>;
+let githubFetch: ReturnType<typeof vi.fn>;
 let resolveAuthHeader: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
@@ -46,11 +47,21 @@ beforeEach(() => {
     status: 200,
     json: async () => ({ exitCode: 0, stdout: "{}", diff: "diff --git a b" }),
   });
+  // GitHub REST seam (#444): default = a successful PR creation.
+  githubFetch = vi.fn().mockResolvedValue({
+    ok: true,
+    status: 201,
+    json: async () => ({
+      number: 42,
+      html_url: "https://github.com/acme/widgets/pull/42",
+    }),
+  });
   resolveAuthHeader = vi
     .fn()
     .mockResolvedValue({ Authorization: `Bearer ${GIT_TOKEN}` });
   __codeAgentWriteDeps.exec = exec as never;
   __codeAgentWriteDeps.fetch = fetchMock as never;
+  __codeAgentWriteDeps.githubFetch = githubFetch as never;
   __codeAgentWriteDeps.resolveAuthHeader = resolveAuthHeader as never;
 });
 
@@ -142,5 +153,162 @@ describe("runCodeAgentWrite", () => {
     expect(rm).toHaveBeenCalledOnce();
     // The runner was never called (no clone → nothing to run).
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does NOT open a PR by default (openPr off)", async () => {
+    const out = await runCodeAgentWrite(PARAMS, ENV);
+    expect(out.pr).toBeUndefined();
+    expect(githubFetch).not.toHaveBeenCalled();
+    // only the clone ran on the git seam
+    expect(exec).toHaveBeenCalledOnce();
+  });
+});
+
+describe("runCodeAgentWrite — open PR (#444)", () => {
+  const gitCmds = () =>
+    exec.mock.calls.map((c) => (c[1] as string[]).join(" "));
+  const expectedBranch = `naary/code-agent/${sandboxRunId("wf-1", "codeAgent")}`;
+
+  it("commits, force-pushes a node-owned branch, and opens a PR", async () => {
+    const out = await runCodeAgentWrite(
+      { ...PARAMS, openPr: true, prTitle: "Fix bug", prBody: "the body" },
+      ENV,
+    );
+    expect(out.pr).toEqual({
+      number: 42,
+      url: "https://github.com/acme/widgets/pull/42",
+      branch: expectedBranch,
+    });
+    // git: clone (call 0) + checkout -B + commit + force-push
+    const cmds = gitCmds();
+    expect(cmds.some((c) => c.includes(`checkout -B ${expectedBranch}`))).toBe(
+      true,
+    );
+    expect(cmds.some((c) => c.includes("commit -m"))).toBe(true);
+    expect(
+      cmds.some((c) =>
+        c.includes(`push --force origin HEAD:refs/heads/${expectedBranch}`),
+      ),
+    ).toBe(true);
+    // PR POST: base = the configured branch (main), head = node branch, GitHub headers set.
+    const post = githubFetch.mock.calls.find(
+      (c) => c[0].endsWith("/pulls") && c[1].method === "POST",
+    );
+    expect(post).toBeTruthy();
+    const body = JSON.parse(post![1].body);
+    expect(body).toMatchObject({
+      title: "Fix bug",
+      head: expectedBranch,
+      base: "main",
+      body: "the body",
+    });
+    expect(post![1].headers["user-agent"]).toBeTruthy();
+    expect(post![1].headers.authorization).toBe(`Bearer ${GIT_TOKEN}`);
+  });
+
+  it("SECURITY: the git token is passed to push via env, never on the argv or the PR body", async () => {
+    await runCodeAgentWrite({ ...PARAMS, openPr: true }, ENV);
+    const push = exec.mock.calls.find((c) =>
+      (c[1] as string[]).join(" ").includes("push --force"),
+    );
+    expect(push).toBeTruthy();
+    expect((push![1] as string[]).join(" ")).not.toContain(GIT_TOKEN); // not on argv
+    expect(push![2].env.GIT_TOKEN).toBe(GIT_TOKEN); // provided via env
+    const post = githubFetch.mock.calls.find(
+      (c) => c[0].endsWith("/pulls") && c[1].method === "POST",
+    );
+    expect(post![1].body).not.toContain(GIT_TOKEN); // not in the PR payload
+  });
+
+  it("an EMPTY diff is a clean no-op: no branch/commit/push, no PR", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ exitCode: 0, stdout: "{}", diff: "   \n  " }),
+    });
+    const out = await runCodeAgentWrite({ ...PARAMS, openPr: true }, ENV);
+    expect(out.pr).toBeUndefined();
+    expect(githubFetch).not.toHaveBeenCalled();
+    expect(exec).toHaveBeenCalledOnce(); // clone only — no checkout/commit/push
+  });
+
+  it("skips the PR when the sandbox CLI exited non-zero", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ exitCode: 1, stdout: "{}", diff: "diff --git a b" }),
+    });
+    const out = await runCodeAgentWrite({ ...PARAMS, openPr: true }, ENV);
+    expect(out.pr).toBeUndefined();
+    expect(githubFetch).not.toHaveBeenCalled();
+  });
+
+  it("resolves the base from the repo's default branch when no branch is configured", async () => {
+    githubFetch.mockImplementation((url: string, init: RequestInit) => {
+      if (url.endsWith("/repos/acme/widgets") && init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ default_branch: "trunk" }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 201,
+        json: async () => ({
+          number: 9,
+          html_url: "https://github.com/acme/widgets/pull/9",
+        }),
+      });
+    });
+    const out = await runCodeAgentWrite(
+      { ...PARAMS, branch: undefined, openPr: true },
+      ENV,
+    );
+    const post = githubFetch.mock.calls.find(
+      (c) => c[0].endsWith("/pulls") && c[1].method === "POST",
+    );
+    expect(JSON.parse(post![1].body).base).toBe("trunk");
+    expect(out.pr?.number).toBe(9);
+  });
+
+  it("is idempotent: a 422 (PR already exists) returns the existing PR", async () => {
+    githubFetch.mockImplementation((url: string, init: RequestInit) => {
+      if (url.includes("/pulls") && init.method === "POST") {
+        return Promise.resolve({
+          ok: false,
+          status: 422,
+          json: async () => ({}),
+        });
+      }
+      // GET /pulls?head=... → the existing PR
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => [
+          { number: 7, html_url: "https://github.com/acme/widgets/pull/7" },
+        ],
+      });
+    });
+    const out = await runCodeAgentWrite({ ...PARAMS, openPr: true }, ENV);
+    expect(out.pr).toEqual({
+      number: 7,
+      url: "https://github.com/acme/widgets/pull/7",
+      branch: expectedBranch,
+    });
+  });
+
+  it("fails non-retryably when the push fails (e.g. connection lacks contents:write)", async () => {
+    exec.mockImplementation((_bin: string, args: string[]) =>
+      Promise.resolve(
+        args.join(" ").includes("push")
+          ? { stdout: "denied", exitCode: 1 }
+          : { stdout: "", exitCode: 0 },
+      ),
+    );
+    await expect(
+      runCodeAgentWrite({ ...PARAMS, openPr: true }, ENV),
+    ).rejects.toMatchObject({ type: "CODE_AGENT_PR_PUSH_FAILED" });
+    expect(rm).toHaveBeenCalledOnce(); // workdir still cleaned up
   });
 });

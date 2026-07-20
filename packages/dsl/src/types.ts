@@ -249,6 +249,19 @@ export interface CodeAgentNodeConfig {
   branch?: string;
   /** GitHub App connection authorizing the clone (write mode). Token used OUTSIDE the sandbox. */
   connectionId?: string;
+  /** Write mode + PR (#444): after a successful run with a non-empty diff, commit the sandbox's
+   *  edits to a node-owned branch, push it (with the same App token, OUTSIDE the sandbox), and open
+   *  a pull request. Off by default — write mode alone just returns the diff. */
+  openPr?: boolean;
+  /** PR title (write+`openPr`). `{{…}}` templated before the activity. Defaults to a generic title. */
+  prTitle?: string;
+  /** PR body (write+`openPr`). `{{…}}` templated before the activity. */
+  prBody?: string;
+  /** Commit message for the pushed edits (write+`openPr`). Defaults to the PR title. */
+  commitMessage?: string;
+  /** Head branch to create/push (write+`openPr`). Node-owned + force-pushed, so a re-run updates it.
+   *  Defaults to `naary/code-agent/<runId>` (deterministic per node+execution). */
+  headBranch?: string;
   /** Flat fallback cost metered if the CLI reports no usage (fail-safe, never zero). */
   costUsd?: number;
 }
