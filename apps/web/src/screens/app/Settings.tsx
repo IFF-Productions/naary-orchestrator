@@ -5,7 +5,11 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, type Environment, UnauthorizedError } from "../../lib/api";
-import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
+import {
+  BELOW_RAIL_QUERY,
+  PHONE_QUERY,
+  useMediaQuery,
+} from "../../lib/useMediaQuery";
 import { ExperienceSection } from "./settings/ExperienceSection";
 import { NotificationsSection } from "./settings/NotificationsSection";
 import { SecretsSection } from "./settings/SecretsSection";
@@ -54,6 +58,9 @@ const LOCAL_CSS = `
 
 export function Settings() {
   const phone = useMediaQuery(PHONE_QUERY);
+  // At <=1024 (phone + tablet) the left sub-nav becomes a wrapping chip row above
+  // the content; only on desktop does it stay a sticky vertical rail.
+  const belowRail = useMediaQuery(BELOW_RAIL_QUERY);
   const [params, setParams] = useSearchParams();
   const rawSection = params.get("section");
   const section: SectionId = isSectionId(rawSection) ? rawSection : "secrets";
@@ -98,12 +105,11 @@ export function Settings() {
     <nav
       aria-label="Settings sections"
       style={
-        phone
+        belowRail
           ? {
               display: "flex",
-              gap: 6,
-              overflowX: "auto",
-              paddingBottom: 4,
+              flexWrap: "wrap",
+              gap: 8,
               marginBottom: 18,
             }
           : {
@@ -129,10 +135,12 @@ export function Settings() {
               display: "flex",
               alignItems: "center",
               gap: 11,
-              padding: "9px 10px",
+              // >=44px tap targets in the chip row (touch); a comfortable list row on desktop.
+              minHeight: belowRail ? 44 : undefined,
+              padding: belowRail ? "9px 14px" : "9px 10px",
               borderRadius: 9,
               cursor: "pointer",
-              marginBottom: phone ? 0 : 2,
+              marginBottom: belowRail ? 0 : 2,
               fontSize: 13,
               fontWeight: "var(--weight-medium)",
               whiteSpace: "nowrap",
@@ -140,8 +148,8 @@ export function Settings() {
               background: active ? "var(--card-2)" : "transparent",
               boxShadow: active ? "inset 2px 0 0 var(--brand)" : "none",
               transition: "background .12s ease, color .12s ease",
-              width: phone ? "auto" : "100%",
-              flex: phone ? "none" : undefined,
+              width: belowRail ? "auto" : "100%",
+              flex: belowRail ? "none" : undefined,
             }}
           >
             <svg
@@ -170,7 +178,7 @@ export function Settings() {
   return (
     <div
       style={{
-        display: phone ? "block" : "flex",
+        display: belowRail ? "block" : "flex",
         gap: 28,
         padding: phone ? "22px 14px 48px" : "28px 32px 48px",
         alignItems: "flex-start",

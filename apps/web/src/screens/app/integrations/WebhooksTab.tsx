@@ -13,14 +13,15 @@ import {
   type FormRow,
   type WebhookRow,
 } from "../../../lib/api";
+import { PHONE_QUERY, useMediaQuery } from "../../../lib/useMediaQuery";
 import {
-  cardShell,
   chatUrl,
   EnvChip,
   formUrl,
   IconTile,
   introStyle,
   monoLabel,
+  ScrollList,
   UrlCopy,
   webhookUrl,
 } from "./shared";
@@ -123,6 +124,7 @@ export function WebhooksTab({
   onChanged: () => Promise<void> | void;
   onError: (msg: string) => void;
 }) {
+  const phone = useMediaQuery(PHONE_QUERY);
   const [dialog, setDialog] = useState<"webhook" | "form" | "chat" | null>(
     null,
   );
@@ -159,7 +161,9 @@ export function WebhooksTab({
       <div
         style={{
           display: "flex",
-          alignItems: "flex-end",
+          alignItems: phone ? "stretch" : "flex-end",
+          flexDirection: phone ? "column" : "row",
+          flexWrap: "wrap",
           justifyContent: "space-between",
           gap: 12,
           marginBottom: 16,
@@ -188,7 +192,7 @@ export function WebhooksTab({
           New webhook
         </Button>
       </div>
-      <div style={{ ...cardShell, marginBottom: 28 }}>
+      <ScrollList marginBottom={28}>
         {webhooks.length === 0 && (
           <div
             style={{
@@ -213,7 +217,7 @@ export function WebhooksTab({
             onError={onError}
           />
         ))}
-      </div>
+      </ScrollList>
 
       {/* ---- Hosted forms ---- */}
       <div
@@ -235,7 +239,7 @@ export function WebhooksTab({
           New form
         </button>
       </div>
-      <div style={{ ...cardShell, marginBottom: 28 }}>
+      <ScrollList marginBottom={28}>
         {forms.length === 0 && (
           <div
             style={{
@@ -261,7 +265,7 @@ export function WebhooksTab({
             onDelete={() => removeForm(f.id)}
           />
         ))}
-      </div>
+      </ScrollList>
 
       {/* ---- Hosted chats ---- */}
       <div
@@ -283,7 +287,7 @@ export function WebhooksTab({
           New chat
         </button>
       </div>
-      <div style={cardShell}>
+      <ScrollList>
         {chats.length === 0 && (
           <div
             style={{
@@ -309,7 +313,7 @@ export function WebhooksTab({
             onDelete={() => removeChat(c.id)}
           />
         ))}
-      </div>
+      </ScrollList>
 
       {/* ---- Create dialogs (the existing registration forms, unchanged) ---- */}
       {tenant && (

@@ -6,6 +6,7 @@ import {
   type ConnectionRow,
   type ProviderCredential,
 } from "../../../lib/api";
+import { PHONE_QUERY, useMediaQuery } from "../../../lib/useMediaQuery";
 import { CodeAgentCard } from "./CodeAgentCard";
 import { ConnectForm, GithubAppForm } from "./connection-forms";
 import { cardShell, EnvChip, IconTile, introStyle } from "./shared";
@@ -56,6 +57,7 @@ export function AppsTab({
   onChanged: () => Promise<void> | void;
   onError: (msg: string) => void;
 }) {
+  const phone = useMediaQuery(PHONE_QUERY);
   const [dialog, setDialog] = useState<"github" | "mcp" | null>(null);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState<string | null>(null);
@@ -96,7 +98,9 @@ export function AppsTab({
       <div
         style={{
           display: "flex",
-          alignItems: "flex-end",
+          alignItems: phone ? "stretch" : "flex-end",
+          flexDirection: phone ? "column" : "row",
+          flexWrap: "wrap",
           justifyContent: "space-between",
           gap: 12,
           marginBottom: 16,
@@ -117,7 +121,7 @@ export function AppsTab({
             connections are bound to the environment they were created in.
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, flex: "none" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Button variant="secondary" onClick={() => setDialog("mcp")}>
             Connect MCP server
           </Button>
@@ -150,98 +154,111 @@ export function AppsTab({
                 ...cardShell,
                 padding: "16px 18px",
                 display: "flex",
-                alignItems: "center",
+                flexDirection: phone ? "column" : "row",
+                alignItems: phone ? "stretch" : "center",
                 gap: 15,
               }}
             >
-              <IconTile
-                name={c.authMode === "github_app" ? "workflow" : "mcp"}
-                color={TYPE_COLOR[c.type] ?? "var(--node-agent)"}
-                size={42}
-              />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 9,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: "var(--text-md)",
-                      fontWeight: "var(--weight-semibold)",
-                      color: "var(--ink)",
-                    }}
-                  >
-                    {c.label}
-                  </span>
-                  <EnvChip slug={env} />
-                  <StatusPill
-                    state={STATUS_STATE[c.status]}
-                    label={STATUS_LABEL[c.status]}
-                  />
-                </div>
-                <div
-                  style={{
-                    fontSize: "var(--text-sm)",
-                    color: "var(--ink-2)",
-                    marginTop: 3,
-                    lineHeight: "var(--leading-snug)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {describe(c)}
-                </div>
-                {c.scopes.length > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 15,
+                  flex: 1,
+                  minWidth: 0,
+                }}
+              >
+                <IconTile
+                  name={c.authMode === "github_app" ? "workflow" : "mcp"}
+                  color={TYPE_COLOR[c.type] ?? "var(--node-agent)"}
+                  size={42}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     style={{
                       display: "flex",
-                      gap: 6,
+                      alignItems: "center",
+                      gap: 9,
                       flexWrap: "wrap",
-                      marginTop: 9,
                     }}
                   >
-                    {c.scopes.map((s) => (
-                      <span
-                        key={s}
-                        className="mono"
-                        style={{
-                          fontSize: 10,
-                          color: "var(--ink-faint)",
-                          border: "1px solid var(--line-mid)",
-                          background: "var(--card-2)",
-                          borderRadius: "var(--radius-xs)",
-                          padding: "2px 7px",
-                        }}
-                      >
-                        {s}
-                      </span>
-                    ))}
+                    <span
+                      style={{
+                        fontSize: "var(--text-md)",
+                        fontWeight: "var(--weight-semibold)",
+                        color: "var(--ink)",
+                      }}
+                    >
+                      {c.label}
+                    </span>
+                    <EnvChip slug={env} />
+                    <StatusPill
+                      state={STATUS_STATE[c.status]}
+                      label={STATUS_LABEL[c.status]}
+                    />
                   </div>
-                )}
+                  <div
+                    style={{
+                      fontSize: "var(--text-sm)",
+                      color: "var(--ink-2)",
+                      marginTop: 3,
+                      lineHeight: "var(--leading-snug)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {describe(c)}
+                  </div>
+                  {c.scopes.length > 0 && (
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 6,
+                        flexWrap: "wrap",
+                        marginTop: 9,
+                      }}
+                    >
+                      {c.scopes.map((s) => (
+                        <span
+                          key={s}
+                          className="mono"
+                          style={{
+                            fontSize: 10,
+                            color: "var(--ink-faint)",
+                            border: "1px solid var(--line-mid)",
+                            background: "var(--card-2)",
+                            borderRadius: "var(--radius-xs)",
+                            padding: "2px 7px",
+                          }}
+                        >
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
-              {warn && c.authMode === "oauth" && (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  disabled={reconnecting !== null}
-                  onClick={() => reconnect(c)}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {warn && c.authMode === "oauth" && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={reconnecting !== null}
+                    onClick={() => reconnect(c)}
+                  >
+                    {reconnecting === c.id ? "Redirecting…" : "Re-authorize"}
+                  </Button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-sm btn-secondary"
+                  disabled={disconnecting === c.id}
+                  onClick={() => disconnect(c)}
                 >
-                  {reconnecting === c.id ? "Redirecting…" : "Re-authorize"}
-                </Button>
-              )}
-              <button
-                type="button"
-                className="btn btn-sm btn-secondary"
-                disabled={disconnecting === c.id}
-                onClick={() => disconnect(c)}
-              >
-                {disconnecting === c.id ? "Disconnecting…" : "Disconnect"}
-              </button>
+                  {disconnecting === c.id ? "Disconnecting…" : "Disconnect"}
+                </button>
+              </div>
             </div>
           );
         })}
