@@ -17,7 +17,11 @@ import { ACCENT, nodeDisplayLabel, nodeSubtitle } from "../../lib/graph-model";
 import { canDo } from "../../lib/permissions-logic";
 import { isTerminal, runStatusUi } from "../../lib/run-status";
 import { useActiveEnvironment } from "../../lib/useActiveEnvironment";
-import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
+import {
+  BELOW_DRAWER_QUERY,
+  PHONE_QUERY,
+  useMediaQuery,
+} from "../../lib/useMediaQuery";
 import { usePermissions } from "../../lib/usePermissions";
 import { envAccent } from "../../workspace/EnvironmentSwitcher";
 import { RerunMenu, VersionBadge } from "./RerunMenu";
@@ -203,6 +207,10 @@ function TopStat({ label, value }: { label: string; value: string }) {
 function RunView({ id }: { id: string }) {
   const navigate = useNavigate();
   const phone = useMediaQuery(PHONE_QUERY);
+  // Three-pane instrument: at <= 1024 the executed-path graph and the hero/
+  // timeline/detail stack vertically (graph capped on top, inspector below)
+  // instead of sitting side-by-side.
+  const stacked = useMediaQuery(BELOW_DRAWER_QUERY);
   const [state, setState] = useState<ExecutionState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -486,12 +494,24 @@ function RunView({ id }: { id: string }) {
     />
   );
 
-  const rightColumn = state && (
+  // Hero block: status + approval decide-in-place + unresolved inputs. Kept
+  // as its own block so that when the screen stacks (<= 1024) the human-in-the-
+  // loop hero stays ABOVE the graph — the paused/approval decision must never
+  // fall below the fold.
+  const heroBlock = state && (
     <div
       style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}
     >
       {hero}
       <UnresolvedInputsSection ctx={state.ctx} />
+    </div>
+  );
+
+  // Inspector block: step timeline + selected-step detail + region trace.
+  const inspectorBlock = state && (
+    <div
+      style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}
+    >
       {graph && (
         <StepTimeline
           steps={timelineSteps}
@@ -504,6 +524,15 @@ function RunView({ id }: { id: string }) {
         <StepDetailCard key={detail.id} step={detail} events={events} />
       )}
       <RegionTraceSection ctx={state.ctx} />
+    </div>
+  );
+
+  const rightColumn = (
+    <div
+      style={{ display: "flex", flexDirection: "column", gap: 18, minWidth: 0 }}
+    >
+      {heroBlock}
+      {inspectorBlock}
     </div>
   );
 
@@ -640,6 +669,7 @@ function RunView({ id }: { id: string }) {
                     `/app/canvas?key=${encodeURIComponent(runWorkflowKey)}`,
                   )
                 }
+                style={stacked ? { minHeight: 44 } : undefined}
               >
                 Open in canvas
               </Button>
@@ -650,6 +680,7 @@ function RunView({ id }: { id: string }) {
                 icon="x"
                 loading={acting}
                 onClick={() => void cancelRun()}
+                style={stacked ? { minHeight: 44 } : undefined}
               >
                 Cancel run
               </Button>
@@ -698,18 +729,20 @@ function RunView({ id }: { id: string }) {
       {!error && state && graph && (
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: phone
-              ? "minmax(0, 1fr)"
+            display: stacked ? "flex" : "grid",
+            flexDirection: stacked ? "column" : undefined,
+            gridTemplateColumns: stacked
+              ? undefined
               : "minmax(320px, 42fr) minmax(360px, 58fr)",
             gap: 18,
-            alignItems: "start",
+            alignItems: stacked ? undefined : "start",
           }}
         >
-          {/* Phone: status first — the graph pane follows the right column. */}
-          {phone ? (
+          {/* Stacked (<= 1024): hero (approval decide-in-place) on top, then the
+              executed-path graph capped, then the timeline/detail inspector. */}
+          {stacked ? (
             <>
-              {rightColumn}
+              {heroBlock}
               <RunGraph
                 graph={graph}
                 states={states}
@@ -718,6 +751,7 @@ function RunView({ id }: { id: string }) {
                 onSelect={setPickedStep}
                 height={360}
               />
+              {inspectorBlock}
             </>
           ) : (
             <>

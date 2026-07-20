@@ -9,7 +9,11 @@ import {
   Toast,
 } from "../../components";
 import { api, type AwaitingApproval, UnauthorizedError } from "../../lib/api";
-import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
+import {
+  BELOW_DRAWER_QUERY,
+  PHONE_QUERY,
+  useMediaQuery,
+} from "../../lib/useMediaQuery";
 import { useMode } from "../../mode";
 import { DetailPanel } from "./approvals/DetailPanel";
 import { QueueRow } from "./approvals/QueueRow";
@@ -122,6 +126,10 @@ export function Approvals() {
   const { mode } = useMode();
   const simple = mode === "simple";
   const phone = useMediaQuery(PHONE_QUERY);
+  // Three-pane instrument: at <= 1024 the queue + detail stack vertically. The
+  // queue (the hero) sits on top at a capped height; the focused request's
+  // decide-in-place panel flows full-width below it.
+  const stacked = useMediaQuery(BELOW_DRAWER_QUERY);
 
   const [items, setItems] = useState<AwaitingApproval[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -408,6 +416,7 @@ export function Approvals() {
             icon="check"
             loading={batchBusy}
             onClick={() => void decideBatch(true)}
+            style={stacked ? { minHeight: 44 } : undefined}
           >
             Approve {selCount}
           </Button>
@@ -415,6 +424,7 @@ export function Approvals() {
             variant="danger"
             disabled={batchBusy}
             onClick={() => void decideBatch(false)}
+            style={stacked ? { minHeight: 44 } : undefined}
           >
             Reject {selCount}
           </Button>
@@ -422,6 +432,7 @@ export function Approvals() {
             variant="ghost"
             disabled={batchBusy}
             onClick={() => setSelected(new Set())}
+            style={stacked ? { minHeight: 44 } : undefined}
           >
             Clear
           </Button>
@@ -434,8 +445,12 @@ export function Approvals() {
     <div
       className="scroll"
       style={{
-        flex: phone ? undefined : 1,
-        overflowY: phone ? undefined : "auto",
+        // Stacked (<= 1024): the queue is the hero on top, capped so the focused
+        // request's Approve/Reject stays reachable without scrolling past every
+        // row. Desktop: fills the column and scrolls independently.
+        flex: stacked ? "none" : 1,
+        overflowY: "auto",
+        maxHeight: stacked ? "42vh" : undefined,
         padding: "12px 16px",
         display: "flex",
         flexDirection: "column",
@@ -508,8 +523,9 @@ export function Approvals() {
         display: "flex",
         flexDirection: "column",
         // Fill the shell's content region (52px context bar + 44px breadcrumb)
-        // so the queue and detail panel scroll independently on desktop.
-        height: phone ? undefined : "calc(100vh - 96px)",
+        // so the queue and detail panel scroll independently on desktop. When
+        // stacked (<= 1024) the whole screen flows and the page scrolls.
+        height: stacked ? undefined : "calc(100vh - 96px)",
         minHeight: 0,
       }}
     >
@@ -591,21 +607,21 @@ export function Approvals() {
       {/* master–detail */}
       <div
         style={{
-          flex: phone ? undefined : 1,
+          flex: stacked ? undefined : 1,
           minHeight: 0,
           display: "flex",
-          flexDirection: phone ? "column" : "row",
+          flexDirection: stacked ? "column" : "row",
           borderTop: "1px solid var(--line)",
         }}
       >
         {/* queue */}
         <div
           style={{
-            flex: 1,
+            flex: stacked ? "none" : 1,
             minWidth: 0,
             display: "flex",
             flexDirection: "column",
-            borderRight: phone ? undefined : "1px solid var(--line)",
+            borderRight: stacked ? undefined : "1px solid var(--line)",
           }}
         >
           {filterBar}
@@ -619,11 +635,11 @@ export function Approvals() {
             <div
               className="scroll"
               style={{
-                width: phone ? undefined : "clamp(340px, 38vw, 472px)",
+                width: stacked ? undefined : "clamp(340px, 38vw, 472px)",
                 flex: "none",
-                overflowY: phone ? undefined : "auto",
+                overflowY: stacked ? undefined : "auto",
                 background: "var(--panel)",
-                borderTop: phone ? "1px solid var(--line)" : undefined,
+                borderTop: stacked ? "1px solid var(--line)" : undefined,
               }}
             >
               {loading ? (
