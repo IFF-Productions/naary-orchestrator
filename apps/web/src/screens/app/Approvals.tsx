@@ -179,7 +179,10 @@ export function Approvals() {
 
   const now = Date.now();
   // Real due-by tones when the gate has an SLA (dueAt), waiting-age otherwise.
-  const infoOf = (it: AwaitingApproval) => slaInfo(it.createdAt, it.dueAt, now);
+  // Urgency anchors on when the gate actually PAUSED (pausedAt) — createdAt is the
+  // run's start and overstates waiting time for runs that executed a while first.
+  const infoOf = (it: AwaitingApproval) =>
+    slaInfo(it.pausedAt ?? it.createdAt, it.dueAt, now);
   const all = items ?? [];
   const overdueCount = all.filter((it) => isOverdue(infoOf(it))).length;
   const recentCount = all.filter((it) => isRecent(infoOf(it))).length;
