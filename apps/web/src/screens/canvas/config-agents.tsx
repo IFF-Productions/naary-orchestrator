@@ -207,9 +207,10 @@ export function renderAgentSections(c: ConfigSectionCtx) {
               marginBottom: 4,
             }}
           >
-            Runs an agentic coding CLI on your task. Today it's{" "}
-            <strong>read-only</strong> (reads code, returns a plan) — cloning,
-            edits, and PRs land in later slices.
+            Runs an agentic coding CLI on your task. <strong>Read</strong> mode
+            reads code and returns a plan (in-worker, no repo).{" "}
+            <strong>Write</strong> mode clones a repo, edits it in an isolated
+            sandbox, and can open a pull request — enabled per deployment.
           </div>
 
           <Labeled label="Tool">
@@ -225,6 +226,21 @@ export function renderAgentSections(c: ConfigSectionCtx) {
               <option value="copilot" disabled>
                 Copilot (coming soon)
               </option>
+            </select>
+          </Labeled>
+
+          <Labeled label="Mode">
+            <select
+              value={str("mode") || "read"}
+              onChange={(e) =>
+                onChange({
+                  mode: e.target.value === "write" ? "write" : "read",
+                })
+              }
+              style={inputStyle}
+            >
+              <option value="read">Read — plan only (no repo)</option>
+              <option value="write">Write — edit a repo in a sandbox</option>
             </select>
           </Labeled>
 
@@ -296,6 +312,114 @@ export function renderAgentSections(c: ConfigSectionCtx) {
               />
             </Labeled>
           </div>
+
+          {str("mode") === "write" && (
+            <div
+              style={{
+                border: "1px solid var(--line)",
+                borderRadius: "var(--radius-md)",
+                padding: 10,
+                display: "grid",
+                gap: 10,
+                marginTop: 2,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--ink-3)",
+                  lineHeight: "var(--leading-snug)",
+                }}
+              >
+                The repo is cloned and edited in an egress-isolated sandbox. The
+                connection's GitHub App token authorizes the clone (and the PR)
+                — it never enters the sandbox. Needs{" "}
+                <code>CODE_AGENT_WRITE_ENABLED</code> on the worker.
+              </div>
+
+              <Labeled label="Repository">
+                <input
+                  value={str("repo")}
+                  onChange={(e) =>
+                    onChange({ repo: e.target.value || undefined })
+                  }
+                  style={inputStyle}
+                  placeholder="owner/name"
+                />
+              </Labeled>
+
+              <Labeled label="Base branch">
+                <input
+                  value={str("branch")}
+                  onChange={(e) =>
+                    onChange({ branch: e.target.value || undefined })
+                  }
+                  style={inputStyle}
+                  placeholder="default branch"
+                />
+              </Labeled>
+
+              <Labeled label="GitHub App connection">
+                <ConnectionSelect
+                  connections={connections}
+                  types={CONNECTION_TYPES[kind] ?? []}
+                  value={str("connectionId")}
+                  onChange={(id) => onChange({ connectionId: id })}
+                />
+              </Labeled>
+
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: "var(--text-sm)",
+                  color: "var(--ink)",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={Boolean(config.openPr)}
+                  onChange={(e) =>
+                    onChange({ openPr: e.target.checked || undefined })
+                  }
+                />
+                Open a pull request with the edits
+              </label>
+
+              {Boolean(config.openPr) && (
+                <>
+                  <Labeled label="PR title">
+                    {exprText("prTitle", {
+                      placeholder: "Naary code agent changes",
+                    })}
+                  </Labeled>
+                  <Labeled label="PR body">
+                    {exprText("prBody", {
+                      multiline: true,
+                      minHeight: "4em",
+                      placeholder: "What this PR changes and why…",
+                    })}
+                  </Labeled>
+                  <Labeled label="Commit message">
+                    {exprText("commitMessage", {
+                      placeholder: "defaults to the PR title",
+                    })}
+                  </Labeled>
+                  <Labeled label="Head branch">
+                    <input
+                      value={str("headBranch")}
+                      onChange={(e) =>
+                        onChange({ headBranch: e.target.value || undefined })
+                      }
+                      style={inputStyle}
+                      placeholder="naary/code-agent/<run> (force-pushed)"
+                    />
+                  </Labeled>
+                </>
+              )}
+            </div>
+          )}
         </>
       )}
 

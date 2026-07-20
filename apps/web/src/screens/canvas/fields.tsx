@@ -30,6 +30,8 @@ export interface BindingRow {
 export const CONNECTION_TYPES: Record<string, ConnectionRow["type"][]> = {
   mcpTool: ["github", "atlassian", "custom"],
   integration: ["github", "atlassian", "custom"],
+  // codeAgent write mode authorizes the clone + PR via a GitHub App connection.
+  codeAgent: ["github"],
   httpRequest: ["github", "atlassian", "custom"],
   sqlQuery: ["postgres", "mssql", "mysql"],
   sqlExec: ["postgres", "mssql", "mysql"],
