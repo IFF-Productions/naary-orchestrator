@@ -18,6 +18,17 @@ x-backend-env: &backend-env
   TEMPORAL_TLS_CERT_PATH: ${TEMPORAL_TLS_CERT_PATH:-}
   TEMPORAL_TLS_KEY_PATH: ${TEMPORAL_TLS_KEY_PATH:-}
   TEMPORAL_TLS_SERVER_NAME: ${TEMPORAL_TLS_SERVER_NAME:-}
+  # GitHub App (native GitHub connections via installation tokens + the install flow).
+  # Both the api (install/callback controller) and the worker (mints installation
+  # tokens for github_app connections in the integration/mcp activities) read these.
+  # OFF unless set: no GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY ⇒ github_app auth and the
+  # install flow are unavailable (githubAppConfig() returns null → AuthConfigError).
+  # GITHUB_APP_SLUG is the app's URL slug (github.com/apps/<slug>) — required to build
+  # the install URL. Values live in /opt/naary/.env; forwarded here so the containers
+  # actually receive them (each service only gets the vars this anchor enumerates).
+  GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+  GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+  GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
   # Claim-check object storage (optional; unset = in-memory). Forwarded from .env
   # so a real S3 bucket can be used without editing this file.
   STORAGE_PROVIDER: ${STORAGE_PROVIDER:-}
