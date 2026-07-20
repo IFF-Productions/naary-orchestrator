@@ -72,6 +72,70 @@ export class InsightsByModelResponse extends InsightsBucketResponse {
   @ApiProperty({ example: "claude-sonnet-4" }) model!: string;
 }
 
+export class InsightsByNodeTypeResponse extends InsightsBucketResponse {
+  @ApiProperty({
+    nullable: true,
+    example: "agent",
+    description:
+      "Node type that spent this (stamped on the ledger row); null for pre-feature rows.",
+  })
+  nodeType!: string | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 1840,
+    description:
+      "Average measured call duration in ms over rows that carry one; null when none do.",
+  })
+  avgDurationMs!: number | null;
+}
+
+/** One UTC day of run outcomes — from the Execution read-model, not the ledger. */
+export class InsightsRunsByDayResponse {
+  @ApiProperty({ example: "2026-07-16", description: "UTC calendar day." })
+  date!: string;
+  @ApiProperty({
+    example: 42,
+    description: "Runs started that day (all statuses).",
+  })
+  total!: number;
+  @ApiProperty({
+    type: "object",
+    additionalProperties: { type: "number" },
+    example: { completed: 38, failed: 3, running: 1 },
+    description: "Run counts per status.",
+  })
+  byStatus!: Record<string, number>;
+}
+
+export class InsightsRunsByWorkflowResponse {
+  @ApiProperty({
+    nullable: true,
+    example: "support-triage",
+    description: "Workflow key; null for runs with no key (pre-migration).",
+  })
+  workflowKey!: string | null;
+  @ApiProperty({ example: 42 }) runs!: number;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 12840,
+    description:
+      "Average run duration in ms over runs with a worker-stamped finishedAt; null when none have one.",
+  })
+  avgDurationMs!: number | null;
+}
+
+export class InsightsFailureKindResponse {
+  @ApiProperty({
+    example: "rate_limit",
+    description:
+      "failureKind when recorded, else the close status (pre-feature fallback).",
+  })
+  kind!: string;
+  @ApiProperty({ example: 3 }) count!: number;
+}
+
 export class InsightsRangeResponse {
   @ApiProperty({ nullable: true, format: "date-time", example: "2026-07-01" })
   from!: string | null;
@@ -93,4 +157,16 @@ export class InsightsResponse {
   byWorkflow!: InsightsByWorkflowResponse[];
   @ApiProperty({ type: [InsightsByModelResponse] })
   byModel!: InsightsByModelResponse[];
+  @ApiProperty({ type: [InsightsByNodeTypeResponse] })
+  byNodeType!: InsightsByNodeTypeResponse[];
+  @ApiProperty({
+    type: [InsightsRunsByDayResponse],
+    description:
+      "Per-day run-outcome counts from the Execution table (un-capped — fixes list-derived KPI floors).",
+  })
+  runsByDay!: InsightsRunsByDayResponse[];
+  @ApiProperty({ type: [InsightsRunsByWorkflowResponse] })
+  runsByWorkflow!: InsightsRunsByWorkflowResponse[];
+  @ApiProperty({ type: [InsightsFailureKindResponse] })
+  failureKinds!: InsightsFailureKindResponse[];
 }

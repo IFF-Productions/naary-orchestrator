@@ -3,7 +3,9 @@ import { delay, http, HttpResponse } from "msw";
 import { ModeProvider } from "../../mode";
 import { Runs } from "./Runs";
 
-// A spread of run statuses so the pills, cost column, and bulk-action affordances all show.
+// A spread of run statuses so the pills, cost, duration, and bulk-action affordances
+// all show. Slice 2 fields: finishedAt/durationMs on terminal runs the worker stamped
+// (null on in-flight + pre-feature rows → "—"), failureKind on classified failures.
 const RUNS = [
   {
     workflowId: "wh-t1-a1b2c3",
@@ -12,6 +14,9 @@ const RUNS = [
     costUsd: 0.0142,
     startedAt: new Date("2026-07-16T09:20:00Z").toISOString(),
     createdAt: new Date("2026-07-16T09:20:00Z").toISOString(),
+    finishedAt: new Date("2026-07-16T09:20:12Z").toISOString(),
+    durationMs: 12_000,
+    failureKind: null,
     archived: false,
     graphVersion: 3,
   },
@@ -22,6 +27,9 @@ const RUNS = [
     costUsd: null,
     startedAt: new Date("2026-07-16T09:12:00Z").toISOString(),
     createdAt: new Date("2026-07-16T09:12:00Z").toISOString(),
+    finishedAt: null,
+    durationMs: null,
+    failureKind: null,
     archived: false,
     graphVersion: 3,
   },
@@ -32,6 +40,9 @@ const RUNS = [
     costUsd: 0.089,
     startedAt: new Date("2026-07-16T08:50:00Z").toISOString(),
     createdAt: new Date("2026-07-16T08:50:00Z").toISOString(),
+    finishedAt: null,
+    durationMs: null,
+    failureKind: null,
     archived: false,
     graphVersion: 3,
   },
@@ -42,16 +53,23 @@ const RUNS = [
     costUsd: null,
     startedAt: new Date("2026-07-16T08:30:00Z").toISOString(),
     createdAt: new Date("2026-07-16T08:30:00Z").toISOString(),
+    finishedAt: new Date("2026-07-16T08:31:24Z").toISOString(),
+    durationMs: 84_000,
+    failureKind: "upstream_5xx",
     archived: false,
     graphVersion: 7,
   },
   {
+    // Pre-feature terminal row: no worker stamp → duration renders "—".
     workflowId: "wh-t1-cafe12",
     workflowKey: "nightly-digest",
     status: "budget_exceeded",
     costUsd: 0.51,
     startedAt: new Date("2026-07-16T07:00:00Z").toISOString(),
     createdAt: new Date("2026-07-16T07:00:00Z").toISOString(),
+    finishedAt: null,
+    durationMs: null,
+    failureKind: "budget",
     archived: false,
     graphVersion: 5,
   },

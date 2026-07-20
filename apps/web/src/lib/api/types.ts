@@ -18,6 +18,11 @@ export interface ExecutionState {
   status: string;
   currentNodeId: string;
   ctx: Record<string, unknown>;
+  /** Per-node timing map (Slice 2): { [nodeId]: { s, f, n?, totalMs? } } — epoch-ms
+   *  windows the interpreter stamped with deterministic workflow time. Kept as an
+   *  unknown-record (matches the generated schema); shape-checked at read time via
+   *  run-view-model's nodeTimeOf. Null/absent for pre-feature runs → render "—". */
+  nodeTimes?: Record<string, unknown> | null;
 }
 
 /** One entry in a run's execution log (mirrors the API's RunEvent). */
@@ -116,9 +121,17 @@ export interface Promotion {
   createdAt: string;
 }
 
-/** Result of a single-node test run. */
+/** Result of a single-node test run. `durationMs`/`costUsd` are the run's own
+ *  measurements (Slice 2: interpreter/server-measured, fail-safe-billed) — null
+ *  when nothing real was recorded; never a client-side guess. */
 export type TestNodeResult =
-  { pure: true; output: unknown } | { pure: false; message: string };
+  | {
+      pure: true;
+      output: unknown;
+      durationMs?: number | null;
+      costUsd?: number | null;
+    }
+  | { pure: false; message: string };
 
 /** A recurring schedule (mirrors the API's ScheduleView). */
 export interface ScheduleRow {
@@ -275,6 +288,14 @@ export interface RunSummary {
   costUsd: number | null;
   startedAt: string;
   createdAt: string;
+  /** When the run reached a terminal status (worker-stamped, Slice 2); null for
+   *  in-flight runs and runs predating the stamp → render "—". */
+  finishedAt: string | null;
+  /** finishedAt − createdAt in ms; null whenever finishedAt is null. */
+  durationMs: number | null;
+  /** Compact failure classification (timeout | upstream_5xx | rate_limit | budget |
+   *  rejected | error); null → fall back to the close status. */
+  failureKind: string | null;
   /** Soft-archived (hidden from the default Runs list). */
   archived: boolean;
   /** The workflow graph version this run snapshotted at start; null for older runs. */
@@ -300,7 +321,10 @@ export interface InsightsBucket {
   calls: number;
 }
 
-/** Usage rolled up by day, environment, workflow, and model (GET /tenants/:id/usage/insights). */
+/** Usage rolled up by day, environment, workflow, and model (GET /tenants/:id/usage/insights).
+ *  Slice 2 adds byNodeType (ledger nodeType tag), plus run-outcome rollups from the
+ *  Execution table (runsByDay/runsByWorkflow/failureKinds — un-capped, unlike the runs
+ *  list). The Slice-2 fields are optional so an older API responds without them. */
 export interface InsightsReport {
   range: { from: string | null; to: string | null };
   totals: InsightsBucket;
@@ -308,6 +332,21 @@ export interface InsightsReport {
   byEnvironment: (InsightsBucket & { environmentId: string | null })[];
   byWorkflow: (InsightsBucket & { workflowKey: string | null })[];
   byModel: (InsightsBucket & { provider: string; model: string })[];
+  byNodeType?: (InsightsBucket & {
+    nodeType: string | null;
+    avgDurationMs: number | null;
+  })[];
+  runsByDay?: {
+    date: string;
+    total: number;
+    byStatus: Record<string, number>;
+  }[];
+  runsByWorkflow?: {
+    workflowKey: string | null;
+    runs: number;
+    avgDurationMs: number | null;
+  }[];
+  failureKinds?: { kind: string; count: number }[];
 }
 /** One Team-screen row: an ACTIVE member (a real Membership) or a PENDING invitation
  *  (RBAC U1). `id` is the Firebase uid for active rows (the role-change/remove key) and

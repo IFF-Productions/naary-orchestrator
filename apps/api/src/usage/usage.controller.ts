@@ -1,6 +1,6 @@
 import { Controller, Get, Param, Query } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
-import type { InsightsResult } from "@naary/usage";
+import type { InsightsResult, RunsRollup } from "@naary/usage";
 import { CurrentPrincipal, type Principal } from "../auth/tenant.decorator";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { InsightsResponse, UsageSummaryResponse } from "./usage.response";
@@ -42,7 +42,7 @@ export class UsageController {
     @Query("to") to?: string,
     @Query("environmentId") environmentId?: string,
     @CurrentPrincipal() principal?: Principal,
-  ): Promise<InsightsResult> {
+  ): Promise<InsightsResult & RunsRollup> {
     return this.usage.getInsights(id, { from, to, environmentId }, principal);
   }
 }

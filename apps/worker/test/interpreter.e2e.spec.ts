@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import { ApplicationFailure } from "@temporalio/activity";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { createLocalTestEnv } from "./local-test-env";
 import { Worker } from "@temporalio/worker";
@@ -36,6 +37,14 @@ const mockActivities = {
     meta: activities.AgentMeta,
   ): Promise<activities.AgentResult> => {
     agentCalls.push(meta);
+    // Slice 2 failure-classification probe: this tenant's agent fails like a real
+    // provider 429 (agent.ts maps 429 → non-retryable "QUOTA").
+    if (meta.tenantId === "t-quota-fail") {
+      throw ApplicationFailure.nonRetryable(
+        "Provider rate limit exhausted",
+        "QUOTA",
+      );
+    }
     return {
       status: "ok",
       output: { category: "billing", urgency: 3 },
@@ -322,7 +331,16 @@ const mockActivities = {
     };
   },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
-  setExecutionStatus: async (): Promise<void> => undefined, // read-model push; no-op here
+  // Read-model push — captured so Slice-2 tests can assert the terminal-failure
+  // status + classified failureKind reach the Execution row.
+  setExecutionStatus: async (meta: {
+    workflowId: string;
+    status: string;
+    costUsd?: number;
+    failureKind?: string;
+  }): Promise<void> => {
+    statusPushes.push(meta);
+  },
   // Global Variables ($vars): return the env-scoped config the interpreter seeds into ctx.$vars.
   // Captures the meta so a test can prove the run's (tenantId, environmentId) reach the read.
   loadVariables: async (meta: {
@@ -347,6 +365,12 @@ const mockActivities = {
   },
 };
 const mapNodeCalls: { nodeType: string; count: number }[] = [];
+const statusPushes: {
+  workflowId: string;
+  status: string;
+  costUsd?: number;
+  failureKind?: string;
+}[] = [];
 const loadVariablesCalls: { tenantId: string; environmentId?: string }[] = [];
 // Mutable so each test can fix the env's variable set (default: one var proving resolution).
 let loadVariablesResult: Record<string, string> = { slackChannel: "#alerts" };
@@ -3780,4 +3804,221 @@ describe("runGraph interpreter — per-node execution matrix", () => {
       expect(result.ctx.trig).toEqual(event);
     },
   );
+});
+
+describe("runGraph interpreter — Slice 2: per-node timing + failure classification", () => {
+  // webhook → agent → set → end: one trigger, one activity node, one pure node —
+  // enough to prove all three get a timing entry.
+  const timingGraph: GraphDef = {
+    startNodeId: "wh",
+    nodes: [
+      { id: "wh", type: "webhookTrigger" },
+      {
+        id: "act",
+        type: "agent",
+        config: {
+          provider: "anthropic",
+          model: "claude-opus-4-8",
+          systemPrompt: "classify",
+        },
+      },
+      {
+        id: "fmt",
+        type: "set",
+        config: {
+          fieldBindings: { cat: { from: "act", path: "output.category" } },
+        },
+      },
+      { id: "end", type: "end" },
+    ],
+    edges: [
+      { from: "wh", to: "act" },
+      { from: "act", to: "fmt" },
+      { from: "fmt", to: "end" },
+    ],
+  };
+
+  it("stamps per-node start/finish (workflow time) into ctx.__nodeTimes for pure AND activity nodes — and the history replays", async () => {
+    const worker = await makeWorker();
+    const history = await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [timingGraph, { message: "hi" }, { tenantId: "t-timing" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-node-times",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+
+      const times = result.ctx.__nodeTimes as Record<
+        string,
+        { s: number; f: number; n?: number; totalMs?: number }
+      >;
+      expect(times).toBeDefined();
+      // Every executed node has a window (trigger, activity, pure, end).
+      for (const id of ["wh", "act", "fmt", "end"]) {
+        expect(times[id], `missing timing for ${id}`).toBeDefined();
+        expect(typeof times[id].s).toBe("number");
+        expect(typeof times[id].f).toBe("number");
+        expect(times[id].f).toBeGreaterThanOrEqual(times[id].s);
+        // Single pass → no loop aggregates (map stays small).
+        expect(times[id].n).toBeUndefined();
+      }
+      // The activity node's window spans its activity round-trip; the pure node
+      // runs within the same workflow task, so act must not FINISH before it starts
+      // and windows must be ordered along the chain.
+      expect(times.act.s).toBeGreaterThanOrEqual(times.wh.f);
+      expect(times.fmt.s).toBeGreaterThanOrEqual(times.act.f);
+      return handle.fetchHistory();
+    });
+    // No new command was issued for the stamping (plain ctx writes reading
+    // sandbox workflow time) — the recorded history replays against this code.
+    await expect(
+      Worker.runReplayHistory(
+        { workflowsPath: WORKFLOWS_PATH },
+        history,
+        "e2e-node-times",
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("a re-executed node (items region) aggregates n/totalMs — last window wins, map stays bounded", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          itemsGraph(),
+          { items: [{ n: 1 }, { n: 2 }, { n: 3 }] },
+          { tenantId: "t-timing-items" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-node-times-items",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      const times = result.ctx.__nodeTimes as Record<
+        string,
+        { s: number; f: number; n?: number; totalMs?: number }
+      >;
+      // The region's `map` node ran once per item → aggregated pass count.
+      expect(times.map.n).toBe(3);
+      expect(typeof times.map.totalMs).toBe("number");
+      expect(times.map.totalMs).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  it("a THROWN failure pushes status 'failed' + the classified failureKind (QUOTA → rate_limit) to the read-model", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [timingGraph, { message: "hi" }, { tenantId: "t-quota-fail" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-fail-quota",
+      });
+      // The QUOTA ApplicationFailure rides in WorkflowFailedError.cause; the
+      // top-level message is the generic wrapper (same as the stopAndError test).
+      await expect(handle.result()).rejects.toThrow(
+        /workflow execution failed/i,
+      );
+    });
+    const push = statusPushes.find((p) => p.workflowId === "e2e-fail-quota");
+    expect(push).toMatchObject({ status: "failed", failureKind: "rate_limit" });
+  });
+
+  it("stopAndError → failureKind 'error'; a returned terminal (rejected) carries NO explicit kind (the activity derives it from status)", async () => {
+    const stopGraph: GraphDef = {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        {
+          id: "boom",
+          type: "stopAndError",
+          config: { message: "deliberate stop" },
+        },
+        { id: "e", type: "end" },
+      ],
+      edges: [
+        { from: "s", to: "boom" },
+        { from: "boom", to: "e" },
+      ],
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [stopGraph, {}, { tenantId: "t-stop-kind" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-fail-stop",
+      });
+      await expect(handle.result()).rejects.toThrow(
+        /workflow execution failed/i,
+      );
+
+      // Returned-terminal path: an approval auto-reject ends via syncStatus with
+      // status only — the failureKind derivation happens IN the activity.
+      const rejHandle = await env.client.workflow.start(runGraph, {
+        args: [approvalTimeoutGraph, {}, { tenantId: "t-rej-kind" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-fail-rejected",
+      });
+      const rej = await rejHandle.result();
+      expect(rej.status).toBe("rejected");
+    });
+    expect(
+      statusPushes.find((p) => p.workflowId === "e2e-fail-stop"),
+    ).toMatchObject({ status: "failed", failureKind: "error" });
+    const rejPushes = statusPushes.filter(
+      (p) => p.workflowId === "e2e-fail-rejected",
+    );
+    const rejPush = rejPushes[rejPushes.length - 1];
+    expect(rejPush).toMatchObject({ status: "rejected" });
+    expect(rejPush?.failureKind).toBeUndefined();
+  });
+
+  it("testNode metering: a test-mode run records __nodeTimes + real __costUsd, and never touches the Runs read-model", async () => {
+    const testGraph: GraphDef = {
+      startNodeId: "act",
+      nodes: [
+        {
+          id: "act",
+          type: "agent",
+          config: {
+            provider: "anthropic",
+            model: "claude-opus-4-8",
+            systemPrompt: "test one node",
+          },
+        },
+        { id: "__snx_end", type: "end" },
+      ],
+      edges: [{ from: "act", to: "__snx_end" }],
+    };
+    const before = statusPushes.length;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const result = await env.client.workflow.execute(runGraph, {
+        args: [
+          testGraph,
+          {},
+          {
+            tenantId: "t-single-test",
+            test: true,
+            seededCtx: { __input: { message: "probe" } },
+          },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-testnode-meter",
+      });
+      expect(result.status).toBe("completed");
+      const times = result.ctx.__nodeTimes as Record<
+        string,
+        { s: number; f: number }
+      >;
+      // The API's testNode surface reads exactly these: the node's own window →
+      // durationMs, and the run's metered spend → costUsd (fail-safe billed by
+      // the activity — the mock returns the ledgered cost like the real one).
+      expect(times.act).toBeDefined();
+      expect(times.act.f).toBeGreaterThanOrEqual(times.act.s);
+      expect(result.ctx.__costUsd).toBe(0.01);
+    });
+    // test-mode: no Execution read-model writes at all.
+    expect(statusPushes.length).toBe(before);
+  });
 });

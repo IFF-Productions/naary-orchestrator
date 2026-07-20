@@ -162,6 +162,38 @@ function usageFixtures(scale: number) {
         },
       ],
       byModel,
+      // Slice 2: ledger node-type buckets + run-duration rollups feed the
+      // Avg-duration card's "By node type / By workflow" toggle.
+      byNodeType: [
+        {
+          nodeType: "agent",
+          costUsd: totalCost * 0.85,
+          totalTokens: Math.round(totalTokens * 0.9),
+          calls: Math.round(calls * 0.8),
+          avgDurationMs: 2_150,
+        },
+        {
+          nodeType: "codeAgent",
+          costUsd: totalCost * 0.1,
+          totalTokens: Math.round(totalTokens * 0.08),
+          calls: Math.round(calls * 0.05),
+          avgDurationMs: 48_000,
+        },
+        {
+          nodeType: "vectorQuery",
+          costUsd: totalCost * 0.05,
+          totalTokens: Math.round(totalTokens * 0.02),
+          calls: Math.round(calls * 0.15),
+          avgDurationMs: 380,
+        },
+      ],
+      runsByWorkflow: [
+        { workflowKey: "deal-won-notifier", runs: 4200, avgDurationMs: 6_400 },
+        { workflowKey: "rag-support-bot", runs: 3100, avgDurationMs: 2_900 },
+        { workflowKey: "nightly-digest", runs: 900, avgDurationMs: 74_000 },
+        // Pre-feature workflow: runs but no recorded durations → omitted from the card.
+        { workflowKey: "invoice-ap", runs: 640, avgDurationMs: null },
+      ],
     },
   };
 }

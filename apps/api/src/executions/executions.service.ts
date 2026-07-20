@@ -17,6 +17,7 @@ import {
 } from "@temporalio/client";
 import {
   APPROVAL_CTX_KEY,
+  NODE_TIMES_CTX_KEY,
   approvalSignal,
   chatMessageSignal,
   chatReplyQuery,
@@ -29,6 +30,7 @@ import {
   type ApprovalAwaitingRecord,
   type ExecutionState,
   type ExecutionStatus,
+  type NodeTimeEntry,
   type ResumeInput,
   type WebhookResponse,
 } from "@naary/contracts";
@@ -79,6 +81,15 @@ export interface RunSummary {
   startedAt: string;
   /** DB record time, ISO (kept for time-bucketed charts). */
   createdAt: string;
+  /** When the run reached a terminal status (worker-stamped, Slice 2); null for
+   *  in-flight runs AND runs predating the stamp — consumers render "—". */
+  finishedAt: string | null;
+  /** finishedAt − createdAt in ms; null whenever finishedAt is null (never derived
+   *  from "now" — an in-flight age is not a duration). */
+  durationMs: number | null;
+  /** Compact failure classification (timeout | upstream_5xx | rate_limit | budget |
+   *  rejected | error) on terminal failures; null → fall back to the status. */
+  failureKind: string | null;
   /** Soft-archived (hidden from the default Runs list). */
   archived: boolean;
   /** The GraphDefinition version this run snapshotted at start; null for
@@ -98,6 +109,20 @@ export interface RunStateView {
   status: RunSummary["status"];
   currentNodeId: string;
   ctx: Record<string, unknown>;
+  /** Per-node timing map the interpreter stamped into ctx (Slice 2), surfaced as a
+   *  first-class field so consumers don't grope the opaque ctx. Null when the run
+   *  predates the feature or the ctx is unavailable (Temporal-level failure). */
+  nodeTimes: Record<string, NodeTimeEntry> | null;
+}
+
+/** Pull the interpreter's per-node timing map out of a run ctx (Slice 2), or null when
+ *  absent (pre-feature run / empty ctx). Shape-checked, never fabricated. */
+function nodeTimesFrom(
+  ctx: Record<string, unknown>,
+): Record<string, NodeTimeEntry> | null {
+  const raw = ctx[NODE_TIMES_CTX_KEY];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  return raw as Record<string, NodeTimeEntry>;
 }
 
 /** Approver routing display summary on an awaiting row (Slice 1). */
@@ -879,7 +904,16 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     workflowKey: string,
     node: NodeDef,
     seededCtx: Record<string, unknown>,
-  ): Promise<unknown> {
+  ): Promise<{
+    output: unknown;
+    /** Interpreter-measured duration of the tested node (Slice 2); null when the
+     *  run recorded none (never a fabricated client-side guess). */
+    durationMs: number | null;
+    /** Real metered spend of the test run (ctx.__costUsd — same fail-safe billing
+     *  as any run: missing usage ledgers the estimate, never zero). Null when the
+     *  node meters no cost at all (pure/uncosted nodes). */
+    costUsd: number | null;
+  }> {
     const graph: GraphDef = {
       startNodeId: node.id,
       nodes: [node, { id: "__snx_end", type: "end" }],
@@ -905,7 +939,13 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       taskQueue: TASK_QUEUE,
       workflowId: `test-${tenantId}-${randomUUID()}`,
     })) as { ctx: Record<string, unknown> };
-    return result.ctx[node.id];
+    const t = nodeTimesFrom(result.ctx)?.[node.id];
+    return {
+      output: result.ctx[node.id],
+      durationMs: t ? Math.max(0, t.f - t.s) : null,
+      costUsd:
+        typeof result.ctx.__costUsd === "number" ? result.ctx.__costUsd : null,
+    };
   }
 
   async approve(
@@ -1467,6 +1507,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     status: string;
     costUsd: unknown;
     createdAt: Date;
+    finishedAt: Date | null;
+    failureKind: string | null;
     archivedAt: Date | null;
     graphVersion: number | null;
   }): Promise<RunSummary> {
@@ -1480,6 +1522,13 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       // real Temporal start time can diverge without silently moving createdAt.
       startedAt: createdAt,
       createdAt,
+      // Slice 2: worker-stamped terminal time → durationMs. Both null for runs that
+      // predate the stamp / closed only at the Temporal level — the UI keeps "—".
+      finishedAt: r.finishedAt ? r.finishedAt.toISOString() : null,
+      durationMs: r.finishedAt
+        ? Math.max(0, r.finishedAt.getTime() - r.createdAt.getTime())
+        : null,
+      failureKind: r.failureKind,
       archived: r.archivedAt !== null,
       graphVersion: r.graphVersion,
     };
@@ -1529,9 +1578,15 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
             status: s.status,
             currentNodeId: s.currentNodeId,
             ctx: s.ctx,
+            nodeTimes: nodeTimesFrom(s.ctx),
           };
         } catch {
-          return { status: "running", currentNodeId: "", ctx: {} };
+          return {
+            status: "running",
+            currentNodeId: "",
+            ctx: {},
+            nodeTimes: null,
+          };
         }
       }
       if (desc.status.name === "COMPLETED") {
@@ -1540,9 +1595,19 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
             status: ExecutionStatus;
             ctx: Record<string, unknown>;
           };
-          return { status: r.status, currentNodeId: "", ctx: r.ctx };
+          return {
+            status: r.status,
+            currentNodeId: "",
+            ctx: r.ctx,
+            nodeTimes: nodeTimesFrom(r.ctx),
+          };
         } catch {
-          return { status: "completed", currentNodeId: "", ctx: {} };
+          return {
+            status: "completed",
+            currentNodeId: "",
+            ctx: {},
+            nodeTimes: null,
+          };
         }
       }
       // Temporal-level failure (the workflow threw, was terminated, etc.) — there's
@@ -1551,6 +1616,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         status: TEMPORAL_CLOSED_STATUS[desc.status.name] ?? "unknown",
         currentNodeId: "",
         ctx: {},
+        nodeTimes: null,
       };
     } catch (e) {
       if (e instanceof WorkflowNotFoundError) {

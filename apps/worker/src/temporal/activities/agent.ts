@@ -67,6 +67,11 @@ export interface AgentResult {
   model: string;
   /** Cost of THIS call — the workflow accumulates these deterministically. */
   costUsd: number;
+  /** Total tokens of THIS call (same figure the ledger records — real or the fail-safe
+   *  estimate, never zero for a real call). Rides into ctx so the run detail can show a
+   *  per-step TOKENS stat without a ledger read (Slice 2). Optional: results recorded
+   *  before this field replay without it. */
+  totalTokens?: number;
 }
 
 // Slice #2 ships one structured-output schema. It can't ride in JSON graph
@@ -281,6 +286,8 @@ export async function runAgent(
       environmentId: meta.environmentId, // per-env cost tag (Slice 6)
       executionId: meta.executionId,
       nodeId: meta.nodeId,
+      nodeType: "agent", // Slice 2: by-node-type rollups without a graph join
+      durationMs: Math.round(secondsSince(startedAt) * 1000), // measured in-activity
       provider,
       model, // the model that actually ran (post-downgrade)
       usage,
@@ -323,6 +330,12 @@ export async function runAgent(
       output: result.output as Record<string, unknown>,
       model,
       costUsd,
+      // Same figure the ledger just recorded (real or fail-safe estimate) — per-step
+      // TOKENS for the run detail (Slice 2). The estimate path has no totalTokens
+      // field, so sum the buckets (mirrors recordUsage's own default).
+      totalTokens:
+        (usage as { totalTokens?: number }).totalTokens ??
+        usage.inputTokens + usage.outputTokens,
     };
   } catch (e) {
     activityRuns.inc({ activity: "runAgent", outcome: "error" });

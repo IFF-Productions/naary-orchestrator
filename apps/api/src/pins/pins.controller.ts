@@ -85,7 +85,18 @@ export class PinsController {
     @EnvironmentSel() envSel?: string,
     @CurrentPrincipal() principal?: Principal,
   ): Promise<
-    { pure: true; output: unknown } | { pure: false; message: string }
+    | {
+        pure: true;
+        output: unknown;
+        /** Measured duration (Slice 2): interpreter-stamped for activity nodes,
+         *  server-measured for in-process pure nodes; null only when unrecorded. */
+        durationMs: number | null;
+        /** Real metered spend of the test (fail-safe billing rules — an activity
+         *  with missing usage ledgers the estimate, never zero). Null when the
+         *  node meters no cost (pure nodes). */
+        costUsd: number | null;
+      }
+    | { pure: false; message: string }
   > {
     // ACTIVE env throughout (Slice 6b): the graph read, the pins, and the creds/connections the
     // activity fetches all live in the env the caller selected (absent header = tenant default).
@@ -131,10 +142,18 @@ export class PinsController {
         new Set(),
       );
     }
-    // Pure node: run in-process, instant, no Temporal.
+    // Pure node: run in-process, instant, no Temporal. Duration measured server-side
+    // around the in-process run (real, if usually ~0ms); pure nodes meter no cost.
     if (isPureNode(node.type)) {
       try {
-        return { pure: true, output: runPureNode(node, ctx) };
+        const t0 = Date.now();
+        const output = runPureNode(node, ctx);
+        return {
+          pure: true,
+          output,
+          durationMs: Date.now() - t0,
+          costUsd: null,
+        };
       } catch (e) {
         throw new BadRequestException(
           e instanceof Error ? e.message : "Node failed to run",
@@ -142,16 +161,22 @@ export class PinsController {
       }
     }
     // Activity node: run the REAL activity via a short-lived test-mode Temporal exec, in the
-    // same (active) env as the graph + pins reads above.
+    // same (active) env as the graph + pins reads above. Duration/cost are the run's own
+    // measurements (Slice 2) — never a client-side wall-clock guess.
     try {
-      const output = await this.executions.testNode(
+      const res = await this.executions.testNode(
         tenantId,
         envId,
         workflowKey,
         node,
         ctx,
       );
-      return { pure: true, output };
+      return {
+        pure: true,
+        output: res.output,
+        durationMs: res.durationMs,
+        costUsd: res.costUsd,
+      };
     } catch (e) {
       return {
         pure: false,
@@ -160,23 +185,24 @@ export class PinsController {
     }
   }
 
-  /** Run one node against ctx (pure → in-process; activity → test-mode Temporal). */
-  private runNode(
+  /** Run one node against ctx (pure → in-process; activity → test-mode Temporal).
+   *  Returns the node OUTPUT only — the autofill path pins outputs, not test meta. */
+  private async runNode(
     tenantId: string,
     environmentId: string,
     workflowKey: string,
     node: NodeDef,
     ctx: Record<string, unknown>,
-  ): Promise<unknown> | unknown {
-    return isPureNode(node.type)
-      ? runPureNode(node, ctx)
-      : this.executions.testNode(
-          tenantId,
-          environmentId,
-          workflowKey,
-          node,
-          ctx,
-        );
+  ): Promise<unknown> {
+    if (isPureNode(node.type)) return runPureNode(node, ctx);
+    const res = await this.executions.testNode(
+      tenantId,
+      environmentId,
+      workflowKey,
+      node,
+      ctx,
+    );
+    return res.output;
   }
 
   /**

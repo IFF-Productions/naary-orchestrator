@@ -349,8 +349,10 @@ export function CanvasPage() {
 
   // Single-node test runner — the ONE path the dock's "Test step", the config panel's
   // "Test node" and the per-node ▶ all use, so card state / measured duration / the
-  // dock's output stay in sync. Wraps the existing api.testNode machinery; measures
-  // wall-clock client-side (the only duration we honestly have).
+  // dock's output stay in sync. Wraps the existing api.testNode machinery. Duration:
+  // prefer the SERVER's measurement (Slice 2 — interpreter-stamped for activity nodes,
+  // server-measured for pure ones); fall back to client wall-clock only when the API
+  // predates it. Cost: the run's real metered spend (fail-safe billed) when returned.
   const runNodeTest = useCallback(
     async (nodeId: string, autofill?: boolean): Promise<TestNodeResult> => {
       if (!workflowKey) {
@@ -371,11 +373,19 @@ export function CanvasPage() {
           undefined,
           autofill,
         );
-        const ms = Math.round(performance.now() - t0);
+        const clientMs = Math.round(performance.now() - t0);
         setNodeRuns((r) => {
           const next = { ...r };
           if (res.pure) {
-            next[nodeId] = { status: "done", output: res.output, ms };
+            next[nodeId] = {
+              status: "done",
+              output: res.output,
+              ms:
+                typeof res.durationMs === "number" ? res.durationMs : clientMs,
+              ...(typeof res.costUsd === "number"
+                ? { costUsd: res.costUsd }
+                : {}),
+            };
           } else {
             // Not actually executed (activity/control node) — back to idle; the
             // message shows in the config panel, a green "done" would be a lie.

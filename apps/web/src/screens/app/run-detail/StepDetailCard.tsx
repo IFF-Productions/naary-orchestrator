@@ -1,10 +1,10 @@
 /**
  * Selected-step detail card for the redesigned Run Detail screen: icon header
  * with the step's state badge, a DURATION / COST / TOKENS / REGION stat strip
- * (real values only — the platform records none of these per node today, so
- * they render "—" except the waiting step's real age), the step's real output
- * (from the run ctx), and the run's execution-log panel in the design's mono
- * log style.
+ * (real values only — worker-stamped per-node duration, the node output's own
+ * metered cost/tokens (Slice 2); anything unrecorded — pre-feature runs, REGION —
+ * renders "—"), the step's real output (from the run ctx), and the run's
+ * execution-log panel in the design's mono log style.
  */
 import type { RunEvent } from "../../../lib/api";
 import { Icon, type IconName } from "../../../components";
@@ -37,8 +37,12 @@ export interface StepDetail {
   icon: IconName;
   accent: string;
   state: StepState;
-  /** Real elapsed for this step (the waiting step's age) or null → "—". */
+  /** Real elapsed for this step (worker-stamped, or the waiting step's age); null → "—". */
   duration: string | null;
+  /** Real metered cost of this step (from its output's costUsd); null → "—". */
+  cost?: string | null;
+  /** Real token count of this step (from its output's totalTokens); null → "—". */
+  tokens?: string | null;
   /** The step's output from the run ctx (undefined = none yet). */
   output: unknown;
   /** True when `output` is the run's trigger payload (the entry node). */
@@ -58,8 +62,8 @@ export function StepDetailCard({
       value: step.duration ?? "—",
       color: step.state === "waiting" ? "var(--state-paused)" : undefined,
     },
-    { label: "COST", value: "—" },
-    { label: "TOKENS", value: "—" },
+    { label: "COST", value: step.cost ?? "—" },
+    { label: "TOKENS", value: step.tokens ?? "—" },
     { label: "REGION", value: "—" },
   ];
 

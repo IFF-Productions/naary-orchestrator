@@ -8,7 +8,7 @@ const ago = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
 const day = (d: number) =>
   new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10);
 
-const RUNS = [
+const BASE_RUNS = [
   {
     workflowId: "wh-t1-a1f9c2",
     workflowKey: "deal-won-notifier",
@@ -101,6 +101,35 @@ const RUNS = [
   },
 ];
 
+// Slice 2: worker-stamped durations + failureKind per run. In-flight rows stay null;
+// "wh-t1-e410bb" is deliberately a PRE-FEATURE failure (no stamp → duration "—",
+// failure reason falls back to its close status).
+const SLICE2: Record<
+  string,
+  { durationMs: number | null; failureKind: string | null }
+> = {
+  "wh-t1-a1f9c2": { durationMs: 9_400, failureKind: null },
+  "wh-t1-7b0433": { durationMs: 3_100, failureKind: null },
+  "wh-t1-3a12ff": { durationMs: 600_000, failureKind: "timeout" },
+  "wh-t1-2c88de": { durationMs: 2_800, failureKind: null },
+  "wh-t1-1b77aa": { durationMs: 45_000, failureKind: "budget" },
+  "wh-t1-0f34cc": { durationMs: 8_200, failureKind: null },
+};
+
+const RUNS = BASE_RUNS.map((r) => {
+  const s = SLICE2[r.workflowId];
+  const durationMs = s?.durationMs ?? null;
+  return {
+    ...r,
+    finishedAt:
+      durationMs !== null
+        ? new Date(new Date(r.createdAt).getTime() + durationMs).toISOString()
+        : null,
+    durationMs,
+    failureKind: s?.failureKind ?? null,
+  };
+});
+
 const INSIGHTS = {
   range: { from: day(7), to: null },
   totals: { costUsd: 1.8421, totalTokens: 412_400, calls: 302 },
@@ -153,6 +182,44 @@ const INSIGHTS = {
       totalTokens: 380_000,
       calls: 260,
     },
+  ],
+  // Slice 2 rollups: ledger node-type buckets + un-capped run-outcome days.
+  byNodeType: [
+    {
+      nodeType: "agent",
+      costUsd: 1.7,
+      totalTokens: 400_000,
+      calls: 280,
+      avgDurationMs: 1_840,
+    },
+    {
+      nodeType: "vectorQuery",
+      costUsd: 0.14,
+      totalTokens: 12_400,
+      calls: 22,
+      avgDurationMs: 420,
+    },
+  ],
+  runsByDay: Array.from({ length: 7 }, (_, i) => ({
+    date: day(6 - i),
+    total: 40 + i * 4,
+    byStatus: {
+      completed: 34 + i * 4,
+      failed: 3,
+      awaiting_approval: 2,
+      timed_out: 1,
+    },
+  })),
+  runsByWorkflow: [
+    { workflowKey: "rag-support-bot", runs: 140, avgDurationMs: 3_400 },
+    { workflowKey: "deal-won-notifier", runs: 96, avgDurationMs: 8_900 },
+    { workflowKey: "invoice-ap", runs: 52, avgDurationMs: 41_000 },
+    { workflowKey: "incident-triage", runs: 24, avgDurationMs: null },
+  ],
+  failureKinds: [
+    { kind: "timeout", count: 7 },
+    { kind: "budget", count: 4 },
+    { kind: "upstream_5xx", count: 3 },
   ],
 };
 

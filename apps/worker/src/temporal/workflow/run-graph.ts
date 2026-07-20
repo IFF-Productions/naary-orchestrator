@@ -6,6 +6,7 @@
 import * as wf from "@temporalio/workflow";
 import {
   APPROVAL_CTX_KEY,
+  NODE_TIMES_CTX_KEY,
   approvalSignal,
   resumeSignal,
   stateQuery,
@@ -15,6 +16,7 @@ import type {
   ApprovalInput,
   ExecutionState,
   ExecutionStatus,
+  NodeTimeEntry,
   ResumeInput,
   WebhookResponse,
 } from "@naary/contracts";
@@ -111,6 +113,7 @@ import {
   MAX_A4_REGION_ACTIVITY_EXECUTIONS,
   MAX_TRACE_ITEMS,
   MAX_TRACE_TOTAL_BYTES,
+  classifyFailure,
   traceCell,
   nodeErrorMessage,
 } from "./helpers";
@@ -262,9 +265,58 @@ export async function runGraph(
     }
   }
 
+  /**
+   * Per-node timing (REDESIGN-FUNCTIONALITY-GAPS.md Slice 2): stamp every executed
+   * node's start/finish into a small ctx map, then delegate to {@link execNodeInner}.
+   *
+   * DETERMINISM JUSTIFICATION (the required Tier-1 rule-2 analysis): the timestamps
+   * come from the Temporal TS sandbox's `Date.now()`, which is NOT a wall-clock read —
+   * the workflow sandbox overrides `Date` so `Date.now()` returns WORKFLOW TIME (the
+   * current workflow task's recorded timestamp; see @temporalio/workflow
+   * global-overrides + interfaces.d.ts "The safe version of time is `new Date()` and
+   * `Date.now()`"). It is the TS SDK's equivalent of `workflow.now()`: on replay it is
+   * re-read from history event timestamps and yields byte-identical values. We chose
+   * this over echoing timestamps FROM each activity because (a) it covers PURE nodes
+   * (set/filter/if/…) that run with no activity at all, (b) it needs no result-shape
+   * change across ~30 activities, and (c) it issues NO Temporal command — a plain ctx
+   * write — so in-flight runs started before this code replay the exact same command
+   * sequence with no patched() gate (same argument as __regionTrace/__unresolved).
+   * Granularity is the workflow task: an activity node's window spans scheduling →
+   * completion (≈ real latency); a pure node executes within one task and may show 0ms
+   * — honest, not fabricated.
+   *
+   * BOUNDED: keyed by nodeId (≤ graph size), 2–4 numbers per entry. A re-executed node
+   * (loop back-edge / items region) keeps the LAST window in s/f and aggregates
+   * n/totalMs across passes — the map never grows with iteration count.
+   */
+  async function execNode(node: NodeDef): Promise<ExecutionStatus | null> {
+    const s = Date.now(); // deterministic workflow time (see justification above)
+    try {
+      return await execNodeInner(node);
+    } finally {
+      const f = Date.now();
+      const times = (ctx[NODE_TIMES_CTX_KEY] ??= {}) as Record<
+        string,
+        NodeTimeEntry
+      >;
+      const prev = times[node.id];
+      times[node.id] =
+        prev === undefined
+          ? { s, f }
+          : {
+              s,
+              f,
+              n: (prev.n ?? 1) + 1,
+              totalMs:
+                (prev.totalMs ?? Math.max(0, prev.f - prev.s)) +
+                Math.max(0, f - s),
+            };
+    }
+  }
+
   /** Run one node's side effect. Returns a TERMINAL status to stop the whole run
    *  (rejected), or null to continue. Mutates ctx / cost via the closures. */
-  async function execNode(node: NodeDef): Promise<ExecutionStatus | null> {
+  async function execNodeInner(node: NodeDef): Promise<ExecutionStatus | null> {
     // Template-lite expressions: resolve any `{{ nodeId.path }}` in string config against ctx
     // BEFORE the node runs (pure + deterministic — design docs/design/EXPRESSIONS.md).
     const cfg = resolveTemplates(
@@ -1875,7 +1927,28 @@ export async function runGraph(
     }
   }
 
-  if (threw !== undefined) throw threw; // preserve FAILED semantics (no syncStatus)
+  if (threw !== undefined) {
+    // Slice 2: the run is about to FAIL at the Temporal level (rethrow below), a path
+    // that never reached syncStatus — so its Execution row stayed non-terminal and the
+    // list had to reconcile via describe(). Push the terminal read-model row (status
+    // "failed" + finishedAt in-activity + the failureKind classified from the failure
+    // Temporal already recorded — classifyFailure is pure/deterministic over replayed
+    // data). NEW COMMAND → gated by patched() so in-flight runs replay unchanged;
+    // best-effort so a read-model hiccup can never mask the original failure.
+    if (!runCtx.test && wf.patched("exec-fail-v1")) {
+      try {
+        await setExecutionStatus({
+          workflowId: wf.workflowInfo().workflowId,
+          status: "failed",
+          costUsd,
+          failureKind: classifyFailure(threw),
+        });
+      } catch {
+        /* best-effort — never mask the original failure */
+      }
+    }
+    throw threw; // preserve FAILED semantics
+  }
   await syncStatus(); // final status + cost for the Runs list
   // Distinguish "no respondToWebhook ran" (undefined) from "ran with an empty body" (null), so the
   // durable chat session can tell a no-reply turn from a real empty reply — mirrors the ingress's

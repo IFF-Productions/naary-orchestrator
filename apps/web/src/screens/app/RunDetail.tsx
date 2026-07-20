@@ -28,10 +28,14 @@ import { LogPanel, useRunHistory } from "./run-detail/RunLog";
 import {
   computeStepStates,
   fmtAge,
+  fmtStepDuration,
   fmtWhen,
   historyTimes,
   nodeIcon,
+  nodeTimeOf,
+  stepCostText,
   stepOrder,
+  stepTokensText,
 } from "./run-detail/run-view-model";
 import { SectionTitle } from "./run-detail/shared";
 import { type ApprovalInfo, StatusHero } from "./run-detail/StatusHero";
@@ -332,19 +336,24 @@ function RunView({ id }: { id: string }) {
       order.map((nid) => {
         const n = nodeById.get(nid);
         const st = states[nid] ?? "pending";
+        // Slice 2: real per-step duration from the worker-stamped nodeTimes map
+        // (deterministic workflow time) and real cost from the node output's own
+        // metered costUsd. A waiting step keeps its live age; runs that predate
+        // the feature carry no map → the columns keep "—" (never fabricated).
+        const t = nodeTimeOf(state?.nodeTimes, nid);
         return {
           id: nid,
           label: n ? nodeDisplayLabel(n.type, n.config) : nid,
           icon: n ? nodeIcon(n.type) : "workflow",
           accent: n ? ACCENT[n.type] : "var(--ink-3)",
           state: st,
-          // Data honesty: the platform records no per-step duration/cost — only
-          // the waiting step's age is real (derived from the durable history).
-          duration: st === "waiting" ? waitingAge : null,
-          cost: null,
+          duration:
+            st === "waiting" ? waitingAge : t ? fmtStepDuration(t) : null,
+          durationMs: t ? Math.max(0, t.f - t.s) : null,
+          cost: stepCostText(state?.ctx[nid]),
         };
       }),
-    [order, nodeById, states, waitingAge],
+    [order, nodeById, states, waitingAge, state],
   );
 
   const detail: StepDetail | null = useMemo(() => {
@@ -358,6 +367,9 @@ function RunView({ id }: { id: string }) {
       !hasOwnOutput &&
       selectedId === graph?.startNodeId &&
       state.ctx.__input !== undefined;
+    // Slice 2: real per-step duration/cost/tokens (worker-stamped times + the node
+    // output's own metered figures); pre-feature runs keep "—".
+    const t = nodeTimeOf(state.nodeTimes, selectedId);
     return {
       id: selectedId,
       label: nodeDisplayLabel(n.type, n.config),
@@ -365,7 +377,9 @@ function RunView({ id }: { id: string }) {
       icon: nodeIcon(n.type),
       accent: ACCENT[n.type],
       state: st,
-      duration: st === "waiting" ? waitingAge : null,
+      duration: st === "waiting" ? waitingAge : t ? fmtStepDuration(t) : null,
+      cost: stepCostText(state.ctx[selectedId]),
+      tokens: stepTokensText(state.ctx[selectedId]),
       output: hasOwnOutput
         ? state.ctx[selectedId]
         : isTriggerInput

@@ -68,6 +68,37 @@ export interface ApprovalAwaitingRecord {
   escalateTo?: string;
 }
 
+/** ctx key under which the interpreter records per-node execution times (Slice 2 —
+ *  per-node timing + cost). `__`-prefixed = reserved/system, so it is stripped from
+ *  user-visible snapshots (code node ctx, sub-workflow projections) like __approval. */
+export const NODE_TIMES_CTX_KEY = "__nodeTimes";
+
+/**
+ * One executed node's timing window (REDESIGN-FUNCTIONALITY-GAPS.md Slice 2), stamped by
+ * the interpreter with DETERMINISTIC workflow time (the Temporal TS sandbox's per-task
+ * `Date.now()` — never a wall clock; see run-graph.ts for the full justification).
+ * Epoch ms. Durations are workflow-task-granular: an activity node's window spans its
+ * activity execution; a pure node executes within one task, so its window may be 0ms.
+ * When a node runs MORE THAN ONCE (loop back-edge, items region), `s`/`f` hold the LAST
+ * iteration's window and `n`/`totalMs` aggregate all passes (absent for a single pass).
+ */
+export interface NodeTimeEntry {
+  /** Started at (epoch ms, workflow time). */
+  s: number;
+  /** Finished at (epoch ms, workflow time). */
+  f: number;
+  /** Total executions, when > 1 (loops / items regions). */
+  n?: number;
+  /** Sum of all passes' durations in ms, when n > 1. */
+  totalMs?: number;
+}
+
+/** Compact terminal-failure classification persisted on the Execution read-model row
+ *  (Slice 2). Derived in the worker from the failure the interpreter/activity actually
+ *  observed. Consumers fall back to the close status when absent (pre-feature runs). */
+export type FailureKind =
+  "timeout" | "upstream_5xx" | "rate_limit" | "budget" | "rejected" | "error";
+
 /** Human approval: delivered as a Signal, awaited via condition() in the workflow. */
 export const approvalSignal = defineSignal<[ApprovalInput]>("approval");
 

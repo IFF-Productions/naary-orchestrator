@@ -14666,6 +14666,24 @@
             "format": "date-time",
             "example": "2026-07-04T12:00:00.000Z"
           },
+          "finishedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "When the run reached a terminal status (worker-stamped); null for in-flight runs and runs predating the stamp."
+          },
+          "durationMs": {
+            "type": "number",
+            "nullable": true,
+            "example": 12840,
+            "description": "finishedAt − createdAt in ms; null whenever finishedAt is null (never derived from now)."
+          },
+          "failureKind": {
+            "type": "string",
+            "nullable": true,
+            "example": "rate_limit",
+            "description": "Compact failure classification on terminal failures (timeout | upstream_5xx | rate_limit | budget | rejected | error); null → fall back to the status."
+          },
           "archived": {
             "type": "boolean",
             "example": false,
@@ -14685,6 +14703,9 @@
           "costUsd",
           "startedAt",
           "createdAt",
+          "finishedAt",
+          "durationMs",
+          "failureKind",
           "archived",
           "graphVersion"
         ]
@@ -15002,12 +15023,19 @@
             "type": "object",
             "additionalProperties": true,
             "description": "Accumulated workflow context."
+          },
+          "nodeTimes": {
+            "type": "object",
+            "additionalProperties": true,
+            "nullable": true,
+            "description": "Per-node timing map (Slice 2): { [nodeId]: { s, f, n?, totalMs? } } — epoch-ms start/finish stamped with deterministic workflow time; n/totalMs aggregate repeated passes (loops). Null when the run predates the feature or its ctx is unavailable."
           }
         },
         "required": [
           "status",
           "currentNodeId",
-          "ctx"
+          "ctx",
+          "nodeTimes"
         ]
       },
       "RunEventResponse": {
@@ -15640,6 +15668,119 @@
           "calls",
           "provider",
           "model"
+        ]
+      },
+      "InsightsByNodeTypeResponse": {
+        "type": "object",
+        "properties": {
+          "costUsd": {
+            "type": "number",
+            "example": 0.18432
+          },
+          "totalTokens": {
+            "type": "number",
+            "example": 45120
+          },
+          "calls": {
+            "type": "number",
+            "example": 12,
+            "description": "Number of billed calls."
+          },
+          "nodeType": {
+            "type": "object",
+            "nullable": true,
+            "example": "agent",
+            "description": "Node type that spent this (stamped on the ledger row); null for pre-feature rows."
+          },
+          "avgDurationMs": {
+            "type": "number",
+            "nullable": true,
+            "example": 1840,
+            "description": "Average measured call duration in ms over rows that carry one; null when none do."
+          }
+        },
+        "required": [
+          "costUsd",
+          "totalTokens",
+          "calls",
+          "nodeType",
+          "avgDurationMs"
+        ]
+      },
+      "InsightsRunsByDayResponse": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "example": "2026-07-16",
+            "description": "UTC calendar day."
+          },
+          "total": {
+            "type": "number",
+            "example": 42,
+            "description": "Runs started that day (all statuses)."
+          },
+          "byStatus": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            },
+            "example": {
+              "completed": 38,
+              "failed": 3,
+              "running": 1
+            },
+            "description": "Run counts per status."
+          }
+        },
+        "required": [
+          "date",
+          "total",
+          "byStatus"
+        ]
+      },
+      "InsightsRunsByWorkflowResponse": {
+        "type": "object",
+        "properties": {
+          "workflowKey": {
+            "type": "object",
+            "nullable": true,
+            "example": "support-triage",
+            "description": "Workflow key; null for runs with no key (pre-migration)."
+          },
+          "runs": {
+            "type": "number",
+            "example": 42
+          },
+          "avgDurationMs": {
+            "type": "number",
+            "nullable": true,
+            "example": 12840,
+            "description": "Average run duration in ms over runs with a worker-stamped finishedAt; null when none have one."
+          }
+        },
+        "required": [
+          "workflowKey",
+          "runs",
+          "avgDurationMs"
+        ]
+      },
+      "InsightsFailureKindResponse": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "example": "rate_limit",
+            "description": "failureKind when recorded, else the close status (pre-feature fallback)."
+          },
+          "count": {
+            "type": "number",
+            "example": 3
+          }
+        },
+        "required": [
+          "kind",
+          "count"
         ]
       },
       "InsightsResponse": {

@@ -1406,6 +1406,21 @@ export interface components {
        */
       createdAt: string;
       /**
+       * Format: date-time
+       * @description When the run reached a terminal status (worker-stamped); null for in-flight runs and runs predating the stamp.
+       */
+      finishedAt: string | null;
+      /**
+       * @description finishedAt − createdAt in ms; null whenever finishedAt is null (never derived from now).
+       * @example 12840
+       */
+      durationMs: number | null;
+      /**
+       * @description Compact failure classification on terminal failures (timeout | upstream_5xx | rate_limit | budget | rejected | error); null → fall back to the status.
+       * @example rate_limit
+       */
+      failureKind: string | null;
+      /**
        * @description Soft-archived (hidden by default).
        * @example false
        */
@@ -1581,6 +1596,10 @@ export interface components {
       ctx: {
         [key: string]: unknown;
       };
+      /** @description Per-node timing map (Slice 2): { [nodeId]: { s, f, n?, totalMs? } } — epoch-ms start/finish stamped with deterministic workflow time; n/totalMs aggregate repeated passes (loops). Null when the run predates the feature or its ctx is unavailable. */
+      nodeTimes: {
+        [key: string]: unknown;
+      } | null;
     };
     RunEventResponse: {
       /** @example 12 */
@@ -1913,6 +1932,73 @@ export interface components {
       provider: string;
       /** @example claude-sonnet-4 */
       model: string;
+    };
+    InsightsByNodeTypeResponse: {
+      /** @example 0.18432 */
+      costUsd: number;
+      /** @example 45120 */
+      totalTokens: number;
+      /**
+       * @description Number of billed calls.
+       * @example 12
+       */
+      calls: number;
+      /**
+       * @description Node type that spent this (stamped on the ledger row); null for pre-feature rows.
+       * @example agent
+       */
+      nodeType: Record<string, unknown> | null;
+      /**
+       * @description Average measured call duration in ms over rows that carry one; null when none do.
+       * @example 1840
+       */
+      avgDurationMs: number | null;
+    };
+    InsightsRunsByDayResponse: {
+      /**
+       * @description UTC calendar day.
+       * @example 2026-07-16
+       */
+      date: string;
+      /**
+       * @description Runs started that day (all statuses).
+       * @example 42
+       */
+      total: number;
+      /**
+       * @description Run counts per status.
+       * @example {
+       *   "completed": 38,
+       *   "failed": 3,
+       *   "running": 1
+       * }
+       */
+      byStatus: {
+        [key: string]: number;
+      };
+    };
+    InsightsRunsByWorkflowResponse: {
+      /**
+       * @description Workflow key; null for runs with no key (pre-migration).
+       * @example support-triage
+       */
+      workflowKey: Record<string, unknown> | null;
+      /** @example 42 */
+      runs: number;
+      /**
+       * @description Average run duration in ms over runs with a worker-stamped finishedAt; null when none have one.
+       * @example 12840
+       */
+      avgDurationMs: number | null;
+    };
+    InsightsFailureKindResponse: {
+      /**
+       * @description failureKind when recorded, else the close status (pre-feature fallback).
+       * @example rate_limit
+       */
+      kind: string;
+      /** @example 3 */
+      count: number;
     };
     InsightsResponse: {
       range: components["schemas"]["InsightsRangeResponse"];

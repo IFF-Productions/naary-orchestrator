@@ -148,18 +148,27 @@ export function DockOutputTabs({
                   stale
                 </span>
               )}
-              {run?.ms !== undefined && !showPinnedCard && (
-                <span
-                  className="mono"
-                  style={{
-                    marginLeft: "auto",
-                    fontSize: "var(--text-2xs)",
-                    color: "var(--ink-3)",
-                  }}
-                >
-                  {fmtMs(run.ms)}
-                </span>
-              )}
+              {(run?.ms !== undefined || run?.costUsd !== undefined) &&
+                !showPinnedCard && (
+                  <span
+                    className="mono"
+                    style={{
+                      marginLeft: "auto",
+                      fontSize: "var(--text-2xs)",
+                      color: "var(--ink-3)",
+                    }}
+                  >
+                    {/* Server-measured duration + real metered cost (Slice 2). */}
+                    {[
+                      run.ms !== undefined ? fmtMs(run.ms) : null,
+                      run.costUsd !== undefined && run.costUsd > 0
+                        ? `$${run.costUsd.toFixed(4)}`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                )}
             </div>
             <div style={{ padding: 6 }}>
               {outputRows.map((f) => (
@@ -280,6 +289,9 @@ export function DockOutputTabs({
             <div style={{ color: "var(--state-done)" }}>
               ✓ completed
               {run.ms !== undefined ? ` · ${fmtMs(run.ms)}` : ""}
+              {run.costUsd !== undefined && run.costUsd > 0
+                ? ` · $${run.costUsd.toFixed(4)}`
+                : ""}
             </div>
           )}
           {run?.status === "done" && run.stale && (

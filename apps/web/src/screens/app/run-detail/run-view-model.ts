@@ -211,6 +211,66 @@ export function fmtWhen(iso: string): string {
   })}`;
 }
 
+/* ---------------- Per-node timing (Slice 2 — worker-stamped, never fabricated) ---------------- */
+
+/** One node's timing window from the run state's nodeTimes map (epoch ms, workflow
+ *  time). `n`/`totalMs` aggregate repeated passes (loops / items regions). */
+export interface NodeTime {
+  s: number;
+  f: number;
+  n?: number;
+  totalMs?: number;
+}
+
+/** Shape-checked read of one node's timing entry from the (unknown-typed) nodeTimes
+ *  map the API surfaces. Null when absent or malformed — the UI then keeps "—". */
+export function nodeTimeOf(
+  nodeTimes: Record<string, unknown> | null | undefined,
+  nodeId: string,
+): NodeTime | null {
+  const raw = nodeTimes?.[nodeId];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const t = raw as { s?: unknown; f?: unknown; n?: unknown; totalMs?: unknown };
+  if (typeof t.s !== "number" || typeof t.f !== "number") return null;
+  return {
+    s: t.s,
+    f: t.f,
+    ...(typeof t.n === "number" ? { n: t.n } : {}),
+    ...(typeof t.totalMs === "number" ? { totalMs: t.totalMs } : {}),
+  };
+}
+
+/** Compact real-duration text: "0ms" · "340ms" · "1.4s" · "3m 20s". Shared by the
+ *  step timeline and the runs-list Duration columns (Slice 2). */
+export function fmtDurMs(ms: number): string {
+  const v = Math.max(0, ms);
+  if (v < 1000) return `${Math.round(v)}ms`;
+  if (v < 60_000) return `${(v / 1000).toFixed(1)}s`;
+  return fmtAge(v);
+}
+
+/** Duration text for a step; a multi-pass node (loop / items region) appends "×n" —
+ *  the window shown is the LAST pass's. */
+export function fmtStepDuration(t: NodeTime): string {
+  const base = fmtDurMs(t.f - t.s);
+  return t.n !== undefined && t.n > 1 ? `${base} ×${t.n}` : base;
+}
+
+/** A node output's real metered cost (agent/mcp/http/… results carry `costUsd`), or
+ *  null when the node metered nothing costful — the UI then keeps "—". */
+export function stepCostText(output: unknown): string | null {
+  if (!output || typeof output !== "object") return null;
+  const c = (output as { costUsd?: unknown }).costUsd;
+  return typeof c === "number" && c > 0 ? `$${c.toFixed(4)}` : null;
+}
+
+/** A node output's real token count (agent results carry `totalTokens`), or null. */
+export function stepTokensText(output: unknown): string | null {
+  if (!output || typeof output !== "object") return null;
+  const t = (output as { totalTokens?: unknown }).totalTokens;
+  return typeof t === "number" && t > 0 ? t.toLocaleString() : null;
+}
+
 /** Compact two-unit age/duration: "2d 4h" · "4h 12m" · "3m 20s" · "12s". */
 export function fmtAge(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));

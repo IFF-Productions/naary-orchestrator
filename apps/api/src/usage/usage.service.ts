@@ -1,6 +1,11 @@
 import { Injectable, Optional } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
-import { type InsightsResult, aggregateInsights } from "@naary/usage";
+import {
+  type InsightsResult,
+  type RunsRollup,
+  aggregateInsights,
+  aggregateRuns,
+} from "@naary/usage";
 import type { Principal } from "../auth/tenant.decorator";
 import {
   type EnvViewTerm,
@@ -145,7 +150,7 @@ export class UsageService {
     tenantId: string,
     opts: { from?: string; to?: string; environmentId?: string } = {},
     actor?: Principal,
-  ): Promise<InsightsResult> {
+  ): Promise<InsightsResult & RunsRollup> {
     const terms = await this.viewTermsFor(actor, tenantId);
     const { from, to, environmentId } = opts;
     const createdAt =
@@ -171,19 +176,51 @@ export class UsageService {
       rows = rows.filter((r) => this.eventVisible(terms, r, workflowKeyByExec));
     }
 
-    return aggregateInsights(
-      rows.map((r) => ({
-        executionId: r.executionId,
-        environmentId: r.environmentId,
-        provider: r.provider,
-        model: r.model,
-        totalTokens: r.totalTokens,
-        costUsd: Number(r.costUsd),
-        createdAt: r.createdAt,
-      })),
-      workflowKeyByExec,
-      { from: from ?? null, to: to ?? null },
-    );
+    // Run-outcome rollups (Slice 2): the SAME window/env scope against the Execution
+    // read-model — un-capped per-day counts + per-workflow durations, so Observe's
+    // throughput/KPIs no longer depend on the capped runs list. RBAC: the same
+    // view-terms semantics filter these rows (env + workflowKey per viewTermsAllow;
+    // a NULL environmentId row counts as the default env, key-less rows are visible
+    // only to unrestricted subjects — identical to the runs-list filter).
+    let execRows = await getPrisma().execution.findMany({
+      where: {
+        tenantId,
+        ...(createdAt ? { createdAt } : {}),
+        ...(environmentId ? { environmentId } : {}),
+      },
+      select: {
+        workflowKey: true,
+        environmentId: true,
+        status: true,
+        createdAt: true,
+        finishedAt: true,
+        failureKind: true,
+      },
+    });
+    if (terms !== null) {
+      execRows = execRows.filter((r) =>
+        viewTermsAllow(terms, r.environmentId, r.workflowKey),
+      );
+    }
+
+    return {
+      ...aggregateInsights(
+        rows.map((r) => ({
+          executionId: r.executionId,
+          environmentId: r.environmentId,
+          provider: r.provider,
+          model: r.model,
+          totalTokens: r.totalTokens,
+          costUsd: Number(r.costUsd),
+          createdAt: r.createdAt,
+          nodeType: r.nodeType,
+          durationMs: r.durationMs,
+        })),
+        workflowKeyByExec,
+        { from: from ?? null, to: to ?? null },
+      ),
+      ...aggregateRuns(execRows),
+    };
   }
 
   /** executionId → workflowKey over the DISTINCT execIds of `rows` (one batched lookup). */

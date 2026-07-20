@@ -58,22 +58,52 @@ export async function loadVariables(meta: {
   return out;
 }
 
+/** Statuses that end a run — the terminal push also stamps `finishedAt` (Slice 2). */
+const TERMINAL_STATUSES = new Set([
+  "completed",
+  "rejected",
+  "budget_exceeded",
+  "circuit_open",
+  "invalid_graph",
+  "failed",
+]);
+
+/** Failure classification derivable from the terminal STATUS itself (returned-status
+ *  terminals). Thrown failures carry an explicit `failureKind` classified in the
+ *  workflow from the recorded error instead. circuit_open/invalid_graph get none —
+ *  their status is already the most precise description (consumers fall back to it). */
+const STATUS_FAILURE_KIND: Record<string, string> = {
+  rejected: "rejected",
+  budget_exceeded: "budget",
+};
+
 /**
  * Push the run's current status + accumulated cost to its Execution row — the
  * read-model the Runs list reads (so listing needs no per-run Temporal calls).
  * Best-effort: a missing row (race before recordExecution) is ignored.
+ * A TERMINAL status also stamps `finishedAt` (the clock read lives HERE, in the
+ * activity — Tier-1 rule 2) and persists the compact `failureKind` (Slice 2):
+ * explicit from the workflow for thrown failures, else derived from the status.
  */
 export async function setExecutionStatus(meta: {
   workflowId: string;
   status: string;
   costUsd?: number;
+  /** Classification of a THROWN failure (workflow-derived, deterministic). */
+  failureKind?: string;
 }): Promise<void> {
+  const terminal = TERMINAL_STATUSES.has(meta.status);
+  const failureKind =
+    meta.failureKind ??
+    (terminal ? STATUS_FAILURE_KIND[meta.status] : undefined);
   await getPrisma()
     .execution.update({
       where: { workflowId: meta.workflowId },
       data: {
         status: meta.status,
         ...(meta.costUsd !== undefined ? { costUsd: meta.costUsd } : {}),
+        ...(terminal ? { finishedAt: new Date() } : {}),
+        ...(failureKind !== undefined ? { failureKind } : {}),
       },
     })
     .catch(() => undefined);

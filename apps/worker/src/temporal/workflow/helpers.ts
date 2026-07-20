@@ -1,6 +1,8 @@
 // Pure interpreter constants + helpers (split out of workflows.ts — moved
 // verbatim, zero behavior change). Everything here is deterministic and
 // command-neutral: safe in the Temporal workflow sandbox.
+import { ApplicationFailure, TimeoutFailure } from "@temporalio/workflow";
+import type { FailureKind } from "@naary/contracts";
 import type { TraceCell } from "@naary/dsl";
 
 /** Max sub-workflow nesting depth (a run at this depth refuses to spawn children).
@@ -81,4 +83,49 @@ export function nodeErrorMessage(err: unknown): string {
   }
   const msg = e instanceof Error ? e.message : String(e);
   return msg.length > 500 ? `${msg.slice(0, 500)}…` : msg;
+}
+
+/**
+ * Classify a THROWN run failure into the compact {@link FailureKind} persisted on the
+ * Execution read-model row (Slice 2 — per-node timing + cost). PURE + DETERMINISTIC:
+ * it only inspects the error object Temporal already recorded in history (failure chain
+ * types + the activity-sanitized messages), so calling it in workflow code issues no
+ * command and replays identically. Mapping is derived from the failure the activity
+ * actually observed — never re-guessed later from logs:
+ *  - TimeoutFailure in the chain (activity start-to-close elapsed) or the activities'
+ *    own *_TIMEOUT types → "timeout"
+ *  - QUOTA (provider 429) → "rate_limit"
+ *  - BUDGET (monthly cap reservation refused) → "budget"
+ *  - HTTP_ERROR_STATUS with a 5xx status in the sanitized message → "upstream_5xx"
+ *  - anything else (STOP_AND_ERROR, AUTH, code errors, …) → "error"
+ * "rejected"/"budget" for RETURNED terminal statuses are mapped in the
+ * setExecutionStatus activity from the status itself, not here.
+ */
+export function classifyFailure(err: unknown): FailureKind {
+  // Walk the wrapped chain (ActivityFailure → cause → …) collecting evidence.
+  let e: unknown = err;
+  for (let i = 0; i < 6 && e; i++) {
+    if (e instanceof TimeoutFailure) return "timeout";
+    if (e instanceof ApplicationFailure) {
+      const type = e.type ?? "";
+      if (type === "QUOTA" || type === "RATE_LIMIT") return "rate_limit";
+      if (type === "BUDGET") return "budget";
+      if (type.endsWith("_TIMEOUT") || type === "TIMEOUT") return "timeout";
+      if (type === "HTTP_ERROR_STATUS" || type === "HTTP_5XX") {
+        // http.ts throws "HTTP request returned status <n>" — a 5xx is an upstream
+        // failure; a 4xx stays a plain error (the caller's request/config).
+        return /\b5\d\d\b/.test(e.message ?? "") ? "upstream_5xx" : "error";
+      }
+    }
+    if (
+      typeof e === "object" &&
+      "cause" in e &&
+      (e as { cause?: unknown }).cause
+    ) {
+      e = (e as { cause: unknown }).cause;
+      continue;
+    }
+    break;
+  }
+  return "error";
 }

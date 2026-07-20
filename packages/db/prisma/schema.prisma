@@ -55,6 +55,18 @@ model Execution {
   status      String   @default("running")
   costUsd     Decimal? @db.Decimal(12, 6)
   createdAt   DateTime @default(now())
+  // When the run reached a TERMINAL status (Slice 2 — per-node timing + cost). Stamped
+  // in-activity (setExecutionStatus) on the terminal push, so durationMs = finishedAt −
+  // createdAt is derivable in one PG read. NULL for in-flight runs AND for runs that
+  // predate this column (or closed at the Temporal level without a terminal push, e.g.
+  // user-terminated) — consumers must render "—", never fabricate.
+  finishedAt  DateTime?
+  // Compact failure classification on terminal FAILED runs (Slice 2):
+  // timeout | upstream_5xx | rate_limit | budget | rejected | error. Derived in the worker
+  // from the failure the interpreter/activity already observed (never re-parsed later).
+  // NULL for successes, in-flight runs, and pre-feature rows — consumers fall back to the
+  // close status.
+  failureKind String?
   // Soft-archive: a user hides a run from the Runs list without deleting it. NULL = active
   // (the default view); non-null = archived + when. Purely a read-model flag — no Temporal
   // interaction, and the worker's status/cost pushes never touch it.
@@ -415,6 +427,15 @@ model UsageEvent {
   cachedInputTokens Int      @default(0)
   reasoningTokens   Int      @default(0)
   costUsd           Decimal  @db.Decimal(12, 6)
+  // The node TYPE that spent this (Slice 2 — per-node timing + cost): "agent" | "codeAgent" |
+  // "vectorUpsert" | … Stamped at the recording site (the activity statically knows which node
+  // kind it serves), so by-node-type rollups need NO graph-snapshot join at query time — the
+  // cheap honest option. Nullable: pre-feature rows have none and stay out of typed buckets.
+  nodeType          String?
+  // Wall-clock duration of the metered call, measured IN the activity around the provider
+  // call (clock reads live in activities, never workflow code). Nullable for pre-feature rows.
+  // Still tokens/cost/timing only — never prompt or completion text (ledger privacy).
+  durationMs        Int?
   createdAt         DateTime @default(now())
 
   @@unique([executionId, nodeId]) // idempotent ledger: a retried activity can't double-write
