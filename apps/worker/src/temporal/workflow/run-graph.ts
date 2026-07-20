@@ -27,30 +27,9 @@ import {
   resolveTemplates,
   collectUnresolved,
   nextNodes,
-  resolveAggregate,
-  resolveCompareDatasets,
-  resolveFilter,
-  resolveListOps,
-  resolveHmac,
-  resolveHash,
-  resolveIf,
-  resolveJson,
-  resolveNumber,
   resolveHttpRequest,
-  resolveGraphQL,
-  resolveJwt,
   resolveMcpArguments,
-  resolveIntegrationFields,
-  getIntegrationAction,
-  resolveRenameKeys,
-  resolveRss,
-  resolveSendEmail,
-  resolveSet,
-  resolveSqlQuery,
-  resolveSqlExec,
   resolveSubWorkflowInput,
-  resolveSwitch,
-  resolveText,
   resolveWebhookResponse,
   asNodeConfig,
   computeItemsRegions,
@@ -72,42 +51,14 @@ import type * as activities from "../activities";
 // Pure fan-out policy (no side effects) — safe to import into workflow code.
 import { FOREACH_CONCURRENCY, perChildCap } from "../foreach-cap";
 import {
-  runAgent,
-  runAgentTooled,
-  callMcpTool,
   recordExecution,
   loadVariables,
   setExecutionStatus,
-  computeDateTime,
   resolveSubWorkflowGraph,
-  callHmac,
-  callHash,
-  callJwt,
-  callTotp,
-  callXml,
-  callHtmlExtract,
-  callMarkdown,
-  callVectorUpsert,
-  callVectorQuery,
-  callCsv,
-  callEncode,
-  callRandom,
-  callHttpRequest,
-  callGraphQL,
-  callIntegrationRead,
-  callIntegrationWrite,
   mapNode,
-  callCodeAgent,
-  callSqlQuery,
-  callSqlExec,
-  callSendEmail,
-  callRssRead,
-  callPoll,
   prepareApproval,
   refreshBudget,
   sendNotification,
-  callCode,
-  retryOverride,
 } from "./proxies";
 import {
   MAX_SUBWORKFLOW_DEPTH,
@@ -122,6 +73,9 @@ import {
   nodeErrorMessage,
 } from "./helpers";
 import type { RunGraphResult, RunGraphCtx, ResumeState } from "./types";
+// Leaf node handlers, extracted VERBATIM behind a registry (Phase 1 run-graph split).
+// Pure/simple-activity nodes dispatch through this; control-flow cases stay inline below.
+import { NODE_HANDLERS } from "./node-handlers";
 
 /**
  * The generic interpreter: one workflow walks graph DATA (CLAUDE.md Tier-1
@@ -393,370 +347,21 @@ export async function runGraph(
       delete diag[node.id];
       if (Object.keys(diag).length === 0) delete ctx.__unresolved;
     }
+    // Leaf dispatch (Phase 1 run-graph split): pure transforms + simple activity
+    // calls live in the registry, extracted VERBATIM. Cost-bearing handlers return a
+    // `costUsd` delta; a `!== undefined` guard reproduces the original's unconditional
+    // `ctx.__costUsd = costUsd` write (a void handler leaves it untouched, exactly as
+    // the non-cost cases did). Control-flow cases fall through to the switch below.
+    const handler = NODE_HANDLERS[node.type];
+    if (handler) {
+      const r = await handler({ node, cfg, ctx, runCtx, metaFor });
+      if (r && r.costUsd !== undefined) {
+        costUsd += r.costUsd;
+        ctx.__costUsd = costUsd;
+      }
+      return null;
+    }
     switch (node.type) {
-      case "start":
-      case "end":
-        return null;
-      case "webhookTrigger":
-        // Slice #4: the inbound event (the workflow input) is this node's output.
-        ctx[node.id] = ctx.__input;
-        return null;
-      case "scheduleTrigger":
-        // Entry node: the run was started by a Temporal cron Schedule (control-plane synced
-        // on save). Passthrough of the run input — the schedule carries no external event.
-        ctx[node.id] = ctx.__input;
-        return null;
-      case "formTrigger":
-        // Entry node: the run was started by a hosted form submission (a later slice adds the
-        // public endpoint). The submitted fields ARE the run input → this node's output.
-        ctx[node.id] = ctx.__input;
-        return null;
-      case "chatTrigger":
-        // Entry node: the run was started by a hosted chat message (public endpoint + durable
-        // session are later slices). The inbound { message, sessionId } IS the run input.
-        ctx[node.id] = ctx.__input;
-        return null;
-      case "errorTrigger":
-        // Entry node of an error-handler graph — its output is the failure context
-        // the interpreter passed as this run's input.
-        ctx[node.id] = ctx.__input;
-        return null;
-      case "pollTrigger": {
-        // Entry node: fetch the URL + detect change vs the persisted cursor (keyed by
-        // workflowKey so it spans the scheduled runs). Output {changed, body}; branch
-        // on `<id>.changed` to no-op when nothing's new.
-        const pollCfg = asNodeConfig(cfg, "pollTrigger");
-        const r = await callPoll(pollCfg, {
-          tenantId: runCtx.tenantId,
-          environmentId: runCtx.environmentId, // env-scoped cursor; absent = legacy run → default env (in-activity)
-          workflowKey: runCtx.workflowKey ?? "",
-          nodeId: node.id,
-        });
-        ctx[node.id] = {
-          changed: r.changed,
-          body: r.body,
-        } satisfies NodeOutputMap["pollTrigger"];
-        return null;
-      }
-      case "agent": {
-        // tenantId flows in workflow args (not a secret); the activity fetches
-        // the tenant's key by tenantId. executionId is deterministic.
-        const agentCfg = cfg as unknown as activities.AgentConfig;
-        // Tooled agents (#449) run a multi-step loop with nested MCP calls → a longer deadline
-        // and AT-MOST-ONCE by default (runAgentTooled), so a retried activity never replays an
-        // already-executed tool. An explicit NodeDef.retry still wins (and gets the long timeout).
-        const tooled = (agentCfg.tools?.length ?? 0) > 0;
-        const over = retryOverride(node.retry, tooled ? 300_000 : 60_000);
-        const runFn = over?.runAgent ?? (tooled ? runAgentTooled : runAgent);
-        const result = await runFn(agentCfg, ctx.__input, metaFor(node.id));
-        ctx[node.id] = result satisfies NodeOutputMap["agent"];
-        // Cost is a commutative SUM — accumulating it is order-independent (safe
-        // even under parallel fan-out, where Temporal replays activity completion
-        // order deterministically anyway).
-        costUsd += result.costUsd;
-        ctx.__costUsd = costUsd;
-        return null;
-      }
-      case "codeAgent": {
-        // The prompt's {{…}} is already resolved in `cfg`. No retryOverride: this node is
-        // AT-MOST-ONCE (its proxy block pins maximumAttempts:1) — later slices commit/PR,
-        // so a partial write must never auto-retry. The activity fetches the BYOK key.
-        const caCfg = asNodeConfig(cfg, "codeAgent");
-        const caResult = await callCodeAgent(
-          {
-            tool: caCfg.tool,
-            prompt: caCfg.prompt,
-            systemPrompt: caCfg.systemPrompt,
-            model: caCfg.model,
-            maxTurns: caCfg.maxTurns,
-            maxBudgetUsd: caCfg.maxBudgetUsd,
-            timeoutMs: caCfg.timeoutMs,
-            costUsd: caCfg.costUsd,
-            // Write mode (Slice 2c): the activity clones `repo` (via the App `connectionId`) and
-            // dispatches to the sandbox-runner; default/read runs in-worker with no repo.
-            mode: caCfg.mode,
-            repo: caCfg.repo,
-            branch: caCfg.branch,
-            connectionId: caCfg.connectionId,
-          },
-          ctx.__input,
-          metaFor(node.id),
-        );
-        ctx[node.id] = caResult satisfies NodeOutputMap["codeAgent"];
-        costUsd += caResult.costUsd;
-        ctx.__costUsd = costUsd;
-        return null;
-      }
-      case "mcpTool": {
-        // Resolving tool args from upstream outputs is deterministic graph work,
-        // so it happens HERE; the I/O (token fetch + HTTP) is inside the activity.
-        const mcpCfg = asNodeConfig(cfg, "mcpTool");
-        const over = retryOverride(node.retry, 60_000);
-        const toolResult = await (over?.callMcpTool ?? callMcpTool)(
-          {
-            connectionId: mcpCfg.connectionId,
-            tool: mcpCfg.tool,
-            arguments: resolveMcpArguments(mcpCfg, ctx),
-            costUsd: mcpCfg.costUsd,
-          },
-          ctx.__input,
-          metaFor(node.id),
-        );
-        ctx[node.id] = toolResult satisfies NodeOutputMap["mcpTool"];
-        // Meter tool spend into the run budget so the per-execution cap sees it
-        // (Arch§4.6) — commutative accumulation, same as the agent node.
-        costUsd += toolResult.costUsd;
-        ctx.__costUsd = costUsd;
-        return null;
-      }
-      case "integration": {
-        // Native provider action. Field resolution (static + bindings) is deterministic
-        // graph work → HERE; the auth fetch + egress + HTTP is in the activity. A WRITE
-        // action runs AT-MOST-ONCE (no retry) so a lost response can't duplicate a create
-        // (design §4); reads retry. No per-node retryOverride — the write/read split governs
-        // idempotency and a retry override must never re-enable retries on a write.
-        const iCfg = asNodeConfig(cfg, "integration");
-        const action = getIntegrationAction(iCfg.provider, iCfg.action);
-        const runIntegration = action?.write
-          ? callIntegrationWrite
-          : callIntegrationRead;
-        ctx[node.id] = (await runIntegration(
-          iCfg,
-          resolveIntegrationFields(iCfg, ctx),
-          metaFor(node.id),
-        )) satisfies NodeOutputMap["integration"];
-        return null;
-      }
-      case "httpRequest": {
-        // Binding resolution is deterministic graph work (pure ctx path-reads), so
-        // it runs HERE; the I/O (auth fetch, egress check, fetch) is in the activity.
-        const httpCfg = asNodeConfig(cfg, "httpRequest");
-        const over = retryOverride(node.retry, 150_000);
-        const result = await (over?.callHttpRequest ?? callHttpRequest)(
-          resolveHttpRequest(httpCfg, ctx),
-          ctx.__input,
-          metaFor(node.id),
-        );
-        // Expose the response as {status, headers, body} so edges branch on
-        // `<nodeId>.status` (the HTTP code), per the node's behavior contract.
-        ctx[node.id] = {
-          status: result.httpStatus,
-          headers: result.headers,
-          body: result.body,
-        } satisfies NodeOutputMap["httpRequest"];
-        costUsd += result.costUsd;
-        ctx.__costUsd = costUsd;
-        return null;
-      }
-      case "graphQL": {
-        // Binding resolution is deterministic graph work (pure ctx path-reads); the POST + egress
-        // check + $secrets resolution are in the activity. `{{ $secrets.X }}` stays literal here.
-        const gqlCfg = asNodeConfig(cfg, "graphQL");
-        const over = retryOverride(node.retry, 150_000);
-        const result = await (over?.callGraphQL ?? callGraphQL)(
-          resolveGraphQL(gqlCfg, ctx),
-          ctx.__input,
-          metaFor(node.id),
-        );
-        // Expose {data, errors, httpStatus} so edges branch on `<id>.errors` (GraphQL returns
-        // 200-with-errors) or read `<id>.data`.
-        ctx[node.id] = {
-          data: result.data,
-          errors: result.errors,
-          httpStatus: result.httpStatus,
-        } satisfies NodeOutputMap["graphQL"];
-        costUsd += result.costUsd;
-        ctx.__costUsd = costUsd;
-        return null;
-      }
-      case "sqlQuery": {
-        // Param binding is deterministic graph work (pure ctx path-reads); the DSN
-        // read + DB query (read-only) are in the activity. The sql text is never
-        // built from bindings — only the params array (no SQL injection).
-        const sqlCfg = asNodeConfig(cfg, "sqlQuery");
-        const over = retryOverride(node.retry, 150_000);
-        const result = await (over?.callSqlQuery ?? callSqlQuery)(
-          resolveSqlQuery(sqlCfg, ctx),
-          ctx.__input,
-          metaFor(node.id),
-        );
-        // Expose {rows, rowCount} so edges branch on `<nodeId>.rowCount`.
-        ctx[node.id] = {
-          rows: result.rows,
-          rowCount: result.rowCount,
-        } satisfies NodeOutputMap["sqlQuery"];
-        costUsd += result.costUsd;
-        ctx.__costUsd = costUsd;
-        return null;
-      }
-      case "sqlExec": {
-        // A WRITE (INSERT/UPDATE/DELETE). Same binding rules as sqlQuery (params only,
-        // never the SQL text); the DSN read + transactional write are in the activity,
-        // which runs at-most-once (writes aren't idempotent).
-        const execCfg = asNodeConfig(cfg, "sqlExec");
-        const result = await callSqlExec(
-          resolveSqlExec(execCfg, ctx),
-          ctx.__input,
-          metaFor(node.id),
-        );
-        // Expose {rowsAffected} so edges branch on `<nodeId>.rowsAffected`.
-        ctx[node.id] = {
-          rowsAffected: result.rowsAffected,
-        } satisfies NodeOutputMap["sqlExec"];
-        costUsd += result.costUsd;
-        ctx.__costUsd = costUsd;
-        return null;
-      }
-      case "set": {
-        // Pure node: build the output object from static fields + upstream
-        // bindings entirely in the interpreter (deterministic, no I/O, no cost).
-        // Output IS the built object, so edges/nodes read `<nodeId>.<field>`.
-        const setCfg = asNodeConfig(cfg, "set");
-        ctx[node.id] = resolveSet(setCfg, ctx);
-        return null;
-      }
-      case "renameKeys": {
-        // Pure node: reshape an upstream object's keys, entirely in the interpreter.
-        const rkCfg = asNodeConfig(cfg, "renameKeys");
-        ctx[node.id] = resolveRenameKeys(rkCfg, ctx);
-        return null;
-      }
-      case "text": {
-        // Pure node: one string op on an upstream value → { result }. Deterministic
-        // (regex is pure; invalid patterns fail closed to null in resolveText).
-        const txtCfg = asNodeConfig(cfg, "text");
-        ctx[node.id] = resolveText(txtCfg, ctx);
-        return null;
-      }
-      case "filter": {
-        // Pure node: keep the upstream array items matching the per-item predicate.
-        // Output IS the filtered array (downstream reads `<id>.0` or aggregates it).
-        const filterCfg = asNodeConfig(cfg, "filter");
-        ctx[node.id] = resolveFilter(filterCfg, ctx);
-        return null;
-      }
-      case "aggregate": {
-        // Pure node: collapse an upstream array → { result }.
-        const aggCfg = asNodeConfig(cfg, "aggregate");
-        ctx[node.id] = resolveAggregate(aggCfg, ctx);
-        return null;
-      }
-      case "listOps": {
-        // Pure node: sort / limit / dedupe an upstream array → array.
-        const loCfg = asNodeConfig(cfg, "listOps");
-        ctx[node.id] = resolveListOps(loCfg, ctx);
-        return null;
-      }
-      case "compareDatasets": {
-        // Pure node: diff two upstream arrays by key → {added,removed,changed,same}.
-        const cdCfg = asNodeConfig(cfg, "compareDatasets");
-        ctx[node.id] = resolveCompareDatasets(cdCfg, ctx);
-        return null;
-      }
-      case "xml": {
-        // Parse XML→object / build object→XML in the activity (parser stays out of
-        // the deterministic bundle). Input value resolved here (pure ctx read).
-        const xmlCfg = asNodeConfig(cfg, "xml");
-        const inputVal = getByPath(ctx[xmlCfg.from], xmlCfg.path);
-        const result = await callXml(
-          { operation: xmlCfg.operation },
-          inputVal,
-          metaFor(node.id),
-        );
-        ctx[node.id] = result.result;
-        return null;
-      }
-      case "htmlExtract": {
-        // Pull values from an HTML string by CSS selector. HTML resolved here (pure ctx
-        // read); the parse runs in the activity (parser out of the deterministic bundle).
-        const htmlCfg = asNodeConfig(cfg, "htmlExtract");
-        const htmlVal = getByPath(ctx[htmlCfg.from], htmlCfg.path);
-        const res = await callHtmlExtract(
-          { extractions: htmlCfg.extractions ?? [] },
-          htmlVal,
-          metaFor(node.id),
-        );
-        ctx[node.id] = res.result;
-        return null;
-      }
-      case "markdown": {
-        // Convert an HTML string → Markdown. HTML resolved here (pure ctx read); the parse runs
-        // in the activity (parser out of the deterministic bundle, like htmlExtract).
-        const mdCfg = asNodeConfig(cfg, "markdown");
-        const mdVal = getByPath(ctx[mdCfg.from], mdCfg.path);
-        const res = await callMarkdown(mdVal, metaFor(node.id));
-        ctx[node.id] = res.result;
-        return null;
-      }
-      case "vectorUpsert": {
-        // RAG: input resolved here (pure ctx read); the BYOK embed + pgvector write are in the
-        // activity (key never crosses the workflow boundary). Output { upserted }.
-        const vuCfg = asNodeConfig(cfg, "vectorUpsert");
-        const vuVal = getByPath(ctx[vuCfg.from], vuCfg.path);
-        const res = await callVectorUpsert(
-          { collection: vuCfg.collection },
-          vuVal,
-          metaFor(node.id),
-        );
-        ctx[node.id] = res.result;
-        costUsd += res.costUsd; // embedding spend, metered like any activity
-        ctx.__costUsd = costUsd;
-        return null;
-      }
-      case "vectorQuery": {
-        // RAG: embed the query + return the top-k nearest chunks (activity). Output { matches }.
-        const vqCfg = asNodeConfig(cfg, "vectorQuery");
-        const vqVal = getByPath(ctx[vqCfg.from], vqCfg.path);
-        const res = await callVectorQuery(
-          { collection: vqCfg.collection, topK: vqCfg.topK },
-          vqVal,
-          metaFor(node.id),
-        );
-        ctx[node.id] = res.result;
-        costUsd += res.costUsd;
-        ctx.__costUsd = costUsd;
-        return null;
-      }
-      case "noOp": {
-        // Does nothing — a structural/placeholder node. Emits {} (downstream nodes bind to real
-        // upstream node ids, so routing an edge through here doesn't break any binding).
-        ctx[node.id] = {};
-        return null;
-      }
-      case "csv": {
-        // Parse CSV→rows / build rows→CSV. Input resolved here (pure ctx read); the parse
-        // runs in the activity (parser out of the deterministic bundle).
-        const csvCfg = asNodeConfig(cfg, "csv");
-        const csvVal = getByPath(ctx[csvCfg.from], csvCfg.path);
-        const res = await callCsv(
-          {
-            operation: csvCfg.operation,
-            header: csvCfg.header,
-            delimiter: csvCfg.delimiter,
-          },
-          csvVal,
-          metaFor(node.id),
-        );
-        ctx[node.id] = res.result;
-        return null;
-      }
-      case "dateTime": {
-        // The base value is resolved deterministically here (pure ctx read); the
-        // CLOCK READ (when source is "now") happens in the activity, since time is
-        // non-deterministic and must not touch workflow code.
-        const dtCfg = asNodeConfig(cfg, "dateTime");
-        const src = dtCfg.source;
-        const base =
-          !src || src === "now"
-            ? null
-            : ((getByPath(ctx[src.from], src.path) ?? null) as
-                string | number | null);
-        ctx[node.id] = await computeDateTime({
-          base,
-          addSeconds: dtCfg.addSeconds,
-        });
-        return null;
-      }
       case "merge": {
         // Fan-in join. Only REACHED here on the LAST inbound arrival (execChain
         // absorbs earlier ones), so all inbound parents have run — combine their
@@ -772,141 +377,6 @@ export async function runGraph(
                 ...inputs.filter((i) => i !== null && typeof i === "object"),
               )
             : inputs;
-        return null;
-      }
-      case "switch": {
-        // Pure node: pick the first matching rule → { matched }. Downstream edges branch
-        // on `<switchId>.matched`. Reuses evaluateCondition (structured, no eval).
-        const swCfg = asNodeConfig(cfg, "switch");
-        ctx[node.id] = resolveSwitch(swCfg, ctx);
-        return null;
-      }
-      case "if": {
-        // Pure node: combine predicates with AND/OR → { result }. Downstream edges branch
-        // on `<ifId>.result` (eq true / eq false).
-        const ifCfg = asNodeConfig(cfg, "if");
-        ctx[node.id] = resolveIf(ifCfg, ctx);
-        return null;
-      }
-      case "json": {
-        // Pure node: JSON parse/stringify (deterministic ES built-ins, no activity).
-        // Malformed JSON on parse throws → a node failure onError:"continue" can catch.
-        const jsonCfg = asNodeConfig(cfg, "json");
-        ctx[node.id] = resolveJson(jsonCfg, ctx);
-        return null;
-      }
-      case "number": {
-        // Pure node: one arithmetic op on resolved operands → { result }.
-        const numCfg = asNodeConfig(cfg, "number");
-        ctx[node.id] = resolveNumber(numCfg, ctx);
-        return null;
-      }
-      case "random": {
-        // Generate a fresh random value. Runs in the activity — randomness must never touch
-        // deterministic workflow code. No inputs. Output { value }.
-        const rndCfg = asNodeConfig(cfg, "random");
-        const res = await callRandom(
-          {
-            operation: rndCfg.operation,
-            length: rndCfg.length,
-            min: rndCfg.min,
-            max: rndCfg.max,
-          },
-          metaFor(node.id),
-        );
-        ctx[node.id] = { value: res.value } satisfies NodeOutputMap["random"];
-        return null;
-      }
-      case "encode": {
-        // Input resolved here (pure ctx read); the encode runs in the activity (Buffer for
-        // base64/hex isn't in the deterministic bundle). Output { result }.
-        const encCfg = asNodeConfig(cfg, "encode");
-        const encVal = getByPath(ctx[encCfg.from], encCfg.path);
-        const res = await callEncode(
-          { operation: encCfg.operation },
-          encVal,
-          metaFor(node.id),
-        );
-        ctx[node.id] = { result: res.result };
-        return null;
-      }
-      case "hmac": {
-        // Binding resolution is deterministic (pure ctx read); the key fetch +
-        // signing happen in the activity (the key never enters workflow history).
-        const hmacCfg = asNodeConfig(cfg, "hmac");
-        const result = await callHmac(
-          resolveHmac(hmacCfg, ctx),
-          ctx.__input,
-          metaFor(node.id),
-        );
-        ctx[node.id] = {
-          digest: result.digest,
-        } satisfies NodeOutputMap["hmac"];
-        return null;
-      }
-      case "hash": {
-        // Keyless digest. Binding resolution is deterministic (pure ctx read); the hash
-        // (node:crypto) runs in the activity, out of the deterministic bundle.
-        const hashCfg = asNodeConfig(cfg, "hash");
-        const result = await callHash(
-          resolveHash(hashCfg, ctx),
-          ctx.__input,
-          metaFor(node.id),
-        );
-        ctx[node.id] = {
-          digest: result.digest,
-        } satisfies NodeOutputMap["hash"];
-        return null;
-      }
-      case "jwt": {
-        const jwtCfg = asNodeConfig(cfg, "jwt");
-        const result = await callJwt(
-          resolveJwt(jwtCfg, ctx),
-          ctx.__input,
-          metaFor(node.id),
-        );
-        ctx[node.id] = { token: result.token } satisfies NodeOutputMap["jwt"];
-        return null;
-      }
-      case "totp": {
-        // No bindings: the seed comes from the connection, the time from the clock
-        // — both handled in the activity. Output is the current code.
-        const totpCfg = asNodeConfig(cfg, "totp");
-        const result = await callTotp(totpCfg, ctx.__input, metaFor(node.id));
-        ctx[node.id] = { code: result.code } satisfies NodeOutputMap["totp"];
-        return null;
-      }
-      case "sendEmail": {
-        // Binding resolution is deterministic (pure ctx read); the SMTP URI fetch +
-        // send happen in the activity (URI/creds never enter workflow history).
-        const emailCfg = asNodeConfig(cfg, "sendEmail");
-        const result = await callSendEmail(
-          resolveSendEmail(emailCfg, ctx),
-          ctx.__input,
-          metaFor(node.id),
-        );
-        ctx[node.id] = {
-          messageId: result.messageId,
-        } satisfies NodeOutputMap["sendEmail"];
-        costUsd += result.costUsd;
-        ctx.__costUsd = costUsd;
-        return null;
-      }
-      case "rssRead": {
-        // URL resolution is deterministic (pure ctx read); the fetch + XML parse
-        // (I/O, egress-guarded) run in the activity. Output {items, count} so
-        // downstream filter/listOps/aggregate can operate on `<nodeId>.items`.
-        const rssCfg = asNodeConfig(cfg, "rssRead");
-        const over = retryOverride(node.retry, 60_000);
-        const result = await (over?.callRssRead ?? callRssRead)(
-          resolveRss(rssCfg, ctx),
-          ctx.__input,
-          metaFor(node.id),
-        );
-        ctx[node.id] = {
-          items: result.items,
-          count: result.count,
-        } satisfies NodeOutputMap["rssRead"];
         return null;
       }
       case "executeSubWorkflow": {
@@ -1190,23 +660,6 @@ export async function runGraph(
         ctx[node.id] = {
           statusCode: webhookResponse.statusCode,
         } satisfies NodeOutputMap["respondToWebhook"];
-        return null;
-      }
-      case "code": {
-        // Sandboxed user JS runs in the activity (QuickJS is non-deterministic).
-        // Pass the entry input + a __-stripped snapshot of upstream outputs; the
-        // code's return value becomes this node's output.
-        const codeCfg = asNodeConfig(cfg, "code");
-        const snapshot: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(ctx)) {
-          if (!k.startsWith("__")) snapshot[k] = v;
-        }
-        const result = await callCode(
-          codeCfg,
-          { input: ctx.__input, ctx: snapshot },
-          metaFor(node.id),
-        );
-        ctx[node.id] = result.result;
         return null;
       }
       case "humanApproval": {
