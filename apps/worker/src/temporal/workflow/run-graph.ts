@@ -1157,18 +1157,24 @@ export async function runGraph(
         await syncStatus(); // surface the pause in the Runs list / approval queue
         const gateCfg = (cfg ?? {}) as ApprovalNodeConfig;
         // ---- Approval routing + SLA/escalation (REDESIGN-FUNCTIONALITY-GAPS.md Slice 1) ----
-        // REPLAY INVARIANT: every NEW command below (prepareApproval, the segmented timer
-        // loop, reminder/escalation notifications) is gated on the PRESENCE of the Slice-1
-        // config fields — new schema surface no pre-existing graph snapshot can carry — so a
-        // gate WITHOUT them takes the exact pre-existing command sequence (same activities,
-        // same single condition() wait) and replays safely WITHOUT a patched() marker.
+        // REPLAY INVARIANT (two layers): every NEW command below (prepareApproval, the
+        // segmented timer loop, reminder/escalation notifications) is gated on
+        // (a) the PRESENCE of the Slice-1 config fields — so plain gates take the exact
+        //     pre-existing command sequence — AND
+        // (b) a patched() marker (PR #424 review): in a staged deploy the API/web can save
+        //     graphs WITH these fields while runs still start on an OLD worker; those
+        //     histories lack the new commands, so the updated worker must replay them on
+        //     the legacy path. patched() returns false for such histories and records the
+        //     marker for new runs (CLAUDE.md: version interpreter changes with patched()).
         const hasSlice1Meta =
           gateCfg.approvers !== undefined ||
           gateCfg.slaHours !== undefined ||
           gateCfg.contextFields !== undefined ||
           (gateCfg.remindAfterHours?.length ?? 0) > 0 ||
           gateCfg.escalateAfterHours !== undefined;
-        if (hasSlice1Meta) {
+        const slice1Active =
+          hasSlice1Meta && wf.patched("approval-routing-sla-v1");
+        if (slice1Active) {
           // Pause-side awaiting snapshot via an ACTIVITY: contextFields expression eval,
           // approver group-name read, and the pausedAt clock stamp are side effects
           // (Tier-1 rules 2/3); `$secrets` refs stay literal inside prepareApproval, so
@@ -1312,7 +1318,7 @@ export async function runGraph(
         status = "running";
         // The gate is no longer pending — drop the awaiting record so a later loop
         // iteration pauses fresh (plain ctx write: no command, replay-safe).
-        if (hasSlice1Meta) delete ctx[APPROVAL_CTX_KEY];
+        if (slice1Active) delete ctx[APPROVAL_CTX_KEY];
         // Record the decision + reason on the node's output so it's durable, visible
         // in the run, and branchable downstream (<nodeId>.approved / .comment). A ctx
         // write is in-workflow state — no new command, so it stays replay-safe.

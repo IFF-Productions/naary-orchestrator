@@ -106,7 +106,7 @@ export function ApprovalQueueCard({
         </div>
       ) : (
         shown.map((q, i) => {
-          const ms = ageMs(q.createdAt, now);
+          const ms = ageMs(q.pausedAt ?? q.createdAt, now);
           const chip = TONE_CHIP[ageTone(ms)];
           const busy = busyId !== null;
           return (
@@ -169,7 +169,7 @@ export function ApprovalQueueCard({
               </div>
               <span
                 className="mono"
-                title={`waiting since ${new Date(q.createdAt).toLocaleString()}`}
+                title={`waiting since ${new Date(q.pausedAt ?? q.createdAt).toLocaleString()}`}
                 style={{
                   flex: "none",
                   fontSize: "var(--text-2xs)",
