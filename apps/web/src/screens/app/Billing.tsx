@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useMediaQuery } from "../../lib/useMediaQuery";
+import { BELOW_RAIL_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import {
   api,
   type BudgetView,
@@ -50,7 +50,8 @@ type Load =
   | { kind: "ready"; tenantId: string };
 
 export function Billing() {
-  const stacked = useMediaQuery("(max-width: 980px)");
+  // Hero + enforcement ladder ride side by side on desktop, stack at ≤1024.
+  const stacked = useMediaQuery(BELOW_RAIL_QUERY);
   const [state, setState] = useState<Load>({ kind: "loading" });
   const [budget, setBudget] = useState<BudgetView | null>(null);
   const [runs, setRuns] = useState<RunSummary[]>([]);
