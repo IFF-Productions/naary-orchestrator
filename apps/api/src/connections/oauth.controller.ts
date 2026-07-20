@@ -1,23 +1,24 @@
 import {
   Controller,
   Get,
+  Logger,
   NotFoundException,
   Param,
   Post,
   Query,
+  Res,
 } from "@nestjs/common";
-import { ApiBearerAuth, ApiOkResponse, ApiOperation } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiOperation, ApiResponse } from "@nestjs/swagger";
 import {
   ConnectionService,
   completeConsent,
   startConsent,
 } from "@naary/connections";
+import type { Response } from "express";
 import { Public } from "../auth/public.decorator";
 import { ApiEndpoint } from "../swagger/api-decorators";
-import {
-  OAuthCallbackResponse,
-  OAuthStartResponse,
-} from "./connection.response";
+import { connectReturnUrl } from "./connect-return";
+import { OAuthStartResponse } from "./connection.response";
 
 /**
  * Interactive OAuth consent (B3) — runs once in the web app. `start` returns the
@@ -27,6 +28,7 @@ import {
  */
 @Controller()
 export class OAuthController {
+  private readonly logger = new Logger(OAuthController.name);
   constructor(private readonly connections: ConnectionService) {}
 
   @ApiBearerAuth("bearer")
@@ -61,16 +63,32 @@ export class OAuthController {
   @ApiOperation({
     summary: "OAuth callback (provider redirect target)",
     description:
-      "Public: the provider redirects here with a single-use `state` (its credential) and `code`; exchanges the code and persists the encrypted refresh token.",
+      "Public: the provider redirects the BROWSER here with a single-use `state` and `code`; " +
+      "exchanges the code, persists the encrypted refresh token, then 302-redirects back to the " +
+      "SPA integrations page (`?connected=1` on success, `?connect_error=…` otherwise).",
   })
-  @ApiOkResponse({ type: OAuthCallbackResponse })
+  @ApiResponse({
+    status: 302,
+    description: "Redirect to the SPA integrations page.",
+  })
   @Public() // provider redirect target; the single-use `state` is its credential
   @Get("oauth/callback")
-  callback(
+  async callback(
+    @Res() res: Response,
     @Query("state") state: string,
     @Query("code") code: string,
     @Query("iss") iss?: string,
-  ): Promise<{ connectionId: string }> {
-    return completeConsent({ state, code, iss });
+  ): Promise<void> {
+    // Browser-facing: 302 back to the SPA rather than rendering JSON / a 500. A replayed or expired
+    // single-use `state` is benign; catching it here keeps it out of Sentry as an unhandled 500.
+    try {
+      await completeConsent({ state, code, iss });
+      res.redirect(connectReturnUrl({ ok: true, tab: "providers" }));
+    } catch (err) {
+      this.logger.warn(`OAuth callback failed: ${(err as Error).message}`);
+      res.redirect(
+        connectReturnUrl({ ok: false, tab: "providers", error: "oauth" }),
+      );
+    }
   }
 }
