@@ -558,7 +558,7 @@ export function ConversationPanel({
             disabled={opening}
             style={{
               width: "100%",
-              height: 38,
+              height: compact ? 44 : 38,
               borderRadius: "var(--radius-md)",
               border: "1px solid color-mix(in srgb, var(--brand) 45%, black)",
               background: "linear-gradient(180deg, #ff8a4c, #f2622e)",
@@ -633,8 +633,8 @@ export function ConversationPanel({
             disabled={!canSend}
             aria-label="Send"
             style={{
-              width: 38,
-              height: 38,
+              width: compact ? 44 : 38,
+              height: compact ? 44 : 38,
               flex: "none",
               borderRadius: "var(--radius-md)",
               border: "1px solid color-mix(in srgb, var(--brand) 45%, black)",

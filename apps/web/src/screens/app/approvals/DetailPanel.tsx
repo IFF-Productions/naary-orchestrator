@@ -1,5 +1,6 @@
 import { Button, Icon } from "../../../components";
 import type { AwaitingApproval } from "../../../lib/api";
+import { BELOW_DRAWER_QUERY, useMediaQuery } from "../../../lib/useMediaQuery";
 import { parseContextFields, toneColors, type WaitingInfo } from "./urgency";
 
 /** Uppercase mono section caption (design: 10.5px / .1em / mono). */
@@ -57,6 +58,8 @@ export function DetailPanel({
   busy: boolean;
 }) {
   const tone = toneColors(waiting.tone);
+  // >= 44px approve/reject hit area on touch (<= 1024); 42px on desktop.
+  const decideH = useMediaQuery(BELOW_DRAWER_QUERY) ? 44 : 42;
   // Prefer the REAL pause-time context fields; fall back to the legacy
   // JSON-shaped-instructions derivation for older gates.
   const contextEntries = item.contextFields
@@ -381,7 +384,7 @@ export function DetailPanel({
             loading={busy}
             disabled={disabled}
             onClick={() => onDecide(true)}
-            style={{ flex: 1, height: 42, borderRadius: 10, fontSize: 13 }}
+            style={{ flex: 1, height: decideH, borderRadius: 10, fontSize: 13 }}
           >
             Approve
           </Button>
@@ -390,7 +393,7 @@ export function DetailPanel({
             disabled={disabled || busy}
             onClick={() => onDecide(false)}
             style={{
-              height: 42,
+              height: decideH,
               padding: "0 22px",
               borderRadius: 10,
               fontSize: 13,

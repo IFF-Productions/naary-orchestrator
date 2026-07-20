@@ -8,7 +8,11 @@
 import type { EdgeDef, NodeDef } from "@naary/dsl";
 import { Icon } from "../../../components";
 import type { BuilderSessionSummary } from "../../../lib/api/builder";
-import { BELOW_RAIL_QUERY, useMediaQuery } from "../../../lib/useMediaQuery";
+import {
+  BELOW_RAIL_QUERY,
+  PHONE_QUERY,
+  useMediaQuery,
+} from "../../../lib/useMediaQuery";
 import { CanvasStage } from "./CanvasStage";
 import {
   type BuildPhase,
@@ -73,6 +77,7 @@ export function BuildWithAiView({
   onReset: () => void;
 }) {
   const compact = useMediaQuery(BELOW_RAIL_QUERY);
+  const phone = useMediaQuery(PHONE_QUERY);
   const {
     phase,
     messages,
@@ -153,12 +158,16 @@ export function BuildWithAiView({
         >
           Build with AI
         </div>
-        <span
-          className="mono"
-          style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
-        >
-          conversational · beta
-        </span>
+        {/* Beta tag drops on phones so the header (title · pill · new-chat)
+            never overflows horizontally on a narrow screen. */}
+        {!phone && (
+          <span
+            className="mono"
+            style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
+          >
+            conversational · beta
+          </span>
+        )}
         <div
           style={{
             marginLeft: "auto",
@@ -200,8 +209,8 @@ export function BuildWithAiView({
             onClick={onReset}
             title="New chat"
             style={{
-              width: 34,
-              height: 34,
+              width: compact ? 44 : 34,
+              height: compact ? 44 : 34,
               borderRadius: "var(--radius-md)",
               border: "1px solid var(--line-2)",
               background: "var(--card)",

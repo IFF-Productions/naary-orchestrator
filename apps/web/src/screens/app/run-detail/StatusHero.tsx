@@ -10,7 +10,15 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Button, Icon } from "../../../components";
 import { runStatusUi } from "../../../lib/run-status";
+import { BELOW_DRAWER_QUERY, useMediaQuery } from "../../../lib/useMediaQuery";
 import { fmtAge, fmtWhen } from "./run-view-model";
+
+/** >= 44px hit area for the decide-in-place buttons on touch (<= 1024). */
+function useTouchDecideStyle(): React.CSSProperties | undefined {
+  return useMediaQuery(BELOW_DRAWER_QUERY)
+    ? { minHeight: 44, paddingLeft: 20, paddingRight: 20 }
+    : undefined;
+}
 
 /** Approval-node config facts the hero may show — only what the config has.
  *  Mirrors ApprovalNodeConfig (@naary/dsl) — the run-detail casts the paused
@@ -144,6 +152,7 @@ function ApprovalHero({
   acting,
   onDecide,
 }: StatusHeroProps) {
+  const touch = useTouchDecideStyle();
   const age = sinceIso
     ? fmtAge(Date.now() - new Date(sinceIso).getTime())
     : null;
@@ -298,6 +307,7 @@ function ApprovalHero({
               icon="check"
               disabled={acting}
               onClick={() => onDecide(true)}
+              style={touch}
             >
               Approve &amp; resume
             </Button>
@@ -305,6 +315,7 @@ function ApprovalHero({
               variant="danger"
               disabled={acting}
               onClick={() => onDecide(false)}
+              style={touch}
             >
               Reject
             </Button>
@@ -417,6 +428,7 @@ function WebhookHero({
 /* ---------------- Paused — on budget (pause-not-fail, Slice 3) ---------------- */
 
 function BudgetHero({ currentNodeLabel, sinceIso }: StatusHeroProps) {
+  const touch = useTouchDecideStyle();
   const age = sinceIso
     ? fmtAge(Date.now() - new Date(sinceIso).getTime())
     : null;
@@ -490,7 +502,9 @@ function BudgetHero({ currentNodeLabel, sinceIso }: StatusHeroProps) {
             }}
           >
             <Link to="/app/billing" style={{ textDecoration: "none" }}>
-              <Button variant="primary">Raise budget &amp; resume</Button>
+              <Button variant="primary" style={touch}>
+                Raise budget &amp; resume
+              </Button>
             </Link>
           </div>
         </div>
