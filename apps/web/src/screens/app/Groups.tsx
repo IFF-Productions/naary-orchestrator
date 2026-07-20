@@ -22,6 +22,7 @@ import {
   EmptyState,
   Icon,
   LoadingBlock,
+  Spinner,
 } from "../../components";
 import {
   api,
@@ -91,7 +92,7 @@ const MATRIX_VERBS: {
   { field: "canRun", label: "run" },
   { field: "canEdit", label: "edit" },
   { field: "canDelete", label: "delete" },
-  { field: "canShare", label: "share" },
+  { field: "canShare", label: "Promote" },
   { field: "canCreate", label: "create" },
 ];
 
@@ -143,6 +144,27 @@ export function Groups() {
     () => new Map(tokens.map((t) => [t.id, t])),
     [tokens],
   );
+
+  // The selected group, resolved once (falls back to the first group).
+  const current = useMemo(
+    () =>
+      (groups ?? []).find((g) => g.id === selected) ??
+      (groups ?? [])[0] ??
+      null,
+    [groups, selected],
+  );
+  // Precompute the add-member / attach-token candidates ONCE per selected group,
+  // instead of rebuilding `new Set(...)` + filtering twice inside each dropdown.
+  const addableMembers = useMemo(() => {
+    if (!current) return [];
+    const inGroup = new Set(current.members.map((m) => m.userId));
+    return members.filter((m) => m.userId && !inGroup.has(m.userId));
+  }, [current, members]);
+  const addableTokens = useMemo(() => {
+    if (!current) return [];
+    const attached = new Set(current.tokens.map((t) => t.tokenId));
+    return tokens.filter((t) => !attached.has(t.id));
+  }, [current, tokens]);
 
   // The active environment resolved to a pill (decorative context for the pane header).
   // Grants are additive per environment, so this NEVER filters the matrix — see below.
@@ -468,7 +490,6 @@ export function Groups() {
   }
 
   const list = groups ?? [];
-  const current = list.find((g) => g.id === selected) ?? list[0] ?? null;
 
   return (
     <div
@@ -635,6 +656,7 @@ export function Groups() {
                     <button
                       key={g.id}
                       type="button"
+                      aria-pressed={on}
                       onClick={() => setSelected(g.id)}
                       style={{
                         display: "flex",
@@ -938,7 +960,12 @@ export function Groups() {
                                         togglingCell ===
                                         `${grant.id}:${v.field}`
                                       }
-                                      disabled={!canManage}
+                                      // Disable EVERY verb cell while any save is in flight —
+                                      // togglingCell tracks a single cell, so a concurrent click
+                                      // elsewhere would race and the first finally() clears busy.
+                                      disabled={
+                                        !canManage || togglingCell !== null
+                                      }
                                       label={v.label}
                                       onToggle={() =>
                                         void toggleVerb(
@@ -1102,37 +1129,22 @@ export function Groups() {
                       )}
                     </div>
                   ))}
-                  {canManage &&
-                    members.filter(
-                      (m) =>
-                        m.userId &&
-                        !new Set(current.members.map((x) => x.userId)).has(
-                          m.userId,
-                        ),
-                    ).length > 0 && (
-                      <select
-                        value=""
-                        onChange={(e) =>
-                          void addMember(current.id, e.target.value)
-                        }
-                        style={{ ...inputStyle, maxWidth: 320, marginTop: 6 }}
-                      >
-                        <option value="">Add a workspace member…</option>
-                        {members
-                          .filter(
-                            (m) =>
-                              m.userId &&
-                              !new Set(
-                                current.members.map((x) => x.userId),
-                              ).has(m.userId),
-                          )
-                          .map((m) => (
-                            <option key={m.userId} value={m.userId}>
-                              {m.email || m.userId}
-                            </option>
-                          ))}
-                      </select>
-                    )}
+                  {canManage && addableMembers.length > 0 && (
+                    <select
+                      value=""
+                      onChange={(e) =>
+                        void addMember(current.id, e.target.value)
+                      }
+                      style={{ ...inputStyle, maxWidth: 320, marginTop: 6 }}
+                    >
+                      <option value="">Add a workspace member…</option>
+                      {addableMembers.map((m) => (
+                        <option key={m.userId} value={m.userId}>
+                          {m.email || m.userId}
+                        </option>
+                      ))}
+                    </select>
+                  )}
 
                   {/* ---------------- API tokens (§4a) ---------------- */}
                   <div style={{ ...sectionLabelStyle, marginTop: 22 }}>
@@ -1168,35 +1180,22 @@ export function Groups() {
                       )}
                     </div>
                   ))}
-                  {canManage &&
-                    tokens.filter(
-                      (t) =>
-                        !new Set(current.tokens.map((x) => x.tokenId)).has(
-                          t.id,
-                        ),
-                    ).length > 0 && (
-                      <select
-                        value=""
-                        onChange={(e) =>
-                          void addToken(current.id, e.target.value)
-                        }
-                        style={{ ...inputStyle, maxWidth: 320, marginTop: 6 }}
-                      >
-                        <option value="">Attach an API token…</option>
-                        {tokens
-                          .filter(
-                            (t) =>
-                              !new Set(
-                                current.tokens.map((x) => x.tokenId),
-                              ).has(t.id),
-                          )
-                          .map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.label}
-                            </option>
-                          ))}
-                      </select>
-                    )}
+                  {canManage && addableTokens.length > 0 && (
+                    <select
+                      value=""
+                      onChange={(e) =>
+                        void addToken(current.id, e.target.value)
+                      }
+                      style={{ ...inputStyle, maxWidth: 320, marginTop: 6 }}
+                    >
+                      <option value="">Attach an API token…</option>
+                      {addableTokens.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   {tokens.length === 0 && (
                     <div style={mutedStyle}>
                       No API tokens in this workspace (mint them under
@@ -1457,11 +1456,21 @@ function VerbCell({
         border: `1px solid ${on ? "var(--state-done)" : "var(--line-2)"}`,
         background: on ? "var(--state-done)" : "transparent",
         color: on ? "#fff" : "var(--ink-3)",
-        opacity: busy ? 0.5 : 1,
+        opacity: busy ? 0.7 : 1,
         transition: "background .12s ease, border-color .12s ease",
       }}
     >
-      {on && <Icon name="check" size={15} />}
+      {busy ? (
+        <Spinner
+          size={14}
+          color={on ? "#fff" : "var(--ink-3)"}
+          track={
+            on ? "color-mix(in srgb, #fff 35%, transparent)" : "var(--line-2)"
+          }
+        />
+      ) : (
+        on && <Icon name="check" size={15} />
+      )}
     </button>
   );
 }

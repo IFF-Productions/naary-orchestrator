@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { GraphDef } from "@naary/dsl";
 import { Button, Icon, Switch } from "../../components";
@@ -71,12 +71,16 @@ function nodeIconFor(
 function summarize(graph: GraphDef): string {
   const nodes = orderedNodes(graph);
   const entry = nodes[0];
-  const trigger =
-    entry && TRIGGER_TYPES.has(entry.type)
-      ? (friendlyStep(entry.type)?.title ??
-        nodeDisplayLabel(entry.type, entry.config))
-      : "Runs manually";
-  const rest = nodes.filter((n) => n !== entry && n.type !== "end");
+  const entryIsTrigger = !!entry && TRIGGER_TYPES.has(entry.type);
+  const trigger = entryIsTrigger
+    ? (friendlyStep(entry.type)?.title ??
+      nodeDisplayLabel(entry.type, entry.config))
+    : "Runs manually";
+  // Only drop the first node from the step count when it's an actual trigger — a
+  // manual graph's first node IS a step (else a 1-step manual flow reads "0 steps").
+  const rest = nodes.filter(
+    (n) => n.type !== "end" && !(entryIsTrigger && n === entry),
+  );
   const hasApproval = nodes.some((n) => n.type === "humanApproval");
   const stepWord = rest.length === 1 ? "step" : "steps";
   return `${trigger} · ${rest.length} ${stepWord}${hasApproval ? " · waits for your approval" : ""}`;
@@ -97,6 +101,9 @@ export function Automations() {
   const [items, setItems] = useState<Enriched[] | null>(null);
   const [tenantId, setTenantId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Keys with an activate/pause request in flight — one per automation at a time, so a
+  // rapid double-tap can't race (the loser would revert on the winner's response).
+  const inFlight = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let live = true;
@@ -161,24 +168,37 @@ export function Automations() {
   const pausedCount = (items ?? []).length - runningCount;
 
   function toggle(key: string, next: boolean) {
-    if (!tenantId) return;
-    // Optimistic flip; revert on failure (paused ≠ failed — this only stops auto-triggers).
-    setItems((prev) =>
-      (prev ?? []).map((it) =>
-        it.summary.workflowKey === key
-          ? { ...it, summary: { ...it.summary, active: next } }
-          : it,
-      ),
-    );
-    api.setWorkflowActive(tenantId, key, next).catch(() => {
+    if (!tenantId) {
+      // The tenant hasn't resolved yet — say so instead of silently doing nothing.
+      setErr("Still getting set up — try that again in a moment.");
+      return;
+    }
+    if (inFlight.current.has(key)) return; // a request for this automation is already running
+    inFlight.current.add(key);
+    setErr(null);
+    const flip = (val: boolean) =>
       setItems((prev) =>
         (prev ?? []).map((it) =>
           it.summary.workflowKey === key
-            ? { ...it, summary: { ...it.summary, active: !next } }
+            ? { ...it, summary: { ...it.summary, active: val } }
             : it,
         ),
       );
-    });
+    // Optimistic flip; revert on failure (paused ≠ failed — this only stops auto-triggers).
+    flip(next);
+    api
+      .setWorkflowActive(tenantId, key, next)
+      .catch(() => {
+        flip(!next);
+        setErr(
+          next
+            ? "Couldn't turn that automation on — try again."
+            : "Couldn't pause that automation — try again.",
+        );
+      })
+      .finally(() => {
+        inFlight.current.delete(key);
+      });
   }
 
   return (

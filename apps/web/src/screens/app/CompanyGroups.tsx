@@ -41,9 +41,15 @@ const NO_VERBS: VerbSet = {
 };
 
 // Decorative dot hues per group (scannability in the rail), cycled by index. The first is the
-// brand token; the rest are redesign role hues that read on both themes. Purely cosmetic —
-// v1 company groups carry no "role".
-const DOTS = ["var(--brand)", "#c07bff", "#4a9dff", "#2fb8c9", "#7c8798"];
+// brand token; the rest are the shared mode tokens (styles/tokens.css) so theming stays
+// centralized and both themes get the right value. Purely cosmetic — v1 groups carry no "role".
+const DOTS = [
+  "var(--brand)",
+  "var(--mode-observe)",
+  "var(--mode-connect)",
+  "var(--mode-operate)",
+  "var(--mode-admin)",
+];
 
 function verbsOf(grant: CompanyGroupGrant | null): VerbSet {
   if (!grant) return { ...NO_VERBS };
@@ -539,7 +545,7 @@ function GroupDetail({
                   <button
                     type="button"
                     aria-pressed={on}
-                    aria-label={v.label}
+                    aria-label={`${v.label} — All workflows`}
                     onClick={() => {
                       setVerbs({ ...verbs, [v.key]: !on });
                       setVerbsDirty(true);
@@ -576,7 +582,8 @@ function GroupDetail({
             }}
           >
             <span style={{ fontSize: 11, color: "var(--ink-faint)", flex: 1 }}>
-              A grant needs at least one verb. Changes apply after you save.
+              Clearing every verb revokes the grant — it stays as a row but adds
+              nothing back. Changes apply after you save.
             </span>
             <Button
               size="sm"
@@ -678,6 +685,7 @@ function GroupDetail({
             <Button
               size="sm"
               variant="ghost"
+              disabled={busy}
               onClick={() =>
                 void run(
                   () =>

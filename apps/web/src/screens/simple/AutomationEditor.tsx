@@ -153,7 +153,11 @@ export function AutomationEditor({
         state: { runId: workflowId },
       });
     } catch {
-      setStatus("Could not run it — try Save first.");
+      // Save already ran above, so "try Save first" is misleading — the failure is the
+      // save or the start itself. Point at the real causes.
+      setStatus(
+        "Couldn't start a test run — check your steps and AI connection.",
+      );
       setBusy(null);
     }
   }
