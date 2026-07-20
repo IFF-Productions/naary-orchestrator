@@ -85,9 +85,9 @@ const labelStyle: CSSProperties = {
   marginBottom: 6,
 };
 
-const inputStyle = (focused: boolean): CSSProperties => ({
+const inputStyle = (focused: boolean, height = 42): CSSProperties => ({
   width: "100%",
-  height: 42,
+  height,
   background: "#12151c",
   border: `1px solid ${focused ? "#f2622e" : "#2c3542"}`,
   borderRadius: 9,
@@ -281,10 +281,15 @@ export function AuthScreen({
   const ready = isFormReady(signals);
   const canSubmit = Boolean(apiToken.trim()) || (configured && ready);
 
-  // Responsive: side-by-side ≥980px; below, the canvas stacks under the form
-  // (column-reverse) and scales down — the design's scale = min(1,(vw-32)/560).
+  // Responsive: side-by-side only on desktop (>1024px, the app-wide single-column
+  // threshold); at ≤1024 the canvas stacks under the form (column-reverse) and
+  // scales down — the design's scale = min(1,(vw-32)/560). Falling into the narrow
+  // branch also drops the fixed 100vh height, so nothing clips on phone/tablet.
   const [vw, vh] = viewport;
-  const wide = vw >= 980;
+  const wide = vw >= 1025;
+  // Touch targets ≥44px at ≤1024 (inputs + the Google button); desktop keeps the
+  // comp's 42px. Submit is already 44px.
+  const controlHeight = wide ? 42 : 44;
   const panelWidth = wide ? Math.max(430, Math.min(760, vw - 470)) : undefined;
   const scale = wide
     ? Math.max(
@@ -420,7 +425,7 @@ export function AuthScreen({
               disabled={!configured || running || stage === "done"}
               style={{
                 width: "100%",
-                height: 42,
+                height: controlHeight,
                 borderRadius: 9,
                 border: `1px solid ${
                   provider === "google" && stage ? "#f2622e" : "#2c3542"
@@ -478,7 +483,7 @@ export function AuthScreen({
                 onBlur={() => setFocus("")}
                 placeholder="Maria Alvarez"
                 autoComplete="name"
-                style={inputStyle(focus === "name")}
+                style={inputStyle(focus === "name", controlHeight)}
               />
             </div>
           )}
@@ -493,7 +498,7 @@ export function AuthScreen({
               onBlur={() => setFocus("")}
               placeholder="you@company.io"
               autoComplete="email"
-              style={inputStyle(focus === "email")}
+              style={inputStyle(focus === "email", controlHeight)}
             />
           </div>
           <div style={{ marginBottom: 7 }}>
@@ -526,7 +531,7 @@ export function AuthScreen({
               autoComplete={
                 mode === "login" ? "current-password" : "new-password"
               }
-              style={inputStyle(focus === "pw")}
+              style={inputStyle(focus === "pw", controlHeight)}
             />
           </div>
 
@@ -610,7 +615,7 @@ export function AuthScreen({
                 placeholder="nry_…  (paste a minted token)"
                 spellCheck={false}
                 autoComplete="off"
-                style={inputStyle(tokenFocus)}
+                style={inputStyle(tokenFocus, controlHeight)}
               />
               <div style={{ fontSize: 11, color: "#5c6573", marginTop: 6 }}>
                 Signs you straight in — no Firebase needed. {copy.cta} uses the

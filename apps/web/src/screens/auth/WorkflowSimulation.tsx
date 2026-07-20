@@ -177,8 +177,8 @@ export function WorkflowSimulation({
   scale,
 }: {
   signals: SimulationSignals;
-  /** Side-by-side layout (≥980px): border-right + fill height; otherwise the
-   *  panel stacks below the form with a border-top and scales down. */
+  /** Side-by-side layout (desktop, >1024px): border-right + fill height; otherwise
+   *  (≤1024) the panel stacks below the form with a border-top and scales down. */
   wide: boolean;
   scale: number;
 }) {
