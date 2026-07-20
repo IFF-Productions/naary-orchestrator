@@ -32,11 +32,12 @@ test("canvas: an integration node is titled by its provider, not the shared type
   page,
 }) => {
   await page.goto("/app/canvas");
-  await expect(page.getByText("ADD NODE")).toBeVisible();
 
-  // Place a GitHub integration tile. The palette button + the node share the accessible
-  // name "GitHub" — scope the assertion to the react-flow node so we read the NODE label.
-  await page.getByRole("button", { name: "GitHub", exact: true }).click();
+  // Place a GitHub integration tile from the rail's Integrations popover. The popover
+  // item + the node share the accessible name "GitHub" — scope the assertion to the
+  // react-flow node so we read the NODE label.
+  await page.getByRole("button", { name: "Integrations", exact: true }).click();
+  await page.getByRole("menuitem", { name: "GitHub", exact: true }).click();
   const ghNode = page
     .locator(".react-flow__node", { hasText: "GitHub" })
     .first();
@@ -47,7 +48,8 @@ test("canvas: an integration node is titled by its provider, not the shared type
   ).toHaveCount(0);
 
   // And a second, different provider is labeled distinctly (proves it's config-driven).
-  await page.getByRole("button", { name: "Notion", exact: true }).click();
+  await page.getByRole("button", { name: "Integrations", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Notion", exact: true }).click();
   await expect(
     page.locator(".react-flow__node", { hasText: "Notion" }),
   ).toBeVisible();
@@ -67,12 +69,12 @@ test("canvas: an integration node with no connection shows an issue warning", as
   page,
 }) => {
   await page.goto("/app/canvas");
-  await expect(page.getByText("ADD NODE")).toBeVisible();
 
   // A freshly placed GitHub tile has no connection → the canvas flags an issue. Since PR #242
   // the two warning pills were merged into ONE clickable "⚠ N issues" pill whose details live
   // in a collapsible panel — so assert the pill, then expand it to see the specific reason.
-  await page.getByRole("button", { name: "GitHub", exact: true }).click();
+  await page.getByRole("button", { name: "Integrations", exact: true }).click();
+  await page.getByRole("menuitem", { name: "GitHub", exact: true }).click();
   const issuesPill = page.getByRole("button", { name: /\d+ issue/i });
   await expect(issuesPill).toBeVisible();
   await issuesPill.click();

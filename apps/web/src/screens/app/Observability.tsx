@@ -98,7 +98,8 @@ export function Observability() {
     setInsights(null);
     api
       .getInsights(tenantId, { from: spendFrom })
-      .then((data) => live && setInsights(data))
+      // Defensive: a malformed response (no totals) degrades like a failed fetch.
+      .then((data) => live && setInsights(data?.totals ? data : null))
       .catch(() => live && setInsights(null));
     return () => {
       live = false;

@@ -80,6 +80,8 @@ export function isEntryKind(kind: NodeType): boolean {
 export const NodeActionsContext = createContext<{
   /** Run a single-node test for this node (wired to the existing test machinery). */
   runNode?: (id: string) => void;
+  /** Delete this node (wired to the canvas's existing node deletion). */
+  deleteNode?: (id: string) => void;
 }>({});
 
 /** Cost-cap / per-call cost chip — ONLY from real DSL config fields (codeAgent's
@@ -99,7 +101,7 @@ export function costChipFor(
  *  Entry nodes have no inbound handle; `end` has no outbound. */
 function NaaryNode({ id, data, selected }: NodeProps<Node<NaaryData>>) {
   const kind = data.kind;
-  const { runNode } = useContext(NodeActionsContext);
+  const { runNode, deleteNode } = useContext(NodeActionsContext);
   const subtitle = nodeSubtitle(kind, data.config);
   // Provider-aware: an integration node reads "GitHub"/"Jira"/…, not the shared type
   // label "integration" (which collapses to the last-registered tile). See nodeDisplayLabel.
@@ -124,6 +126,7 @@ function NaaryNode({ id, data, selected }: NodeProps<Node<NaaryData>>) {
         runMs={data.runMs}
         costChip={costChipFor(data.config)}
         onRun={onRun}
+        onDelete={deleteNode ? () => deleteNode(id) : undefined}
       />
       {kind !== "end" && <Handle type="source" position={Position.Right} />}
     </>

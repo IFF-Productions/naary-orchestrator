@@ -37,7 +37,7 @@ export const AllStates: Story = {
     }[] = [
       { state: "idle", note: "not run yet" },
       { state: "queued", note: "about to start" },
-      { state: "running", note: "ember glow-pulse" },
+      { state: "running", note: "ember glow-pulse + bottom progress strip" },
       { state: "waiting", note: "amber pulse + ping ring" },
       { state: "done", note: "measured duration", runMs: 840 },
       { state: "error", note: "test failed" },
@@ -61,6 +61,7 @@ export const AllStates: Story = {
                 runMs={runMs}
                 pinned={pinned}
                 onRun={() => {}}
+                onDelete={() => {}}
               />
             </div>
             <span
@@ -132,7 +133,8 @@ export const TypeAccents: Story = {
   ),
 };
 
-/** Selected ring, lint warning badge, and the pinned-data badge together. */
+/** Selected ring (with the ✕ delete micro-button visible), lint warning badge,
+ *  and the pinned-data badge together. */
 export const BadgesAndSelection: Story = {
   render: () => (
     <div style={stage}>
@@ -145,6 +147,7 @@ export const BadgesAndSelection: Story = {
         runMs={2600}
         pinned
         onRun={() => {}}
+        onDelete={() => {}}
       />
       <NodeCard
         kind="httpRequest"
