@@ -278,9 +278,7 @@ export function earliestEventDate(
 /* ---------------- model ranking / colors ---------------- */
 
 /** Top-cost models from the insights rollup — the shared series ranking. */
-export function rankModels(
-  byModel: InsightsReport["byModel"],
-): {
+export function rankModels(byModel: InsightsReport["byModel"]): {
   provider: string;
   model: string;
   costUsd: number;
@@ -313,6 +311,8 @@ export function modelColor(rank: number): string {
 /* ---------------- formatting ---------------- */
 
 export function usd(n: number): string {
+  // Defensive: a malformed payload renders "—" instead of white-screening.
+  if (typeof n !== "number" || !Number.isFinite(n)) return "—";
   const small = n > 0 && n < 1;
   return `$${n.toLocaleString(undefined, {
     minimumFractionDigits: 2,
@@ -322,6 +322,7 @@ export function usd(n: number): string {
 
 /** Compact token count: 1.2k · 18.2M · 1.1B. */
 export function fmtTokens(n: number): string {
+  if (typeof n !== "number" || !Number.isFinite(n)) return "—";
   if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
   if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
