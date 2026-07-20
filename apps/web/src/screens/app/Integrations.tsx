@@ -1,9 +1,9 @@
 // Integrations — four env-scoped tabs: Providers (BYOK) · Webhooks · MCP & API · Apps & agents.
 // The app shell owns the environment switcher; every list here is already scoped to the active
 // env server-side (X-Environment-Id), so row env chips echo that real binding.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { LoadingBlock, SegmentedToggle } from "../../components";
+import { LoadingBlock, SegmentedToggle, Toast } from "../../components";
 import {
   api,
   type ChatRow,
@@ -32,6 +32,20 @@ const TABS: { value: TabId; label: string }[] = [
 const isTab = (v: string | null): v is TabId =>
   v === "providers" || v === "webhooks" || v === "mcp" || v === "apps";
 
+interface ToastItem {
+  id: number;
+  kind: "info" | "done" | "error";
+  text: string;
+}
+
+// A friendly message for the `?connect_error=<code>` a connect callback bounces back with.
+const CONNECT_ERROR_TEXT: Record<string, string> = {
+  github_app:
+    "Couldn't finish the GitHub App connection — the install link may have expired or already been used. Start again from Connect.",
+  oauth:
+    "Couldn't finish the connection — the authorization link may have expired or already been used. Start again from Connect.",
+};
+
 export function Integrations() {
   const phone = useMediaQuery(PHONE_QUERY);
   const env = useActiveEnvironment();
@@ -46,6 +60,56 @@ export function Integrations() {
   const [chats, setChats] = useState<ChatRow[] | null>(null);
   const [credentials, setCredentials] = useState<ProviderCredential[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  // Transient toasts (used for the connect-callback outcome below).
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const toastId = useRef(0);
+  const toastTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const dismissToast = useCallback(
+    (id: number) => setToasts((ts) => ts.filter((t) => t.id !== id)),
+    [],
+  );
+  const toast = useCallback(
+    (kind: ToastItem["kind"], text: string) => {
+      const id = ++toastId.current;
+      setToasts((ts) => [...ts, { id, kind, text }]);
+      toastTimers.current.push(setTimeout(() => dismissToast(id), 4200));
+    },
+    [dismissToast],
+  );
+  useEffect(
+    () => () => {
+      for (const h of toastTimers.current) clearTimeout(h);
+    },
+    [],
+  );
+
+  // A connect callback (GitHub App install / OAuth consent) 302s the browser back here with
+  // `?connected=1` or `?connect_error=<code>`. Surface the outcome as a toast, then strip those
+  // params (keep `tab`) so a refresh doesn't re-fire it. Runs once per distinct outcome param.
+  useEffect(() => {
+    const connected = searchParams.get("connected");
+    const connectError = searchParams.get("connect_error");
+    if (!connected && !connectError) return;
+    if (connected) toast("done", "Connection added.");
+    else if (connectError)
+      toast(
+        "error",
+        CONNECT_ERROR_TEXT[connectError] ??
+          "Couldn't finish the connection. Start again from Connect.",
+      );
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("connected");
+        next.delete("connect_error");
+        return next;
+      },
+      { replace: true },
+    );
+    // Depend on the raw param values so it fires once per outcome, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get("connected"), searchParams.get("connect_error")]);
 
   const load = useCallback(async () => {
     try {
@@ -196,6 +260,30 @@ export function Integrations() {
               onError={setError}
             />
           )}
+        </div>
+      )}
+
+      {/* connect-callback outcome toasts (bottom-right; shared Toast animates its entrance) */}
+      {toasts.length > 0 && (
+        <div
+          style={{
+            position: "fixed",
+            right: 24,
+            bottom: 22,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: 9,
+            zIndex: 60,
+          }}
+        >
+          {toasts.map((t) => (
+            <div key={t.id}>
+              <Toast kind={t.kind} onDismiss={() => dismissToast(t.id)}>
+                {t.text}
+              </Toast>
+            </div>
+          ))}
         </div>
       )}
     </div>
