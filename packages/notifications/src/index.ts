@@ -12,7 +12,11 @@ export type NotificationKind =
   /** Monthly spend crossed the budget's alert threshold (redesign Slice 3). Tenant-scoped
    *  (not a run outcome) — fired at most once per calendar month, from the reservation
    *  path. Channels opt in via `onBudgetThreshold`. */
-  | "budget_threshold";
+  | "budget_threshold"
+  /** A workflow definition was promoted into an environment (redesign Slice 4). Not a run
+   *  event — `workflowId` carries the WORKFLOW KEY (there is no run). Sent API-side from
+   *  the promote path to the TARGET env's channels; channels opt in via `onPromotion`. */
+  | "promotion";
 
 /** Sub-flavor of an `approval_pending` notification (REDESIGN-FUNCTIONALITY-GAPS.md Slice 1):
  *  undefined = the initial pause; "reminder" = a scheduled (or manual "Remind now") nudge;
@@ -41,6 +45,12 @@ export interface NotificationInput {
   capUsd?: number;
   /** budget_threshold only: month spend at the crossing (committed + reserved), USD. */
   spendUsd?: number;
+  /** promotion only: SOURCE environment name (e.g. "sandbox"). */
+  fromEnv?: string;
+  /** promotion only: TARGET environment name (e.g. "prod"). */
+  toEnv?: string;
+  /** promotion only: the new version number in the target environment. */
+  version?: number;
 }
 
 /** Compact USD for notification copy: cents for small figures, 2dp otherwise. */
@@ -60,6 +70,8 @@ export interface NotificationLinks {
   runUrl?: string;
   /** Deep link to the Usage & budgets page (budget_threshold). */
   usageUrl?: string;
+  /** Deep link to the workflow's detail page (promotion). */
+  workflowUrl?: string;
 }
 
 export type NotificationAction = {
@@ -88,6 +100,11 @@ export function notificationHeader(input: NotificationInput): string {
     return input.thresholdPct !== undefined
       ? `📊 Budget alert — ${input.thresholdPct}% of the monthly cap`
       : "📊 Budget alert";
+  }
+  if (input.kind === "promotion") {
+    return input.toEnv
+      ? `🚀 Workflow promoted to ${input.toEnv}`
+      : "🚀 Workflow promoted";
   }
   if (input.kind !== "approval_pending") return "❌ Run failed";
   if (input.flavor === "reminder") {
@@ -128,6 +145,12 @@ export function notificationActions(
       actions.push({ label: "View usage & budgets", url: links.usageUrl });
     return actions;
   }
+  if (input.kind === "promotion") {
+    // Promotions act on the WORKFLOW, not a run — the one action is its detail page.
+    if (links.workflowUrl)
+      actions.push({ label: "View workflow", url: links.workflowUrl });
+    return actions;
+  }
   if (links.runUrl) actions.push({ label: "View run", url: links.runUrl });
   return actions;
 }
@@ -160,6 +183,15 @@ export function notificationText(
   const wf = input.workflowKey
     ? `"${slackEscape(input.workflowKey)}"`
     : "a workflow";
+  if (input.kind === "promotion") {
+    const envs =
+      input.fromEnv && input.toEnv
+        ? ` ${slackEscape(input.fromEnv)} → ${slackEscape(input.toEnv)}`
+        : "";
+    const ver = input.version !== undefined ? ` (v${input.version})` : "";
+    const view = links.workflowUrl ? ` View: ${links.workflowUrl}` : "";
+    return `🚀 ${wf} promoted${envs}${ver}.${view}`;
+  }
   const runId = slackEscape(input.workflowId);
   if (input.kind === "approval_pending") {
     const decide = links.approvalUrl
@@ -210,6 +242,7 @@ export function notificationBlocks(
   // also left the grid lopsided at an odd field count — the "looks odd" report).
   // budget_threshold is TENANT-scoped: the grid shows cap + spend, not a workflow/run pair
   // (the crossing reservation's run is incidental; the alert is about the monthly budget).
+  // promotion is WORKFLOW-scoped: workflow/version + from/to env — there is no run at all.
   const fields: { type: "mrkdwn"; text: string }[] =
     input.kind === "budget_threshold"
       ? [
@@ -222,13 +255,32 @@ export function notificationBlocks(
             text: `*Spend (incl. reserved)*\n${input.spendUsd !== undefined ? usd(input.spendUsd) : "—"}`,
           },
         ]
-      : [
-          {
-            type: "mrkdwn",
-            text: `*Workflow*\n${input.workflowKey ? `\`${codeText(input.workflowKey)}\`` : "_unnamed_"}`,
-          },
-          { type: "mrkdwn", text: `*Run*\n${runField}` },
-        ];
+      : input.kind === "promotion"
+        ? [
+            {
+              type: "mrkdwn",
+              text: `*Workflow*\n${input.workflowKey ? `\`${codeText(input.workflowKey)}\`` : "_unnamed_"}`,
+            },
+            {
+              type: "mrkdwn",
+              text: `*Version*\n${input.version !== undefined ? `v${input.version}` : "—"}`,
+            },
+            {
+              type: "mrkdwn",
+              text: `*From*\n${input.fromEnv ? slackEscape(input.fromEnv) : "—"}`,
+            },
+            {
+              type: "mrkdwn",
+              text: `*To*\n${input.toEnv ? slackEscape(input.toEnv) : "—"}`,
+            },
+          ]
+        : [
+            {
+              type: "mrkdwn",
+              text: `*Workflow*\n${input.workflowKey ? `\`${codeText(input.workflowKey)}\`` : "_unnamed_"}`,
+            },
+            { type: "mrkdwn", text: `*Run*\n${runField}` },
+          ];
 
   const blocks: unknown[] = [
     {
@@ -291,12 +343,18 @@ export function notificationBlocks(
  * OpenUrl/ShowCard/ToggleVisibility, NOT Action.Submit). Shape verified against Microsoft's
  * docs; not yet verified against a live Teams tenant (use the settings "send test" path).
  */
-export function notificationTeamsCard(
+/**
+ * The notification's facts as PLAIN title/value strings (no mrkdwn, no escaping) —
+ * shared by the Teams Adaptive Card FactSet and the email renderings so the two can't
+ * drift. Callers escape per their own medium (Teams: none — plain JSON; email HTML:
+ * htmlEscape).
+ */
+export function notificationFacts(
   input: NotificationInput,
-  links: NotificationLinks,
-): unknown {
+): { title: string; value: string }[] {
   const isApproval = input.kind === "approval_pending";
   // budget_threshold: tenant-scoped facts (cap/spend/threshold) — no workflow/run pair.
+  // promotion: workflow/version + from/to env facts — there is no run at all.
   const facts: { title: string; value: string }[] =
     input.kind === "budget_threshold"
       ? [
@@ -310,19 +368,36 @@ export function notificationTeamsCard(
             ? [{ title: "Spend (incl. reserved)", value: usd(input.spendUsd) }]
             : []),
         ]
-      : [
-          { title: "Workflow", value: input.workflowKey ?? "(unnamed)" },
-          { title: "Run", value: input.workflowId },
-        ];
+      : input.kind === "promotion"
+        ? [
+            { title: "Workflow", value: input.workflowKey ?? "(unnamed)" },
+            ...(input.fromEnv ? [{ title: "From", value: input.fromEnv }] : []),
+            ...(input.toEnv ? [{ title: "To", value: input.toEnv }] : []),
+            ...(input.version !== undefined
+              ? [{ title: "Version", value: `v${input.version}` }]
+              : []),
+          ]
+        : [
+            { title: "Workflow", value: input.workflowKey ?? "(unnamed)" },
+            { title: "Run", value: input.workflowId },
+          ];
   if (isApproval && input.title)
     facts.push({ title: "Awaiting", value: input.title });
-  // Flavor facts (plain JSON strings — Adaptive Card facts are not mrkdwn).
+  // Flavor facts (plain strings — neither medium wants mrkdwn here).
   if (isApproval && input.flavor === "reminder" && input.reminderIndex)
     facts.push({ title: "Reminder", value: `#${input.reminderIndex}` });
   if (isApproval && input.flavor === "escalation" && input.escalateTo)
     facts.push({ title: "Escalated to", value: input.escalateTo });
   if (!isApproval && input.detail)
     facts.push({ title: "Reason", value: input.detail });
+  return facts;
+}
+
+export function notificationTeamsCard(
+  input: NotificationInput,
+  links: NotificationLinks,
+): unknown {
+  const facts = notificationFacts(input);
 
   const body: unknown[] = [
     {
@@ -408,5 +483,101 @@ export function notificationPayload(
           ...(links.usageUrl ? { usageUrl: links.usageUrl } : {}),
         }
       : {}),
+    ...(input.kind === "promotion"
+      ? {
+          // Generic hooks get the promotion facts raw (workflowUrl mirrors runUrl's role).
+          ...(input.fromEnv ? { fromEnv: input.fromEnv } : {}),
+          ...(input.toEnv ? { toEnv: input.toEnv } : {}),
+          ...(input.version !== undefined ? { version: input.version } : {}),
+          ...(links.workflowUrl ? { workflowUrl: links.workflowUrl } : {}),
+        }
+      : {}),
   };
+}
+
+/* ---------------- Email rendering (redesign Slice 4) ---------------- */
+
+/** A rendered email: subject + plain-text body + a simple self-contained HTML body.
+ *  The SENDING (SMTP connection, credentials, transport) stays caller-side — this is
+ *  pure formatting, same boundary as the Slack/Teams shapes above. */
+export interface NotificationEmail {
+  subject: string;
+  text: string;
+  html: string;
+}
+
+/** Escape the five HTML-sensitive characters so user values (workflow keys, titles,
+ *  failure reasons) can't inject markup into the HTML body. `&` first, always. */
+export function htmlEscape(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Inline-styled link-button for the HTML body (email clients ignore <style> blocks;
+ *  everything is inline and self-contained — no images, no external assets). */
+function htmlButton(a: NotificationAction): string {
+  const bg =
+    a.style === "primary"
+      ? "#1f7a4d"
+      : a.style === "danger"
+        ? "#a13232"
+        : "#444c56";
+  return `<a href="${htmlEscape(a.url)}" style="display:inline-block;margin:0 8px 8px 0;padding:8px 14px;border-radius:6px;background:${bg};color:#ffffff;text-decoration:none;font-weight:600;">${htmlEscape(a.label)}</a>`;
+}
+
+/**
+ * Render a notification as an email (subject + text AND html bodies) for every kind and
+ * approval flavor. Decide-in-place for email = the SAME signed approve/reject LINKS the
+ * Slack buttons carry (via `notificationActions`, so the URLs literally cannot differ) —
+ * links are the honest email equivalent of buttons. Facts come from `notificationFacts`,
+ * shared with the Teams card.
+ */
+export function notificationEmail(
+  input: NotificationInput,
+  links: NotificationLinks,
+): NotificationEmail {
+  const header = notificationHeader(input);
+  // budget_threshold headers already carry the full story; run/workflow-scoped kinds
+  // append the workflow key so subjects are scannable in a crowded inbox.
+  const subject =
+    input.kind !== "budget_threshold" && input.workflowKey
+      ? `${header} — "${input.workflowKey}"`
+      : header;
+
+  const facts = notificationFacts(input);
+  const actions = notificationActions(input, links);
+
+  const text = [
+    header,
+    "",
+    ...facts.map((f) => `${f.title}: ${f.value}`),
+    ...(actions.length
+      ? ["", ...actions.map((a) => `${a.label}: ${a.url}`)]
+      : []),
+  ].join("\n");
+
+  const factRows = facts
+    .map(
+      (f) =>
+        `<tr><td style="padding:4px 16px 4px 0;color:#57606a;white-space:nowrap;vertical-align:top;">${htmlEscape(f.title)}</td><td style="padding:4px 0;color:#1f2328;">${htmlEscape(f.value)}</td></tr>`,
+    )
+    .join("");
+  const html = [
+    `<div style="font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1f2328;max-width:560px;">`,
+    `<h2 style="font-size:17px;margin:0 0 12px;">${htmlEscape(header)}</h2>`,
+    factRows
+      ? `<table style="border-collapse:collapse;margin:0 0 16px;">${factRows}</table>`
+      : "",
+    actions.length ? `<div>${actions.map(htmlButton).join("")}</div>` : "",
+    `<p style="margin:16px 0 0;font-size:12px;color:#8b949e;">Sent by Naary — manage notification channels in Settings.</p>`,
+    `</div>`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return { subject, text, html };
 }

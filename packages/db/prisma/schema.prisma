@@ -787,18 +787,22 @@ model NotificationChannel {
   id                String   @id @default(uuid())
   tenantId          String
   environmentId     String // env-scoped (Slice 6b): a sandbox failure must not page prod's Slack
-  type              String // "slack" | "teams" | (future: "email")
+  type              String // "slack" | "teams" | "email"
   label             String? // user-facing name (e.g. "#alerts"); null = unnamed
   enabled           Boolean  @default(true)
-  webhookUrl        String? // POST target for slack/teams; null for channels that don't use one
-  // Channel-specific settings a URL can't hold (e.g. email recipients). Null + unused for
-  // slack/teams — reserved for the coming email/other channels, not invented structure now.
+  webhookUrl        String? // POST target for slack/teams; null for email channels
+  // Channel-specific settings a URL can't hold. Email (Slice 4): { connectionId, to[] } —
+  // the SMTP connection reference (same connection the sendEmail node uses; credentials
+  // stay in the encrypted store, resolved only at send time) + recipient addresses.
   config            Json?
   onApprovalPending Boolean  @default(true)
   onRunFailed       Boolean  @default(true)
   // Slice 3: notify when monthly spend crosses the budget's alertThresholdPct. Default OFF —
   // an existing channel must opt in (the alert is new traffic, never surprise-enabled).
   onBudgetThreshold Boolean  @default(false)
+  // Slice 4: notify when a workflow is promoted into this channel's environment. Default
+  // OFF — promotions are new traffic, never surprise-enabled on an existing channel.
+  onPromotion       Boolean  @default(false)
   createdAt         DateTime @default(now()) // stable list/fan-out order among same-type rows
   updatedAt         DateTime @default(now()) @updatedAt
 

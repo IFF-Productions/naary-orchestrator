@@ -40,12 +40,14 @@
     "firebase-admin": "^14.1.0",
     "helmet": "^8.2.0",
     "jose": "^6.2.3",
+    "nodemailer": "^9.0.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "yaml": "2.9.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@nestjs/testing": "^11.1.28"
+    "@nestjs/testing": "^11.1.28",
+    "@types/nodemailer": "^8.0.1"
   }
 }

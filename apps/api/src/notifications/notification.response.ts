@@ -9,12 +9,12 @@ export class NotificationChannelResponse {
   id!: string;
 
   @ApiProperty({
-    enum: ["slack", "teams"],
+    enum: ["slack", "teams", "email"],
     example: "slack",
     description:
-      "Channel type — determines the payload format + which webhook to use.",
+      "Channel type — determines the delivery format (Slack blocks / Teams card / SMTP email).",
   })
-  type!: "slack" | "teams";
+  type!: "slack" | "teams" | "email";
 
   @ApiProperty({
     nullable: true,
@@ -39,6 +39,22 @@ export class NotificationChannelResponse {
   webhookUrl!: string | null;
 
   @ApiProperty({
+    nullable: true,
+    example: null,
+    description:
+      "Email channels: id of the smtp connection this channel sends through. Null for webhook channels / unconfigured.",
+  })
+  emailConnectionId!: string | null;
+
+  @ApiProperty({
+    type: [String],
+    example: [],
+    description:
+      "Email channels: recipient addresses. Empty for webhook channels.",
+  })
+  emailTo!: string[];
+
+  @ApiProperty({
     example: true,
     description: "Notify this channel when a run pauses for approval.",
   })
@@ -56,6 +72,13 @@ export class NotificationChannelResponse {
       "Notify this channel when monthly spend crosses the budget's alert threshold (once per calendar month). Default off.",
   })
   onBudgetThreshold!: boolean;
+
+  @ApiProperty({
+    example: false,
+    description:
+      "Notify this channel when a workflow is promoted into this environment. Default off.",
+  })
+  onPromotion!: boolean;
 }
 
 /** Result of a successful test send (a failure surfaces as a 400 with a message). */
