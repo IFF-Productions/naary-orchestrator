@@ -131,7 +131,9 @@ export const AuthoringLoop: Story = {
           "radial-gradient(120% 90% at 20% 0%, var(--grad-a), var(--bg) 60%)",
       }}
     >
-      <NodeActionsContext.Provider value={{ runNode: () => {} }}>
+      <NodeActionsContext.Provider
+        value={{ runNode: () => {}, deleteNode: () => {} }}
+      >
         <ReactFlow
           nodes={NODES}
           edges={EDGES}

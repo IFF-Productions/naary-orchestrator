@@ -3,6 +3,12 @@
  * platform GraphDef and runs it. Closes the core loop — author visually → save →
  * durable execution.
  *
+ * Layout (redesign: Canvas Authoring Loop, three-pane):
+ *   56px top bar (flame · name · key/version · env chip · run-cap · actions)
+ *   → 60px icon-only category rail · canvas (dot grid + ambient wash + hint pill)
+ *   · 492px inspector dock (selected node's header/actions/input-data/parameters/
+ *   output-logs; a selected edge overlays it with the Connection inspector).
+ *
  * Flow: edit nodes/edges → live compileGraph() (same validation the API runs) →
  * Run → saveGraph("canvas") → startExecution("canvas") → land on the run view.
  * Seeded with a credential-free start → approval → end graph, so a first Run
@@ -38,11 +44,12 @@ import {
   type GraphDef,
   type NodeType,
 } from "@naary/dsl";
-import { Button, Icon, StatusPill } from "../components";
-import { ExpressionField } from "../components/ExpressionField";
+import { Button, Icon } from "../components";
 import {
   api,
+  type BudgetView,
   type ConnectionRow,
+  type Environment,
   type GraphSummary,
   type TestNodeResult,
   UnauthorizedError,
@@ -56,20 +63,28 @@ import {
   PROGRESS_MESSAGES,
 } from "../lib/progress-messages";
 import { PHONE_QUERY, useMediaQuery } from "../lib/useMediaQuery";
+import { useActiveEnvironment } from "../lib/useActiveEnvironment";
 import { usePermissions } from "../lib/usePermissions";
 import {
   type CanvasNode,
   defaultConfigFor,
   type EdgeConditionDraft,
-  NODE_GROUPS,
   NODE_KINDS,
   nodeDisplayLabel,
 } from "../lib/graph-model";
+import { envAccent } from "../workspace/EnvironmentSwitcher";
+import { CATALOG, type CatalogEntry } from "./app/catalog/catalog-data";
+import { CategoryRail } from "./canvas/CategoryRail";
+import { CatalogModal } from "./canvas/CatalogModal";
 import { ConfigPanel } from "./canvas/ConfigPanel";
-import { EdgeConfigPanel } from "./canvas/EdgeConfigPanel";
-import { CONNECTION_TYPES, headerInputStyle, PROVIDERS } from "./canvas/fields";
+import { EdgeInspector } from "./canvas/EdgeInspector";
+import { CONNECTION_TYPES, PROVIDERS } from "./canvas/fields";
 import {
-  DEFAULT_KEY,
+  type DockInputRow,
+  type DockRoutingRow,
+  InspectorDock,
+} from "./canvas/InspectorDock";
+import {
   type FlowEdge,
   isEntryKind,
   type NaaryData,
@@ -84,8 +99,8 @@ import {
 } from "./canvas/flow";
 import { edgeTypes, type EdgeRunState } from "./canvas/NaaryEdge";
 import type { NodeRunState } from "./canvas/NodeCard";
-import { OutputInspector } from "./canvas/OutputInspector";
-import { clampW, InspectorPanel, ResizeHandle } from "./canvas/InspectorPanel";
+import { flattenOutput } from "./canvas/output-fields";
+import { CanvasTopBar } from "./canvas/TopBar";
 
 /** Client-side record of a single-node test run (the EXISTING test machinery's result
  *  + a measured wall-clock). `stale` marks outputs invalidated by later edits. */
@@ -96,6 +111,16 @@ interface NodeTestRun {
   /** Measured wall-clock of the test call (real, client-side). */
   ms?: number;
   stale?: boolean;
+  /** Client timestamp the test started — the dock's live elapsed readout. */
+  startedAt?: number;
+}
+
+/** Bottom-right toast (offset left of the dock so it never hides under it). */
+interface CanvasToast {
+  id: number;
+  text: string;
+  meta?: string;
+  tone: "ok" | "warn";
 }
 
 /** All node ids reachable downstream of `id` (for stale-marking after an edit). */
@@ -114,6 +139,27 @@ function downstreamOf(
   return out;
 }
 
+/** All node ids upstream of `id` (BFS, nearest first) — the dock's INPUT DATA. */
+function upstreamOf(
+  id: string,
+  edges: { source: string; target: string }[],
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>([id]);
+  const queue = edges.filter((e) => e.target === id).map((e) => e.source);
+  while (queue.length) {
+    const n = queue.shift();
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+    for (const e of edges) if (e.target === n) queue.push(e.source);
+  }
+  return out;
+}
+
+/** Breakpoint where the docked 492px inspector overlays instead of squeezing the canvas. */
+const NARROW_QUERY = "(max-width: 1080px)";
+
 export function CanvasPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -128,22 +174,14 @@ export function CanvasPage() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [name, setName] = useState("Canvas draft");
-  const [paletteQuery, setPaletteQuery] = useState("");
-  // Hidden file input backing the "Import" button (a graph JSON → canvas draft).
+  // Saved version of the open workflow (null = unsaved draft) — the top bar meta.
+  const [version, setVersion] = useState<number | null>(null);
+  // Hidden file input backing the overflow menu's "Import" (a graph JSON → canvas draft).
   const importInputRef = useRef<HTMLInputElement>(null);
-  // Drag-resizable side panels (palette + node inspector). Widths persist per browser.
-  const panelsRowRef = useRef<HTMLDivElement>(null);
-  const [paletteWidth, setPaletteWidth] = useState(
-    () => Number(localStorage.getItem("naary.paletteW")) || 180,
-  );
-  const [inspectorWidth, setInspectorWidth] = useState(
-    () => Number(localStorage.getItem("naary.inspectorW")) || 440,
-  );
-  // On phone the palette + a 440px inspector don't fit a ~375px viewport — clamp the palette and
-  // let the inspector take the full width (an overlay over the canvas) so node editing is usable.
+  // Phone keeps the full-screen inspector sheet; narrow overlays the dock over the canvas.
   const phone = useMediaQuery(PHONE_QUERY);
-  const effPaletteWidth = phone ? Math.min(paletteWidth, 132) : paletteWidth;
-  // Full-screen the graph (palette + inspector hidden) for a focused, roomy edit. CSS overlay,
+  const narrow = useMediaQuery(NARROW_QUERY);
+  // Full-screen the graph (rail + dock hidden) for a focused, roomy edit. CSS overlay,
   // Esc to exit — same approach as RunDiagram.
   const [canvasFullscreen, setCanvasFullscreen] = useState(false);
   useEffect(() => {
@@ -154,12 +192,6 @@ export function CanvasPage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [canvasFullscreen]);
-  useEffect(() => {
-    localStorage.setItem("naary.paletteW", String(paletteWidth));
-  }, [paletteWidth]);
-  useEffect(() => {
-    localStorage.setItem("naary.inspectorW", String(inspectorWidth));
-  }, [inspectorWidth]);
   // The saved workflowKey (empty until first save of a NEW workflow → slug(name)).
   const [workflowKey, setWorkflowKey] = useState("");
   const [workflows, setWorkflows] = useState<GraphSummary[]>([]);
@@ -167,22 +199,45 @@ export function CanvasPage() {
   // Tenant connections (DBs, MCP servers, SMTP, signing) so a node's config can PICK one
   // by label instead of pasting a raw connectionId.
   const [connections, setConnections] = useState<ConnectionRow[]>([]);
+  // Per-workspace environments + budget policy — the top bar's env chip and RUN CAP
+  // (both REAL: the active environment and the configured per-execution cap only).
+  const [envs, setEnvs] = useState<Environment[]>([]);
+  const [budget, setBudget] = useState<BudgetView | null>(null);
+  const activeEnvSlug = useActiveEnvironment();
   // Pinned node outputs (authoring samples) for the saved workflow, keyed by nodeId.
   const [pins, setPins] = useState<Record<string, unknown>>({});
   // Single-node test-run state per nodeId — drives node card colours, the edge
-  // animation, and the output inspector. Client-side authoring state only.
+  // animation, and the dock's output/logs. Client-side authoring state only.
   const [nodeRuns, setNodeRuns] = useState<Record<string, NodeTestRun>>({});
-  // The most recent successful single-node test — the output drawer keeps showing it
-  // while a node WITHOUT output is selected (the drag-to-map flow).
-  const [lastTestedId, setLastTestedId] = useState<string | null>(null);
-  // The output inspector can be dismissed per selection; reopens on re-select/re-run.
-  const [outputClosed, setOutputClosed] = useState(false);
   // Optional per-run input (JSON) — overrides the Start node's sampleInput for the
   // next run. Blank ⇒ the server falls back to the sample (api.startExecution).
   const [showInput, setShowInput] = useState(false);
   const [runInput, setRunInput] = useState("");
   // Whether the issues panel (lint warnings + missing resources) is expanded.
   const [showIssues, setShowIssues] = useState(false);
+  // The full catalog modal (the rail's dashed "+").
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  // Bottom-right toasts (offset left of the dock).
+  const [toasts, setToasts] = useState<CanvasToast[]>([]);
+  const toastSeq = useRef(0);
+  const toastTimers = useRef<number[]>([]);
+  useEffect(() => {
+    const pending = toastTimers.current;
+    return () => pending.forEach(clearTimeout);
+  }, []);
+  const pushToast = useCallback(
+    (text: string, meta?: string, tone: "ok" | "warn" = "ok") => {
+      const id = ++toastSeq.current;
+      setToasts((t) => [...t, { id, text, meta, tone }]);
+      toastTimers.current.push(
+        window.setTimeout(
+          () => setToasts((t) => t.filter((x) => x.id !== id)),
+          2600,
+        ),
+      );
+    },
+    [],
+  );
   // AI workflow builder: describe a flow → generate a draft onto the canvas.
   const [showAi, setShowAi] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
@@ -225,22 +280,27 @@ export function CanvasPage() {
   const keyParam = searchParams.get("key");
   const templateParam = searchParams.get("template");
 
-  // Registered webhook endpoints + tenant connections (so a webhookTrigger node can show its
-  // hook URL, and connection-based nodes can pick a connection by label).
+  // Registered webhook endpoints, tenant connections, environments and the budget
+  // policy (a webhookTrigger node shows its hook URL; connection-based nodes pick a
+  // connection by label; the top bar shows the active env + the real run cap).
   useEffect(() => {
     let live = true;
     api
       .getMe()
       .then((me) =>
         Promise.all([
-          api.listWebhooks(me.tenantId).catch(() => []),
-          api.listConnections(me.tenantId).catch(() => []),
+          api.listWebhooks(me.tenantId).catch(() => [] as WebhookRow[]),
+          api.listConnections(me.tenantId).catch(() => [] as ConnectionRow[]),
+          api.listEnvironments(me.tenantId).catch(() => [] as Environment[]),
+          api.getBudget(me.tenantId).catch(() => null),
         ]),
       )
-      .then(([ws, conns]) => {
+      .then(([ws, conns, es, b]) => {
         if (!live) return;
         setWebhooks(ws);
         setConnections(conns);
+        setEnvs(es);
+        setBudget(b);
       })
       .catch(() => {
         /* unauthenticated / none — nodes show their register/add hints */
@@ -287,10 +347,10 @@ export function CanvasPage() {
     [workflowKey],
   );
 
-  // Single-node test runner — the ONE path both the config panel's "Test node" and the
-  // per-node ▶ use, so card state / measured duration / output inspector stay in sync.
-  // Wraps the existing api.testNode machinery; measures wall-clock client-side (the
-  // only duration we honestly have — testNode returns no usage/cost).
+  // Single-node test runner — the ONE path the dock's "Test step", the config panel's
+  // "Test node" and the per-node ▶ all use, so card state / measured duration / the
+  // dock's output stay in sync. Wraps the existing api.testNode machinery; measures
+  // wall-clock client-side (the only duration we honestly have).
   const runNodeTest = useCallback(
     async (nodeId: string, autofill?: boolean): Promise<TestNodeResult> => {
       if (!workflowKey) {
@@ -300,8 +360,10 @@ export function CanvasPage() {
         throw new Error("Workflow not saved yet.");
       }
       const t0 = performance.now();
-      setNodeRuns((r) => ({ ...r, [nodeId]: { status: "running" } }));
-      setOutputClosed(false);
+      setNodeRuns((r) => ({
+        ...r,
+        [nodeId]: { status: "running", startedAt: Date.now() },
+      }));
       try {
         const res = await api.testNode(
           workflowKey,
@@ -321,7 +383,6 @@ export function CanvasPage() {
           }
           return next;
         });
-        if (res.pure) setLastTestedId(nodeId);
         if (!res.pure) setStatus(res.message);
         // Autofill pins upstream nodes server-side — refresh so they show.
         if (autofill) {
@@ -347,7 +408,7 @@ export function CanvasPage() {
   );
 
   // The per-node ▶ (node card): run the test and select the node so its output
-  // drawer opens on completion. Errors surface on the card + status line.
+  // shows in the dock on completion. Errors surface on the card + status line.
   const handleNodeRun = useCallback(
     (id: string) => {
       setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === id })));
@@ -358,17 +419,56 @@ export function CanvasPage() {
     },
     [runNodeTest],
   );
-  const nodeActions = useMemo(
-    () => ({ runNode: handleNodeRun }),
-    [handleNodeRun],
+
+  // Mark this node's + all downstream nodes' test outputs stale — their inputs
+  // changed, so a green "done" would misrepresent the graph (design: stale state).
+  const markStaleFrom = useCallback(
+    (id: string, includeSelf: boolean): void => {
+      const affected = downstreamOf(id, edges);
+      if (includeSelf) affected.add(id);
+      setNodeRuns((r) => {
+        let changed = false;
+        const next = { ...r };
+        for (const nid of affected) {
+          const run = next[nid];
+          if (run && run.status === "done" && !run.stale) {
+            next[nid] = { ...run, stale: true };
+            changed = true;
+          }
+        }
+        return changed ? next : r;
+      });
+    },
+    [edges],
   );
 
-  // Load the workflow list (for the selector) + open ?key= if present.
+  // Remove a node + any edges touching it (dock trash + the card's ✕). Removing
+  // the node clears the selection, so the dock returns to its empty state.
+  const deleteNode = useCallback(
+    (id: string): void => {
+      markStaleFrom(id, false);
+      setNodes((ns) => ns.filter((n) => n.id !== id));
+      setEdges((es) => es.filter((e) => e.source !== id && e.target !== id));
+      setNodeRuns((r) => {
+        if (!(id in r)) return r;
+        const next = { ...r };
+        delete next[id];
+        return next;
+      });
+    },
+    [markStaleFrom],
+  );
+
+  const nodeActions = useMemo(
+    () => ({ runNode: handleNodeRun, deleteNode }),
+    [handleNodeRun, deleteNode],
+  );
+
+  // Load the workflow list (for the switcher) + open ?key= if present.
   useEffect(() => {
     let live = true;
     // A different workflow (or a template fork) invalidates all local test-run state.
     setNodeRuns({});
-    setLastTestedId(null);
     api
       .listGraphs()
       .then((ws) => live && setWorkflows(ws))
@@ -387,6 +487,7 @@ export function CanvasPage() {
           setEdges(toFlowEdges(ce));
           setName(t.name);
           setWorkflowKey("");
+          setVersion(null);
           setStatus(`Forked from template "${t.name}" — Save to keep it.`);
           // The initial fitView ran before the graph landed — refit to it.
           setTimeout(
@@ -407,6 +508,7 @@ export function CanvasPage() {
           setEdges(toFlowEdges(ce));
           setName(g.name);
           setWorkflowKey(g.workflowKey);
+          setVersion(g.version);
           setStatus(null);
           // The initial fitView ran before the graph landed — refit to it.
           setTimeout(
@@ -527,7 +629,7 @@ export function CanvasPage() {
     [templateWarnings, resourceWarnings],
   );
 
-  // node id → its issue lines (for the ⚠ tooltip on the node badge).
+  // node id → its issue lines (for the ⚠ tooltip on the node badge + dock banner).
   const issuesByNode = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const it of allIssues) {
@@ -536,6 +638,30 @@ export function CanvasPage() {
     }
     return m;
   }, [allIssues]);
+
+  // Display run-state of a node (design: card colour = run state). "no-input" (a
+  // non-entry node with no inbound edge) wins — it can't run; then live test state.
+  const runStateFor = useCallback(
+    (n: Node<NaaryData>): NodeRunState | undefined => {
+      const run = nodeRuns[n.id];
+      const noInput =
+        !generating &&
+        !isEntryKind(n.data.kind) &&
+        !edges.some((e) => e.target === n.id);
+      return noInput
+        ? "no-input"
+        : run?.status === "running"
+          ? "running"
+          : run?.status === "error"
+            ? "error"
+            : run?.status === "done" && run.output !== undefined
+              ? run.stale
+                ? "stale"
+                : "done"
+              : undefined;
+    },
+    [nodeRuns, generating, edges],
+  );
 
   // Overlay a 📌 badge on nodes with a pinned sample and a ⚠ badge on nodes with issues. Derived
   // (not stored on the node) so it doesn't churn the editable `nodes` state; onNodesChange still
@@ -550,24 +676,8 @@ export function CanvasPage() {
         const warning = generating
           ? undefined
           : issuesByNode.get(n.id)?.join("\n");
-        // Display run-state (design: card colour = run state). "no-input" (a non-entry
-        // node with no inbound edge) wins — it can't run; then live test-run state.
         const run = nodeRuns[n.id];
-        const noInput =
-          !generating &&
-          !isEntryKind(n.data.kind) &&
-          !edges.some((e) => e.target === n.id);
-        const runState: NodeRunState | undefined = noInput
-          ? "no-input"
-          : run?.status === "running"
-            ? "running"
-            : run?.status === "error"
-              ? "error"
-              : run?.status === "done" && run.output !== undefined
-                ? run.stale
-                  ? "stale"
-                  : "done"
-                : undefined;
+        const runState = runStateFor(n);
         const runMs =
           run?.status === "done" && run.output !== undefined
             ? run.ms
@@ -582,7 +692,7 @@ export function CanvasPage() {
         }
         return { ...n, data: { ...n.data, pinned, warning, runState, runMs } };
       }),
-    [nodes, pins, issuesByNode, generating, nodeRuns, edges],
+    [nodes, pins, issuesByNode, generating, nodeRuns, runStateFor],
   );
 
   // Edge display state derives from the endpoint nodes' test-run state: a running
@@ -607,40 +717,15 @@ export function CanvasPage() {
   );
 
   const selected = nodes.find((n) => n.selected);
+  const selectedEdge = edges.find((e) => e.selected);
+  const selectedRun = selected ? nodeRuns[selected.id] : undefined;
+  const selectedState: NodeRunState = selected
+    ? (runStateFor(selected) ?? "idle")
+    : "idle";
+  const selectedFreshOutput =
+    selectedRun?.status === "done" && selectedRun.output !== undefined;
 
-  // Output inspector (floating drawer over the canvas): the selected node's REAL
-  // output — its last test result, else its pinned sample. When the newly selected
-  // node has neither, the LAST test output stays up — that's the drag-to-map loop
-  // (test step A with ▷, select step B, drag A's fields into B's parameters).
-  const selectedId = selected?.id;
-  useEffect(() => {
-    setOutputClosed(false);
-  }, [selectedId]);
-  const freshOutput = (r?: NodeTestRun) =>
-    r?.status === "done" && r.output !== undefined;
-  let drawerId: string | undefined;
-  let drawerSource: "test" | "pin" | undefined;
-  if (selectedId && freshOutput(nodeRuns[selectedId])) {
-    drawerId = selectedId;
-    drawerSource = "test";
-  } else if (selectedId && Object.hasOwn(pins, selectedId)) {
-    drawerId = selectedId;
-    drawerSource = "pin";
-  } else if (
-    selectedId &&
-    lastTestedId &&
-    freshOutput(nodeRuns[lastTestedId])
-  ) {
-    drawerId = lastTestedId;
-    drawerSource = "test";
-  }
-  const drawerNode = drawerId
-    ? nodes.find((n) => n.id === drawerId)
-    : undefined;
-  const drawerRun = drawerId ? nodeRuns[drawerId] : undefined;
-  const showOutput = !!drawerNode && !!drawerSource && !outputClosed;
-
-  // Jump to a node from the issues panel: select it (opens its inspector) and clear other selection.
+  // Jump to a node from the issues panel: select it (opens the dock) and clear other selection.
   function selectNode(id: string): void {
     setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === id })));
     setEdges((es) =>
@@ -648,7 +733,6 @@ export function CanvasPage() {
     );
     setShowIssues(true);
   }
-  const selectedEdge = edges.find((e) => e.selected);
 
   // Webhook endpoint URLs registered for THIS workflow (shown in the webhook node).
   // The full, invokable URL: the hooks ingress lives at /hooks/:id on the API, reachable
@@ -657,76 +741,99 @@ export function CanvasPage() {
     .filter((w) => workflowKey && w.workflowId === workflowKey)
     .map((w) => `${window.location.origin}/api/hooks/${w.id}`);
 
-  // Close the inspector modal by clearing the react-flow selection.
-  function closeInspector(): void {
+  // Clear the react-flow selection (dock → empty state; edge overlay closes).
+  const closeInspector = useCallback((): void => {
     setNodes((ns) =>
       ns.map((n) => (n.selected ? { ...n, selected: false } : n)),
     );
     setEdges((es) =>
       es.map((e) => (e.selected ? { ...e, selected: false } : e)),
     );
-  }
+  }, []);
 
-  // Mark this node's + all downstream nodes' test outputs stale — their inputs
-  // changed, so a green "done" would misrepresent the graph (design: stale state).
-  function markStaleFrom(id: string, includeSelf: boolean): void {
-    const affected = downstreamOf(id, edges);
-    if (includeSelf) affected.add(id);
-    setNodeRuns((r) => {
-      let changed = false;
-      const next = { ...r };
-      for (const nid of affected) {
-        const run = next[nid];
-        if (run && run.status === "done" && !run.stale) {
-          next[nid] = { ...run, stale: true };
-          changed = true;
-        }
-      }
-      return changed ? next : r;
-    });
-  }
+  // Esc clears the selection (the old inspector panel's behavior, kept).
+  useEffect(() => {
+    if (!selected && !selectedEdge) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeInspector();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected, selectedEdge, closeInspector]);
 
-  // Remove a node + any edges touching it (the modal's Delete button). Removing the
-  // node clears the selection, so the inspector modal closes on its own.
-  function deleteNode(id: string): void {
-    markStaleFrom(id, false);
-    setNodes((ns) => ns.filter((n) => n.id !== id));
-    setEdges((es) => es.filter((e) => e.source !== id && e.target !== id));
-    setNodeRuns((r) => {
-      if (!(id in r)) return r;
-      const next = { ...r };
-      delete next[id];
-      return next;
-    });
-  }
   function deleteEdge(id: string): void {
     const edge = edges.find((e) => e.id === id);
     if (edge) markStaleFrom(edge.target, true);
     setEdges((es) => es.filter((e) => e.id !== id));
   }
 
-  function addNode(kind: NodeType, preset?: Record<string, unknown>) {
-    const id = `${kind}-${crypto.randomUUID().slice(0, 8)}`;
-    // Drop in with working example config (single source: the node registry), so a
-    // non-technical user sees filled-in fields — and a node they never open still runs.
-    // A palette tile may pass its own preset (e.g. GitHub vs Jira, both `integration`).
-    const config = preset ? structuredClone(preset) : defaultConfigFor(kind);
-    setNodes((ns) => [
-      ...ns,
-      {
-        id,
-        type: "naary",
-        position: {
-          x: 160 + (ns.length % 5) * 40,
-          y: 300 + (ns.length % 3) * 30,
+  const addNode = useCallback(
+    (kind: NodeType, preset?: Record<string, unknown>) => {
+      const id = `${kind}-${crypto.randomUUID().slice(0, 8)}`;
+      // Drop in with working example config (single source: the node registry), so a
+      // non-technical user sees filled-in fields — and a node they never open still runs.
+      // A catalog tile may pass its own preset (e.g. GitHub vs Jira, both `integration`).
+      const config = preset ? structuredClone(preset) : defaultConfigFor(kind);
+      setNodes((ns) => [
+        ...ns,
+        {
+          id,
+          type: "naary",
+          position: {
+            x: 160 + (ns.length % 5) * 40,
+            y: 300 + (ns.length % 3) * 30,
+          },
+          data: { kind, config },
+          // Appear animation: scale(.85)+translateY(6px)→1 + a brief ember glow
+          // (canvas.css). Mount-once — React Flow keys nodes by id.
+          className: "naary-node-enter",
         },
-        data: { kind, config },
-        // Appear animation: scale(.85)+translateY(6px)→1 + a brief ember glow
-        // (canvas.css). Mount-once — React Flow keys nodes by id.
-        className: "naary-node-enter",
+      ]);
+    },
+    [],
+  );
+
+  // Add a catalog entry (rail popover / catalog modal / ?add= deep link): resolve the
+  // palette's working example config for it (provider tiles carry their provider preset).
+  const addEntry = useCallback(
+    (entry: CatalogEntry) => {
+      const kindDef = entry.provider
+        ? NODE_KINDS.find(
+            (k) =>
+              k.type === "integration" &&
+              (k.defaultConfig as { provider?: string } | undefined)
+                ?.provider === entry.provider,
+          )
+        : NODE_KINDS.find((k) => k.type === entry.nodeType);
+      addNode(entry.nodeType, kindDef?.defaultConfig);
+      pushToast(entry.name, "added to canvas");
+    },
+    [addNode, pushToast],
+  );
+
+  // ?add=<type>[&provider=…] deep link (the /app/catalog "Add" flow): drop the node
+  // on the canvas, then strip the params so a refresh doesn't add it again.
+  const addParam = searchParams.get("add");
+  const providerParam = searchParams.get("provider");
+  useEffect(() => {
+    if (!addParam) return;
+    const entry =
+      CATALOG.find((e) =>
+        providerParam
+          ? e.id === `${addParam}:${providerParam}`
+          : e.id === addParam,
+      ) ?? CATALOG.find((e) => e.nodeType === addParam);
+    if (entry) addEntry(entry);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("add");
+        next.delete("provider");
+        return next;
       },
-    ]);
-  }
+      { replace: true },
+    );
+  }, [addParam, providerParam, addEntry, setSearchParams]);
 
   function updateConfig(nodeId: string, patch: Record<string, unknown>) {
     setNodes((ns) =>
@@ -798,6 +905,7 @@ export function CanvasPage() {
     setEdges(SEED_EDGES);
     setName("Untitled workflow");
     setWorkflowKey("");
+    setVersion(null);
     setStatus(null);
     if (keyParam) setSearchParams({}, { replace: true });
   }
@@ -897,6 +1005,7 @@ export function CanvasPage() {
       setEdges(toFlowEdges(ce));
       setName(genName);
       setWorkflowKey(""); // now a NEW unsaved draft (only after a successful generation)
+      setVersion(null);
       if (keyParam || templateParam) setSearchParams({}, { replace: true });
       setStatus("Generated — review, edit, and Save to keep it.");
       // The generating effect stops refitting once `generating` flips false (same render
@@ -1003,6 +1112,7 @@ export function CanvasPage() {
       const appliedName = fromWrapper.trim() || "Imported workflow";
       setName(appliedName);
       setWorkflowKey("");
+      setVersion(null);
       if (keyParam || templateParam) setSearchParams({}, { replace: true });
       setStatus(`Imported "${appliedName}" — review, then Save to keep it.`);
     };
@@ -1015,8 +1125,13 @@ export function CanvasPage() {
       return null;
     }
     const key = activeKey;
-    await api.saveGraph(key, name.trim() || "Untitled workflow", graph);
+    const saved = await api.saveGraph(
+      key,
+      name.trim() || "Untitled workflow",
+      graph,
+    );
     setWorkflowKey(key);
+    setVersion(saved.version);
     api
       .listGraphs()
       .then(setWorkflows)
@@ -1080,6 +1195,249 @@ export function CanvasPage() {
     }
   }
 
+  /* ---------------- dock derivations ---------------- */
+
+  const nodeLabelOf = useCallback(
+    (id: string): string => {
+      const n = nodes.find((x) => x.id === id);
+      return n ? nodeDisplayLabel(n.data.kind, n.data.config) : id;
+    },
+    [nodes],
+  );
+
+  // INPUT DATA: the selected node's REAL available inputs — every upstream node's
+  // fresh test output, else its pinned sample. Source tag = the node's name; pinned
+  // samples are tagged "pinned" (per the design comp).
+  const dockInputRows = useMemo((): DockInputRow[] => {
+    if (!selected) return [];
+    const rows: DockInputRow[] = [];
+    for (const uid of upstreamOf(selected.id, edges)) {
+      const run = nodeRuns[uid];
+      const fresh =
+        run?.status === "done" && run.output !== undefined && !run.stale;
+      const src = fresh
+        ? run.output
+        : Object.hasOwn(pins, uid)
+          ? pins[uid]
+          : undefined;
+      if (src === undefined) continue;
+      const tag = fresh ? nodeLabelOf(uid) : "pinned";
+      for (const f of flattenOutput(src, "", 0, [], 8)) {
+        rows.push({
+          key: `${uid}.${f.path}`,
+          token: `{{ ${uid}.${f.path} }}`,
+          path: f.path,
+          preview: f.preview,
+          tag,
+        });
+        if (rows.length >= 40) return rows;
+      }
+    }
+    return rows;
+  }, [selected, edges, nodeRuns, pins, nodeLabelOf]);
+
+  // ROUTING RULES read-view (switch/if) — derived from the REAL config + edges.
+  // Switch: rules run top-to-bottom (first match wins) and set `<id>.matched`;
+  // MATCHED/SKIPPED badges appear only when a real test output states which rule
+  // matched. If: each outgoing edge is its own branch (every matching edge fires).
+  const dockRouting = useMemo((): {
+    rows: DockRoutingRow[];
+    title: string;
+    note: string;
+  } | null => {
+    if (!selected) return null;
+    const kind = selected.data.kind;
+    if (kind !== "switch" && kind !== "if") return null;
+    const outs = edges.filter((e) => e.source === selected.id);
+    const fmt = (c?: {
+      path?: string;
+      op?: string;
+      value?: unknown;
+    }): string => {
+      if (!c?.path?.trim()) return "always";
+      if (c.op === "exists") return `${c.path} exists`;
+      const v = typeof c.value === "string" ? c.value : JSON.stringify(c.value);
+      return `${c.path} ${c.op ?? "eq"} ${v ?? ""}`.trim();
+    };
+    if (kind === "if") {
+      if (outs.length === 0) return null;
+      return {
+        rows: outs.map((e, i) => ({
+          n: i + 1,
+          cond: fmt(e.data?.condition),
+          target: nodeLabelOf(e.target),
+        })),
+        title: "Branches · every matching edge fires",
+        note: "Each outgoing edge is taken when its condition holds; unconditional edges always fire.",
+      };
+    }
+    // switch — rules from the node's real config; targets from real edges that
+    // branch on `matched eq <name>`.
+    const cfg = selected.data.config ?? {};
+    const rules =
+      (cfg.rules as
+        | {
+            name?: string;
+            condition?: { path?: string; op?: string; value?: unknown };
+          }[]
+        | undefined) ?? [];
+    if (rules.length === 0) return null;
+    const fallback =
+      typeof cfg.fallback === "string" ? cfg.fallback : "default";
+    const run = nodeRuns[selected.id];
+    const out =
+      run?.status === "done" && !run.stale && run.output
+        ? (run.output as Record<string, unknown>)
+        : undefined;
+    const matched =
+      out && typeof out.matched === "string" ? out.matched : undefined;
+    const targetFor = (ruleName?: string): string | undefined => {
+      if (!ruleName) return undefined;
+      const e = outs.find((x) => {
+        const c = x.data?.condition;
+        return (
+          c &&
+          /(^|\.)matched$/.test(c.path ?? "") &&
+          c.op === "eq" &&
+          String(c.value) === ruleName
+        );
+      });
+      return e ? nodeLabelOf(e.target) : undefined;
+    };
+    const badge = (ruleName: string): "matched" | "skipped" | undefined =>
+      matched === undefined
+        ? undefined
+        : matched === ruleName
+          ? "matched"
+          : "skipped";
+    const rows: DockRoutingRow[] = rules.map((r, i) => ({
+      n: i + 1,
+      cond: fmt(r.condition),
+      target: targetFor(r.name),
+      badge: r.name ? badge(r.name) : undefined,
+    }));
+    rows.push({
+      n: rules.length + 1,
+      cond: `else (${fallback})`,
+      target: targetFor(fallback),
+      badge: badge(fallback),
+    });
+    return {
+      rows,
+      title: "Routing rules · first match wins",
+      note: `The first matching rule sets ${selected.id}.matched to its name; outgoing edges branch on it (matched eq <name>).`,
+    };
+  }, [selected, edges, nodeRuns, nodeLabelOf]);
+
+  // Edge (Connection) inspector — overlays the dock when an edge is selected.
+  const edgeOverlay = selectedEdge ? (
+    <EdgeInspector
+      key={selectedEdge.id}
+      sourceLabel={nodeLabelOf(selectedEdge.source)}
+      targetLabel={nodeLabelOf(selectedEdge.target)}
+      condition={selectedEdge.data?.condition}
+      onChange={(patch) => updateEdgeCondition(selectedEdge.id, patch)}
+      onClear={() => clearEdgeCondition(selectedEdge.id)}
+      onDelete={() => {
+        deleteEdge(selectedEdge.id);
+        pushToast(
+          "Edge removed",
+          `${nodeLabelOf(selectedEdge.target)} may need a new input`,
+          "warn",
+        );
+      }}
+      onClose={closeInspector}
+    />
+  ) : undefined;
+
+  // On narrow viewports the dock overlays the canvas — render it only when there's
+  // a selection; desktop keeps the persistent 492px column (empty state otherwise).
+  const dockFloating = phone || narrow;
+  const showDock = dockFloating ? Boolean(selected || selectedEdge) : true;
+
+  const dock = showDock ? (
+    <InspectorDock
+      key={selected?.id ?? "empty"}
+      nodeId={selected?.id}
+      kind={selected?.data.kind}
+      title={
+        selected
+          ? nodeDisplayLabel(selected.data.kind, selected.data.config)
+          : undefined
+      }
+      state={selectedState}
+      run={selectedRun}
+      isPinned={selected ? Object.hasOwn(pins, selected.id) : false}
+      pinnedOutput={selected ? pins[selected.id] : undefined}
+      canPin={!!workflowKey}
+      warnings={
+        selected && !generating ? issuesByNode.get(selected.id) : undefined
+      }
+      routing={dockRouting?.rows}
+      routingTitle={dockRouting?.title}
+      routingNote={dockRouting?.note}
+      inputRows={dockInputRows}
+      parameters={
+        selected ? (
+          <ConfigPanel
+            key={selected.id}
+            node={selected}
+            hideHeader
+            upstreamIds={nodes
+              .filter((n) => n.id !== selected.id)
+              .map((n) => n.id)}
+            edges={edges}
+            nodeKinds={nodeKinds}
+            hookUrls={hookUrls}
+            connections={connections}
+            pins={pins}
+            canPin={!!workflowKey}
+            pinnedOutput={pins[selected.id]}
+            isPinned={Object.hasOwn(pins, selected.id)}
+            onPin={(output) => pinNode(selected.id, output)}
+            onUnpin={() => unpinNode(selected.id)}
+            // The shared single-node test runner — also drives the node card
+            // state + the dock's output tab.
+            onTest={(autofill) => runNodeTest(selected.id, autofill)}
+            onChange={(patch) => updateConfig(selected.id, patch)}
+          />
+        ) : undefined
+      }
+      onTest={
+        selected
+          ? () => runNodeTest(selected.id, false).catch(() => undefined)
+          : undefined
+      }
+      onPin={
+        selected && selectedFreshOutput
+          ? () => {
+              void pinNode(selected.id, selectedRun?.output).then(() =>
+                pushToast("Pinned as sample data", selected.id),
+              );
+            }
+          : undefined
+      }
+      onUnpin={selected ? () => void unpinNode(selected.id) : undefined}
+      onDelete={selected ? () => deleteNode(selected.id) : undefined}
+      overlay={edgeOverlay}
+      floating={dockFloating}
+      onClose={closeInspector}
+    />
+  ) : null;
+
+  // The active environment (real env store; falls back to the workspace default).
+  const activeEnv =
+    envs.find((e) => e.slug === activeEnvSlug || e.id === activeEnvSlug) ??
+    envs.find((e) => e.isDefault) ??
+    null;
+  const envChip = activeEnv
+    ? {
+        name: activeEnv.name,
+        accent: envAccent(activeEnv),
+        isProd: envAccent(activeEnv) === "var(--env-prod)",
+      }
+    : null;
+
   return (
     <div
       style={{
@@ -1088,175 +1446,51 @@ export function CanvasPage() {
         height: "100vh",
         background: "var(--bg)",
         color: "var(--ink)",
+        position: "relative",
+        overflow: "hidden",
       }}
     >
-      {/* header */}
-      <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          // Wrap on narrow screens so the toolbar can't force the page wider than the viewport
-          // (a non-wrapping row of buttons was overflowing horizontally on phone/tablet).
-          flexWrap: "wrap",
-          gap: 10,
-          rowGap: 8,
-          padding: "10px 16px",
-          borderBottom: "1px solid var(--line)",
-          background: "var(--panel)",
-        }}
-      >
-        <Button variant="secondary" onClick={() => navigate("/app")}>
-          ← Back
-        </Button>
+      {/* top bar (56px) */}
+      <CanvasTopBar
+        name={name}
+        onNameChange={setName}
+        activeKey={activeKey}
+        version={version}
+        generating={generating}
+        graphValid={!!graph}
+        graphError={error}
+        issuesCount={generating ? 0 : allIssues.length}
+        issuesSevere={resourceWarnings.length > 0}
+        showIssues={showIssues}
+        onToggleIssues={() => setShowIssues((s) => !s)}
+        env={envChip}
+        runCapUsd={budget?.perExecutionCapUsd ?? null}
+        status={status}
+        busy={busy}
+        maySave={maySave}
+        saveDeniedTitle={saveDeniedTitle}
+        showAi={showAi}
+        onToggleAi={() => setShowAi((s) => !s)}
+        showInput={showInput}
+        onToggleInput={() => setShowInput((s) => !s)}
+        onImport={() => importInputRef.current?.click()}
+        onExport={exportGraph}
+        workflows={workflows}
+        currentKeyParam={keyParam}
+        onOpenWorkflow={openWorkflow}
+        onNewWorkflow={newWorkflow}
+        onSave={() => void saveOnly()}
+        onRun={() => void run()}
+      />
 
-        {/* workflow selector */}
-        <select
-          value={keyParam ?? ""}
-          onChange={(e) => openWorkflow(e.target.value)}
-          style={{ ...headerInputStyle, maxWidth: 180 }}
-          title="Open a saved workflow"
-        >
-          <option value="">+ New workflow</option>
-          {workflows.map((w) => (
-            <option key={w.workflowKey} value={w.workflowKey}>
-              {w.name} (v{w.version})
-            </option>
-          ))}
-        </select>
-
-        {/* name */}
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Workflow name"
-          style={{ ...headerInputStyle, width: 170 }}
-          aria-label="Workflow name"
-        />
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "baseline",
-            gap: 6,
-            minWidth: 0,
-          }}
-        >
-          <span
-            className="mono"
-            style={{
-              fontSize: "var(--text-2xs)",
-              fontWeight: "var(--weight-semibold)",
-              letterSpacing: "var(--tracking-label)",
-              textTransform: "uppercase",
-              color: "var(--ink-3)",
-            }}
-          >
-            key
-          </span>
-          <span
-            className="mono"
-            style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
-          >
-            {activeKey}
-          </span>
-        </span>
-
-        {/* While streaming the graph is incomplete — showing "invalid/disconnected" (and
-            the issue count) would read as broken. Show a neutral "building…" pill instead;
-            real validity returns the instant generation finishes. */}
-        <StatusPill
-          state={generating ? "running" : graph ? "done" : "error"}
-          label={
-            generating ? "building…" : graph ? "valid" : (error ?? "invalid")
-          }
-        />
-        {!generating && allIssues.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setShowIssues((s) => !s)}
-            title="Show details of every issue"
-            className={`pill ${resourceWarnings.length > 0 ? "pill-error" : "pill-paused"}`}
-            style={{ border: "none", cursor: "pointer" }}
-          >
-            ⚠ {allIssues.length} issue{allIssues.length > 1 ? "s" : ""}{" "}
-            {showIssues ? "▲" : "▼"}
-          </button>
-        )}
-        <div
-          style={{
-            marginLeft: "auto",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 10,
-          }}
-        >
-          {status && (
-            <span
-              style={{
-                fontSize: "var(--text-sm)",
-                color: "var(--ink-2)",
-                alignSelf: "center",
-                maxWidth: 280,
-              }}
-            >
-              {status}
-            </span>
-          )}
-          <Button
-            variant="secondary"
-            disabled={busy}
-            onClick={() => setShowAi((s) => !s)}
-          >
-            {showAi ? "Close AI" : "✨ Build with AI"}
-          </Button>
-          <Button
-            variant="secondary"
-            disabled={busy}
-            onClick={() => setShowInput((s) => !s)}
-          >
-            {showInput ? "Hide input" : "Input"}
-          </Button>
-          {/* Import a graph JSON as a new draft; export the current valid graph to a file. */}
-          <input
-            ref={importInputRef}
-            type="file"
-            accept="application/json,.json"
-            style={{ display: "none" }}
-            onChange={importFromFile}
-          />
-          <Button
-            variant="secondary"
-            disabled={busy}
-            onClick={() => importInputRef.current?.click()}
-            title="Load a graph JSON as a new draft"
-          >
-            Import
-          </Button>
-          <Button
-            variant="secondary"
-            disabled={busy || !graph}
-            onClick={exportGraph}
-            title="Download this graph as JSON"
-          >
-            Export
-          </Button>
-          <Button
-            variant="secondary"
-            disabled={busy || !graph || !maySave}
-            title={maySave ? undefined : saveDeniedTitle}
-            onClick={() => void saveOnly()}
-          >
-            Save
-          </Button>
-          <Button
-            variant="primary"
-            disabled={busy || !graph || !maySave}
-            title={maySave ? undefined : saveDeniedTitle}
-            onClick={() => void run()}
-          >
-            {busy ? "Running…" : "Save & run"}
-          </Button>
-        </div>
-      </header>
+      {/* hidden file input backing the overflow menu's Import */}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept="application/json,.json"
+        style={{ display: "none" }}
+        onChange={importFromFile}
+      />
 
       {showIssues && allIssues.length > 0 && (
         <div
@@ -1464,149 +1698,16 @@ export function CanvasPage() {
         </div>
       )}
 
+      {/* BODY: 60px icon rail · canvas · 492px inspector dock */}
       <div
-        ref={panelsRowRef}
-        style={{ display: "flex", flex: 1, minHeight: 0 }}
+        style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}
       >
-        {/* palette (drag its right edge to resize) */}
-        <aside
-          style={{
-            width: effPaletteWidth,
-            flex: "none",
-            padding: 14,
-            background: "var(--panel)",
-            borderRight: "1px solid var(--line)",
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            minHeight: 0,
-          }}
-        >
-          <div
-            className="mono"
-            style={{
-              fontSize: "var(--text-2xs)",
-              fontWeight: "var(--weight-semibold)",
-              letterSpacing: "var(--tracking-label)",
-              textTransform: "uppercase",
-              color: "var(--ink-3)",
-              marginBottom: 2,
-            }}
-          >
-            Add node
-          </div>
-          <input
-            value={paletteQuery}
-            onChange={(e) => setPaletteQuery(e.target.value)}
-            placeholder="Search nodes…"
-            aria-label="Search nodes"
-            style={{
-              padding: "6px 9px",
-              borderRadius: "var(--radius-md)",
-              border: "1px solid var(--line-2)",
-              background: "var(--card)",
-              color: "var(--ink)",
-              fontSize: "var(--text-sm)",
-            }}
-          />
-          <div
-            style={{
-              overflowY: "auto",
-              display: "flex",
-              flexDirection: "column",
-              gap: 10,
-            }}
-          >
-            {NODE_GROUPS.map((group) => {
-              const q = paletteQuery.trim().toLowerCase();
-              const items = NODE_KINDS.filter(
-                (k) =>
-                  k.group === group &&
-                  (!q ||
-                    k.label.toLowerCase().includes(q) ||
-                    k.type.toLowerCase().includes(q)),
-              );
-              if (items.length === 0) return null;
-              return (
-                <div
-                  key={group}
-                  style={{ display: "flex", flexDirection: "column", gap: 6 }}
-                >
-                  <div
-                    className="mono"
-                    style={{
-                      fontSize: "var(--text-2xs)",
-                      fontWeight: "var(--weight-semibold)",
-                      letterSpacing: "var(--tracking-label)",
-                      textTransform: "uppercase",
-                      color: "var(--ink-3)",
-                    }}
-                  >
-                    {group}
-                  </div>
-                  {items.map((k) => (
-                    <button
-                      type="button"
-                      key={k.label}
-                      onClick={() => addNode(k.type, k.defaultConfig)}
-                      title={k.description}
-                      // Keep the accessible name exactly the label (the visible
-                      // description div would otherwise widen it and break exact-name
-                      // lookups, incl. the new-nodes Playwright spec).
-                      aria-label={k.label}
-                      style={{
-                        textAlign: "left",
-                        padding: "8px 10px",
-                        borderRadius: "var(--radius-md)",
-                        border: "1px solid var(--line-2)",
-                        borderLeft: `3px solid ${k.accent}`,
-                        background: "var(--card)",
-                        color: "var(--ink)",
-                        cursor: "pointer",
-                        fontSize: "var(--text-body)",
-                      }}
-                    >
-                      <div style={{ fontWeight: "var(--weight-semibold)" }}>
-                        {k.label}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: "var(--text-xs)",
-                          color: "var(--ink-3)",
-                          marginTop: 2,
-                          lineHeight: 1.35,
-                        }}
-                      >
-                        {k.description}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              );
-            })}
-          </div>
-          <div
-            style={{
-              marginTop: "auto",
-              fontSize: "var(--text-xs)",
-              color: "var(--ink-3)",
-              lineHeight: 1.5,
-            }}
-          >
-            Drag to move · drag a handle to connect · select + Backspace to
-            delete.
-          </div>
-        </aside>
-
-        {/* drag to resize the palette */}
-        <ResizeHandle
-          onResize={(clientX) => {
-            const r = panelsRowRef.current?.getBoundingClientRect();
-            if (r) setPaletteWidth(clampW(clientX - r.left, 150, 420));
-          }}
+        <CategoryRail
+          onAdd={addEntry}
+          onOpenCatalog={() => setCatalogOpen(true)}
         />
 
-        {/* canvas — ambient warm wash + dotted grid; the output drawer floats over it */}
+        {/* canvas — ambient warm wash + dotted grid */}
         <div
           style={
             canvasFullscreen
@@ -1679,98 +1780,134 @@ export function CanvasPage() {
             </ReactFlow>
           </NodeActionsContext.Provider>
 
-          {/* floating output inspector — an absolute overlay, never pushes the canvas */}
-          {showOutput && drawerNode && drawerSource && (
-            <OutputInspector
-              key={drawerNode.id}
-              nodeId={drawerNode.id}
-              title={nodeDisplayLabel(
-                drawerNode.data.kind,
-                drawerNode.data.config,
-              )}
-              output={
-                drawerSource === "test"
-                  ? drawerRun?.output
-                  : pins[drawerNode.id]
-              }
-              source={drawerSource}
-              runMs={drawerSource === "test" ? drawerRun?.ms : undefined}
-              stale={drawerSource === "test" ? drawerRun?.stale : undefined}
-              canPin={!!workflowKey}
-              isPinned={Object.hasOwn(pins, drawerNode.id)}
-              onPin={() => {
-                if (drawerRun?.output !== undefined)
-                  void pinNode(drawerNode.id, drawerRun.output);
+          {/* hint pill (design comp copy, verbatim) */}
+          {!phone && (
+            <div
+              style={{
+                position: "absolute",
+                left: 20,
+                bottom: 18,
+                display: "flex",
+                alignItems: "center",
+                gap: 9,
+                fontSize: "var(--text-xs)",
+                color: "var(--ink-faint)",
+                border: "1px solid var(--line-mid)",
+                background: "color-mix(in srgb, var(--panel) 82%, transparent)",
+                backdropFilter: "blur(6px)",
+                borderRadius: 9,
+                padding: "8px 13px",
+                pointerEvents: "none",
+                zIndex: 5,
+                maxWidth: "calc(100% - 40px)",
               }}
-              onClose={() => setOutputClosed(true)}
-            />
+            >
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: "var(--brand)",
+                  boxShadow: "0 0 8px var(--brand)",
+                  flex: "none",
+                }}
+              />
+              Card colour = run state · icon colour = node type. Test a step
+              with ▷, then drag its output into the next node.
+            </div>
           )}
         </div>
 
-        {/* node / edge editor — a docked, drag-resizable side panel (right) */}
-        {(selected || selectedEdge) && (
-          <>
-            {!phone && (
-              <ResizeHandle
-                onResize={(clientX) => {
-                  const r = panelsRowRef.current?.getBoundingClientRect();
-                  if (r) setInspectorWidth(clampW(r.right - clientX, 320, 760));
-                }}
-              />
-            )}
-            <InspectorPanel
-              title={selected ? "Edit node" : "Edit branch condition"}
-              width={inspectorWidth}
-              phone={phone}
-              onClose={closeInspector}
-              onDelete={
-                selected
-                  ? () => deleteNode(selected.id)
-                  : selectedEdge
-                    ? () => deleteEdge(selectedEdge.id)
-                    : undefined
-              }
-              deleteLabel={selected ? "Delete node" : "Delete edge"}
+        {/* inspector dock (persistent right column; overlay on narrow/phone) */}
+        {dock}
+      </div>
+
+      {/* full catalog modal (the rail's dashed "+") */}
+      <CatalogModal
+        open={catalogOpen}
+        onClose={() => setCatalogOpen(false)}
+        onAdd={(entry) => {
+          addEntry(entry);
+          setCatalogOpen(false);
+        }}
+      />
+
+      {/* toasts — bottom-right, offset LEFT of the dock so they never hide under it */}
+      <div
+        style={{
+          position: "absolute",
+          right: showDock && !dockFloating ? 508 : 16,
+          bottom: 20,
+          display: "flex",
+          flexDirection: "column",
+          gap: 9,
+          zIndex: 60,
+          alignItems: "flex-end",
+          pointerEvents: "none",
+        }}
+      >
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            role="status"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              border: `1px solid ${
+                t.tone === "warn"
+                  ? "color-mix(in srgb, var(--state-paused) 45%, transparent)"
+                  : "color-mix(in srgb, var(--state-done) 40%, transparent)"
+              }`,
+              background: "var(--card-2)",
+              borderRadius: 11,
+              padding: "11px 15px",
+              minWidth: 230,
+              boxShadow: "0 18px 40px -18px rgba(0, 0, 0, 0.5)",
+              animation: "naaryToastIn .28s cubic-bezier(.2,.9,.3,1.2)",
+            }}
+          >
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                flex: "none",
+                background:
+                  t.tone === "warn"
+                    ? "var(--state-paused)"
+                    : "var(--state-done)",
+                boxShadow: `0 0 9px ${
+                  t.tone === "warn"
+                    ? "var(--state-paused)"
+                    : "var(--state-done)"
+                }`,
+              }}
+            />
+            <span
+              style={{
+                fontSize: "var(--text-sm)",
+                color: "var(--ink)",
+                fontWeight: "var(--weight-medium)",
+              }}
             >
-              {selected ? (
-                /* naary-drop-scope: while a field row is dragged from the output
-                   inspector, the expression inputs inside highlight (canvas.css). */
-                <div className="naary-drop-scope">
-                  <ConfigPanel
-                    key={selected.id}
-                    node={selected}
-                    upstreamIds={nodes
-                      .filter((n) => n.id !== selected.id)
-                      .map((n) => n.id)}
-                    edges={edges}
-                    nodeKinds={nodeKinds}
-                    hookUrls={hookUrls}
-                    connections={connections}
-                    pins={pins}
-                    canPin={!!workflowKey}
-                    pinnedOutput={pins[selected.id]}
-                    isPinned={Object.hasOwn(pins, selected.id)}
-                    onPin={(output) => pinNode(selected.id, output)}
-                    onUnpin={() => unpinNode(selected.id)}
-                    // The shared single-node test runner — also drives the node
-                    // card state + the floating output inspector.
-                    onTest={(autofill) => runNodeTest(selected.id, autofill)}
-                    onChange={(patch) => updateConfig(selected.id, patch)}
-                  />
-                </div>
-              ) : selectedEdge ? (
-                <EdgeConfigPanel
-                  key={selectedEdge.id}
-                  condition={selectedEdge.data?.condition}
-                  onChange={(patch) =>
-                    updateEdgeCondition(selectedEdge.id, patch)
-                  }
-                  onClear={() => clearEdgeCondition(selectedEdge.id)}
-                />
-              ) : null}
-            </InspectorPanel>
-          </>
-        )}
+              {t.text}
+            </span>
+            {t.meta && (
+              <span
+                className="mono"
+                style={{
+                  marginLeft: "auto",
+                  fontSize: "var(--text-2xs)",
+                  color: "var(--ink-faint)",
+                  paddingLeft: 8,
+                }}
+              >
+                {t.meta}
+              </span>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );

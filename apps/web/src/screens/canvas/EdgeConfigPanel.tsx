@@ -12,31 +12,37 @@ export function EdgeConfigPanel({
   condition,
   onChange,
   onClear,
+  hideHeader,
 }: {
   condition?: EdgeConditionDraft;
   onChange: (patch: Partial<EdgeConditionDraft>) => void;
   onClear: () => void;
+  /** The edge inspector overlay provides its own header — skip the built-in one. */
+  hideHeader?: boolean;
 }) {
   const c = condition ?? { path: "", op: "eq" as const, value: "" };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div>
-        <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
-          EDGE
+      {!hideHeader && (
+        <div>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
+            EDGE
+          </div>
+          <div style={{ fontWeight: "var(--weight-semibold)" }}>
+            Branch condition
+          </div>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: 2,
+            }}
+          >
+            Blank path = always fires. The edge is taken when the predicate
+            holds.
+          </div>
         </div>
-        <div style={{ fontWeight: "var(--weight-semibold)" }}>
-          Branch condition
-        </div>
-        <div
-          style={{
-            fontSize: "var(--text-xs)",
-            color: "var(--ink-3)",
-            marginTop: 2,
-          }}
-        >
-          Blank path = always fires. The edge is taken when the predicate holds.
-        </div>
-      </div>
+      )}
 
       <Labeled label="Path (in ctx, e.g. agent.urgency)">
         <input

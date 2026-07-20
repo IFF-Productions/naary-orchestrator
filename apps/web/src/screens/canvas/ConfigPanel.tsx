@@ -63,6 +63,7 @@ export function ConfigPanel({
   onUnpin,
   onTest,
   onChange,
+  hideHeader,
 }: {
   node: Node<NaaryData>;
   upstreamIds: string[];
@@ -78,6 +79,8 @@ export function ConfigPanel({
   onUnpin: () => Promise<void>;
   onTest: (autofillUpstream?: boolean) => Promise<TestNodeResult>;
   onChange: (patch: Record<string, unknown>) => void;
+  /** The inspector dock renders its own node header — skip the built-in one. */
+  hideHeader?: boolean;
 }) {
   const kind = node.data.kind;
   const config = node.data.config ?? {};
@@ -132,47 +135,49 @@ export function ConfigPanel({
         maxWidth: 640,
       }}
     >
-      {/* header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-        <span
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: "var(--radius-md)",
-            flex: "none",
-            background: `color-mix(in srgb, ${ACCENT[kind]} 18%, transparent)`,
-            color: ACCENT[kind],
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
+      {/* header (the dock provides its own — see hideHeader) */}
+      {!hideHeader && (
+        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
           <span
             style={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: "currentColor",
-            }}
-          />
-        </span>
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: "var(--text-md)",
-              fontWeight: "var(--weight-semibold)",
+              width: 28,
+              height: 28,
+              borderRadius: "var(--radius-md)",
+              flex: "none",
+              background: `color-mix(in srgb, ${ACCENT[kind]} 18%, transparent)`,
+              color: ACCENT[kind],
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
-            {nodeDisplayLabel(kind, config)}
-          </div>
-          <div
-            className="mono"
-            style={{ fontSize: "var(--text-2xs)", color: "var(--ink-3)" }}
-          >
-            {kind} · {node.id}
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: "currentColor",
+              }}
+            />
+          </span>
+          <div style={{ minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: "var(--text-md)",
+                fontWeight: "var(--weight-semibold)",
+              }}
+            >
+              {nodeDisplayLabel(kind, config)}
+            </div>
+            <div
+              className="mono"
+              style={{ fontSize: "var(--text-2xs)", color: "var(--ink-3)" }}
+            >
+              {kind} · {node.id}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div
         style={{

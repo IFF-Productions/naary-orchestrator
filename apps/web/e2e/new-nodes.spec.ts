@@ -40,25 +40,28 @@ for (const n of NEW_NODES) {
     page,
   }) => {
     await page.goto("/app/canvas");
-    await expect(page.getByText("ADD NODE")).toBeVisible();
 
-    // Add from the palette (a <button>); the node renders as a react-flow div.
-    await page.getByRole("button", { name: n.label, exact: true }).click();
+    // Add via the full catalog modal (the rail's dashed "+"): search, then Add.
+    await page.getByRole("button", { name: "Browse all nodes" }).click();
+    await page.getByLabel("Search nodes").fill(n.label);
+    await page
+      .getByRole("button", { name: `Add ${n.label} to canvas`, exact: true })
+      .click();
     const node = page
       .locator(".react-flow__node", { hasText: n.label })
       .first();
     await expect(node).toBeVisible();
 
-    // Selecting it opens the inspector with this node type's own config field.
+    // Selecting it fills the dock with this node type's own config field.
     await node.click();
-    await expect(page.getByText("Edit node")).toBeVisible();
+    await expect(page.getByText("Parameters", { exact: true })).toBeVisible();
     // .first(): some field labels (e.g. "JavaScript") also appear in a select's
     // options, so the label text matches more than one node — presence is enough.
     await expect(page.getByText(n.field).first()).toBeVisible();
 
-    // Delete via the modal; it closes.
+    // Delete via the dock header; the dock returns to its empty state.
     await page.getByRole("button", { name: "Delete node" }).click();
-    await expect(page.getByText("Edit node")).toBeHidden();
+    await expect(page.getByText("Select a node to configure it")).toBeVisible();
   });
 }
 
@@ -79,18 +82,29 @@ test("run-through: a graph using set → merge → wait completes end-to-end", a
   });
 });
 
-test("palette groups + search filter the node list", async ({ page }) => {
+test("category rail + catalog search filter the node list", async ({
+  page,
+}) => {
   await page.goto("/app/canvas");
-  await expect(page.getByText("ADD NODE")).toBeVisible();
-  // category headers render
-  await expect(page.getByText("Crypto", { exact: true })).toBeVisible();
-  await expect(page.getByText("Transform", { exact: true })).toBeVisible();
-  // search narrows to matching nodes
-  await page.getByLabel("Search nodes").fill("jwt");
+  // Category tiles render on the icon rail.
   await expect(
-    page.getByRole("button", { name: "JWT", exact: true }),
+    page.getByRole("button", { name: "Transform", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Filter", exact: true }),
+    page.getByRole("button", { name: "Control flow", exact: true }),
+  ).toBeVisible();
+  // A rail tile opens its category popover listing that category's nodes.
+  await page.getByRole("button", { name: "Transform", exact: true }).click();
+  await expect(
+    page.getByRole("menuitem", { name: "Edit Fields", exact: true }),
+  ).toBeVisible();
+  // The catalog modal's search narrows to matching nodes.
+  await page.getByRole("button", { name: "Browse all nodes" }).click();
+  await page.getByLabel("Search nodes").fill("jwt");
+  await expect(
+    page.getByRole("button", { name: "Add JWT to canvas", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Add Filter to canvas", exact: true }),
   ).toHaveCount(0);
 });

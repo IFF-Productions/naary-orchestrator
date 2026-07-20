@@ -12,12 +12,14 @@ test("export downloads a graph JSON, and import loads it back", async ({
   page,
 }) => {
   await page.goto("/app/canvas");
-  await expect(page.getByRole("button", { name: "Export" })).toBeVisible();
+  // Import/Export live in the top bar's "…" overflow menu now.
+  await page.getByRole("button", { name: "More actions" }).click();
+  await expect(page.getByRole("menuitem", { name: "Export" })).toBeVisible();
 
   // --- Export: capture the download and assert the file shape ---
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "Export" }).click(),
+    page.getByRole("menuitem", { name: "Export" }).click(),
   ]);
   expect(download.suggestedFilename()).toMatch(/\.json$/);
   const dlPath = await download.path();

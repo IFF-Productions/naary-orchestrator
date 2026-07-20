@@ -74,6 +74,9 @@ export function NaaryEdge({
       <BaseEdge
         id={id}
         path={path}
+        // Wide invisible hit path (design: stroke-width 18, pointer-events: stroke)
+        // so clicking a line reliably opens the Connection inspector.
+        interactionWidth={18}
         style={{
           stroke: selected ? "var(--brand)" : s.color,
           strokeWidth: selected ? 2.6 : 2,

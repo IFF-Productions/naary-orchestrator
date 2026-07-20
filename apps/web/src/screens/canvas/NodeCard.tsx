@@ -201,6 +201,8 @@ export interface NodeCardProps {
   costChip?: string;
   /** Per-node ▶ test-run affordance; omit to hide (e.g. end node). */
   onRun?: () => void;
+  /** ✕ delete micro-button (top-left, visible on hover/selection); omit to hide. */
+  onDelete?: () => void;
 }
 
 export function NodeCard({
@@ -214,6 +216,7 @@ export function NodeCard({
   runMs,
   costChip,
   onRun,
+  onDelete,
 }: NodeCardProps) {
   const accent = ACCENT[kind] ?? "var(--ink-faint)";
   const s = STATE_STYLE[state];
@@ -413,6 +416,84 @@ export function NodeCard({
       <span style={{ ...monoLabel, color: s.fg, flex: "none" }}>
         {STATE_WORD[state]}
       </span>
+
+      {/* ✕ delete micro-button (top-left; CSS shows it on hover, `is-visible` when selected) */}
+      {onDelete && (
+        <button
+          type="button"
+          className={`nodrag naary-node-del${selected ? " is-visible" : ""}`}
+          title="Delete node"
+          aria-label={`Delete ${title}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          style={{
+            position: "absolute",
+            top: -9,
+            left: -9,
+            width: 22,
+            height: 22,
+            borderRadius: "50%",
+            border:
+              "1px solid color-mix(in srgb, var(--state-error) 55%, transparent)",
+            background: "var(--card)",
+            color: "var(--state-error)",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            boxShadow: "0 3px 10px -3px rgba(0, 0, 0, 0.4)",
+            padding: 0,
+          }}
+        >
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden
+          >
+            <path
+              d="M6 6l12 12M18 6L6 18"
+              stroke="currentColor"
+              strokeWidth="2.6"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
+      )}
+
+      {/* bottom progress strip while the single-node test runs (indeterminate —
+          we have no honest percentage; the sweep just signals live work) */}
+      {busy && (
+        <span
+          aria-hidden
+          style={{
+            position: "absolute",
+            left: 13,
+            right: 13,
+            bottom: 4,
+            height: 3,
+            borderRadius: 3,
+            background: "var(--brand-soft)",
+            overflow: "hidden",
+            pointerEvents: "none",
+          }}
+        >
+          <span
+            style={{
+              position: "absolute",
+              top: 0,
+              bottom: 0,
+              width: "40%",
+              borderRadius: 3,
+              background:
+                "linear-gradient(90deg, var(--brand), var(--brand-2))",
+              animation: "naaryIndeterminate 1.1s ease-in-out infinite",
+            }}
+          />
+        </span>
+      )}
 
       {/* floating per-node ▶ run affordance (single-node test) */}
       {onRun && (
