@@ -2,10 +2,17 @@
  * Groups (RBAC-GROUPS.md §4/§4a/§8, slice G2): permission groups + the six-verb grant
  * matrix. Owner/admin only (the API 403s members — this screen explains instead).
  *
+ * Redesign "1a — two-pane matrix table": a left rail lists the workspace's groups; the
+ * right pane is the selected group's grant MATRIX — one row per grant, six verb cells
+ * toggled inline. Toggling persists through the SAME grant API the dialog uses
+ * (draftFromGrant → flip one verb → draftToPayload → api.updateGrant), so the render is
+ * a restyle over the existing logic — no new data flow, no client-only state.
+ *
  * THE CLIFF (§8.6): a workspace with zero grants behaves as today; saving the FIRST
- * grant flips ALL `member` users AND ALL ungrouped API tokens to deny-by-default.
- * That save is gated behind an explicit confirm dialog with the token impact spelled
- * out — creating the first grant IS the admin's opt-in to enforcement.
+ * grant flips ALL `member` users AND ALL ungrouped API tokens to deny-by-default. The
+ * enforcement switch IS grant existence in the workspace (§9), so the banner reads the
+ * real state from `workspaceHasAnyGrant` — it is not a simulated toggle. That first save
+ * is gated behind an explicit confirm dialog with the token impact spelled out.
  */
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -15,7 +22,6 @@ import {
   EmptyState,
   Icon,
   LoadingBlock,
-  Tag,
 } from "../../components";
 import {
   api,
@@ -27,15 +33,19 @@ import {
   type PermissionGroup,
   UnauthorizedError,
 } from "../../lib/api";
+import { useActiveEnvironment } from "../../lib/useActiveEnvironment";
+import { BELOW_DRAWER_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import {
   type GrantDraft,
   draftFromGrant,
+  draftProblem,
   draftToPayload,
   emptyGrantDraft,
   workspaceHasAnyGrant,
   workspaceHasAnyTagGrant,
 } from "../../lib/permissions-logic";
 import { invalidateMyPermissions } from "../../lib/usePermissions";
+import { envAccent } from "../../workspace/EnvironmentSwitcher";
 import {
   GrantEditorDialog,
   type TagOption,
@@ -48,6 +58,42 @@ interface EditorTarget {
   grantId: string | null;
   initial: GrantDraft;
 }
+
+/** Scope/role tints with no design token yet (decorative): brand ember + purple + blue. */
+const SCOPE_ALL = "var(--brand)";
+const SCOPE_SELECTED = "#4a9dff";
+const SCOPE_TAG = "#c07bff";
+
+/** Stable per-group dot color (decorative — no server field). */
+const DOT_PALETTE = [
+  "var(--brand)",
+  "#c07bff",
+  "#4a9dff",
+  "#3fb27f",
+  "#f5b544",
+  "#e0607e",
+];
+function groupColor(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return DOT_PALETTE[h % DOT_PALETTE.length];
+}
+
+/** The six matrix columns (order + copy per the redesign header). */
+const MATRIX_VERBS: {
+  field: keyof Pick<
+    GrantDraft,
+    "canView" | "canRun" | "canEdit" | "canDelete" | "canShare" | "canCreate"
+  >;
+  label: string;
+}[] = [
+  { field: "canView", label: "view" },
+  { field: "canRun", label: "run" },
+  { field: "canEdit", label: "edit" },
+  { field: "canDelete", label: "delete" },
+  { field: "canShare", label: "share" },
+  { field: "canCreate", label: "create" },
+];
 
 export function Groups() {
   const [tenant, setTenant] = useState<string | null>(null);
@@ -62,11 +108,15 @@ export function Groups() {
   const [notAllowed, setNotAllowed] = useState(false);
 
   const [newName, setNewName] = useState("");
+  const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(
     null,
   );
+  // Which verb cell is mid-save (`grantId:field`) — a per-cell spinner instead of
+  // optimistic local state (which could desync from the real grant).
+  const [togglingCell, setTogglingCell] = useState<string | null>(null);
 
   // Grant editor + the first-grant confirm (§8.6). `pendingSave` holds the draft the
   // confirm dialog is guarding; `ackRestrict` is the explicit checkbox it requires.
@@ -75,6 +125,9 @@ export function Groups() {
   const [editorError, setEditorError] = useState<string | null>(null);
   const [pendingSave, setPendingSave] = useState<GrantDraft | null>(null);
   const [ackRestrict, setAckRestrict] = useState(false);
+
+  const belowDrawer = useMediaQuery(BELOW_DRAWER_QUERY);
+  const activeEnv = useActiveEnvironment();
 
   const canManage = myRole === "owner" || myRole === "admin";
   const hasAnyGrant = workspaceHasAnyGrant(groups ?? []);
@@ -90,6 +143,21 @@ export function Groups() {
     () => new Map(tokens.map((t) => [t.id, t])),
     [tokens],
   );
+
+  // The active environment resolved to a pill (decorative context for the pane header).
+  // Grants are additive per environment, so this NEVER filters the matrix — see below.
+  const activeEnvObj = useMemo(
+    () => envs.find((e) => e.id === activeEnv || e.slug === activeEnv) ?? null,
+    [envs, activeEnv],
+  );
+
+  // ≥44px touch targets where a finger taps (≤1024); stay compact on desktop.
+  const touchMin = belowDrawer ? 44 : 32;
+  const iconBtn: React.CSSProperties = {
+    ...iconBtnStyle,
+    minWidth: touchMin,
+    minHeight: touchMin,
+  };
 
   useEffect(() => {
     let live = true;
@@ -120,6 +188,7 @@ export function Groups() {
           workspaces.find((w) => w.tenantId === me.tenantId)?.role ?? null,
         );
         setGroups(groupList);
+        setSelected(groupList[0]?.id ?? null);
         setMembers(memberList.filter((m) => m.status === "active"));
         setTokens(tokenList);
         setEnvs(envList);
@@ -168,8 +237,9 @@ export function Groups() {
     try {
       const g = await api.createGroup(tenant, newName.trim());
       setNewName("");
+      setAdding(false);
       setGroups((gs) => [...(gs ?? []), g]);
-      setExpanded(g.id);
+      setSelected(g.id);
     } catch (e) {
       setError(describe(e, "Could not create the group (duplicate name?)."));
     } finally {
@@ -212,6 +282,7 @@ export function Groups() {
       await api.deleteGroup(tenant, g.id);
       invalidateMyPermissions();
       setGroups((gs) => (gs ?? []).filter((x) => x.id !== g.id));
+      setSelected((cur) => (cur === g.id ? null : cur));
     } catch (e) {
       setError(describe(e, "Could not delete the group."));
     }
@@ -299,6 +370,46 @@ export function Groups() {
     }
   }
 
+  /**
+   * Inline verb toggle on an EXISTING grant. Reuses the dialog's exact save path —
+   * seed the draft from the grant, flip one verb, normalize via draftToPayload, PATCH.
+   * Blocking a toggle that would zero the grant's verbs mirrors the dialog's disabled
+   * Save (draftProblem) — it is the same policy, not a new one. No first-grant confirm:
+   * the grant already exists, so the cliff has already been crossed (or never will be
+   * here). canManage-gated; the server also 403s a forced request.
+   */
+  async function toggleVerb(
+    groupId: string,
+    grant: GroupGrant,
+    field: (typeof MATRIX_VERBS)[number]["field"],
+  ): Promise<void> {
+    if (!tenant || !canManage) return;
+    // §8.3: create is coherent only on 'all'-scope grants.
+    if (field === "canCreate" && grant.scope === "selected") return;
+    const next = { ...draftFromGrant(grant), [field]: !grant[field] };
+    const problem = draftProblem(next);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setError(null);
+    setTogglingCell(`${grant.id}:${field}`);
+    try {
+      await api.updateGrant(tenant, groupId, grant.id, draftToPayload(next));
+      invalidateMyPermissions();
+      await reload();
+    } catch (e) {
+      setError(describe(e, "Could not update the grant."));
+    } finally {
+      setTogglingCell(null);
+    }
+  }
+
+  function openEditor(groupId: string, seed: GrantDraft): void {
+    setEditorError(null);
+    setEditor({ groupId, grantId: null, initial: seed });
+  }
+
   /** Save from the editor dialog. A NEW grant in a zero-grant workspace routes through
    *  the first-grant confirm (§4/§8.6) instead of saving straight away. */
   function requestSave(draft: GrantDraft): void {
@@ -339,16 +450,10 @@ export function Groups() {
       ? "All environments"
       : (envs.find((e) => e.id === id)?.name ?? "Deleted environment");
 
-  const grantVerbs = (g: GroupGrant): string[] => {
-    const on: string[] = [];
-    if (g.canView) on.push("view");
-    if (g.canRun) on.push("run");
-    if (g.canEdit) on.push("edit");
-    if (g.canDelete) on.push("delete");
-    if (g.canShare) on.push("promote");
-    if (g.canCreate) on.push("create");
-    return on;
-  };
+  const wfName = (key: string): string =>
+    workflows.find((w) => w.workflowKey === key)?.name ?? key;
+  const tagName = (id: string): string =>
+    tags.find((t) => t.id === id)?.name ?? id;
 
   if (notAllowed) {
     return (
@@ -361,6 +466,9 @@ export function Groups() {
       </div>
     );
   }
+
+  const list = groups ?? [];
+  const current = list.find((g) => g.id === selected) ?? list[0] ?? null;
 
   return (
     <div
@@ -416,361 +524,697 @@ export function Groups() {
         </div>
       )}
 
-      {/* create group — owner/admin only (server-enforced; hidden otherwise, like Team) */}
-      {canManage && (
-        <Card style={{ padding: 14, marginBottom: 16 }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !busy) void createGroup();
-              }}
-              placeholder="New group name (e.g. Support engineers)"
-              style={inputStyle}
-            />
-            <Button
-              variant="primary"
-              icon="plus"
-              loading={busy}
-              disabled={!newName.trim()}
-              onClick={() => void createGroup()}
-            >
-              Create group
-            </Button>
-          </div>
-        </Card>
-      )}
-
       {groups === null && !error && <LoadingBlock label="Loading groups…" />}
 
-      {groups?.length === 0 && (
+      {groups?.length === 0 && !adding && (
         <Card style={{ padding: 0 }}>
           <EmptyState
             icon="key"
             title="No permission groups yet"
             body="Groups scope what workspace members and API tokens can see and do, per environment. Until a group holds a grant, everyone keeps full access."
+            action={
+              canManage ? (
+                <Button
+                  variant="primary"
+                  icon="plus"
+                  onClick={() => setAdding(true)}
+                >
+                  New group
+                </Button>
+              ) : undefined
+            }
           />
         </Card>
       )}
 
-      {groups?.map((g) => {
-        const open = expanded === g.id;
-        const memberIds = new Set(g.members.map((m) => m.userId));
-        const tokenIds = new Set(g.tokens.map((t) => t.tokenId));
-        const addableMembers = members.filter(
-          (m) => m.userId && !memberIds.has(m.userId),
-        );
-        const addableTokens = tokens.filter((t) => !tokenIds.has(t.id));
-        return (
-          <Card key={g.id} style={{ padding: 0, marginBottom: 12 }}>
-            {/* header row */}
+      {groups && (groups.length > 0 || adding) && (
+        <Card style={{ padding: 0, overflow: "hidden" }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: belowDrawer ? "column" : "row",
+              alignItems: "stretch",
+            }}
+          >
+            {/* ---------------- LEFT RAIL (chip-wrap ≤1024) ---------------- */}
             <div
-              onClick={() => setExpanded(open ? null : g.id)}
-              className="run-row"
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "13px 16px",
-                cursor: "pointer",
-                // Keep the hover tint inside the Card's rounded corners.
-                borderRadius: open
-                  ? "var(--radius-lg) var(--radius-lg) 0 0"
-                  : "var(--radius-lg)",
+                flex: belowDrawer ? "none" : "0 0 236px",
+                width: belowDrawer ? "auto" : 236,
+                borderRight: belowDrawer ? "none" : "1px solid var(--line)",
+                borderBottom: belowDrawer ? "1px solid var(--line)" : "none",
+                padding: 12,
+                background: "var(--card-2)",
               }}
             >
-              <Icon
-                name="chevron-down"
-                size={15}
+              <div
                 style={{
-                  color: "var(--ink-3)",
-                  transform: open ? "none" : "rotate(-90deg)",
-                  transition: "transform .14s ease",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "2px 6px 8px",
                 }}
-              />
-              {renaming?.id === g.id ? (
-                <span
-                  onClick={(e) => e.stopPropagation()}
-                  style={{ display: "flex", gap: 8, flex: 1 }}
-                >
-                  <input
-                    value={renaming.name}
-                    autoFocus
-                    onChange={(e) =>
-                      setRenaming({ id: g.id, name: e.target.value })
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void renameGroup();
-                      if (e.key === "Escape") setRenaming(null);
+              >
+                <span style={railLabelStyle}>Groups</span>
+                {canManage && (
+                  <button
+                    type="button"
+                    aria-label="Add group"
+                    title="Add group"
+                    onClick={() => setAdding((v) => !v)}
+                    style={{
+                      ...iconBtn,
+                      display: "grid",
+                      placeItems: "center",
                     }}
-                    style={{ ...inputStyle, maxWidth: 280 }}
+                  >
+                    <Icon name="plus" size={15} />
+                  </button>
+                )}
+              </div>
+
+              {adding && (
+                <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                  <input
+                    value={newName}
+                    autoFocus
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !busy) void createGroup();
+                      if (e.key === "Escape") {
+                        setAdding(false);
+                        setNewName("");
+                      }
+                    }}
+                    placeholder="Group name…"
+                    style={{ ...inputStyle, padding: "7px 9px" }}
                   />
                   <Button
                     size="sm"
                     variant="primary"
-                    onClick={() => void renameGroup()}
+                    loading={busy}
+                    disabled={!newName.trim()}
+                    onClick={() => void createGroup()}
                   >
-                    Save
+                    Add
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setRenaming(null)}
-                  >
-                    Cancel
-                  </Button>
-                </span>
-              ) : (
-                <span
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    fontSize: "var(--text-body)",
-                    fontWeight: "var(--weight-semibold)",
-                    color: "var(--ink)",
-                  }}
-                >
-                  {g.name}
-                </span>
+                </div>
               )}
-              <span style={countStyle}>
-                {g.members.length} member{g.members.length === 1 ? "" : "s"}
-              </span>
-              <span style={countStyle}>
-                {g.tokens.length} token{g.tokens.length === 1 ? "" : "s"}
-              </span>
-              <span style={countStyle}>
-                {g.grants.length} grant{g.grants.length === 1 ? "" : "s"}
-              </span>
-              {canManage && renaming?.id !== g.id && (
-                <span
-                  onClick={(e) => e.stopPropagation()}
-                  style={{ display: "flex", gap: 4 }}
-                >
-                  <button
-                    type="button"
-                    aria-label="Rename group"
-                    title="Rename group"
-                    onClick={() => setRenaming({ id: g.id, name: g.name })}
-                    style={iconBtnStyle}
-                  >
-                    <Icon name="edit" size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Delete group"
-                    title="Delete group"
-                    onClick={() => void deleteGroup(g)}
-                    style={iconBtnStyle}
-                  >
-                    <Icon name="trash" size={14} />
-                  </button>
-                </span>
-              )}
-            </div>
 
-            {open && (
               <div
                 style={{
-                  borderTop: "1px solid var(--line)",
-                  padding: 16,
-                  animation: "naaryFadeUp .2s ease",
+                  display: "flex",
+                  flexDirection: belowDrawer ? "row" : "column",
+                  flexWrap: belowDrawer ? "wrap" : "nowrap",
+                  gap: belowDrawer ? 8 : 3,
                 }}
               >
-                {/* -------- members -------- */}
-                <div style={sectionLabelStyle}>Members</div>
-                {g.members.length === 0 && (
-                  <div style={mutedStyle}>No members in this group yet.</div>
-                )}
-                {g.members.map((m) => (
-                  <div key={m.userId} style={rowStyle}>
-                    <span
-                      style={{
-                        flex: 1,
-                        fontSize: "var(--text-sm)",
-                        color: "var(--ink)",
-                      }}
-                    >
-                      {emailByUid.get(m.userId) ?? m.userId}
-                    </span>
-                    {canManage && (
-                      <button
-                        type="button"
-                        aria-label="Remove from group"
-                        onClick={() => void removeMember(g.id, m.userId)}
-                        style={iconBtnStyle}
-                      >
-                        <Icon name="x" size={13} />
-                      </button>
-                    )}
-                  </div>
-                ))}
-                {canManage && addableMembers.length > 0 && (
-                  <select
-                    value=""
-                    onChange={(e) => void addMember(g.id, e.target.value)}
-                    style={{ ...inputStyle, maxWidth: 320, marginTop: 6 }}
-                  >
-                    <option value="">Add a workspace member…</option>
-                    {addableMembers.map((m) => (
-                      <option key={m.userId} value={m.userId}>
-                        {m.email || m.userId}
-                      </option>
-                    ))}
-                  </select>
-                )}
-
-                {/* -------- API tokens (§4a) -------- */}
-                <div style={{ ...sectionLabelStyle, marginTop: 18 }}>
-                  API tokens
-                </div>
-                <div style={{ ...mutedStyle, marginBottom: 6 }}>
-                  Once this workspace has any grant, ungrouped API tokens (CI,
-                  MCP, CLI) are denied everything — attach a token here to give
-                  it this group&rsquo;s access.
-                </div>
-                {g.tokens.map((t) => (
-                  <div key={t.tokenId} style={rowStyle}>
-                    <span
-                      style={{
-                        flex: 1,
-                        fontSize: "var(--text-sm)",
-                        color: "var(--ink)",
-                      }}
-                    >
-                      {tokenById.get(t.tokenId)?.label ?? t.tokenId}
-                    </span>
-                    {canManage && (
-                      <button
-                        type="button"
-                        aria-label="Detach token"
-                        onClick={() => void removeToken(g.id, t.tokenId)}
-                        style={iconBtnStyle}
-                      >
-                        <Icon name="x" size={13} />
-                      </button>
-                    )}
-                  </div>
-                ))}
-                {canManage && addableTokens.length > 0 && (
-                  <select
-                    value=""
-                    onChange={(e) => void addToken(g.id, e.target.value)}
-                    style={{ ...inputStyle, maxWidth: 320, marginTop: 6 }}
-                  >
-                    <option value="">Attach an API token…</option>
-                    {addableTokens.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {tokens.length === 0 && (
-                  <div style={mutedStyle}>
-                    No API tokens in this workspace (mint them under
-                    Integrations → MCP access).
-                  </div>
-                )}
-
-                {/* -------- grants -------- */}
-                <div style={{ ...sectionLabelStyle, marginTop: 18 }}>
-                  Grants
-                </div>
-                {g.grants.length === 0 && (
-                  <div style={mutedStyle}>
-                    No grants — this group gives its members and tokens nothing
-                    yet.
-                  </div>
-                )}
-                {g.grants.map((grant) => (
-                  <div key={grant.id} style={{ ...rowStyle, flexWrap: "wrap" }}>
-                    <span
-                      style={{
-                        fontSize: "var(--text-sm)",
-                        fontWeight: "var(--weight-medium)",
-                        color: "var(--ink)",
-                      }}
-                    >
-                      {envName(grant.environmentId)}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "var(--text-xs)",
-                        color: "var(--ink-3)",
-                      }}
-                    >
-                      {grant.scope === "all"
-                        ? "all workflows"
-                        : `${grant.workflowKeys.length} workflow${grant.workflowKeys.length === 1 ? "" : "s"}` +
-                          ((grant.tagIds ?? []).length > 0
-                            ? ` + ${grant.tagIds.length} tag${grant.tagIds.length === 1 ? "" : "s"}`
-                            : "")}
-                    </span>
-                    <span
+                {list.map((g) => {
+                  const on = current?.id === g.id;
+                  return (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => setSelected(g.id)}
                       style={{
                         display: "flex",
-                        gap: 4,
-                        flexWrap: "wrap",
-                        flex: 1,
+                        alignItems: "center",
+                        gap: 9,
+                        minHeight: 44,
+                        padding: "8px 10px",
+                        borderRadius: "var(--radius-sm)",
+                        border: belowDrawer
+                          ? `1px solid ${on ? "var(--brand)" : "var(--line-2)"}`
+                          : "1px solid transparent",
+                        background: on
+                          ? "var(--brand-soft)"
+                          : belowDrawer
+                            ? "var(--card)"
+                            : "transparent",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        width: belowDrawer ? "auto" : "100%",
+                        transition: "background .12s ease",
                       }}
                     >
-                      {grantVerbs(grant).map((v) => (
-                        <Tag key={v}>{v}</Tag>
-                      ))}
-                    </span>
-                    {canManage && (
-                      <span style={{ display: "flex", gap: 6 }}>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => {
-                            setEditorError(null);
-                            setEditor({
-                              groupId: g.id,
-                              grantId: grant.id,
-                              initial: draftFromGrant(grant),
-                            });
+                      <span
+                        style={{
+                          width: 10,
+                          height: 10,
+                          flex: "none",
+                          borderRadius: "50%",
+                          background: groupColor(g.id),
+                        }}
+                      />
+                      <span style={{ minWidth: 0, flex: 1 }}>
+                        <span
+                          style={{
+                            display: "block",
+                            fontSize: "var(--text-sm)",
+                            fontWeight: "var(--weight-semibold)",
+                            color: "var(--ink)",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
                           }}
                         >
-                          Edit
+                          {g.name}
+                        </span>
+                        <span
+                          style={{
+                            display: "block",
+                            fontSize: "var(--text-xs)",
+                            color: "var(--ink-3)",
+                          }}
+                        >
+                          {g.members.length} member
+                          {g.members.length === 1 ? "" : "s"} ·{" "}
+                          {g.grants.length} grant
+                          {g.grants.length === 1 ? "" : "s"}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ---------------- RIGHT MATRIX PANE ---------------- */}
+            <div style={{ flex: 1, minWidth: 0, padding: 18 }}>
+              {current ? (
+                <>
+                  {/* header: role-tinted icon + name + union meta + active-env pill */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 34,
+                        height: 34,
+                        flex: "none",
+                        borderRadius: "var(--radius-sm)",
+                        display: "grid",
+                        placeItems: "center",
+                        background: `color-mix(in srgb, ${groupColor(current.id)} 18%, transparent)`,
+                        color: groupColor(current.id),
+                      }}
+                    >
+                      <Icon name="users" size={17} />
+                    </span>
+                    {renaming?.id === current.id ? (
+                      <span style={{ display: "flex", gap: 8, flex: 1 }}>
+                        <input
+                          value={renaming.name}
+                          autoFocus
+                          onChange={(e) =>
+                            setRenaming({
+                              id: current.id,
+                              name: e.target.value,
+                            })
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") void renameGroup();
+                            if (e.key === "Escape") setRenaming(null);
+                          }}
+                          style={{ ...inputStyle, maxWidth: 280 }}
+                        />
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={() => void renameGroup()}
+                        >
+                          Save
                         </Button>
                         <Button
                           size="sm"
-                          variant="secondary"
-                          onClick={() => void deleteGrant(g.id, grant)}
+                          variant="ghost"
+                          onClick={() => setRenaming(null)}
                         >
-                          Delete
+                          Cancel
                         </Button>
+                      </span>
+                    ) : (
+                      <span style={{ minWidth: 0, flex: 1 }}>
+                        <span
+                          style={{
+                            display: "block",
+                            fontSize: "var(--text-body)",
+                            fontWeight: "var(--weight-bold)",
+                            color: "var(--ink)",
+                          }}
+                        >
+                          {current.name}
+                        </span>
+                        <span
+                          style={{
+                            display: "block",
+                            fontSize: "var(--text-xs)",
+                            color: "var(--ink-3)",
+                          }}
+                        >
+                          {current.members.length} member
+                          {current.members.length === 1 ? "" : "s"} · grants add
+                          up (union)
+                        </span>
+                      </span>
+                    )}
+                    {activeEnvObj && (
+                      <span
+                        title="Active environment"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "3px 9px",
+                          borderRadius: 999,
+                          fontSize: "var(--text-xs)",
+                          fontWeight: "var(--weight-semibold)",
+                          color: envAccent(activeEnvObj),
+                          background: `color-mix(in srgb, ${envAccent(activeEnvObj)} 14%, transparent)`,
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: "50%",
+                            background: envAccent(activeEnvObj),
+                          }}
+                        />
+                        {activeEnvObj.name}
+                      </span>
+                    )}
+                    {canManage && renaming?.id !== current.id && (
+                      <span style={{ display: "flex", gap: 4 }}>
+                        <button
+                          type="button"
+                          aria-label="Rename group"
+                          title="Rename group"
+                          onClick={() =>
+                            setRenaming({ id: current.id, name: current.name })
+                          }
+                          style={iconBtn}
+                        >
+                          <Icon name="edit" size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Delete group"
+                          title="Delete group"
+                          onClick={() => void deleteGroup(current)}
+                          style={iconBtn}
+                        >
+                          <Icon name="trash" size={15} />
+                        </button>
                       </span>
                     )}
                   </div>
-                ))}
-                {canManage && (
-                  <div style={{ marginTop: 8 }}>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      icon="plus"
-                      onClick={() => {
-                        setEditorError(null);
-                        setEditor({
-                          groupId: g.id,
-                          grantId: null,
-                          initial: emptyGrantDraft(),
-                        });
+
+                  {/* CLIFF banner — bound to REAL workspace state (grant existence §9) */}
+                  <div
+                    style={{
+                      marginTop: 14,
+                      padding: "10px 12px",
+                      borderRadius: "var(--radius-sm)",
+                      display: "flex",
+                      gap: 9,
+                      alignItems: "flex-start",
+                      fontSize: "var(--text-sm)",
+                      lineHeight: "var(--leading-snug)",
+                      background: hasAnyGrant
+                        ? "var(--warning-soft, rgba(217,119,6,.12))"
+                        : "var(--info-soft)",
+                      color: hasAnyGrant
+                        ? "var(--state-warning, #b45309)"
+                        : "var(--ink-2)",
+                    }}
+                  >
+                    <Icon
+                      name={hasAnyGrant ? "alert" : "info"}
+                      size={15}
+                      style={{ marginTop: 1, flex: "none" }}
+                    />
+                    <span>
+                      {hasAnyGrant ? (
+                        <>
+                          <strong>Deny-by-default active.</strong> The
+                          workspace&rsquo;s first grant flipped all members and
+                          all ungrouped API tokens to deny — they now get only
+                          what their groups grant. (Removing every grant returns
+                          the workspace to implicit-allow.)
+                        </>
+                      ) : (
+                        <>
+                          <strong>Implicit allow.</strong> With zero grants,
+                          every member and API token has full access. Saving the
+                          first grant switches this whole workspace to
+                          deny-by-default.
+                        </>
+                      )}
+                    </span>
+                  </div>
+
+                  {/* ---------------- MATRIX TABLE ---------------- */}
+                  <div style={{ ...sectionLabelStyle, marginTop: 18 }}>
+                    Grants
+                  </div>
+                  {current.grants.length === 0 ? (
+                    <div style={{ ...mutedStyle, marginBottom: 10 }}>
+                      No grants — this group gives its members and tokens
+                      nothing yet. Add one below.
+                    </div>
+                  ) : (
+                    <div style={{ overflowX: "auto", marginBottom: 10 }}>
+                      <table
+                        style={{
+                          minWidth: 560,
+                          width: "100%",
+                          borderCollapse: "collapse",
+                        }}
+                      >
+                        <thead>
+                          <tr>
+                            <th style={{ ...thStyle, textAlign: "left" }}>
+                              Scope target
+                            </th>
+                            {MATRIX_VERBS.map((v) => (
+                              <th key={v.field} style={thStyle}>
+                                {v.label}
+                              </th>
+                            ))}
+                            {canManage && <th style={thStyle} />}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {current.grants.map((grant) => (
+                            <tr
+                              key={grant.id}
+                              style={{ borderTop: "1px solid var(--line)" }}
+                            >
+                              <td style={{ ...tdStyle, textAlign: "left" }}>
+                                <ScopeTarget
+                                  grant={grant}
+                                  envName={envName}
+                                  wfName={wfName}
+                                  tagName={tagName}
+                                />
+                              </td>
+                              {MATRIX_VERBS.map((v) => {
+                                const locked =
+                                  v.field === "canCreate" &&
+                                  grant.scope === "selected";
+                                return (
+                                  <td key={v.field} style={tdStyle}>
+                                    <VerbCell
+                                      on={grant[v.field]}
+                                      locked={locked}
+                                      touch={belowDrawer}
+                                      busy={
+                                        togglingCell ===
+                                        `${grant.id}:${v.field}`
+                                      }
+                                      disabled={!canManage}
+                                      label={v.label}
+                                      onToggle={() =>
+                                        void toggleVerb(
+                                          current.id,
+                                          grant,
+                                          v.field,
+                                        )
+                                      }
+                                    />
+                                  </td>
+                                );
+                              })}
+                              {canManage && (
+                                <td style={tdStyle}>
+                                  <span
+                                    style={{
+                                      display: "flex",
+                                      gap: 2,
+                                      justifyContent: "flex-end",
+                                    }}
+                                  >
+                                    <button
+                                      type="button"
+                                      aria-label="Edit grant scope"
+                                      title="Edit scope, targets and environment"
+                                      onClick={() => {
+                                        setEditorError(null);
+                                        setEditor({
+                                          groupId: current.id,
+                                          grantId: grant.id,
+                                          initial: draftFromGrant(grant),
+                                        });
+                                      }}
+                                      style={iconBtn}
+                                    >
+                                      <Icon name="edit" size={14} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      aria-label="Delete grant"
+                                      title="Delete grant"
+                                      onClick={() =>
+                                        void deleteGrant(current.id, grant)
+                                      }
+                                      style={iconBtn}
+                                    >
+                                      <Icon name="trash" size={14} />
+                                    </button>
+                                  </span>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* add-grant pills — reuse the existing GrantEditorDialog flow */}
+                  {canManage && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        flexWrap: "wrap",
                       }}
                     >
-                      Add grant
-                    </Button>
+                      <span
+                        style={{
+                          fontSize: "var(--text-xs)",
+                          color: "var(--ink-3)",
+                          fontWeight: "var(--weight-semibold)",
+                        }}
+                      >
+                        Add grant scope:
+                      </span>
+                      <button
+                        type="button"
+                        style={pillStyle(SCOPE_ALL, belowDrawer)}
+                        onClick={() =>
+                          openEditor(current.id, {
+                            ...emptyGrantDraft(),
+                            scope: "all",
+                          })
+                        }
+                      >
+                        All workflows
+                      </button>
+                      <button
+                        type="button"
+                        style={pillStyle(SCOPE_SELECTED, belowDrawer)}
+                        onClick={() =>
+                          openEditor(current.id, {
+                            ...emptyGrantDraft(),
+                            scope: "selected",
+                          })
+                        }
+                      >
+                        Pick workflows…
+                      </button>
+                      <button
+                        type="button"
+                        style={pillStyle(SCOPE_TAG, belowDrawer)}
+                        onClick={() =>
+                          openEditor(current.id, {
+                            ...emptyGrantDraft(),
+                            scope: "selected",
+                          })
+                        }
+                      >
+                        Pick tags…
+                      </button>
+                    </div>
+                  )}
+
+                  {/* footnote */}
+                  <div
+                    style={{
+                      marginTop: 10,
+                      fontSize: "var(--text-xs)",
+                      color: "var(--ink-3)",
+                      lineHeight: "var(--leading-snug)",
+                    }}
+                  >
+                    A grant needs at least one permission (and, for a selected
+                    scope, at least one workflow or tag). Create is only
+                    available on All workflows. A tag grant auto-covers current
+                    and future workflows carrying that tag.
                   </div>
-                )}
-              </div>
-            )}
-          </Card>
-        );
-      })}
+
+                  {/* ---------------- MEMBERS ---------------- */}
+                  <div style={{ ...sectionLabelStyle, marginTop: 22 }}>
+                    Members
+                  </div>
+                  {current.members.length === 0 && (
+                    <div style={mutedStyle}>No members in this group yet.</div>
+                  )}
+                  {current.members.map((m) => (
+                    <div key={m.userId} style={rowStyle}>
+                      <span
+                        style={{
+                          flex: 1,
+                          fontSize: "var(--text-sm)",
+                          color: "var(--ink)",
+                        }}
+                      >
+                        {emailByUid.get(m.userId) ?? m.userId}
+                      </span>
+                      {canManage && (
+                        <button
+                          type="button"
+                          aria-label="Remove from group"
+                          onClick={() =>
+                            void removeMember(current.id, m.userId)
+                          }
+                          style={iconBtn}
+                        >
+                          <Icon name="x" size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {canManage &&
+                    members.filter(
+                      (m) =>
+                        m.userId &&
+                        !new Set(current.members.map((x) => x.userId)).has(
+                          m.userId,
+                        ),
+                    ).length > 0 && (
+                      <select
+                        value=""
+                        onChange={(e) =>
+                          void addMember(current.id, e.target.value)
+                        }
+                        style={{ ...inputStyle, maxWidth: 320, marginTop: 6 }}
+                      >
+                        <option value="">Add a workspace member…</option>
+                        {members
+                          .filter(
+                            (m) =>
+                              m.userId &&
+                              !new Set(
+                                current.members.map((x) => x.userId),
+                              ).has(m.userId),
+                          )
+                          .map((m) => (
+                            <option key={m.userId} value={m.userId}>
+                              {m.email || m.userId}
+                            </option>
+                          ))}
+                      </select>
+                    )}
+
+                  {/* ---------------- API tokens (§4a) ---------------- */}
+                  <div style={{ ...sectionLabelStyle, marginTop: 22 }}>
+                    API tokens
+                  </div>
+                  <div style={{ ...mutedStyle, marginBottom: 6 }}>
+                    Once this workspace has any grant, ungrouped API tokens (CI,
+                    MCP, CLI) are denied everything — attach a token here to
+                    give it this group&rsquo;s access.
+                  </div>
+                  {current.tokens.map((t) => (
+                    <div key={t.tokenId} style={rowStyle}>
+                      <span
+                        style={{
+                          flex: 1,
+                          fontSize: "var(--text-sm)",
+                          color: "var(--ink)",
+                        }}
+                      >
+                        {tokenById.get(t.tokenId)?.label ?? t.tokenId}
+                      </span>
+                      {canManage && (
+                        <button
+                          type="button"
+                          aria-label="Detach token"
+                          onClick={() =>
+                            void removeToken(current.id, t.tokenId)
+                          }
+                          style={iconBtn}
+                        >
+                          <Icon name="x" size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {canManage &&
+                    tokens.filter(
+                      (t) =>
+                        !new Set(current.tokens.map((x) => x.tokenId)).has(
+                          t.id,
+                        ),
+                    ).length > 0 && (
+                      <select
+                        value=""
+                        onChange={(e) =>
+                          void addToken(current.id, e.target.value)
+                        }
+                        style={{ ...inputStyle, maxWidth: 320, marginTop: 6 }}
+                      >
+                        <option value="">Attach an API token…</option>
+                        {tokens
+                          .filter(
+                            (t) =>
+                              !new Set(
+                                current.tokens.map((x) => x.tokenId),
+                              ).has(t.id),
+                          )
+                          .map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.label}
+                            </option>
+                          ))}
+                      </select>
+                    )}
+                  {tokens.length === 0 && (
+                    <div style={mutedStyle}>
+                      No API tokens in this workspace (mint them under
+                      Integrations → MCP access).
+                    </div>
+                  )}
+                </>
+              ) : (
+                <EmptyState
+                  icon="key"
+                  title="Select a group"
+                  body="Pick a group on the left to edit its grant matrix, members and tokens."
+                />
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* grant editor — keyed so a new target reseeds the local draft */}
       {editor && (
@@ -874,6 +1318,178 @@ export function Groups() {
   );
 }
 
+/** The scope + target cell: role-tinted scope icon then mono target chips. A single
+ *  'selected' grant can carry several workflow keys AND tags (all shown); a non-null
+ *  environmentId is load-bearing (grants are per-env) so it rides along as a chip. */
+function ScopeTarget({
+  grant,
+  envName,
+  wfName,
+  tagName,
+}: {
+  grant: GroupGrant;
+  envName: (id: string | null) => string;
+  wfName: (key: string) => string;
+  tagName: (id: string) => string;
+}) {
+  const isAll = grant.scope === "all";
+  const tint = isAll ? SCOPE_ALL : SCOPE_SELECTED;
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
+      <span
+        style={{
+          width: 22,
+          height: 22,
+          flex: "none",
+          marginTop: 1,
+          borderRadius: 6,
+          display: "grid",
+          placeItems: "center",
+          color: tint,
+          background: `color-mix(in srgb, ${tint} 16%, transparent)`,
+        }}
+      >
+        <Icon name={isAll ? "grid" : "workflow"} size={13} />
+      </span>
+      <span style={{ display: "flex", flexWrap: "wrap", gap: 4, minWidth: 0 }}>
+        {isAll ? (
+          <span style={targetChip("var(--brand)")}>All workflows</span>
+        ) : (
+          <>
+            {grant.workflowKeys.map((k) => (
+              <span
+                key={`wf:${k}`}
+                title={wfName(k)}
+                style={targetChip(SCOPE_SELECTED)}
+              >
+                wf: {k}
+              </span>
+            ))}
+            {(grant.tagIds ?? []).map((id) => (
+              <span
+                key={`tag:${id}`}
+                title={tagName(id)}
+                style={targetChip(SCOPE_TAG)}
+              >
+                tag: {id}
+              </span>
+            ))}
+            {grant.workflowKeys.length === 0 &&
+              (grant.tagIds ?? []).length === 0 && (
+                <span style={targetChip("var(--ink-3)")}>no targets</span>
+              )}
+          </>
+        )}
+        {grant.environmentId !== null && (
+          <span
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              alignSelf: "center",
+            }}
+          >
+            @ {envName(grant.environmentId)}
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
+
+/** One verb toggle cell: a green tap-target when on; a LOCK + disabled when `locked`
+ *  (create off a selected scope). Persist happens in the parent — this is presentational
+ *  plus a busy spinner. */
+function VerbCell({
+  on,
+  locked,
+  touch,
+  busy,
+  disabled,
+  label,
+  onToggle,
+}: {
+  on: boolean;
+  locked: boolean;
+  touch: boolean;
+  busy: boolean;
+  disabled: boolean;
+  label: string;
+  onToggle: () => void;
+}) {
+  const size = touch ? 44 : 30;
+  if (locked) {
+    return (
+      <span
+        title="Create requires the All-workflows scope"
+        aria-label={`${label} locked (requires All workflows)`}
+        style={{
+          display: "inline-grid",
+          placeItems: "center",
+          width: size,
+          height: size,
+          color: "var(--ink-3)",
+          opacity: 0.5,
+        }}
+      >
+        <LockGlyph />
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={on}
+      aria-label={label}
+      disabled={disabled || busy}
+      onClick={onToggle}
+      style={{
+        display: "inline-grid",
+        placeItems: "center",
+        width: size,
+        height: size,
+        minWidth: size,
+        minHeight: size,
+        margin: "0 auto",
+        padding: 0,
+        borderRadius: 7,
+        cursor: disabled ? "default" : "pointer",
+        border: `1px solid ${on ? "var(--state-done)" : "var(--line-2)"}`,
+        background: on ? "var(--state-done)" : "transparent",
+        color: on ? "#fff" : "var(--ink-3)",
+        opacity: busy ? 0.5 : 1,
+        transition: "background .12s ease, border-color .12s ease",
+      }}
+    >
+      {on && <Icon name="check" size={15} />}
+    </button>
+  );
+}
+
+/** Small inline lock (no `lock` in the icon set). */
+function LockGlyph() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+      <rect
+        x="5"
+        y="11"
+        width="14"
+        height="9"
+        rx="2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path
+        d="M8 11V8a4 4 0 0 1 8 0v3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+    </svg>
+  );
+}
+
 const inputStyle: React.CSSProperties = {
   flex: 1,
   padding: "8px 10px",
@@ -889,13 +1505,18 @@ const iconBtnStyle: React.CSSProperties = {
   background: "transparent",
   cursor: "pointer",
   color: "var(--ink-3)",
-  padding: 4,
+  padding: 6,
+  minWidth: 32,
+  minHeight: 32,
+  borderRadius: "var(--radius-sm)",
 };
 
-const countStyle: React.CSSProperties = {
+const railLabelStyle: React.CSSProperties = {
   fontSize: "var(--text-xs)",
+  fontWeight: "var(--weight-semibold)",
+  letterSpacing: "var(--tracking-label)",
+  textTransform: "uppercase",
   color: "var(--ink-3)",
-  whiteSpace: "nowrap",
 };
 
 const sectionLabelStyle: React.CSSProperties = {
@@ -916,6 +1537,57 @@ const rowStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 10,
+  minHeight: 44,
   padding: "7px 0",
   borderBottom: "1px solid var(--line)",
 };
+
+const thStyle: React.CSSProperties = {
+  fontSize: "var(--text-xs)",
+  fontWeight: "var(--weight-semibold)",
+  letterSpacing: "var(--tracking-label)",
+  textTransform: "uppercase",
+  color: "var(--ink-3)",
+  textAlign: "center",
+  padding: "0 6px 8px",
+  whiteSpace: "nowrap",
+};
+
+const tdStyle: React.CSSProperties = {
+  padding: "8px 6px",
+  textAlign: "center",
+  verticalAlign: "middle",
+  fontSize: "var(--text-sm)",
+  color: "var(--ink)",
+};
+
+function pillStyle(tint: string, touch: boolean): React.CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    minHeight: touch ? 44 : 32,
+    padding: touch ? "10px 14px" : "6px 12px",
+    borderRadius: 999,
+    cursor: "pointer",
+    fontSize: "var(--text-sm)",
+    fontWeight: "var(--weight-medium)",
+    color: tint,
+    background: `color-mix(in srgb, ${tint} 12%, transparent)`,
+    border: `1px solid color-mix(in srgb, ${tint} 40%, transparent)`,
+  };
+}
+
+function targetChip(tint: string): React.CSSProperties {
+  return {
+    display: "inline-block",
+    padding: "2px 7px",
+    borderRadius: "var(--radius-sm)",
+    fontSize: "var(--text-xs)",
+    fontFamily:
+      "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)",
+    color: tint,
+    background: `color-mix(in srgb, ${tint} 12%, transparent)`,
+    whiteSpace: "nowrap",
+  };
+}
