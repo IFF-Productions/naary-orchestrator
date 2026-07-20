@@ -1,5 +1,6 @@
 // Shared styles, URL helpers, env chip, icon tile, kebab menu and copy button
 // for the Integrations screen.
+import type { ReactNode } from "react";
 import { useState } from "react";
 import { Icon, type IconName } from "../../../components";
 
@@ -244,6 +245,30 @@ export const cardShell: React.CSSProperties = {
   boxShadow: "var(--shadow-card)",
   overflow: "hidden",
 };
+
+/**
+ * A `cardShell` list that scrolls sideways below `minWidth` instead of crushing its
+ * rows. Row lists here pack a URL/name (which would ellipsize to nothing) next to
+ * fixed-width copy/status/action controls; on a narrow phone that overflows the page
+ * body. A min-width scroll container keeps the row intact and the page body still.
+ */
+export function ScrollList({
+  minWidth = 520,
+  marginBottom,
+  children,
+}: {
+  minWidth?: number;
+  marginBottom?: number;
+  children: ReactNode;
+}) {
+  return (
+    <div style={{ ...cardShell, marginBottom }}>
+      <div style={{ overflowX: "auto" }}>
+        <div style={{ minWidth }}>{children}</div>
+      </div>
+    </div>
+  );
+}
 
 /** A tab's intro line under its section title. */
 export const introStyle: React.CSSProperties = {

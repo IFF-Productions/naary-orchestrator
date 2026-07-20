@@ -166,12 +166,15 @@ export function Integrations() {
         maxWidth: 1100,
       }}
     >
-      {/* heading + segmented tabs */}
+      {/* heading + segmented tabs — the header wraps onto a second row before it
+          overflows; the four-tab segmented control scrolls sideways inside its own
+          container so it never pushes the page body wider than the viewport. */}
       <div
         style={{
           display: "flex",
           alignItems: phone ? "stretch" : "flex-end",
           flexDirection: phone ? "column" : "row",
+          flexWrap: "wrap",
           justifyContent: "space-between",
           gap: 12,
           marginBottom: 22,
@@ -200,7 +203,16 @@ export function Integrations() {
             {connectedCount === 1 ? "" : "s"} in this environment.
           </div>
         </div>
-        <SegmentedToggle options={TABS} value={tab} onChange={setTab} />
+        <div
+          style={{
+            overflowX: "auto",
+            maxWidth: "100%",
+            paddingBottom: 2,
+            WebkitOverflowScrolling: "touch",
+          }}
+        >
+          <SegmentedToggle options={TABS} value={tab} onChange={setTab} />
+        </div>
       </div>
 
       {error && (
