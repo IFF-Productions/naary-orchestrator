@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import type { GraphDef } from "@naary/dsl";
 import { Button, Icon, LoadingBlock, StatusPill } from "../../components";
 import {
@@ -46,8 +46,15 @@ function stepLabel(node: GraphDef["nodes"][number]): string {
  */
 export function AutomationDetail() {
   const { key = "" } = useParams<{ key: string }>();
+  const location = useLocation();
+  // A run id handed over by the editor's Test action opens THAT run directly,
+  // skipping the (possibly-stale) listRuns resolver on first render.
+  const handoffRunId =
+    (location.state as { runId?: string } | null)?.runId ?? null;
   const [named, setNamed] = useState<NamedGraph | null | "error">(null);
-  const [latestRunId, setLatestRunId] = useState<string | null | "none">(null);
+  const [latestRunId, setLatestRunId] = useState<string | null | "none">(
+    handoffRunId,
+  );
 
   // The automation's name + a fallback graph (for the "hasn't run yet" step preview).
   useEffect(() => {
@@ -78,8 +85,10 @@ export function AutomationDetail() {
     }
   }, [key]);
   useEffect(() => {
+    // The editor handed us the exact run to open — don't second-guess it with listRuns.
+    if (handoffRunId) return;
     void resolveLatest();
-  }, [resolveLatest]);
+  }, [resolveLatest, handoffRunId]);
 
   if (named === "error") {
     return <Message>Couldn't load that automation.</Message>;

@@ -146,8 +146,12 @@ export function AutomationEditor({
     setStatus(null);
     try {
       const key = await save();
-      await api.startExecution(key);
-      navigate(`/app/automations/${encodeURIComponent(key)}`);
+      const { workflowId } = await api.startExecution(key);
+      // Hand the fresh run id to the detail view so it opens THIS run — never a
+      // stale "latest" from listRuns (which may not have propagated yet).
+      navigate(`/app/automations/${encodeURIComponent(key)}`, {
+        state: { runId: workflowId },
+      });
     } catch {
       setStatus("Could not run it — try Save first.");
       setBusy(null);
