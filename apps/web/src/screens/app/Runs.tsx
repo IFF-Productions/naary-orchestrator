@@ -11,8 +11,15 @@ import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import { isFailure, isTerminal, runStatusUi } from "../../lib/run-status";
 import { useMode } from "../../mode";
 import { RerunMenu, VersionBadge } from "./RerunMenu";
+import { fmtDurMs } from "./run-detail/run-view-model";
 
-const COLS = "28px 1.4fr 1fr 0.5fr 0.8fr 0.6fr 0.7fr 0.6fr";
+const COLS = "28px 1.4fr 1fr 0.5fr 0.8fr 0.6fr 0.6fr 0.7fr 0.6fr";
+
+/** Real run duration (worker-stamped finishedAt − createdAt); "—" until recorded —
+ *  in-flight runs and runs predating the stamp have none (Slice 2, never faked). */
+function durText(ms: number | null): string {
+  return ms === null ? "—" : fmtDurMs(ms);
+}
 
 /** Compact relative time from an ISO timestamp (no date lib). */
 function ago(iso: string): string {
@@ -509,6 +516,7 @@ export function Runs() {
             <span>Version</span>
             <span>Status</span>
             <span>Cost</span>
+            <span>Duration</span>
             <span>Started</span>
             <span />
           </div>
@@ -578,6 +586,7 @@ export function Runs() {
                 <Skeleton width={26} />
                 <Skeleton width={64} height={20} radius={10} />
                 <Skeleton width="50%" />
+                <Skeleton width="45%" />
                 <Skeleton width="60%" />
                 <span />
               </div>
@@ -742,6 +751,10 @@ export function Runs() {
                     <span>
                       {r.costUsd === null ? "—" : `$${r.costUsd.toFixed(4)}`}
                     </span>
+                    {/* Real duration when recorded (Slice 2) — phone card keeps it terse. */}
+                    {r.durationMs !== null && (
+                      <span>{durText(r.durationMs)}</span>
+                    )}
                     <VersionBadge version={r.graphVersion} />
                   </div>
                   <span style={{ display: "flex", gap: 6 }}>{actions}</span>
@@ -800,6 +813,12 @@ export function Runs() {
                 style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
               >
                 {r.costUsd === null ? "—" : `$${r.costUsd.toFixed(4)}`}
+              </span>
+              <span
+                className="mono"
+                style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
+              >
+                {durText(r.durationMs)}
               </span>
               <span
                 className="mono"

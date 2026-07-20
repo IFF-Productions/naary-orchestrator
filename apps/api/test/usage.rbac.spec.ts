@@ -76,6 +76,50 @@ const EXECS = [
   { workflowId: "x-null", workflowKey: null },
 ];
 
+/** Execution rows for the Slice-2 run-outcome rollup (the SECOND findMany getInsights
+ *  issues — where {tenantId}, not the workflowId-in join). Same RBAC semantics as the
+ *  ledger: wf-b in env-prod is hidden from the TERMS-restricted member. */
+const EXEC_RUN_ROWS = [
+  {
+    workflowKey: "wf-a",
+    environmentId: "env-prod",
+    status: "completed",
+    createdAt: new Date("2026-07-16T10:00:00Z"),
+    finishedAt: new Date("2026-07-16T10:00:10Z"),
+    failureKind: null,
+  },
+  {
+    // hidden for the restricted member (wf-b in the default env)
+    workflowKey: "wf-b",
+    environmentId: "env-prod",
+    status: "failed",
+    createdAt: new Date("2026-07-16T11:00:00Z"),
+    finishedAt: null,
+    failureKind: "timeout",
+  },
+  {
+    // visible (env-sbx is view-all)
+    workflowKey: "wf-b",
+    environmentId: "env-sbx",
+    status: "completed",
+    createdAt: new Date("2026-07-16T12:00:00Z"),
+    finishedAt: null,
+    failureKind: null,
+  },
+];
+
+/** getInsights issues TWO execution.findMany calls: the exec→key JOIN (where.workflowId)
+ *  and the Slice-2 run-rollup read (where.tenantId). Route each to its fixture. */
+function mockExecutionFindMany(
+  joinRows: unknown[] = EXECS,
+  runRows: unknown[] = EXEC_RUN_ROWS,
+) {
+  execution.findMany.mockImplementation(
+    async (args?: { where?: { workflowId?: unknown } }) =>
+      args?.where?.workflowId ? joinRows : runRows,
+  );
+}
+
 beforeEach(() => {
   usageEvent.findMany.mockReset().mockResolvedValue([]);
   execution.findMany.mockReset().mockResolvedValue([]);
@@ -155,7 +199,7 @@ describe("UsageService.getUsage RBAC filtering", () => {
 describe("UsageService.getInsights RBAC filtering", () => {
   it("filters BEFORE the rollup: totals, byDay, byEnvironment and byWorkflow reflect only the viewable slice", async () => {
     usageEvent.findMany.mockResolvedValue(LEDGER);
-    execution.findMany.mockResolvedValue(EXECS);
+    mockExecutionFindMany();
     const out = await makeService(perms(TERMS)).getInsights("t-1", {}, member);
 
     expect(out.totals).toEqual({ costUsd: 0.3, totalTokens: 450, calls: 3 });
@@ -174,11 +218,21 @@ describe("UsageService.getInsights RBAC filtering", () => {
     expect(out.byEnvironment.map((e) => e.environmentId).sort()).toEqual(
       [null, "env-prod", "env-sbx"].sort(),
     );
+    // Slice 2: the run-outcome rollup is view-filtered with the SAME terms —
+    // the hidden wf-b prod failure (and its failureKind) never leaks.
+    expect(out.runsByDay).toEqual([
+      { date: "2026-07-16", total: 2, byStatus: { completed: 2 } },
+    ]);
+    expect(out.failureKinds).toEqual([]);
+    expect(out.runsByWorkflow).toEqual([
+      { workflowKey: "wf-a", runs: 1, avgDurationMs: 10_000 },
+      { workflowKey: "wf-b", runs: 1, avgDurationMs: null },
+    ]);
   });
 
   it("an UNRESTRICTED actor's rollup is unchanged (same where, null-key bucket intact)", async () => {
     usageEvent.findMany.mockResolvedValue(LEDGER);
-    execution.findMany.mockResolvedValue(EXECS);
+    mockExecutionFindMany();
     const out = await makeService(perms(null)).getInsights("t-1", {}, member);
     expect(usageEvent.findMany).toHaveBeenCalledWith({
       where: { tenantId: "t-1" },
@@ -186,13 +240,16 @@ describe("UsageService.getInsights RBAC filtering", () => {
     });
     expect(out.totals.calls).toBe(6);
     expect(out.byWorkflow.some((w) => w.workflowKey === null)).toBe(true);
+    // Slice 2: unrestricted sees every run — incl. the classified failure.
+    expect(out.runsByDay[0].total).toBe(3);
+    expect(out.failureKinds).toEqual([{ kind: "timeout", count: 1 }]);
   });
 
   it("the explicit ?environmentId filter composes with the RBAC filter (query unchanged)", async () => {
     usageEvent.findMany.mockResolvedValue([
       ev({ id: "e-2", executionId: "x-b", environmentId: "env-prod" }),
     ]);
-    execution.findMany.mockResolvedValue(EXECS);
+    mockExecutionFindMany(EXECS, []);
     const out = await makeService(perms(TERMS)).getInsights(
       "t-1",
       { environmentId: "env-prod" },

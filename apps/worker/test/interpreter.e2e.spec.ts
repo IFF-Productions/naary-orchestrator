@@ -1,10 +1,12 @@
 import * as path from "node:path";
+import { ApplicationFailure } from "@temporalio/activity";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { createLocalTestEnv } from "./local-test-env";
 import { Worker } from "@temporalio/worker";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   approvalSignal,
+  budgetResumeSignal,
   stateQuery,
   TASK_QUEUE,
   webhookResponseQuery,
@@ -36,6 +38,25 @@ const mockActivities = {
     meta: activities.AgentMeta,
   ): Promise<activities.AgentResult> => {
     agentCalls.push(meta);
+    // Slice 2 failure-classification probe: this tenant's agent fails like a real
+    // provider 429 (agent.ts maps 429 → non-retryable "QUOTA").
+    if (meta.tenantId === "t-quota-fail") {
+      throw ApplicationFailure.nonRetryable(
+        "Provider rate limit exhausted",
+        "QUOTA",
+      );
+    }
+    // Slice 3 pause-not-fail probe: mirror agent.ts under a LIVE policy of "pause" —
+    // the monthly-cap reservation refuses N times (BUDGET_PAUSE), then succeeds
+    // (the cap was raised / the month rolled over between attempts).
+    if (pauseAgentFailures > 0) {
+      pauseAgentFailures -= 1;
+      throw ApplicationFailure.nonRetryable(
+        "Monthly budget exceeded — run paused until the cap is raised or the month rolls over",
+        "BUDGET_PAUSE",
+        { tenantId: meta.tenantId },
+      );
+    }
     return {
       status: "ok",
       output: { category: "billing", urgency: 3 },
@@ -322,7 +343,24 @@ const mockActivities = {
     };
   },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
-  setExecutionStatus: async (): Promise<void> => undefined, // read-model push; no-op here
+  // Slice 3: the post-resume budget re-read. Mutable result so a test can model the
+  // PUT that raised the caps; captures calls to prove the re-read happens on resume.
+  refreshBudget: async (meta: {
+    tenantId: string;
+  }): Promise<activities.BudgetSnapshot | null> => {
+    refreshBudgetCalls.push(meta);
+    return refreshBudgetResult;
+  },
+  // Read-model push — captured so Slice-2 tests can assert the terminal-failure
+  // status + classified failureKind reach the Execution row.
+  setExecutionStatus: async (meta: {
+    workflowId: string;
+    status: string;
+    costUsd?: number;
+    failureKind?: string;
+  }): Promise<void> => {
+    statusPushes.push(meta);
+  },
   // Global Variables ($vars): return the env-scoped config the interpreter seeds into ctx.$vars.
   // Captures the meta so a test can prove the run's (tenantId, environmentId) reach the read.
   loadVariables: async (meta: {
@@ -347,11 +385,21 @@ const mockActivities = {
   },
 };
 const mapNodeCalls: { nodeType: string; count: number }[] = [];
+const statusPushes: {
+  workflowId: string;
+  status: string;
+  costUsd?: number;
+  failureKind?: string;
+}[] = [];
 const loadVariablesCalls: { tenantId: string; environmentId?: string }[] = [];
 // Mutable so each test can fix the env's variable set (default: one var proving resolution).
 let loadVariablesResult: Record<string, string> = { slackChannel: "#alerts" };
 const pollCalls: activities.PollMeta[] = [];
 let pollChanged = true;
+// Slice 3 pause-not-fail probes (see the runAgent/refreshBudget mocks).
+let pauseAgentFailures = 0;
+const refreshBudgetCalls: { tenantId: string }[] = [];
+let refreshBudgetResult: activities.BudgetSnapshot | null = null;
 const notifyCalls: activities.NotificationInput[] = [];
 const prepareApprovalCalls: {
   tenantId: string;
@@ -3780,4 +3828,499 @@ describe("runGraph interpreter — per-node execution matrix", () => {
       expect(result.ctx.trig).toEqual(event);
     },
   );
+});
+
+describe("runGraph interpreter — Slice 2: per-node timing + failure classification", () => {
+  // webhook → agent → set → end: one trigger, one activity node, one pure node —
+  // enough to prove all three get a timing entry.
+  const timingGraph: GraphDef = {
+    startNodeId: "wh",
+    nodes: [
+      { id: "wh", type: "webhookTrigger" },
+      {
+        id: "act",
+        type: "agent",
+        config: {
+          provider: "anthropic",
+          model: "claude-opus-4-8",
+          systemPrompt: "classify",
+        },
+      },
+      {
+        id: "fmt",
+        type: "set",
+        config: {
+          fieldBindings: { cat: { from: "act", path: "output.category" } },
+        },
+      },
+      { id: "end", type: "end" },
+    ],
+    edges: [
+      { from: "wh", to: "act" },
+      { from: "act", to: "fmt" },
+      { from: "fmt", to: "end" },
+    ],
+  };
+
+  it("stamps per-node start/finish (workflow time) into ctx.__nodeTimes for pure AND activity nodes — and the history replays", async () => {
+    const worker = await makeWorker();
+    const history = await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [timingGraph, { message: "hi" }, { tenantId: "t-timing" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-node-times",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+
+      const times = result.ctx.__nodeTimes as Record<
+        string,
+        { s: number; f: number; n?: number; totalMs?: number }
+      >;
+      expect(times).toBeDefined();
+      // Every executed node has a window (trigger, activity, pure, end).
+      for (const id of ["wh", "act", "fmt", "end"]) {
+        expect(times[id], `missing timing for ${id}`).toBeDefined();
+        expect(typeof times[id].s).toBe("number");
+        expect(typeof times[id].f).toBe("number");
+        expect(times[id].f).toBeGreaterThanOrEqual(times[id].s);
+        // Single pass → no loop aggregates (map stays small).
+        expect(times[id].n).toBeUndefined();
+      }
+      // The activity node's window spans its activity round-trip; the pure node
+      // runs within the same workflow task, so act must not FINISH before it starts
+      // and windows must be ordered along the chain.
+      expect(times.act.s).toBeGreaterThanOrEqual(times.wh.f);
+      expect(times.fmt.s).toBeGreaterThanOrEqual(times.act.f);
+      return handle.fetchHistory();
+    });
+    // No new command was issued for the stamping (plain ctx writes reading
+    // sandbox workflow time) — the recorded history replays against this code.
+    await expect(
+      Worker.runReplayHistory(
+        { workflowsPath: WORKFLOWS_PATH },
+        history,
+        "e2e-node-times",
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("a re-executed node (items region) aggregates n/totalMs — last window wins, map stays bounded", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          itemsGraph(),
+          { items: [{ n: 1 }, { n: 2 }, { n: 3 }] },
+          { tenantId: "t-timing-items" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-node-times-items",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      const times = result.ctx.__nodeTimes as Record<
+        string,
+        { s: number; f: number; n?: number; totalMs?: number }
+      >;
+      // The region's `map` node ran once per item → aggregated pass count.
+      expect(times.map.n).toBe(3);
+      expect(typeof times.map.totalMs).toBe("number");
+      expect(times.map.totalMs).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  it("a THROWN failure pushes status 'failed' + the classified failureKind (QUOTA → rate_limit) to the read-model", async () => {
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [timingGraph, { message: "hi" }, { tenantId: "t-quota-fail" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-fail-quota",
+      });
+      // The QUOTA ApplicationFailure rides in WorkflowFailedError.cause; the
+      // top-level message is the generic wrapper (same as the stopAndError test).
+      await expect(handle.result()).rejects.toThrow(
+        /workflow execution failed/i,
+      );
+    });
+    const push = statusPushes.find((p) => p.workflowId === "e2e-fail-quota");
+    expect(push).toMatchObject({ status: "failed", failureKind: "rate_limit" });
+  });
+
+  it("stopAndError → failureKind 'error'; a returned terminal (rejected) carries NO explicit kind (the activity derives it from status)", async () => {
+    const stopGraph: GraphDef = {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        {
+          id: "boom",
+          type: "stopAndError",
+          config: { message: "deliberate stop" },
+        },
+        { id: "e", type: "end" },
+      ],
+      edges: [
+        { from: "s", to: "boom" },
+        { from: "boom", to: "e" },
+      ],
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [stopGraph, {}, { tenantId: "t-stop-kind" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-fail-stop",
+      });
+      await expect(handle.result()).rejects.toThrow(
+        /workflow execution failed/i,
+      );
+
+      // Returned-terminal path: an approval auto-reject ends via syncStatus with
+      // status only — the failureKind derivation happens IN the activity.
+      const rejHandle = await env.client.workflow.start(runGraph, {
+        args: [approvalTimeoutGraph, {}, { tenantId: "t-rej-kind" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-fail-rejected",
+      });
+      const rej = await rejHandle.result();
+      expect(rej.status).toBe("rejected");
+    });
+    expect(
+      statusPushes.find((p) => p.workflowId === "e2e-fail-stop"),
+    ).toMatchObject({ status: "failed", failureKind: "error" });
+    const rejPushes = statusPushes.filter(
+      (p) => p.workflowId === "e2e-fail-rejected",
+    );
+    const rejPush = rejPushes[rejPushes.length - 1];
+    expect(rejPush).toMatchObject({ status: "rejected" });
+    expect(rejPush?.failureKind).toBeUndefined();
+  });
+
+  it("testNode metering: a test-mode run records __nodeTimes + real __costUsd, and never touches the Runs read-model", async () => {
+    const testGraph: GraphDef = {
+      startNodeId: "act",
+      nodes: [
+        {
+          id: "act",
+          type: "agent",
+          config: {
+            provider: "anthropic",
+            model: "claude-opus-4-8",
+            systemPrompt: "test one node",
+          },
+        },
+        { id: "__snx_end", type: "end" },
+      ],
+      edges: [{ from: "act", to: "__snx_end" }],
+    };
+    const before = statusPushes.length;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const result = await env.client.workflow.execute(runGraph, {
+        args: [
+          testGraph,
+          {},
+          {
+            tenantId: "t-single-test",
+            test: true,
+            seededCtx: { __input: { message: "probe" } },
+          },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-testnode-meter",
+      });
+      expect(result.status).toBe("completed");
+      const times = result.ctx.__nodeTimes as Record<
+        string,
+        { s: number; f: number }
+      >;
+      // The API's testNode surface reads exactly these: the node's own window →
+      // durationMs, and the run's metered spend → costUsd (fail-safe billed by
+      // the activity — the mock returns the ledgered cost like the real one).
+      expect(times.act).toBeDefined();
+      expect(times.act.f).toBeGreaterThanOrEqual(times.act.s);
+      expect(result.ctx.__costUsd).toBe(0.01);
+    });
+    // test-mode: no Execution read-model writes at all.
+    expect(statusPushes.length).toBe(before);
+  });
+});
+
+describe("runGraph interpreter — budget pause-not-fail (Slice 3)", () => {
+  // start → agent → end. The agent mock throws BUDGET_PAUSE while
+  // pauseAgentFailures > 0 (the live-read monthly-cap policy is "pause").
+  const pauseGraph: GraphDef = {
+    startNodeId: "s",
+    nodes: [
+      { id: "s", type: "start" },
+      {
+        id: "act",
+        type: "agent",
+        config: {
+          provider: "anthropic",
+          model: "claude-opus-4-8",
+          systemPrompt: "x",
+        },
+      },
+      { id: "e", type: "end" },
+    ],
+    edges: [
+      { from: "s", to: "act" },
+      { from: "act", to: "e" },
+    ],
+  };
+
+  it("monthly-cap BUDGET_PAUSE parks the run; budgetResume RETRIES the node and the run completes — and the history replays", async () => {
+    pauseAgentFailures = 1; // first reservation refused under policy "pause"
+    refreshBudgetResult = {
+      perExecutionCapUsd: 5,
+      maxStepsPerRun: 50,
+      onBudgetExceeded: "pause",
+    };
+    refreshBudgetCalls.length = 0;
+    const worker = await makeWorker();
+    const history = await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [pauseGraph, {}, { tenantId: "t-pause-monthly" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-budget-pause",
+      });
+      await waitFor(
+        async () =>
+          (await handle.query(stateQuery)).status === "awaiting_budget",
+      );
+      // The pause reached the Runs read-model (where PUT-resume enumerates from).
+      expect(
+        statusPushes.some(
+          (p) =>
+            p.workflowId === "e2e-budget-pause" &&
+            p.status === "awaiting_budget",
+        ),
+      ).toBe(true);
+      // Live spend rides the state query while parked (Slice 3 item 4).
+      const parked = await handle.query(stateQuery);
+      expect(parked.spentUsd).toBe(0); // the refused call never billed
+      await handle.signal(budgetResumeSignal, { tenantId: "t-pause-monthly" });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(result.ctx.act).toMatchObject({ status: "ok" }); // the node RETRIED
+      return handle.fetchHistory();
+    });
+    // On resume the workflow re-read the caps in-activity (never in workflow code).
+    expect(
+      refreshBudgetCalls.some((c) => c.tenantId === "t-pause-monthly"),
+    ).toBe(true);
+    // The pause path (patched marker + condition + activities) replays deterministically.
+    await expect(
+      Worker.runReplayHistory(
+        { workflowsPath: WORKFLOWS_PATH },
+        history,
+        "e2e-budget-pause",
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("per-run cap under policy 'pause': parks instead of budget_exceeded; a resume with a RAISED cap completes — and replays", async () => {
+    pauseAgentFailures = 0;
+    refreshBudgetResult = {
+      perExecutionCapUsd: 5, // the "PUT raised the cap" the resume re-reads
+      maxStepsPerRun: 50,
+      onBudgetExceeded: "pause",
+    };
+    const worker = await makeWorker();
+    const history = await worker.runUntil(async () => {
+      // agent costs 0.01; cap 0.005 trips at the node AFTER the agent — but the
+      // snapshotted policy "pause" parks the run instead of the old terminal.
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          pauseGraph,
+          {},
+          {
+            tenantId: "t-pause-cap",
+            perExecutionCapUsd: 0.005,
+            maxStepsPerRun: 50,
+            onBudgetExceeded: "pause",
+          },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-budget-pause-cap",
+      });
+      await waitFor(
+        async () =>
+          (await handle.query(stateQuery)).status === "awaiting_budget",
+      );
+      // The meter shows the REAL figures while parked: spend + the run's own cap.
+      const parked = await handle.query(stateQuery);
+      expect(parked.spentUsd).toBe(0.01);
+      expect(parked.perExecutionCapUsd).toBe(0.005);
+      await handle.signal(budgetResumeSignal, { tenantId: "t-pause-cap" });
+      const result = await handle.result();
+      expect(result.status).toBe("completed"); // raised cap → the run finished
+      return handle.fetchHistory();
+    });
+    await expect(
+      Worker.runReplayHistory(
+        { workflowsPath: WORKFLOWS_PATH },
+        history,
+        "e2e-budget-pause-cap",
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("still over after resume: the run re-parks (each cycle consumes its own Signal), then completes after a real raise", async () => {
+    pauseAgentFailures = 0;
+    refreshBudgetResult = {
+      perExecutionCapUsd: 0.005, // resume does NOT clear the cap yet
+      maxStepsPerRun: 50,
+      onBudgetExceeded: "pause",
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          pauseGraph,
+          {},
+          {
+            tenantId: "t-pause-repark",
+            perExecutionCapUsd: 0.005,
+            maxStepsPerRun: 50,
+            onBudgetExceeded: "pause",
+          },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-budget-repark",
+      });
+      await waitFor(
+        async () =>
+          (await handle.query(stateQuery)).status === "awaiting_budget",
+      );
+      // First resume: the re-read cap is UNCHANGED → the run parks AGAIN. Await the
+      // SECOND awaiting_budget read-model push (the first park pushed once already) —
+      // querying the status alone could race the signal and see the FIRST park.
+      const parks = () =>
+        statusPushes.filter(
+          (p) =>
+            p.workflowId === "e2e-budget-repark" &&
+            p.status === "awaiting_budget",
+        ).length;
+      expect(parks()).toBe(1);
+      await handle.signal(budgetResumeSignal, { tenantId: "t-pause-repark" });
+      await waitFor(async () => parks() >= 2);
+      // Now the cap really rises; the next Signal completes the run.
+      refreshBudgetResult = {
+        perExecutionCapUsd: 5,
+        maxStepsPerRun: 50,
+        onBudgetExceeded: "pause",
+      };
+      await handle.signal(budgetResumeSignal, { tenantId: "t-pause-repark" });
+      expect((await handle.result()).status).toBe("completed");
+    });
+  });
+
+  it("ONE budgetResume Signal wakes ALL parked parallel branches (monotonic counter, not a flag)", async () => {
+    // start fans out to two agents; BOTH reservations refuse under "pause".
+    const parallelGraph: GraphDef = {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        {
+          id: "a1",
+          type: "agent",
+          config: {
+            provider: "anthropic",
+            model: "claude-opus-4-8",
+            systemPrompt: "x",
+          },
+        },
+        {
+          id: "a2",
+          type: "agent",
+          config: {
+            provider: "anthropic",
+            model: "claude-opus-4-8",
+            systemPrompt: "y",
+          },
+        },
+        { id: "e", type: "end" },
+      ],
+      edges: [
+        { from: "s", to: "a1" },
+        { from: "s", to: "a2" },
+        { from: "a1", to: "e" },
+        { from: "a2", to: "e" },
+      ],
+    };
+    pauseAgentFailures = 2; // one refusal per branch
+    refreshBudgetResult = {
+      perExecutionCapUsd: 5,
+      maxStepsPerRun: 50,
+      onBudgetExceeded: "pause",
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [parallelGraph, {}, { tenantId: "t-pause-parallel" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-budget-pause-parallel",
+      });
+      await waitFor(
+        async () =>
+          (await handle.query(stateQuery)).status === "awaiting_budget",
+      );
+      await handle.signal(budgetResumeSignal, { tenantId: "t-pause-parallel" });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(result.ctx.a1).toMatchObject({ status: "ok" });
+      expect(result.ctx.a2).toMatchObject({ status: "ok" });
+    });
+  });
+
+  it("Slice 3 invariant: a NON-pause run keeps the exact legacy terminal (budget_exceeded, no pause commands) and its history REPLAYS", async () => {
+    pauseAgentFailures = 0;
+    refreshBudgetCalls.length = 0;
+    const worker = await makeWorker();
+    const history = await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          pauseGraph,
+          {},
+          // No onBudgetExceeded in the snapshot — the pre-Slice-3 shape.
+          {
+            tenantId: "t-legacy-cap",
+            perExecutionCapUsd: 0.005,
+            maxStepsPerRun: 50,
+          },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-budget-legacy",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("budget_exceeded");
+      return handle.fetchHistory();
+    });
+    // No pause machinery ran: no budget re-read, no budgetResume wait.
+    expect(refreshBudgetCalls.length).toBe(0);
+    const events = (history.events ?? []) as {
+      activityTaskScheduledEventAttributes?: {
+        activityType?: { name?: string };
+      };
+    }[];
+    expect(
+      events.some(
+        (e) =>
+          e.activityTaskScheduledEventAttributes?.activityType?.name ===
+          "refreshBudget",
+      ),
+    ).toBe(false);
+    // The "old history" case: recorded WITHOUT the pause path/marker, replayed
+    // against the NEW interpreter — byte-identical commands, no nondeterminism.
+    await expect(
+      Worker.runReplayHistory(
+        { workflowsPath: WORKFLOWS_PATH },
+        history,
+        "e2e-budget-legacy",
+      ),
+    ).resolves.toBeUndefined();
+  });
 });

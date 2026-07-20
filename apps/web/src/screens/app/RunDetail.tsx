@@ -28,10 +28,14 @@ import { LogPanel, useRunHistory } from "./run-detail/RunLog";
 import {
   computeStepStates,
   fmtAge,
+  fmtStepDuration,
   fmtWhen,
   historyTimes,
   nodeIcon,
+  nodeTimeOf,
+  stepCostText,
   stepOrder,
+  stepTokensText,
 } from "./run-detail/run-view-model";
 import { SectionTitle } from "./run-detail/shared";
 import { type ApprovalInfo, StatusHero } from "./run-detail/StatusHero";
@@ -91,6 +95,79 @@ function isNodeOutputKey(key: string): boolean {
 function costText(ctx: Record<string, unknown>): string {
   const c = ctx.__costUsd;
   return typeof c === "number" ? `$${c.toFixed(4)}` : "—";
+}
+
+/**
+ * Small REAL budget meter (Slice 3 — live run spend): the run's metered spend vs its
+ * own per-run cap. Rendered only when the run enforces a cap (never fabricated).
+ */
+function RunBudgetMeter({
+  spentUsd,
+  capUsd,
+}: {
+  spentUsd: number;
+  capUsd: number;
+}) {
+  const pct = Math.min(100, (spentUsd / capUsd) * 100);
+  const over = pct >= 100;
+  const near = pct >= 80;
+  const color = over
+    ? "var(--state-error)"
+    : near
+      ? "var(--state-paused)"
+      : "var(--state-done)";
+  return (
+    <div style={{ minWidth: 96 }}>
+      <div
+        className="mono"
+        style={{
+          fontSize: "var(--text-2xs)",
+          color: "var(--ink-3)",
+          letterSpacing: ".03em",
+        }}
+      >
+        RUN BUDGET
+      </div>
+      <div
+        style={{
+          fontSize: "var(--text-body)",
+          color: "var(--ink-soft)",
+          fontWeight: "var(--weight-semibold)",
+          marginTop: 1,
+          whiteSpace: "nowrap",
+        }}
+      >
+        ${spentUsd.toFixed(4)}{" "}
+        <span style={{ color: "var(--ink-3)", fontWeight: 400 }}>
+          / ${capUsd.toFixed(2)}
+        </span>
+      </div>
+      <div
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(pct)}
+        aria-label="Run spend vs per-run cap"
+        style={{
+          marginTop: 4,
+          height: 4,
+          borderRadius: 2,
+          background: "var(--card-2)",
+          border: "1px solid var(--line)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            width: `${pct}%`,
+            height: "100%",
+            background: color,
+            transition: "width .4s ease",
+          }}
+        />
+      </div>
+    </div>
+  );
 }
 
 /** Mono uppercase stat (STEPS / ELAPSED / COST) for the top strip. */
@@ -268,8 +345,10 @@ function RunView({ id }: { id: string }) {
   const status = state?.status;
   const awaiting = status === "awaiting_approval";
   const awaitingWebhook = status === "awaiting_webhook";
+  // Budget pause-not-fail (Slice 3): a durable pause like the other awaiting states.
+  const awaitingBudget = status === "awaiting_budget";
   const running = status === "running";
-  const active = awaiting || awaitingWebhook || running;
+  const active = awaiting || awaitingWebhook || awaitingBudget || running;
   const ui = status ? runStatusUi(status) : null;
 
   /* ---------- Derived view-model (all from real run data) ---------- */
@@ -289,7 +368,8 @@ function RunView({ id }: { id: string }) {
 
   const { startedAt, lastAt, errorDetail } = historyTimes(events);
   // "Suspended since": the moment the history went idle (its last recorded event).
-  const sinceIso = awaiting || awaitingWebhook ? lastAt : null;
+  const sinceIso =
+    awaiting || awaitingWebhook || awaitingBudget ? lastAt : null;
   const waitingAge = sinceIso
     ? fmtAge(Date.now() - new Date(sinceIso).getTime())
     : null;
@@ -332,19 +412,24 @@ function RunView({ id }: { id: string }) {
       order.map((nid) => {
         const n = nodeById.get(nid);
         const st = states[nid] ?? "pending";
+        // Slice 2: real per-step duration from the worker-stamped nodeTimes map
+        // (deterministic workflow time) and real cost from the node output's own
+        // metered costUsd. A waiting step keeps its live age; runs that predate
+        // the feature carry no map → the columns keep "—" (never fabricated).
+        const t = nodeTimeOf(state?.nodeTimes, nid);
         return {
           id: nid,
           label: n ? nodeDisplayLabel(n.type, n.config) : nid,
           icon: n ? nodeIcon(n.type) : "workflow",
           accent: n ? ACCENT[n.type] : "var(--ink-3)",
           state: st,
-          // Data honesty: the platform records no per-step duration/cost — only
-          // the waiting step's age is real (derived from the durable history).
-          duration: st === "waiting" ? waitingAge : null,
-          cost: null,
+          duration:
+            st === "waiting" ? waitingAge : t ? fmtStepDuration(t) : null,
+          durationMs: t ? Math.max(0, t.f - t.s) : null,
+          cost: stepCostText(state?.ctx[nid]),
         };
       }),
-    [order, nodeById, states, waitingAge],
+    [order, nodeById, states, waitingAge, state],
   );
 
   const detail: StepDetail | null = useMemo(() => {
@@ -358,6 +443,9 @@ function RunView({ id }: { id: string }) {
       !hasOwnOutput &&
       selectedId === graph?.startNodeId &&
       state.ctx.__input !== undefined;
+    // Slice 2: real per-step duration/cost/tokens (worker-stamped times + the node
+    // output's own metered figures); pre-feature runs keep "—".
+    const t = nodeTimeOf(state.nodeTimes, selectedId);
     return {
       id: selectedId,
       label: nodeDisplayLabel(n.type, n.config),
@@ -365,7 +453,9 @@ function RunView({ id }: { id: string }) {
       icon: nodeIcon(n.type),
       accent: ACCENT[n.type],
       state: st,
-      duration: st === "waiting" ? waitingAge : null,
+      duration: st === "waiting" ? waitingAge : t ? fmtStepDuration(t) : null,
+      cost: stepCostText(state.ctx[selectedId]),
+      tokens: stepTokensText(state.ctx[selectedId]),
       output: hasOwnOutput
         ? state.ctx[selectedId]
         : isTriggerInput
@@ -526,6 +616,18 @@ function RunView({ id }: { id: string }) {
               />
               <TopStat label="ELAPSED" value={elapsed ?? "—"} />
               <TopStat label="COST" value={costText(state.ctx)} />
+              {/* Real budget meter (Slice 3): only when the run enforces a per-run
+                  cap — spentUsd is the interpreter's metered accumulator, the cap
+                  is the run's own snapshot. Never fabricated without both. */}
+              {typeof state.perExecutionCapUsd === "number" &&
+                state.perExecutionCapUsd > 0 && (
+                  <RunBudgetMeter
+                    spentUsd={
+                      typeof state.spentUsd === "number" ? state.spentUsd : 0
+                    }
+                    capUsd={state.perExecutionCapUsd}
+                  />
+                )}
             </div>
           )}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

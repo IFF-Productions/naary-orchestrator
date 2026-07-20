@@ -20,6 +20,7 @@ import { TracedClass } from "@naary/observability";
 // classic `moduleResolution: node`, which doesn't honor package `exports` subpaths for types.
 import { validateGraphConfigs } from "@naary/dsl/dist/registry";
 import type { Principal } from "../auth/tenant.decorator";
+import { NotificationsService } from "../notifications/notifications.service";
 import {
   PermissionsService,
   type WorkflowAction,
@@ -59,8 +60,13 @@ export interface GraphSummary {
 @TracedClass()
 export class GraphsService {
   /** @Optional so the many `new GraphsService()` test/CLI constructions still work; when an
-   *  ACTOR is passed to a method the service must be wired (fail CLOSED, never skip). */
-  constructor(@Optional() private readonly permissions?: PermissionsService) {}
+   *  ACTOR is passed to a method the service must be wired (fail CLOSED, never skip).
+   *  `notifications` is optional for the same reason — promotion notifications (Slice 4)
+   *  are best-effort and simply skipped when unwired. */
+  constructor(
+    @Optional() private readonly permissions?: PermissionsService,
+    @Optional() private readonly notifications?: NotificationsService,
+  ) {}
 
   /** In-service permission assert (RBAC-GROUPS.md §4): no actor = internal/trigger caller —
    *  never checked; with an actor the check must actually run (missing wiring throws). */
@@ -405,6 +411,27 @@ export class GraphsService {
         actor,
       },
     });
+    // Slice 4 (REDESIGN-FUNCTIONALITY-GAPS.md): announce the promotion to the TARGET env's
+    // notification channels (onPromotion opt-in). Best-effort AFTER the promote is durable —
+    // a notification problem must never fail (or roll back) the promote itself.
+    if (this.notifications) {
+      try {
+        const envs = await getPrisma().environment.findMany({
+          where: { tenantId, id: { in: [fromEnvId, toEnvId] } },
+          select: { id: true, name: true },
+        });
+        const envName = (id: string) =>
+          envs.find((e) => e.id === id)?.name ?? id;
+        await this.notifications.sendPromotion(tenantId, toEnvId, {
+          workflowKey,
+          fromEnv: envName(fromEnvId),
+          toEnv: envName(toEnvId),
+          version: snap.version,
+        });
+      } catch {
+        // Best-effort — the promote already succeeded.
+      }
+    }
     return {
       fromVersion: source.version,
       toVersion: snap.version,

@@ -1,6 +1,8 @@
 import { getPrisma, Prisma } from "@naary/db";
 
-export type BudgetPolicy = "reject" | "downgrade";
+/** "pause" (redesign Slice 3): a refused reservation PARKS the run (awaiting_budget)
+ *  instead of failing it; a budgetResume Signal (cap raise / month rollover) retries. */
+export type BudgetPolicy = "reject" | "downgrade" | "pause";
 
 export interface TenantBudgetConfig {
   tenantId: string;
@@ -9,6 +11,8 @@ export interface TenantBudgetConfig {
   maxStepsPerRun: number;
   onBudgetExceeded: BudgetPolicy;
   fallbackModel: string | null;
+  /** Alert threshold as % of monthlyCapUsd (1–100); null = no alert configured. */
+  alertThresholdPct: number | null;
 }
 
 export interface SetBudgetInput {
@@ -17,6 +21,7 @@ export interface SetBudgetInput {
   maxStepsPerRun?: number;
   onBudgetExceeded?: BudgetPolicy;
   fallbackModel?: string | null;
+  alertThresholdPct?: number | null;
 }
 
 // Decimal(12,2) money — Number() for in-memory comparisons; toFixed(2) → Decimal on write.
@@ -27,6 +32,7 @@ function toConfig(row: {
   maxStepsPerRun: number;
   onBudgetExceeded: string;
   fallbackModel: string | null;
+  alertThresholdPct: number | null;
 }): TenantBudgetConfig {
   return {
     tenantId: row.tenantId,
@@ -35,6 +41,7 @@ function toConfig(row: {
     maxStepsPerRun: row.maxStepsPerRun,
     onBudgetExceeded: row.onBudgetExceeded as BudgetPolicy,
     fallbackModel: row.fallbackModel,
+    alertThresholdPct: row.alertThresholdPct,
   };
 }
 
@@ -61,6 +68,10 @@ export async function setBudget(
       ? { onBudgetExceeded: input.onBudgetExceeded }
       : {}),
     fallbackModel: input.fallbackModel ?? null,
+    // Like fallbackModel: omitted/null clears the threshold (the editor always sends the
+    // full policy). NOTE: lastAlertMonth is deliberately NOT touched here — editing the
+    // budget must not re-arm (or forfeit) the current month's exactly-once alert claim.
+    alertThresholdPct: input.alertThresholdPct ?? null,
   };
   const row = await getPrisma().tenantBudget.upsert({
     where: { tenantId },

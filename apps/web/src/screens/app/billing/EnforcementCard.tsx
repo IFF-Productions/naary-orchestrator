@@ -1,8 +1,8 @@
 /**
  * Enforcement policy card — the ladder Naary actually applies, straight from the
- * persisted budget config: ONE monthly rung at 100% (reject OR downgrade — the
- * backend has no multi-threshold ladder and no server-side spend alert, so no
- * other monthly rung is invented), plus the two per-run guards (per-execution
+ * persisted budget config: an optional ALERT rung (alertThresholdPct — a real
+ * server-side notification, shown only when configured), ONE monthly rung at
+ * 100% (reject, downgrade, or pause), plus the two per-run guards (per-execution
  * cap, step limit). A rung glows when live spend has crossed it.
  */
 import type { BudgetView } from "../../../lib/api";
@@ -149,20 +149,24 @@ export function EnforcementCard({
               <Rung key={rung.title} rung={rung} />
             ))}
           </div>
-          <div
-            style={{
-              marginTop: 14,
-              paddingTop: 14,
-              borderTop: "1px solid var(--line)",
-              fontSize: "var(--text-xs)",
-              color: "var(--ink-faint)",
-              lineHeight: 1.5,
-            }}
-          >
-            The {ALERT_PCT}% marker on the meter is a dashboard threshold — no
-            server-side spend alert is configured; enforcement applies at the
-            rungs above.
-          </div>
+          {/* The disclaimer only applies while NO server-side alert exists; once
+              alertThresholdPct is configured the ladder's Alert rung replaces it. */}
+          {budget.alertThresholdPct == null && (
+            <div
+              style={{
+                marginTop: 14,
+                paddingTop: 14,
+                borderTop: "1px solid var(--line)",
+                fontSize: "var(--text-xs)",
+                color: "var(--ink-faint)",
+                lineHeight: 1.5,
+              }}
+            >
+              The {ALERT_PCT}% marker on the meter is a dashboard threshold — no
+              server-side spend alert is configured; enforcement applies at the
+              rungs above.
+            </div>
+          )}
         </>
       ) : (
         <div

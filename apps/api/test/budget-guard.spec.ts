@@ -24,6 +24,7 @@ const REJECT = {
   maxStepsPerRun: 50,
   onBudgetExceeded: "reject" as const,
   fallbackModel: null,
+  alertThresholdPct: null,
 };
 
 describe("assertWithinMonthlyBudget (run-start gate)", () => {
@@ -55,6 +56,17 @@ describe("assertWithinMonthlyBudget (run-start gate)", () => {
       assertWithinMonthlyBudget("t1", {
         ...REJECT,
         onBudgetExceeded: "downgrade",
+      }),
+    ).resolves.toBeUndefined();
+    expect(isOver.mock.calls.length).toBe(before); // short-circuits before the spend read
+  });
+
+  it("does NOT hard-reject in PAUSE mode (Slice 3): the run starts and parks at its first reservation", async () => {
+    const before = isOver.mock.calls.length;
+    await expect(
+      assertWithinMonthlyBudget("t1", {
+        ...REJECT,
+        onBudgetExceeded: "pause",
       }),
     ).resolves.toBeUndefined();
     expect(isOver.mock.calls.length).toBe(before); // short-circuits before the spend read

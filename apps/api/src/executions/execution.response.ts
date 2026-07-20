@@ -33,6 +33,30 @@ export class RunListItemResponse {
   @ApiProperty({ format: "date-time", example: "2026-07-04T12:00:00.000Z" })
   createdAt!: string;
   @ApiProperty({
+    type: String,
+    nullable: true,
+    format: "date-time",
+    description:
+      "When the run reached a terminal status (worker-stamped); null for in-flight runs and runs predating the stamp.",
+  })
+  finishedAt!: string | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 12840,
+    description:
+      "finishedAt − createdAt in ms; null whenever finishedAt is null (never derived from now).",
+  })
+  durationMs!: number | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: "rate_limit",
+    description:
+      "Compact failure classification on terminal failures (timeout | upstream_5xx | rate_limit | budget | rejected | error); null → fall back to the status.",
+  })
+  failureKind!: string | null;
+  @ApiProperty({
     example: false,
     description: "Soft-archived (hidden by default).",
   })
@@ -172,6 +196,30 @@ export class RunStateResponse {
     description: "Accumulated workflow context.",
   })
   ctx!: Record<string, unknown>;
+  @ApiProperty({
+    type: "object",
+    additionalProperties: true,
+    nullable: true,
+    description:
+      "Per-node timing map (Slice 2): { [nodeId]: { s, f, n?, totalMs? } } — epoch-ms start/finish stamped with deterministic workflow time; n/totalMs aggregate repeated passes (loops). Null when the run predates the feature or its ctx is unavailable.",
+  })
+  nodeTimes!: Record<string, unknown> | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 0.0123,
+    description:
+      "Live spend-so-far of this run in USD (the interpreter's metered cost accumulator). Null when unavailable (pre-feature worker or Temporal-level failure).",
+  })
+  spentUsd!: number | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 0.5,
+    description:
+      "The per-run budget cap this run enforces (snapshotted at start, refreshed after a budget-pause resume). Null when no cap is configured or the run is closed.",
+  })
+  perExecutionCapUsd!: number | null;
 }
 
 /** The graph snapshot a run executed — for the run-detail canvas (read-only). */

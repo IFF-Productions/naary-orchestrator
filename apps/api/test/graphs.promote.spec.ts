@@ -6,14 +6,17 @@ const findUnique = vi.fn();
 const create = vi.fn();
 const promotionCreate = vi.fn();
 const promotionFindMany = vi.fn();
+const environmentFindMany = vi.fn();
 vi.mock("@naary/db", () => ({
   getPrisma: () => ({
     graphDefinition: { findFirst, findUnique, create },
     promotion: { create: promotionCreate, findMany: promotionFindMany },
+    environment: { findMany: environmentFindMany },
   }),
 }));
 
 import { GraphsService } from "../src/graphs/graphs.service";
+import type { NotificationsService } from "../src/notifications/notifications.service";
 
 const graph: GraphDef = {
   startNodeId: "a",
@@ -31,8 +34,13 @@ beforeEach(() => {
     create,
     promotionCreate,
     promotionFindMany,
+    environmentFindMany,
   ])
     m.mockReset();
+  environmentFindMany.mockResolvedValue([
+    { id: "e-sandbox", name: "sandbox" },
+    { id: "e-prod", name: "prod" },
+  ]);
 });
 
 describe("GraphsService.promote", () => {
@@ -121,5 +129,79 @@ describe("GraphsService.promote", () => {
       new GraphsService().promote("t1", "ghost", "e-sandbox", "e-prod", "u"),
     ).rejects.toThrow(/No 'ghost' graph in the source/);
     expect(promotionCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("GraphsService.promote — promotion notification (Slice 4)", () => {
+  const wire = () => {
+    const sendPromotion = vi.fn().mockResolvedValue({ sent: 1 });
+    const svc = new GraphsService(undefined, {
+      sendPromotion,
+    } as unknown as NotificationsService);
+    return { svc, sendPromotion };
+  };
+
+  const seedHappyPath = () => {
+    findFirst
+      .mockResolvedValueOnce({
+        name: "Refunds",
+        graph,
+        version: 5,
+        contentHash: "h",
+      })
+      .mockResolvedValueOnce(null);
+    create.mockImplementation(async ({ data }) => ({ ...data }));
+  };
+
+  it("announces to the TARGET env with env NAMES + the new version, AFTER lineage", async () => {
+    seedHappyPath();
+    const { svc, sendPromotion } = wire();
+    await svc.promote("t1", "refunds", "e-sandbox", "e-prod", "user-42");
+    expect(sendPromotion).toHaveBeenCalledWith("t1", "e-prod", {
+      workflowKey: "refunds",
+      fromEnv: "sandbox",
+      toEnv: "prod",
+      version: 1,
+    });
+    // The notification never preempts the durable record.
+    expect(promotionCreate).toHaveBeenCalled();
+  });
+
+  it("falls back to env IDs when a name can't be resolved", async () => {
+    seedHappyPath();
+    environmentFindMany.mockResolvedValue([]);
+    const { svc, sendPromotion } = wire();
+    await svc.promote("t1", "refunds", "e-sandbox", "e-prod", "user-42");
+    expect(sendPromotion).toHaveBeenCalledWith(
+      "t1",
+      "e-prod",
+      expect.objectContaining({ fromEnv: "e-sandbox", toEnv: "e-prod" }),
+    );
+  });
+
+  it("a notification failure NEVER fails the promote", async () => {
+    seedHappyPath();
+    const { svc, sendPromotion } = wire();
+    sendPromotion.mockRejectedValue(new Error("smtp down"));
+    const out = await svc.promote(
+      "t1",
+      "refunds",
+      "e-sandbox",
+      "e-prod",
+      "user-42",
+    );
+    expect(out.toVersion).toBe(1);
+  });
+
+  it("unwired notifications (plain `new GraphsService()`) → no emission, no env read", async () => {
+    seedHappyPath();
+    await new GraphsService().promote(
+      "t1",
+      "refunds",
+      "e-sandbox",
+      "e-prod",
+      "user-42",
+    );
+    expect(environmentFindMany).not.toHaveBeenCalled();
   });
 });

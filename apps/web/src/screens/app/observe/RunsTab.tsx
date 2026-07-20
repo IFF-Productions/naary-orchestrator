@@ -1,16 +1,18 @@
 /**
  * Observe › Runs & logs — the design's runs table over the same /executions
  * list the Runs screen uses. Columns: run id (mono) · workflow · status (glow
- * dot + state color) · cost · when. The design also showed a Duration column;
- * the run list carries no duration/finishedAt, so it is omitted rather than
- * faked. Row click opens the run detail (with its full log view).
+ * dot + state color) · cost · duration · when. Duration is the worker-stamped
+ * finishedAt − createdAt (Slice 2); runs without one (in-flight / pre-feature)
+ * render "—" — never faked. Row click opens the run detail (with its full log
+ * view).
  */
 import type { RunSummary } from "../../../lib/api";
 import { runStatusUi } from "../../../lib/run-status";
+import { fmtDurMs } from "../run-detail/run-view-model";
 import { fmtCost, relTime } from "./observe-model";
 import { CardEmpty, panelCard } from "./ui";
 
-const GRID = "1.2fr 1.6fr 1.1fr 0.8fr 0.7fr";
+const GRID = "1.2fr 1.6fr 1.1fr 0.8fr 0.7fr 0.7fr";
 
 const STATE_COLOR: Record<string, string> = {
   done: "var(--state-done)",
@@ -51,6 +53,7 @@ export function RunsTab({
           <span>Workflow</span>
           <span>Status</span>
           <span>Cost</span>
+          <span>Duration</span>
           <span style={{ textAlign: "right" }}>When</span>
         </div>
 
@@ -136,6 +139,12 @@ export function RunsTab({
                 style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}
               >
                 {fmtCost(r.costUsd)}
+              </span>
+              <span
+                className="mono"
+                style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}
+              >
+                {r.durationMs === null ? "—" : fmtDurMs(r.durationMs)}
               </span>
               <span
                 className="mono"

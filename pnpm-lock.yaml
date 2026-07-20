@@ -128,6 +128,9 @@ importers:
       jose:
         specifier: ^6.2.3
         version: 6.2.3
+      nodemailer:
+        specifier: ^9.0.3
+        version: 9.0.3
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
@@ -144,6 +147,9 @@ importers:
       '@nestjs/testing':
         specifier: ^11.1.28
         version: 11.1.28(@nestjs/common@11.1.28(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)(@nestjs/platform-express@11.1.28)
+      '@types/nodemailer':
+        specifier: ^8.0.1
+        version: 8.0.1
 
   apps/sandbox-runner:
     devDependencies:

@@ -45,7 +45,12 @@ export interface DockRun {
   status: "running" | "done" | "error";
   output?: unknown;
   message?: string;
+  /** Measured duration: the SERVER's measurement when the API returns one
+   *  (Slice 2 — interpreter-stamped), else the client wall-clock fallback. */
   ms?: number;
+  /** Real metered spend of the test run (fail-safe billed, Slice 2); absent
+   *  when the node metered no cost. */
+  costUsd?: number;
   stale?: boolean;
   startedAt?: number;
 }

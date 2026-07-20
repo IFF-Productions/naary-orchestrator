@@ -220,6 +220,8 @@ export async function callCodeAgent(
       environmentId: meta.environmentId, // per-env cost tag (Slice 6)
       executionId: meta.executionId,
       nodeId: meta.nodeId,
+      nodeType: "codeAgent", // Slice 2: by-node-type rollups without a graph join
+      durationMs: Math.round(secondsSince(startedAt) * 1000), // measured in-activity
       provider: driver.credentialProvider,
       model,
       usage,

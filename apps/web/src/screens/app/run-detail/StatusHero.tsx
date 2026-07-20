@@ -7,6 +7,7 @@
  * anything unknown is simply omitted.
  */
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Button, Icon } from "../../../components";
 import { runStatusUi } from "../../../lib/run-status";
 import { fmtAge, fmtWhen } from "./run-view-model";
@@ -128,6 +129,7 @@ export function StatusHero(props: StatusHeroProps) {
   const { status } = props;
   if (status === "awaiting_approval") return <ApprovalHero {...props} />;
   if (status === "awaiting_webhook") return <WebhookHero {...props} />;
+  if (status === "awaiting_budget") return <BudgetHero {...props} />;
   if (status === "running") return <RunningHero {...props} />;
   if (status === "completed") return <CompletedHero {...props} />;
   return <ClosedHero {...props} />;
@@ -405,6 +407,91 @@ function WebhookHero({
             >
               {copied ? "Copied" : "Copy"}
             </Button>
+          </div>
+        </div>
+      </div>
+    </HeroShell>
+  );
+}
+
+/* ---------------- Paused — on budget (pause-not-fail, Slice 3) ---------------- */
+
+function BudgetHero({ currentNodeLabel, sinceIso }: StatusHeroProps) {
+  const age = sinceIso
+    ? fmtAge(Date.now() - new Date(sinceIso).getTime())
+    : null;
+  return (
+    <HeroShell color="var(--state-paused)" soft="var(--paused-soft)">
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
+        <WaitTile />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 18,
+              fontWeight: "var(--weight-bold)",
+              color: "var(--ink)",
+              letterSpacing: "var(--tracking-tight)",
+            }}
+          >
+            Paused on budget — resumes when the cap is raised or next month
+          </div>
+          <div
+            style={{
+              fontSize: "var(--text-body)",
+              color: "var(--ink-2)",
+              marginTop: 5,
+              lineHeight: "var(--leading-body)",
+            }}
+          >
+            The workspace budget refused further spend
+            {currentNodeLabel ? (
+              <>
+                {" "}
+                at{" "}
+                <strong style={{ color: "var(--ink-soft)", fontWeight: 600 }}>
+                  {currentNodeLabel}
+                </strong>
+              </>
+            ) : null}
+            {sinceIso && (
+              <>
+                {" "}
+                since{" "}
+                <strong
+                  style={{ color: "var(--state-paused)", fontWeight: 600 }}
+                >
+                  {fmtWhen(sinceIso)}
+                </strong>
+                {age ? ` · ${age} ago` : ""}
+              </>
+            )}
+            . Nothing was lost — the run parked instead of failing, and it
+            retries the refused step automatically when the cap is raised (via
+            Usage &amp; budgets) or the month rolls over. {DURABLE_COPY}
+          </div>
+          <div
+            style={{ display: "flex", gap: 9, flexWrap: "wrap", marginTop: 13 }}
+          >
+            {age && (
+              <Chip>
+                <Icon name="clock" size={12} />
+                paused{" "}
+                <span style={{ color: "var(--state-paused)" }}>{age}</span>
+              </Chip>
+            )}
+            <Chip>policy: pause &amp; resume</Chip>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              marginTop: 16,
+              flexWrap: "wrap",
+            }}
+          >
+            <Link to="/app/billing" style={{ textDecoration: "none" }}>
+              <Button variant="primary">Raise budget &amp; resume</Button>
+            </Link>
           </div>
         </div>
       </div>

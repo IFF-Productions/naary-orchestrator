@@ -40,10 +40,26 @@ describe("UsageService.getInsights", () => {
         createdAt: "2026-07-16T12:00:00.000Z",
       },
     ]);
-    execution.findMany.mockResolvedValue([
-      { workflowId: "x1", workflowKey: "triage" },
-      { workflowId: "x2", workflowKey: "summarize" },
-    ]);
+    // getInsights issues TWO execution.findMany calls: the exec→key join and the
+    // Slice-2 run-outcome rollup (where.tenantId) — route each to its fixture.
+    execution.findMany.mockImplementation(
+      async (args?: { where?: { workflowId?: unknown } }) =>
+        args?.where?.workflowId
+          ? [
+              { workflowId: "x1", workflowKey: "triage" },
+              { workflowId: "x2", workflowKey: "summarize" },
+            ]
+          : [
+              {
+                workflowKey: "triage",
+                environmentId: "prod",
+                status: "completed",
+                createdAt: new Date("2026-07-16T10:00:00Z"),
+                finishedAt: new Date("2026-07-16T10:00:05Z"),
+                failureKind: null,
+              },
+            ],
+    );
 
     const out = await svc.getInsights("t-1", {});
 
@@ -62,12 +78,20 @@ describe("UsageService.getInsights", () => {
       "summarize",
       "triage",
     ]);
+    // Slice 2: the run-outcome rollups ride the same response.
+    expect(out.runsByDay).toEqual([
+      { date: "2026-07-16", total: 1, byStatus: { completed: 1 } },
+    ]);
+    expect(out.runsByWorkflow).toEqual([
+      { workflowKey: "triage", runs: 1, avgDurationMs: 5000 },
+    ]);
   });
 
-  it("applies the date window and environmentId filter in the where clause", async () => {
+  it("applies the date window and environmentId filter in the where clause (ledger AND run-rollup reads)", async () => {
     usageEvent.findMany.mockResolvedValue([]);
+    execution.findMany.mockResolvedValue([]);
 
-    await svc.getInsights("t-1", {
+    const out = await svc.getInsights("t-1", {
       from: "2026-07-01",
       to: "2026-07-31",
       environmentId: "env-prod",
@@ -81,8 +105,25 @@ describe("UsageService.getInsights", () => {
       },
       orderBy: { createdAt: "asc" },
     });
-    // No events → no execution lookup at all.
-    expect(execution.findMany).not.toHaveBeenCalled();
+    // No events → no exec→key JOIN; the Slice-2 run rollup still reads the
+    // Execution table with the SAME tenant/window/env scope.
+    expect(execution.findMany).toHaveBeenCalledTimes(1);
+    expect(execution.findMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: "t-1",
+        createdAt: { gte: new Date("2026-07-01"), lte: new Date("2026-07-31") },
+        environmentId: "env-prod",
+      },
+      select: {
+        workflowKey: true,
+        environmentId: true,
+        status: true,
+        createdAt: true,
+        finishedAt: true,
+        failureKind: true,
+      },
+    });
+    expect(out.runsByDay).toEqual([]);
   });
 });
 

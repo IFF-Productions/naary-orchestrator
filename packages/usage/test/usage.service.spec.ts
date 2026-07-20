@@ -74,6 +74,36 @@ describe("recordUsage", () => {
     expect(upsert.mock.calls[0][0].create.environmentId).toBeNull();
   });
 
+  it("stamps nodeType + durationMs on the ledger row (Slice 2), rounding sub-ms readings", async () => {
+    await recordUsage({
+      tenantId: "t1",
+      executionId: "exec-1",
+      nodeId: "agent",
+      nodeType: "agent",
+      durationMs: 1840.6,
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      usage: { inputTokens: 10, outputTokens: 5 },
+    });
+    const create = upsert.mock.calls[0][0].create;
+    expect(create.nodeType).toBe("agent");
+    expect(create.durationMs).toBe(1841); // Int column — rounded, never a float insert
+  });
+
+  it("writes nodeType/durationMs as null when the call site doesn't measure (never undefined, never fabricated)", async () => {
+    await recordUsage({
+      tenantId: "t1",
+      executionId: "exec-1",
+      nodeId: "agent",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      usage: { inputTokens: 10, outputTokens: 5 },
+    });
+    const create = upsert.mock.calls[0][0].create;
+    expect(create.nodeType).toBeNull();
+    expect(create.durationMs).toBeNull();
+  });
+
   it("persists the cache-read + reasoning buckets and bills cache reads at the reduced rate", async () => {
     await recordUsage({
       tenantId: "t1",

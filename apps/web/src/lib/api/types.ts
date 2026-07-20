@@ -7,6 +7,8 @@ import type { GraphDef } from "@naary/dsl";
 export type ExecutionStatus =
   | "running"
   | "awaiting_approval"
+  | "awaiting_webhook"
+  | "awaiting_budget" // paused on budget (policy "pause") — resumes on cap raise / month rollover
   | "completed"
   | "rejected"
   | "budget_exceeded"
@@ -18,6 +20,15 @@ export interface ExecutionState {
   status: string;
   currentNodeId: string;
   ctx: Record<string, unknown>;
+  /** Per-node timing map (Slice 2): { [nodeId]: { s, f, n?, totalMs? } } — epoch-ms
+   *  windows the interpreter stamped with deterministic workflow time. Kept as an
+   *  unknown-record (matches the generated schema); shape-checked at read time via
+   *  run-view-model's nodeTimeOf. Null/absent for pre-feature runs → render "—". */
+  nodeTimes?: Record<string, unknown> | null;
+  /** Live spend-so-far of this run in USD (Slice 3). Null/absent = unavailable — render "—". */
+  spentUsd?: number | null;
+  /** The per-run cap the run enforces; null/absent = no cap — never fabricate a meter. */
+  perExecutionCapUsd?: number | null;
 }
 
 /** One entry in a run's execution log (mirrors the API's RunEvent). */
@@ -116,9 +127,17 @@ export interface Promotion {
   createdAt: string;
 }
 
-/** Result of a single-node test run. */
+/** Result of a single-node test run. `durationMs`/`costUsd` are the run's own
+ *  measurements (Slice 2: interpreter/server-measured, fail-safe-billed) — null
+ *  when nothing real was recorded; never a client-side guess. */
 export type TestNodeResult =
-  { pure: true; output: unknown } | { pure: false; message: string };
+  | {
+      pure: true;
+      output: unknown;
+      durationMs?: number | null;
+      costUsd?: number | null;
+    }
+  | { pure: false; message: string };
 
 /** A recurring schedule (mirrors the API's ScheduleView). */
 export interface ScheduleRow {
@@ -275,6 +294,14 @@ export interface RunSummary {
   costUsd: number | null;
   startedAt: string;
   createdAt: string;
+  /** When the run reached a terminal status (worker-stamped, Slice 2); null for
+   *  in-flight runs and runs predating the stamp → render "—". */
+  finishedAt: string | null;
+  /** finishedAt − createdAt in ms; null whenever finishedAt is null. */
+  durationMs: number | null;
+  /** Compact failure classification (timeout | upstream_5xx | rate_limit | budget |
+   *  rejected | error); null → fall back to the close status. */
+  failureKind: string | null;
   /** Soft-archived (hidden from the default Runs list). */
   archived: boolean;
   /** The workflow graph version this run snapshotted at start; null for older runs. */
@@ -300,7 +327,10 @@ export interface InsightsBucket {
   calls: number;
 }
 
-/** Usage rolled up by day, environment, workflow, and model (GET /tenants/:id/usage/insights). */
+/** Usage rolled up by day, environment, workflow, and model (GET /tenants/:id/usage/insights).
+ *  Slice 2 adds byNodeType (ledger nodeType tag), plus run-outcome rollups from the
+ *  Execution table (runsByDay/runsByWorkflow/failureKinds — un-capped, unlike the runs
+ *  list). The Slice-2 fields are optional so an older API responds without them. */
 export interface InsightsReport {
   range: { from: string | null; to: string | null };
   totals: InsightsBucket;
@@ -308,6 +338,21 @@ export interface InsightsReport {
   byEnvironment: (InsightsBucket & { environmentId: string | null })[];
   byWorkflow: (InsightsBucket & { workflowKey: string | null })[];
   byModel: (InsightsBucket & { provider: string; model: string })[];
+  byNodeType?: (InsightsBucket & {
+    nodeType: string | null;
+    avgDurationMs: number | null;
+  })[];
+  runsByDay?: {
+    date: string;
+    total: number;
+    byStatus: Record<string, number>;
+  }[];
+  runsByWorkflow?: {
+    workflowKey: string | null;
+    runs: number;
+    avgDurationMs: number | null;
+  }[];
+  failureKinds?: { kind: string; count: number }[];
 }
 /** One Team-screen row: an ACTIVE member (a real Membership) or a PENDING invitation
  *  (RBAC U1). `id` is the Firebase uid for active rows (the role-change/remove key) and
@@ -455,11 +500,11 @@ export interface AuditEvent {
   createdAt: string;
 }
 
-export type NotificationChannelType = "slack" | "teams";
+export type NotificationChannelType = "slack" | "teams" | "email";
 
 /** One notification channel row — a workspace can have ANY NUMBER per type (e.g. two
- *  Slack webhooks for #alerts and #oncall). Addressed by `id`; `label` tells same-type
- *  channels apart. */
+ *  Slack webhooks for #alerts and #oncall, plus an email list). Addressed by `id`;
+ *  `label` tells same-type channels apart. */
 export interface NotificationChannel {
   id: string;
   type: NotificationChannelType;
@@ -467,8 +512,17 @@ export interface NotificationChannel {
   /** Off = the worker skips this channel entirely, even with a URL set. */
   enabled: boolean;
   webhookUrl: string | null;
+  /** Email channels: the smtp connection this channel sends through (Slice 4).
+   *  Null for webhook channels / unconfigured. Credentials never leave the server. */
+  emailConnectionId: string | null;
+  /** Email channels: recipient addresses. Empty for webhook channels. */
+  emailTo: string[];
   onApprovalPending: boolean;
   onRunFailed: boolean;
+  /** Budget alert-threshold opt-in (Slice 3). Default false. */
+  onBudgetThreshold: boolean;
+  /** Promotion opt-in (Slice 4): a workflow promoted into this env. Default false. */
+  onPromotion: boolean;
 }
 
 /**
@@ -483,8 +537,10 @@ export interface BudgetView {
   monthlyCapUsd: number;
   perExecutionCapUsd: number;
   maxStepsPerRun: number;
-  onBudgetExceeded: "reject" | "downgrade";
+  onBudgetExceeded: "reject" | "downgrade" | "pause";
   fallbackModel: string | null;
+  /** Alert threshold as % of the monthly cap; null = no alert configured (Slice 3). */
+  alertThresholdPct: number | null;
   /** Spend so far this calendar month, in USD. */
   mtdSpendUsd: number;
   /** monthlyCapUsd − mtdSpendUsd (may be negative if over cap). */
@@ -496,8 +552,9 @@ export interface SetBudgetInput {
   monthlyCapUsd: number;
   perExecutionCapUsd: number;
   maxStepsPerRun?: number;
-  onBudgetExceeded?: "reject" | "downgrade";
+  onBudgetExceeded?: "reject" | "downgrade" | "pause";
   fallbackModel?: string | null;
+  alertThresholdPct?: number | null;
 }
 
 /** One usage-ledger line item (UsageReport.events, narrowed — see parseUsageEvents). */
@@ -606,6 +663,9 @@ export function statusToRunState(
     case "running":
       return "running";
     case "awaiting_approval":
+    case "awaiting_webhook":
+    // Budget pause-not-fail (Slice 3): a durable pause, not an error.
+    case "awaiting_budget":
       return "paused";
     case "completed":
       return "done";

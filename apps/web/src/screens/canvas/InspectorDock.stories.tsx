@@ -101,7 +101,13 @@ const parameters = (
     isPinned={false}
     onPin={async () => {}}
     onUnpin={async () => {}}
-    onTest={async () => ({ pure: true, output: {} })}
+    onTest={async () => ({
+      pure: true,
+      output: {},
+      // Slice 2: the server returns the run's own measured duration + metered cost.
+      durationMs: 640,
+      costUsd: 0.0012,
+    })}
     onChange={() => {}}
   />
 );

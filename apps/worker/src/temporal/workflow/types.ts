@@ -30,6 +30,13 @@ export interface RunGraphCtx {
   workflowKey?: string;
   perExecutionCapUsd?: number;
   maxStepsPerRun?: number;
+  /** The tenant's onBudgetExceeded policy SNAPSHOTTED at start (Slice 3). Drives the
+   *  workflow-side per-run-cap decision only: "pause" parks the run (awaiting_budget)
+   *  instead of the terminal budget_exceeded. REPLAY SAFETY: no pre-Slice-3 run's
+   *  snapshot carries "pause" (the value didn't exist), and the new commands are ALSO
+   *  gated by wf.patched("budget-pause-v1"). Monthly-cap policy is NOT read from here —
+   *  the agent activity reads it live per reservation (see agent.ts BUDGET_PAUSE). */
+  onBudgetExceeded?: "reject" | "downgrade" | "pause";
   /** The version-pinned graph snapshot this run executes (Slice #5). Carried in
    *  history for traceability; the interpreter walks the passed graph as-is. */
   graphContentHash?: string;

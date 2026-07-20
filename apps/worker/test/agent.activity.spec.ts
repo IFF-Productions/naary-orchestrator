@@ -28,6 +28,7 @@ let getBudget: () => Promise<unknown>;
 let mtdSpend = 0;
 const reserveBudget = vi.fn();
 const releaseReservation = vi.fn();
+const sendNotification = vi.fn();
 
 beforeEach(() => {
   generateText.mockReset();
@@ -46,6 +47,8 @@ beforeEach(() => {
   __agentDeps.monthToDateSpend = (() => Promise.resolve(mtdSpend)) as never;
   __agentDeps.reserveBudget = reserveBudget as never;
   __agentDeps.releaseReservation = releaseReservation as never;
+  sendNotification.mockReset().mockResolvedValue(undefined);
+  __agentDeps.sendNotification = sendNotification as never;
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -233,6 +236,138 @@ describe("runAgent", () => {
       type: "FALLBACK_UNPRICED",
     });
     expect(generateText).not.toHaveBeenCalled();
+  });
+
+  // --- Slice 3: pause-not-fail policy + alert threshold ---
+
+  it("pre-flight: throws BUDGET_PAUSE (non-retryable) when the LIVE policy is 'pause'", async () => {
+    getBudget = () =>
+      Promise.resolve({
+        tenantId: "t1",
+        monthlyCapUsd: 0.001,
+        perExecutionCapUsd: 1,
+        maxStepsPerRun: 50,
+        onBudgetExceeded: "pause",
+        fallbackModel: null,
+        alertThresholdPct: null,
+      });
+    reserveBudget.mockResolvedValue({ ok: false });
+
+    await expect(runAgent(CFG, { msg: "x" }, META)).rejects.toMatchObject({
+      nonRetryable: true,
+      type: "BUDGET_PAUSE",
+    });
+    expect(generateText).not.toHaveBeenCalled();
+    expect(recordUsage).not.toHaveBeenCalled();
+  });
+
+  it("threads alertThresholdPct into the reservation and FIRES the alert on a crossing", async () => {
+    getBudget = () =>
+      Promise.resolve({
+        tenantId: "t1",
+        monthlyCapUsd: 5,
+        perExecutionCapUsd: 1,
+        maxStepsPerRun: 50,
+        onBudgetExceeded: "reject",
+        fallbackModel: null,
+        alertThresholdPct: 80,
+      });
+    reserveBudget.mockResolvedValue({
+      ok: true,
+      id: "res_x",
+      thresholdCrossed: { pct: 80, spendUsd: 4.2, capUsd: 5 },
+    });
+    generateText.mockResolvedValue(OK);
+
+    const result = await runAgent(
+      CFG,
+      { msg: "x" },
+      { ...META, environmentId: "e-sandbox" },
+    );
+    expect(result.status).toBe("ok");
+    // The threshold rode into reserveBudget (5th arg after the `now` slot).
+    expect(reserveBudget.mock.calls[0][4]).toBe(80);
+    // Fire-and-forget send — flush microtasks, then assert the payload.
+    await new Promise((r) => setImmediate(r));
+    expect(sendNotification).toHaveBeenCalledWith({
+      tenantId: "t1",
+      environmentId: "e-sandbox",
+      kind: "budget_threshold",
+      workflowId: "exec-1",
+      thresholdPct: 80,
+      capUsd: 5,
+      spendUsd: 4.2,
+    });
+  });
+
+  it("FAIL-SAFE: a rejecting alert send never blocks the reservation or the call", async () => {
+    getBudget = () =>
+      Promise.resolve({
+        tenantId: "t1",
+        monthlyCapUsd: 5,
+        perExecutionCapUsd: 1,
+        maxStepsPerRun: 50,
+        onBudgetExceeded: "reject",
+        fallbackModel: null,
+        alertThresholdPct: 80,
+      });
+    reserveBudget.mockResolvedValue({
+      ok: true,
+      id: "res_y",
+      thresholdCrossed: { pct: 80, spendUsd: 4.2, capUsd: 5 },
+    });
+    sendNotification.mockRejectedValue(new Error("webhook down"));
+    generateText.mockResolvedValue(OK);
+
+    const result = await runAgent(CFG, { msg: "x" }, META);
+    expect(result.status).toBe("ok"); // the run proceeded
+    expect(recordUsage).toHaveBeenCalledOnce(); // and billed normally
+    await new Promise((r) => setImmediate(r)); // the rejection is swallowed (no unhandled)
+  });
+
+  it("FAIL-SAFE: a SYNCHRONOUSLY-throwing alert sender never blocks the call", async () => {
+    getBudget = () =>
+      Promise.resolve({
+        tenantId: "t1",
+        monthlyCapUsd: 5,
+        perExecutionCapUsd: 1,
+        maxStepsPerRun: 50,
+        onBudgetExceeded: "reject",
+        fallbackModel: null,
+        alertThresholdPct: 80,
+      });
+    reserveBudget.mockResolvedValue({
+      ok: true,
+      id: "res_z",
+      thresholdCrossed: { pct: 80, spendUsd: 4.2, capUsd: 5 },
+    });
+    sendNotification.mockImplementation(() => {
+      throw new Error("sync boom");
+    });
+    generateText.mockResolvedValue(OK);
+
+    await expect(runAgent(CFG, { msg: "x" }, META)).resolves.toMatchObject({
+      status: "ok",
+    });
+  });
+
+  it("no crossing → no alert send", async () => {
+    getBudget = () =>
+      Promise.resolve({
+        tenantId: "t1",
+        monthlyCapUsd: 5,
+        perExecutionCapUsd: 1,
+        maxStepsPerRun: 50,
+        onBudgetExceeded: "reject",
+        fallbackModel: null,
+        alertThresholdPct: 80,
+      });
+    reserveBudget.mockResolvedValue({ ok: true, id: "res_q" });
+    generateText.mockResolvedValue(OK);
+
+    await runAgent(CFG, { msg: "x" }, META);
+    await new Promise((r) => setImmediate(r));
+    expect(sendNotification).not.toHaveBeenCalled();
   });
 
   it("maps a missing credential to a NON-retryable AUTH failure", async () => {

@@ -13,6 +13,7 @@ import { AttentionRow } from "./overview/AttentionRow";
 import { BusiestWorkflowsCard } from "./overview/BusiestWorkflowsCard";
 import {
   ageMs,
+  budgetPausedNow,
   budgetStoppedLast24h,
   busiestWorkflows,
   DAY,
@@ -121,6 +122,8 @@ export function Overview() {
   const last24 = runsLast24h(runList, now);
   const failures = failuresLast24h(runList, now);
   const budgetStopped = budgetStoppedLast24h(runList, now);
+  // Slice 3 (policy "pause"): runs parked as awaiting_budget right now.
+  const budgetPaused = budgetPausedNow(runList);
   const approvalAges = awaitingList.map((a) => ageMs(a.createdAt, now));
   const oldestApprovalMs =
     approvalAges.length > 0 ? Math.max(...approvalAges) : null;
@@ -179,6 +182,7 @@ export function Overview() {
         oldestApprovalMs={oldestApprovalMs}
         breachedCount={breachedCount}
         budgetStoppedCount={budgetStopped.length}
+        budgetPausedCount={budgetPaused.length}
         failureCount={failures.length}
         failureHint={failureHint(failures)}
         narrow={stacked}
