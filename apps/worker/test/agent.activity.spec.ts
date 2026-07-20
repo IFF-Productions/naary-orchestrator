@@ -473,3 +473,159 @@ describe("runAgent", () => {
     expect(seen[0]).toEqual(["t1", "e-default", "anthropic"]);
   });
 });
+
+// #449 — the in-loop tool-calling path. These prove the WIRING (generateText receives a
+// tools map + a stopWhen loop bound; tool `execute` routes through the MCP seam; output is
+// gated on a schema; flat tool cost folds into the node cost). They do NOT prove the SDK
+// actually iterates — the mock replaces the loop — so the real multi-step loop + totalUsage
+// aggregation is proven by agent-tools.live.spec.ts against a real model + MCP server.
+describe("runAgent — in-loop tools (#449)", () => {
+  const resolveMcpTarget = vi.fn();
+  const callMcpTool = vi.fn();
+
+  beforeEach(() => {
+    resolveMcpTarget
+      .mockReset()
+      .mockResolvedValue({ serverUrl: "https://mcp.example", headers: {} });
+    callMcpTool
+      .mockReset()
+      .mockResolvedValue({ isError: false, content: { ok: true, id: 7 } });
+    __agentDeps.resolveMcpTarget = resolveMcpTarget as never;
+    __agentDeps.callMcpTool = callMcpTool as never;
+  });
+
+  const TOOLED_CFG = {
+    ...CFG,
+    tools: [
+      {
+        connectionId: "conn-1",
+        tool: "create_issue",
+        name: "openIssue",
+        description: "Open a GitHub issue",
+        costUsd: 0.02,
+      },
+    ],
+  };
+
+  it("passes a tools map + a stopWhen loop bound, and (no schema) drops structured output", async () => {
+    generateText.mockResolvedValue({
+      text: "opened issue #7",
+      totalUsage: { inputTokens: 300, outputTokens: 120, totalTokens: 420 },
+    });
+
+    const result = await runAgent(TOOLED_CFG, { msg: "open an issue" }, META);
+
+    const opts = generateText.mock.calls[0][0] as {
+      tools?: Record<string, { execute: (a: unknown) => Promise<unknown> }>;
+      stopWhen?: unknown;
+      output?: unknown;
+    };
+    // tools present, keyed by the exposed `name` (not the raw tool id), with a loop bound
+    expect(opts.tools && Object.keys(opts.tools)).toEqual(["openIssue"]);
+    expect(opts.stopWhen).toBeDefined();
+    // no outputSchema on a tooled agent ⇒ free-text final answer, no Output.object
+    expect(opts.output).toBeUndefined();
+    expect(result.output).toEqual({ text: "opened issue #7" });
+  });
+
+  it("tool.execute resolves the connection + calls the MCP seam and returns its content", async () => {
+    // Simulate the SDK invoking the tool mid-loop, twice, before answering.
+    generateText.mockImplementation(
+      async (opts: {
+        tools: Record<string, { execute: (a: unknown) => Promise<unknown> }>;
+      }) => {
+        const out1 = await opts.tools.openIssue.execute({ title: "bug" });
+        await opts.tools.openIssue.execute({ title: "bug2" });
+        expect(out1).toEqual({ ok: true, id: 7 });
+        return {
+          text: "done",
+          totalUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        };
+      },
+    );
+
+    const result = await runAgent(TOOLED_CFG, { msg: "go" }, META);
+
+    // routed through the SAME resolve→call path the standalone mcpTool node uses
+    expect(resolveMcpTarget).toHaveBeenCalledWith("t1", "conn-1");
+    expect(callMcpTool).toHaveBeenCalledTimes(2);
+    expect(callMcpTool.mock.calls[0][0]).toMatchObject({
+      serverUrl: "https://mcp.example",
+      tool: "create_issue",
+      arguments: { title: "bug" },
+    });
+    // BILLING: token cost (summed across steps via totalUsage) PLUS the two flat tool costs
+    const tokenCost = computeCost({
+      provider: "anthropic",
+      model: CFG.model,
+      inputTokens: 100,
+      outputTokens: 50,
+    });
+    expect(result.costUsd).toBeCloseTo(tokenCost + 0.04, 9);
+    // the ledger still records ONE token event (flat tool cost is node-cost only, no UsageEvent)
+    expect(recordUsage).toHaveBeenCalledOnce();
+  });
+
+  it("a tool-level error surfaces as a non-retryable failure (no phantom success)", async () => {
+    callMcpTool.mockResolvedValue({ isError: true, content: "boom" });
+    generateText.mockImplementation(
+      async (opts: {
+        tools: Record<string, { execute: (a: unknown) => Promise<unknown> }>;
+      }) => {
+        // the execute rejection propagates out of generateText
+        await opts.tools.openIssue.execute({});
+        return { text: "unreachable" };
+      },
+    );
+
+    await expect(runAgent(TOOLED_CFG, { msg: "go" }, META)).rejects.toThrow(
+      /MCP tool 'create_issue' returned an error/,
+    );
+  });
+
+  it("with an outputSchema, a tooled agent still returns structured output", async () => {
+    const cfg = {
+      ...TOOLED_CFG,
+      outputSchema: {
+        type: "object",
+        properties: { summary: { type: "string" } },
+        required: ["summary"],
+        additionalProperties: false,
+      },
+    };
+    generateText.mockResolvedValue({
+      output: { summary: "issue opened" },
+      text: "",
+      totalUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+    });
+
+    const result = await runAgent(cfg, { msg: "go" }, META);
+
+    const opts = generateText.mock.calls[0][0] as {
+      tools?: unknown;
+      output?: unknown;
+    };
+    expect(opts.tools).toBeDefined();
+    expect(opts.output).toBeDefined(); // schema ⇒ Output.object applied alongside tools
+    expect(result.output).toEqual({ summary: "issue opened" });
+  });
+
+  it("a plain (tool-less) agent passes NO tools/stopWhen — unchanged path", async () => {
+    generateText.mockResolvedValue({
+      output: { category: "billing", urgency: 2 },
+      text: "{}",
+      totalUsage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+    });
+
+    await runAgent(CFG, { msg: "x" }, META);
+
+    const opts = generateText.mock.calls[0][0] as {
+      tools?: unknown;
+      stopWhen?: unknown;
+      output?: unknown;
+    };
+    expect(opts.tools).toBeUndefined();
+    expect(opts.stopWhen).toBeUndefined();
+    expect(opts.output).toBeDefined();
+  });
+});

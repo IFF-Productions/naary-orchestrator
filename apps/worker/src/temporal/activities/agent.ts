@@ -2,6 +2,7 @@
 import { createLogger } from "@naary/logging";
 import { ApplicationFailure } from "@temporalio/activity";
 import { getDefaultEnvironmentId } from "@naary/db";
+import { callMcpTool as mcpCall, resolveMcpTarget } from "@naary/connections";
 import { MissingCredentialError } from "@naary/secrets";
 import {
   computeCost,
@@ -38,6 +39,26 @@ import { sendNotification } from "./notifications";
 const log = createLogger({ component: "worker" });
 
 const MAX_OUTPUT_TOKENS = 1024;
+/** Default loop bound for a tooled agent (#449) — generateText's own default is 1 step,
+ *  which would emit a tool call and STOP before answering, so a tooled agent must always
+ *  pass an explicit stopWhen. Bounds runaway loops + Temporal history growth. */
+const DEFAULT_MAX_TOOL_STEPS = 8;
+
+/** One MCP tool the agent may call mid-reasoning (#449). */
+export interface AgentToolConfig {
+  /** Tenant MCP connection the tool call authenticates through. */
+  connectionId: string;
+  /** Remote tool name on that MCP server. */
+  tool: string;
+  /** Name exposed to the model (defaults to `tool`). */
+  name?: string;
+  /** What the tool does — the model reads this to decide when to call it. */
+  description?: string;
+  /** JSON Schema for the tool's arguments; omitted ⇒ open object. */
+  inputSchema?: Record<string, unknown>;
+  /** Flat per-call cost (parity with the mcpTool node — MCP tools carry no token cost). */
+  costUsd?: number;
+}
 
 export interface AgentConfig {
   provider: string;
@@ -53,6 +74,11 @@ export interface AgentConfig {
   /** Opt-in Anthropic prompt caching of the system prompt (default off). Only worthwhile for a
    *  high-volume agent reusing a large, stable system prompt within Anthropic's ~5-min TTL. */
   cacheSystemPrompt?: boolean;
+  /** MCP tools the agent may call mid-reasoning (#449). Non-empty ⇒ generateText runs a
+   *  multi-step tool loop (bounded by maxToolSteps) instead of a single call. */
+  tools?: AgentToolConfig[];
+  /** Max reasoning+tool steps before the loop must produce a final answer (default 8). */
+  maxToolSteps?: number;
 }
 
 export interface AgentOutput {
@@ -121,6 +147,11 @@ export const __agentDeps = {
   monthToDateSpend,
   reserveBudget,
   releaseReservation,
+  /** In-loop MCP tool wiring (#449): connection→target resolution + the MCP call, swappable
+   *  in tests so the tool loop can be exercised without a live MCP server. Mirrors __mcpDeps
+   *  in mcp.ts so both the standalone mcpTool node and the in-agent loop hit the same path. */
+  resolveMcpTarget,
+  callMcpTool: mcpCall,
   /** Budget alert-threshold notification (Slice 3). Routed through the same channel
    *  fan-out as run notifications; swappable so specs can capture/fail the send. */
   sendNotification,
@@ -294,7 +325,75 @@ export async function runAgent(
       provider === "anthropic" &&
       !!cfg.systemPrompt;
 
-    const { generateText, Output, jsonSchema } = await aiSdk();
+    const { generateText, Output, jsonSchema, tool, stepCountIs } =
+      await aiSdk();
+
+    // In-loop tools (#449): each configured MCP tool becomes an AI-SDK tool whose `execute`
+    // resolves the connection + calls the remote tool IN-ACTIVITY (token never crosses the
+    // workflow boundary — Tier-1 §4), routed through the SAME __mcpDeps-equivalent path the
+    // standalone mcpTool node uses. The model decides when to call them; the loop is bounded
+    // by stopWhen below. MCP tools carry no token cost, so their flat costUsd is summed here
+    // and folded into the node's returned cost (parity with the mcpTool node — no UsageEvent).
+    const toolConfigs = cfg.tools ?? [];
+    const tooled = toolConfigs.length > 0;
+    let toolCostUsd = 0;
+    const builtTools: Record<string, unknown> = {};
+    for (const t of toolConfigs) {
+      const exposedName = t.name?.trim() || t.tool;
+      builtTools[exposedName] = tool({
+        description: t.description ?? `MCP tool '${t.tool}'`,
+        inputSchema: jsonSchema(
+          (t.inputSchema ?? {
+            type: "object",
+            additionalProperties: true,
+          }) as unknown as Parameters<typeof jsonSchema>[0],
+        ),
+        execute: async (args: unknown) => {
+          const target = await __agentDeps.resolveMcpTarget(
+            meta.tenantId,
+            t.connectionId,
+          );
+          const r = await __agentDeps.callMcpTool({
+            serverUrl: target.serverUrl,
+            headers: target.headers,
+            tool: t.tool,
+            arguments: (args ?? {}) as Record<string, unknown>,
+          });
+          // A tool-level error is NOT success — surface it (non-retryable: same args fail the
+          // same way) so the model doesn't proceed on a phantom result.
+          if (r.isError) {
+            throw ApplicationFailure.nonRetryable(
+              `MCP tool '${t.tool}' returned an error`,
+              "MCP_TOOL_ERROR",
+              { connectionId: t.connectionId },
+            );
+          }
+          toolCostUsd += t.costUsd ?? 0;
+          return r.content;
+        },
+      });
+    }
+
+    // Structured output is applied when there are no tools (historical behaviour), OR when a
+    // tooled agent explicitly configures an `outputSchema`. A tooled agent WITHOUT a schema
+    // returns free text — forcing the default {category,urgency} shape onto "fetch-and-summarize"
+    // would be nonsense, and tools-returns-text is the well-trodden AI-SDK path.
+    const wantStructured = !tooled || cfg.outputSchema !== undefined;
+    const outputOpt = wantStructured
+      ? {
+          output: Output.object({
+            // Per-node schema when configured (QA#9), else the default shape. `as const` literals
+            // widen to the mutable JSONSchema7 the SDK expects (runtime schema unchanged).
+            schema: jsonSchema<Record<string, unknown>>(
+              (cfg.outputSchema ??
+                DEFAULT_OUTPUT_SCHEMA) as unknown as Parameters<
+                typeof jsonSchema
+              >[0],
+            ),
+          }),
+        }
+      : {};
+
     const result = await generateText({
       model: await buildModel(provider, model, apiKey),
       ...(cachePrompt
@@ -311,20 +410,26 @@ export async function runAgent(
             ],
           }
         : { system: cfg.systemPrompt, prompt: JSON.stringify(input) }),
-      output: Output.object({
-        // Per-node schema when configured (QA#9), else the default shape. `as const` literals are
-        // widened to the mutable JSONSchema7 the SDK expects (runtime schema unchanged).
-        schema: jsonSchema<Record<string, unknown>>(
-          (cfg.outputSchema ?? DEFAULT_OUTPUT_SCHEMA) as unknown as Parameters<
-            typeof jsonSchema
-          >[0],
-        ),
-      }),
+      ...(tooled
+        ? {
+            // Cast keeps generateText's tool generics shallow — combining ToolSet + Output
+            // inference otherwise risks a TS2589 deep-instantiation blow-up (see jsonSchema note).
+            tools: builtTools as Parameters<typeof generateText>[0]["tools"],
+            stopWhen: stepCountIs(cfg.maxToolSteps ?? DEFAULT_MAX_TOOL_STEPS),
+          }
+        : {}),
+      ...outputOpt,
       maxOutputTokens,
       ...(cfg.temperature !== undefined
         ? { temperature: cfg.temperature }
         : {}),
     });
+
+    // The node's output: the structured object when a schema drove the call, else the model's
+    // final free-text answer as { text } (a stable shape downstream expressions can read).
+    const nodeOutput: Record<string, unknown> = wantStructured
+      ? (result.output as Record<string, unknown>)
+      : { text: result.text };
 
     // BILLING (CLAUDE.md rule 6): totalUsage sums across tool steps; guard the
     // ai@6 undefined-usage bug so we never silently record a free call.
@@ -363,8 +468,11 @@ export async function runAgent(
     });
 
     // Same cost recordUsage computed — returned so the workflow can accumulate
-    // it deterministically (no DB read in workflow code).
-    const costUsd = computeCost({
+    // it deterministically (no DB read in workflow code). For a tooled call, add the
+    // flat MCP tool costs accrued during the loop (#449): the ledger records token
+    // spend, while the returned costUsd is the node's total spend the run accumulates —
+    // exactly how the standalone mcpTool node contributes its flat cost (no UsageEvent).
+    const tokenCostUsd = computeCost({
       provider,
       model,
       inputTokens: usage.inputTokens,
@@ -372,6 +480,7 @@ export async function runAgent(
       cachedInputTokens: (usage as { cachedInputTokens?: number })
         .cachedInputTokens,
     });
+    const costUsd = tokenCostUsd + toolCostUsd;
 
     log.info(
       {
@@ -396,7 +505,7 @@ export async function runAgent(
 
     return {
       status: "ok",
-      output: result.output as Record<string, unknown>,
+      output: nodeOutput,
       model,
       costUsd,
       // Same figure the ledger just recorded (real or fail-safe estimate) — per-step
