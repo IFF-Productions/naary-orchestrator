@@ -19,8 +19,8 @@ function getMql(query: string): MediaQueryList | null {
  * resize pixel). Backed by `matchMedia` via useSyncExternalStore so it's SSR-safe
  * and tear-free. Returns the current match.
  *
- * Breakpoints mirror the Naary design comp exactly: phone `< 720px`, and the
- * icon-rail threshold `< 1080px` (see AppShell).
+ * Breakpoints mirror the Naary redesign shell exactly: phone `<= 640px`, the
+ * drawer threshold `<= 1024px`, and desktop `> 1024px` (see AppShell).
  */
 export function useMediaQuery(query: string): boolean {
   return useSyncExternalStore(
@@ -43,9 +43,15 @@ export function useMediaQuery(query: string): boolean {
   );
 }
 
-/** `< 720px` — sidebar becomes a slide-in drawer + a hamburger appears. */
-export const PHONE_QUERY = "(max-width: 719px)";
-/** `< 1080px` — sidebar auto-collapses to the 70px icon rail (tablet). */
-export const BELOW_RAIL_QUERY = "(max-width: 1079px)";
-/** `>= 1080px` — the topbar search box is shown. */
-export const DESKTOP_QUERY = "(min-width: 1080px)";
+/** `<= 640px` — phone: table rows render as stacked cards; tightest chrome. */
+export const PHONE_QUERY = "(max-width: 640px)";
+/**
+ * `<= 1024px` — the shell nav collapses to a hamburger slide-out drawer and the
+ * context bar wraps (workspace + variant move into the drawer). Covers phone +
+ * tablet as one range; the old tablet icon-rail is gone.
+ */
+export const BELOW_RAIL_QUERY = "(max-width: 1024px)";
+/** Alias of {@link BELOW_RAIL_QUERY} — reads clearer at the shell's drawer call sites. */
+export const BELOW_DRAWER_QUERY = "(max-width: 1024px)";
+/** `> 1024px` — desktop: the full five-mode rail (with manual collapse) is shown. */
+export const DESKTOP_QUERY = "(min-width: 1025px)";

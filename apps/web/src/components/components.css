@@ -52,6 +52,26 @@
   width: 100%;
 }
 
+/* Touch targets on the wrapped context bar (<= 1024): every icon button in the bar
+   gets a >= 44px hit area (hamburger, theme toggle, notifications, primary CTA). */
+@media (max-width: 1024px) {
+  .ctx-bar .btn-icon {
+    width: 44px;
+    height: 44px;
+  }
+  .ctx-bar .btn {
+    min-height: 44px;
+  }
+  /* Relocated segmented switchers (environment inline in the bar; variant + workspace
+     in the drawer top) use `all: unset` buttons — a stylesheet min-height still wins
+     since it isn't in their inline style. */
+  .ctx-bar [role="group"] button,
+  .ctx-bar [aria-haspopup="menu"],
+  .drawer-context button {
+    min-height: 44px;
+  }
+}
+
 .btn-primary {
   background: linear-gradient(180deg, var(--brand-2), var(--brand));
   border-color: color-mix(in srgb, var(--brand) 50%, transparent);

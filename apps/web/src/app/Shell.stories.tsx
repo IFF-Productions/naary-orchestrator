@@ -71,7 +71,7 @@ export const ContextBarStory: Story = {
       <div style={{ background: "var(--bg)", minHeight: 220 }}>
         <ContextBar
           approvalsCount={6}
-          phone={false}
+          compact={false}
           drawerOpen={false}
           onToggleDrawer={() => {}}
         />
@@ -191,7 +191,7 @@ export const FullChrome: Story = {
       >
         <ContextBar
           approvalsCount={6}
-          phone={false}
+          compact={false}
           drawerOpen={false}
           onToggleDrawer={() => {}}
         />
