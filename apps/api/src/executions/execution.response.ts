@@ -33,6 +33,30 @@ export class RunListItemResponse {
   @ApiProperty({ format: "date-time", example: "2026-07-04T12:00:00.000Z" })
   createdAt!: string;
   @ApiProperty({
+    type: String,
+    nullable: true,
+    format: "date-time",
+    description:
+      "When the run reached a terminal status (worker-stamped); null for in-flight runs and runs predating the stamp.",
+  })
+  finishedAt!: string | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 12840,
+    description:
+      "finishedAt − createdAt in ms; null whenever finishedAt is null (never derived from now).",
+  })
+  durationMs!: number | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: "rate_limit",
+    description:
+      "Compact failure classification on terminal failures (timeout | upstream_5xx | rate_limit | budget | rejected | error); null → fall back to the status.",
+  })
+  failureKind!: string | null;
+  @ApiProperty({
     example: false,
     description: "Soft-archived (hidden by default).",
   })
@@ -47,7 +71,22 @@ export class RunListItemResponse {
   graphVersion!: number | null;
 }
 
-/** A run paused for approval, enriched with the humanApproval node's prompt. */
+/** One approver group on an awaiting row (display summary). */
+export class ApproverGroupResponse {
+  @ApiProperty({ example: "9f3a…" }) id!: string;
+  @ApiProperty({ example: "finance-leads" }) name!: string;
+}
+
+/** Who may decide a routed approval gate (display summary; enforced on approve). */
+export class ApproverSummaryResponse {
+  @ApiProperty({ type: [String], example: ["sam@acme.io"] })
+  emails!: string[];
+  @ApiProperty({ type: [ApproverGroupResponse] })
+  groups!: ApproverGroupResponse[];
+}
+
+/** A run paused for approval, enriched with the humanApproval node's prompt and the
+ *  pause-time routing/SLA/context snapshot (null when the gate has none). */
 export class AwaitingApprovalResponse {
   @ApiProperty({ example: "run-8f3a1c2e" }) workflowId!: string;
   @ApiProperty({ type: String, nullable: true, example: "support-triage" })
@@ -62,6 +101,53 @@ export class AwaitingApprovalResponse {
   instructions!: string | null;
   @ApiProperty({ format: "date-time", example: "2026-07-04T12:00:00.000Z" })
   createdAt!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    format: "date-time",
+    description: "When the gate paused (worker clock at pause time).",
+  })
+  pausedAt!: string | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 48,
+    description: "The gate's display-only SLA in hours.",
+  })
+  slaHours!: number | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    format: "date-time",
+    description:
+      "pausedAt + slaHours (server-derived); null unless both exist.",
+  })
+  dueAt!: string | null;
+  @ApiProperty({
+    type: "object",
+    additionalProperties: { type: "string" },
+    nullable: true,
+    description:
+      "Structured context card — expressions resolved at pause time (never secrets).",
+  })
+  contextFields!: Record<string, string> | null;
+  @ApiProperty({ type: ApproverSummaryResponse, nullable: true })
+  approvers!: ApproverSummaryResponse | null;
+  @ApiProperty({ type: Number, nullable: true, example: 20 })
+  escalateAfterHours!: number | null;
+  @ApiProperty({ type: String, nullable: true, example: "@ops-oncall" })
+  escalateTo!: string | null;
+}
+
+/** Outcome of a manual "Remind now" — how many channels were POSTed. */
+export class RemindResponse {
+  @ApiProperty({ example: true }) accepted!: boolean;
+  @ApiProperty({
+    example: 2,
+    description:
+      "How many notification channels the reminder was delivered to.",
+  })
+  sent!: number;
 }
 
 /** Acknowledgement that an approval decision was accepted (async, 202). */
@@ -110,6 +196,30 @@ export class RunStateResponse {
     description: "Accumulated workflow context.",
   })
   ctx!: Record<string, unknown>;
+  @ApiProperty({
+    type: "object",
+    additionalProperties: true,
+    nullable: true,
+    description:
+      "Per-node timing map (Slice 2): { [nodeId]: { s, f, n?, totalMs? } } — epoch-ms start/finish stamped with deterministic workflow time; n/totalMs aggregate repeated passes (loops). Null when the run predates the feature or its ctx is unavailable.",
+  })
+  nodeTimes!: Record<string, unknown> | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 0.0123,
+    description:
+      "Live spend-so-far of this run in USD (the interpreter's metered cost accumulator). Null when unavailable (pre-feature worker or Temporal-level failure).",
+  })
+  spentUsd!: number | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 0.5,
+    description:
+      "The per-run budget cap this run enforces (snapshotted at start, refreshed after a budget-pause resume). Null when no cap is configured or the run is closed.",
+  })
+  perExecutionCapUsd!: number | null;
 }
 
 /** The graph snapshot a run executed — for the run-detail canvas (read-only). */

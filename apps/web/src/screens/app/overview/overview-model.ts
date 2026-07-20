@@ -78,6 +78,12 @@ export function budgetStoppedLast24h(
   return runsLast24h(runs, now).filter((r) => r.status === "budget_exceeded");
 }
 
+/** Runs currently PARKED on budget (status awaiting_budget, policy "pause" — Slice 3).
+ *  Live state, so no 24h window — a paused run needs attention until it resumes. */
+export function budgetPausedNow(runs: RunSummary[]): RunSummary[] {
+  return runs.filter((r) => r.status === "awaiting_budget");
+}
+
 /** 24 hourly buckets, oldest → newest, counting run starts. */
 export function hourlyBuckets(runs: RunSummary[], now = Date.now()): number[] {
   const buckets = new Array<number>(24).fill(0);

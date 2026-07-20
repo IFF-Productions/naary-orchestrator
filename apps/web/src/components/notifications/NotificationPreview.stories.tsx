@@ -15,6 +15,7 @@ const LINKS: NotificationLinks = {
   approvalUrl:
     "https://app.naary.io/approve/wh-t1-9a8b7c?token=deadbeefcafef00d",
   runUrl: "https://app.naary.io/app/runs/wh-t1-9a8b7c",
+  usageUrl: "https://app.naary.io/app/billing",
 };
 
 const APPROVAL: NotificationInput = {
@@ -29,6 +30,29 @@ const FAILED: NotificationInput = {
   workflowId: "wh-t1-deadbeef",
   workflowKey: "invoice-sync",
   detail: "AGENT_TIMEOUT",
+};
+
+// Slice-1 approval flavors: a scheduled reminder (#2) and an escalation naming its target.
+const REMINDER: NotificationInput = {
+  ...APPROVAL,
+  flavor: "reminder",
+  reminderIndex: 2,
+};
+
+const ESCALATION: NotificationInput = {
+  ...APPROVAL,
+  flavor: "escalation",
+  escalateTo: "@ops-oncall",
+};
+
+// Slice 3: the monthly-spend alert — tenant-scoped (cap/spend facts, a usage link,
+// no run buttons). Fired at most once per calendar month from the reservation path.
+const BUDGET_THRESHOLD: NotificationInput = {
+  kind: "budget_threshold",
+  workflowId: "wh-t1-9a8b7c",
+  thresholdPct: 80,
+  capUsd: 400,
+  spendUsd: 321.4,
 };
 
 function Slack({
@@ -83,10 +107,34 @@ export const SlackLightTheme: Story = {
   render: () => <Slack input={FAILED} theme="light" />,
 };
 
+/** Scheduled reminder flavor — "⏰ Approval reminder #2" header, same decision buttons. */
+export const SlackApprovalReminder: Story = {
+  render: () => <Slack input={REMINDER} />,
+};
+
+/** Escalation flavor — "🚨 Approval escalated" + the full-width "Escalated to" line. */
+export const SlackApprovalEscalation: Story = {
+  render: () => <Slack input={ESCALATION} />,
+};
+
 export const TeamsApprovalPending: Story = {
   render: () => <Teams input={APPROVAL} />,
 };
 
+/** Escalation as an Adaptive Card — the target rides the FactSet. */
+export const TeamsApprovalEscalation: Story = {
+  render: () => <Teams input={ESCALATION} />,
+};
+
 export const TeamsRunFailed: Story = {
   render: () => <Teams input={FAILED} />,
+};
+
+/** Budget alert (Slice 3) — cap/spend facts + a "View usage & budgets" button. */
+export const SlackBudgetThreshold: Story = {
+  render: () => <Slack input={BUDGET_THRESHOLD} />,
+};
+
+export const TeamsBudgetThreshold: Story = {
+  render: () => <Teams input={BUDGET_THRESHOLD} />,
 };

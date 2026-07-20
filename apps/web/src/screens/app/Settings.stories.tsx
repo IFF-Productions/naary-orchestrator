@@ -43,6 +43,8 @@ const SECRETS: Record<string, { name: string }[]> = {
   ],
 };
 
+/** The per-event × channel matrix rows: two Slack webhooks, a disabled Teams row, and an
+ *  email list (SMTP connection + recipients) with the promotion column on. */
 const CHANNELS = [
   {
     id: "nc-1",
@@ -50,8 +52,12 @@ const CHANNELS = [
     label: "#approvals",
     enabled: true,
     webhookUrl: "https://hooks.slack.com/services/T0/B0/xxx",
+    emailConnectionId: null,
+    emailTo: [],
     onApprovalPending: true,
     onRunFailed: false,
+    onBudgetThreshold: true,
+    onPromotion: false,
   },
   {
     id: "nc-2",
@@ -59,8 +65,12 @@ const CHANNELS = [
     label: "#oncall",
     enabled: true,
     webhookUrl: "https://hooks.slack.com/services/T0/B1/yyy",
+    emailConnectionId: null,
+    emailTo: [],
     onApprovalPending: false,
     onRunFailed: true,
+    onBudgetThreshold: false,
+    onPromotion: false,
   },
   {
     id: "nc-3",
@@ -68,8 +78,49 @@ const CHANNELS = [
     label: "Ops",
     enabled: false,
     webhookUrl: "https://prod-00.westus.logic.azure.com/workflows/abc",
+    emailConnectionId: null,
+    emailTo: [],
     onApprovalPending: true,
     onRunFailed: true,
+    onBudgetThreshold: false,
+    onPromotion: false,
+  },
+  {
+    id: "nc-4",
+    type: "email",
+    label: "Ops list",
+    enabled: true,
+    webhookUrl: null,
+    emailConnectionId: "conn-smtp-1",
+    emailTo: ["ops@acme.io", "oncall@acme.io"],
+    onApprovalPending: true,
+    onRunFailed: true,
+    onBudgetThreshold: false,
+    onPromotion: true,
+  },
+];
+
+/** The environment's connections — the email channel's SMTP picker filters to `smtp`. */
+const CONNECTIONS = [
+  {
+    id: "conn-smtp-1",
+    type: "smtp",
+    label: "Postmark",
+    serverUrl: "smtp.postmarkapp.com",
+    authMode: "api_token",
+    scopes: [],
+    status: "connected",
+    createdAt: "2026-07-01T10:00:00.000Z",
+  },
+  {
+    id: "conn-gh-1",
+    type: "github",
+    label: "GitHub App",
+    serverUrl: "https://api.github.com",
+    authMode: "oauth",
+    scopes: [],
+    status: "connected",
+    createdAt: "2026-07-01T10:00:00.000Z",
   },
 ];
 
@@ -117,6 +168,9 @@ const handlers = [
     () => new HttpResponse(null, { status: 204 }),
   ),
   http.get("*/api/tenants/:t/notifications", () => HttpResponse.json(CHANNELS)),
+  http.get("*/api/tenants/:t/connections", () =>
+    HttpResponse.json(CONNECTIONS),
+  ),
   http.post("*/api/tenants/:t/notifications", async ({ request }) => {
     const body = (await request.json()) as Record<string, unknown>;
     return HttpResponse.json({ id: "nc-new", ...body });
@@ -168,7 +222,9 @@ export const Variables: Story = {
   },
 };
 
-/** Webhook channels of the active environment — Slack rows with decide-in-place, a disabled Teams row. */
+/** The per-event × channel matrix — rows are Slack/Teams/email channels, columns the four
+ *  real event flags (approval / run failed / budget / promotion); expanding the email row
+ *  shows the SMTP connection picker + recipients. */
 export const Notifications: Story = {
   parameters: {
     router: { initialEntries: ["/app/settings?section=notifications"] },

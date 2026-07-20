@@ -1,26 +1,32 @@
 /**
- * Observe › Insights — KPI row, run-throughput lines, outcome donut, failure
- * reasons, and top-workflow spend. Data notes (honesty over decoration):
- * - Run-derived figures (KPIs, throughput, donut, failures) come from the run
- *   list, filtered client-side to the exact range window — the usage rollups
- *   API has no run-outcome dimension.
+ * Observe › Insights — KPI row, run-throughput lines, latency, outcome donut,
+ * failure reasons, and top-workflow spend. Data notes (honesty over decoration):
+ * - 7d/30d throughput + total-runs come from the SERVER's runsByDay rollup
+ *   (Slice 2 — un-capped, so no 50-row list floor); 24h keeps the list-derived
+ *   hourly series (the rollup is day-granular).
+ * - Latency (median KPI + distribution) uses REAL run durations (worker-stamped
+ *   finishedAt − createdAt); runs without one contribute nothing, and the cards
+ *   show their empty state when no run carries a duration.
  * - Spend figures come from the insights rollups (GET /usage/insights), which
  *   are DAY-granular: the KPI prints its true from-date so a "24h" range never
  *   silently shows two days of spend.
- * - No latency cards and no delta-vs-previous-period: the API exposes neither
- *   run durations nor cheap previous-window rollups.
+ * - No delta-vs-previous-period: the API exposes no previous-window rollups.
  */
 import type { InsightsReport, RunSummary } from "../../../lib/api";
 import { successRate } from "../../../lib/run-status";
 import { rankBuckets, usd, wfLabel } from "../insights.logic";
+import { fmtDurMs } from "../run-detail/run-view-model";
 import {
   failureReasons,
+  latencyStats,
   linePath,
   type RangeId,
   rangeById,
   runOutcomes,
   runsInRange,
+  throughputFromRollup,
   throughputSeries,
+  totalRunsFromRollup,
   xAxisLabels,
 } from "./observe-model";
 import { CardEmpty, CardTitle, panelCard } from "./ui";
@@ -81,14 +87,20 @@ function LegendSwatch({ color, label }: { color: string; label: string }) {
 
 function ThroughputCard({
   runs,
+  insights,
   now,
   range,
 }: {
   runs: RunSummary[];
+  insights: InsightsReport | null;
   now: number;
   range: RangeId;
 }) {
-  const series = throughputSeries(runs, now, range);
+  // Prefer the server's un-capped runsByDay rollup (Slice 2) for day-granular
+  // ranges; 24h / older APIs fall back to the list-derived series.
+  const series =
+    throughputFromRollup(insights?.runsByDay, now, range) ??
+    throughputSeries(runs, now, range);
   const ok = series.map((b) => b.ok);
   const bad = series.map((b) => b.bad);
   const max = Math.max(4, ...ok, ...bad);
@@ -178,6 +190,87 @@ function ThroughputCard({
         </>
       ) : (
         <CardEmpty height={180}>No runs in this range.</CardEmpty>
+      )}
+    </div>
+  );
+}
+
+/** Latency distribution over REAL run durations (Slice 2) — honest empty state
+ *  when no run in the range carries a worker-stamped duration. */
+function LatencyCard({ runs }: { runs: RunSummary[] }) {
+  const stats = latencyStats(runs);
+  const max = stats ? Math.max(1, ...stats.histogram.map((b) => b.count)) : 1;
+  return (
+    <div style={{ ...panelCard, padding: "18px 20px" }}>
+      <CardTitle style={{ marginBottom: 4 }}>Latency distribution</CardTitle>
+      <div
+        style={{
+          fontSize: "var(--text-xs)",
+          color: "var(--ink-faint)",
+          marginBottom: 16,
+        }}
+      >
+        {stats
+          ? `Run durations in this range (${stats.sample} runs with a recorded duration)`
+          : "Run durations in this range"}
+      </div>
+      {stats === null ? (
+        <CardEmpty height={100}>
+          No recorded durations yet — runs started before duration tracking show
+          none.
+        </CardEmpty>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {stats.histogram.map((b) => (
+            <div
+              key={b.label}
+              style={{ display: "flex", alignItems: "center", gap: 10 }}
+            >
+              <span
+                className="mono"
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--ink-soft)",
+                  width: 52,
+                  flex: "none",
+                }}
+              >
+                {b.label}
+              </span>
+              <div
+                style={{
+                  flex: 1,
+                  height: 6,
+                  borderRadius: 4,
+                  background: "var(--card-2)",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${(b.count / max) * 100}%`,
+                    background: "var(--brand)",
+                    borderRadius: 4,
+                  }}
+                />
+              </div>
+              <span
+                className="mono"
+                style={{
+                  fontSize: "var(--text-sm)",
+                  fontWeight: "var(--weight-semibold)",
+                  color: "var(--ink)",
+                  width: 30,
+                  textAlign: "right",
+                  flex: "none",
+                }}
+              >
+                {b.count}
+              </span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -524,6 +617,11 @@ export function InsightsTab({
   const paused = runs.filter(
     (r) => r.status === "awaiting_approval" || r.status === "awaiting_webhook",
   ).length;
+  // Total runs: the server's un-capped runsByDay rollup (Slice 2) beats the
+  // 50-row list floor for 7d/30d; 24h / older APIs keep the list count.
+  const rollupTotal = totalRunsFromRollup(insights?.runsByDay, now, range);
+  // Median latency over REAL durations in the range — "—" when none recorded.
+  const latency = latencyStats(ranged);
 
   return (
     <div
@@ -544,13 +642,22 @@ export function InsightsTab({
       >
         <Kpi
           label="Total runs"
-          value={`${ranged.length}`}
+          value={`${rollupTotal ?? ranged.length}`}
           sub={`last ${rangeById(range).label}`}
         />
         <Kpi
           label="Success rate"
           value={rate === null ? "—" : `${rate.toFixed(1)}%`}
           sub={rate === null ? "no finished runs yet" : "of finished runs"}
+        />
+        <Kpi
+          label="Median latency"
+          value={latency === null ? "—" : fmtDurMs(latency.medianMs)}
+          sub={
+            latency === null
+              ? "no recorded durations yet"
+              : `over ${latency.sample} finished runs`
+          }
         />
         <Kpi
           label="Paused (HITL)"
@@ -568,7 +675,7 @@ export function InsightsTab({
         />
       </div>
 
-      <ThroughputCard runs={runs} now={now} range={range} />
+      <ThroughputCard runs={runs} insights={insights} now={now} range={range} />
 
       <div
         style={{
@@ -578,6 +685,7 @@ export function InsightsTab({
         }}
       >
         <OutcomesCard runs={ranged} />
+        <LatencyCard runs={ranged} />
         <FailureReasonsCard runs={ranged} />
         <SpendByWorkflowCard insights={insights} />
       </div>

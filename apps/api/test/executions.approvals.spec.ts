@@ -145,14 +145,17 @@ describe("listAwaiting (approvals inbox)", () => {
 });
 
 describe("approve forwards the reviewer comment to the signal", () => {
+  // assertOwner returns the owned row (approve threads it into the access checks).
+  const OWNED_ROW = { tenantId: "t-1", workflowKey: null, environmentId: null };
+
   it("signals { approved, comment } when a comment is given", async () => {
     const signal = vi.fn().mockResolvedValue(undefined);
     const service = makeService({ getHandle: () => ({ signal }) });
     // ownership check hits prisma indirectly — stub it out for this unit.
     vi.spyOn(
-      service as unknown as { assertOwner: () => Promise<void> },
+      service as unknown as { assertOwner: () => Promise<typeof OWNED_ROW> },
       "assertOwner",
-    ).mockResolvedValue(undefined);
+    ).mockResolvedValue(OWNED_ROW);
 
     await service.approve("wf-1", true, "t-1", "looks good");
 
@@ -165,9 +168,9 @@ describe("approve forwards the reviewer comment to the signal", () => {
     const signal = vi.fn().mockResolvedValue(undefined);
     const service = makeService({ getHandle: () => ({ signal }) });
     vi.spyOn(
-      service as unknown as { assertOwner: () => Promise<void> },
+      service as unknown as { assertOwner: () => Promise<typeof OWNED_ROW> },
       "assertOwner",
-    ).mockResolvedValue(undefined);
+    ).mockResolvedValue(OWNED_ROW);
 
     await service.approve("wf-1", false, "t-1");
 

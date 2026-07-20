@@ -16,6 +16,13 @@ export interface RecordUsageInput {
   environmentId?: string;
   executionId: string;
   nodeId: string;
+  /** The node TYPE that spent this ("agent" | "codeAgent" | "vectorQuery" | …) — Slice 2.
+   *  The recording activity statically knows which node kind it serves, so by-node-type
+   *  rollups need no graph join. Optional: older call sites / rows simply have none. */
+  nodeType?: string;
+  /** Wall-clock duration of the metered call in ms, measured IN the activity around the
+   *  provider call (Slice 2). Optional — never fabricated when unknown. */
+  durationMs?: number;
   provider: string;
   model: string;
   usage: UsageTokens;
@@ -55,6 +62,10 @@ export async function recordUsage(input: RecordUsageInput) {
     environmentId: input.environmentId ?? null,
     executionId: input.executionId,
     nodeId: input.nodeId,
+    nodeType: input.nodeType ?? null,
+    // Math.round: PG column is Int; a sub-ms reading must not fail the insert.
+    durationMs:
+      input.durationMs !== undefined ? Math.round(input.durationMs) : null,
     provider: input.provider,
     model: input.model,
     inputTokens,

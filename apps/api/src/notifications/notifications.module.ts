@@ -7,5 +7,6 @@ import { NotificationsService } from "./notifications.service";
   imports: [EnvironmentsModule],
   controllers: [NotificationsController],
   providers: [NotificationsService],
+  exports: [NotificationsService], // the executions "Remind now" endpoint reuses the fan-out
 })
 export class NotificationsModule {}

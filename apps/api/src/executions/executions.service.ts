@@ -16,6 +16,8 @@ import {
   WorkflowNotFoundError,
 } from "@temporalio/client";
 import {
+  APPROVAL_CTX_KEY,
+  NODE_TIMES_CTX_KEY,
   approvalSignal,
   chatMessageSignal,
   chatReplyQuery,
@@ -25,8 +27,10 @@ import {
   stateQuery,
   TASK_QUEUE,
   webhookResponseQuery,
+  type ApprovalAwaitingRecord,
   type ExecutionState,
   type ExecutionStatus,
+  type NodeTimeEntry,
   type ResumeInput,
   type WebhookResponse,
 } from "@naary/contracts";
@@ -61,9 +65,10 @@ const DEFAULT_WORKFLOW_KEY = "default";
 export interface RunSummary {
   workflowId: string;
   workflowKey: string | null;
-  /** App status (running | awaiting_approval | completed | rejected |
-   *  budget_exceeded | circuit_open | invalid_graph) or a Temporal close reason
-   *  (failed | timed_out | terminated | canceled) or "unknown" if unreachable. */
+  /** App status (running | awaiting_approval | awaiting_webhook | awaiting_budget |
+   *  completed | rejected | budget_exceeded | circuit_open | invalid_graph) or a
+   *  Temporal close reason (failed | timed_out | terminated | canceled) or "unknown"
+   *  if unreachable. */
   status:
     | ExecutionStatus
     | "failed"
@@ -77,6 +82,15 @@ export interface RunSummary {
   startedAt: string;
   /** DB record time, ISO (kept for time-bucketed charts). */
   createdAt: string;
+  /** When the run reached a terminal status (worker-stamped, Slice 2); null for
+   *  in-flight runs AND runs predating the stamp — consumers render "—". */
+  finishedAt: string | null;
+  /** finishedAt − createdAt in ms; null whenever finishedAt is null (never derived
+   *  from "now" — an in-flight age is not a duration). */
+  durationMs: number | null;
+  /** Compact failure classification (timeout | upstream_5xx | rate_limit | budget |
+   *  rejected | error) on terminal failures; null → fall back to the status. */
+  failureKind: string | null;
   /** Soft-archived (hidden from the default Runs list). */
   archived: boolean;
   /** The GraphDefinition version this run snapshotted at start; null for
@@ -96,10 +110,48 @@ export interface RunStateView {
   status: RunSummary["status"];
   currentNodeId: string;
   ctx: Record<string, unknown>;
+  /** Per-node timing map the interpreter stamped into ctx (Slice 2), surfaced as a
+   *  first-class field so consumers don't grope the opaque ctx. Null when the run
+   *  predates the feature or the ctx is unavailable (Temporal-level failure). */
+  nodeTimes: Record<string, NodeTimeEntry> | null;
+  /** Live spend-so-far of this run in USD (Slice 3 — the interpreter's deterministic
+   *  cost accumulator, via the state query; closed runs fall back to ctx.__costUsd).
+   *  Null when unavailable (pre-feature worker / Temporal-level failure). */
+  spentUsd: number | null;
+  /** The per-run cap this run enforces (start snapshot, refreshed after a budget-pause
+   *  resume). Null when no cap is configured / the run is closed — consumers must not
+   *  fabricate a budget meter without it. */
+  perExecutionCapUsd: number | null;
+}
+
+/** Pull the interpreter's per-node timing map out of a run ctx (Slice 2), or null when
+ *  absent (pre-feature run / empty ctx). Shape-checked, never fabricated. */
+function nodeTimesFrom(
+  ctx: Record<string, unknown>,
+): Record<string, NodeTimeEntry> | null {
+  const raw = ctx[NODE_TIMES_CTX_KEY];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  return raw as Record<string, NodeTimeEntry>;
+}
+
+/** The run's accumulated spend mirrored into ctx (__costUsd), or null when the run
+ *  metered nothing / predates the mirror. Shape-checked, never fabricated (Slice 3). */
+function costUsdFrom(ctx: Record<string, unknown>): number | null {
+  const c = ctx.__costUsd;
+  return typeof c === "number" && Number.isFinite(c) ? c : null;
+}
+
+/** Approver routing display summary on an awaiting row (Slice 1). */
+export interface ApproverSummary {
+  emails: string[];
+  groups: { id: string; name: string }[];
 }
 
 /** A run paused at a humanApproval node, enriched with the node's prompt (resolved
- *  from the stored graph) so the approvals inbox can show WHAT is being approved. */
+ *  from the stored graph) so the approvals inbox can show WHAT is being approved.
+ *  The Slice-1 fields (contextFields/slaHours/dueAt/approvers/…) come from the
+ *  awaiting record the worker snapshotted at pause time (ctx.__approval); they are
+ *  null for gates without routing/SLA config (and for pre-Slice-1 paused runs). */
 export interface AwaitingApproval {
   workflowId: string;
   workflowKey: string | null;
@@ -107,6 +159,19 @@ export interface AwaitingApproval {
   title: string;
   instructions: string | null;
   createdAt: string;
+  /** When the gate paused (worker clock at pause time), ISO. */
+  pausedAt: string | null;
+  /** The gate's display-only SLA in hours. */
+  slaHours: number | null;
+  /** pausedAt + slaHours, computed server-side (null unless both exist). */
+  dueAt: string | null;
+  /** Resolved context fields (expressions evaluated at pause time). */
+  contextFields: Record<string, string> | null;
+  /** Who may decide (display summary; enforcement happens on the approve path). */
+  approvers: ApproverSummary | null;
+  /** Escalation display info (notify-only v1). */
+  escalateAfterHours: number | null;
+  escalateTo: string | null;
 }
 
 /** One run's outcome in a batch approve/reject — ok:false carries why it slipped. */
@@ -271,6 +336,50 @@ const TERMINAL_STATUSES = new Set([
 ]);
 function isTerminalStatus(s: string): boolean {
   return TERMINAL_STATUSES.has(s);
+}
+
+/** The awaiting-approval record the worker snapshotted at pause time (ctx.__approval),
+ *  or null when the gate carries no Slice-1 fields / the run predates them. */
+function awaitingRecord(s: ExecutionState): ApprovalAwaitingRecord | null {
+  const rec = (s.ctx ?? {})[APPROVAL_CTX_KEY];
+  if (!rec || typeof rec !== "object" || Array.isArray(rec)) return null;
+  return rec as ApprovalAwaitingRecord;
+}
+
+/** dueAt = pausedAt + slaHours (server-side derivation — display-only, no timer). */
+function dueAtFrom(rec: ApprovalAwaitingRecord | null): string | null {
+  if (!rec?.pausedAt || typeof rec.slaHours !== "number" || rec.slaHours <= 0) {
+    return null;
+  }
+  const paused = Date.parse(rec.pausedAt);
+  if (Number.isNaN(paused)) return null;
+  return new Date(paused + rec.slaHours * 3_600_000).toISOString();
+}
+
+/** The Slice-1 display fields shared by the awaiting inbox row + the public prompt. */
+function awaitingFields(rec: ApprovalAwaitingRecord | null): {
+  pausedAt: string | null;
+  slaHours: number | null;
+  dueAt: string | null;
+  contextFields: Record<string, string> | null;
+  approvers: ApproverSummary | null;
+  escalateAfterHours: number | null;
+  escalateTo: string | null;
+} {
+  return {
+    pausedAt: rec?.pausedAt ?? null,
+    slaHours: rec?.slaHours ?? null,
+    dueAt: dueAtFrom(rec),
+    contextFields: rec?.contextFields ?? null,
+    approvers: rec?.approvers
+      ? {
+          emails: rec.approvers.emails ?? [],
+          groups: rec.approvers.groups ?? [],
+        }
+      : null,
+    escalateAfterHours: rec?.escalateAfterHours ?? null,
+    escalateTo: rec?.escalateTo ?? null,
+  };
 }
 
 /** The Start node's configured sample input (used as the default manual-run input). */
@@ -642,6 +751,10 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
             workflowKey,
             perExecutionCapUsd: budget?.perExecutionCapUsd,
             maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
+            // Slice 3: same pause-only snapshot as startGraph (see its comment).
+            ...(budget?.onBudgetExceeded === "pause"
+              ? { onBudgetExceeded: "pause" as const }
+              : {}),
             graphContentHash: snapshot.contentHash,
             graphVersion: snapshot.version,
           },
@@ -770,6 +883,12 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           workflowKey,
           perExecutionCapUsd: budget?.perExecutionCapUsd,
           maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
+          // Slice 3 (pause-not-fail): snapshot the policy ONLY when it is "pause" — the
+          // value that activates the interpreter's park path. reject/downgrade behave
+          // identically to the pre-Slice-3 absent field, so old args stay byte-identical.
+          ...(budget?.onBudgetExceeded === "pause"
+            ? { onBudgetExceeded: "pause" as const }
+            : {}),
           graphContentHash: snapshot.contentHash,
           graphVersion: snapshot.version,
           ...(errorWorkflowKey ? { errorWorkflowKey } : {}),
@@ -811,7 +930,16 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     workflowKey: string,
     node: NodeDef,
     seededCtx: Record<string, unknown>,
-  ): Promise<unknown> {
+  ): Promise<{
+    output: unknown;
+    /** Interpreter-measured duration of the tested node (Slice 2); null when the
+     *  run recorded none (never a fabricated client-side guess). */
+    durationMs: number | null;
+    /** Real metered spend of the test run (ctx.__costUsd — same fail-safe billing
+     *  as any run: missing usage ledgers the estimate, never zero). Null when the
+     *  node meters no cost at all (pure/uncosted nodes). */
+    costUsd: number | null;
+  }> {
     const graph: GraphDef = {
       startNodeId: node.id,
       nodes: [node, { id: "__snx_end", type: "end" }],
@@ -832,12 +960,20 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           seededCtx,
           perExecutionCapUsd: budget?.perExecutionCapUsd,
           maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
+          // Slice 3: deliberately NO onBudgetExceeded here — a single-node test is
+          // awaited synchronously and must fail fast on budget, never park.
         },
       ],
       taskQueue: TASK_QUEUE,
       workflowId: `test-${tenantId}-${randomUUID()}`,
     })) as { ctx: Record<string, unknown> };
-    return result.ctx[node.id];
+    const t = nodeTimesFrom(result.ctx)?.[node.id];
+    return {
+      output: result.ctx[node.id],
+      durationMs: t ? Math.max(0, t.f - t.s) : null,
+      costUsd:
+        typeof result.ctx.__costUsd === "number" ? result.ctx.__costUsd : null,
+    };
   }
 
   async approve(
@@ -852,6 +988,9 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     const row = await this.assertOwner(id, tenantId);
     await this.assertRunAccess(actor, "run", row);
+    // Slice 1: when the gate names approvers, the deciding principal must match them
+    // (owner/admin user principals bypass). No-op when the gate has no routing.
+    await this.assertApprover(actor, id, row.tenantId);
     try {
       await this.client.workflow
         .getHandle(id)
@@ -869,6 +1008,87 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       }
       throw e;
     }
+  }
+
+  /**
+   * Decide-time approver enforcement (REDESIGN-FUNCTIONALITY-GAPS.md Slice 1). Reads the
+   * awaiting record the worker snapshotted at pause time (ctx.__approval via stateQuery —
+   * the RUN'S OWN config snapshot, immune to later graph edits). Semantics:
+   *  - gate has no `approvers` (or the run predates the snapshot) → unchanged behavior;
+   *  - workspace owner/admin USER principals bypass (consistent with RBAC-GROUPS §4 —
+   *    PermissionsService.subjectKey gates only `member` users and tokens);
+   *  - user principals match by email (case-insensitive) OR GroupMember membership (uid)
+   *    in a listed group;
+   *  - restricted `nry_` token principals match via GroupTokenMember (tokenId). A token
+   *    WITHOUT a tokenId stamp (unenforced workspace) has no group identity and no email,
+   *    so it cannot match a routed gate — fail CLOSED with the same 403;
+   *  - absent actor (internal callers; the PUBLIC signed-link path uses decideByToken and
+   *    stays HMAC-authorized) → never checked.
+   * A closed/undecidable run skips the check — the signal path right after produces the
+   * proper 409/404.
+   */
+  private async assertApprover(
+    actor: Principal | undefined,
+    workflowId: string,
+    tenantId: string,
+  ): Promise<void> {
+    if (!actor) return;
+    let state: ExecutionState;
+    try {
+      state = await this.client.workflow
+        .getHandle(workflowId)
+        .query(stateQuery);
+    } catch {
+      return; // closed/gone — the signal below yields the right 409/404
+    }
+    if (state.status !== "awaiting_approval") return;
+    const approvers = awaitingRecord(state)?.approvers;
+    if (!approvers) return;
+    const emails = (approvers.emails ?? []).filter((e) => !!e);
+    const groupIds = (approvers.groups ?? []).map((g) => g.id).filter(Boolean);
+    if (emails.length === 0 && groupIds.length === 0) return;
+    // Owner/admin USER principals bypass.
+    if (actor.userId && (actor.role === "owner" || actor.role === "admin")) {
+      return;
+    }
+    // Email match (user principals).
+    if (
+      actor.userId &&
+      actor.email &&
+      emails.some((e) => e.toLowerCase() === actor.email?.toLowerCase())
+    ) {
+      return;
+    }
+    // Group membership: uid via GroupMember, token via GroupTokenMember — tenant-scoped
+    // through the group relation so a same-id group of another tenant can never match.
+    if (groupIds.length > 0) {
+      const prisma = getPrisma();
+      if (actor.tokenId) {
+        const m = await prisma.groupTokenMember.findFirst({
+          where: {
+            tokenId: actor.tokenId,
+            groupId: { in: groupIds },
+            group: { tenantId },
+          },
+          select: { groupId: true },
+        });
+        if (m) return;
+      } else if (actor.userId) {
+        const m = await prisma.groupMember.findFirst({
+          where: {
+            userId: actor.userId,
+            groupId: { in: groupIds },
+            group: { tenantId },
+          },
+          select: { groupId: true },
+        });
+        if (m) return;
+      }
+    }
+    throw new ForbiddenException(
+      "This approval is restricted to its listed approvers. " +
+        "Ask one of them to decide, or a workspace owner/admin.",
+    );
   }
 
   /**
@@ -898,6 +1118,57 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
               r.reason instanceof Error ? r.reason.message : String(r.reason),
           },
     );
+  }
+
+  /**
+   * Resolve everything a manual "Remind now" needs (Slice 1): asserts tenant ownership +
+   * the `run` verb on the run's workflow, confirms the run is STILL awaiting approval
+   * (409 otherwise — nothing to remind about), and returns the run's env + prompt title.
+   * The controller then fans the reminder out via NotificationsService.sendApprovalReminder
+   * (API-side send — see that method for why not a worker Signal round-trip).
+   */
+  async remindContext(
+    id: string,
+    tenantId: string,
+    actor?: Principal,
+  ): Promise<{
+    environmentId: string;
+    workflowId: string;
+    workflowKey: string | null;
+    title: string;
+  }> {
+    const row = await this.assertOwner(id, tenantId);
+    await this.assertRunAccess(actor, "run", row);
+    let state: ExecutionState;
+    try {
+      state = await this.client.workflow.getHandle(id).query(stateQuery);
+    } catch (e) {
+      if (e instanceof WorkflowNotFoundError) {
+        throw new ConflictException(
+          "Run is not awaiting approval (already decided, completed, or timed out).",
+        );
+      }
+      throw e;
+    }
+    if (state.status !== "awaiting_approval") {
+      throw new ConflictException(
+        "Run is not awaiting approval (already decided, completed, or timed out).",
+      );
+    }
+    const prompt = await this.approvalPrompt(
+      tenantId,
+      row.environmentId,
+      row.workflowKey,
+      state.currentNodeId,
+    );
+    const environmentId =
+      row.environmentId ?? (await this.environments.defaultEnvId(tenantId));
+    return {
+      environmentId,
+      workflowId: id,
+      workflowKey: row.workflowKey,
+      title: prompt.title,
+    };
   }
 
   /**
@@ -1075,6 +1346,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     const items = await Promise.all(
       rows.map(async (r): Promise<AwaitingApproval | null> => {
         let currentNodeId = "";
+        let rec: ApprovalAwaitingRecord | null = null;
         try {
           const s = await this.client.workflow
             .getHandle(r.workflowId)
@@ -1082,6 +1354,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           // Decided/advanced since the read-model write, or closed → not awaiting.
           if (s.status !== "awaiting_approval") return null;
           currentNodeId = s.currentNodeId;
+          // Slice 1: the pause-time snapshot (contextFields/SLA/approvers) rides the ctx.
+          rec = awaitingRecord(s);
         } catch {
           return null; // closed/gone
         }
@@ -1098,6 +1372,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           title: prompt.title,
           instructions: prompt.instructions,
           createdAt: r.createdAt.toISOString(),
+          ...awaitingFields(rec),
         };
       }),
     );
@@ -1106,11 +1381,19 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
 
   /** Public (token-authed) approval prompt lookup by workflowId — for the signed-link decision page.
    *  Resolves tenant/workflowKey from the Execution row (no bearer), confirms the run is still
-   *  awaiting, and returns the node's prompt. Degrades to `{ awaiting: false }` on any miss. */
+   *  awaiting, and returns the node's prompt plus (Slice 1) the workspace display name and the
+   *  pause-time context fields — the public page's trust line + fields card. Degrades to
+   *  `{ awaiting: false }` on any miss. */
   async promptByWorkflowId(workflowId: string): Promise<{
     awaiting: boolean;
     title?: string;
     instructions?: string | null;
+    /** Workspace display name (TenantSettings.displayName) — "on behalf of …". Null if unset. */
+    workspaceName?: string | null;
+    /** Resolved pause-time context fields (never secrets — see prepareApproval). */
+    contextFields?: Record<string, string> | null;
+    slaHours?: number | null;
+    dueAt?: string | null;
   }> {
     const row = await getPrisma().execution.findUnique({
       where: { workflowId },
@@ -1127,10 +1410,22 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         row.workflowKey,
         s.currentNodeId,
       );
+      const rec = awaitingRecord(s);
+      // Best-effort workspace display name — the public trust line ("on behalf of Acme").
+      const settings = await getPrisma()
+        .tenantSettings.findUnique({
+          where: { tenantId: row.tenantId },
+          select: { displayName: true },
+        })
+        .catch(() => null);
       return {
         awaiting: true,
         title: prompt.title,
         instructions: prompt.instructions,
+        workspaceName: settings?.displayName ?? null,
+        contextFields: rec?.contextFields ?? null,
+        slaHours: rec?.slaHours ?? null,
+        dueAt: dueAtFrom(rec),
       };
     } catch {
       return { awaiting: false };
@@ -1240,6 +1535,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     status: string;
     costUsd: unknown;
     createdAt: Date;
+    finishedAt: Date | null;
+    failureKind: string | null;
     archivedAt: Date | null;
     graphVersion: number | null;
   }): Promise<RunSummary> {
@@ -1253,6 +1550,13 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       // real Temporal start time can diverge without silently moving createdAt.
       startedAt: createdAt,
       createdAt,
+      // Slice 2: worker-stamped terminal time → durationMs. Both null for runs that
+      // predate the stamp / closed only at the Temporal level — the UI keeps "—".
+      finishedAt: r.finishedAt ? r.finishedAt.toISOString() : null,
+      durationMs: r.finishedAt
+        ? Math.max(0, r.finishedAt.getTime() - r.createdAt.getTime())
+        : null,
+      failureKind: r.failureKind,
       archived: r.archivedAt !== null,
       graphVersion: r.graphVersion,
     };
@@ -1302,9 +1606,21 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
             status: s.status,
             currentNodeId: s.currentNodeId,
             ctx: s.ctx,
+            nodeTimes: nodeTimesFrom(s.ctx),
+            // Slice 3 live spend: the query's first-class figure; a pre-feature worker
+            // omits it → fall back to the ctx mirror; null when neither exists.
+            spentUsd: s.spentUsd ?? costUsdFrom(s.ctx),
+            perExecutionCapUsd: s.perExecutionCapUsd ?? null,
           };
         } catch {
-          return { status: "running", currentNodeId: "", ctx: {} };
+          return {
+            status: "running",
+            currentNodeId: "",
+            ctx: {},
+            nodeTimes: null,
+            spentUsd: null,
+            perExecutionCapUsd: null,
+          };
         }
       }
       if (desc.status.name === "COMPLETED") {
@@ -1313,9 +1629,23 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
             status: ExecutionStatus;
             ctx: Record<string, unknown>;
           };
-          return { status: r.status, currentNodeId: "", ctx: r.ctx };
+          return {
+            status: r.status,
+            currentNodeId: "",
+            ctx: r.ctx,
+            nodeTimes: nodeTimesFrom(r.ctx),
+            spentUsd: costUsdFrom(r.ctx),
+            perExecutionCapUsd: null, // closed — no live cap to meter against
+          };
         } catch {
-          return { status: "completed", currentNodeId: "", ctx: {} };
+          return {
+            status: "completed",
+            currentNodeId: "",
+            ctx: {},
+            nodeTimes: null,
+            spentUsd: null,
+            perExecutionCapUsd: null,
+          };
         }
       }
       // Temporal-level failure (the workflow threw, was terminated, etc.) — there's
@@ -1324,6 +1654,9 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         status: TEMPORAL_CLOSED_STATUS[desc.status.name] ?? "unknown",
         currentNodeId: "",
         ctx: {},
+        nodeTimes: null,
+        spentUsd: null,
+        perExecutionCapUsd: null,
       };
     } catch (e) {
       if (e instanceof WorkflowNotFoundError) {

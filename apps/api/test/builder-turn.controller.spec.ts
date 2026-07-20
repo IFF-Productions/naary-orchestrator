@@ -191,7 +191,11 @@ describe("POST /builder/sessions/:id/turns — edit-mode streaming", () => {
     generator.editStream.mockImplementation(async () => ({
       name: "My Flow",
       graph: EDIT_GRAPH,
-      meter: { provider: "anthropic", model: "claude-opus-4-8", tokens: null },
+      meter: {
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        tokens: null as never,
+      },
     }));
 
     await controller.turn("t-1", "s-1", { message: "go" }, makeRes() as never);

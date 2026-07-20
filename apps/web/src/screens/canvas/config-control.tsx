@@ -1,4 +1,5 @@
 // sendEmail / rss / sub-workflow / forEach / wait / stop / respond / code / approval config sections of the node inspector (extracted verbatim from CanvasPage).
+import { ApprovalRoutingFields } from "./ApprovalRoutingFields";
 import type { ConfigSectionCtx } from "./ConfigPanel";
 import {
   type BindingRow,
@@ -435,6 +436,8 @@ export function renderControlSections(c: ConfigSectionCtx) {
               placeholder="blank = wait forever"
             />
           </Labeled>
+          {/* Slice 1: routing (approvers), SLA, reminders/escalation, context fields. */}
+          <ApprovalRoutingFields c={c} />
         </>
       )}
     </>

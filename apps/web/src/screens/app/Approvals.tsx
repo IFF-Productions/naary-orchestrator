@@ -13,7 +13,7 @@ import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import { useMode } from "../../mode";
 import { DetailPanel } from "./approvals/DetailPanel";
 import { QueueRow } from "./approvals/QueueRow";
-import { isOverdue, isRecent, waitingInfo } from "./approvals/urgency";
+import { isOverdue, isRecent, slaInfo } from "./approvals/urgency";
 
 type Filter = "all" | "overdue" | "recent";
 
@@ -178,7 +178,11 @@ export function Approvals() {
   }, []);
 
   const now = Date.now();
-  const infoOf = (it: AwaitingApproval) => waitingInfo(it.createdAt, now);
+  // Real due-by tones when the gate has an SLA (dueAt), waiting-age otherwise.
+  // Urgency anchors on when the gate actually PAUSED (pausedAt) — createdAt is the
+  // run's start and overstates waiting time for runs that executed a while first.
+  const infoOf = (it: AwaitingApproval) =>
+    slaInfo(it.pausedAt ?? it.createdAt, it.dueAt, now);
   const all = items ?? [];
   const overdueCount = all.filter((it) => isOverdue(infoOf(it))).length;
   const recentCount = all.filter((it) => isRecent(infoOf(it))).length;
@@ -281,6 +285,27 @@ export function Approvals() {
       await load();
     } finally {
       setBatchBusy(false);
+    }
+  }
+
+  // Manual "Remind now" — re-fires the approval notification to the run env's channels.
+  const [remindBusy, setRemindBusy] = useState<string | null>(null);
+  async function remind(item: AwaitingApproval) {
+    setRemindBusy(item.workflowId);
+    try {
+      const res = await api.remindApproval(item.workflowId);
+      pushToast(
+        "done",
+        res.sent > 0
+          ? `Reminder sent to ${res.sent} channel${res.sent === 1 ? "" : "s"}`
+          : "No enabled notification channels to remind",
+        item.title,
+      );
+    } catch {
+      pushToast("error", "Couldn't send the reminder — refreshed the queue.");
+      await load();
+    } finally {
+      setRemindBusy(null);
     }
   }
 
@@ -453,6 +478,8 @@ export function Approvals() {
         }
         onDecide={(approved) => void decide(focused, approved)}
         onOpenRun={() => navigate(`/app/runs/${focused.workflowId}`)}
+        onRemind={() => void remind(focused)}
+        remindBusy={remindBusy === focused.workflowId}
         disabled={batchBusy || busy === focused.workflowId}
         busy={busy === focused.workflowId}
       />

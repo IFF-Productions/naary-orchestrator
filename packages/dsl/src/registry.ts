@@ -467,6 +467,25 @@ const CONFIG_SCHEMAS = {
     title: z.string().optional(),
     instructions: z.string().optional(),
     timeoutHours: z.number().optional(),
+    // --- Routing + SLA/escalation/context (REDESIGN-FUNCTIONALITY-GAPS.md Slice 1) ---
+    approvers: z
+      .object({
+        emails: z.array(z.string()).optional(),
+        groupIds: z.array(z.string()).optional(),
+      })
+      .optional(),
+    slaHours: z.number().positive().optional(),
+    remindAfterHours: z
+      .array(z.number().positive())
+      .max(5)
+      .refine((a) => a.every((v, i) => i === 0 || v > a[i - 1]), {
+        message: "remindAfterHours must be strictly ascending",
+      })
+      .optional(),
+    escalateAfterHours: z.number().positive().optional(),
+    escalateTo: z.string().optional(),
+    // Values may contain {{ }} expressions — resolved in-activity at pause time.
+    contextFields: z.record(z.string(), z.string()).optional(),
   }),
   respondToWebhook: z.object({
     statusCode: z.number().optional(),

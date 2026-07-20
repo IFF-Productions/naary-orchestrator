@@ -141,7 +141,7 @@ export function QueueRow({
             fontFamily: "var(--font-mono)",
           }}
         >
-          {new Date(item.createdAt).toLocaleString(undefined, {
+          {new Date(item.pausedAt ?? item.createdAt).toLocaleString(undefined, {
             month: "short",
             day: "numeric",
             hour: "2-digit",

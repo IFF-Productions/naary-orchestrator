@@ -66,7 +66,7 @@ export class BuilderSessionResponse {
   @ApiProperty({
     required: false,
     nullable: true,
-    type: "object",
+    type: Object,
     additionalProperties: true,
     description:
       "The latest validated working draft (graph JSON), or null before the first turn.",

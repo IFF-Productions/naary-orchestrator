@@ -24,8 +24,10 @@ function MonoLabel({ children }: { children: string }) {
 /**
  * Right-hand detail panel: full context for the focused request + the
  * decide-in-place box (optional audit comment · Approve / Reject).
- * Renders only honest data — no approver/escalation/SLA rows, the backend
- * doesn't have them.
+ * Renders only honest data — the fields card comes from the gate's REAL
+ * pause-time contextFields (Slice 1) when present (legacy JSON-instructions
+ * fallback otherwise), and the Routing section appears only when the gate
+ * actually names approvers / an escalation.
  */
 export function DetailPanel({
   item,
@@ -35,6 +37,8 @@ export function DetailPanel({
   onCommentChange,
   onDecide,
   onOpenRun,
+  onRemind,
+  remindBusy,
   disabled,
   busy,
 }: {
@@ -45,12 +49,30 @@ export function DetailPanel({
   onCommentChange: (v: string) => void;
   onDecide: (approved: boolean) => void;
   onOpenRun: () => void;
+  /** Manual "Remind now" — re-fires the approval notification. */
+  onRemind?: () => void;
+  remindBusy?: boolean;
   disabled: boolean;
   /** A decision for THIS item is in flight. */
   busy: boolean;
 }) {
   const tone = toneColors(waiting.tone);
-  const fields = parseContextFields(item.instructions);
+  // Prefer the REAL pause-time context fields; fall back to the legacy
+  // JSON-shaped-instructions derivation for older gates.
+  const contextEntries = item.contextFields
+    ? Object.entries(item.contextFields).map(([k, v]) => ({ k, v }))
+    : null;
+  const legacyFields = parseContextFields(item.instructions);
+  const fields =
+    contextEntries && contextEntries.length > 0 ? contextEntries : legacyFields;
+  // Prose instructions render unless the instructions THEMSELVES became the card.
+  const instructionsAsProse =
+    !!item.instructions && !(fields !== null && fields === legacyFields);
+  const hasRouting =
+    (item.approvers &&
+      (item.approvers.emails.length > 0 || item.approvers.groups.length > 0)) ||
+    item.escalateTo ||
+    item.escalateAfterHours != null;
   const noun = simple ? "automation" : "workflow";
 
   return (
@@ -128,7 +150,7 @@ export function DetailPanel({
       {/* context */}
       <div style={{ padding: "18px 22px" }}>
         <MonoLabel>What you're approving</MonoLabel>
-        {item.instructions && !fields && (
+        {instructionsAsProse && (
           <div
             style={{
               fontSize: "var(--text-body)",
@@ -141,7 +163,7 @@ export function DetailPanel({
             {item.instructions}
           </div>
         )}
-        {!item.instructions && (
+        {!item.instructions && !fields && (
           <div
             style={{
               fontSize: "var(--text-body)",
@@ -227,6 +249,105 @@ export function DetailPanel({
           </span>
         </button>
       </div>
+
+      {/* routing — only when the gate actually names approvers / an escalation */}
+      {hasRouting && (
+        <div style={{ padding: "0 22px 18px" }}>
+          <MonoLabel>Routing</MonoLabel>
+          <div
+            style={{
+              border: "1px solid var(--line-mid)",
+              background: "var(--card)",
+              borderRadius: 11,
+              padding: "10px 14px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              fontSize: 12,
+            }}
+          >
+            {item.approvers &&
+              (item.approvers.emails.length > 0 ||
+                item.approvers.groups.length > 0) && (
+                <div style={{ display: "flex", gap: 10 }}>
+                  <span
+                    style={{
+                      color: "var(--ink-faint)",
+                      width: 92,
+                      flex: "none",
+                    }}
+                  >
+                    Approvers
+                  </span>
+                  <span
+                    style={{
+                      color: "var(--ink)",
+                      fontFamily: "var(--font-mono)",
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    {[
+                      ...item.approvers.emails,
+                      ...item.approvers.groups.map((g) => `@${g.name}`),
+                    ].join(", ")}
+                  </span>
+                </div>
+              )}
+            {(item.escalateTo || item.escalateAfterHours != null) && (
+              <div style={{ display: "flex", gap: 10 }}>
+                <span
+                  style={{ color: "var(--ink-faint)", width: 92, flex: "none" }}
+                >
+                  Escalation
+                </span>
+                <span style={{ color: "var(--ink)" }}>
+                  {item.escalateAfterHours != null
+                    ? `after ${item.escalateAfterHours}h`
+                    : "configured"}
+                  {item.escalateTo ? ` → ${item.escalateTo}` : ""}
+                </span>
+              </div>
+            )}
+            {item.slaHours != null && (
+              <div style={{ display: "flex", gap: 10 }}>
+                <span
+                  style={{ color: "var(--ink-faint)", width: 92, flex: "none" }}
+                >
+                  SLA
+                </span>
+                <span style={{ color: "var(--ink)" }}>{item.slaHours}h</span>
+              </div>
+            )}
+          </div>
+          {onRemind && (
+            <Button
+              variant="ghost"
+              icon="bell"
+              loading={remindBusy}
+              disabled={disabled || remindBusy}
+              onClick={onRemind}
+              style={{ marginTop: 10, height: 34, fontSize: 12 }}
+            >
+              Remind now
+            </Button>
+          )}
+        </div>
+      )}
+      {/* Remind still available for un-routed gates */}
+      {!hasRouting && onRemind && (
+        <div style={{ padding: "0 22px 6px" }}>
+          <Button
+            variant="ghost"
+            icon="bell"
+            loading={remindBusy}
+            disabled={disabled || remindBusy}
+            onClick={onRemind}
+            style={{ height: 34, fontSize: 12 }}
+          >
+            Remind now
+          </Button>
+        </div>
+      )}
 
       {/* decide */}
       <div style={{ padding: "6px 22px 22px" }}>

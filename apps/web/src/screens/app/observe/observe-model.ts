@@ -58,10 +58,67 @@ export interface SeriesBucket {
   bad: number;
 }
 
+/** One day of the server's run-outcome rollup (insights.runsByDay — Slice 2). */
+export interface RunsByDayRow {
+  date: string;
+  total: number;
+  byStatus: Record<string, number>;
+}
+
+/**
+ * Day-bucketed succeeded/failed series from the SERVER's runsByDay rollup
+ * (Slice 2) — un-capped, unlike the 50-row runs list. Null for the 24h range
+ * (the rollup is day-granular; the list-derived hourly series stays honest
+ * there) and when the API predates the rollup.
+ */
+export function throughputFromRollup(
+  days: RunsByDayRow[] | undefined,
+  now: number,
+  range: RangeId,
+): SeriesBucket[] | null {
+  if (!days || range === "24h") return null;
+  const { ms, days: n } = rangeById(range);
+  const from = now - ms;
+  const buckets: SeriesBucket[] = Array.from({ length: n }, () => ({
+    ok: 0,
+    bad: 0,
+  }));
+  for (const d of days) {
+    const t = Date.parse(`${d.date}T00:00:00Z`);
+    if (Number.isNaN(t) || t > now || t < from - 86_400_000) continue;
+    const i = Math.min(n - 1, Math.max(0, Math.floor((t - from) / 86_400_000)));
+    for (const [status, count] of Object.entries(d.byStatus)) {
+      if (status === "completed") buckets[i].ok += count;
+      else if (isFailure(status)) buckets[i].bad += count;
+    }
+  }
+  return buckets;
+}
+
+/** Total runs in the range from the server rollup (un-capped); null for 24h /
+ *  an API without the rollup — the caller falls back to the (capped) list count. */
+export function totalRunsFromRollup(
+  days: RunsByDayRow[] | undefined,
+  now: number,
+  range: RangeId,
+): number | null {
+  if (!days || range === "24h") return null;
+  const { ms } = rangeById(range);
+  const from = now - ms;
+  let total = 0;
+  for (const d of days) {
+    const t = Date.parse(`${d.date}T00:00:00Z`);
+    if (Number.isNaN(t) || t > now || t < from - 86_400_000) continue;
+    total += d.total;
+  }
+  return total;
+}
+
 /**
  * Bucket runs into succeeded/failed counts across the range: 12 × 2h buckets
  * for 24h, one bucket per day otherwise. Derived client-side from the run list
- * (the usage rollups have no run-outcome dimension — see the tab's data notes).
+ * — used for 24h (hour-granular) and as the fallback when the server's
+ * runsByDay rollup (Slice 2) is unavailable.
  */
 export function throughputSeries(
   runs: RunSummary[],
@@ -171,16 +228,28 @@ export interface FailureReason {
   pct: number;
 }
 
+/** Display labels for the worker's compact failureKind classification (Slice 2). */
+const FAILURE_KIND_LABEL: Record<string, string> = {
+  timeout: "Timed out",
+  upstream_5xx: "Upstream 5xx",
+  rate_limit: "Rate limited",
+  budget: "Budget exceeded",
+  rejected: "Rejected",
+  error: "Error",
+};
+
 /**
- * Failed terminal runs grouped by their close reason — the status itself IS the
- * reason on this API (timed_out / budget_exceeded / rejected / circuit_open /
- * failed / …), labelled via the shared run-status map.
+ * Failed terminal runs grouped by reason: the worker's `failureKind`
+ * classification when recorded (Slice 2), else the close status itself
+ * (pre-feature runs), labelled via the shared run-status map.
  */
 export function failureReasons(runs: RunSummary[], top = 5): FailureReason[] {
   const counts = new Map<string, number>();
   for (const r of runs) {
     if (!isFailure(r.status)) continue;
-    const label = runStatusUi(r.status).label;
+    const label = r.failureKind
+      ? (FAILURE_KIND_LABEL[r.failureKind] ?? r.failureKind)
+      : runStatusUi(r.status).label;
     counts.set(label, (counts.get(label) ?? 0) + 1);
   }
   const rows = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, top);
@@ -190,6 +259,45 @@ export function failureReasons(runs: RunSummary[], top = 5): FailureReason[] {
     count,
     pct: max > 0 ? (count / max) * 100 : 0,
   }));
+}
+
+// --- latency (real worker-stamped durations — Slice 2) ----------------------
+
+export interface LatencyStats {
+  medianMs: number;
+  /** How many runs in the range carry a real duration (the sample size shown). */
+  sample: number;
+  histogram: { label: string; count: number }[];
+}
+
+const LATENCY_BUCKETS: { label: string; maxMs: number }[] = [
+  { label: "<1s", maxMs: 1_000 },
+  { label: "1–5s", maxMs: 5_000 },
+  { label: "5–15s", maxMs: 15_000 },
+  { label: "15–60s", maxMs: 60_000 },
+  { label: "1–5m", maxMs: 300_000 },
+  { label: ">5m", maxMs: Number.POSITIVE_INFINITY },
+];
+
+/**
+ * Median + distribution over the REAL run durations in the list (worker-stamped
+ * finishedAt − createdAt, Slice 2). Runs without one (in-flight / pre-feature)
+ * contribute nothing; null when NO run carries a duration — the KPI/histogram
+ * then keep their honest empty state.
+ */
+export function latencyStats(runs: RunSummary[]): LatencyStats | null {
+  const ds = runs
+    .map((r) => r.durationMs)
+    .filter((v): v is number => typeof v === "number")
+    .sort((a, b) => a - b);
+  if (ds.length === 0) return null;
+  const mid = Math.floor(ds.length / 2);
+  const medianMs = ds.length % 2 === 1 ? ds[mid] : (ds[mid - 1] + ds[mid]) / 2;
+  const histogram = LATENCY_BUCKETS.map((b) => ({ label: b.label, count: 0 }));
+  for (const v of ds) {
+    histogram[LATENCY_BUCKETS.findIndex((b) => v < b.maxMs)].count += 1;
+  }
+  return { medianMs, sample: ds.length, histogram };
 }
 
 // --- audit categorisation ---------------------------------------------------

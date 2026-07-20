@@ -66,12 +66,17 @@ function toVectorLiteral(v: number[]): string {
 async function recordEmbedUsage(
   meta: AgentMeta,
   tokens: number,
+  /** Node-type tag + measured call duration (Slice 2) — the caller knows which node
+   *  kind it serves and measured the embed around the provider call. */
+  timing?: { nodeType: string; durationMs: number },
 ): Promise<number> {
   await __agentDeps.recordUsage({
     tenantId: meta.tenantId,
     environmentId: meta.environmentId, // per-env cost tag (Slice 6)
     executionId: meta.executionId,
     nodeId: meta.nodeId,
+    nodeType: timing?.nodeType,
+    durationMs: timing?.durationMs,
     provider: "openai",
     model: EMBED_MODEL,
     usage: { inputTokens: tokens, outputTokens: 0 },
@@ -101,6 +106,7 @@ export async function callVectorUpsert(
   input: unknown,
   meta: AgentMeta,
 ): Promise<VectorUpsertResult> {
+  const startedAtMs = Date.now(); // Slice 2: in-activity measured duration (clock in activity — fine)
   const store = getObjectStore();
   const value = await resolveClaimChecks(input, store);
   const chunks = (Array.isArray(value) ? value : [value])
@@ -125,7 +131,10 @@ export async function callVectorUpsert(
       INSERT INTO "VectorChunk" ("id", "tenantId", "collection", "chunkText", "embedding")
       VALUES (${randomUUID()}, ${meta.tenantId}, ${cfg.collection}, ${chunks[i]}, ${toVectorLiteral(embeddings[i])}::vector)`;
   }
-  const costUsd = await recordEmbedUsage(meta, tokens);
+  const costUsd = await recordEmbedUsage(meta, tokens, {
+    nodeType: "vectorUpsert",
+    durationMs: Date.now() - startedAtMs,
+  });
   activityRuns.inc({ activity: "callVectorUpsert", outcome: "ok" });
   return { status: "ok", result: { upserted: chunks.length }, costUsd };
 }
@@ -147,6 +156,7 @@ export async function callVectorQuery(
   input: unknown,
   meta: AgentMeta,
 ): Promise<VectorQueryResult> {
+  const startedAtMs = Date.now(); // Slice 2: in-activity measured duration
   const store = getObjectStore();
   const value = await resolveClaimChecks(input, store);
   const query = typeof value === "string" ? value : JSON.stringify(value ?? "");
@@ -178,7 +188,10 @@ export async function callVectorQuery(
     chunkText: r.chunkText,
     score: Number(r.score),
   }));
-  const costUsd = await recordEmbedUsage(meta, tokens);
+  const costUsd = await recordEmbedUsage(meta, tokens, {
+    nodeType: "vectorQuery",
+    durationMs: Date.now() - startedAtMs,
+  });
   activityRuns.inc({ activity: "callVectorQuery", outcome: "ok" });
   return { status: "ok", result: { matches }, costUsd };
 }

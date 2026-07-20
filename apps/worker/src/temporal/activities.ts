@@ -47,12 +47,17 @@ export {
   recordExecution,
   loadVariables,
   setExecutionStatus,
+  refreshBudget,
   loadChatHistory,
   appendChatTurn,
   computeDateTime,
   resolveSubWorkflowGraph,
 } from "./activities/execution";
-export type { DateTimeResult, SubWorkflowGraph } from "./activities/execution";
+export type {
+  BudgetSnapshot,
+  DateTimeResult,
+  SubWorkflowGraph,
+} from "./activities/execution";
 
 export {
   __signingDeps,
@@ -89,6 +94,8 @@ export type {
 export {
   __notifyDeps,
   normalizeBaseUrl,
+  parseEmailChannelConfig,
+  prepareApproval,
   sendNotification,
 } from "./activities/notifications";
 export type {

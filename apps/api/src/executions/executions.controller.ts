@@ -23,10 +23,12 @@ import {
   RerunDto,
   StartExecutionDto,
 } from "./execution.dto";
+import { NotificationsService } from "../notifications/notifications.service";
 import {
   AcceptedResponse,
   AwaitingApprovalResponse,
   BatchDecisionItemResponse,
+  RemindResponse,
   ResumeUrlResponse,
   RunEventResponse,
   RunGraphResponse,
@@ -48,6 +50,7 @@ export class ExecutionsController {
   constructor(
     private readonly executions: ExecutionsService,
     private readonly environments: EnvironmentsService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   @ApiEndpoint({
@@ -193,6 +196,31 @@ export class ExecutionsController {
       principal,
     );
     return { accepted: true };
+  }
+
+  /** Manual "Remind now" for a paused approval: re-fires the approval notification with a
+   *  `reminder` flavor to the run env's enabled channels. 409 if no longer awaiting. */
+  @ApiEndpoint({
+    summary: "Send an approval reminder now",
+    description:
+      "Re-notifies the run environment's channels (reminder flavor) that this approval is still waiting. 409 if the run is no longer awaiting approval.",
+    ok: RemindResponse,
+    notFound: true,
+  })
+  @Post(":id/remind")
+  @HttpCode(200)
+  async remind(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+    @CurrentPrincipal() principal?: Principal,
+  ): Promise<RemindResponse> {
+    const info = await this.executions.remindContext(id, tenantId, principal);
+    const { sent } = await this.notifications.sendApprovalReminder(
+      tenantId,
+      info.environmentId,
+      info,
+    );
+    return { accepted: true, sent };
   }
 
   @ApiEndpoint({

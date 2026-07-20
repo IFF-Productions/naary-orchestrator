@@ -3,9 +3,10 @@
  * execution order: glowing state dot · type icon tile · name · state bar
  * (green for done, ember for running, amber marching stripes for waiting, thin
  * dashed for pending/skipped) · duration + cost mono columns. Data honesty:
- * the platform records no per-node duration or cost, so those columns render
- * real values only where they exist (the waiting node's age) and "—" elsewhere;
- * done bars are uniform state bars, not fabricated proportions.
+ * duration/cost render REAL recorded values only — worker-stamped per-node times
+ * (Slice 2) and the node output's own metered cost; runs that predate the
+ * recording keep "—", and done bars are proportional ONLY when real durations
+ * exist (uniform state bars otherwise, never fabricated proportions).
  */
 import { Icon, type IconName } from "../../../components";
 import { STEP_FG, type StepState } from "./run-view-model";
@@ -16,13 +17,19 @@ export interface TimelineStep {
   icon: IconName;
   accent: string;
   state: StepState;
-  /** Real elapsed text (e.g. the waiting node's age); null → "—". */
+  /** Real elapsed text (worker-stamped duration, or the waiting node's age); null → "—". */
   duration: string | null;
-  /** Real per-step cost; null → "—" (the ledger records run totals only). */
+  /** Real recorded duration in ms (drives the proportional done bar); null → uniform bar. */
+  durationMs?: number | null;
+  /** Real per-step cost (the node output's metered costUsd); null → "—". */
   cost: string | null;
 }
 
-function barStyle(state: StepState): React.CSSProperties {
+function barStyle(
+  state: StepState,
+  /** 0..1 share of the longest recorded step duration; null → uniform width. */
+  share: number | null,
+): React.CSSProperties {
   switch (state) {
     case "waiting":
       return {
@@ -45,7 +52,9 @@ function barStyle(state: StepState): React.CSSProperties {
     case "done":
       return {
         height: 10,
-        width: "100%",
+        // Proportional to the real recorded duration when one exists (8% floor keeps
+        // sub-ms pure steps visible); uniform when the run predates per-node timing.
+        width: share === null ? "100%" : `${Math.max(8, share * 100)}%`,
         borderRadius: 6,
         background:
           "linear-gradient(90deg, var(--state-done), color-mix(in srgb, var(--state-done) 55%, white))",
@@ -54,7 +63,7 @@ function barStyle(state: StepState): React.CSSProperties {
     case "error":
       return {
         height: 10,
-        width: "100%",
+        width: share === null ? "100%" : `${Math.max(8, share * 100)}%`,
         borderRadius: 6,
         background: "var(--state-error)",
         opacity: 0.85,
@@ -104,123 +113,138 @@ export function StepTimeline({
         Step timeline
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        {steps.map((p) => {
-          const sel = p.id === selectedId;
-          const dot = STEP_FG[p.state];
-          return (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => onSelect(p.id)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 11,
-                padding: "8px 11px",
-                borderRadius: "var(--radius-md)",
-                cursor: "pointer",
-                border: `1px solid ${sel ? "var(--brand)" : "transparent"}`,
-                background: sel ? "var(--brand-soft)" : "transparent",
-                transition: "background .15s, border-color .15s",
-                font: "inherit",
-                color: "inherit",
-                textAlign: "left",
-                width: "100%",
-              }}
-              onMouseEnter={(e) => {
-                if (!sel) e.currentTarget.style.background = "var(--hover)";
-              }}
-              onMouseLeave={(e) => {
-                if (!sel) e.currentTarget.style.background = "transparent";
-              }}
-            >
-              <span
-                style={{
-                  width: 9,
-                  height: 9,
-                  borderRadius: "50%",
-                  flex: "none",
-                  background: dot,
-                  boxShadow:
-                    p.state === "pending" || p.state === "skipped"
-                      ? "none"
-                      : `0 0 7px ${dot}`,
-                  opacity:
-                    p.state === "pending" || p.state === "skipped" ? 0.55 : 1,
-                }}
-              />
-              <span
-                style={{
-                  width: 26,
-                  height: 26,
-                  flex: "none",
-                  borderRadius: 7,
-                  border: `1px solid ${p.accent}`,
-                  color: p.accent,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  opacity: p.state === "skipped" ? 0.55 : 1,
-                }}
-              >
-                <Icon name={p.icon} size={13} />
-              </span>
-              <span
-                style={{
-                  fontSize: 12.5,
-                  fontWeight: "var(--weight-medium)",
-                  color: "var(--ink)",
-                  width: 132,
-                  flex: "none",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  opacity: p.state === "skipped" ? 0.6 : 1,
-                }}
-              >
-                {p.label}
-              </span>
-              <span
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  height: 16,
-                  display: "flex",
-                  alignItems: "center",
-                }}
-              >
-                <span style={barStyle(p.state)} />
-              </span>
-              <span
-                className="mono"
-                style={{
-                  fontSize: "var(--text-xs)",
-                  color:
-                    p.state === "waiting"
-                      ? "var(--state-paused)"
-                      : "var(--ink-3)",
-                  width: 64,
-                  textAlign: "right",
-                  flex: "none",
-                }}
-              >
-                {p.duration ?? (p.state === "running" ? "…" : "—")}
-              </span>
-              <span
-                className="mono"
-                style={{
-                  fontSize: "var(--text-xs)",
-                  color: "var(--ink-3)",
-                  width: 66,
-                  textAlign: "right",
-                  flex: "none",
-                }}
-              >
-                {p.cost ?? "—"}
-              </span>
-            </button>
+        {(() => {
+          // Longest REAL recorded duration → the proportional-bar denominator.
+          // No recorded durations at all (pre-feature run) → null → uniform bars.
+          const maxMs = steps.reduce(
+            (m, s) =>
+              typeof s.durationMs === "number" && s.durationMs > m
+                ? s.durationMs
+                : m,
+            0,
           );
-        })}
+          return steps.map((p) => {
+            const sel = p.id === selectedId;
+            const dot = STEP_FG[p.state];
+            const share =
+              maxMs > 0 && typeof p.durationMs === "number"
+                ? p.durationMs / maxMs
+                : null;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => onSelect(p.id)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 11,
+                  padding: "8px 11px",
+                  borderRadius: "var(--radius-md)",
+                  cursor: "pointer",
+                  border: `1px solid ${sel ? "var(--brand)" : "transparent"}`,
+                  background: sel ? "var(--brand-soft)" : "transparent",
+                  transition: "background .15s, border-color .15s",
+                  font: "inherit",
+                  color: "inherit",
+                  textAlign: "left",
+                  width: "100%",
+                }}
+                onMouseEnter={(e) => {
+                  if (!sel) e.currentTarget.style.background = "var(--hover)";
+                }}
+                onMouseLeave={(e) => {
+                  if (!sel) e.currentTarget.style.background = "transparent";
+                }}
+              >
+                <span
+                  style={{
+                    width: 9,
+                    height: 9,
+                    borderRadius: "50%",
+                    flex: "none",
+                    background: dot,
+                    boxShadow:
+                      p.state === "pending" || p.state === "skipped"
+                        ? "none"
+                        : `0 0 7px ${dot}`,
+                    opacity:
+                      p.state === "pending" || p.state === "skipped" ? 0.55 : 1,
+                  }}
+                />
+                <span
+                  style={{
+                    width: 26,
+                    height: 26,
+                    flex: "none",
+                    borderRadius: 7,
+                    border: `1px solid ${p.accent}`,
+                    color: p.accent,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    opacity: p.state === "skipped" ? 0.55 : 1,
+                  }}
+                >
+                  <Icon name={p.icon} size={13} />
+                </span>
+                <span
+                  style={{
+                    fontSize: 12.5,
+                    fontWeight: "var(--weight-medium)",
+                    color: "var(--ink)",
+                    width: 132,
+                    flex: "none",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    opacity: p.state === "skipped" ? 0.6 : 1,
+                  }}
+                >
+                  {p.label}
+                </span>
+                <span
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    height: 16,
+                    display: "flex",
+                    alignItems: "center",
+                  }}
+                >
+                  <span style={barStyle(p.state, share)} />
+                </span>
+                <span
+                  className="mono"
+                  style={{
+                    fontSize: "var(--text-xs)",
+                    color:
+                      p.state === "waiting"
+                        ? "var(--state-paused)"
+                        : "var(--ink-3)",
+                    width: 64,
+                    textAlign: "right",
+                    flex: "none",
+                  }}
+                >
+                  {p.duration ?? (p.state === "running" ? "…" : "—")}
+                </span>
+                <span
+                  className="mono"
+                  style={{
+                    fontSize: "var(--text-xs)",
+                    color: "var(--ink-3)",
+                    width: 66,
+                    textAlign: "right",
+                    flex: "none",
+                  }}
+                >
+                  {p.cost ?? "—"}
+                </span>
+              </button>
+            );
+          });
+        })()}
       </div>
     </div>
   );

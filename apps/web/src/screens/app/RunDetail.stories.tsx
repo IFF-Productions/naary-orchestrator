@@ -26,6 +26,15 @@ const GRAPH: GraphDef = {
         title: "Refund > $500",
         instructions: "Review the drafted summary before the refund is issued.",
         timeoutHours: 72,
+        // Slice 1 routing — drives the hero's real SLA/approver/escalation chips.
+        slaHours: 48,
+        approvers: {
+          emails: ["sam@acme.io"],
+          groupIds: ["finance-leads"],
+        },
+        remindAfterHours: [4, 12],
+        escalateAfterHours: 20,
+        escalateTo: "@ops-oncall",
       },
     },
     {
@@ -201,7 +210,9 @@ export const AwaitingApproval: Story = {
   },
 };
 
-/** A completed run — green hero, fully-green executed path, per-step outputs. */
+/** A completed run — green hero, fully-green executed path, per-step outputs,
+ *  and the Slice-2 per-node timing map (proportional duration bars + per-step
+ *  duration/cost/tokens in the timeline + detail card). */
 export const Completed: Story = {
   parameters: {
     msw: {
@@ -211,11 +222,31 @@ export const Completed: Story = {
           currentNodeId: "end",
           ctx: {
             ...CTX_UP_TO_ROUTE,
+            // The agent's real result shape carries its own metered cost/tokens.
+            classify: {
+              ...CTX_UP_TO_ROUTE.classify,
+              costUsd: 0.0021,
+              totalTokens: 1840,
+            },
             approve: { approved: true },
-            refund: { refunded: true, id: "re_123" },
+            refund: { refunded: true, id: "re_123", costUsd: 0.005 },
             end: {},
             __costUsd: 0.0142,
           },
+          // Worker-stamped per-node windows (epoch ms, workflow time).
+          nodeTimes: (() => {
+            const t0 = Date.parse("2026-07-17T09:20:00Z");
+            const dec = Date.parse("2026-07-18T11:41:00Z"); // approval decided
+            return {
+              start: { s: t0, f: t0 },
+              enrich: { s: t0 + 500, f: t0 + 1400 },
+              classify: { s: t0 + 1400, f: t0 + 3900 },
+              route: { s: t0 + 3900, f: t0 + 3900 },
+              approve: { s: t0 + 3900, f: dec },
+              refund: { s: dec, f: dec + 1200 },
+              end: { s: dec + 1200, f: dec + 1200 },
+            };
+          })(),
         },
         completedHistory,
       ),

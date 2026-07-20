@@ -162,6 +162,38 @@ function usageFixtures(scale: number) {
         },
       ],
       byModel,
+      // Slice 2: ledger node-type buckets + run-duration rollups feed the
+      // Avg-duration card's "By node type / By workflow" toggle.
+      byNodeType: [
+        {
+          nodeType: "agent",
+          costUsd: totalCost * 0.85,
+          totalTokens: Math.round(totalTokens * 0.9),
+          calls: Math.round(calls * 0.8),
+          avgDurationMs: 2_150,
+        },
+        {
+          nodeType: "codeAgent",
+          costUsd: totalCost * 0.1,
+          totalTokens: Math.round(totalTokens * 0.08),
+          calls: Math.round(calls * 0.05),
+          avgDurationMs: 48_000,
+        },
+        {
+          nodeType: "vectorQuery",
+          costUsd: totalCost * 0.05,
+          totalTokens: Math.round(totalTokens * 0.02),
+          calls: Math.round(calls * 0.15),
+          avgDurationMs: 380,
+        },
+      ],
+      runsByWorkflow: [
+        { workflowKey: "deal-won-notifier", runs: 4200, avgDurationMs: 6_400 },
+        { workflowKey: "rag-support-bot", runs: 3100, avgDurationMs: 2_900 },
+        { workflowKey: "nightly-digest", runs: 900, avgDurationMs: 74_000 },
+        // Pre-feature workflow: runs but no recorded durations → omitted from the card.
+        { workflowKey: "invoice-ap", runs: 640, avgDurationMs: null },
+      ],
     },
   };
 }
@@ -241,6 +273,7 @@ export const Healthy: Story = {
           maxStepsPerRun: 50,
           onBudgetExceeded: "downgrade",
           fallbackModel: "claude-3-5-haiku",
+          alertThresholdPct: null,
           mtdSpendUsd: 132.4,
           remainingUsd: 267.6,
         },
@@ -267,6 +300,9 @@ export const NearCap: Story = {
           maxStepsPerRun: 50,
           onBudgetExceeded: "reject",
           fallbackModel: null,
+          // Slice 3: a configured server-side alert → the ladder's Alert rung
+          // replaces the "dashboard threshold only" disclaimer (and it's lit at 93%).
+          alertThresholdPct: 80,
           mtdSpendUsd: 372.1,
           remainingUsd: 27.9,
         },
@@ -284,6 +320,34 @@ export const NearCap: Story = {
           mtdSpendUsd: 940,
           remainingUsd: 560,
         },
+      }),
+    },
+  },
+};
+
+/** Over cap under policy "pause" (Slice 3): runs are PARKED as awaiting_budget —
+ *  paused banner with "Raise budget & resume", pause rung in the ladder. */
+export const PausedOnBudget: Story = {
+  parameters: {
+    msw: {
+      handlers: handlers({
+        scale: 1.55, // ≈ over the $400 cap
+        budget: {
+          tenantId: "t1",
+          monthlyCapUsd: 400,
+          perExecutionCapUsd: 0.5,
+          maxStepsPerRun: 50,
+          onBudgetExceeded: "pause",
+          fallbackModel: null,
+          alertThresholdPct: 80,
+          mtdSpendUsd: 401.3,
+          remainingUsd: -1.3,
+        },
+        runs: [
+          run("wh-1", "awaiting_budget", 0.2, 0.31),
+          run("wh-2", "awaiting_budget", 0.6, 0.12),
+          run("wh-3", "completed", 1.2, 0.02),
+        ],
       }),
     },
   },

@@ -128,6 +128,17 @@ export const runsApi = {
   async listAwaitingApprovals(): Promise<AwaitingApprovalItem[]> {
     return unwrap(await client.GET("/executions/awaiting", {}));
   },
+  // Manual "Remind now" — re-fires the approval notification (reminder flavor) to the
+  // run environment's channels. 409 if the run is no longer awaiting approval.
+  async remindApproval(
+    id: string,
+  ): Promise<components["schemas"]["RemindResponse"]> {
+    return unwrap(
+      await client.POST("/executions/{id}/remind", {
+        params: { path: { id } },
+      }),
+    );
+  },
   async getState(id: string): Promise<RunState> {
     return unwrap(
       await client.GET("/executions/{id}", { params: { path: { id } } }),
@@ -179,13 +190,19 @@ export const runsApi = {
     );
   },
   // PUBLIC (anonymous — no auth): approve/reject a run via a signed link token.
+  // Links minted from Slice 1 on carry an `exp` claim signed into the token — it must be
+  // passed back for such links to verify; legacy links have none (omit it).
   async getApprovalPrompt(
     workflowId: string,
     token: string,
+    exp?: string,
   ): Promise<ApprovalPrompt> {
     return unwrap(
       await client.GET("/approvals/{workflowId}", {
-        params: { path: { workflowId }, query: { token } },
+        params: {
+          path: { workflowId },
+          query: { token, ...(exp ? { exp } : {}) },
+        },
       }),
     );
   },
@@ -194,11 +211,17 @@ export const runsApi = {
     token: string,
     decision: "approve" | "reject",
     comment?: string,
+    exp?: string,
   ): Promise<DecideResult> {
     return unwrap(
       await client.POST("/approvals/{workflowId}/decide", {
         params: { path: { workflowId } },
-        body: { token, decision, ...(comment ? { comment } : {}) },
+        body: {
+          token,
+          decision,
+          ...(comment ? { comment } : {}),
+          ...(exp ? { exp } : {}),
+        },
       }),
     );
   },

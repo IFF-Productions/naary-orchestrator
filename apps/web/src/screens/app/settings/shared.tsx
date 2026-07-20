@@ -187,13 +187,14 @@ export function LockGlyph({ style }: { style?: CSSProperties }) {
   );
 }
 
-/** Slack = channel hash; Teams = the two-person mark. Enough to tell rows apart. */
+/** Slack = channel hash; Teams = the two-person mark; Email = an envelope. Enough to
+ *  tell rows apart. */
 export function ChannelGlyph({
   type,
   size = 15,
   style,
 }: {
-  type: "slack" | "teams";
+  type: "slack" | "teams" | "email";
   size?: number;
   style?: CSSProperties;
 }) {
@@ -204,6 +205,34 @@ export function ChannelGlyph({
         size={size}
         style={style}
       />
+    );
+  if (type === "email")
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="none"
+        style={{ flex: "none", ...style }}
+        aria-hidden
+      >
+        <rect
+          x="3.5"
+          y="5.5"
+          width="17"
+          height="13"
+          rx="2"
+          stroke="currentColor"
+          strokeWidth="1.7"
+        />
+        <path
+          d="m4.5 7.5 7.5 6 7.5-6"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
     );
   return (
     <svg

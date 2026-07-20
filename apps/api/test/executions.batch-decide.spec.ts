@@ -11,16 +11,33 @@ import { ExecutionsService } from "../src/executions/executions.service";
  * one run to fail (closed → WorkflowNotFoundError) while the rest succeed.
  */
 function makeService(signalFor: (id: string) => () => Promise<void>) {
-  const service = new ExecutionsService({} as never, { defaultEnvId: async () => "env-test", resolveEnvId: async () => "env-test" } as never);
+  const service = new ExecutionsService(
+    {} as never,
+    {
+      defaultEnvId: async () => "env-test",
+      resolveEnvId: async () => "env-test",
+    } as never,
+  );
   (service as unknown as { client: unknown }).client = {
     workflow: {
       getHandle: (id: string) => ({ signal: signalFor(id) }),
     },
   };
+  // assertOwner returns the owned row (approve threads it into the access checks).
   vi.spyOn(
-    service as unknown as { assertOwner: () => Promise<void> },
+    service as unknown as {
+      assertOwner: () => Promise<{
+        tenantId: string;
+        workflowKey: string | null;
+        environmentId: string | null;
+      }>;
+    },
     "assertOwner",
-  ).mockResolvedValue(undefined);
+  ).mockResolvedValue({
+    tenantId: "t-1",
+    workflowKey: null,
+    environmentId: null,
+  });
   return service;
 }
 

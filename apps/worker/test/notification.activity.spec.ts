@@ -6,6 +6,9 @@ import {
 } from "../src/temporal/activities";
 
 const fetch = vi.fn();
+const sendMail = vi.fn();
+const resolveSmtpUri = vi.fn();
+const assertHostPublic = vi.fn();
 // The tenant's ENABLED channels the worker fans out to (readChannels returns only enabled rows).
 let channels: NotificationChannelRow[];
 
@@ -43,6 +46,15 @@ beforeEach(() => {
   __notifyDeps.fetch = ((url: string, init?: RequestInit) =>
     fetch(url, init)) as never;
   __notifyDeps.readChannels = (async () => channels) as never;
+  // Email seam (Slice 4): resolver + SSRF check + transport, all test doubles — no SMTP/DB.
+  sendMail.mockReset().mockResolvedValue({ messageId: "m1" });
+  resolveSmtpUri
+    .mockReset()
+    .mockResolvedValue("smtps://ops%40acme.io:s3cret@smtp.acme.io:465");
+  assertHostPublic.mockReset().mockResolvedValue(undefined);
+  __notifyDeps.resolveSmtpUri = resolveSmtpUri as never;
+  __notifyDeps.assertHostPublic = assertHostPublic as never;
+  __notifyDeps.createTransport = (() => ({ sendMail })) as never;
 });
 
 const BASE = {
@@ -475,6 +487,224 @@ describe("sendNotification", () => {
   });
 });
 
+describe("sendNotification — budget_threshold (Slice 3)", () => {
+  const BUDGET = {
+    tenantId: "t1",
+    workflowId: "wf-1",
+    kind: "budget_threshold" as const,
+    thresholdPct: 80,
+    capUsd: 400,
+    spendUsd: 321.4,
+  };
+
+  it("is OPT-IN: a channel without onBudgetThreshold (default/legacy) gets NO post", async () => {
+    // The default channel above has no onBudgetThreshold field at all (legacy row shape).
+    await sendNotification(BUDGET);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("POSTs to a channel that opted in, with the usage deep link + budget facts", async () => {
+    channels = [
+      {
+        type: "slack",
+        webhookUrl: "https://hooks.example.com/x",
+        onApprovalPending: false,
+        onRunFailed: false,
+        onBudgetThreshold: true,
+      },
+    ];
+    await sendNotification(BUDGET);
+    expect(fetch).toHaveBeenCalledOnce();
+    const body = JSON.parse(
+      (fetch.mock.calls[0][1] as { body: string }).body,
+    ) as {
+      text: string;
+      kind: string;
+      usageUrl?: string;
+      thresholdPct?: number;
+    };
+    expect(body.kind).toBe("budget_threshold");
+    expect(body.thresholdPct).toBe(80);
+    expect(body.text).toContain("80%");
+    expect(body.usageUrl).toBe("https://app.naary.test/app/billing");
+  });
+
+  it("routes per-channel: only the opted-in channel is posted", async () => {
+    channels = [
+      {
+        type: "slack",
+        webhookUrl: "https://hooks.example.com/alerts",
+        onApprovalPending: true,
+        onRunFailed: true,
+        onBudgetThreshold: false,
+      },
+      {
+        type: "teams",
+        webhookUrl: "https://hooks.example.com/finance",
+        onApprovalPending: false,
+        onRunFailed: false,
+        onBudgetThreshold: true,
+      },
+    ];
+    await sendNotification(BUDGET);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch.mock.calls[0][0]).toBe("https://hooks.example.com/finance");
+    // Teams channel → Adaptive Card envelope with the budget FactSet.
+    const body = JSON.parse(
+      (fetch.mock.calls[0][1] as { body: string }).body,
+    ) as { type: string; attachments: { content: { body: unknown[] } }[] };
+    expect(body.type).toBe("message");
+    expect(JSON.stringify(body)).toContain("Monthly cap");
+  });
+
+  it("omits the usage link when no base URL resolves (no fabricated buttons)", async () => {
+    delete process.env.APP_BASE_URL;
+    process.env.CORS_ORIGINS = "";
+    channels = [
+      {
+        type: "slack",
+        webhookUrl: "https://hooks.example.com/x",
+        onApprovalPending: false,
+        onRunFailed: false,
+        onBudgetThreshold: true,
+      },
+    ];
+    await sendNotification(BUDGET);
+    const body = JSON.parse(
+      (fetch.mock.calls[0][1] as { body: string }).body,
+    ) as { usageUrl?: string; actions: unknown[] };
+    expect(body.usageUrl).toBeUndefined();
+    expect(body.actions).toEqual([]);
+  });
+});
+
+describe("sendNotification — approval reminder/escalation flavors (Slice 1)", () => {
+  it("reminder flavor: header + text say reminder #N; decision buttons stay", async () => {
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      flavor: "reminder",
+      reminderIndex: 2,
+      title: "Ship it?",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    const header = body.blocks.find(
+      (b: { type: string }) => b.type === "header",
+    );
+    expect(header.text.text).toBe("⏰ Approval reminder #2");
+    expect(body.text).toContain("Reminder #2");
+    expect(body.text).toContain("Ship it?");
+    // Same one-click decision actions as the initial pause notification.
+    expect(body.actions.map((a: { label: string }) => a.label)).toEqual([
+      "✅ Approve",
+      "❌ Reject",
+      "View run",
+    ]);
+    // Generic hooks can branch on the flavor.
+    expect(body.flavor).toBe("reminder");
+    expect(body.reminderIndex).toBe(2);
+  });
+
+  it("reminder without an index (manual Remind now) drops the #N", async () => {
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      flavor: "reminder",
+      title: "Ship it?",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    const header = body.blocks.find(
+      (b: { type: string }) => b.type === "header",
+    );
+    expect(header.text.text).toBe("⏰ Approval reminder");
+  });
+
+  it("escalation flavor: names the target in a full-width section (escaped)", async () => {
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      flavor: "escalation",
+      escalateTo: "@ops-oncall <primary>",
+      title: "Ship it?",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    const header = body.blocks.find(
+      (b: { type: string }) => b.type === "header",
+    );
+    expect(header.text.text).toBe("🚨 Approval escalated");
+    const target = body.blocks.find(
+      (b: { type: string; text?: { text?: string } }) =>
+        b.type === "section" && b.text?.text?.includes("*Escalated to*"),
+    );
+    expect(target?.text.text).toContain("@ops-oncall &lt;primary&gt;");
+    expect(body.text).toContain("escalated to @ops-oncall &lt;primary&gt;");
+    expect(body.escalateTo).toBe("@ops-oncall <primary>");
+  });
+
+  it("flavors still respect the onApprovalPending channel toggle", async () => {
+    channels = [
+      {
+        type: "slack",
+        webhookUrl: "https://hooks.example.com/x",
+        onApprovalPending: false,
+        onRunFailed: true,
+      },
+    ];
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      flavor: "reminder",
+      reminderIndex: 1,
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("Teams: reminder/escalation ride the FactSet (plain values, no mrkdwn)", async () => {
+    channels = [
+      {
+        type: "teams",
+        webhookUrl: "https://teams.example/x",
+        onApprovalPending: true,
+        onRunFailed: true,
+      },
+    ];
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      flavor: "escalation",
+      escalateTo: "@ops-oncall",
+      title: "Ship?",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    const card = body.attachments[0].content;
+    const headerBlock = card.body.find(
+      (b: { type: string }) => b.type === "TextBlock",
+    );
+    expect(headerBlock.text).toBe("🚨 Approval escalated");
+    const facts = card.body.find((b: { type: string }) => b.type === "FactSet")
+      .facts as { title: string; value: string }[];
+    expect(facts).toContainEqual({
+      title: "Escalated to",
+      value: "@ops-oncall",
+    });
+  });
+
+  it("approval links now carry a SIGNED expiry claim (&exp=…)", async () => {
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      title: "Ship?",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    expect(body.approvalUrl).toMatch(/\?token=[0-9a-f]{64}&exp=\d+$/);
+    const exp = Number(
+      new URL(body.approvalUrl).searchParams.get("exp") ?? "0",
+    );
+    // Fresh mint → the claim is in the future.
+    expect(exp).toBeGreaterThan(Date.now() / 1000);
+  });
+});
+
 describe("sendNotification — Microsoft Teams channel", () => {
   /** The Adaptive Card content object out of the Teams envelope. */
   function teamsCard(body: {
@@ -595,6 +825,134 @@ describe("sendNotification — Microsoft Teams channel", () => {
   });
 
   it("uses the Slack shape for an unknown/legacy channel type (fallback)", async () => {
+    channels = [
+      {
+        type: "discord", // unknown type → Slack/generic payload, not the Teams envelope
+        webhookUrl: "https://hooks.slack.com/x",
+        onApprovalPending: true,
+        onRunFailed: true,
+      },
+    ];
+    await sendNotification({ ...BASE, kind: "run_failed", detail: "boom" });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    expect(body.type).toBeUndefined(); // not the Teams envelope
+    expect(Array.isArray(body.blocks)).toBe(true);
+  });
+});
+
+describe("sendNotification — email channel (Slice 4)", () => {
+  const EMAIL_CHANNEL: NotificationChannelRow = {
+    type: "email",
+    webhookUrl: null,
+    config: { connectionId: "conn-smtp-1", to: ["ops@acme.io", "sre@acme.io"] },
+    onApprovalPending: true,
+    onRunFailed: true,
+  };
+
+  it("delivers an approval email via the SMTP connection — same signed links as Slack", async () => {
+    channels = [EMAIL_CHANNEL];
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      title: "Ship it?",
+    });
+
+    // No webhook POST for an email channel.
+    expect(fetch).not.toHaveBeenCalled();
+    // The SMTP URI is resolved by tenant + the channel's connectionId, at send time.
+    expect(resolveSmtpUri).toHaveBeenCalledWith("t1", "conn-smtp-1");
+    // SSRF: the SMTP host must be public.
+    expect(assertHostPublic).toHaveBeenCalledWith("smtp.acme.io");
+    expect(sendMail).toHaveBeenCalledOnce();
+    const mail = sendMail.mock.calls[0][0];
+    expect(mail.to).toEqual(["ops@acme.io", "sre@acme.io"]);
+    // `from` defaults to the URI's user (decoded), like the sendEmail node.
+    expect(mail.from).toBe("ops@acme.io");
+    expect(mail.subject).toContain("Approval needed");
+    // Decide-in-place = the SAME signed approve/reject links the Slack buttons carry.
+    expect(mail.text).toContain("https://app.naary.test/approve/wf-1?token=");
+    expect(mail.text).toContain("&decision=approve");
+    expect(mail.text).toContain("&decision=reject");
+    expect(mail.html).toContain("&amp;decision=approve");
+  });
+
+  it("skips an UNCONFIGURED email channel (no connection / no recipients)", async () => {
+    channels = [
+      { ...EMAIL_CHANNEL, config: null },
+      { ...EMAIL_CHANNEL, config: { connectionId: "conn-1", to: [] } },
+      { ...EMAIL_CHANNEL, config: { to: ["ops@acme.io"] } },
+    ];
+    await sendNotification({ ...BASE, kind: "run_failed", detail: "boom" });
+    expect(sendMail).not.toHaveBeenCalled();
+    expect(resolveSmtpUri).not.toHaveBeenCalled();
+  });
+
+  it("respects the per-event toggles on email channels too", async () => {
+    channels = [{ ...EMAIL_CHANNEL, onRunFailed: false }];
+    await sendNotification({ ...BASE, kind: "run_failed", detail: "boom" });
+    expect(sendMail).not.toHaveBeenCalled();
+
+    channels = [{ ...EMAIL_CHANNEL, onBudgetThreshold: true }];
+    await sendNotification({
+      tenantId: "t1",
+      workflowId: "wf-1",
+      kind: "budget_threshold",
+      thresholdPct: 80,
+      capUsd: 400,
+      spendUsd: 321.4,
+    });
+    expect(sendMail).toHaveBeenCalledOnce();
+    expect(sendMail.mock.calls[0][0].subject).toContain("Budget alert");
+  });
+
+  it("NEVER throws on an SMTP failure, and the next channel still sends", async () => {
+    channels = [
+      EMAIL_CHANNEL,
+      {
+        type: "slack",
+        webhookUrl: "https://hooks.slack.com/x",
+        onApprovalPending: true,
+        onRunFailed: true,
+      },
+    ];
+    sendMail.mockRejectedValue(
+      new Error("smtps://user:pass@smtp.acme.io refused"),
+    );
+    await expect(
+      sendNotification({ ...BASE, kind: "run_failed", detail: "boom" }),
+    ).resolves.toBeUndefined();
+    // The Slack channel was still POSTed after the email failure.
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("a blocked (private) SMTP host is refused before any send", async () => {
+    channels = [EMAIL_CHANNEL];
+    assertHostPublic.mockRejectedValue(new Error("private host"));
+    await sendNotification({ ...BASE, kind: "run_failed", detail: "boom" });
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
+  it("mixed fan-out: Slack webhook + email both deliver, each in its own format", async () => {
+    channels = [
+      {
+        type: "slack",
+        webhookUrl: "https://hooks.slack.com/x",
+        onApprovalPending: true,
+        onRunFailed: true,
+      },
+      EMAIL_CHANNEL,
+    ];
+    await sendNotification({ ...BASE, kind: "run_failed", detail: "boom" });
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(sendMail).toHaveBeenCalledOnce();
+    const mail = sendMail.mock.calls[0][0];
+    expect(mail.subject).toBe('❌ Run failed — "poller"');
+    expect(mail.html).toContain("boom");
+  });
+});
+
+describe("sendNotification — legacy fallback (unknown type)", () => {
+  it("keeps the Slack shape for an unknown type even with email channels shipped", async () => {
     channels = [
       {
         type: "discord", // unknown type → Slack/generic payload, not the Teams envelope

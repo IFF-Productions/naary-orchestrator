@@ -7,17 +7,25 @@
  * anything unknown is simply omitted.
  */
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Button, Icon } from "../../../components";
 import { runStatusUi } from "../../../lib/run-status";
 import { fmtAge, fmtWhen } from "./run-view-model";
 
-/** Approval-node config facts the hero may show — only what the config has. */
+/** Approval-node config facts the hero may show — only what the config has.
+ *  Mirrors ApprovalNodeConfig (@naary/dsl) — the run-detail casts the paused
+ *  gate's config to this, so every rendered fact is real graph data. */
 export interface ApprovalInfo {
   title?: string;
   instructions?: string;
   timeoutHours?: number;
-  /** Not part of the current schema; rendered only if a graph carries it. */
-  approvers?: string | string[];
+  /** Slice 1 routing: who may decide (emails and/or permission-group ids). */
+  approvers?: { emails?: string[]; groupIds?: string[] };
+  /** Display-only SLA (due = pause + slaHours). */
+  slaHours?: number;
+  remindAfterHours?: number[];
+  escalateAfterHours?: number;
+  escalateTo?: string;
 }
 
 export interface StatusHeroProps {
@@ -121,6 +129,7 @@ export function StatusHero(props: StatusHeroProps) {
   const { status } = props;
   if (status === "awaiting_approval") return <ApprovalHero {...props} />;
   if (status === "awaiting_webhook") return <WebhookHero {...props} />;
+  if (status === "awaiting_budget") return <BudgetHero {...props} />;
   if (status === "running") return <RunningHero {...props} />;
   if (status === "completed") return <CompletedHero {...props} />;
   return <ClosedHero {...props} />;
@@ -138,10 +147,21 @@ function ApprovalHero({
   const age = sinceIso
     ? fmtAge(Date.now() - new Date(sinceIso).getTime())
     : null;
-  const approvers = approval?.approvers
-    ? Array.isArray(approval.approvers)
-      ? approval.approvers.join(", ")
-      : approval.approvers
+  // Slice 1 routing facts, straight from the gate's config (real graph data).
+  const approverParts = [
+    ...(approval?.approvers?.emails ?? []),
+    ...(approval?.approvers?.groupIds ?? []).map((g) => `@${g}`),
+  ];
+  const approvers = approverParts.length > 0 ? approverParts.join(", ") : null;
+  // Real due-by when the gate has an SLA and we know when it paused.
+  const dueMs =
+    approval?.slaHours && sinceIso
+      ? new Date(sinceIso).getTime() + approval.slaHours * 3_600_000
+      : null;
+  const slaChip = dueMs
+    ? dueMs < Date.now()
+      ? { label: `SLA breached ${fmtAge(Date.now() - dueMs)} ago`, bad: true }
+      : { label: `due in ${fmtAge(dueMs - Date.now())}`, bad: false }
     : null;
   return (
     <HeroShell color="var(--state-paused)" soft="var(--paused-soft)">
@@ -228,10 +248,37 @@ function ApprovalHero({
                 <span style={{ color: "var(--state-paused)" }}>{age}</span>
               </Chip>
             )}
+            {slaChip && (
+              <Chip>
+                <Icon name="clock" size={12} />
+                <span
+                  style={{
+                    color: slaChip.bad
+                      ? "var(--state-error)"
+                      : "var(--state-paused)",
+                  }}
+                >
+                  {slaChip.label}
+                </span>
+              </Chip>
+            )}
+            {!slaChip && approval?.slaHours !== undefined && (
+              <Chip>SLA {approval.slaHours}h</Chip>
+            )}
             {approvers && (
               <Chip>
                 Approvers:{" "}
                 <span style={{ color: "var(--ink-soft)" }}>{approvers}</span>
+              </Chip>
+            )}
+            {approval?.escalateAfterHours !== undefined && (
+              <Chip>
+                Escalates after {approval.escalateAfterHours}h
+                {approval.escalateTo ? (
+                  <span style={{ color: "var(--ink-soft)" }}>
+                    → {approval.escalateTo}
+                  </span>
+                ) : null}
               </Chip>
             )}
             {approval?.timeoutHours !== undefined && (
@@ -360,6 +407,91 @@ function WebhookHero({
             >
               {copied ? "Copied" : "Copy"}
             </Button>
+          </div>
+        </div>
+      </div>
+    </HeroShell>
+  );
+}
+
+/* ---------------- Paused — on budget (pause-not-fail, Slice 3) ---------------- */
+
+function BudgetHero({ currentNodeLabel, sinceIso }: StatusHeroProps) {
+  const age = sinceIso
+    ? fmtAge(Date.now() - new Date(sinceIso).getTime())
+    : null;
+  return (
+    <HeroShell color="var(--state-paused)" soft="var(--paused-soft)">
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
+        <WaitTile />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 18,
+              fontWeight: "var(--weight-bold)",
+              color: "var(--ink)",
+              letterSpacing: "var(--tracking-tight)",
+            }}
+          >
+            Paused on budget — resumes when the cap is raised or next month
+          </div>
+          <div
+            style={{
+              fontSize: "var(--text-body)",
+              color: "var(--ink-2)",
+              marginTop: 5,
+              lineHeight: "var(--leading-body)",
+            }}
+          >
+            The workspace budget refused further spend
+            {currentNodeLabel ? (
+              <>
+                {" "}
+                at{" "}
+                <strong style={{ color: "var(--ink-soft)", fontWeight: 600 }}>
+                  {currentNodeLabel}
+                </strong>
+              </>
+            ) : null}
+            {sinceIso && (
+              <>
+                {" "}
+                since{" "}
+                <strong
+                  style={{ color: "var(--state-paused)", fontWeight: 600 }}
+                >
+                  {fmtWhen(sinceIso)}
+                </strong>
+                {age ? ` · ${age} ago` : ""}
+              </>
+            )}
+            . Nothing was lost — the run parked instead of failing, and it
+            retries the refused step automatically when the cap is raised (via
+            Usage &amp; budgets) or the month rolls over. {DURABLE_COPY}
+          </div>
+          <div
+            style={{ display: "flex", gap: 9, flexWrap: "wrap", marginTop: 13 }}
+          >
+            {age && (
+              <Chip>
+                <Icon name="clock" size={12} />
+                paused{" "}
+                <span style={{ color: "var(--state-paused)" }}>{age}</span>
+              </Chip>
+            )}
+            <Chip>policy: pause &amp; resume</Chip>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              marginTop: 16,
+              flexWrap: "wrap",
+            }}
+          >
+            <Link to="/app/billing" style={{ textDecoration: "none" }}>
+              <Button variant="primary">Raise budget &amp; resume</Button>
+            </Link>
           </div>
         </div>
       </div>

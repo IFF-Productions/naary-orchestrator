@@ -6,7 +6,23 @@
  * therefore never enters the browser bundle.
  */
 
-export type NotificationKind = "approval_pending" | "run_failed";
+export type NotificationKind =
+  | "approval_pending"
+  | "run_failed"
+  /** Monthly spend crossed the budget's alert threshold (redesign Slice 3). Tenant-scoped
+   *  (not a run outcome) — fired at most once per calendar month, from the reservation
+   *  path. Channels opt in via `onBudgetThreshold`. */
+  | "budget_threshold"
+  /** A workflow definition was promoted into an environment (redesign Slice 4). Not a run
+   *  event — `workflowId` carries the WORKFLOW KEY (there is no run). Sent API-side from
+   *  the promote path to the TARGET env's channels; channels opt in via `onPromotion`. */
+  | "promotion";
+
+/** Sub-flavor of an `approval_pending` notification (REDESIGN-FUNCTIONALITY-GAPS.md Slice 1):
+ *  undefined = the initial pause; "reminder" = a scheduled (or manual "Remind now") nudge;
+ *  "escalation" = the gate's escalation deadline elapsed. Flavors reuse the approval channel
+ *  toggle (`onApprovalPending`) — they are the same conversation, retold. */
+export type ApprovalFlavor = "reminder" | "escalation";
 
 /** The run facts a notification describes (worker adds `tenantId` upstream; formatting never needs it). */
 export interface NotificationInput {
@@ -17,6 +33,29 @@ export interface NotificationInput {
   title?: string;
   /** For run_failed: the terminal status / error type. */
   detail?: string;
+  /** approval_pending only: reminder/escalation flavor (absent = the initial pause). */
+  flavor?: ApprovalFlavor;
+  /** For flavor "reminder": the 1-based reminder number ("Reminder #2"). */
+  reminderIndex?: number;
+  /** For flavor "escalation": who the escalation mentions (free-form, e.g. "@ops-oncall"). */
+  escalateTo?: string;
+  /** budget_threshold only: the configured threshold (% of the monthly cap). */
+  thresholdPct?: number;
+  /** budget_threshold only: the monthly cap in USD. */
+  capUsd?: number;
+  /** budget_threshold only: month spend at the crossing (committed + reserved), USD. */
+  spendUsd?: number;
+  /** promotion only: SOURCE environment name (e.g. "sandbox"). */
+  fromEnv?: string;
+  /** promotion only: TARGET environment name (e.g. "prod"). */
+  toEnv?: string;
+  /** promotion only: the new version number in the target environment. */
+  version?: number;
+}
+
+/** Compact USD for notification copy: cents for small figures, 2dp otherwise. */
+function usd(n: number): string {
+  return `$${n.toFixed(n > 0 && n < 1 ? 4 : 2)}`;
 }
 
 /**
@@ -29,6 +68,10 @@ export interface NotificationLinks {
   approvalUrl?: string;
   /** Deep link to the run detail page. */
   runUrl?: string;
+  /** Deep link to the Usage & budgets page (budget_threshold). */
+  usageUrl?: string;
+  /** Deep link to the workflow's detail page (promotion). */
+  workflowUrl?: string;
 }
 
 export type NotificationAction = {
@@ -53,9 +96,24 @@ export function codeText(s: string): string {
 
 /** Short headline for the notification, shared by the Slack header + the Teams card. */
 export function notificationHeader(input: NotificationInput): string {
-  return input.kind === "approval_pending"
-    ? "⏳ Approval needed"
-    : "❌ Run failed";
+  if (input.kind === "budget_threshold") {
+    return input.thresholdPct !== undefined
+      ? `📊 Budget alert — ${input.thresholdPct}% of the monthly cap`
+      : "📊 Budget alert";
+  }
+  if (input.kind === "promotion") {
+    return input.toEnv
+      ? `🚀 Workflow promoted to ${input.toEnv}`
+      : "🚀 Workflow promoted";
+  }
+  if (input.kind !== "approval_pending") return "❌ Run failed";
+  if (input.flavor === "reminder") {
+    return input.reminderIndex
+      ? `⏰ Approval reminder #${input.reminderIndex}`
+      : "⏰ Approval reminder";
+  }
+  if (input.flavor === "escalation") return "🚨 Approval escalated";
+  return "⏳ Approval needed";
 }
 
 /** The action links a recipient can act on — Approve/Reject for a pause (each with the
@@ -81,6 +139,18 @@ export function notificationActions(
       style: "danger",
     });
   }
+  if (input.kind === "budget_threshold") {
+    // Budget alerts act on the BUDGET, not a run — the one action is the usage page.
+    if (links.usageUrl)
+      actions.push({ label: "View usage & budgets", url: links.usageUrl });
+    return actions;
+  }
+  if (input.kind === "promotion") {
+    // Promotions act on the WORKFLOW, not a run — the one action is its detail page.
+    if (links.workflowUrl)
+      actions.push({ label: "View workflow", url: links.workflowUrl });
+    return actions;
+  }
   if (links.runUrl) actions.push({ label: "View run", url: links.runUrl });
   return actions;
 }
@@ -92,14 +162,53 @@ export function notificationText(
   input: NotificationInput,
   links: NotificationLinks,
 ): string {
+  if (input.kind === "budget_threshold") {
+    const pct =
+      input.thresholdPct !== undefined
+        ? `${input.thresholdPct}%`
+        : "the alert threshold";
+    const cap =
+      input.capUsd !== undefined
+        ? ` of the ${usd(input.capUsd)} monthly cap`
+        : "";
+    const spend =
+      input.spendUsd !== undefined
+        ? ` (${usd(input.spendUsd)} committed + reserved)`
+        : "";
+    const view = links.usageUrl ? ` View usage: ${links.usageUrl}` : "";
+    return `📊 Budget alert — workspace spend crossed ${pct}${cap}${spend}. Runs continue until the cap.${view}`;
+  }
   // Slack treats the top-level `text` as mrkdwn too (it's the fallback/notification line some
   // clients show), so escape the interpolated user values — NOT the URLs, which must stay intact.
   const wf = input.workflowKey
     ? `"${slackEscape(input.workflowKey)}"`
     : "a workflow";
+  if (input.kind === "promotion") {
+    const envs =
+      input.fromEnv && input.toEnv
+        ? ` ${slackEscape(input.fromEnv)} → ${slackEscape(input.toEnv)}`
+        : "";
+    const ver = input.version !== undefined ? ` (v${input.version})` : "";
+    const view = links.workflowUrl ? ` View: ${links.workflowUrl}` : "";
+    return `🚀 ${wf} promoted${envs}${ver}.${view}`;
+  }
   const runId = slackEscape(input.workflowId);
   if (input.kind === "approval_pending") {
-    return `⏳ Approval needed on ${wf}${input.title ? `: ${slackEscape(input.title)}` : ""} (run ${runId}).${links.approvalUrl ? ` Approve or reject: ${links.approvalUrl}` : ""}`;
+    const decide = links.approvalUrl
+      ? ` Approve or reject: ${links.approvalUrl}`
+      : "";
+    const gate = `${wf}${input.title ? `: ${slackEscape(input.title)}` : ""} (run ${runId})`;
+    if (input.flavor === "reminder") {
+      const n = input.reminderIndex ? ` #${input.reminderIndex}` : "";
+      return `⏰ Reminder${n} — approval still needed on ${gate}.${decide}`;
+    }
+    if (input.flavor === "escalation") {
+      const target = input.escalateTo
+        ? ` to ${slackEscape(input.escalateTo)}`
+        : "";
+      return `🚨 Approval escalated${target} — still undecided on ${gate}.${decide}`;
+    }
+    return `⏳ Approval needed on ${gate}.${decide}`;
   }
   return `❌ ${wf} run failed${input.detail ? ` (${slackEscape(input.detail)})` : ""} — run ${runId}.${links.runUrl ? ` View: ${links.runUrl}` : ""}`;
 }
@@ -131,13 +240,47 @@ export function notificationBlocks(
   // are half-width-friendly. The free-text Awaiting/Reason (which can be a full sentence) gets its
   // own full-width `section` below instead of being crammed into a half-width grid column (which
   // also left the grid lopsided at an odd field count — the "looks odd" report).
-  const fields: { type: "mrkdwn"; text: string }[] = [
-    {
-      type: "mrkdwn",
-      text: `*Workflow*\n${input.workflowKey ? `\`${codeText(input.workflowKey)}\`` : "_unnamed_"}`,
-    },
-    { type: "mrkdwn", text: `*Run*\n${runField}` },
-  ];
+  // budget_threshold is TENANT-scoped: the grid shows cap + spend, not a workflow/run pair
+  // (the crossing reservation's run is incidental; the alert is about the monthly budget).
+  // promotion is WORKFLOW-scoped: workflow/version + from/to env — there is no run at all.
+  const fields: { type: "mrkdwn"; text: string }[] =
+    input.kind === "budget_threshold"
+      ? [
+          {
+            type: "mrkdwn",
+            text: `*Monthly cap*\n${input.capUsd !== undefined ? usd(input.capUsd) : "—"}`,
+          },
+          {
+            type: "mrkdwn",
+            text: `*Spend (incl. reserved)*\n${input.spendUsd !== undefined ? usd(input.spendUsd) : "—"}`,
+          },
+        ]
+      : input.kind === "promotion"
+        ? [
+            {
+              type: "mrkdwn",
+              text: `*Workflow*\n${input.workflowKey ? `\`${codeText(input.workflowKey)}\`` : "_unnamed_"}`,
+            },
+            {
+              type: "mrkdwn",
+              text: `*Version*\n${input.version !== undefined ? `v${input.version}` : "—"}`,
+            },
+            {
+              type: "mrkdwn",
+              text: `*From*\n${input.fromEnv ? slackEscape(input.fromEnv) : "—"}`,
+            },
+            {
+              type: "mrkdwn",
+              text: `*To*\n${input.toEnv ? slackEscape(input.toEnv) : "—"}`,
+            },
+          ]
+        : [
+            {
+              type: "mrkdwn",
+              text: `*Workflow*\n${input.workflowKey ? `\`${codeText(input.workflowKey)}\`` : "_unnamed_"}`,
+            },
+            { type: "mrkdwn", text: `*Run*\n${runField}` },
+          ];
 
   const blocks: unknown[] = [
     {
@@ -155,6 +298,16 @@ export function notificationBlocks(
     blocks.push({
       type: "section",
       text: { type: "mrkdwn", text: `*Awaiting*\n${slackEscape(input.title)}` },
+    });
+  // Escalation flavor: name the target as its own full-width line (the comp's
+  // "escalates → @ops-oncall"). Free text, so not crammed into the fields grid.
+  if (isApproval && input.flavor === "escalation" && input.escalateTo)
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*Escalated to*\n${slackEscape(input.escalateTo)}`,
+      },
     });
   if (!isApproval && input.detail)
     blocks.push({
@@ -190,19 +343,61 @@ export function notificationBlocks(
  * OpenUrl/ShowCard/ToggleVisibility, NOT Action.Submit). Shape verified against Microsoft's
  * docs; not yet verified against a live Teams tenant (use the settings "send test" path).
  */
+/**
+ * The notification's facts as PLAIN title/value strings (no mrkdwn, no escaping) —
+ * shared by the Teams Adaptive Card FactSet and the email renderings so the two can't
+ * drift. Callers escape per their own medium (Teams: none — plain JSON; email HTML:
+ * htmlEscape).
+ */
+export function notificationFacts(
+  input: NotificationInput,
+): { title: string; value: string }[] {
+  const isApproval = input.kind === "approval_pending";
+  // budget_threshold: tenant-scoped facts (cap/spend/threshold) — no workflow/run pair.
+  // promotion: workflow/version + from/to env facts — there is no run at all.
+  const facts: { title: string; value: string }[] =
+    input.kind === "budget_threshold"
+      ? [
+          ...(input.thresholdPct !== undefined
+            ? [{ title: "Threshold", value: `${input.thresholdPct}%` }]
+            : []),
+          ...(input.capUsd !== undefined
+            ? [{ title: "Monthly cap", value: usd(input.capUsd) }]
+            : []),
+          ...(input.spendUsd !== undefined
+            ? [{ title: "Spend (incl. reserved)", value: usd(input.spendUsd) }]
+            : []),
+        ]
+      : input.kind === "promotion"
+        ? [
+            { title: "Workflow", value: input.workflowKey ?? "(unnamed)" },
+            ...(input.fromEnv ? [{ title: "From", value: input.fromEnv }] : []),
+            ...(input.toEnv ? [{ title: "To", value: input.toEnv }] : []),
+            ...(input.version !== undefined
+              ? [{ title: "Version", value: `v${input.version}` }]
+              : []),
+          ]
+        : [
+            { title: "Workflow", value: input.workflowKey ?? "(unnamed)" },
+            { title: "Run", value: input.workflowId },
+          ];
+  if (isApproval && input.title)
+    facts.push({ title: "Awaiting", value: input.title });
+  // Flavor facts (plain strings — neither medium wants mrkdwn here).
+  if (isApproval && input.flavor === "reminder" && input.reminderIndex)
+    facts.push({ title: "Reminder", value: `#${input.reminderIndex}` });
+  if (isApproval && input.flavor === "escalation" && input.escalateTo)
+    facts.push({ title: "Escalated to", value: input.escalateTo });
+  if (!isApproval && input.detail)
+    facts.push({ title: "Reason", value: input.detail });
+  return facts;
+}
+
 export function notificationTeamsCard(
   input: NotificationInput,
   links: NotificationLinks,
 ): unknown {
-  const isApproval = input.kind === "approval_pending";
-  const facts: { title: string; value: string }[] = [
-    { title: "Workflow", value: input.workflowKey ?? "(unnamed)" },
-    { title: "Run", value: input.workflowId },
-  ];
-  if (isApproval && input.title)
-    facts.push({ title: "Awaiting", value: input.title });
-  if (!isApproval && input.detail)
-    facts.push({ title: "Reason", value: input.detail });
+  const facts = notificationFacts(input);
 
   const body: unknown[] = [
     {
@@ -267,7 +462,122 @@ export function notificationPayload(
     runUrl: links.runUrl,
     actions,
     ...(input.kind === "approval_pending"
-      ? { approvalUrl: links.approvalUrl }
+      ? {
+          approvalUrl: links.approvalUrl,
+          // Generic hooks can branch on the flavor (initial vs reminder vs escalation).
+          ...(input.flavor ? { flavor: input.flavor } : {}),
+          ...(input.reminderIndex !== undefined
+            ? { reminderIndex: input.reminderIndex }
+            : {}),
+          ...(input.escalateTo ? { escalateTo: input.escalateTo } : {}),
+        }
+      : {}),
+    ...(input.kind === "budget_threshold"
+      ? {
+          // Generic hooks get the raw figures too (usageUrl mirrors runUrl's role).
+          ...(input.thresholdPct !== undefined
+            ? { thresholdPct: input.thresholdPct }
+            : {}),
+          ...(input.capUsd !== undefined ? { capUsd: input.capUsd } : {}),
+          ...(input.spendUsd !== undefined ? { spendUsd: input.spendUsd } : {}),
+          ...(links.usageUrl ? { usageUrl: links.usageUrl } : {}),
+        }
+      : {}),
+    ...(input.kind === "promotion"
+      ? {
+          // Generic hooks get the promotion facts raw (workflowUrl mirrors runUrl's role).
+          ...(input.fromEnv ? { fromEnv: input.fromEnv } : {}),
+          ...(input.toEnv ? { toEnv: input.toEnv } : {}),
+          ...(input.version !== undefined ? { version: input.version } : {}),
+          ...(links.workflowUrl ? { workflowUrl: links.workflowUrl } : {}),
+        }
       : {}),
   };
+}
+
+/* ---------------- Email rendering (redesign Slice 4) ---------------- */
+
+/** A rendered email: subject + plain-text body + a simple self-contained HTML body.
+ *  The SENDING (SMTP connection, credentials, transport) stays caller-side — this is
+ *  pure formatting, same boundary as the Slack/Teams shapes above. */
+export interface NotificationEmail {
+  subject: string;
+  text: string;
+  html: string;
+}
+
+/** Escape the five HTML-sensitive characters so user values (workflow keys, titles,
+ *  failure reasons) can't inject markup into the HTML body. `&` first, always. */
+export function htmlEscape(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Inline-styled link-button for the HTML body (email clients ignore <style> blocks;
+ *  everything is inline and self-contained — no images, no external assets). */
+function htmlButton(a: NotificationAction): string {
+  const bg =
+    a.style === "primary"
+      ? "#1f7a4d"
+      : a.style === "danger"
+        ? "#a13232"
+        : "#444c56";
+  return `<a href="${htmlEscape(a.url)}" style="display:inline-block;margin:0 8px 8px 0;padding:8px 14px;border-radius:6px;background:${bg};color:#ffffff;text-decoration:none;font-weight:600;">${htmlEscape(a.label)}</a>`;
+}
+
+/**
+ * Render a notification as an email (subject + text AND html bodies) for every kind and
+ * approval flavor. Decide-in-place for email = the SAME signed approve/reject LINKS the
+ * Slack buttons carry (via `notificationActions`, so the URLs literally cannot differ) —
+ * links are the honest email equivalent of buttons. Facts come from `notificationFacts`,
+ * shared with the Teams card.
+ */
+export function notificationEmail(
+  input: NotificationInput,
+  links: NotificationLinks,
+): NotificationEmail {
+  const header = notificationHeader(input);
+  // budget_threshold headers already carry the full story; run/workflow-scoped kinds
+  // append the workflow key so subjects are scannable in a crowded inbox.
+  const subject =
+    input.kind !== "budget_threshold" && input.workflowKey
+      ? `${header} — "${input.workflowKey}"`
+      : header;
+
+  const facts = notificationFacts(input);
+  const actions = notificationActions(input, links);
+
+  const text = [
+    header,
+    "",
+    ...facts.map((f) => `${f.title}: ${f.value}`),
+    ...(actions.length
+      ? ["", ...actions.map((a) => `${a.label}: ${a.url}`)]
+      : []),
+  ].join("\n");
+
+  const factRows = facts
+    .map(
+      (f) =>
+        `<tr><td style="padding:4px 16px 4px 0;color:#57606a;white-space:nowrap;vertical-align:top;">${htmlEscape(f.title)}</td><td style="padding:4px 0;color:#1f2328;">${htmlEscape(f.value)}</td></tr>`,
+    )
+    .join("");
+  const html = [
+    `<div style="font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1f2328;max-width:560px;">`,
+    `<h2 style="font-size:17px;margin:0 0 12px;">${htmlEscape(header)}</h2>`,
+    factRows
+      ? `<table style="border-collapse:collapse;margin:0 0 16px;">${factRows}</table>`
+      : "",
+    actions.length ? `<div>${actions.map(htmlButton).join("")}</div>` : "",
+    `<p style="margin:16px 0 0;font-size:12px;color:#8b949e;">Sent by Naary — manage notification channels in Settings.</p>`,
+    `</div>`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return { subject, text, html };
 }

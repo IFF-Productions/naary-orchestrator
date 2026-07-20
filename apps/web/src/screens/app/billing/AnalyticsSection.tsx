@@ -6,7 +6,9 @@
  *     (falls back to single-series byDay totals when an environment filter is
  *     active: ledger line items don't carry environmentId, so an env-scoped
  *     stack would be fabricated).
- *   · Top workflows by cost · Cost by model (tokens + $) · By environment.
+ *   · Top workflows by cost · Avg duration (by node type / by workflow —
+ *     Slice 2's real recorded durations) · Cost by model (tokens + $) ·
+ *     By environment.
  * All from the server's insights rollups; the model ranking (and its colors)
  * is shared between the chart legend and the Cost-by-model card.
  */
@@ -29,6 +31,7 @@ import {
   windowFromDate,
   windowLabel,
 } from "../insights.logic";
+import { fmtDurMs } from "../run-detail/run-view-model";
 import {
   earliestEventDate,
   fmtTokens,
@@ -92,6 +95,143 @@ function EmptyRows() {
 }
 
 /* ---------------- breakdown cards ---------------- */
+
+/**
+ * Avg duration widget (Slice 2 — per-node timing + cost), per the comp's
+ * "By node type / By workflow" toggle. Real measurements only:
+ *  · By node type — the ledger's in-activity measured call durations
+ *    (insights.byNodeType.avgDurationMs);
+ *  · By workflow — worker-stamped run durations (insights.runsByWorkflow).
+ * Buckets without a recorded duration are omitted (pre-feature rows), and the
+ * card shows its empty state rather than fabricating an average.
+ */
+function AvgDurationCard({ data }: { data: InsightsReport }) {
+  const [mode, setMode] = useState<"node" | "workflow">("node");
+  const rows = (
+    mode === "node"
+      ? (data.byNodeType ?? [])
+          .filter((r) => r.avgDurationMs !== null && r.nodeType !== null)
+          .map((r) => ({
+            label: r.nodeType as string,
+            avgMs: r.avgDurationMs as number,
+            meta: `${r.calls.toLocaleString()} calls`,
+          }))
+      : (data.runsByWorkflow ?? [])
+          .filter((r) => r.avgDurationMs !== null)
+          .map((r) => ({
+            label: wfLabel(r.workflowKey),
+            avgMs: r.avgDurationMs as number,
+            meta: `${r.runs.toLocaleString()} runs`,
+          }))
+  )
+    .sort((a, b) => b.avgMs - a.avgMs)
+    .slice(0, 6);
+  const max = Math.max(1, ...rows.map((r) => r.avgMs));
+
+  const toggle = (
+    <span style={{ display: "flex", gap: 4 }}>
+      {(
+        [
+          ["node", "By node type"],
+          ["workflow", "By workflow"],
+        ] as const
+      ).map(([id, label]) => (
+        <button
+          key={id}
+          type="button"
+          onClick={() => setMode(id)}
+          style={{
+            font: "inherit",
+            fontSize: "var(--text-2xs)",
+            padding: "3px 9px",
+            borderRadius: 7,
+            cursor: "pointer",
+            border: `1px solid ${mode === id ? "var(--brand)" : "var(--line-mid)"}`,
+            background: mode === id ? "var(--brand-soft)" : "transparent",
+            color: mode === id ? "var(--brand)" : "var(--ink-3)",
+          }}
+        >
+          {label}
+        </button>
+      ))}
+    </span>
+  );
+
+  return (
+    <Card pad={false} style={{ padding: "20px 22px" }}>
+      <CardTitle title="Avg duration" right={toggle} />
+      {rows.length === 0 ? (
+        <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
+          No recorded durations in this window yet.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {rows.map((r) => (
+            <div key={r.label}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 9,
+                  marginBottom: 6,
+                }}
+              >
+                <span
+                  className="mono"
+                  style={{
+                    fontSize: "var(--text-sm)",
+                    fontWeight: "var(--weight-medium)",
+                    color: "var(--ink)",
+                    flex: 1,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                  title={r.label}
+                >
+                  {r.label}
+                </span>
+                <span
+                  className="mono"
+                  style={{ fontSize: "var(--text-2xs)", color: "var(--ink-3)" }}
+                >
+                  {r.meta}
+                </span>
+                <span
+                  className="mono"
+                  style={{
+                    fontSize: "var(--text-sm)",
+                    fontWeight: "var(--weight-semibold)",
+                    color: "var(--ink)",
+                  }}
+                >
+                  {fmtDurMs(r.avgMs)}
+                </span>
+              </div>
+              <div
+                style={{
+                  height: 8,
+                  borderRadius: 5,
+                  background: "var(--card-2)",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${(r.avgMs / max) * 100}%`,
+                    background: "var(--brand)",
+                    borderRadius: 5,
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
 
 function TopWorkflowsCard({ rows }: { rows: RankedRow[] }) {
   return (
@@ -642,6 +782,7 @@ function ReadyBody({
         }}
       >
         <TopWorkflowsCard rows={byWf} />
+        <AvgDurationCard data={data} />
         <CostByModelCard byModel={data.byModel} downgradeTip={downgradeTip} />
         <ByEnvironmentCard rows={byEnv} />
       </div>
