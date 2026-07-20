@@ -120,6 +120,7 @@ export function InspectorDock({
   onDelete,
   overlay,
   floating,
+  stacked,
   onClose,
 }: {
   /** Selected node (all absent → empty state). */
@@ -148,6 +149,10 @@ export function InspectorDock({
   overlay?: ReactNode;
   /** Overlay mode on narrow viewports/phone: absolute over the canvas + close btn. */
   floating?: boolean;
+  /** Stacked mode (≤1024): full-width panel BELOW the graph — static, not overlaid.
+   *  Fills the remaining column height with its own scroll; keeps the close btn so a
+   *  selection can be dismissed. */
+  stacked?: boolean;
   onClose?: () => void;
 }) {
   const hasNode = Boolean(nodeId && kind);
@@ -157,15 +162,18 @@ export function InspectorDock({
   const pill = PILL[state];
   const running = run?.status === "running";
   const freshOutput = run?.status === "done" && run.output !== undefined;
+  // Floating overlay OR stacked-below both get the close affordance and touch sizing.
+  const compact = Boolean(floating || stacked);
 
   return (
     <aside
       aria-label="Inspector"
-      className="naary-dock"
+      className={`naary-dock${compact ? " naary-dock-compact" : ""}`}
       style={{
-        width: floating ? "min(492px, 100vw)" : 492,
-        flex: "none",
-        borderLeft: "1px solid var(--line)",
+        width: stacked ? "100%" : floating ? "min(492px, 100vw)" : 492,
+        flex: stacked ? "1 1 auto" : "none",
+        borderLeft: stacked ? "none" : "1px solid var(--line)",
+        borderTop: stacked ? "1px solid var(--line)" : undefined,
         background: "var(--panel)",
         overflowY: "auto",
         position: floating ? "absolute" : "relative",
@@ -301,8 +309,8 @@ export function InspectorDock({
                   title="Delete node"
                   onClick={onDelete}
                   style={{
-                    width: 32,
-                    height: 32,
+                    width: compact ? 44 : 32,
+                    height: compact ? 44 : 32,
                     flex: "none",
                     borderRadius: 8,
                     border: "1px solid var(--line-2)",
@@ -317,14 +325,14 @@ export function InspectorDock({
                   <Icon name="trash" size={15} />
                 </button>
               )}
-              {floating && onClose && (
+              {compact && onClose && (
                 <button
                   type="button"
                   aria-label="Close inspector"
                   onClick={onClose}
                   style={{
-                    width: 32,
-                    height: 32,
+                    width: compact ? 44 : 32,
+                    height: compact ? 44 : 32,
                     flex: "none",
                     borderRadius: 8,
                     border: "1px solid var(--line-2)",
@@ -357,7 +365,7 @@ export function InspectorDock({
                   disabled={running}
                   style={{
                     flex: 1,
-                    height: 38,
+                    height: compact ? 44 : 38,
                     borderRadius: 9,
                     border: freshOutput
                       ? "1px solid var(--line-2)"
@@ -431,7 +439,7 @@ export function InspectorDock({
                     else onPin?.();
                   }}
                   style={{
-                    height: 38,
+                    height: compact ? 44 : 38,
                     padding: "0 13px",
                     borderRadius: 9,
                     border: `1px solid ${
