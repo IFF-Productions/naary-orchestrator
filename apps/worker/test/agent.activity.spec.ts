@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { computeCost } from "@naary/usage";
+import { NeedsReauthError, BlockedEgressError } from "@naary/connections";
 import { MissingCredentialError } from "@naary/secrets";
 
 // Mock only the model network. Credentials + usage are injected via the
@@ -608,6 +609,57 @@ describe("runAgent — in-loop tools (#449)", () => {
     expect(opts.tools).toBeDefined();
     expect(opts.output).toBeDefined(); // schema ⇒ Output.object applied alongside tools
     expect(result.output).toEqual({ summary: "issue opened" });
+  });
+
+  it("maps a connection error from a tool to the mcpTool node's NON-retryable failure (#449 review)", async () => {
+    // A reauth/blocked/missing-token error must NOT become a retryable AGENT_TRANSIENT — it's
+    // user-actionable, exactly as the standalone mcpTool node treats it.
+    callMcpTool.mockRejectedValue(new NeedsReauthError("conn-1"));
+    generateText.mockImplementation(
+      async (opts: {
+        tools: Record<string, { execute: (a: unknown) => Promise<unknown> }>;
+      }) => {
+        await opts.tools.openIssue.execute({});
+        return { text: "unreachable" };
+      },
+    );
+
+    await expect(
+      runAgent(TOOLED_CFG, { msg: "go" }, META),
+    ).rejects.toMatchObject({ type: "CONNECTION_REAUTH", nonRetryable: true });
+  });
+
+  it("unwraps a WRAPPED connection error (generateText may wrap a tool throw) — still non-retryable", async () => {
+    // Simulate the SDK wrapping the tool's throw in an error carrying `.cause`.
+    generateText.mockImplementation(async () => {
+      const wrapped = new Error("Tool execution failed") as Error & {
+        cause?: unknown;
+      };
+      wrapped.cause = new BlockedEgressError("private ip");
+      throw wrapped;
+    });
+
+    await expect(
+      runAgent(TOOLED_CFG, { msg: "go" }, META),
+    ).rejects.toMatchObject({ type: "BLOCKED_EGRESS", nonRetryable: true });
+  });
+
+  it("fails fast on a duplicate exposed tool name (#449 review)", async () => {
+    const cfg = {
+      ...CFG,
+      tools: [
+        { connectionId: "c1", tool: "search", name: "lookup" },
+        { connectionId: "c2", tool: "find", name: "lookup" }, // same exposed name
+      ],
+    };
+    generateText.mockResolvedValue({ text: "x" });
+
+    await expect(runAgent(cfg, { msg: "go" }, META)).rejects.toMatchObject({
+      type: "DUPLICATE_TOOL_NAME",
+      nonRetryable: true,
+    });
+    // rejected BEFORE any model call
+    expect(generateText).not.toHaveBeenCalled();
   });
 
   it("a plain (tool-less) agent passes NO tools/stopWhen — unchanged path", async () => {

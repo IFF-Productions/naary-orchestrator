@@ -2,7 +2,14 @@
 import { createLogger } from "@naary/logging";
 import { ApplicationFailure } from "@temporalio/activity";
 import { getDefaultEnvironmentId } from "@naary/db";
-import { callMcpTool as mcpCall, resolveMcpTarget } from "@naary/connections";
+import {
+  AuthConfigError,
+  BlockedEgressError,
+  callMcpTool as mcpCall,
+  MissingConnectionTokenError,
+  NeedsReauthError,
+  resolveMcpTarget,
+} from "@naary/connections";
 import { MissingCredentialError } from "@naary/secrets";
 import {
   computeCost,
@@ -116,6 +123,42 @@ const DEFAULT_OUTPUT_SCHEMA = {
 } as const;
 // The AI SDK's `jsonSchema()` wrapper is applied lazily inside runAgent (the `ai` package is
 // ESM-only, loaded via dynamic import) — this stays a plain JSON-schema object with no SDK dep.
+
+/**
+ * Map a connection/MCP transport error to the SAME non-retryable ApplicationFailure the
+ * standalone mcpTool node uses (#449 review). Without this, an in-loop tool's reauth / blocked-
+ * egress / missing-token / auth-misconfig error would fall through to runAgent's generic catch and
+ * become a retryable AGENT_TRANSIENT — wrong semantics for a user-actionable connection problem
+ * (and it would burn Temporal retries when NodeDef.retry is set). Returns undefined for anything
+ * that isn't a known connection error, so genuine transient errors still retry.
+ */
+function mapMcpToolError(
+  e: unknown,
+  connectionId?: string,
+): ApplicationFailure | undefined {
+  const detail = connectionId ? { connectionId } : undefined;
+  if (e instanceof BlockedEgressError) {
+    return ApplicationFailure.nonRetryable(
+      "Connection target is not allowed",
+      "BLOCKED_EGRESS",
+      detail,
+    );
+  }
+  if (e instanceof AuthConfigError) {
+    return ApplicationFailure.nonRetryable(e.message, "AUTH_NOT_CONFIGURED");
+  }
+  if (
+    e instanceof MissingConnectionTokenError ||
+    e instanceof NeedsReauthError
+  ) {
+    return ApplicationFailure.nonRetryable(
+      "Connection needs re-authorization",
+      "CONNECTION_REAUTH",
+      detail,
+    );
+  }
+  return undefined;
+}
 
 async function buildModel(provider: string, model: string, apiKey: string) {
   if (provider === "anthropic") {
@@ -340,6 +383,15 @@ export async function runAgent(
     const builtTools: Record<string, unknown> = {};
     for (const t of toolConfigs) {
       const exposedName = t.name?.trim() || t.tool;
+      // Fail fast on a duplicate exposed name (#449 review): silently overwriting would make the
+      // effective toolset non-obvious, let the model call an unintended tool, and mis-count flat
+      // tool cost. Non-retryable — it's a static config error the author must fix.
+      if (Object.prototype.hasOwnProperty.call(builtTools, exposedName)) {
+        throw ApplicationFailure.nonRetryable(
+          `Duplicate agent tool name '${exposedName}' — exposed tool names must be unique`,
+          "DUPLICATE_TOOL_NAME",
+        );
+      }
       builtTools[exposedName] = tool({
         description: t.description ?? `MCP tool '${t.tool}'`,
         inputSchema: jsonSchema(
@@ -349,27 +401,38 @@ export async function runAgent(
           }) as unknown as Parameters<typeof jsonSchema>[0],
         ),
         execute: async (args: unknown) => {
-          const target = await __agentDeps.resolveMcpTarget(
-            meta.tenantId,
-            t.connectionId,
-          );
-          const r = await __agentDeps.callMcpTool({
-            serverUrl: target.serverUrl,
-            headers: target.headers,
-            tool: t.tool,
-            arguments: (args ?? {}) as Record<string, unknown>,
-          });
-          // A tool-level error is NOT success — surface it (non-retryable: same args fail the
-          // same way) so the model doesn't proceed on a phantom result.
-          if (r.isError) {
-            throw ApplicationFailure.nonRetryable(
-              `MCP tool '${t.tool}' returned an error`,
-              "MCP_TOOL_ERROR",
-              { connectionId: t.connectionId },
+          try {
+            const target = await __agentDeps.resolveMcpTarget(
+              meta.tenantId,
+              t.connectionId,
             );
+            const r = await __agentDeps.callMcpTool({
+              serverUrl: target.serverUrl,
+              headers: target.headers,
+              tool: t.tool,
+              arguments: (args ?? {}) as Record<string, unknown>,
+            });
+            // A tool-level error is NOT success — surface it (non-retryable: same args fail the
+            // same way) so the model doesn't proceed on a phantom result.
+            if (r.isError) {
+              throw ApplicationFailure.nonRetryable(
+                `MCP tool '${t.tool}' returned an error`,
+                "MCP_TOOL_ERROR",
+                { connectionId: t.connectionId },
+              );
+            }
+            toolCostUsd += t.costUsd ?? 0;
+            return r.content;
+          } catch (err) {
+            // Map connection/transport errors to the SAME non-retryable failures the mcpTool node
+            // uses (with THIS tool's connectionId) before they escape into the model loop — so
+            // reauth/blocked/missing-token/misconfig don't get sanitized to a retryable transient
+            // by the outer catch. Our own ApplicationFailures pass through untouched.
+            if (err instanceof ApplicationFailure) throw err;
+            const mapped = mapMcpToolError(err, t.connectionId);
+            if (mapped) throw mapped;
+            throw err;
           }
-          toolCostUsd += t.costUsd ?? 0;
-          return r.content;
         },
       });
     }
@@ -521,6 +584,14 @@ export async function runAgent(
     // Our own deliberate failures (BUDGET, UNSUPPORTED_PROVIDER, …) are already
     // safe + correctly (non-)retryable — pass them through untouched.
     if (e instanceof ApplicationFailure) throw e;
+    // Defensive (#449 review): generateText may WRAP a tool's throw (e.g. a ToolExecutionError
+    // carrying `.cause`), so an already-mapped ApplicationFailure or a raw connection error nested
+    // as the cause would otherwise be re-sanitized to a retryable AGENT_TRANSIENT below. Unwrap one
+    // level and preserve the correct non-retryable classification.
+    const cause = (e as { cause?: unknown })?.cause;
+    if (cause instanceof ApplicationFailure) throw cause;
+    const mappedCause = mapMcpToolError(e) ?? mapMcpToolError(cause);
+    if (mappedCause) throw mappedCause;
     if (e instanceof MissingCredentialError) {
       throw ApplicationFailure.nonRetryable(
         "Missing or invalid provider credential",
