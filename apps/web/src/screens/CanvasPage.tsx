@@ -62,7 +62,11 @@ import {
   nextProgressMessage,
   PROGRESS_MESSAGES,
 } from "../lib/progress-messages";
-import { PHONE_QUERY, useMediaQuery } from "../lib/useMediaQuery";
+import {
+  BELOW_RAIL_QUERY,
+  PHONE_QUERY,
+  useMediaQuery,
+} from "../lib/useMediaQuery";
 import { useActiveEnvironment } from "../lib/useActiveEnvironment";
 import { usePermissions } from "../lib/usePermissions";
 import {
@@ -181,6 +185,10 @@ export function CanvasPage() {
   // Phone keeps the full-screen inspector sheet; narrow overlays the dock over the canvas.
   const phone = useMediaQuery(PHONE_QUERY);
   const narrow = useMediaQuery(NARROW_QUERY);
+  // ≤1024 (phone + tablet): the three-pane row collapses to a stacked column — the
+  // category rail is hidden, the graph becomes a capped pan/scroll viewport on top, and
+  // the inspector is a full-width panel BELOW it. Desktop (>1024) is untouched.
+  const stacked = useMediaQuery(BELOW_RAIL_QUERY);
   // Full-screen the graph (rail + dock hidden) for a focused, roomy edit. CSS overlay,
   // Esc to exit — same approach as RunDiagram.
   const [canvasFullscreen, setCanvasFullscreen] = useState(false);
@@ -1360,10 +1368,15 @@ export function CanvasPage() {
     />
   ) : undefined;
 
-  // On narrow viewports the dock overlays the canvas — render it only when there's
-  // a selection; desktop keeps the persistent 492px column (empty state otherwise).
-  const dockFloating = phone || narrow;
-  const showDock = dockFloating ? Boolean(selected || selectedEdge) : true;
+  // Dock presentation by breakpoint:
+  //  · ≤1024 (stacked): full-width panel BELOW the graph (not overlaid).
+  //  · 1025–1080 (narrow, desktop): floats over the canvas from the right.
+  //  · >1080 (desktop): the persistent 492px right column.
+  // On both stacked and floating the dock is only mounted when something is selected
+  // (so the graph keeps the full viewport otherwise); the desktop column is always shown.
+  const dockFloating = (phone || narrow) && !stacked;
+  const dockOnDemand = stacked || dockFloating;
+  const showDock = dockOnDemand ? Boolean(selected || selectedEdge) : true;
 
   const dock = showDock ? (
     <InspectorDock
@@ -1431,6 +1444,7 @@ export function CanvasPage() {
       onDelete={selected ? () => deleteNode(selected.id) : undefined}
       overlay={edgeOverlay}
       floating={dockFloating}
+      stacked={stacked}
       onClose={closeInspector}
     />
   ) : null;
@@ -1708,14 +1722,25 @@ export function CanvasPage() {
         </div>
       )}
 
-      {/* BODY: 60px icon rail · canvas · 492px inspector dock */}
+      {/* BODY: desktop = 60px icon rail · canvas · 492px inspector dock (a flex ROW).
+          ≤1024 (stacked) = a flex COLUMN: the rail is hidden, the graph is a capped
+          pan/scroll viewport on top, and the dock is a full-width panel below it. */}
       <div
-        style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}
+        style={{
+          display: "flex",
+          flexDirection: stacked ? "column" : "row",
+          flex: 1,
+          minHeight: 0,
+          position: "relative",
+        }}
       >
-        <CategoryRail
-          onAdd={addEntry}
-          onOpenCatalog={() => setCatalogOpen(true)}
-        />
+        {/* The category rail is hidden ≤1024 — node-add moves to the "+" FAB / catalog modal. */}
+        {!stacked && (
+          <CategoryRail
+            onAdd={addEntry}
+            onOpenCatalog={() => setCatalogOpen(true)}
+          />
+        )}
 
         {/* canvas — ambient warm wash + dotted grid */}
         <div
@@ -1728,13 +1753,24 @@ export function CanvasPage() {
                   background:
                     "radial-gradient(120% 90% at 20% 0%, var(--grad-a), var(--bg) 60%)",
                 }
-              : {
-                  flex: 1,
-                  minWidth: 0,
-                  position: "relative",
-                  background:
-                    "radial-gradient(120% 90% at 20% 0%, var(--grad-a), var(--bg) 60%)",
-                }
+              : stacked
+                ? {
+                    // Capped viewport when the inspector shares the column; full height otherwise.
+                    flex: showDock ? "none" : 1,
+                    height: showDock ? "min(52vh, 460px)" : undefined,
+                    minHeight: 0,
+                    width: "100%",
+                    position: "relative",
+                    background:
+                      "radial-gradient(120% 90% at 20% 0%, var(--grad-a), var(--bg) 60%)",
+                  }
+                : {
+                    flex: 1,
+                    minWidth: 0,
+                    position: "relative",
+                    background:
+                      "radial-gradient(120% 90% at 20% 0%, var(--grad-a), var(--bg) 60%)",
+                  }
           }
         >
           <NodeActionsContext.Provider value={nodeActions}>
@@ -1790,8 +1826,9 @@ export function CanvasPage() {
             </ReactFlow>
           </NodeActionsContext.Provider>
 
-          {/* hint pill (design comp copy, verbatim) */}
-          {!phone && (
+          {/* hint pill (design comp copy, verbatim) — hidden ≤1024 where the graph
+              viewport is capped and the drag-to-map loop lives in the stacked dock. */}
+          {!stacked && (
             <div
               style={{
                 position: "absolute",
@@ -1826,9 +1863,40 @@ export function CanvasPage() {
               with ▷, then drag its output into the next node.
             </div>
           )}
+
+          {/* ≤1024: the category rail is hidden, so a floating "+" opens the full
+              catalog modal (the node-add affordance). ≥44px touch target. */}
+          {stacked && (
+            <button
+              type="button"
+              aria-label="Add node"
+              title="Add node"
+              onClick={() => setCatalogOpen(true)}
+              style={{
+                position: "absolute",
+                right: 16,
+                bottom: 16,
+                width: 52,
+                height: 52,
+                borderRadius: "50%",
+                border: "none",
+                background:
+                  "radial-gradient(120% 120% at 50% 120%, #ffb347, #f2622e 55%, #c8331f)",
+                boxShadow: "0 8px 24px -6px rgba(242, 98, 46, 0.6)",
+                color: "#fff3ec",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                zIndex: 6,
+              }}
+            >
+              <Icon name="plus" size={22} />
+            </button>
+          )}
         </div>
 
-        {/* inspector dock (persistent right column; overlay on narrow/phone) */}
+        {/* inspector dock — desktop right column · ≤1024 stacked full-width below · 1025–1080 overlay */}
         {dock}
       </div>
 
@@ -1846,7 +1914,9 @@ export function CanvasPage() {
       <div
         style={{
           position: "absolute",
-          right: showDock && !dockFloating ? 508 : 16,
+          // Offset left of the persistent desktop dock only; the stacked/floating dock
+          // isn't a right column, so toasts stay at the edge there.
+          right: showDock && !dockOnDemand ? 508 : 16,
           bottom: 20,
           display: "flex",
           flexDirection: "column",
