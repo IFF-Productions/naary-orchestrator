@@ -62,6 +62,14 @@
   .ctx-bar .btn {
     min-height: 44px;
   }
+  /* Relocated segmented switchers (environment inline in the bar; variant + workspace
+     in the drawer top) use `all: unset` buttons — a stylesheet min-height still wins
+     since it isn't in their inline style. */
+  .ctx-bar [role="group"] button,
+  .ctx-bar [aria-haspopup="menu"],
+  .drawer-context button {
+    min-height: 44px;
+  }
 }
 
 .btn-primary {

@@ -210,6 +210,8 @@ export function AppShell() {
               moves them out (it keeps the environment switcher inline instead). */}
           {smallShell && (
             <div
+              // `drawer-context` gives the relocated segmented switchers a >= 44px hit area.
+              className="drawer-context"
               style={{
                 flex: "none",
                 padding: "14px 14px 12px",
