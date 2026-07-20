@@ -1,8 +1,8 @@
 /**
  * Five-mode nav rail (redesign shell, "Naary Shell.dc.html") — Build / Operate / Observe /
  * Connect / Admin, each mode color-coded with an uppercase mono header. 236px expanded;
- * icon-only 70px rail on tablet or manual desktop collapse; full-width labels inside the
- * phone drawer. Items carry live badges (approvals waiting) and a chevron.
+ * icon-only 70px rail on manual desktop collapse; full-width labels inside the slide-out
+ * drawer (<= 1024). Items carry live badges (approvals waiting) and a chevron.
  */
 import { NavLink } from "react-router-dom";
 import { Icon } from "../components";
@@ -31,11 +31,14 @@ function NavRow({
   item,
   mode,
   rail,
+  touch,
   approvalsCount,
 }: {
   item: NavItem;
   mode: NavMode;
   rail: boolean;
+  /** Drawer/touch presentation — rows get a >= 44px hit height. */
+  touch: boolean;
   approvalsCount: number;
 }) {
   const badge =
@@ -50,7 +53,8 @@ function NavRow({
         alignItems: "center",
         justifyContent: rail ? "center" : "flex-start",
         gap: rail ? 0 : 8,
-        padding: rail ? "9px 0" : "8px 9px",
+        minHeight: touch ? 44 : undefined,
+        padding: rail ? "9px 0" : touch ? "10px 11px" : "8px 9px",
         borderRadius: "var(--radius-md)",
         fontSize: 12.5,
         marginBottom: 1,
@@ -100,14 +104,17 @@ export function NavRail({
   modes,
   approvalsCount,
   rail,
+  touch = false,
   onCollapseToggle,
   collapsed,
   showCollapseToggle,
 }: {
   modes: NavMode[];
   approvalsCount: number;
-  /** Icon-only presentation (tablet auto or desktop manual collapse). */
+  /** Icon-only presentation (desktop manual collapse). */
   rail: boolean;
+  /** Drawer/touch presentation (<= 1024) — rows get a >= 44px hit height. */
+  touch?: boolean;
   collapsed: boolean;
   showCollapseToggle: boolean;
   onCollapseToggle: () => void;
@@ -173,6 +180,7 @@ export function NavRail({
               item={it}
               mode={m}
               rail={rail}
+              touch={touch}
               approvalsCount={approvalsCount}
             />
           ))}

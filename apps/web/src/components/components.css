@@ -52,6 +52,18 @@
   width: 100%;
 }
 
+/* Touch targets on the wrapped context bar (<= 1024): every icon button in the bar
+   gets a >= 44px hit area (hamburger, theme toggle, notifications, primary CTA). */
+@media (max-width: 1024px) {
+  .ctx-bar .btn-icon {
+    width: 44px;
+    height: 44px;
+  }
+  .ctx-bar .btn {
+    min-height: 44px;
+  }
+}
+
 .btn-primary {
   background: linear-gradient(180deg, var(--brand-2), var(--brand));
   border-color: color-mix(in srgb, var(--brand) 50%, transparent);

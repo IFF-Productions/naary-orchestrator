@@ -81,7 +81,7 @@ export function VariantSwitcher() {
 }
 
 /** Avatar → menu (signed-in context + sign out; sign-out left the old sidebar footer). */
-function AvatarMenu() {
+function AvatarMenu({ compact }: { compact: boolean }) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const { logout } = useAuth();
@@ -126,8 +126,9 @@ function AvatarMenu() {
         aria-label="Account"
         style={{
           all: "unset",
-          width: 30,
-          height: 30,
+          // ≥44px hit area on touch (compact) — a 30px dot at desktop.
+          width: compact ? 44 : 30,
+          height: compact ? 44 : 30,
           borderRadius: "50%",
           cursor: "pointer",
           background: "linear-gradient(140deg, #f2622e, #c8331f)",
@@ -218,12 +219,13 @@ function AvatarMenu() {
 
 export function ContextBar({
   approvalsCount,
-  phone,
+  compact,
   drawerOpen,
   onToggleDrawer,
 }: {
   approvalsCount: number;
-  phone: boolean;
+  /** `<= 1024px`: hamburger + wrapped bar; workspace + variant move into the drawer. */
+  compact: boolean;
   drawerOpen: boolean;
   onToggleDrawer: () => void;
 }) {
@@ -233,21 +235,26 @@ export function ContextBar({
 
   return (
     <header
+      // `ctx-bar` bumps icon buttons to a 44px hit area at <= 1024 (see components.css).
+      className={compact ? "ctx-bar" : undefined}
       style={{
-        height: 52,
+        minHeight: 52,
         flex: "none",
         borderBottom: "1px solid var(--line)",
         background: "var(--panel)",
         display: "flex",
         alignItems: "center",
+        // Wrap onto a second row on narrow (compact) widths rather than overflow.
+        flexWrap: compact ? "wrap" : "nowrap",
+        rowGap: 6,
         gap: 12,
-        padding: "0 16px",
+        padding: compact ? "6px 12px" : "0 16px",
         position: "relative",
         zIndex: 10,
       }}
     >
-      {/* Hamburger — phone only; opens the nav drawer. */}
-      {phone && (
+      {/* Hamburger — opens the nav drawer at <= 1024. */}
+      {compact && (
         <button
           type="button"
           aria-label="Menu"
@@ -277,12 +284,13 @@ export function ContextBar({
         <Icon name="flame" size={16} style={{ color: "var(--brand-ink)" }} />
       </div>
 
-      <WorkspaceSwitcher />
-
-      {!phone && (
+      {/* Workspace + variant are CONTEXT that moves into the drawer top at <= 1024;
+          the environment switcher stays inline at every size (it's the hero of the bar). */}
+      {!compact && <WorkspaceSwitcher />}
+      {!compact && <Divider />}
+      <EnvironmentSwitcher />
+      {!compact && (
         <>
-          <Divider />
-          <EnvironmentSwitcher />
           <Divider />
           <VariantSwitcher />
         </>
@@ -296,23 +304,30 @@ export function ContextBar({
           gap: 10,
         }}
       >
-        {/* Live human-in-the-loop signal — approvals are the hero, never buried. */}
-        {!phone && approvalsCount > 0 && (
+        {/* Live human-in-the-loop signal — approvals are the hero, never buried. Stays
+            visible at every size; the label just contracts to a count on the wrapped bar. */}
+        {approvalsCount > 0 && (
           <button
             type="button"
             onClick={() => navigate("/app/approvals")}
-            title="Open approvals"
+            title={`${approvalsCount} approval${approvalsCount === 1 ? "" : "s"} waiting`}
+            aria-label={`${approvalsCount} approval${approvalsCount === 1 ? "" : "s"} waiting`}
             style={{
               all: "unset",
               cursor: "pointer",
               display: "flex",
               alignItems: "center",
+              justifyContent: "center",
               gap: 7,
               fontSize: 12,
+              fontWeight: compact ? 600 : undefined,
               color: "var(--ink-2)",
               border: "1px solid var(--line-2)",
               borderRadius: "var(--radius-pill)",
-              padding: "5px 11px",
+              // ≥44px hit area on the wrapped (compact) bar.
+              minHeight: compact ? 44 : undefined,
+              padding: compact ? "0 13px" : "5px 11px",
+              boxSizing: "border-box",
               whiteSpace: "nowrap",
             }}
           >
@@ -326,7 +341,9 @@ export function ContextBar({
                 flex: "none",
               }}
             />
-            {approvalsCount} approval{approvalsCount === 1 ? "" : "s"} waiting
+            {compact
+              ? `${approvalsCount} approval${approvalsCount === 1 ? "" : "s"}`
+              : `${approvalsCount} approval${approvalsCount === 1 ? "" : "s"} waiting`}
           </button>
         )}
 
@@ -334,12 +351,12 @@ export function ContextBar({
           <Button
             variant="primary"
             icon="plus"
-            iconOnly={phone}
+            iconOnly={compact}
             title="New workflow"
             aria-label="New workflow"
             onClick={() => navigate("/app/canvas")}
           >
-            {phone ? undefined : "New workflow"}
+            {compact ? undefined : "New workflow"}
           </Button>
         )}
         <Button
@@ -350,7 +367,7 @@ export function ContextBar({
           aria-label="Toggle theme"
         />
         <NotificationsBell />
-        <AvatarMenu />
+        <AvatarMenu compact={compact} />
       </div>
     </header>
   );
