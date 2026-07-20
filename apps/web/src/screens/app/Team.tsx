@@ -8,6 +8,7 @@ import {
   UnauthorizedError,
 } from "../../lib/api";
 import { workspaceHasAnyGrant } from "../../lib/permissions-logic";
+import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import { MembersTable } from "./team/MembersTable";
 import { roleCounts } from "./team/model";
 import { RolesAccess } from "./team/RolesAccess";
@@ -26,6 +27,7 @@ type Tab = "members" | "roles";
  */
 export function Team({ initialTab = "members" }: { initialTab?: Tab }) {
   const [tab, setTab] = useState<Tab>(initialTab);
+  const phone = useMediaQuery(PHONE_QUERY);
   const [tenant, setTenant] = useState<string | null>(null);
   const [myRole, setMyRole] = useState<string | null>(null);
   const [members, setMembers] = useState<Member[] | null>(null);
@@ -151,7 +153,12 @@ export function Team({ initialTab = "members" }: { initialTab?: Tab }) {
   const restricted = groups ? workspaceHasAnyGrant(groups) : null;
 
   return (
-    <div style={{ padding: "22px 28px 40px", maxWidth: 1180 }}>
+    <div
+      style={{
+        padding: phone ? "18px 16px 32px" : "22px 28px 40px",
+        maxWidth: 1180,
+      }}
+    >
       {/* header: title + summary · tabs · Invite CTA */}
       <div
         style={{

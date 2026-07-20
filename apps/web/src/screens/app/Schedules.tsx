@@ -31,6 +31,7 @@ import {
 } from "../../lib/api";
 import { runStatusUi } from "../../lib/run-status";
 import { useActiveEnvironment } from "../../lib/useActiveEnvironment";
+import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import { envAccent } from "../../workspace/EnvironmentSwitcher";
 import {
   absolute,
@@ -42,6 +43,10 @@ import {
 import { NewScheduleDialog } from "./schedules/NewScheduleDialog";
 
 const COLS = "2fr 1.2fr 1.1fr 1.2fr 0.7fr 1fr";
+
+/** Below this width the 6 columns get cramped — the table scrolls horizontally
+ *  inside its card (phone/tablet) rather than crushing the columns. */
+const TABLE_MIN_WIDTH = 820;
 
 /** The Runs list caps at this many recent rows — if it's saturated, 24h counts are a floor. */
 const RUNS_LIST_CAP = 50;
@@ -63,6 +68,7 @@ interface ToastItem {
 
 export function Schedules() {
   const activeEnv = useActiveEnvironment();
+  const phone = useMediaQuery(PHONE_QUERY);
   const [tenant, setTenant] = useState<string | null>(null);
   const [rows, setRows] = useState<ScheduleRow[] | null>(null);
   const [graphs, setGraphs] = useState<GraphSummary[]>([]);
@@ -245,7 +251,7 @@ export function Schedules() {
   return (
     <div
       style={{
-        padding: "24px 28px 40px",
+        padding: phone ? "18px 16px 32px" : "24px 28px 40px",
         maxWidth: 1200,
         margin: "0 auto",
         animation: "naaryFadeUp .25s ease",
@@ -413,60 +419,9 @@ export function Schedules() {
         </div>
       </div>
 
-      {/* table */}
+      {/* table — scrolls horizontally on phone/tablet so the 6 columns stay legible */}
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        <div
-          className="mono"
-          style={{
-            display: "grid",
-            gridTemplateColumns: COLS,
-            gap: 10,
-            padding: "11px 18px",
-            borderBottom: "1px solid var(--line)",
-            background: "var(--card-2)",
-            fontSize: "var(--text-2xs)",
-            fontWeight: "var(--weight-semibold)",
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-            color: "var(--ink-3)",
-          }}
-        >
-          <span>Schedule</span>
-          <span>Cadence</span>
-          <span>Next fire</span>
-          <span>Last run</span>
-          <span>Env</span>
-          <span />
-        </div>
-
-        {rows === null &&
-          !error &&
-          Array.from({ length: 4 }).map((_, i) => (
-            <div
-              // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length skeleton placeholder
-              key={i}
-              style={{
-                display: "grid",
-                gridTemplateColumns: COLS,
-                gap: 10,
-                padding: "13px 18px",
-                borderBottom: "1px solid var(--line)",
-                alignItems: "center",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <Skeleton width={34} height={34} radius={9} />
-                <Skeleton width="60%" />
-              </div>
-              <Skeleton width="70%" />
-              <Skeleton width="55%" />
-              <Skeleton width="65%" />
-              <Skeleton width={52} height={18} radius={10} />
-              <span />
-            </div>
-          ))}
-
-        {rows?.length === 0 && (
+        {rows?.length === 0 ? (
           <EmptyState
             icon="clock"
             title="No schedules yet"
@@ -481,243 +436,305 @@ export function Schedules() {
               </Button>
             }
           />
-        )}
-
-        {rows?.map((r) => {
-          const at = fireAt(r);
-          const last = lastRunOf(r.workflowKey);
-          const lastUi = last ? runStatusUi(last.status) : null;
-          const dot = lastUi ? (DOT[lastUi.state] ?? DOT.idle) : null;
-          const cadence = humanizeCron(r.cron);
-          return (
-            <div
-              key={r.id}
-              data-testid="schedule-row"
-              className="run-row"
-              style={{
-                display: "grid",
-                gridTemplateColumns: COLS,
-                gap: 10,
-                padding: "13px 18px",
-                borderBottom: "1px solid var(--line)",
-                alignItems: "center",
-                opacity: r.paused ? 0.62 : 1,
-                transition: "opacity 150ms ease",
-              }}
-            >
-              {/* schedule: icon tile + name + mono cron */}
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <div style={{ minWidth: TABLE_MIN_WIDTH }}>
               <div
+                className="mono"
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  minWidth: 0,
+                  display: "grid",
+                  gridTemplateColumns: COLS,
+                  gap: 10,
+                  padding: "11px 18px",
+                  borderBottom: "1px solid var(--line)",
+                  background: "var(--card-2)",
+                  fontSize: "var(--text-2xs)",
+                  fontWeight: "var(--weight-semibold)",
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  color: "var(--ink-3)",
                 }}
               >
-                <span
-                  style={{
-                    width: 34,
-                    height: 34,
-                    flex: "none",
-                    borderRadius: 9,
-                    border: "1px solid var(--node-trigger)",
-                    color: "var(--node-trigger)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <Icon name="clock" size={16} />
-                </span>
-                <div style={{ minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: "var(--text-body)",
-                      fontWeight: "var(--weight-semibold)",
-                      color: "var(--ink)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {nameOf(r.workflowKey)}
-                  </div>
-                  <div
-                    className="mono"
-                    style={{
-                      fontSize: "var(--text-2xs)",
-                      color: "var(--ink-3)",
-                      marginTop: 1,
-                    }}
-                  >
-                    {r.cron}
-                  </div>
-                </div>
+                <span>Schedule</span>
+                <span>Cadence</span>
+                <span>Next fire</span>
+                <span>Last run</span>
+                <span>Env</span>
+                <span />
               </div>
 
-              {/* cadence (humanized) + the cron's clock zone */}
-              <div
-                style={{ fontSize: "var(--text-xs)", color: "var(--ink-soft)" }}
-              >
-                {cadence === "Custom" ? "Custom cadence" : cadence}
-                <div
-                  style={{
-                    fontSize: "var(--text-2xs)",
-                    color: "var(--ink-3)",
-                    marginTop: 1,
-                  }}
-                >
-                  UTC
-                </div>
-              </div>
-
-              {/* next fire: countdown + absolute, or "— paused" */}
-              <div style={{ fontSize: "var(--text-xs)" }}>
-                {r.paused ? (
-                  <span style={{ color: "var(--ink-3)" }}>— paused</span>
-                ) : at ? (
-                  <>
-                    <span
-                      style={{
-                        color: "var(--ink)",
-                        fontWeight: "var(--weight-medium)",
-                      }}
+              {rows === null &&
+                !error &&
+                Array.from({ length: 4 }).map((_, i) => (
+                  <div
+                    // biome-ignore lint/suspicious/noArrayIndexKey: fixed-length skeleton placeholder
+                    key={i}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: COLS,
+                      gap: 10,
+                      padding: "13px 18px",
+                      borderBottom: "1px solid var(--line)",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 12 }}
                     >
-                      {countdown(at, now) ?? "any moment"}
-                    </span>
+                      <Skeleton width={34} height={34} radius={9} />
+                      <Skeleton width="60%" />
+                    </div>
+                    <Skeleton width="70%" />
+                    <Skeleton width="55%" />
+                    <Skeleton width="65%" />
+                    <Skeleton width={52} height={18} radius={10} />
+                    <span />
+                  </div>
+                ))}
+
+              {rows?.map((r) => {
+                const at = fireAt(r);
+                const last = lastRunOf(r.workflowKey);
+                const lastUi = last ? runStatusUi(last.status) : null;
+                const dot = lastUi ? (DOT[lastUi.state] ?? DOT.idle) : null;
+                const cadence = humanizeCron(r.cron);
+                return (
+                  <div
+                    key={r.id}
+                    data-testid="schedule-row"
+                    className="run-row"
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: COLS,
+                      gap: 10,
+                      padding: "13px 18px",
+                      borderBottom: "1px solid var(--line)",
+                      alignItems: "center",
+                      opacity: r.paused ? 0.62 : 1,
+                      transition: "opacity 150ms ease",
+                    }}
+                  >
+                    {/* schedule: icon tile + name + mono cron */}
                     <div
                       style={{
-                        fontSize: "var(--text-2xs)",
-                        color: "var(--ink-3)",
-                        marginTop: 1,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        minWidth: 0,
                       }}
                     >
-                      {absolute(at, now)}
-                    </div>
-                  </>
-                ) : (
-                  <span style={{ color: "var(--ink-3)" }}>—</span>
-                )}
-              </div>
-
-              {/* last run: glow dot + status + age (from the Runs list) */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {last && lastUi && dot ? (
-                  <>
-                    <span
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: "50%",
-                        flex: "none",
-                        background: dot,
-                        boxShadow: `0 0 7px ${dot}`,
-                      }}
-                    />
-                    <div>
-                      <div
+                      <span
                         style={{
-                          fontSize: "var(--text-xs)",
-                          color: "var(--ink-soft)",
+                          width: 34,
+                          height: 34,
+                          flex: "none",
+                          borderRadius: 9,
+                          border: "1px solid var(--node-trigger)",
+                          color: "var(--node-trigger)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
                         }}
                       >
-                        {lastUi.label}
+                        <Icon name="clock" size={16} />
+                      </span>
+                      <div style={{ minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: "var(--text-body)",
+                            fontWeight: "var(--weight-semibold)",
+                            color: "var(--ink)",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {nameOf(r.workflowKey)}
+                        </div>
+                        <div
+                          className="mono"
+                          style={{
+                            fontSize: "var(--text-2xs)",
+                            color: "var(--ink-3)",
+                            marginTop: 1,
+                          }}
+                        >
+                          {r.cron}
+                        </div>
                       </div>
+                    </div>
+
+                    {/* cadence (humanized) + the cron's clock zone */}
+                    <div
+                      style={{
+                        fontSize: "var(--text-xs)",
+                        color: "var(--ink-soft)",
+                      }}
+                    >
+                      {cadence === "Custom" ? "Custom cadence" : cadence}
                       <div
                         style={{
                           fontSize: "var(--text-2xs)",
                           color: "var(--ink-3)",
+                          marginTop: 1,
                         }}
                       >
-                        {ago(last.startedAt, now)}
+                        UTC
                       </div>
                     </div>
-                  </>
-                ) : (
-                  <span
-                    style={{
-                      fontSize: "var(--text-xs)",
-                      color: "var(--ink-3)",
-                    }}
-                  >
-                    —
-                  </span>
-                )}
-              </div>
 
-              {/* env chip — the whole list is scoped to the shell's active env */}
-              <div>
-                {envObj ? (
-                  <span
-                    className="mono"
-                    style={{
-                      fontSize: "var(--text-2xs)",
-                      fontWeight: "var(--weight-semibold)",
-                      color: envAccent(envObj),
-                      border: `1px solid ${envAccent(envObj)}`,
-                      borderRadius: 20,
-                      padding: "2px 8px",
-                    }}
-                  >
-                    {envObj.name}
-                  </span>
-                ) : (
-                  <span
-                    style={{
-                      fontSize: "var(--text-xs)",
-                      color: "var(--ink-3)",
-                    }}
-                  >
-                    —
-                  </span>
-                )}
-              </div>
+                    {/* next fire: countdown + absolute, or "— paused" */}
+                    <div style={{ fontSize: "var(--text-xs)" }}>
+                      {r.paused ? (
+                        <span style={{ color: "var(--ink-3)" }}>— paused</span>
+                      ) : at ? (
+                        <>
+                          <span
+                            style={{
+                              color: "var(--ink)",
+                              fontWeight: "var(--weight-medium)",
+                            }}
+                          >
+                            {countdown(at, now) ?? "any moment"}
+                          </span>
+                          <div
+                            style={{
+                              fontSize: "var(--text-2xs)",
+                              color: "var(--ink-3)",
+                              marginTop: 1,
+                            }}
+                          >
+                            {absolute(at, now)}
+                          </div>
+                        </>
+                      ) : (
+                        <span style={{ color: "var(--ink-3)" }}>—</span>
+                      )}
+                    </div>
 
-              {/* actions: run now · delete · pause/resume switch */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "flex-end",
-                  gap: 6,
-                }}
-              >
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  icon="play"
-                  iconOnly
-                  title="Run now"
-                  aria-label={`Run ${nameOf(r.workflowKey)} now`}
-                  onClick={() => void runNow(r)}
-                />
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  icon="trash"
-                  iconOnly
-                  title="Delete schedule"
-                  aria-label={`Delete the ${nameOf(r.workflowKey)} schedule`}
-                  onClick={() => void remove(r)}
-                />
-                <span
-                  title={r.paused ? "Resume schedule" : "Pause schedule"}
-                  style={{
-                    display: "inline-flex",
-                    opacity: busyIds.has(r.id) ? 0.5 : 1,
-                    pointerEvents: busyIds.has(r.id) ? "none" : undefined,
-                  }}
-                >
-                  <Switch
-                    checked={!r.paused}
-                    aria-label={`${r.paused ? "Resume" : "Pause"} the ${nameOf(r.workflowKey)} schedule`}
-                    onChange={() => void togglePause(r)}
-                  />
-                </span>
-              </div>
+                    {/* last run: glow dot + status + age (from the Runs list) */}
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 8 }}
+                    >
+                      {last && lastUi && dot ? (
+                        <>
+                          <span
+                            style={{
+                              width: 8,
+                              height: 8,
+                              borderRadius: "50%",
+                              flex: "none",
+                              background: dot,
+                              boxShadow: `0 0 7px ${dot}`,
+                            }}
+                          />
+                          <div>
+                            <div
+                              style={{
+                                fontSize: "var(--text-xs)",
+                                color: "var(--ink-soft)",
+                              }}
+                            >
+                              {lastUi.label}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "var(--text-2xs)",
+                                color: "var(--ink-3)",
+                              }}
+                            >
+                              {ago(last.startedAt, now)}
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <span
+                          style={{
+                            fontSize: "var(--text-xs)",
+                            color: "var(--ink-3)",
+                          }}
+                        >
+                          —
+                        </span>
+                      )}
+                    </div>
+
+                    {/* env chip — the whole list is scoped to the shell's active env */}
+                    <div>
+                      {envObj ? (
+                        <span
+                          className="mono"
+                          style={{
+                            fontSize: "var(--text-2xs)",
+                            fontWeight: "var(--weight-semibold)",
+                            color: envAccent(envObj),
+                            border: `1px solid ${envAccent(envObj)}`,
+                            borderRadius: 20,
+                            padding: "2px 8px",
+                          }}
+                        >
+                          {envObj.name}
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            fontSize: "var(--text-xs)",
+                            color: "var(--ink-3)",
+                          }}
+                        >
+                          —
+                        </span>
+                      )}
+                    </div>
+
+                    {/* actions: run now · delete · pause/resume switch */}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "flex-end",
+                        gap: 6,
+                      }}
+                    >
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon="play"
+                        iconOnly
+                        title="Run now"
+                        aria-label={`Run ${nameOf(r.workflowKey)} now`}
+                        onClick={() => void runNow(r)}
+                      />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon="trash"
+                        iconOnly
+                        title="Delete schedule"
+                        aria-label={`Delete the ${nameOf(r.workflowKey)} schedule`}
+                        onClick={() => void remove(r)}
+                      />
+                      <span
+                        title={r.paused ? "Resume schedule" : "Pause schedule"}
+                        style={{
+                          display: "inline-flex",
+                          opacity: busyIds.has(r.id) ? 0.5 : 1,
+                          pointerEvents: busyIds.has(r.id) ? "none" : undefined,
+                        }}
+                      >
+                        <Switch
+                          checked={!r.paused}
+                          aria-label={`${r.paused ? "Resume" : "Pause"} the ${nameOf(r.workflowKey)} schedule`}
+                          onChange={() => void togglePause(r)}
+                        />
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
+          </div>
+        )}
       </div>
 
       {/* durability note — Temporal Schedules catch up missed fires */}

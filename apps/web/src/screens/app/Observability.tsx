@@ -21,6 +21,7 @@ import {
   type RunSummary,
   UnauthorizedError,
 } from "../../lib/api";
+import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import { windowFromDate } from "./insights.logic";
 import { AuditTab } from "./observe/AuditTab";
 import { InsightsTab } from "./observe/InsightsTab";
@@ -47,6 +48,7 @@ export function Observability() {
   const tab = tabFromParam(searchParams.get("tab"));
   const setTab = (t: TabId) =>
     setSearchParams(t === "insights" ? {} : { tab: t }, { replace: true });
+  const phone = useMediaQuery(PHONE_QUERY);
 
   // Snapshot the clock once per mount so range windows and relative times are
   // stable across renders (screens remount on env change anyway).
@@ -107,7 +109,12 @@ export function Observability() {
   }, [tenantId, spendFrom]);
 
   return (
-    <div style={{ padding: "22px 28px 48px", maxWidth: 1360 }}>
+    <div
+      style={{
+        padding: phone ? "18px 16px 40px" : "22px 28px 48px",
+        maxWidth: 1360,
+      }}
+    >
       {/* keyframes the design's charts use (drawLine); scoped by name prefix */}
       <style>{`@keyframes obDrawLine{from{stroke-dashoffset:900;}to{stroke-dashoffset:0;}}`}</style>
 

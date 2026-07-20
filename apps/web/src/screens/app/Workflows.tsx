@@ -286,7 +286,10 @@ export function Workflows() {
 
   return (
     <div
-      style={{ padding: "22px 28px 40px", animation: "naaryFadeUp .25s ease" }}
+      style={{
+        padding: phone ? "16px 14px 32px" : "22px 28px 40px",
+        animation: "naaryFadeUp .25s ease",
+      }}
     >
       <div
         style={{

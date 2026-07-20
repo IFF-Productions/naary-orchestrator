@@ -297,7 +297,7 @@ export function WorkflowDetail() {
   return (
     <div
       style={{
-        padding: "22px 28px 40px",
+        padding: phone ? "16px 14px 32px" : "22px 28px 40px",
         maxWidth: 1120,
         margin: "0 auto",
         animation: "naaryFadeUp .25s ease",
