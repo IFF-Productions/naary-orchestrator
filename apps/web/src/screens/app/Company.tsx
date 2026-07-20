@@ -60,9 +60,12 @@ function initialsOf(label: string): string {
 function billingPeriod(range: CompanyUsage["range"]): string {
   if (!range.from || !range.to) return "this month";
   const fmt = (s: string) =>
+    // Pin to UTC: range.from/to are date-only ISO strings, which would otherwise
+    // render off-by-one in timezones behind UTC.
     new Date(s).toLocaleDateString(undefined, {
       month: "short",
       day: "numeric",
+      timeZone: "UTC",
     });
   return `${fmt(range.from)} – ${fmt(range.to)}`;
 }
@@ -114,6 +117,8 @@ export function Company() {
     setSeats(null);
     setDrill(null);
     setTab("workspaces");
+    // Clear any prior failure so a stale error can't linger after a successful switch.
+    setErr(null);
     api
       .getCompanyUsage(companyId)
       .then((u) => live && setUsage(u))
@@ -744,14 +749,35 @@ function WorkspacesTab({
                         </Button>
                       )}
                     </div>
-                    {/* Drill-in chevron — opens the READ-ONLY workspace observer (same as a
-                        row click; the row's onRowClick handles the actual open). */}
-                    <span
-                      aria-hidden
-                      style={{ display: "inline-flex", color: "var(--ink-3)" }}
+                    {/* Drill-in chevron — a real focusable button so keyboard users can open
+                        the READ-ONLY workspace observer (the row's onRowClick handles the
+                        mouse path; stopPropagation avoids a double-invoke via the row). */}
+                    <button
+                      type="button"
+                      aria-label={`Open ${workspaceLabel(
+                        w.tenantId,
+                        w.displayName ?? undefined,
+                      )} (read-only)`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDrill(w);
+                      }}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        minWidth: 32,
+                        minHeight: 32,
+                        padding: 0,
+                        border: "none",
+                        background: "transparent",
+                        cursor: "pointer",
+                        color: "var(--ink-3)",
+                        borderRadius: "var(--radius-sm)",
+                      }}
                     >
                       <Icon name="chevron-right" size={16} />
-                    </span>
+                    </button>
                   </div>
                 ),
               },

@@ -5,6 +5,7 @@ import { Button, Icon, LoadingBlock, StatusPill } from "../../components";
 import {
   api,
   type ExecutionState,
+  HttpError,
   type NamedGraph,
   type RunSummary,
   UnauthorizedError,
@@ -51,10 +52,16 @@ export function AutomationDetail() {
   // skipping the (possibly-stale) listRuns resolver on first render.
   const handoffRunId =
     (location.state as { runId?: string } | null)?.runId ?? null;
-  const [named, setNamed] = useState<NamedGraph | null | "error">(null);
-  const [latestRunId, setLatestRunId] = useState<string | null | "none">(
-    handoffRunId,
-  );
+  // getGraph outcome: null = loading; a NamedGraph; or a distinct load error we can
+  // message honestly (401 → sign in; 404 → not found; anything else → generic).
+  const [named, setNamed] = useState<
+    NamedGraph | null | "unauthorized" | "notfound" | "failed"
+  >(null);
+  // Latest run: null = resolving; a run id; "none" = genuinely no run yet;
+  // "unknown" = listRuns FAILED (don't lie "hasn't run yet" — offer a retry).
+  const [latestRunId, setLatestRunId] = useState<
+    string | null | "none" | "unknown"
+  >(handoffRunId);
 
   // The automation's name + a fallback graph (for the "hasn't run yet" step preview).
   useEffect(() => {
@@ -63,7 +70,13 @@ export function AutomationDetail() {
     api
       .getGraph(key)
       .then((g) => live && setNamed(g))
-      .catch(() => live && setNamed("error"));
+      .catch((e) => {
+        if (!live) return;
+        if (e instanceof UnauthorizedError) setNamed("unauthorized");
+        else if (e instanceof HttpError && e.status === 404)
+          setNamed("notfound");
+        else setNamed("failed");
+      });
     return () => {
       live = false;
     };
@@ -81,7 +94,9 @@ export function AutomationDetail() {
         );
       setLatestRunId(mine.length ? mine[0].workflowId : "none");
     } catch {
-      setLatestRunId("none");
+      // Couldn't reach the runs list — this is NOT "no runs yet". Surface it as
+      // unknown so the view can offer a retry instead of a false empty state.
+      setLatestRunId("unknown");
     }
   }, [key]);
   useEffect(() => {
@@ -90,11 +105,41 @@ export function AutomationDetail() {
     void resolveLatest();
   }, [resolveLatest, handoffRunId]);
 
-  if (named === "error") {
+  if (named === "unauthorized") {
+    return <Message>Sign in to see this automation.</Message>;
+  }
+  if (named === "notfound") {
+    return <Message>Couldn't find that automation.</Message>;
+  }
+  if (named === "failed") {
     return <Message>Couldn't load that automation.</Message>;
   }
   if (!named || latestRunId === null) {
     return <Message subtle>Loading…</Message>;
+  }
+  if (latestRunId === "unknown") {
+    return (
+      <div style={{ padding: "22px 28px" }}>
+        <div
+          style={{
+            fontSize: "var(--text-body)",
+            color: "var(--ink-2)",
+            marginBottom: 12,
+          }}
+        >
+          Couldn't check this automation's runs.
+        </div>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setLatestRunId(null);
+            void resolveLatest();
+          }}
+        >
+          Try again
+        </Button>
+      </div>
+    );
   }
   if (latestRunId === "none") {
     return (
