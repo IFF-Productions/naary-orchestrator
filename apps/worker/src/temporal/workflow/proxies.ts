@@ -36,6 +36,18 @@ export const {
   retry: { maximumAttempts: 3 },
 });
 
+// Agent TOOL-LOOP path (#449): a tooled agent makes several LLM steps + nested MCP
+// round-trips inside ONE activity, so the 1-minute default is far too tight — give it 5 min.
+// AT-MOST-ONCE (maximumAttempts:1): a transient failure re-runs the WHOLE activity, replaying
+// every tool already executed (incl. any write) — so, like codeAgent's write path, we don't
+// auto-retry a side-effecting loop. A user can still opt into retries via NodeDef.retry.
+export const { runAgent: runAgentTooled } = wf.proxyActivities<
+  typeof activities
+>({
+  startToCloseTimeout: "5 minutes",
+  retry: { maximumAttempts: 1 },
+});
+
 // The HTTP node's request deadline is user-configurable (up to MAX_HTTP_TIMEOUT_MS,
 // clamped in the activity), so it needs a start-to-close strictly ABOVE that cap —
 // otherwise Temporal would kill a slow-but-running request and RETRY it, duplicating

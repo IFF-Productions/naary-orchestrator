@@ -73,6 +73,7 @@ import type * as activities from "../activities";
 import { FOREACH_CONCURRENCY, perChildCap } from "../foreach-cap";
 import {
   runAgent,
+  runAgentTooled,
   callMcpTool,
   recordExecution,
   loadVariables,
@@ -440,12 +441,14 @@ export async function runGraph(
       case "agent": {
         // tenantId flows in workflow args (not a secret); the activity fetches
         // the tenant's key by tenantId. executionId is deterministic.
-        const over = retryOverride(node.retry, 60_000);
-        const result = await (over?.runAgent ?? runAgent)(
-          cfg as unknown as activities.AgentConfig,
-          ctx.__input,
-          metaFor(node.id),
-        );
+        const agentCfg = cfg as unknown as activities.AgentConfig;
+        // Tooled agents (#449) run a multi-step loop with nested MCP calls → a longer deadline
+        // and AT-MOST-ONCE by default (runAgentTooled), so a retried activity never replays an
+        // already-executed tool. An explicit NodeDef.retry still wins (and gets the long timeout).
+        const tooled = (agentCfg.tools?.length ?? 0) > 0;
+        const over = retryOverride(node.retry, tooled ? 300_000 : 60_000);
+        const runFn = over?.runAgent ?? (tooled ? runAgentTooled : runAgent);
+        const result = await runFn(agentCfg, ctx.__input, metaFor(node.id));
         ctx[node.id] = result satisfies NodeOutputMap["agent"];
         // Cost is a commutative SUM — accumulating it is order-independent (safe
         // even under parallel fan-out, where Temporal replays activity completion

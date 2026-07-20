@@ -178,6 +178,33 @@ const CONFIG_SCHEMAS = {
     maxOutputTokens: z.number().optional(),
     /** JSON-schema-ish object describing the agent's structured output, if any. */
     outputSchema: z.record(z.string(), z.unknown()).optional(),
+    /** MCP tools the agent may call mid-reasoning (#449). Each references a tenant MCP
+     *  connection + a remote tool; the model decides when to call them, and the loop runs
+     *  IN the agent activity (the token+tool resolution never crosses the workflow boundary).
+     *  Empty/absent ⇒ a single structured call (the historical behaviour, byte-identical).
+     *  NOTE: with tools and NO `outputSchema`, the agent returns free text ({ text }); add an
+     *  `outputSchema` to force a structured final answer after the tool loop. */
+    tools: z
+      .array(
+        z.object({
+          /** Tenant MCP connection the tool call authenticates through. */
+          connectionId: z.string(),
+          /** Remote tool name on that MCP server. */
+          tool: z.string(),
+          /** Name exposed to the model (defaults to `tool`). */
+          name: z.string().optional(),
+          /** What the tool does — the model reads this to decide when to call it. */
+          description: z.string().optional(),
+          /** JSON Schema for the tool's arguments; omitted ⇒ open object. */
+          inputSchema: z.record(z.string(), z.unknown()).optional(),
+          /** Flat per-call cost (parity with the mcpTool node — MCP tools carry no token
+           *  cost, so spend is operator-configured and folded into the node's costUsd). */
+          costUsd: z.number().optional(),
+        }),
+      )
+      .optional(),
+    /** Max reasoning+tool steps before the loop must produce a final answer (default 8). */
+    maxToolSteps: z.number().int().positive().optional(),
     /** Opt-in Anthropic prompt caching of the (stable) system prompt. Default OFF: it only
      *  pays off for HIGH-VOLUME agents reusing the same large system prompt within Anthropic's
      *  ~5-min cache TTL — a one-shot call PAYS a ~25% cache-WRITE premium with no read to offset
