@@ -14,6 +14,11 @@ const PUBLIC_CSS = `
 @keyframes naaryPubDot { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
 @keyframes naaryPubPop { 0% { transform: scale(.4); opacity: 0; } 60% { transform: scale(1.15); } 100% { transform: scale(1); opacity: 1; } }
 .naary-public input:focus, .naary-public textarea:focus { border-color: var(--brand) !important; outline: none; }
+/* Touch targets ≥44px on phone + tablet (≤1024). Scoped to text controls only —
+   NOT buttons — so the reason chips and the 36px chat send button keep their size. */
+@media (max-width: 1024px) {
+  .naary-public input, .naary-public textarea { min-height: 44px; }
+}
 `;
 
 /** Full-viewport public frame: warm diagonal-striped wash with the card floating centered. */
