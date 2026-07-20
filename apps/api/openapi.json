@@ -4099,6 +4099,93 @@
         ]
       }
     },
+    "/executions/{id}/remind": {
+      "post": {
+        "description": "Re-notifies the run environment's channels (reminder flavor) that this approval is still waiting. 409 if the run is no longer awaiting approval.",
+        "operationId": "ExecutionsController_remind",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemindResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Send an approval reminder now",
+        "tags": [
+          "Executions"
+        ]
+      }
+    },
     "/executions/{id}/cancel": {
       "post": {
         "description": "Terminates the workflow (status → terminated). 409 if already finished.",
@@ -4825,6 +4912,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "exp",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4881,6 +4976,434 @@
         },
         "tags": [
           "ApprovalsPublic"
+        ]
+      }
+    },
+    "/tenants/{id}/notifications": {
+      "get": {
+        "description": "Every channel configured in the active environment (any number of Slack/Teams webhooks), in a stable order.",
+        "operationId": "NotificationsController_list",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NotificationChannelResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List notification channels",
+        "tags": [
+          "Notifications"
+        ]
+      },
+      "post": {
+        "description": "Creates a new channel of the given type in the active environment — a tenant can have several per type (e.g. two Slack webhooks for #alerts and #oncall).",
+        "operationId": "NotificationsController_createChannel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNotificationChannelDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationChannelResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add a notification channel",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/tenants/{id}/notifications/{channelId}": {
+      "patch": {
+        "description": "Patches a single channel's config (identified by :channelId). Other channels are untouched.",
+        "operationId": "NotificationsController_updateChannel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "channelId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateNotificationChannelDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationChannelResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update one notification channel",
+        "tags": [
+          "Notifications"
+        ]
+      },
+      "delete": {
+        "description": "Removes the channel (idempotent).",
+        "operationId": "NotificationsController_deleteChannel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "channelId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestNotificationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete one notification channel",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/tenants/{id}/notifications/{channelId}/test": {
+      "post": {
+        "description": "POSTs a sample message to that channel's webhook so you can confirm delivery + formatting from your own channel.",
+        "operationId": "NotificationsController_sendTest",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "channelId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestNotificationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Send a test notification to one channel",
+        "tags": [
+          "Notifications"
         ]
       }
     },
@@ -10336,434 +10859,6 @@
         ]
       }
     },
-    "/tenants/{id}/notifications": {
-      "get": {
-        "description": "Every channel configured in the active environment (any number of Slack/Teams webhooks), in a stable order.",
-        "operationId": "NotificationsController_list",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/NotificationChannelResponse"
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List notification channels",
-        "tags": [
-          "Notifications"
-        ]
-      },
-      "post": {
-        "description": "Creates a new channel of the given type in the active environment — a tenant can have several per type (e.g. two Slack webhooks for #alerts and #oncall).",
-        "operationId": "NotificationsController_createChannel",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateNotificationChannelDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NotificationChannelResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Add a notification channel",
-        "tags": [
-          "Notifications"
-        ]
-      }
-    },
-    "/tenants/{id}/notifications/{channelId}": {
-      "patch": {
-        "description": "Patches a single channel's config (identified by :channelId). Other channels are untouched.",
-        "operationId": "NotificationsController_updateChannel",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "channelId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateNotificationChannelDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NotificationChannelResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Update one notification channel",
-        "tags": [
-          "Notifications"
-        ]
-      },
-      "delete": {
-        "description": "Removes the channel (idempotent).",
-        "operationId": "NotificationsController_deleteChannel",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "channelId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TestNotificationResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Delete one notification channel",
-        "tags": [
-          "Notifications"
-        ]
-      }
-    },
-    "/tenants/{id}/notifications/{channelId}/test": {
-      "post": {
-        "description": "POSTs a sample message to that channel's webhook so you can confirm delivery + formatting from your own channel.",
-        "operationId": "NotificationsController_sendTest",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "channelId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TestNotificationResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Send a test notification to one channel",
-        "tags": [
-          "Notifications"
-        ]
-      }
-    },
     "/tags": {
       "get": {
         "description": "Every tag in the workspace, with how many workflows carry each.",
@@ -14594,6 +14689,47 @@
           "graphVersion"
         ]
       },
+      "ApproverGroupResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "9f3a…"
+          },
+          "name": {
+            "type": "string",
+            "example": "finance-leads"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "ApproverSummaryResponse": {
+        "type": "object",
+        "properties": {
+          "emails": {
+            "example": [
+              "sam@acme.io"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApproverGroupResponse"
+            }
+          }
+        },
+        "required": [
+          "emails",
+          "groups"
+        ]
+      },
       "AwaitingApprovalResponse": {
         "type": "object",
         "properties": {
@@ -14623,6 +14759,51 @@
             "type": "string",
             "format": "date-time",
             "example": "2026-07-04T12:00:00.000Z"
+          },
+          "pausedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "When the gate paused (worker clock at pause time)."
+          },
+          "slaHours": {
+            "type": "number",
+            "nullable": true,
+            "example": 48,
+            "description": "The gate's display-only SLA in hours."
+          },
+          "dueAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "pausedAt + slaHours (server-derived); null unless both exist."
+          },
+          "contextFields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "nullable": true,
+            "description": "Structured context card — expressions resolved at pause time (never secrets)."
+          },
+          "approvers": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ApproverSummaryResponse"
+              }
+            ]
+          },
+          "escalateAfterHours": {
+            "type": "number",
+            "nullable": true,
+            "example": 20
+          },
+          "escalateTo": {
+            "type": "string",
+            "nullable": true,
+            "example": "@ops-oncall"
           }
         },
         "required": [
@@ -14631,7 +14812,14 @@
           "nodeId",
           "title",
           "instructions",
-          "createdAt"
+          "createdAt",
+          "pausedAt",
+          "slaHours",
+          "dueAt",
+          "contextFields",
+          "approvers",
+          "escalateAfterHours",
+          "escalateTo"
         ]
       },
       "ApproveBatchDto": {
@@ -14728,6 +14916,24 @@
         },
         "required": [
           "approved"
+        ]
+      },
+      "RemindResponse": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "example": true
+          },
+          "sent": {
+            "type": "number",
+            "example": 2,
+            "description": "How many notification channels the reminder was delivered to."
+          }
+        },
+        "required": [
+          "accepted",
+          "sent"
         ]
       },
       "RerunDto": {
@@ -14863,6 +15069,37 @@
             "type": "string",
             "nullable": true,
             "example": "Review the summary before it is emailed."
+          },
+          "workspaceName": {
+            "type": "string",
+            "nullable": true,
+            "example": "Acme Inc",
+            "description": "Workspace display name — the page's trust line (on behalf of …). Null when unset."
+          },
+          "contextFields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "nullable": true,
+            "description": "Structured context card — expressions resolved at pause time (never secrets)."
+          },
+          "slaHours": {
+            "type": "number",
+            "nullable": true,
+            "example": 48
+          },
+          "dueAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "pausedAt + slaHours (server-derived)."
+          },
+          "expiresAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "When this signed link expires (its `exp` claim). Null for legacy links minted without one."
           }
         },
         "required": [
@@ -14875,6 +15112,10 @@
           "token": {
             "type": "string",
             "description": "The signed link token."
+          },
+          "exp": {
+            "type": "string",
+            "description": "The link's `exp` claim (unix seconds), when the link carried one. Signed into the token — required to verify an expiring link."
           },
           "decision": {
             "type": "string",
@@ -14906,6 +15147,155 @@
           }
         },
         "required": [
+          "status"
+        ]
+      },
+      "NotificationChannelResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "9a8b7c6d-…",
+            "description": "Channel id — the handle for update/delete/test."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "slack",
+              "teams"
+            ],
+            "example": "slack",
+            "description": "Channel type — determines the payload format + which webhook to use."
+          },
+          "label": {
+            "type": "object",
+            "nullable": true,
+            "example": "#alerts",
+            "description": "User-facing name distinguishing same-type channels. Null = unnamed."
+          },
+          "enabled": {
+            "type": "boolean",
+            "example": true,
+            "description": "Whether this channel sends. Off = skipped even with a URL set."
+          },
+          "webhookUrl": {
+            "type": "object",
+            "nullable": true,
+            "example": "https://hooks.slack.com/services/T000/B000/xxxx",
+            "description": "Outbound webhook URL for this channel. Null = none set."
+          },
+          "onApprovalPending": {
+            "type": "boolean",
+            "example": true,
+            "description": "Notify this channel when a run pauses for approval."
+          },
+          "onRunFailed": {
+            "type": "boolean",
+            "example": true,
+            "description": "Notify this channel when a run fails."
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "label",
+          "enabled",
+          "webhookUrl",
+          "onApprovalPending",
+          "onRunFailed"
+        ]
+      },
+      "CreateNotificationChannelDto": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 100,
+            "example": "#alerts",
+            "description": "User-facing name distinguishing same-type channels. Blank clears it."
+          },
+          "enabled": {
+            "type": "boolean",
+            "example": true,
+            "description": "Whether this channel sends. Off = the worker skips it even with a URL set."
+          },
+          "webhookUrl": {
+            "type": "string",
+            "maxLength": 2000,
+            "example": "https://hooks.slack.com/services/T000/B000/xxxx",
+            "description": "Outbound webhook URL for this channel. Blank clears it (nothing to POST to)."
+          },
+          "onApprovalPending": {
+            "type": "boolean",
+            "example": true,
+            "description": "Notify this channel when a run pauses for approval."
+          },
+          "onRunFailed": {
+            "type": "boolean",
+            "example": true,
+            "description": "Notify this channel when a run fails."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "slack",
+              "teams"
+            ],
+            "example": "slack",
+            "description": "Channel type — determines the payload format."
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "UpdateNotificationChannelDto": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 100,
+            "example": "#alerts",
+            "description": "User-facing name distinguishing same-type channels. Blank clears it."
+          },
+          "enabled": {
+            "type": "boolean",
+            "example": true,
+            "description": "Whether this channel sends. Off = the worker skips it even with a URL set."
+          },
+          "webhookUrl": {
+            "type": "string",
+            "maxLength": 2000,
+            "example": "https://hooks.slack.com/services/T000/B000/xxxx",
+            "description": "Outbound webhook URL for this channel. Blank clears it (nothing to POST to)."
+          },
+          "onApprovalPending": {
+            "type": "boolean",
+            "example": true,
+            "description": "Notify this channel when a run pauses for approval."
+          },
+          "onRunFailed": {
+            "type": "boolean",
+            "example": true,
+            "description": "Notify this channel when a run fails."
+          }
+        }
+      },
+      "TestNotificationResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "example": true
+          },
+          "status": {
+            "type": "number",
+            "example": 200,
+            "description": "HTTP status the webhook returned."
+          }
+        },
+        "required": [
+          "ok",
           "status"
         ]
       },
@@ -16635,155 +17025,6 @@
             "description": "Ordered widget layout for the Overview: [{ id, hidden, span }]. Omit to leave unchanged."
           }
         }
-      },
-      "NotificationChannelResponse": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "example": "9a8b7c6d-…",
-            "description": "Channel id — the handle for update/delete/test."
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "slack",
-              "teams"
-            ],
-            "example": "slack",
-            "description": "Channel type — determines the payload format + which webhook to use."
-          },
-          "label": {
-            "type": "object",
-            "nullable": true,
-            "example": "#alerts",
-            "description": "User-facing name distinguishing same-type channels. Null = unnamed."
-          },
-          "enabled": {
-            "type": "boolean",
-            "example": true,
-            "description": "Whether this channel sends. Off = skipped even with a URL set."
-          },
-          "webhookUrl": {
-            "type": "object",
-            "nullable": true,
-            "example": "https://hooks.slack.com/services/T000/B000/xxxx",
-            "description": "Outbound webhook URL for this channel. Null = none set."
-          },
-          "onApprovalPending": {
-            "type": "boolean",
-            "example": true,
-            "description": "Notify this channel when a run pauses for approval."
-          },
-          "onRunFailed": {
-            "type": "boolean",
-            "example": true,
-            "description": "Notify this channel when a run fails."
-          }
-        },
-        "required": [
-          "id",
-          "type",
-          "label",
-          "enabled",
-          "webhookUrl",
-          "onApprovalPending",
-          "onRunFailed"
-        ]
-      },
-      "CreateNotificationChannelDto": {
-        "type": "object",
-        "properties": {
-          "label": {
-            "type": "string",
-            "maxLength": 100,
-            "example": "#alerts",
-            "description": "User-facing name distinguishing same-type channels. Blank clears it."
-          },
-          "enabled": {
-            "type": "boolean",
-            "example": true,
-            "description": "Whether this channel sends. Off = the worker skips it even with a URL set."
-          },
-          "webhookUrl": {
-            "type": "string",
-            "maxLength": 2000,
-            "example": "https://hooks.slack.com/services/T000/B000/xxxx",
-            "description": "Outbound webhook URL for this channel. Blank clears it (nothing to POST to)."
-          },
-          "onApprovalPending": {
-            "type": "boolean",
-            "example": true,
-            "description": "Notify this channel when a run pauses for approval."
-          },
-          "onRunFailed": {
-            "type": "boolean",
-            "example": true,
-            "description": "Notify this channel when a run fails."
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "slack",
-              "teams"
-            ],
-            "example": "slack",
-            "description": "Channel type — determines the payload format."
-          }
-        },
-        "required": [
-          "type"
-        ]
-      },
-      "UpdateNotificationChannelDto": {
-        "type": "object",
-        "properties": {
-          "label": {
-            "type": "string",
-            "maxLength": 100,
-            "example": "#alerts",
-            "description": "User-facing name distinguishing same-type channels. Blank clears it."
-          },
-          "enabled": {
-            "type": "boolean",
-            "example": true,
-            "description": "Whether this channel sends. Off = the worker skips it even with a URL set."
-          },
-          "webhookUrl": {
-            "type": "string",
-            "maxLength": 2000,
-            "example": "https://hooks.slack.com/services/T000/B000/xxxx",
-            "description": "Outbound webhook URL for this channel. Blank clears it (nothing to POST to)."
-          },
-          "onApprovalPending": {
-            "type": "boolean",
-            "example": true,
-            "description": "Notify this channel when a run pauses for approval."
-          },
-          "onRunFailed": {
-            "type": "boolean",
-            "example": true,
-            "description": "Notify this channel when a run fails."
-          }
-        }
-      },
-      "TestNotificationResponse": {
-        "type": "object",
-        "properties": {
-          "ok": {
-            "type": "boolean",
-            "example": true
-          },
-          "status": {
-            "type": "number",
-            "example": 200,
-            "description": "HTTP status the webhook returned."
-          }
-        },
-        "required": [
-          "ok",
-          "status"
-        ]
       },
       "TagResponse": {
         "type": "object",

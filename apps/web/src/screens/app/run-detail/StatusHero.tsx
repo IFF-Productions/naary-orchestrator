@@ -11,13 +11,20 @@ import { Button, Icon } from "../../../components";
 import { runStatusUi } from "../../../lib/run-status";
 import { fmtAge, fmtWhen } from "./run-view-model";
 
-/** Approval-node config facts the hero may show — only what the config has. */
+/** Approval-node config facts the hero may show — only what the config has.
+ *  Mirrors ApprovalNodeConfig (@naary/dsl) — the run-detail casts the paused
+ *  gate's config to this, so every rendered fact is real graph data. */
 export interface ApprovalInfo {
   title?: string;
   instructions?: string;
   timeoutHours?: number;
-  /** Not part of the current schema; rendered only if a graph carries it. */
-  approvers?: string | string[];
+  /** Slice 1 routing: who may decide (emails and/or permission-group ids). */
+  approvers?: { emails?: string[]; groupIds?: string[] };
+  /** Display-only SLA (due = pause + slaHours). */
+  slaHours?: number;
+  remindAfterHours?: number[];
+  escalateAfterHours?: number;
+  escalateTo?: string;
 }
 
 export interface StatusHeroProps {
@@ -138,10 +145,21 @@ function ApprovalHero({
   const age = sinceIso
     ? fmtAge(Date.now() - new Date(sinceIso).getTime())
     : null;
-  const approvers = approval?.approvers
-    ? Array.isArray(approval.approvers)
-      ? approval.approvers.join(", ")
-      : approval.approvers
+  // Slice 1 routing facts, straight from the gate's config (real graph data).
+  const approverParts = [
+    ...(approval?.approvers?.emails ?? []),
+    ...(approval?.approvers?.groupIds ?? []).map((g) => `@${g}`),
+  ];
+  const approvers = approverParts.length > 0 ? approverParts.join(", ") : null;
+  // Real due-by when the gate has an SLA and we know when it paused.
+  const dueMs =
+    approval?.slaHours && sinceIso
+      ? new Date(sinceIso).getTime() + approval.slaHours * 3_600_000
+      : null;
+  const slaChip = dueMs
+    ? dueMs < Date.now()
+      ? { label: `SLA breached ${fmtAge(Date.now() - dueMs)} ago`, bad: true }
+      : { label: `due in ${fmtAge(dueMs - Date.now())}`, bad: false }
     : null;
   return (
     <HeroShell color="var(--state-paused)" soft="var(--paused-soft)">
@@ -228,10 +246,37 @@ function ApprovalHero({
                 <span style={{ color: "var(--state-paused)" }}>{age}</span>
               </Chip>
             )}
+            {slaChip && (
+              <Chip>
+                <Icon name="clock" size={12} />
+                <span
+                  style={{
+                    color: slaChip.bad
+                      ? "var(--state-error)"
+                      : "var(--state-paused)",
+                  }}
+                >
+                  {slaChip.label}
+                </span>
+              </Chip>
+            )}
+            {!slaChip && approval?.slaHours !== undefined && (
+              <Chip>SLA {approval.slaHours}h</Chip>
+            )}
             {approvers && (
               <Chip>
                 Approvers:{" "}
                 <span style={{ color: "var(--ink-soft)" }}>{approvers}</span>
+              </Chip>
+            )}
+            {approval?.escalateAfterHours !== undefined && (
+              <Chip>
+                Escalates after {approval.escalateAfterHours}h
+                {approval.escalateTo ? (
+                  <span style={{ color: "var(--ink-soft)" }}>
+                    → {approval.escalateTo}
+                  </span>
+                ) : null}
               </Chip>
             )}
             {approval?.timeoutHours !== undefined && (

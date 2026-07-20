@@ -170,14 +170,41 @@ export interface ChatTriggerNodeConfig {
   durableSession?: boolean;
 }
 
+/** Who may decide an approval gate (REDESIGN-FUNCTIONALITY-GAPS.md Slice 1). Either list may be
+ *  set; a decider must match an email OR be a member of a listed permission group. Enforced at
+ *  decide time in the API (owner/admin bypass, consistent with RBAC-GROUPS §4). */
+export interface ApprovalApprovers {
+  /** Exact-match (case-insensitive) user emails allowed to decide. */
+  emails?: string[];
+  /** Permission-group ids whose members (users or API tokens) may decide. */
+  groupIds?: string[];
+}
+
 /** Human-approval node config. The interpreter reads `timeoutHours` to bound the
- *  durable wait (auto-reject on elapse); title/instructions are display-only (the
- *  UI reads them from the graph). */
+ *  durable wait (auto-reject on elapse) and `remindAfterHours`/`escalateAfterHours`
+ *  to drive durable reminder/escalation timers; title/instructions are display-only
+ *  (the UI reads them from the graph). Routing/SLA/context fields are Slice 1 of
+ *  REDESIGN-FUNCTIONALITY-GAPS.md. */
 export interface ApprovalNodeConfig {
   title?: string;
   instructions?: string;
   /** Auto-reject if no decision within this many hours (omitted = wait forever). */
   timeoutHours?: number;
+  /** Who may decide (emails and/or permission-group ids). Omitted = anyone with `run`. */
+  approvers?: ApprovalApprovers;
+  /** Display-only SLA: due = pausedAt + slaHours (no timer — chips derive due-by tones). */
+  slaHours?: number;
+  /** Reminder notification offsets (hours after pause), ascending, ≤5 entries. Each fires
+   *  the notification channels with a `reminder` flavor via a durable Temporal timer. */
+  remindAfterHours?: number[];
+  /** Escalation notification offset (hours after pause). Notify-only in v1. */
+  escalateAfterHours?: number;
+  /** Who the escalation notification mentions (free-form, e.g. "@ops-oncall"). */
+  escalateTo?: string;
+  /** Structured context card: key → value, where values may contain `{{ }}` expressions
+   *  resolved against the run ctx AT PAUSE TIME (in-activity; `$secrets` refs are never
+   *  resolved here — they stay literal, so secrets can't leak into the awaiting record). */
+  contextFields?: Record<string, string>;
 }
 
 export interface McpToolNodeConfig {

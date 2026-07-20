@@ -284,6 +284,13 @@ export interface paths {
      */
     post: operations["ExecutionsController_approve"];
   };
+  "/executions/{id}/remind": {
+    /**
+     * Send an approval reminder now
+     * @description Re-notifies the run environment's channels (reminder flavor) that this approval is still waiting. 409 if the run is no longer awaiting approval.
+     */
+    post: operations["ExecutionsController_remind"];
+  };
   "/executions/{id}/cancel": {
     /**
      * Cancel a running run
@@ -339,6 +346,37 @@ export interface paths {
   };
   "/approvals/{workflowId}/decide": {
     post: operations["ApprovalsPublicController_decide"];
+  };
+  "/tenants/{id}/notifications": {
+    /**
+     * List notification channels
+     * @description Every channel configured in the active environment (any number of Slack/Teams webhooks), in a stable order.
+     */
+    get: operations["NotificationsController_list"];
+    /**
+     * Add a notification channel
+     * @description Creates a new channel of the given type in the active environment — a tenant can have several per type (e.g. two Slack webhooks for #alerts and #oncall).
+     */
+    post: operations["NotificationsController_createChannel"];
+  };
+  "/tenants/{id}/notifications/{channelId}": {
+    /**
+     * Delete one notification channel
+     * @description Removes the channel (idempotent).
+     */
+    delete: operations["NotificationsController_deleteChannel"];
+    /**
+     * Update one notification channel
+     * @description Patches a single channel's config (identified by :channelId). Other channels are untouched.
+     */
+    patch: operations["NotificationsController_updateChannel"];
+  };
+  "/tenants/{id}/notifications/{channelId}/test": {
+    /**
+     * Send a test notification to one channel
+     * @description POSTs a sample message to that channel's webhook so you can confirm delivery + formatting from your own channel.
+     */
+    post: operations["NotificationsController_sendTest"];
   };
   "/tenants/{id}/credentials": {
     /**
@@ -714,37 +752,6 @@ export interface paths {
     get: operations["PreferencesController_get"];
     /** Update my preferences */
     put: operations["PreferencesController_save"];
-  };
-  "/tenants/{id}/notifications": {
-    /**
-     * List notification channels
-     * @description Every channel configured in the active environment (any number of Slack/Teams webhooks), in a stable order.
-     */
-    get: operations["NotificationsController_list"];
-    /**
-     * Add a notification channel
-     * @description Creates a new channel of the given type in the active environment — a tenant can have several per type (e.g. two Slack webhooks for #alerts and #oncall).
-     */
-    post: operations["NotificationsController_createChannel"];
-  };
-  "/tenants/{id}/notifications/{channelId}": {
-    /**
-     * Delete one notification channel
-     * @description Removes the channel (idempotent).
-     */
-    delete: operations["NotificationsController_deleteChannel"];
-    /**
-     * Update one notification channel
-     * @description Patches a single channel's config (identified by :channelId). Other channels are untouched.
-     */
-    patch: operations["NotificationsController_updateChannel"];
-  };
-  "/tenants/{id}/notifications/{channelId}/test": {
-    /**
-     * Send a test notification to one channel
-     * @description POSTs a sample message to that channel's webhook so you can confirm delivery + formatting from your own channel.
-     */
-    post: operations["NotificationsController_sendTest"];
   };
   "/tags": {
     /**
@@ -1409,6 +1416,21 @@ export interface components {
        */
       graphVersion: number | null;
     };
+    ApproverGroupResponse: {
+      /** @example 9f3a… */
+      id: string;
+      /** @example finance-leads */
+      name: string;
+    };
+    ApproverSummaryResponse: {
+      /**
+       * @example [
+       *   "sam@acme.io"
+       * ]
+       */
+      emails: string[];
+      groups: components["schemas"]["ApproverGroupResponse"][];
+    };
     AwaitingApprovalResponse: {
       /** @example run-8f3a1c2e */
       workflowId: string;
@@ -1425,6 +1447,30 @@ export interface components {
        * @example 2026-07-04T12:00:00.000Z
        */
       createdAt: string;
+      /**
+       * Format: date-time
+       * @description When the gate paused (worker clock at pause time).
+       */
+      pausedAt: string | null;
+      /**
+       * @description The gate's display-only SLA in hours.
+       * @example 48
+       */
+      slaHours: number | null;
+      /**
+       * Format: date-time
+       * @description pausedAt + slaHours (server-derived); null unless both exist.
+       */
+      dueAt: string | null;
+      /** @description Structured context card — expressions resolved at pause time (never secrets). */
+      contextFields: {
+        [key: string]: string;
+      } | null;
+      approvers: components["schemas"]["ApproverSummaryResponse"] | null;
+      /** @example 20 */
+      escalateAfterHours: number | null;
+      /** @example @ops-oncall */
+      escalateTo: string | null;
     };
     ApproveBatchDto: {
       /**
@@ -1483,6 +1529,15 @@ export interface components {
        * @example Looks good, ship it.
        */
       comment?: string;
+    };
+    RemindResponse: {
+      /** @example true */
+      accepted: boolean;
+      /**
+       * @description How many notification channels the reminder was delivered to.
+       * @example 2
+       */
+      sent: number;
     };
     RerunDto: {
       /**
@@ -1556,10 +1611,33 @@ export interface components {
       title?: string;
       /** @example Review the summary before it is emailed. */
       instructions?: string | null;
+      /**
+       * @description Workspace display name — the page's trust line (on behalf of …). Null when unset.
+       * @example Acme Inc
+       */
+      workspaceName?: string | null;
+      /** @description Structured context card — expressions resolved at pause time (never secrets). */
+      contextFields?: {
+        [key: string]: string;
+      } | null;
+      /** @example 48 */
+      slaHours?: number | null;
+      /**
+       * Format: date-time
+       * @description pausedAt + slaHours (server-derived).
+       */
+      dueAt?: string | null;
+      /**
+       * Format: date-time
+       * @description When this signed link expires (its `exp` claim). Null for legacy links minted without one.
+       */
+      expiresAt?: string | null;
     };
     DecideDto: {
       /** @description The signed link token. */
       token: string;
+      /** @description The link's `exp` claim (unix seconds), when the link carried one. Signed into the token — required to verify an expiring link. */
+      exp?: string;
       /** @enum {string} */
       decision: "approve" | "reject";
       /** @description Optional reason. */
@@ -1571,6 +1649,113 @@ export interface components {
        * @enum {string}
        */
       status: "approved" | "rejected";
+    };
+    NotificationChannelResponse: {
+      /**
+       * @description Channel id — the handle for update/delete/test.
+       * @example 9a8b7c6d-…
+       */
+      id: string;
+      /**
+       * @description Channel type — determines the payload format + which webhook to use.
+       * @example slack
+       * @enum {string}
+       */
+      type: "slack" | "teams";
+      /**
+       * @description User-facing name distinguishing same-type channels. Null = unnamed.
+       * @example #alerts
+       */
+      label: Record<string, unknown> | null;
+      /**
+       * @description Whether this channel sends. Off = skipped even with a URL set.
+       * @example true
+       */
+      enabled: boolean;
+      /**
+       * @description Outbound webhook URL for this channel. Null = none set.
+       * @example https://hooks.slack.com/services/T000/B000/xxxx
+       */
+      webhookUrl: Record<string, unknown> | null;
+      /**
+       * @description Notify this channel when a run pauses for approval.
+       * @example true
+       */
+      onApprovalPending: boolean;
+      /**
+       * @description Notify this channel when a run fails.
+       * @example true
+       */
+      onRunFailed: boolean;
+    };
+    CreateNotificationChannelDto: {
+      /**
+       * @description User-facing name distinguishing same-type channels. Blank clears it.
+       * @example #alerts
+       */
+      label?: string;
+      /**
+       * @description Whether this channel sends. Off = the worker skips it even with a URL set.
+       * @example true
+       */
+      enabled?: boolean;
+      /**
+       * @description Outbound webhook URL for this channel. Blank clears it (nothing to POST to).
+       * @example https://hooks.slack.com/services/T000/B000/xxxx
+       */
+      webhookUrl?: string;
+      /**
+       * @description Notify this channel when a run pauses for approval.
+       * @example true
+       */
+      onApprovalPending?: boolean;
+      /**
+       * @description Notify this channel when a run fails.
+       * @example true
+       */
+      onRunFailed?: boolean;
+      /**
+       * @description Channel type — determines the payload format.
+       * @example slack
+       * @enum {string}
+       */
+      type: "slack" | "teams";
+    };
+    UpdateNotificationChannelDto: {
+      /**
+       * @description User-facing name distinguishing same-type channels. Blank clears it.
+       * @example #alerts
+       */
+      label?: string;
+      /**
+       * @description Whether this channel sends. Off = the worker skips it even with a URL set.
+       * @example true
+       */
+      enabled?: boolean;
+      /**
+       * @description Outbound webhook URL for this channel. Blank clears it (nothing to POST to).
+       * @example https://hooks.slack.com/services/T000/B000/xxxx
+       */
+      webhookUrl?: string;
+      /**
+       * @description Notify this channel when a run pauses for approval.
+       * @example true
+       */
+      onApprovalPending?: boolean;
+      /**
+       * @description Notify this channel when a run fails.
+       * @example true
+       */
+      onRunFailed?: boolean;
+    };
+    TestNotificationResponse: {
+      /** @example true */
+      ok: boolean;
+      /**
+       * @description HTTP status the webhook returned.
+       * @example 200
+       */
+      status: number;
     };
     CredentialProviderResponse: {
       /** @example anthropic */
@@ -2416,113 +2601,6 @@ export interface components {
       mode?: "builder" | "simple" | null;
       /** @description Ordered widget layout for the Overview: [{ id, hidden, span }]. Omit to leave unchanged. */
       dashboard?: unknown[] | null;
-    };
-    NotificationChannelResponse: {
-      /**
-       * @description Channel id — the handle for update/delete/test.
-       * @example 9a8b7c6d-…
-       */
-      id: string;
-      /**
-       * @description Channel type — determines the payload format + which webhook to use.
-       * @example slack
-       * @enum {string}
-       */
-      type: "slack" | "teams";
-      /**
-       * @description User-facing name distinguishing same-type channels. Null = unnamed.
-       * @example #alerts
-       */
-      label: Record<string, unknown> | null;
-      /**
-       * @description Whether this channel sends. Off = skipped even with a URL set.
-       * @example true
-       */
-      enabled: boolean;
-      /**
-       * @description Outbound webhook URL for this channel. Null = none set.
-       * @example https://hooks.slack.com/services/T000/B000/xxxx
-       */
-      webhookUrl: Record<string, unknown> | null;
-      /**
-       * @description Notify this channel when a run pauses for approval.
-       * @example true
-       */
-      onApprovalPending: boolean;
-      /**
-       * @description Notify this channel when a run fails.
-       * @example true
-       */
-      onRunFailed: boolean;
-    };
-    CreateNotificationChannelDto: {
-      /**
-       * @description User-facing name distinguishing same-type channels. Blank clears it.
-       * @example #alerts
-       */
-      label?: string;
-      /**
-       * @description Whether this channel sends. Off = the worker skips it even with a URL set.
-       * @example true
-       */
-      enabled?: boolean;
-      /**
-       * @description Outbound webhook URL for this channel. Blank clears it (nothing to POST to).
-       * @example https://hooks.slack.com/services/T000/B000/xxxx
-       */
-      webhookUrl?: string;
-      /**
-       * @description Notify this channel when a run pauses for approval.
-       * @example true
-       */
-      onApprovalPending?: boolean;
-      /**
-       * @description Notify this channel when a run fails.
-       * @example true
-       */
-      onRunFailed?: boolean;
-      /**
-       * @description Channel type — determines the payload format.
-       * @example slack
-       * @enum {string}
-       */
-      type: "slack" | "teams";
-    };
-    UpdateNotificationChannelDto: {
-      /**
-       * @description User-facing name distinguishing same-type channels. Blank clears it.
-       * @example #alerts
-       */
-      label?: string;
-      /**
-       * @description Whether this channel sends. Off = the worker skips it even with a URL set.
-       * @example true
-       */
-      enabled?: boolean;
-      /**
-       * @description Outbound webhook URL for this channel. Blank clears it (nothing to POST to).
-       * @example https://hooks.slack.com/services/T000/B000/xxxx
-       */
-      webhookUrl?: string;
-      /**
-       * @description Notify this channel when a run pauses for approval.
-       * @example true
-       */
-      onApprovalPending?: boolean;
-      /**
-       * @description Notify this channel when a run fails.
-       * @example true
-       */
-      onRunFailed?: boolean;
-    };
-    TestNotificationResponse: {
-      /** @example true */
-      ok: boolean;
-      /**
-       * @description HTTP status the webhook returned.
-       * @example 200
-       */
-      status: number;
     };
     TagResponse: {
       /** @example 9a8b7c6d-… */
@@ -5163,6 +5241,54 @@ export interface operations {
     };
   };
   /**
+   * Send an approval reminder now
+   * @description Re-notifies the run environment's channels (reminder flavor) that this approval is still waiting. 409 if the run is no longer awaiting approval.
+   */
+  ExecutionsController_remind: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      200: {
+        content: {
+          "application/json": components["schemas"]["RemindResponse"];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Resource not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
    * Cancel a running run
    * @description Terminates the workflow (status → terminated). 409 if already finished.
    */
@@ -5549,6 +5675,7 @@ export interface operations {
     parameters: {
       query: {
         token: string;
+        exp?: string;
       };
       path: {
         workflowId: string;
@@ -5577,6 +5704,229 @@ export interface operations {
       202: {
         content: {
           "application/json": components["schemas"]["DecideResultResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * List notification channels
+   * @description Every channel configured in the active environment (any number of Slack/Teams webhooks), in a stable order.
+   */
+  NotificationsController_list: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    responses: {
+      200: {
+        content: {
+          "application/json": components["schemas"]["NotificationChannelResponse"][];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Add a notification channel
+   * @description Creates a new channel of the given type in the active environment — a tenant can have several per type (e.g. two Slack webhooks for #alerts and #oncall).
+   */
+  NotificationsController_createChannel: {
+    parameters: {
+      path: {
+        id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateNotificationChannelDto"];
+      };
+    };
+    responses: {
+      201: {
+        content: {
+          "application/json": components["schemas"]["NotificationChannelResponse"];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Delete one notification channel
+   * @description Removes the channel (idempotent).
+   */
+  NotificationsController_deleteChannel: {
+    parameters: {
+      path: {
+        id: string;
+        channelId: string;
+      };
+    };
+    responses: {
+      200: {
+        content: {
+          "application/json": components["schemas"]["TestNotificationResponse"];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Update one notification channel
+   * @description Patches a single channel's config (identified by :channelId). Other channels are untouched.
+   */
+  NotificationsController_updateChannel: {
+    parameters: {
+      path: {
+        id: string;
+        channelId: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateNotificationChannelDto"];
+      };
+    };
+    responses: {
+      200: {
+        content: {
+          "application/json": components["schemas"]["NotificationChannelResponse"];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Send a test notification to one channel
+   * @description POSTs a sample message to that channel's webhook so you can confirm delivery + formatting from your own channel.
+   */
+  NotificationsController_sendTest: {
+    parameters: {
+      path: {
+        id: string;
+        channelId: string;
+      };
+    };
+    responses: {
+      200: {
+        content: {
+          "application/json": components["schemas"]["TestNotificationResponse"];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
     };
@@ -8373,229 +8723,6 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["PreferencesResponse"];
-        };
-      };
-      /** @description Validation error / malformed request. */
-      400: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      /** @description Missing or invalid credentials (bearer token). */
-      401: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      /** @description Authenticated but not permitted for this workspace. */
-      403: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      /** @description Unexpected server error. */
-      500: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-    };
-  };
-  /**
-   * List notification channels
-   * @description Every channel configured in the active environment (any number of Slack/Teams webhooks), in a stable order.
-   */
-  NotificationsController_list: {
-    parameters: {
-      path: {
-        id: string;
-      };
-    };
-    responses: {
-      200: {
-        content: {
-          "application/json": components["schemas"]["NotificationChannelResponse"][];
-        };
-      };
-      /** @description Validation error / malformed request. */
-      400: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      /** @description Missing or invalid credentials (bearer token). */
-      401: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      /** @description Authenticated but not permitted for this workspace. */
-      403: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      /** @description Unexpected server error. */
-      500: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-    };
-  };
-  /**
-   * Add a notification channel
-   * @description Creates a new channel of the given type in the active environment — a tenant can have several per type (e.g. two Slack webhooks for #alerts and #oncall).
-   */
-  NotificationsController_createChannel: {
-    parameters: {
-      path: {
-        id: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["CreateNotificationChannelDto"];
-      };
-    };
-    responses: {
-      201: {
-        content: {
-          "application/json": components["schemas"]["NotificationChannelResponse"];
-        };
-      };
-      /** @description Validation error / malformed request. */
-      400: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      /** @description Missing or invalid credentials (bearer token). */
-      401: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      /** @description Authenticated but not permitted for this workspace. */
-      403: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      /** @description Unexpected server error. */
-      500: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-    };
-  };
-  /**
-   * Delete one notification channel
-   * @description Removes the channel (idempotent).
-   */
-  NotificationsController_deleteChannel: {
-    parameters: {
-      path: {
-        id: string;
-        channelId: string;
-      };
-    };
-    responses: {
-      200: {
-        content: {
-          "application/json": components["schemas"]["TestNotificationResponse"];
-        };
-      };
-      /** @description Validation error / malformed request. */
-      400: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      /** @description Missing or invalid credentials (bearer token). */
-      401: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      /** @description Authenticated but not permitted for this workspace. */
-      403: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      /** @description Unexpected server error. */
-      500: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-    };
-  };
-  /**
-   * Update one notification channel
-   * @description Patches a single channel's config (identified by :channelId). Other channels are untouched.
-   */
-  NotificationsController_updateChannel: {
-    parameters: {
-      path: {
-        id: string;
-        channelId: string;
-      };
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["UpdateNotificationChannelDto"];
-      };
-    };
-    responses: {
-      200: {
-        content: {
-          "application/json": components["schemas"]["NotificationChannelResponse"];
-        };
-      };
-      /** @description Validation error / malformed request. */
-      400: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      /** @description Missing or invalid credentials (bearer token). */
-      401: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      /** @description Authenticated but not permitted for this workspace. */
-      403: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      /** @description Unexpected server error. */
-      500: {
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-    };
-  };
-  /**
-   * Send a test notification to one channel
-   * @description POSTs a sample message to that channel's webhook so you can confirm delivery + formatting from your own channel.
-   */
-  NotificationsController_sendTest: {
-    parameters: {
-      path: {
-        id: string;
-        channelId: string;
-      };
-    };
-    responses: {
-      200: {
-        content: {
-          "application/json": components["schemas"]["TestNotificationResponse"];
         };
       };
       /** @description Validation error / malformed request. */

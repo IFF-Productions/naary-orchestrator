@@ -31,6 +31,19 @@ const FAILED: NotificationInput = {
   detail: "AGENT_TIMEOUT",
 };
 
+// Slice-1 approval flavors: a scheduled reminder (#2) and an escalation naming its target.
+const REMINDER: NotificationInput = {
+  ...APPROVAL,
+  flavor: "reminder",
+  reminderIndex: 2,
+};
+
+const ESCALATION: NotificationInput = {
+  ...APPROVAL,
+  flavor: "escalation",
+  escalateTo: "@ops-oncall",
+};
+
 function Slack({
   input,
   links = LINKS,
@@ -83,8 +96,23 @@ export const SlackLightTheme: Story = {
   render: () => <Slack input={FAILED} theme="light" />,
 };
 
+/** Scheduled reminder flavor — "⏰ Approval reminder #2" header, same decision buttons. */
+export const SlackApprovalReminder: Story = {
+  render: () => <Slack input={REMINDER} />,
+};
+
+/** Escalation flavor — "🚨 Approval escalated" + the full-width "Escalated to" line. */
+export const SlackApprovalEscalation: Story = {
+  render: () => <Slack input={ESCALATION} />,
+};
+
 export const TeamsApprovalPending: Story = {
   render: () => <Teams input={APPROVAL} />,
+};
+
+/** Escalation as an Adaptive Card — the target rides the FactSet. */
+export const TeamsApprovalEscalation: Story = {
+  render: () => <Teams input={ESCALATION} />,
 };
 
 export const TeamsRunFailed: Story = {

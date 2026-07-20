@@ -126,6 +126,13 @@ export const { sendNotification } = wf.proxyActivities<typeof activities>({
   retry: { maximumAttempts: 2 },
 });
 
+// Pause-side approval snapshot (Slice 1): resolves contextFields expressions + approver
+// display names and stamps pausedAt. Read-only DB + clock — idempotent, so normal retries.
+export const { prepareApproval } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "30 seconds",
+  retry: { maximumAttempts: 3 },
+});
+
 // Sandboxed user JS. The activity caps wall-clock at ≤5s; the start-to-close sits
 // above that. User-code failures are non-retryable in the activity, so 1 attempt.
 export const { callCode } = wf.proxyActivities<typeof activities>({

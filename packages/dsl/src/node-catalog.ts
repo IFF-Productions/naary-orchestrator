@@ -287,8 +287,9 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
   humanApproval: {
     group: "flow",
     summary:
-      "Pause until a person approves/rejects (can wait days). Continue on approve; run stops on reject.",
-    config: "{ title?, instructions?, timeoutHours? }",
+      "Pause until a person approves/rejects (can wait days). Continue on approve; run stops on reject. Optional routing (approvers), SLA, reminder/escalation timers, and a structured context card.",
+    config:
+      "{ title?, instructions?, timeoutHours?, approvers?: { emails?, groupIds? }, slaHours?, remindAfterHours?: number[], escalateAfterHours?, escalateTo?, contextFields?: { key: expression } }",
   },
   respondToWebhook: {
     group: "flow",

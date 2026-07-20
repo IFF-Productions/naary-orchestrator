@@ -8,9 +8,15 @@ import {
   stateQuery,
   TASK_QUEUE,
   webhookResponseQuery,
+  type ApprovalAwaitingRecord,
 } from "@naary/contracts";
-import { githubReviewGraph, sampleGraph, webhookSampleGraph } from "@naary/dsl";
-import type { GraphDef } from "@naary/dsl";
+import {
+  githubReviewGraph,
+  resolveTemplates,
+  sampleGraph,
+  webhookSampleGraph,
+} from "@naary/dsl";
+import type { ApprovalNodeConfig, GraphDef } from "@naary/dsl";
 import type * as activities from "../src/temporal/activities";
 import { runGraph } from "../src/temporal/workflows";
 
@@ -264,6 +270,57 @@ const mockActivities = {
   ): Promise<void> => {
     notifyCalls.push(input);
   },
+  // Slice 1 pause-side snapshot. Mirrors the real activity's shape: contextFields resolved
+  // with the SAME resolveTemplates against the ctx snapshot the interpreter handed over
+  // (proving eval happens in-activity on pause-time data), a fixed pausedAt, and group
+  // display names derived from the ids (the real activity reads them from PG).
+  prepareApproval: async (input: {
+    tenantId: string;
+    nodeId: string;
+    config: ApprovalNodeConfig;
+    ctx: Record<string, unknown>;
+  }): Promise<ApprovalAwaitingRecord> => {
+    prepareApprovalCalls.push(input);
+    const cfg = input.config;
+    const contextFields = cfg.contextFields
+      ? Object.fromEntries(
+          Object.entries(cfg.contextFields).map(([k, v]) => {
+            const r = (resolveTemplates({ v }, input.ctx) as { v: unknown }).v;
+            return [
+              k,
+              r == null
+                ? ""
+                : typeof r === "object"
+                  ? JSON.stringify(r)
+                  : String(r),
+            ];
+          }),
+        )
+      : undefined;
+    return {
+      nodeId: input.nodeId,
+      pausedAt: "2026-01-01T00:00:00.000Z",
+      ...(cfg.slaHours ? { slaHours: cfg.slaHours } : {}),
+      ...(contextFields ? { contextFields } : {}),
+      ...(cfg.approvers
+        ? {
+            approvers: {
+              emails: cfg.approvers.emails ?? [],
+              groups: (cfg.approvers.groupIds ?? []).map((id) => ({
+                id,
+                name: `${id}-name`,
+              })),
+            },
+          }
+        : {}),
+      ...(cfg.escalateAfterHours
+        ? {
+            escalateAfterHours: cfg.escalateAfterHours,
+            ...(cfg.escalateTo ? { escalateTo: cfg.escalateTo } : {}),
+          }
+        : {}),
+    };
+  },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
   setExecutionStatus: async (): Promise<void> => undefined, // read-model push; no-op here
   // Global Variables ($vars): return the env-scoped config the interpreter seeds into ctx.$vars.
@@ -296,6 +353,12 @@ let loadVariablesResult: Record<string, string> = { slackChannel: "#alerts" };
 const pollCalls: activities.PollMeta[] = [];
 let pollChanged = true;
 const notifyCalls: activities.NotificationInput[] = [];
+const prepareApprovalCalls: {
+  tenantId: string;
+  nodeId: string;
+  config: ApprovalNodeConfig;
+  ctx: Record<string, unknown>;
+}[] = [];
 
 // pollTrigger(entry) → branch on poll.changed: changed → agent → end; else → end.
 const pollGraph: GraphDef = {
@@ -1707,6 +1770,207 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
     });
   });
 
+  it("Slice 1: a ROUTED gate snapshots contextFields/approvers/SLA into ctx.__approval at pause, and clears it on decision", async () => {
+    // webhookTrigger → humanApproval(with Slice-1 fields) → end. The contextFields
+    // expressions reference the trigger's output — resolvable only from the run ctx
+    // AT PAUSE TIME, in the activity.
+    const routedGraph: GraphDef = {
+      startNodeId: "trigger",
+      nodes: [
+        { id: "trigger", type: "webhookTrigger" },
+        {
+          id: "appr",
+          type: "humanApproval",
+          config: {
+            title: "Approve the deal?",
+            slaHours: 48,
+            approvers: {
+              emails: ["sam@acme.io"],
+              groupIds: ["g-finance"],
+            },
+            contextFields: {
+              Company: "{{ trigger.company }}",
+              Amount: "{{ trigger.amount }}",
+            },
+          },
+        },
+        { id: "e", type: "end" },
+      ],
+      edges: [
+        { from: "trigger", to: "appr" },
+        { from: "appr", to: "e" },
+      ],
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          routedGraph,
+          { company: "Acme", amount: 1200 },
+          { tenantId: "t-routed" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-approve-routed",
+      });
+      await waitFor(
+        async () =>
+          (await handle.query(stateQuery)).status === "awaiting_approval",
+      );
+      const paused = await handle.query(stateQuery);
+      // The awaiting record the API reads (inbox rows / decide enforcement / public
+      // prompt) rides the ctx under the reserved __approval key.
+      expect(paused.ctx.__approval).toMatchObject({
+        nodeId: "appr",
+        pausedAt: "2026-01-01T00:00:00.000Z",
+        slaHours: 48,
+        contextFields: { Company: "Acme", Amount: "1200" },
+        approvers: {
+          emails: ["sam@acme.io"],
+          groups: [{ id: "g-finance", name: "g-finance-name" }],
+        },
+      });
+      // The activity got the PAUSE-TIME ctx snapshot with reserved __ keys stripped
+      // (no __input — same contract as the code node's snapshot) + the tenant.
+      const call = prepareApprovalCalls.find((c) => c.tenantId === "t-routed");
+      expect(call).toBeTruthy();
+      expect(call?.nodeId).toBe("appr");
+      expect(call?.ctx.trigger).toEqual({ company: "Acme", amount: 1200 });
+      expect("__input" in (call?.ctx ?? {})).toBe(false);
+
+      await handle.signal(approvalSignal, { approved: true });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      // Decision recorded as usual; the awaiting record is CLEARED once decided.
+      expect(result.ctx.appr).toEqual({ approved: true, comment: null });
+      expect(result.ctx.__approval).toBeUndefined();
+    });
+  });
+
+  it("Slice 1: reminder + escalation timers fire the notification ACTIVITY (durable timers), then the gate still resolves — and the history REPLAYS", async () => {
+    // Tiny hour offsets (env is createLocal — real time): reminders at ~0.7s/​~1.4s,
+    // escalation at ~2.2s. No timeoutHours — after the schedule the gate waits forever.
+    const reminderGraph: GraphDef = {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        {
+          id: "appr",
+          type: "humanApproval",
+          config: {
+            title: "Remind me",
+            remindAfterHours: [0.0002, 0.0004],
+            escalateAfterHours: 0.0006,
+            escalateTo: "@ops-oncall",
+          },
+        },
+        { id: "e", type: "end" },
+      ],
+      edges: [
+        { from: "s", to: "appr" },
+        { from: "appr", to: "e" },
+      ],
+    };
+    const worker = await makeWorker();
+    const history = await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [reminderGraph, {}, { tenantId: "t-remind" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-approve-remind",
+      });
+      // Both reminders AND the escalation fire while nobody decides.
+      await waitFor(async () =>
+        notifyCalls.some(
+          (n) => n.tenantId === "t-remind" && n.flavor === "escalation",
+        ),
+      );
+      const mine = notifyCalls.filter((n) => n.tenantId === "t-remind");
+      // Initial pause notification first (no flavor), then reminder #1, #2, escalation.
+      expect(mine.map((n) => n.flavor ?? "initial")).toEqual([
+        "initial",
+        "reminder",
+        "reminder",
+        "escalation",
+      ]);
+      expect(mine.every((n) => n.kind === "approval_pending")).toBe(true);
+      expect(mine[1]).toMatchObject({ reminderIndex: 1, title: "Remind me" });
+      expect(mine[2]).toMatchObject({ reminderIndex: 2 });
+      expect(mine[3]).toMatchObject({ escalateTo: "@ops-oncall" });
+
+      // The gate is still decidable after the whole schedule elapsed.
+      await handle.signal(approvalSignal, { approved: true });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      return handle.fetchHistory();
+    });
+    // The segmented timer loop replays deterministically (schedule is a pure
+    // derivation of the config snapshot — the authoritative determinism guard).
+    await expect(
+      Worker.runReplayHistory(
+        { workflowsPath: WORKFLOWS_PATH },
+        history,
+        "e2e-approve-remind",
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("Slice 1 invariant: an OLD-STYLE gate (no new fields) emits NO new commands — no prepareApproval, no timers — and its history replays", async () => {
+    const plainGraph: GraphDef = {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        { id: "appr", type: "humanApproval", config: { title: "Plain" } },
+        { id: "e", type: "end" },
+      ],
+      edges: [
+        { from: "s", to: "appr" },
+        { from: "appr", to: "e" },
+      ],
+    };
+    const worker = await makeWorker();
+    const history = await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [plainGraph, {}, { tenantId: "t-plain-gate" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-approve-plain",
+      });
+      await waitFor(
+        async () =>
+          (await handle.query(stateQuery)).status === "awaiting_approval",
+      );
+      // No awaiting snapshot for an un-routed gate (the exact pre-existing path).
+      expect((await handle.query(stateQuery)).ctx.__approval).toBeUndefined();
+      await handle.signal(approvalSignal, { approved: true });
+      expect((await handle.result()).status).toBe("completed");
+      return handle.fetchHistory();
+    });
+    expect(
+      prepareApprovalCalls.some((c) => c.tenantId === "t-plain-gate"),
+    ).toBe(false);
+    // The durable record agrees: no prepareApproval activity, no timer commands.
+    const events = (history.events ?? []) as {
+      activityTaskScheduledEventAttributes?: {
+        activityType?: { name?: string };
+      };
+      timerStartedEventAttributes?: unknown;
+    }[];
+    expect(
+      events.some(
+        (e) =>
+          e.activityTaskScheduledEventAttributes?.activityType?.name ===
+          "prepareApproval",
+      ),
+    ).toBe(false);
+    expect(events.some((e) => e.timerStartedEventAttributes)).toBe(false);
+    // And it replays against the NEW interpreter code — the replay-safety invariant.
+    await expect(
+      Worker.runReplayHistory(
+        { workflowsPath: WORKFLOWS_PATH },
+        history,
+        "e2e-approve-plain",
+      ),
+    ).resolves.toBeUndefined();
+  });
+
   it("resolves to rejected when approval is denied", async () => {
     const worker = await makeWorker();
     await worker.runUntil(async () => {
@@ -3000,8 +3264,14 @@ describe("runGraph interpreter — conditional & multi-path routing", () => {
         type: "switch",
         config: {
           rules: [
-            { name: "high", condition: { path: "trigger.amount", op: "gt", value: 100 } },
-            { name: "mid", condition: { path: "trigger.amount", op: "gt", value: 10 } },
+            {
+              name: "high",
+              condition: { path: "trigger.amount", op: "gt", value: 100 },
+            },
+            {
+              name: "mid",
+              condition: { path: "trigger.amount", op: "gt", value: 10 },
+            },
           ],
           fallback: "low",
         },
@@ -3013,9 +3283,21 @@ describe("runGraph interpreter — conditional & multi-path routing", () => {
     ],
     edges: [
       { from: "trigger", to: "sw" },
-      { from: "sw", to: "tHigh", condition: { path: "sw.matched", op: "eq", value: "high" } },
-      { from: "sw", to: "tMid", condition: { path: "sw.matched", op: "eq", value: "mid" } },
-      { from: "sw", to: "tLow", condition: { path: "sw.matched", op: "eq", value: "low" } },
+      {
+        from: "sw",
+        to: "tHigh",
+        condition: { path: "sw.matched", op: "eq", value: "high" },
+      },
+      {
+        from: "sw",
+        to: "tMid",
+        condition: { path: "sw.matched", op: "eq", value: "mid" },
+      },
+      {
+        from: "sw",
+        to: "tLow",
+        condition: { path: "sw.matched", op: "eq", value: "low" },
+      },
       { from: "tHigh", to: "end" },
       { from: "tMid", to: "end" },
       { from: "tLow", to: "end" },
@@ -3057,8 +3339,16 @@ describe("runGraph interpreter — conditional & multi-path routing", () => {
       ],
       edges: [
         { from: "trigger", to: "gate" },
-        { from: "gate", to: "tYes", condition: { path: "gate.result", op: "eq", value: true } },
-        { from: "gate", to: "tNo", condition: { path: "gate.result", op: "eq", value: false } },
+        {
+          from: "gate",
+          to: "tYes",
+          condition: { path: "gate.result", op: "eq", value: true },
+        },
+        {
+          from: "gate",
+          to: "tNo",
+          condition: { path: "gate.result", op: "eq", value: false },
+        },
         { from: "tYes", to: "end" },
         { from: "tNo", to: "end" },
       ],
@@ -3066,7 +3356,9 @@ describe("runGraph interpreter — conditional & multi-path routing", () => {
   }
 
   it("if: a passing predicate takes the true edge", async () => {
-    const g = ifGraph({ conditions: [{ path: "trigger.amount", op: "gt", value: 100 }] });
+    const g = ifGraph({
+      conditions: [{ path: "trigger.amount", op: "gt", value: 100 }],
+    });
     const r = await runFlow(g, { amount: 250 }, "e2e-if-true");
     expect(r.ctx.gate).toEqual({ result: true });
     expect(r.ctx.tYes).toEqual({ took: "yes" });
@@ -3074,7 +3366,9 @@ describe("runGraph interpreter — conditional & multi-path routing", () => {
   });
 
   it("if: a failing predicate takes the false edge", async () => {
-    const g = ifGraph({ conditions: [{ path: "trigger.amount", op: "gt", value: 100 }] });
+    const g = ifGraph({
+      conditions: [{ path: "trigger.amount", op: "gt", value: 100 }],
+    });
     const r = await runFlow(g, { amount: 5 }, "e2e-if-false");
     expect(r.ctx.gate).toEqual({ result: false });
     expect(r.ctx.tNo).toEqual({ took: "no" });
@@ -3089,7 +3383,9 @@ describe("runGraph interpreter — conditional & multi-path routing", () => {
         { path: "trigger.b", op: "eq", value: 2 },
       ],
     });
-    expect((await runFlow(or, { a: 0, b: 2 }, "e2e-if-or")).ctx.gate).toEqual({ result: true });
+    expect((await runFlow(or, { a: 0, b: 2 }, "e2e-if-or")).ctx.gate).toEqual({
+      result: true,
+    });
 
     const and = ifGraph({
       combine: "and",
@@ -3098,7 +3394,9 @@ describe("runGraph interpreter — conditional & multi-path routing", () => {
         { path: "trigger.b", op: "eq", value: 2 },
       ],
     });
-    expect((await runFlow(and, { a: 1, b: 0 }, "e2e-if-and")).ctx.gate).toEqual({ result: false });
+    expect((await runFlow(and, { a: 1, b: 0 }, "e2e-if-and")).ctx.gate).toEqual(
+      { result: false },
+    );
   });
 
   it("if: empty conditions ⇒ false (a gate with nothing to test doesn't pass)", async () => {
@@ -3180,12 +3478,23 @@ describe("runGraph interpreter — conditional & multi-path routing", () => {
       startNodeId: "trigger",
       nodes: [
         { id: "trigger", type: "webhookTrigger" },
-        { id: "gate", type: "if", config: { conditions: [{ path: "trigger.amount", op: "gt", value: 0 }] } },
+        {
+          id: "gate",
+          type: "if",
+          config: {
+            conditions: [{ path: "trigger.amount", op: "gt", value: 0 }],
+          },
+        },
         {
           id: "sw",
           type: "switch",
           config: {
-            rules: [{ name: "b", condition: { path: "trigger.category", op: "eq", value: "b" } }],
+            rules: [
+              {
+                name: "b",
+                condition: { path: "trigger.category", op: "eq", value: "b" },
+              },
+            ],
             fallback: "other",
           },
         },
@@ -3196,10 +3505,26 @@ describe("runGraph interpreter — conditional & multi-path routing", () => {
       ],
       edges: [
         { from: "trigger", to: "gate" },
-        { from: "gate", to: "sw", condition: { path: "gate.result", op: "eq", value: true } },
-        { from: "gate", to: "neg", condition: { path: "gate.result", op: "eq", value: false } },
-        { from: "sw", to: "hitB", condition: { path: "sw.matched", op: "eq", value: "b" } },
-        { from: "sw", to: "hitOther", condition: { path: "sw.matched", op: "eq", value: "other" } },
+        {
+          from: "gate",
+          to: "sw",
+          condition: { path: "gate.result", op: "eq", value: true },
+        },
+        {
+          from: "gate",
+          to: "neg",
+          condition: { path: "gate.result", op: "eq", value: false },
+        },
+        {
+          from: "sw",
+          to: "hitB",
+          condition: { path: "sw.matched", op: "eq", value: "b" },
+        },
+        {
+          from: "sw",
+          to: "hitOther",
+          condition: { path: "sw.matched", op: "eq", value: "other" },
+        },
         { from: "hitB", to: "end" },
         { from: "hitOther", to: "end" },
         { from: "neg", to: "end" },
@@ -3214,7 +3539,6 @@ describe("runGraph interpreter — conditional & multi-path routing", () => {
     expect(r.ctx.neg).toBeUndefined();
   });
 });
-
 
 /**
  * Per-node execution matrix (Part 2): prove every remaining node type actually RUNS through the real

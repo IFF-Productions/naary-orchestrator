@@ -9,6 +9,8 @@ import {
   safeFetch,
 } from "@naary/connections";
 import { getPrisma } from "@naary/db";
+import { notificationPayload } from "@naary/notifications";
+import { approvalPath } from "../executions/approval-token";
 
 /** Channel types the product ships today. A tenant may have ANY NUMBER of channels per
  *  type (N Slack + N Teams webhooks); `email` and others slot in here later without a
@@ -239,6 +241,106 @@ export class NotificationsService {
     }
     return { ok: true, status: res.status };
   }
+
+  /**
+   * Manual "Remind now" for a paused approval (REDESIGN-FUNCTIONALITY-GAPS.md Slice 1):
+   * fan a `reminder`-flavored approval notification out to the env's enabled channels
+   * with `onApprovalPending` on — the SAME channels + formatter the worker's scheduled
+   * reminders use (@naary/notifications owns the shape, so the two can't drift).
+   *
+   * DESIGN CHOICE (documented in the slice): this is an API-SIDE send, not a worker
+   * Signal round-trip. A Signal would need a new handler in the deterministic workflow
+   * (new commands on EVERY run → patched() gating + replay risk) just to re-enter an
+   * activity whose inputs the API already holds. The direct send is the simpler correct
+   * path; scheduled reminders still run in the worker as durable timers.
+   *
+   * Best-effort per channel (mirrors the worker fan-out): one bad webhook doesn't stop
+   * the rest; returns how many channels were actually POSTed.
+   */
+  async sendApprovalReminder(
+    tenantId: string,
+    environmentId: string,
+    info: { workflowId: string; workflowKey?: string | null; title?: string },
+  ): Promise<{ sent: number }> {
+    const rows = await getPrisma().notificationChannel.findMany({
+      where: {
+        tenantId,
+        environmentId,
+        enabled: true,
+        onApprovalPending: true,
+      },
+      orderBy: [{ type: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      select: { type: true, webhookUrl: true },
+    });
+    // Same link semantics as the worker: absolute links only (a relative /approve/… is
+    // useless as a Slack button); approvalPath mints the signed + expiring token.
+    const base = resolveAppBaseUrl();
+    const links = {
+      approvalUrl:
+        base && process.env.ENCRYPTION_KEY
+          ? `${base}${approvalPath(info.workflowId)}`
+          : undefined,
+      runUrl: base
+        ? `${base}/app/runs/${encodeURIComponent(info.workflowId)}`
+        : undefined,
+    };
+    const input = {
+      kind: "approval_pending" as const,
+      flavor: "reminder" as const,
+      workflowId: info.workflowId,
+      workflowKey: info.workflowKey ?? undefined,
+      title: info.title,
+    };
+    let sent = 0;
+    for (const ch of rows) {
+      if (!ch.webhookUrl) continue;
+      try {
+        await assertEgressAllowed(ch.webhookUrl);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10_000);
+        try {
+          await safeFetch(ch.webhookUrl, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(notificationPayload(input, ch.type, links)),
+            signal: controller.signal,
+          } as never);
+          sent += 1;
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch {
+        // Best-effort per channel — skip and continue (mirrors the worker).
+      }
+    }
+    return { sent };
+  }
+}
+
+/** Normalize a candidate into a deep-link base (origin + path, no query/fragment). Mirrors the
+ *  worker's normalizeBaseUrl — kept local so the API stays decoupled from worker code. */
+function normalizeBaseUrl(raw: string): string | undefined {
+  try {
+    const u = new URL(raw.trim());
+    if (u.protocol !== "http:" && u.protocol !== "https:") return undefined;
+    return `${u.origin}${u.pathname}`.replace(/\/+$/, "");
+  } catch {
+    return undefined;
+  }
+}
+
+/** The SPA's public base URL (APP_BASE_URL, else the first http(s) CORS origin) — the same
+ *  resolution the worker's notification activity uses for deep links. */
+function resolveAppBaseUrl(): string | undefined {
+  const candidates = [
+    process.env.APP_BASE_URL ?? "",
+    ...(process.env.CORS_ORIGINS ?? "").split(","),
+  ];
+  for (const c of candidates) {
+    const base = normalizeBaseUrl(c);
+    if (base) return base;
+  }
+  return undefined;
 }
 
 /** Minimal Slack test payload — a header + one line. Enough to confirm delivery + rendering. */

@@ -475,6 +475,133 @@ describe("sendNotification", () => {
   });
 });
 
+describe("sendNotification — approval reminder/escalation flavors (Slice 1)", () => {
+  it("reminder flavor: header + text say reminder #N; decision buttons stay", async () => {
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      flavor: "reminder",
+      reminderIndex: 2,
+      title: "Ship it?",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    const header = body.blocks.find(
+      (b: { type: string }) => b.type === "header",
+    );
+    expect(header.text.text).toBe("⏰ Approval reminder #2");
+    expect(body.text).toContain("Reminder #2");
+    expect(body.text).toContain("Ship it?");
+    // Same one-click decision actions as the initial pause notification.
+    expect(body.actions.map((a: { label: string }) => a.label)).toEqual([
+      "✅ Approve",
+      "❌ Reject",
+      "View run",
+    ]);
+    // Generic hooks can branch on the flavor.
+    expect(body.flavor).toBe("reminder");
+    expect(body.reminderIndex).toBe(2);
+  });
+
+  it("reminder without an index (manual Remind now) drops the #N", async () => {
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      flavor: "reminder",
+      title: "Ship it?",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    const header = body.blocks.find(
+      (b: { type: string }) => b.type === "header",
+    );
+    expect(header.text.text).toBe("⏰ Approval reminder");
+  });
+
+  it("escalation flavor: names the target in a full-width section (escaped)", async () => {
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      flavor: "escalation",
+      escalateTo: "@ops-oncall <primary>",
+      title: "Ship it?",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    const header = body.blocks.find(
+      (b: { type: string }) => b.type === "header",
+    );
+    expect(header.text.text).toBe("🚨 Approval escalated");
+    const target = body.blocks.find(
+      (b: { type: string; text?: { text?: string } }) =>
+        b.type === "section" && b.text?.text?.includes("*Escalated to*"),
+    );
+    expect(target?.text.text).toContain("@ops-oncall &lt;primary&gt;");
+    expect(body.text).toContain("escalated to @ops-oncall &lt;primary&gt;");
+    expect(body.escalateTo).toBe("@ops-oncall <primary>");
+  });
+
+  it("flavors still respect the onApprovalPending channel toggle", async () => {
+    channels = [
+      {
+        type: "slack",
+        webhookUrl: "https://hooks.example.com/x",
+        onApprovalPending: false,
+        onRunFailed: true,
+      },
+    ];
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      flavor: "reminder",
+      reminderIndex: 1,
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("Teams: reminder/escalation ride the FactSet (plain values, no mrkdwn)", async () => {
+    channels = [
+      {
+        type: "teams",
+        webhookUrl: "https://teams.example/x",
+        onApprovalPending: true,
+        onRunFailed: true,
+      },
+    ];
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      flavor: "escalation",
+      escalateTo: "@ops-oncall",
+      title: "Ship?",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    const card = body.attachments[0].content;
+    const headerBlock = card.body.find(
+      (b: { type: string }) => b.type === "TextBlock",
+    );
+    expect(headerBlock.text).toBe("🚨 Approval escalated");
+    const facts = card.body.find((b: { type: string }) => b.type === "FactSet")
+      .facts as { title: string; value: string }[];
+    expect(facts).toContainEqual({
+      title: "Escalated to",
+      value: "@ops-oncall",
+    });
+  });
+
+  it("approval links now carry a SIGNED expiry claim (&exp=…)", async () => {
+    await sendNotification({
+      ...BASE,
+      kind: "approval_pending",
+      title: "Ship?",
+    });
+    const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    expect(body.approvalUrl).toMatch(/\?token=[0-9a-f]{64}&exp=\d+$/);
+    const exp = Number(
+      new URL(body.approvalUrl).searchParams.get("exp") ?? "0",
+    );
+    // Fresh mint → the claim is in the future.
+    expect(exp).toBeGreaterThan(Date.now() / 1000);
+  });
+});
+
 describe("sendNotification — Microsoft Teams channel", () => {
   /** The Adaptive Card content object out of the Teams envelope. */
   function teamsCard(body: {

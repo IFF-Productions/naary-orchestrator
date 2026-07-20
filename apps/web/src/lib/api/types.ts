@@ -236,7 +236,15 @@ export interface ChatDefinition {
   greeting?: string;
 }
 
-/** A run paused at an approval, enriched with the node's prompt (approvals inbox). */
+/** Approver routing summary on an awaiting row (Slice 1 — display; enforced server-side). */
+export interface ApproverSummary {
+  emails: string[];
+  groups: { id: string; name: string }[];
+}
+
+/** A run paused at an approval, enriched with the node's prompt (approvals inbox).
+ *  The Slice-1 fields come from the worker's pause-time snapshot; all null for
+ *  gates without routing/SLA config (and for runs paused before Slice 1). */
 export interface AwaitingApproval {
   workflowId: string;
   workflowKey: string | null;
@@ -244,6 +252,17 @@ export interface AwaitingApproval {
   title: string;
   instructions: string | null;
   createdAt: string;
+  /** When the gate paused (worker clock), ISO. */
+  pausedAt: string | null;
+  /** Display-only SLA hours configured on the gate. */
+  slaHours: number | null;
+  /** pausedAt + slaHours, derived server-side. */
+  dueAt: string | null;
+  /** Structured context card — expressions resolved at pause time (never secrets). */
+  contextFields: Record<string, string> | null;
+  approvers: ApproverSummary | null;
+  escalateAfterHours: number | null;
+  escalateTo: string | null;
 }
 
 export interface RunSummary {

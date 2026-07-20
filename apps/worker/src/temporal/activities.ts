@@ -89,6 +89,7 @@ export type {
 export {
   __notifyDeps,
   normalizeBaseUrl,
+  prepareApproval,
   sendNotification,
 } from "./activities/notifications";
 export type {

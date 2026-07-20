@@ -1,7 +1,10 @@
 // Tenant notification fan-out (Slack/Teams webhooks) + deep-link minting.
 import { createHmac } from "node:crypto";
 import { assertEgressAllowed, safeFetch } from "@naary/connections";
+import type { ApprovalAwaitingRecord } from "@naary/contracts";
 import { getDefaultEnvironmentId, getPrisma } from "@naary/db";
+import { resolveTemplates } from "@naary/dsl";
+import type { ApprovalNodeConfig } from "@naary/dsl";
 import {
   type NotificationInput as FormatterNotificationInput,
   type NotificationKind,
@@ -61,6 +64,96 @@ export const __notifyDeps = {
   assertEgressAllowed,
 };
 
+/** Coerce a resolved contextFields value for the display card (mirrors the template engine's
+ *  `embed`: objects → JSON, null/undefined → ""). */
+function displayValue(v: unknown): string {
+  if (v == null) return "";
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}
+
+/**
+ * Pause-side snapshot for a humanApproval gate carrying Slice-1 fields
+ * (REDESIGN-FUNCTIONALITY-GAPS.md): resolve the gate's `contextFields` expressions against the
+ * run ctx AT PAUSE TIME and the approver group ids to display names, and stamp `pausedAt` (the
+ * clock read is exactly why this is an activity — Tier-1 rule 2). The workflow stores the
+ * returned DATA in ctx under APPROVAL_CTX_KEY; the API reads it via stateQuery for the
+ * awaiting inbox, decide-time enforcement, and the public approve prompt.
+ *
+ * SECRETS: expressions resolve through the same `resolveTemplates` every node uses, whose
+ * `$secrets` root is deliberately NOT resolvable here — `{{ $secrets.NAME }}` tokens stay
+ * LITERAL (isSecretRef in @naary/dsl leaves them untouched, and no secret resolver runs in
+ * this activity), so a secret value can never enter the awaiting record / Temporal history
+ * (Tier-1 rule 4).
+ */
+export async function prepareApproval(input: {
+  tenantId: string;
+  nodeId: string;
+  config: Pick<
+    ApprovalNodeConfig,
+    | "approvers"
+    | "slaHours"
+    | "remindAfterHours"
+    | "escalateAfterHours"
+    | "escalateTo"
+    | "contextFields"
+  >;
+  /** The run ctx snapshot (reserved `__` keys already stripped by the caller). */
+  ctx: Record<string, unknown>;
+}): Promise<ApprovalAwaitingRecord> {
+  const cfg = input.config ?? {};
+  const record: ApprovalAwaitingRecord = {
+    nodeId: input.nodeId,
+    pausedAt: new Date().toISOString(),
+  };
+  if (typeof cfg.slaHours === "number" && cfg.slaHours > 0) {
+    record.slaHours = cfg.slaHours;
+  }
+  if (Array.isArray(cfg.remindAfterHours) && cfg.remindAfterHours.length > 0) {
+    record.remindAfterHours = cfg.remindAfterHours;
+  }
+  if (
+    typeof cfg.escalateAfterHours === "number" &&
+    cfg.escalateAfterHours > 0
+  ) {
+    record.escalateAfterHours = cfg.escalateAfterHours;
+    if (cfg.escalateTo) record.escalateTo = cfg.escalateTo;
+  }
+  if (cfg.contextFields && typeof cfg.contextFields === "object") {
+    const resolved: Record<string, string> = {};
+    for (const [k, v] of Object.entries(cfg.contextFields)) {
+      if (typeof v !== "string") continue;
+      resolved[k] = displayValue(
+        (resolveTemplates({ v }, input.ctx) as { v: unknown }).v,
+      );
+    }
+    record.contextFields = resolved;
+  }
+  const emails = (cfg.approvers?.emails ?? []).filter(
+    (e): e is string => typeof e === "string" && e.trim() !== "",
+  );
+  const groupIds = (cfg.approvers?.groupIds ?? []).filter(
+    (g): g is string => typeof g === "string" && g !== "",
+  );
+  if (emails.length > 0 || groupIds.length > 0) {
+    // Group DISPLAY names, tenant-scoped (a foreign/deleted group id yields no row — it is
+    // kept with its id as the name so enforcement still sees it and the UI shows something).
+    const rows =
+      groupIds.length > 0
+        ? await getPrisma().permissionGroup.findMany({
+            where: { tenantId: input.tenantId, id: { in: groupIds } },
+            select: { id: true, name: true },
+          })
+        : [];
+    const nameById = new Map(rows.map((r) => [r.id, r.name]));
+    record.approvers = {
+      emails,
+      groups: groupIds.map((id) => ({ id, name: nameById.get(id) ?? id })),
+    };
+  }
+  return record;
+}
+
 /**
  * Signed approve/reject decision link for the pause notification (the notification-links gap). MUST
  * match the API's `mintApprovalToken` (apps/api/.../approval-token.ts): HMAC-SHA256(ENCRYPTION_KEY,
@@ -104,16 +197,25 @@ function resolveAppBaseUrl(): string | undefined {
   return undefined;
 }
 
+/** How long a newly minted approval link stays valid (Slice 1 expiry claim). Generous — a
+ *  HITL pause can last days; the claim exists so a leaked link isn't a forever-credential. */
+export const APPROVAL_LINK_TTL_SECONDS = 7 * 24 * 3600;
+
 function approvalUrl(workflowId: string): string | undefined {
   const key = process.env.ENCRYPTION_KEY;
   const base = resolveAppBaseUrl();
   // Both are required for an absolute, clickable link. Without a base the URL would be
   // relative (`/approve/…`) — useless as a Slack url-button — so omit it (like runUrl).
   if (!key || !base) return undefined;
+  // Expiring claim (Slice 1): the unix-seconds expiry is SIGNED INTO the token
+  // (`approval:<id>:<exp>`) and travels as `exp=`, so it can't be tampered with. MUST match
+  // the API's mintApprovalToken/verifyApprovalToken (approval-token.ts) — the API still
+  // verifies legacy exp-less links with the old formula.
+  const exp = Math.floor(Date.now() / 1000) + APPROVAL_LINK_TTL_SECONDS;
   const token = createHmac("sha256", key)
-    .update(`approval:${workflowId}`)
+    .update(`approval:${workflowId}:${exp}`)
     .digest("hex");
-  return `${base}/approve/${encodeURIComponent(workflowId)}?token=${token}`;
+  return `${base}/approve/${encodeURIComponent(workflowId)}?token=${token}&exp=${exp}`;
 }
 
 /** Deep link to the run detail page — the resource the recipient needs to act on. Needs a

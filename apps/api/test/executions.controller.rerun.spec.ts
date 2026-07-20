@@ -10,10 +10,15 @@ function makeController(
     typeof ExecutionsController
   >[0];
   return {
-    controller: new ExecutionsController(service, {
-      defaultEnvId: async () => "e1",
-      resolveEnvId: async () => "e1",
-    } as never),
+    controller: new ExecutionsController(
+      service,
+      {
+        defaultEnvId: async () => "e1",
+        resolveEnvId: async () => "e1",
+      } as never,
+      // NotificationsService — only the "Remind now" endpoint uses it.
+      { sendApprovalReminder: vi.fn() } as never,
+    ),
     rerun,
   };
 }

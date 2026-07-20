@@ -74,6 +74,9 @@ importers:
       '@naary/metrics':
         specifier: workspace:*
         version: link:../../packages/metrics
+      '@naary/notifications':
+        specifier: workspace:*
+        version: link:../../packages/notifications
       '@naary/observability':
         specifier: workspace:*
         version: link:../../packages/observability

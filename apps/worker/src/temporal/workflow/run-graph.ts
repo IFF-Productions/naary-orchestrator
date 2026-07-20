@@ -5,6 +5,7 @@
 // enter workflow args/history; wf.patched() call sites are load-bearing for replay.
 import * as wf from "@temporalio/workflow";
 import {
+  APPROVAL_CTX_KEY,
   approvalSignal,
   resumeSignal,
   stateQuery,
@@ -56,7 +57,12 @@ import {
   type RegionTrace,
   type UnresolvedRef,
 } from "@naary/dsl";
-import type { GraphDef, NodeDef, NodeOutputMap } from "@naary/dsl";
+import type {
+  ApprovalNodeConfig,
+  GraphDef,
+  NodeDef,
+  NodeOutputMap,
+} from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
 // Do NOT drop `type` — that would pull I/O code into the sandbox.
 import type * as activities from "../activities";
@@ -93,6 +99,7 @@ import {
   callSendEmail,
   callRssRead,
   callPoll,
+  prepareApproval,
   sendNotification,
   callCode,
   retryOverride,
@@ -1096,13 +1103,47 @@ export async function runGraph(
       case "humanApproval": {
         status = "awaiting_approval";
         await syncStatus(); // surface the pause in the Runs list / approval queue
+        const gateCfg = (cfg ?? {}) as ApprovalNodeConfig;
+        // ---- Approval routing + SLA/escalation (REDESIGN-FUNCTIONALITY-GAPS.md Slice 1) ----
+        // REPLAY INVARIANT: every NEW command below (prepareApproval, the segmented timer
+        // loop, reminder/escalation notifications) is gated on the PRESENCE of the Slice-1
+        // config fields — new schema surface no pre-existing graph snapshot can carry — so a
+        // gate WITHOUT them takes the exact pre-existing command sequence (same activities,
+        // same single condition() wait) and replays safely WITHOUT a patched() marker.
+        const hasSlice1Meta =
+          gateCfg.approvers !== undefined ||
+          gateCfg.slaHours !== undefined ||
+          gateCfg.contextFields !== undefined ||
+          (gateCfg.remindAfterHours?.length ?? 0) > 0 ||
+          gateCfg.escalateAfterHours !== undefined;
+        if (hasSlice1Meta) {
+          // Pause-side awaiting snapshot via an ACTIVITY: contextFields expression eval,
+          // approver group-name read, and the pausedAt clock stamp are side effects
+          // (Tier-1 rules 2/3); `$secrets` refs stay literal inside prepareApproval, so
+          // secrets can never enter this record / history (rule 4). The returned DATA is
+          // stored under the reserved __approval ctx key, where the API's stateQuery
+          // reads it (inbox rows, decide-time enforcement, public prompt).
+          const snapshot: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(ctx)) {
+            if (!k.startsWith("__")) snapshot[k] = v;
+          }
+          ctx[APPROVAL_CTX_KEY] = await prepareApproval({
+            tenantId: runCtx.tenantId,
+            nodeId: node.id,
+            config: {
+              approvers: gateCfg.approvers,
+              slaHours: gateCfg.slaHours,
+              remindAfterHours: gateCfg.remindAfterHours,
+              escalateAfterHours: gateCfg.escalateAfterHours,
+              escalateTo: gateCfg.escalateTo,
+              contextFields: gateCfg.contextFields,
+            },
+            ctx: snapshot,
+          });
+        }
         // Notify the tenant (best-effort) that a decision is needed — a HITL pause can
         // last days, so don't rely on someone watching the inbox. Gated + swallowed so
         // it can never affect the run. Patched so in-flight runs don't diverge on replay.
-        const approvalCfg2 = (cfg ?? {}) as {
-          title?: string;
-          timeoutHours?: number;
-        };
         if (wf.patched("notify-v1") && !runCtx.isErrorHandler) {
           try {
             await sendNotification({
@@ -1111,27 +1152,115 @@ export async function runGraph(
               kind: "approval_pending",
               workflowId: wf.workflowInfo().workflowId,
               workflowKey: runCtx.workflowKey,
-              title: approvalCfg2.title,
+              title: gateCfg.title,
             });
           } catch {
             /* best-effort — never block the pause on a notification */
           }
         }
         // Optional auto-reject timeout (durable Temporal timer; deterministic).
-        const approvalCfg = (cfg ?? {}) as { timeoutHours?: number };
         const timeoutMs =
-          typeof approvalCfg.timeoutHours === "number" &&
-          approvalCfg.timeoutHours > 0
-            ? approvalCfg.timeoutHours * 3_600_000
+          typeof gateCfg.timeoutHours === "number" && gateCfg.timeoutHours > 0
+            ? gateCfg.timeoutHours * 3_600_000
             : undefined;
+        // Reminder/escalation schedule — a PURE derivation of the immutable config
+        // snapshot (offsets in ms, sorted ascending; a same-offset reminder fires before
+        // the escalation via the stable sort), so the timer sequence replays identically.
+        // Offsets at/after the auto-reject timeout can never fire and are dropped.
+        const gateTimers: {
+          atMs: number;
+          flavor: "reminder" | "escalation";
+          index?: number;
+        }[] = [];
+        (gateCfg.remindAfterHours ?? []).forEach((h, i) => {
+          if (typeof h === "number" && h > 0) {
+            gateTimers.push({
+              atMs: h * 3_600_000,
+              flavor: "reminder",
+              index: i + 1,
+            });
+          }
+        });
+        if (
+          typeof gateCfg.escalateAfterHours === "number" &&
+          gateCfg.escalateAfterHours > 0
+        ) {
+          gateTimers.push({
+            atMs: gateCfg.escalateAfterHours * 3_600_000,
+            flavor: "escalation",
+          });
+        }
+        gateTimers.sort((a, b) => a.atMs - b.atMs);
+        const schedule = gateTimers.filter(
+          (t) => timeoutMs === undefined || t.atMs < timeoutMs,
+        );
+
         let decided = true;
-        if (timeoutMs !== undefined) {
-          // condition(fn, timeout) → true if signalled, false if it timed out.
-          decided = await wf.condition(() => approval !== undefined, timeoutMs);
+        if (schedule.length === 0) {
+          // Pre-existing durable wait — byte-identical commands for old graphs (see the
+          // replay invariant above).
+          if (timeoutMs !== undefined) {
+            // condition(fn, timeout) → true if signalled, false if it timed out.
+            decided = await wf.condition(
+              () => approval !== undefined,
+              timeoutMs,
+            );
+          } else {
+            await wf.condition(() => approval !== undefined); // wait forever
+          }
         } else {
-          await wf.condition(() => approval !== undefined); // wait forever
+          // Segmented durable wait: condition() up to each reminder/escalation offset
+          // (durable Temporal timers — no clock reads in workflow code), firing the
+          // notification ACTIVITY on each elapse, then the remaining auto-reject window
+          // (or wait forever). A decision signal at any point exits the loop.
+          let elapsedMs = 0;
+          for (const t of schedule) {
+            const deltaMs = t.atMs - elapsedMs;
+            const signalled =
+              deltaMs > 0
+                ? await wf.condition(() => approval !== undefined, deltaMs)
+                : approval !== undefined;
+            if (signalled) break;
+            elapsedMs = t.atMs;
+            // Same error-handler gate as the initial pause notification (an error-handler
+            // run never pages) — deterministic (runCtx is workflow-args data).
+            if (!runCtx.isErrorHandler) {
+              try {
+                await sendNotification({
+                  tenantId: runCtx.tenantId,
+                  environmentId: runCtx.environmentId,
+                  kind: "approval_pending",
+                  workflowId: wf.workflowInfo().workflowId,
+                  workflowKey: runCtx.workflowKey,
+                  title: gateCfg.title,
+                  flavor: t.flavor,
+                  ...(t.flavor === "reminder"
+                    ? { reminderIndex: t.index }
+                    : {}),
+                  ...(t.flavor === "escalation" && gateCfg.escalateTo
+                    ? { escalateTo: gateCfg.escalateTo }
+                    : {}),
+                });
+              } catch {
+                /* best-effort — a notification must never affect the pause */
+              }
+            }
+          }
+          if (approval === undefined) {
+            if (timeoutMs !== undefined) {
+              decided = await wf.condition(
+                () => approval !== undefined,
+                timeoutMs - elapsedMs,
+              );
+            } else {
+              await wf.condition(() => approval !== undefined); // wait forever
+            }
+          }
         }
         status = "running";
+        // The gate is no longer pending — drop the awaiting record so a later loop
+        // iteration pauses fresh (plain ctx write: no command, replay-safe).
+        if (hasSlice1Meta) delete ctx[APPROVAL_CTX_KEY];
         // Record the decision + reason on the node's output so it's durable, visible
         // in the run, and branchable downstream (<nodeId>.approved / .comment). A ctx
         // write is in-workflow state — no new command, so it stays replay-safe.

@@ -20,14 +20,30 @@ import {
  *
  * Redesign: the Approvals design's public view — centered card with brand tile, review copy,
  * the gate's instructions, optional comment, green-gradient Approve / Reject, secure-link footer,
- * and pop-in Approved/Rejected decided states (from the server's recorded outcome). The prompt
- * payload carries only `{ awaiting, title, instructions }` — no context-field table, workspace
- * name, or link expiry — so those design elements are omitted rather than invented.
+ * and pop-in Approved/Rejected decided states (from the server's recorded outcome). Slice 1: the
+ * prompt now carries the workspace display name (trust line), the gate's pause-time context
+ * fields (key/value card), and the link's expiry — each rendered only when the API provides it.
+ * Links minted from Slice 1 on also carry an `exp` claim signed into the token; it's passed back
+ * on both the fetch and the decision (legacy links have none and keep working).
  */
+/** "expires in 6d 23h" while in the future, else an absolute date (already-expired links 401). */
+function formatExpiry(iso: string): string {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (Number.isNaN(ms)) return "soon";
+  if (ms <= 0) return "now";
+  const h = Math.floor(ms / 3_600_000);
+  if (h < 1) return `in ${Math.max(1, Math.floor(ms / 60_000))}m`;
+  if (h < 48) return `in ${h}h`;
+  const d = Math.floor(h / 24);
+  const rem = h % 24;
+  return `in ${d}d${rem > 0 ? ` ${rem}h` : ""}`;
+}
+
 export function ApprovePage() {
   const { workflowId } = useParams<{ workflowId: string }>();
   const [params] = useSearchParams();
   const token = params.get("token") ?? "";
+  const exp = params.get("exp") ?? undefined;
   // A Slack/Teams Approve or Reject button deep-links here with the choice pre-selected.
   // We DON'T auto-submit (a link-prefetch must not be able to decide) — instead we
   // emphasize + focus that action so the recipient confirms in one click.
@@ -42,6 +58,9 @@ export function ApprovePage() {
   const [prompt, setPrompt] = useState<{
     title?: string;
     instructions?: string | null;
+    workspaceName?: string | null;
+    contextFields?: Record<string, string> | null;
+    expiresAt?: string | null;
   }>({});
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
@@ -54,17 +73,23 @@ export function ApprovePage() {
       return;
     }
     try {
-      const p = await api.getApprovalPrompt(workflowId, token);
+      const p = await api.getApprovalPrompt(workflowId, token, exp);
       if (!p.awaiting) {
         setState("closed");
         return;
       }
-      setPrompt({ title: p.title, instructions: p.instructions });
+      setPrompt({
+        title: p.title,
+        instructions: p.instructions,
+        workspaceName: p.workspaceName,
+        contextFields: p.contextFields,
+        expiresAt: p.expiresAt,
+      });
       setState("ready");
     } catch {
       setState("invalid");
     }
-  }, [workflowId, token]);
+  }, [workflowId, token, exp]);
 
   useEffect(() => {
     void load();
@@ -80,6 +105,7 @@ export function ApprovePage() {
         token,
         decision,
         comment.trim(),
+        exp,
       );
       // Show the server's RECORDED outcome, not just the button we clicked.
       setDone(res.status);
@@ -188,13 +214,73 @@ export function ApprovePage() {
             lineHeight: 1.55,
           }}
         >
-          You've been asked to review this request. Your decision resumes the
-          workflow immediately.
+          You've been asked to review this request
+          {prompt.workspaceName ? (
+            <>
+              {" "}
+              on behalf of{" "}
+              <strong style={{ color: "var(--ink)" }}>
+                {prompt.workspaceName}
+              </strong>
+            </>
+          ) : null}
+          . Your decision resumes the workflow immediately.
         </div>
       </div>
 
       {/* context + decision */}
       <div style={{ padding: "22px 28px" }}>
+        {prompt.contextFields &&
+          Object.keys(prompt.contextFields).length > 0 && (
+            <div
+              style={{
+                border: "1px solid var(--line-mid)",
+                background: "var(--card)",
+                borderRadius: 12,
+                overflow: "hidden",
+                marginBottom: 16,
+              }}
+            >
+              {Object.entries(prompt.contextFields).map(([k, v], i, arr) => (
+                <div
+                  key={k}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "9px 14px",
+                    borderBottom:
+                      i < arr.length - 1 ? "1px solid var(--line)" : "none",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 11.5,
+                      color: "var(--ink-faint)",
+                      width: 110,
+                      flex: "none",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {k}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 12.5,
+                      color: "var(--ink)",
+                      fontWeight: 600,
+                      fontFamily: "var(--font-mono)",
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    {v}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         {prompt.instructions && (
           <div
             style={{
@@ -318,8 +404,14 @@ export function ApprovePage() {
         </div>
 
         <div style={{ marginTop: 16 }}>
-          {/* The signed link carries no expiry in the prompt payload — footer omits it. */}
-          <SecureFooter>Secure decision link · powered by Naary</SecureFooter>
+          {/* Expiry renders only when the link actually carries the claim (legacy links: none). */}
+          <SecureFooter>
+            Secure decision link
+            {prompt.expiresAt
+              ? ` · expires ${formatExpiry(prompt.expiresAt)}`
+              : ""}{" "}
+            · powered by Naary
+          </SecureFooter>
         </div>
       </div>
     </div>,

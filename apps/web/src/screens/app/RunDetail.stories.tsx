@@ -26,6 +26,15 @@ const GRAPH: GraphDef = {
         title: "Refund > $500",
         instructions: "Review the drafted summary before the refund is issued.",
         timeoutHours: 72,
+        // Slice 1 routing — drives the hero's real SLA/approver/escalation chips.
+        slaHours: 48,
+        approvers: {
+          emails: ["sam@acme.io"],
+          groupIds: ["finance-leads"],
+        },
+        remindAfterHours: [4, 12],
+        escalateAfterHours: 20,
+        escalateTo: "@ops-oncall",
       },
     },
     {

@@ -1,14 +1,16 @@
 /**
- * Waiting-age urgency for the approvals inbox.
+ * SLA / waiting-age urgency for the approvals inbox.
  *
- * The backend has NO SLA configuration on approval gates today (AwaitingApproval
- * carries only createdAt/title/instructions/workflowKey/nodeId), so instead of
- * fabricating "SLA 2d / breached" chips we derive an HONEST urgency from how long
- * the run has actually been blocked:
+ * Gates with a configured SLA (Slice 1) carry a REAL server-derived `dueAt`
+ * (pausedAt + slaHours) — those get true due-by tones:
+ *   past due            → bad  ("breached 3h")
+ *   due within 4h       → warn ("due 2h")
+ *   otherwise           → neutral ("due 2d")
+ * Gates without an SLA keep the honest waiting-age derivation:
  *   < 4h   → neutral ("waiting 3h")
  *   4–24h  → warn    ("waiting 5h")
  *   > 24h  → bad     ("waiting 2d 4h")
- * Same visual language as the design's SLA chips, truthful labels.
+ * Same visual language as the design's SLA chips, truthful labels either way.
  */
 
 export type UrgencyTone = "neutral" | "warn" | "bad";
@@ -60,6 +62,51 @@ export function waitingInfo(
         ? `Waiting ${duration} — needs a decision soon.`
         : `Waiting ${duration}.`;
   return { minutes, duration, label: `waiting ${duration}`, banner, tone };
+}
+
+/** Warn window before a real SLA deadline. */
+const DUE_WARN_MIN = 4 * 60;
+
+/**
+ * Real due-by urgency when the gate has an SLA (`dueAt` from the API), falling back
+ * to {@link waitingInfo} when it doesn't. The returned shape is chip/banner-compatible,
+ * so QueueRow/DetailPanel render either without caring which derivation applied.
+ */
+export function slaInfo(
+  createdAtIso: string,
+  dueAtIso: string | null | undefined,
+  now = Date.now(),
+): WaitingInfo {
+  if (!dueAtIso) return waitingInfo(createdAtIso, now);
+  const due = new Date(dueAtIso).getTime();
+  if (Number.isNaN(due)) return waitingInfo(createdAtIso, now);
+  const waitedMin = Math.max(
+    0,
+    Math.floor((now - new Date(createdAtIso).getTime()) / 60_000),
+  );
+  const deltaMin = Math.floor((due - now) / 60_000);
+  if (deltaMin < 0) {
+    const over = formatDuration(-deltaMin);
+    return {
+      minutes: waitedMin,
+      duration: over,
+      label: `breached ${over}`,
+      banner: `SLA breached ${over} ago — this decision is overdue.`,
+      tone: "bad",
+    };
+  }
+  const left = formatDuration(deltaMin);
+  const tone: UrgencyTone = deltaMin <= DUE_WARN_MIN ? "warn" : "neutral";
+  return {
+    minutes: waitedMin,
+    duration: left,
+    label: `due ${left}`,
+    banner:
+      tone === "warn"
+        ? `Due in ${left} — needs a decision soon.`
+        : `Due in ${left}.`,
+    tone,
+  };
 }
 
 export function isOverdue(info: WaitingInfo): boolean {

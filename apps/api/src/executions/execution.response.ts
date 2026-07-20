@@ -47,7 +47,22 @@ export class RunListItemResponse {
   graphVersion!: number | null;
 }
 
-/** A run paused for approval, enriched with the humanApproval node's prompt. */
+/** One approver group on an awaiting row (display summary). */
+export class ApproverGroupResponse {
+  @ApiProperty({ example: "9f3a…" }) id!: string;
+  @ApiProperty({ example: "finance-leads" }) name!: string;
+}
+
+/** Who may decide a routed approval gate (display summary; enforced on approve). */
+export class ApproverSummaryResponse {
+  @ApiProperty({ type: [String], example: ["sam@acme.io"] })
+  emails!: string[];
+  @ApiProperty({ type: [ApproverGroupResponse] })
+  groups!: ApproverGroupResponse[];
+}
+
+/** A run paused for approval, enriched with the humanApproval node's prompt and the
+ *  pause-time routing/SLA/context snapshot (null when the gate has none). */
 export class AwaitingApprovalResponse {
   @ApiProperty({ example: "run-8f3a1c2e" }) workflowId!: string;
   @ApiProperty({ type: String, nullable: true, example: "support-triage" })
@@ -62,6 +77,53 @@ export class AwaitingApprovalResponse {
   instructions!: string | null;
   @ApiProperty({ format: "date-time", example: "2026-07-04T12:00:00.000Z" })
   createdAt!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    format: "date-time",
+    description: "When the gate paused (worker clock at pause time).",
+  })
+  pausedAt!: string | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 48,
+    description: "The gate's display-only SLA in hours.",
+  })
+  slaHours!: number | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    format: "date-time",
+    description:
+      "pausedAt + slaHours (server-derived); null unless both exist.",
+  })
+  dueAt!: string | null;
+  @ApiProperty({
+    type: "object",
+    additionalProperties: { type: "string" },
+    nullable: true,
+    description:
+      "Structured context card — expressions resolved at pause time (never secrets).",
+  })
+  contextFields!: Record<string, string> | null;
+  @ApiProperty({ type: ApproverSummaryResponse, nullable: true })
+  approvers!: ApproverSummaryResponse | null;
+  @ApiProperty({ type: Number, nullable: true, example: 20 })
+  escalateAfterHours!: number | null;
+  @ApiProperty({ type: String, nullable: true, example: "@ops-oncall" })
+  escalateTo!: string | null;
+}
+
+/** Outcome of a manual "Remind now" — how many channels were POSTed. */
+export class RemindResponse {
+  @ApiProperty({ example: true }) accepted!: boolean;
+  @ApiProperty({
+    example: 2,
+    description:
+      "How many notification channels the reminder was delivered to.",
+  })
+  sent!: number;
 }
 
 /** Acknowledgement that an approval decision was accepted (async, 202). */

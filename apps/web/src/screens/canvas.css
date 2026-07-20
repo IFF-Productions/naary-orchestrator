@@ -198,3 +198,61 @@ body.naary-dragging
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
 }
+
+/* ---- Three-pane layout (top bar · icon rail · inspector dock) ---- */
+
+/* Indeterminate progress sweep — the node card's bottom strip + the dock's
+   running card. No fake percentages: a constant sweep just signals live work. */
+@keyframes naaryIndeterminate {
+  0% {
+    left: -40%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+/* Node card ✕ delete micro-button: hidden until the card is hovered or selected. */
+.naary-node-del {
+  display: none;
+}
+.naary-node-card:hover .naary-node-del,
+.naary-node-del.is-visible {
+  display: flex;
+}
+.naary-node-del:hover {
+  border-color: var(--state-error);
+  background: color-mix(in srgb, var(--state-error) 10%, var(--card));
+}
+
+/* Icon rail tiles + popover items. */
+.naary-rail-tile {
+  transition:
+    border-color 0.14s ease,
+    background 0.14s ease,
+    transform 0.14s ease;
+}
+.naary-rail-tile:hover {
+  transform: translateY(-1px);
+  border-color: var(--line-2);
+  background: var(--hover);
+}
+.naary-rail-item {
+  transition: background 0.12s ease;
+}
+.naary-rail-item:hover {
+  background: var(--hover);
+}
+
+/* Top-bar overflow menu rows + the plain-text workflow name input. */
+.naary-menu-item:not(:disabled):hover {
+  background: var(--hover);
+}
+.naary-name-input:hover {
+  border-color: var(--line-2);
+}
+.naary-name-input:focus {
+  border-color: var(--brand);
+  outline: none;
+  background: var(--card);
+}

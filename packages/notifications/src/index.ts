@@ -8,6 +8,12 @@
 
 export type NotificationKind = "approval_pending" | "run_failed";
 
+/** Sub-flavor of an `approval_pending` notification (REDESIGN-FUNCTIONALITY-GAPS.md Slice 1):
+ *  undefined = the initial pause; "reminder" = a scheduled (or manual "Remind now") nudge;
+ *  "escalation" = the gate's escalation deadline elapsed. Flavors reuse the approval channel
+ *  toggle (`onApprovalPending`) — they are the same conversation, retold. */
+export type ApprovalFlavor = "reminder" | "escalation";
+
 /** The run facts a notification describes (worker adds `tenantId` upstream; formatting never needs it). */
 export interface NotificationInput {
   kind: NotificationKind;
@@ -17,6 +23,12 @@ export interface NotificationInput {
   title?: string;
   /** For run_failed: the terminal status / error type. */
   detail?: string;
+  /** approval_pending only: reminder/escalation flavor (absent = the initial pause). */
+  flavor?: ApprovalFlavor;
+  /** For flavor "reminder": the 1-based reminder number ("Reminder #2"). */
+  reminderIndex?: number;
+  /** For flavor "escalation": who the escalation mentions (free-form, e.g. "@ops-oncall"). */
+  escalateTo?: string;
 }
 
 /**
@@ -53,9 +65,14 @@ export function codeText(s: string): string {
 
 /** Short headline for the notification, shared by the Slack header + the Teams card. */
 export function notificationHeader(input: NotificationInput): string {
-  return input.kind === "approval_pending"
-    ? "⏳ Approval needed"
-    : "❌ Run failed";
+  if (input.kind !== "approval_pending") return "❌ Run failed";
+  if (input.flavor === "reminder") {
+    return input.reminderIndex
+      ? `⏰ Approval reminder #${input.reminderIndex}`
+      : "⏰ Approval reminder";
+  }
+  if (input.flavor === "escalation") return "🚨 Approval escalated";
+  return "⏳ Approval needed";
 }
 
 /** The action links a recipient can act on — Approve/Reject for a pause (each with the
@@ -99,7 +116,21 @@ export function notificationText(
     : "a workflow";
   const runId = slackEscape(input.workflowId);
   if (input.kind === "approval_pending") {
-    return `⏳ Approval needed on ${wf}${input.title ? `: ${slackEscape(input.title)}` : ""} (run ${runId}).${links.approvalUrl ? ` Approve or reject: ${links.approvalUrl}` : ""}`;
+    const decide = links.approvalUrl
+      ? ` Approve or reject: ${links.approvalUrl}`
+      : "";
+    const gate = `${wf}${input.title ? `: ${slackEscape(input.title)}` : ""} (run ${runId})`;
+    if (input.flavor === "reminder") {
+      const n = input.reminderIndex ? ` #${input.reminderIndex}` : "";
+      return `⏰ Reminder${n} — approval still needed on ${gate}.${decide}`;
+    }
+    if (input.flavor === "escalation") {
+      const target = input.escalateTo
+        ? ` to ${slackEscape(input.escalateTo)}`
+        : "";
+      return `🚨 Approval escalated${target} — still undecided on ${gate}.${decide}`;
+    }
+    return `⏳ Approval needed on ${gate}.${decide}`;
   }
   return `❌ ${wf} run failed${input.detail ? ` (${slackEscape(input.detail)})` : ""} — run ${runId}.${links.runUrl ? ` View: ${links.runUrl}` : ""}`;
 }
@@ -156,6 +187,16 @@ export function notificationBlocks(
       type: "section",
       text: { type: "mrkdwn", text: `*Awaiting*\n${slackEscape(input.title)}` },
     });
+  // Escalation flavor: name the target as its own full-width line (the comp's
+  // "escalates → @ops-oncall"). Free text, so not crammed into the fields grid.
+  if (isApproval && input.flavor === "escalation" && input.escalateTo)
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*Escalated to*\n${slackEscape(input.escalateTo)}`,
+      },
+    });
   if (!isApproval && input.detail)
     blocks.push({
       type: "section",
@@ -201,6 +242,11 @@ export function notificationTeamsCard(
   ];
   if (isApproval && input.title)
     facts.push({ title: "Awaiting", value: input.title });
+  // Flavor facts (plain JSON strings — Adaptive Card facts are not mrkdwn).
+  if (isApproval && input.flavor === "reminder" && input.reminderIndex)
+    facts.push({ title: "Reminder", value: `#${input.reminderIndex}` });
+  if (isApproval && input.flavor === "escalation" && input.escalateTo)
+    facts.push({ title: "Escalated to", value: input.escalateTo });
   if (!isApproval && input.detail)
     facts.push({ title: "Reason", value: input.detail });
 
@@ -267,7 +313,15 @@ export function notificationPayload(
     runUrl: links.runUrl,
     actions,
     ...(input.kind === "approval_pending"
-      ? { approvalUrl: links.approvalUrl }
+      ? {
+          approvalUrl: links.approvalUrl,
+          // Generic hooks can branch on the flavor (initial vs reminder vs escalation).
+          ...(input.flavor ? { flavor: input.flavor } : {}),
+          ...(input.reminderIndex !== undefined
+            ? { reminderIndex: input.reminderIndex }
+            : {}),
+          ...(input.escalateTo ? { escalateTo: input.escalateTo } : {}),
+        }
       : {}),
   };
 }

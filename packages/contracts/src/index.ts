@@ -37,6 +37,37 @@ export interface ApprovalInput {
   comment?: string;
 }
 
+/** ctx key under which the interpreter stores the {@link ApprovalAwaitingRecord} while a
+ *  humanApproval gate with Slice-1 fields is paused. `__`-prefixed = reserved/system (stripped
+ *  from user-visible snapshots like the code node's ctx). */
+export const APPROVAL_CTX_KEY = "__approval";
+
+/**
+ * The awaiting-approval record (REDESIGN-FUNCTIONALITY-GAPS.md Slice 1). Snapshotted by the
+ * worker's pause-side activity — contextFields expressions are resolved against the run ctx AT
+ * PAUSE TIME, group ids get display names — and stored in the workflow ctx under
+ * {@link APPROVAL_CTX_KEY}, where the API's stateQuery reads it for `GET /executions/awaiting`,
+ * decide-time approver enforcement, and the public approve prompt. Absent for gates without any
+ * Slice-1 field (old graphs keep their exact pre-existing path).
+ */
+export interface ApprovalAwaitingRecord {
+  /** The paused humanApproval node. */
+  nodeId: string;
+  /** When the gate paused (activity clock), ISO — dueAt = pausedAt + slaHours. */
+  pausedAt: string;
+  /** Resolved, display-ready context fields (secrets are never resolved — see prepareApproval). */
+  contextFields?: Record<string, string>;
+  slaHours?: number;
+  /** Approver routing snapshot: raw emails + groups with display names. */
+  approvers?: {
+    emails: string[];
+    groups: { id: string; name: string }[];
+  };
+  remindAfterHours?: number[];
+  escalateAfterHours?: number;
+  escalateTo?: string;
+}
+
 /** Human approval: delivered as a Signal, awaited via condition() in the workflow. */
 export const approvalSignal = defineSignal<[ApprovalInput]>("approval");
 

@@ -64,6 +64,29 @@ const APPROVAL_PROMPT = {
   title: "Approve $1,240 refund",
   instructions:
     "Customer requested a refund within the policy window. Approving issues the refund via Stripe and closes the ticket.",
+  // Slice 1: trust line, pause-time context fields, and the link's expiry claim.
+  workspaceName: "Globex Support",
+  contextFields: {
+    Customer: "ada@globex.com",
+    Order: "#48213",
+    Amount: "$1,240",
+  },
+  slaHours: 48,
+  dueAt: new Date(Date.now() + 20 * 3_600_000).toISOString(),
+  expiresAt: new Date(Date.now() + 6 * 24 * 3_600_000).toISOString(),
+};
+
+/** A legacy link/gate: no workspace name, fields, or expiry — those lines simply don't render. */
+const APPROVAL_PROMPT_LEGACY = {
+  awaiting: true,
+  title: "Approve $1,240 refund",
+  instructions:
+    "Customer requested a refund within the policy window. Approving issues the refund via Stripe and closes the ticket.",
+  workspaceName: null,
+  contextFields: null,
+  slaHours: null,
+  dueAt: null,
+  expiresAt: null,
 };
 
 const meta: Meta = {
@@ -167,13 +190,44 @@ const approveRouter = {
   initialEntries: ["/approve/wh-1?token=tok_demo"],
 };
 
-/** The pending decision card: brand tile, review copy, the gate's instructions, comment box,
- *  Approve / Reject, secure-link footer. */
+/** The pending decision card: brand tile, "on behalf of" trust line, the pause-time
+ *  context-fields card, the gate's instructions, comment box, Approve / Reject, and the
+ *  secure-link footer with the link's real expiry (all Slice-1 fields from the API). */
 export const ApprovePending: Story = {
   name: "Approve — pending",
   render: () => <ApprovePage />,
   parameters: {
     msw: { handlers: approveHandlers("approved") },
+    router: approveRouter,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() =>
+      expect(canvas.getByText("Globex Support")).toBeTruthy(),
+    );
+    await expect(canvas.getByText("ada@globex.com")).toBeTruthy();
+    await expect(
+      canvas.getByText(/expires in 5d 23h|expires in 6d/),
+    ).toBeTruthy();
+  },
+};
+
+/** A legacy signed link (no exp claim / un-routed gate): the trust line, fields card,
+ *  and expiry are simply omitted — nothing is invented. */
+export const ApprovePendingLegacy: Story = {
+  name: "Approve — pending (legacy link)",
+  render: () => <ApprovePage />,
+  parameters: {
+    msw: {
+      handlers: [
+        http.get("*/api/approvals/wh-1", () =>
+          HttpResponse.json(APPROVAL_PROMPT_LEGACY),
+        ),
+        http.post("*/api/approvals/wh-1/decide", () =>
+          HttpResponse.json({ status: "approved" }),
+        ),
+      ],
+    },
     router: approveRouter,
   },
 };

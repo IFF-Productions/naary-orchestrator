@@ -16,6 +16,7 @@ import {
   WorkflowNotFoundError,
 } from "@temporalio/client";
 import {
+  APPROVAL_CTX_KEY,
   approvalSignal,
   chatMessageSignal,
   chatReplyQuery,
@@ -25,6 +26,7 @@ import {
   stateQuery,
   TASK_QUEUE,
   webhookResponseQuery,
+  type ApprovalAwaitingRecord,
   type ExecutionState,
   type ExecutionStatus,
   type ResumeInput,
@@ -98,8 +100,17 @@ export interface RunStateView {
   ctx: Record<string, unknown>;
 }
 
+/** Approver routing display summary on an awaiting row (Slice 1). */
+export interface ApproverSummary {
+  emails: string[];
+  groups: { id: string; name: string }[];
+}
+
 /** A run paused at a humanApproval node, enriched with the node's prompt (resolved
- *  from the stored graph) so the approvals inbox can show WHAT is being approved. */
+ *  from the stored graph) so the approvals inbox can show WHAT is being approved.
+ *  The Slice-1 fields (contextFields/slaHours/dueAt/approvers/…) come from the
+ *  awaiting record the worker snapshotted at pause time (ctx.__approval); they are
+ *  null for gates without routing/SLA config (and for pre-Slice-1 paused runs). */
 export interface AwaitingApproval {
   workflowId: string;
   workflowKey: string | null;
@@ -107,6 +118,19 @@ export interface AwaitingApproval {
   title: string;
   instructions: string | null;
   createdAt: string;
+  /** When the gate paused (worker clock at pause time), ISO. */
+  pausedAt: string | null;
+  /** The gate's display-only SLA in hours. */
+  slaHours: number | null;
+  /** pausedAt + slaHours, computed server-side (null unless both exist). */
+  dueAt: string | null;
+  /** Resolved context fields (expressions evaluated at pause time). */
+  contextFields: Record<string, string> | null;
+  /** Who may decide (display summary; enforcement happens on the approve path). */
+  approvers: ApproverSummary | null;
+  /** Escalation display info (notify-only v1). */
+  escalateAfterHours: number | null;
+  escalateTo: string | null;
 }
 
 /** One run's outcome in a batch approve/reject — ok:false carries why it slipped. */
@@ -271,6 +295,50 @@ const TERMINAL_STATUSES = new Set([
 ]);
 function isTerminalStatus(s: string): boolean {
   return TERMINAL_STATUSES.has(s);
+}
+
+/** The awaiting-approval record the worker snapshotted at pause time (ctx.__approval),
+ *  or null when the gate carries no Slice-1 fields / the run predates them. */
+function awaitingRecord(s: ExecutionState): ApprovalAwaitingRecord | null {
+  const rec = (s.ctx ?? {})[APPROVAL_CTX_KEY];
+  if (!rec || typeof rec !== "object" || Array.isArray(rec)) return null;
+  return rec as ApprovalAwaitingRecord;
+}
+
+/** dueAt = pausedAt + slaHours (server-side derivation — display-only, no timer). */
+function dueAtFrom(rec: ApprovalAwaitingRecord | null): string | null {
+  if (!rec?.pausedAt || typeof rec.slaHours !== "number" || rec.slaHours <= 0) {
+    return null;
+  }
+  const paused = Date.parse(rec.pausedAt);
+  if (Number.isNaN(paused)) return null;
+  return new Date(paused + rec.slaHours * 3_600_000).toISOString();
+}
+
+/** The Slice-1 display fields shared by the awaiting inbox row + the public prompt. */
+function awaitingFields(rec: ApprovalAwaitingRecord | null): {
+  pausedAt: string | null;
+  slaHours: number | null;
+  dueAt: string | null;
+  contextFields: Record<string, string> | null;
+  approvers: ApproverSummary | null;
+  escalateAfterHours: number | null;
+  escalateTo: string | null;
+} {
+  return {
+    pausedAt: rec?.pausedAt ?? null,
+    slaHours: rec?.slaHours ?? null,
+    dueAt: dueAtFrom(rec),
+    contextFields: rec?.contextFields ?? null,
+    approvers: rec?.approvers
+      ? {
+          emails: rec.approvers.emails ?? [],
+          groups: rec.approvers.groups ?? [],
+        }
+      : null,
+    escalateAfterHours: rec?.escalateAfterHours ?? null,
+    escalateTo: rec?.escalateTo ?? null,
+  };
 }
 
 /** The Start node's configured sample input (used as the default manual-run input). */
@@ -852,6 +920,9 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     const row = await this.assertOwner(id, tenantId);
     await this.assertRunAccess(actor, "run", row);
+    // Slice 1: when the gate names approvers, the deciding principal must match them
+    // (owner/admin user principals bypass). No-op when the gate has no routing.
+    await this.assertApprover(actor, id, row.tenantId);
     try {
       await this.client.workflow
         .getHandle(id)
@@ -869,6 +940,87 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       }
       throw e;
     }
+  }
+
+  /**
+   * Decide-time approver enforcement (REDESIGN-FUNCTIONALITY-GAPS.md Slice 1). Reads the
+   * awaiting record the worker snapshotted at pause time (ctx.__approval via stateQuery —
+   * the RUN'S OWN config snapshot, immune to later graph edits). Semantics:
+   *  - gate has no `approvers` (or the run predates the snapshot) → unchanged behavior;
+   *  - workspace owner/admin USER principals bypass (consistent with RBAC-GROUPS §4 —
+   *    PermissionsService.subjectKey gates only `member` users and tokens);
+   *  - user principals match by email (case-insensitive) OR GroupMember membership (uid)
+   *    in a listed group;
+   *  - restricted `nry_` token principals match via GroupTokenMember (tokenId). A token
+   *    WITHOUT a tokenId stamp (unenforced workspace) has no group identity and no email,
+   *    so it cannot match a routed gate — fail CLOSED with the same 403;
+   *  - absent actor (internal callers; the PUBLIC signed-link path uses decideByToken and
+   *    stays HMAC-authorized) → never checked.
+   * A closed/undecidable run skips the check — the signal path right after produces the
+   * proper 409/404.
+   */
+  private async assertApprover(
+    actor: Principal | undefined,
+    workflowId: string,
+    tenantId: string,
+  ): Promise<void> {
+    if (!actor) return;
+    let state: ExecutionState;
+    try {
+      state = await this.client.workflow
+        .getHandle(workflowId)
+        .query(stateQuery);
+    } catch {
+      return; // closed/gone — the signal below yields the right 409/404
+    }
+    if (state.status !== "awaiting_approval") return;
+    const approvers = awaitingRecord(state)?.approvers;
+    if (!approvers) return;
+    const emails = (approvers.emails ?? []).filter((e) => !!e);
+    const groupIds = (approvers.groups ?? []).map((g) => g.id).filter(Boolean);
+    if (emails.length === 0 && groupIds.length === 0) return;
+    // Owner/admin USER principals bypass.
+    if (actor.userId && (actor.role === "owner" || actor.role === "admin")) {
+      return;
+    }
+    // Email match (user principals).
+    if (
+      actor.userId &&
+      actor.email &&
+      emails.some((e) => e.toLowerCase() === actor.email?.toLowerCase())
+    ) {
+      return;
+    }
+    // Group membership: uid via GroupMember, token via GroupTokenMember — tenant-scoped
+    // through the group relation so a same-id group of another tenant can never match.
+    if (groupIds.length > 0) {
+      const prisma = getPrisma();
+      if (actor.tokenId) {
+        const m = await prisma.groupTokenMember.findFirst({
+          where: {
+            tokenId: actor.tokenId,
+            groupId: { in: groupIds },
+            group: { tenantId },
+          },
+          select: { groupId: true },
+        });
+        if (m) return;
+      } else if (actor.userId) {
+        const m = await prisma.groupMember.findFirst({
+          where: {
+            userId: actor.userId,
+            groupId: { in: groupIds },
+            group: { tenantId },
+          },
+          select: { groupId: true },
+        });
+        if (m) return;
+      }
+    }
+    throw new ForbiddenException(
+      "This approval is restricted to its listed approvers. " +
+        "Ask one of them to decide, or a workspace owner/admin.",
+    );
   }
 
   /**
@@ -898,6 +1050,57 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
               r.reason instanceof Error ? r.reason.message : String(r.reason),
           },
     );
+  }
+
+  /**
+   * Resolve everything a manual "Remind now" needs (Slice 1): asserts tenant ownership +
+   * the `run` verb on the run's workflow, confirms the run is STILL awaiting approval
+   * (409 otherwise — nothing to remind about), and returns the run's env + prompt title.
+   * The controller then fans the reminder out via NotificationsService.sendApprovalReminder
+   * (API-side send — see that method for why not a worker Signal round-trip).
+   */
+  async remindContext(
+    id: string,
+    tenantId: string,
+    actor?: Principal,
+  ): Promise<{
+    environmentId: string;
+    workflowId: string;
+    workflowKey: string | null;
+    title: string;
+  }> {
+    const row = await this.assertOwner(id, tenantId);
+    await this.assertRunAccess(actor, "run", row);
+    let state: ExecutionState;
+    try {
+      state = await this.client.workflow.getHandle(id).query(stateQuery);
+    } catch (e) {
+      if (e instanceof WorkflowNotFoundError) {
+        throw new ConflictException(
+          "Run is not awaiting approval (already decided, completed, or timed out).",
+        );
+      }
+      throw e;
+    }
+    if (state.status !== "awaiting_approval") {
+      throw new ConflictException(
+        "Run is not awaiting approval (already decided, completed, or timed out).",
+      );
+    }
+    const prompt = await this.approvalPrompt(
+      tenantId,
+      row.environmentId,
+      row.workflowKey,
+      state.currentNodeId,
+    );
+    const environmentId =
+      row.environmentId ?? (await this.environments.defaultEnvId(tenantId));
+    return {
+      environmentId,
+      workflowId: id,
+      workflowKey: row.workflowKey,
+      title: prompt.title,
+    };
   }
 
   /**
@@ -1075,6 +1278,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     const items = await Promise.all(
       rows.map(async (r): Promise<AwaitingApproval | null> => {
         let currentNodeId = "";
+        let rec: ApprovalAwaitingRecord | null = null;
         try {
           const s = await this.client.workflow
             .getHandle(r.workflowId)
@@ -1082,6 +1286,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           // Decided/advanced since the read-model write, or closed → not awaiting.
           if (s.status !== "awaiting_approval") return null;
           currentNodeId = s.currentNodeId;
+          // Slice 1: the pause-time snapshot (contextFields/SLA/approvers) rides the ctx.
+          rec = awaitingRecord(s);
         } catch {
           return null; // closed/gone
         }
@@ -1098,6 +1304,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           title: prompt.title,
           instructions: prompt.instructions,
           createdAt: r.createdAt.toISOString(),
+          ...awaitingFields(rec),
         };
       }),
     );
@@ -1106,11 +1313,19 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
 
   /** Public (token-authed) approval prompt lookup by workflowId — for the signed-link decision page.
    *  Resolves tenant/workflowKey from the Execution row (no bearer), confirms the run is still
-   *  awaiting, and returns the node's prompt. Degrades to `{ awaiting: false }` on any miss. */
+   *  awaiting, and returns the node's prompt plus (Slice 1) the workspace display name and the
+   *  pause-time context fields — the public page's trust line + fields card. Degrades to
+   *  `{ awaiting: false }` on any miss. */
   async promptByWorkflowId(workflowId: string): Promise<{
     awaiting: boolean;
     title?: string;
     instructions?: string | null;
+    /** Workspace display name (TenantSettings.displayName) — "on behalf of …". Null if unset. */
+    workspaceName?: string | null;
+    /** Resolved pause-time context fields (never secrets — see prepareApproval). */
+    contextFields?: Record<string, string> | null;
+    slaHours?: number | null;
+    dueAt?: string | null;
   }> {
     const row = await getPrisma().execution.findUnique({
       where: { workflowId },
@@ -1127,10 +1342,22 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         row.workflowKey,
         s.currentNodeId,
       );
+      const rec = awaitingRecord(s);
+      // Best-effort workspace display name — the public trust line ("on behalf of Acme").
+      const settings = await getPrisma()
+        .tenantSettings.findUnique({
+          where: { tenantId: row.tenantId },
+          select: { displayName: true },
+        })
+        .catch(() => null);
       return {
         awaiting: true,
         title: prompt.title,
         instructions: prompt.instructions,
+        workspaceName: settings?.displayName ?? null,
+        contextFields: rec?.contextFields ?? null,
+        slaHours: rec?.slaHours ?? null,
+        dueAt: dueAtFrom(rec),
       };
     } catch {
       return { awaiting: false };
