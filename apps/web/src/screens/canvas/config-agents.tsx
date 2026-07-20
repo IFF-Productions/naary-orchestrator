@@ -1,5 +1,6 @@
 // Agent / code-agent / MCP tool / integration config sections of the node inspector (extracted verbatim from CanvasPage).
 import type { ConfigSectionCtx } from "./ConfigPanel";
+import type { ConnectionRow } from "../../lib/api";
 import { getIntegrationProvider } from "@naary/dsl";
 import { ExpressionField } from "../../components/ExpressionField";
 import type { JsonSchemaObject } from "../../lib/schema-fields";
@@ -18,6 +19,155 @@ import {
   PROVIDERS,
 } from "./fields";
 import { RowHead } from "./PinSection";
+
+/** One in-loop MCP tool the agent may call (#449). All fields optional in the editor so a
+ *  half-filled row doesn't break saving; the activity treats a missing connection/tool as a no-op. */
+interface AgentToolRow {
+  connectionId?: string;
+  tool?: string;
+  name?: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+  costUsd?: number;
+}
+
+/** Add/remove editor for the agent node's `tools[]` (#449 follow-up). Mirrors the mcpTool node's
+ *  connection + tool fields; each tool the model can call mid-reasoning is one card. */
+function AgentToolsEditor({
+  tools,
+  connections,
+  onChange,
+}: {
+  tools: AgentToolRow[];
+  connections: ConnectionRow[];
+  onChange: (tools: AgentToolRow[] | undefined) => void;
+}) {
+  const update = (i: number, patch: Partial<AgentToolRow>) =>
+    onChange(tools.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
+  const remove = (i: number) => {
+    const next = tools.filter((_, idx) => idx !== i);
+    onChange(next.length ? next : undefined);
+  };
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      {tools.map((t, i) => (
+        <div
+          // Index key: rows are positional (no stable id) and only reorder on remove, which
+          // re-renders the whole list from the new array — acceptable for a small config list.
+          key={i}
+          style={{
+            border: "1px solid var(--line)",
+            borderRadius: "var(--radius-md)",
+            padding: 10,
+            display: "grid",
+            gap: 8,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
+              Tool {i + 1}
+            </span>
+            <button
+              type="button"
+              onClick={() => remove(i)}
+              style={{
+                fontSize: "var(--text-2xs)",
+                cursor: "pointer",
+                border: "1px solid var(--line-2)",
+                color: "var(--ink-2)",
+                background: "var(--card)",
+                padding: "2px 8px",
+                borderRadius: "var(--radius-sm)",
+              }}
+            >
+              Remove
+            </button>
+          </div>
+          <Labeled label="Connection">
+            <ConnectionSelect
+              connections={connections}
+              types={CONNECTION_TYPES.mcpTool ?? []}
+              value={t.connectionId ?? ""}
+              onChange={(id) => update(i, { connectionId: id })}
+            />
+          </Labeled>
+          <Labeled label="Tool name">
+            <input
+              value={t.tool ?? ""}
+              onChange={(e) => update(i, { tool: e.target.value })}
+              style={inputStyle}
+              placeholder="search_issues"
+            />
+          </Labeled>
+          <Labeled label="Exposed name (optional)">
+            <input
+              value={t.name ?? ""}
+              onChange={(e) => update(i, { name: e.target.value || undefined })}
+              style={inputStyle}
+              placeholder="defaults to the tool name"
+            />
+          </Labeled>
+          <Labeled label="Description">
+            <input
+              value={t.description ?? ""}
+              onChange={(e) =>
+                update(i, { description: e.target.value || undefined })
+              }
+              style={inputStyle}
+              placeholder="what the model uses to decide when to call it"
+            />
+          </Labeled>
+          <JsonField
+            label="Input schema (JSON)"
+            value={t.inputSchema}
+            placeholder={'{\n  "type": "object",\n  "properties": {}\n}'}
+            onChange={(v) =>
+              update(i, {
+                inputSchema: v as Record<string, unknown> | undefined,
+              })
+            }
+          />
+          <Labeled label="Cost (USD per call)">
+            <input
+              type="number"
+              min={0}
+              step={0.001}
+              value={t.costUsd ?? ""}
+              onChange={(e) =>
+                update(i, {
+                  costUsd: e.target.value ? Number(e.target.value) : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="0.00"
+            />
+          </Labeled>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => onChange([...tools, {}])}
+        style={{
+          fontSize: "var(--text-xs)",
+          cursor: "pointer",
+          border: "1px dashed var(--line-2)",
+          color: "var(--ink-2)",
+          background: "var(--card)",
+          padding: "6px 10px",
+          borderRadius: "var(--radius-sm)",
+        }}
+      >
+        + Add tool
+      </button>
+    </div>
+  );
+}
 
 export function renderAgentSections(c: ConfigSectionCtx) {
   const {
@@ -163,6 +313,49 @@ export function renderAgentSections(c: ConfigSectionCtx) {
               placeholder="1024 (default)"
             />
           </Labeled>
+
+          <div>
+            <RowHead
+              label="Tools (MCP)"
+              value={`${((config.tools as unknown[] | undefined)?.length ?? 0) || "none"}`}
+            />
+            <div
+              style={{
+                fontSize: "var(--text-xs)",
+                color: "var(--ink-3)",
+                marginBottom: 6,
+                lineHeight: "var(--leading-snug)",
+              }}
+            >
+              MCP tools the agent can call mid-reasoning (a bounded tool loop).
+              With tools and no structured-output fields above, the agent
+              returns free text.
+            </div>
+            <AgentToolsEditor
+              tools={(config.tools as AgentToolRow[] | undefined) ?? []}
+              connections={connections}
+              onChange={(tools) => onChange({ tools })}
+            />
+          </div>
+
+          {Boolean((config.tools as unknown[] | undefined)?.length) && (
+            <Labeled label="Max tool steps">
+              <input
+                type="number"
+                min={1}
+                value={num("maxToolSteps") ?? ""}
+                onChange={(e) =>
+                  onChange({
+                    maxToolSteps: e.target.value
+                      ? Number(e.target.value)
+                      : undefined,
+                  })
+                }
+                style={inputStyle}
+                placeholder="8 (default)"
+              />
+            </Labeled>
+          )}
 
           <label
             style={{
