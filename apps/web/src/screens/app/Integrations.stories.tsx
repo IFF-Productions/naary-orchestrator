@@ -14,6 +14,7 @@ const CONNECTIONS = [
     authMode: "connection_string",
     scopes: [],
     status: "connected",
+    usedByNodeCount: 3,
     createdAt: now,
   },
   {
@@ -54,6 +55,7 @@ const CONNECTIONS = [
     authMode: "github_app",
     scopes: ["repo", "issues", "checks"],
     status: "connected",
+    usedByNodeCount: 1,
     createdAt: now,
   },
   {
@@ -64,6 +66,7 @@ const CONNECTIONS = [
     authMode: "oauth",
     scopes: ["tools:call"],
     status: "needs_reauth",
+    usedByNodeCount: 0, // unused → safe to delete
     createdAt: now,
   },
 ];
@@ -106,9 +109,16 @@ const handlers = [
         id: "w1",
         provider: "github",
         workflowId: "refund-triage",
+        deliveries7d: 42,
         createdAt: now,
       },
-      { id: "w2", provider: "generic", workflowId: "deal.won", createdAt: now },
+      {
+        id: "w2",
+        provider: "generic",
+        workflowId: "deal.won",
+        deliveries7d: 0,
+        createdAt: now,
+      },
     ]),
   ),
   http.get("*/api/tenants/:t/forms", () =>

@@ -43,6 +43,13 @@ export class ConnectionResponse {
     enum: ["connected", "needs_reauth", "error"],
   })
   status!: string;
+  @ApiProperty({
+    example: 3,
+    description:
+      "How many nodes across the tenant's latest graphs in this env reference this " +
+      "connection (#471). 0 = unreferenced (safe to delete).",
+  })
+  usedByNodeCount!: number;
   @ApiProperty({ format: "date-time" }) createdAt!: Date;
 }
 

@@ -11,6 +11,7 @@ import {
   diffGraphs,
   type GraphDef,
   type GraphDiff,
+  type NodeDef,
   validateGraph,
 } from "@naary/dsl";
 import { TracedClass } from "@naary/observability";
@@ -231,6 +232,45 @@ export class GraphsService {
       }
     }
     return [...latest.values()];
+  }
+
+  /**
+   * How many nodes reference each connection, across the tenant's LATEST graphs in this env
+   * (#471, the Integrations "used by N nodes" count). Env-scoped — connections are env-scoped,
+   * so a prod connection must not count sandbox usage. Generic over node type: any node whose
+   * `config.connectionId` matches counts (http / integration / mcpTool / sqlQuery today, plus
+   * any future connection-bearing node). A connection with no references is simply absent →
+   * callers read it as 0. No actor gating: this is an internal aggregate for the owner's
+   * Integrations screen, not a per-workflow read.
+   */
+  async connectionUsageCounts(
+    tenantId: string,
+    environmentId: string,
+  ): Promise<Record<string, number>> {
+    // Fetch ONLY the latest body per workflowKey — `distinct` + workflowKey-led order pushes a
+    // Postgres DISTINCT ON, so we don't ship every historical version's graph JSON just to
+    // dedupe in memory. The `seen` guard below stays as a defensive backstop (a no-op once the
+    // DB deduped).
+    const rows = await getPrisma().graphDefinition.findMany({
+      where: { tenantId, environmentId },
+      orderBy: [{ workflowKey: "asc" }, { version: "desc" }],
+      distinct: ["workflowKey"],
+      select: { workflowKey: true, graph: true },
+    });
+    const seen = new Set<string>();
+    const counts: Record<string, number> = {};
+    for (const r of rows) {
+      if (seen.has(r.workflowKey)) continue;
+      seen.add(r.workflowKey);
+      const nodes = (r.graph as { nodes?: NodeDef[] } | null)?.nodes ?? [];
+      for (const node of nodes) {
+        const cid = node?.config?.connectionId;
+        if (typeof cid === "string" && cid) {
+          counts[cid] = (counts[cid] ?? 0) + 1;
+        }
+      }
+    }
+    return counts;
   }
 
   /** Latest graph for a key, WITH its name + version — for opening into the canvas.

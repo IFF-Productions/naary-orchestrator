@@ -2238,6 +2238,11 @@ export interface components {
       /** @example support-triage */
       workflowId: string;
       /**
+       * @description Deliveries received in the last 7 days (#471). Count only — there is no stored delivery status, so a success rate isn't shown.
+       * @example 42
+       */
+      deliveries7d: number;
+      /**
        * Format: date-time
        * @example 2026-07-04T12:00:00.000Z
        */
@@ -2405,6 +2410,11 @@ export interface components {
        * @enum {string}
        */
       status: "connected" | "needs_reauth" | "error";
+      /**
+       * @description How many nodes across the tenant's latest graphs in this env reference this connection (#471). 0 = unreferenced (safe to delete).
+       * @example 3
+       */
+      usedByNodeCount: number;
       /** Format: date-time */
       createdAt: string;
     };

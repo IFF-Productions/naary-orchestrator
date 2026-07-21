@@ -16154,6 +16154,11 @@
             "type": "string",
             "example": "support-triage"
           },
+          "deliveries7d": {
+            "type": "number",
+            "example": 42,
+            "description": "Deliveries received in the last 7 days (#471). Count only — there is no stored delivery status, so a success rate isn't shown."
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string",
@@ -16164,6 +16169,7 @@
           "id",
           "provider",
           "workflowId",
+          "deliveries7d",
           "createdAt"
         ]
       },
@@ -16473,6 +16479,11 @@
               "error"
             ]
           },
+          "usedByNodeCount": {
+            "type": "number",
+            "example": 3,
+            "description": "How many nodes across the tenant's latest graphs in this env reference this connection (#471). 0 = unreferenced (safe to delete)."
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -16487,6 +16498,7 @@
           "authMode",
           "scopes",
           "status",
+          "usedByNodeCount",
           "createdAt"
         ]
       },

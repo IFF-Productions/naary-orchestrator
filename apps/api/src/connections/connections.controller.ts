@@ -11,6 +11,7 @@ import { ApiBearerAuth } from "@nestjs/swagger";
 import { ConnectionService, type ConnectionView } from "@naary/connections";
 import { EnvironmentSel } from "../auth/tenant.decorator";
 import { EnvironmentsService } from "../environments/environments.service";
+import { GraphsService } from "../graphs/graphs.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { ConnectionResponse } from "./connection.response";
 import { CreateConnectionDto } from "./create-connection.dto";
@@ -21,6 +22,7 @@ export class ConnectionsController {
   constructor(
     private readonly connections: ConnectionService,
     private readonly environments: EnvironmentsService,
+    private readonly graphs: GraphsService,
   ) {}
 
   @ApiEndpoint({
@@ -49,9 +51,14 @@ export class ConnectionsController {
   async list(
     @Param("id") tenantId: string,
     @EnvironmentSel() envSel?: string,
-  ): Promise<ConnectionView[]> {
+  ): Promise<Array<ConnectionView & { usedByNodeCount: number }>> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    return this.connections.list(tenantId, envId);
+    // Connections + their reference counts (#471) in parallel — both env-scoped to `envId`.
+    const [conns, usage] = await Promise.all([
+      this.connections.list(tenantId, envId),
+      this.graphs.connectionUsageCounts(tenantId, envId),
+    ]);
+    return conns.map((c) => ({ ...c, usedByNodeCount: usage[c.id] ?? 0 }));
   }
 
   @ApiEndpoint({
