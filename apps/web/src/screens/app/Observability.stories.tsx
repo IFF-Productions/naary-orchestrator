@@ -362,6 +362,7 @@ export const Empty: Story = {
           }),
         ),
         http.get("*/api/tenants/:t/audit", () => HttpResponse.json([])),
+        http.get("*/api/tenants/:t/environments", () => HttpResponse.json([])),
       ],
     },
   },
