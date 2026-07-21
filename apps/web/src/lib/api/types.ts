@@ -20,6 +20,9 @@ export interface ExecutionState {
   status: string;
   currentNodeId: string;
   ctx: Record<string, unknown>;
+  /** Node ids known to have run, for a failed run whose ctx came back empty (#525) — the
+   *  UI marks them done + the currentNodeId failed. Empty when ctx carries the outputs. */
+  executedNodeIds?: string[];
   /** Per-node timing map (Slice 2): { [nodeId]: { s, f, n?, totalMs? } } — epoch-ms
    *  windows the interpreter stamped with deterministic workflow time. Kept as an
    *  unknown-record (matches the generated schema); shape-checked at read time via

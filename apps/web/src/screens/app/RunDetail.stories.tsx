@@ -151,6 +151,44 @@ const rejectedHistory: RunEvent[] = [
   },
 ];
 
+// A run that FAILED at the agent (#525): enrich ran, the agent activity failed with a
+// provider-credential error, the run failed. The `error` event carries the failure detail.
+const failedHistory: RunEvent[] = [
+  { id: 1, kind: "started", label: "Run started", at: "2026-07-17T09:20:00Z" },
+  {
+    id: 2,
+    kind: "activity",
+    label: "Activity: callHttp",
+    at: "2026-07-17T09:20:01Z",
+  },
+  {
+    id: 3,
+    kind: "activity",
+    label: "Activity completed",
+    at: "2026-07-17T09:20:02Z",
+  },
+  {
+    id: 4,
+    kind: "activity",
+    label: "Activity: callAgent",
+    at: "2026-07-17T09:20:02Z",
+  },
+  {
+    id: 5,
+    kind: "error",
+    label: "Activity failed",
+    detail: "Missing or invalid provider credential",
+    at: "2026-07-17T09:20:03Z",
+  },
+  {
+    id: 6,
+    kind: "error",
+    label: "Run failed",
+    detail: "Activity task failed",
+    at: "2026-07-17T09:20:03Z",
+  },
+];
+
 // Shared handlers; per-story `state` overrides /executions/:id (status + ctx).
 function handlers(state: ExecutionState, hist: RunEvent[]) {
   return [
@@ -265,6 +303,26 @@ export const Rejected: Story = {
           ctx: { ...CTX_UP_TO_ROUTE, __costUsd: 0.0021 },
         },
         rejectedHistory,
+      ),
+    },
+  },
+};
+
+/** Failed AT the agent (#525): the run threw, so its ctx came back EMPTY — but the
+ *  interpreter stamped `currentNodeId` = the failed node + `executedNodeIds` = the nodes
+ *  that ran. So the agent shows FAILED (with its error), upstream nodes show done, and the
+ *  full log lives in the run-level Execution log — not under the step. */
+export const Failed: Story = {
+  parameters: {
+    msw: {
+      handlers: handlers(
+        {
+          status: "failed",
+          currentNodeId: "classify", // the node the run died on
+          ctx: {}, // a thrown run's ctx isn't recoverable — the real empty case
+          executedNodeIds: ["enrich"], // stamped: enrich had run before the agent failed
+        },
+        failedHistory,
       ),
     },
   },

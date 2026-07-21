@@ -55,6 +55,8 @@ export interface ExecutionsDeps {
     tenantId: string;
     workflowKey: string | null;
     environmentId: string | null;
+    failedNodeId: string | null;
+    executedNodeIds: string[];
   }>;
   assertRunAccess: (
     actor: Principal | undefined,
@@ -158,6 +160,7 @@ export async function queryState(
           status: s.status,
           currentNodeId: s.currentNodeId,
           ctx: s.ctx,
+          executedNodeIds: [], // live ctx carries the outputs — the UI derives from it
           nodeTimes: nodeTimesFrom(s.ctx),
           // Slice 3 live spend: the query's first-class figure; a pre-feature worker
           // omits it → fall back to the ctx mirror; null when neither exists.
@@ -169,6 +172,7 @@ export async function queryState(
           status: "running",
           currentNodeId: "",
           ctx: {},
+          executedNodeIds: [],
           nodeTimes: null,
           spentUsd: null,
           perExecutionCapUsd: null,
@@ -185,6 +189,7 @@ export async function queryState(
           status: r.status,
           currentNodeId: "",
           ctx: r.ctx,
+          executedNodeIds: [], // completed ctx carries every node's output
           nodeTimes: nodeTimesFrom(r.ctx),
           spentUsd: costUsdFrom(r.ctx),
           perExecutionCapUsd: null, // closed — no live cap to meter against
@@ -194,18 +199,22 @@ export async function queryState(
           status: "completed",
           currentNodeId: "",
           ctx: {},
+          executedNodeIds: [],
           nodeTimes: null,
           spentUsd: null,
           perExecutionCapUsd: null,
         };
       }
     }
-    // Temporal-level failure (the workflow threw, was terminated, etc.) — there's
-    // no returned {status,ctx} to recover, so report the mapped close reason.
+    // Temporal-level failure (the workflow threw, was terminated, etc.) — there's no
+    // returned {status,ctx} to recover. Fall back to what the interpreter stamped on the
+    // read-model before it rethrew (#525): the node it died on (→ currentNodeId, so the UI
+    // marks it FAILED) and the nodes that had run (→ the UI marks them done, not "skipped").
     return {
       status: TEMPORAL_CLOSED_STATUS[desc.status.name] ?? "unknown",
-      currentNodeId: "",
+      currentNodeId: row.failedNodeId ?? "",
       ctx: {},
+      executedNodeIds: row.executedNodeIds,
       nodeTimes: null,
       spentUsd: null,
       perExecutionCapUsd: null,

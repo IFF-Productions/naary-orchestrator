@@ -3,13 +3,12 @@
  * with the step's state badge, a DURATION / COST / TOKENS / REGION stat strip
  * (real values only — worker-stamped per-node duration, the node output's own
  * metered cost/tokens (Slice 2); anything unrecorded — pre-feature runs, REGION —
- * renders "—"), the step's real output (from the run ctx), and the run's
- * execution-log panel in the design's mono log style.
+ * renders "—"), and the step's own result — its output from the run ctx, or, for the
+ * node the run FAILED on, that node's error (#525). The full durable run log is a
+ * SEPARATE run-level panel (RunDetail's "Execution log"), not repeated per step.
  */
-import type { RunEvent } from "../../../lib/api";
 import { Icon, type IconName } from "../../../components";
 import { NodeOutputBody } from "./NodeOutputBody";
-import { LogPanel } from "./RunLog";
 import { STEP_FG, STEP_WORD, type StepState } from "./run-view-model";
 
 function MonoLabel({ children }: { children: React.ReactNode }) {
@@ -47,15 +46,11 @@ export interface StepDetail {
   output: unknown;
   /** True when `output` is the run's trigger payload (the entry node). */
   isTriggerInput: boolean;
+  /** The failure message when the run died on THIS node (#525); null otherwise. */
+  error?: string | null;
 }
 
-export function StepDetailCard({
-  step,
-  events,
-}: {
-  step: StepDetail;
-  events: RunEvent[] | null;
-}) {
+export function StepDetailCard({ step }: { step: StepDetail }) {
   const stats: { label: string; value: string; color?: string }[] = [
     {
       label: "DURATION",
@@ -189,10 +184,33 @@ export function StepDetailCard({
         ))}
       </div>
 
+      {/* Error — shown FIRST for the node the run failed on (#525): the failure happened
+          here, so this is the step's own error, not a generic run message. */}
+      {step.state === "error" && step.error && (
+        <div
+          style={{
+            padding: "14px 18px",
+            borderBottom: "1px solid var(--line)",
+          }}
+        >
+          <MonoLabel>Error</MonoLabel>
+          <div
+            className="mono"
+            style={{
+              fontSize: "var(--text-sm)",
+              color: "var(--state-error)",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              lineHeight: 1.5,
+            }}
+          >
+            {step.error}
+          </div>
+        </div>
+      )}
+
       {/* Step output — the real per-node result from the run ctx. */}
-      <div
-        style={{ padding: "14px 18px", borderBottom: "1px solid var(--line)" }}
-      >
+      <div style={{ padding: "14px 18px" }}>
         <MonoLabel>
           {step.isTriggerInput ? "Trigger input" : "Output"}
         </MonoLabel>
@@ -204,27 +222,13 @@ export function StepDetailCard({
                 ? "No output yet — this step hasn't run."
                 : step.state === "waiting"
                   ? "No output yet — the run resumes here once a decision arrives."
-                  : "No output was recorded for this step."}
+                  : step.state === "error"
+                    ? "This step failed before producing an output — see the error above and the run's Execution log."
+                    : "No output was recorded for this step."}
           </div>
         ) : (
           <NodeOutputBody output={step.output} />
         )}
-      </div>
-
-      {/* Run log — the curated Temporal history (the durable record). */}
-      <div style={{ padding: "14px 18px" }}>
-        <MonoLabel>Logs</MonoLabel>
-        <LogPanel events={events} />
-        <div
-          className="mono"
-          style={{
-            marginTop: 8,
-            fontSize: "var(--text-2xs)",
-            color: "var(--ink-3)",
-          }}
-        >
-          full run history · durable · state checkpointed · resumable for 30d
-        </div>
       </div>
     </div>
   );

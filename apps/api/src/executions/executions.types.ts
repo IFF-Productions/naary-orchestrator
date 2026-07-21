@@ -53,8 +53,14 @@ export interface RunPage {
  *  Temporal-failed/terminated, which ExecutionStatus alone can't express). */
 export interface RunStateView {
   status: RunSummary["status"];
+  /** The node the run is at: the live node on a running/paused run, or — for a THROWN
+   *  failure whose ctx isn't queryable — the node it died on (#525). "" when unknown. */
   currentNodeId: string;
   ctx: Record<string, unknown>;
+  /** #525 — node ids known to have run, for a failed run whose ctx came back empty (the
+   *  UI marks them done + the currentNodeId failed, instead of "skipped"). Empty when the
+   *  ctx itself carries the outputs (running/completed) — the UI derives from ctx then. */
+  executedNodeIds: string[];
   /** Per-node timing map the interpreter stamped into ctx (Slice 2), surfaced as a
    *  first-class field so consumers don't grope the opaque ctx. Null when the run
    *  predates the feature or the ctx is unavailable (Temporal-level failure). */

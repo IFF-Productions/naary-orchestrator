@@ -92,6 +92,11 @@ export async function setExecutionStatus(meta: {
   costUsd?: number;
   /** Classification of a THROWN failure (workflow-derived, deterministic). */
   failureKind?: string;
+  /** Run-detail recovery (#525): the node a THROWN run died on. Node id only. */
+  failedNodeId?: string;
+  /** Run-detail recovery (#525): the node ids that had produced output when the run
+   *  threw — so the UI marks them done even though the failed run's ctx isn't queryable. */
+  executedNodeIds?: string[];
 }): Promise<void> {
   const terminal = TERMINAL_STATUSES.has(meta.status);
   const failureKind =
@@ -105,6 +110,12 @@ export async function setExecutionStatus(meta: {
         ...(meta.costUsd !== undefined ? { costUsd: meta.costUsd } : {}),
         ...(terminal ? { finishedAt: new Date() } : {}),
         ...(failureKind !== undefined ? { failureKind } : {}),
+        ...(meta.failedNodeId !== undefined
+          ? { failedNodeId: meta.failedNodeId }
+          : {}),
+        ...(meta.executedNodeIds !== undefined
+          ? { executedNodeIds: meta.executedNodeIds }
+          : {}),
         // Pause-not-fail (Slice 3): stamp when the run parks on budget; clear on any
         // other status so the column always means "currently paused since". The
         // month-rollover boot reconcile keys off it.

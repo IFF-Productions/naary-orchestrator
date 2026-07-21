@@ -42,6 +42,10 @@ export interface EngineState {
   status: ExecutionStatus;
   /** The node currently executing — surfaced via the stateQuery. */
   currentNodeId: string;
+  /** The node a run actually THREW on (#525 fan-out fix). Set once, at the throwing node
+   *  (first-writer-wins), so it's exact even across concurrent branches where the shared
+   *  `currentNodeId` races. Undefined until a node throws; the failure stamp prefers it. */
+  failedNodeId?: string;
   /** Fan-in arrival counts per merge node id (Slice N5). */
   mergeArrivals: Record<string, number>;
 }

@@ -15261,6 +15261,17 @@
             "type": "string",
             "example": "agent-1"
           },
+          "executedNodeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "trigger",
+              "http-1"
+            ],
+            "description": "Node ids known to have run — populated for a failed run whose ctx came back empty (#525); empty when the ctx itself carries the outputs."
+          },
           "ctx": {
             "type": "object",
             "additionalProperties": true,
@@ -15288,6 +15299,7 @@
         "required": [
           "status",
           "currentNodeId",
+          "executedNodeIds",
           "ctx",
           "nodeTimes",
           "spentUsd",

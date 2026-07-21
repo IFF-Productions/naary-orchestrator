@@ -55,8 +55,13 @@ export function computeStepStates(
   ctx: Record<string, unknown>,
   currentNodeId: string,
   status: string,
+  /** #525 — node ids the interpreter stamped as having run, for a FAILED run whose ctx
+   *  came back empty. ADDITIVE to the ctx-derived set (ctx wins when present), so
+   *  completed/running runs are unaffected; a failed run's upstream nodes show done. */
+  stampedExecuted?: string[],
 ): Record<string, StepState> {
   const executed = executedNodeIds(graph, ctx);
+  for (const id of stampedExecuted ?? []) executed.add(id);
   // The entry trigger produced the run itself — a run existing means it fired,
   // even though only its payload (ctx.__input), not a node output, is recorded.
   executed.add(graph.startNodeId);
@@ -191,9 +196,12 @@ export function historyTimes(events: RunEvent[] | null): {
     events.find((e) => e.kind === "started" && e.at)?.at ?? null;
   let lastAt: string | null = null;
   for (const e of events) if (e.at) lastAt = e.at;
+  // Prefer the FIRST error's detail — the ROOT cause. A failed run records the specific
+  // activityTaskFailed ("Missing or invalid provider credential") BEFORE the generic
+  // workflowExecutionFailed wrapper ("Activity task failed"); taking the last would surface
+  // the wrapper. For a workflow-level failure (stopAndError) the first error IS that message.
   const errorDetail =
-    [...events].reverse().find((e) => e.kind === "error" && e.detail)?.detail ??
-    null;
+    events.find((e) => e.kind === "error" && e.detail)?.detail ?? null;
   return { startedAt, lastAt, errorDetail };
 }
 

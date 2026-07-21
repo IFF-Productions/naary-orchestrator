@@ -987,6 +987,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     tenantId: string;
     workflowKey: string | null;
     environmentId: string | null;
+    failedNodeId: string | null;
+    executedNodeIds: string[];
   }> {
     return accessAssertOwner(workflowId, tenantId);
   }
