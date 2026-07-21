@@ -16,6 +16,7 @@ import {
   JsonField,
   Labeled,
   MODELS,
+  PROVIDER_LABELS,
   PROVIDERS,
 } from "./fields";
 import { RowHead } from "./PinSection";
@@ -185,6 +186,10 @@ export function renderAgentSections(c: ConfigSectionCtx) {
     connections,
     pins,
   } = c;
+  // "claude-code" runs the agent's instruction through the Claude Code CLI (read-mode plan run)
+  // instead of a raw LLM call, so the LLM-only knobs below (temperature, structured output, max
+  // tokens, in-loop MCP tools, prompt caching) are no-ops for it and are hidden.
+  const isClaudeCode = (str("provider") || "anthropic") === "claude-code";
   return (
     <>
       {kind === "agent" && (
@@ -204,7 +209,7 @@ export function renderAgentSections(c: ConfigSectionCtx) {
             >
               {PROVIDERS.map((p) => (
                 <option key={p} value={p}>
-                  {p}
+                  {PROVIDER_LABELS[p] ?? p}
                 </option>
               ))}
             </select>
@@ -255,31 +260,52 @@ export function renderAgentSections(c: ConfigSectionCtx) {
             </div>
           </Labeled>
 
-          <div>
-            <RowHead
-              label="Temperature"
-              value={
-                num("temperature") === undefined
-                  ? "default"
-                  : (num("temperature") as number).toFixed(2)
-              }
-            />
-            <input
-              type="range"
-              min={0}
-              max={2}
-              step={0.05}
-              value={num("temperature") ?? 0}
-              onChange={(e) =>
-                onChange({ temperature: Number(e.target.value) })
-              }
-              style={{ width: "100%", accentColor: ACCENT.agent }}
-            />
-          </div>
+          {isClaudeCode && (
+            <div
+              style={{
+                fontSize: "var(--text-xs)",
+                color: "var(--ink-3)",
+                lineHeight: "var(--leading-snug)",
+                padding: "8px 10px",
+                border: "1px solid var(--line-2)",
+                borderRadius: 8,
+                background: "var(--card)",
+              }}
+            >
+              Runs your instruction through the Claude Code CLI (read-only plan
+              mode, no repo). The system prompt below is the task; the upstream
+              input is appended. Output is plain text at{" "}
+              <span className="mono">output.text</span>.
+            </div>
+          )}
+
+          {!isClaudeCode && (
+            <div>
+              <RowHead
+                label="Temperature"
+                value={
+                  num("temperature") === undefined
+                    ? "default"
+                    : (num("temperature") as number).toFixed(2)
+                }
+              />
+              <input
+                type="range"
+                min={0}
+                max={2}
+                step={0.05}
+                value={num("temperature") ?? 0}
+                onChange={(e) =>
+                  onChange({ temperature: Number(e.target.value) })
+                }
+                style={{ width: "100%", accentColor: ACCENT.agent }}
+              />
+            </div>
+          )}
 
           <div>
             <RowHead
-              label="System prompt"
+              label={isClaudeCode ? "Instruction" : "System prompt"}
               value={`~${Math.ceil(str("systemPrompt").length / 4)} tok`}
             />
             {exprText("systemPrompt", {
@@ -289,104 +315,110 @@ export function renderAgentSections(c: ConfigSectionCtx) {
             })}
           </div>
 
-          <div>
-            <RowHead label="Structured output" value="fields" />
-            <SchemaEditor
-              schema={obj("outputSchema") as JsonSchemaObject | undefined}
-              onChange={(v) => onChange({ outputSchema: v })}
-            />
-          </div>
+          {!isClaudeCode && (
+            <>
+              <div>
+                <RowHead label="Structured output" value="fields" />
+                <SchemaEditor
+                  schema={obj("outputSchema") as JsonSchemaObject | undefined}
+                  onChange={(v) => onChange({ outputSchema: v })}
+                />
+              </div>
 
-          <Labeled label="Max output tokens">
-            <input
-              type="number"
-              min={1}
-              value={num("maxOutputTokens") ?? ""}
-              onChange={(e) =>
-                onChange({
-                  maxOutputTokens: e.target.value
-                    ? Number(e.target.value)
-                    : undefined,
-                })
-              }
-              style={inputStyle}
-              placeholder="1024 (default)"
-            />
-          </Labeled>
+              <Labeled label="Max output tokens">
+                <input
+                  type="number"
+                  min={1}
+                  value={num("maxOutputTokens") ?? ""}
+                  onChange={(e) =>
+                    onChange({
+                      maxOutputTokens: e.target.value
+                        ? Number(e.target.value)
+                        : undefined,
+                    })
+                  }
+                  style={inputStyle}
+                  placeholder="1024 (default)"
+                />
+              </Labeled>
 
-          <div>
-            <RowHead
-              label="Tools (MCP)"
-              value={`${((config.tools as unknown[] | undefined)?.length ?? 0) || "none"}`}
-            />
-            <div
-              style={{
-                fontSize: "var(--text-xs)",
-                color: "var(--ink-3)",
-                marginBottom: 6,
-                lineHeight: "var(--leading-snug)",
-              }}
-            >
-              MCP tools the agent can call mid-reasoning (a bounded tool loop).
-              With tools and no structured-output fields above, the agent
-              returns free text.
-            </div>
-            <AgentToolsEditor
-              tools={(config.tools as AgentToolRow[] | undefined) ?? []}
-              connections={connections}
-              onChange={(tools) => onChange({ tools })}
-            />
-          </div>
+              <div>
+                <RowHead
+                  label="Tools (MCP)"
+                  value={`${((config.tools as unknown[] | undefined)?.length ?? 0) || "none"}`}
+                />
+                <div
+                  style={{
+                    fontSize: "var(--text-xs)",
+                    color: "var(--ink-3)",
+                    marginBottom: 6,
+                    lineHeight: "var(--leading-snug)",
+                  }}
+                >
+                  MCP tools the agent can call mid-reasoning (a bounded tool
+                  loop). With tools and no structured-output fields above, the
+                  agent returns free text.
+                </div>
+                <AgentToolsEditor
+                  tools={(config.tools as AgentToolRow[] | undefined) ?? []}
+                  connections={connections}
+                  onChange={(tools) => onChange({ tools })}
+                />
+              </div>
 
-          {Boolean((config.tools as unknown[] | undefined)?.length) && (
-            <Labeled label="Max tool steps">
-              <input
-                type="number"
-                min={1}
-                value={num("maxToolSteps") ?? ""}
-                onChange={(e) =>
-                  onChange({
-                    maxToolSteps: e.target.value
-                      ? Number(e.target.value)
-                      : undefined,
-                  })
-                }
-                style={inputStyle}
-                placeholder="8 (default)"
-              />
-            </Labeled>
+              {Boolean((config.tools as unknown[] | undefined)?.length) && (
+                <Labeled label="Max tool steps">
+                  <input
+                    type="number"
+                    min={1}
+                    value={num("maxToolSteps") ?? ""}
+                    onChange={(e) =>
+                      onChange({
+                        maxToolSteps: e.target.value
+                          ? Number(e.target.value)
+                          : undefined,
+                      })
+                    }
+                    style={inputStyle}
+                    placeholder="8 (default)"
+                  />
+                </Labeled>
+              )}
+
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: "var(--text-sm)",
+                  color: "var(--ink-2)",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={Boolean(config.cacheSystemPrompt)}
+                  onChange={(e) =>
+                    onChange({
+                      cacheSystemPrompt: e.target.checked || undefined,
+                    })
+                  }
+                />
+                Cache the system prompt (Anthropic)
+              </label>
+              <div
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--ink-3)",
+                  marginTop: -6,
+                }}
+              >
+                Only worth it for a HIGH-VOLUME agent reusing a large, stable
+                system prompt within ~5&nbsp;minutes. For one-shot flows it can
+                slightly increase cost (a cache-write premium with no reuse), so
+                leave it off unless this agent runs often with the same prompt.
+              </div>
+            </>
           )}
-
-          <label
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              fontSize: "var(--text-sm)",
-              color: "var(--ink-2)",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={Boolean(config.cacheSystemPrompt)}
-              onChange={(e) =>
-                onChange({ cacheSystemPrompt: e.target.checked || undefined })
-              }
-            />
-            Cache the system prompt (Anthropic)
-          </label>
-          <div
-            style={{
-              fontSize: "var(--text-xs)",
-              color: "var(--ink-3)",
-              marginTop: -6,
-            }}
-          >
-            Only worth it for a HIGH-VOLUME agent reusing a large, stable system
-            prompt within ~5&nbsp;minutes. For one-shot flows it can slightly
-            increase cost (a cache-write premium with no reuse), so leave it off
-            unless this agent runs often with the same prompt.
-          </div>
         </>
       )}
 

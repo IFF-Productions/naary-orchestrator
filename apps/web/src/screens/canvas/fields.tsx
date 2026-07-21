@@ -12,11 +12,26 @@ import { RowHead } from "./PinSection";
 /** Provider/model options the runtime actually supports today. Must stay in sync with the
  *  worker's buildModel() (the providers it can construct) + MODEL_PRICING (so runs are billed) —
  *  offering a provider/model outside those would author nodes that fail or misbill at run time. */
-export const PROVIDERS = ["anthropic", "openai", "google"] as const;
+export const PROVIDERS = [
+  "anthropic",
+  "openai",
+  "google",
+  "claude-code",
+] as const;
 export const MODELS: Record<string, string[]> = {
   anthropic: ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"],
   openai: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"],
   google: ["gemini-2.5-pro", "gemini-2.5-flash"],
+  // "claude-code" runs the Claude Code CLI (agentic), so it drives claude models.
+  "claude-code": ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"],
+};
+
+/** Friendly label for a provider option (raw keys otherwise read oddly, e.g. "claude-code"). */
+export const PROVIDER_LABELS: Record<string, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  google: "Google",
+  "claude-code": "Claude Code (agentic CLI)",
 };
 
 /** One upstream→argument binding row in the mcpTool editor. */

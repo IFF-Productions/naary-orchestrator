@@ -112,6 +112,48 @@ const parameters = (
   />
 );
 
+// An agent node whose provider is Claude Code — runs the instruction through the CLI instead of
+// a raw LLM call. The LLM-only knobs are hidden and the prompt is relabeled "Instruction".
+const CLAUDE_CODE_NODE: Node<NaaryData> = {
+  id: "summarize",
+  type: "naary",
+  position: { x: 0, y: 0 },
+  data: {
+    kind: "agent",
+    config: {
+      provider: "claude-code",
+      model: "claude-opus-4-8",
+      systemPrompt:
+        "Summarize this deal for the approver, flag risk, and recommend approve or reject.",
+    },
+  },
+};
+
+const parametersClaudeCode = (
+  <ConfigPanel
+    node={CLAUDE_CODE_NODE}
+    hideHeader
+    upstreamIds={["webhook", "enrich"]}
+    edges={EDGES}
+    nodeKinds={{ webhook: "webhookTrigger", enrich: "httpRequest" }}
+    hookUrls={[]}
+    connections={[]}
+    pins={{ webhook: { company: { name: "Northwind" }, amount: 48000 } }}
+    canPin
+    pinnedOutput={undefined}
+    isPinned={false}
+    onPin={async () => {}}
+    onUnpin={async () => {}}
+    onTest={async () => ({
+      pure: true,
+      output: {},
+      durationMs: 640,
+      costUsd: 0.0012,
+    })}
+    onChange={() => {}}
+  />
+);
+
 /** A selected agent node with real parameters, upstream INPUT DATA rows and a
  *  finished test output (draggable green rows + measured wall-clock). */
 export const SelectedWithOutput: Story = {
@@ -136,6 +178,23 @@ export const SelectedWithOutput: Story = {
     onTest: () => {},
     onPin: () => {},
     onUnpin: () => {},
+    onDelete: () => {},
+  },
+};
+
+/** Agent node with provider "Claude Code" — runs via the Claude Code CLI; the LLM-only knobs
+ *  (temperature / structured output / max tokens / MCP tools / prompt cache) are hidden and the
+ *  system prompt reads "Instruction". */
+export const AgentClaudeCode: Story = {
+  args: {
+    nodeId: "summarize",
+    kind: "agent",
+    title: "Summarize deal",
+    state: "idle",
+    canPin: true,
+    inputRows: INPUT_ROWS,
+    parameters: parametersClaudeCode,
+    onTest: () => {},
     onDelete: () => {},
   },
 };
