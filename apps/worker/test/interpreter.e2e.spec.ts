@@ -4034,6 +4034,49 @@ describe("runGraph interpreter — Slice 2: per-node timing + failure classifica
     expect(push?.failedNodeId).toBe("boom");
   });
 
+  it("does NOT attribute an onError:'continue' node's swallowed error as the failure (#525)", async () => {
+    // `soft` throws but is onError:"continue" → the run swallows it (ctx.soft={error}) and goes
+    // on to `hard`, which throws and FAILS the run. The failure is `hard`, never the earlier
+    // soft-failed node (first-writer-wins must not latch onto a non-fatal continue error).
+    const continueGraph: GraphDef = {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        {
+          id: "soft",
+          type: "agent",
+          config: { provider: "anthropic", model: "claude-opus-4-8" },
+          onError: "continue",
+        },
+        {
+          id: "hard",
+          type: "agent",
+          config: { provider: "anthropic", model: "claude-opus-4-8" },
+        },
+        { id: "e", type: "end" },
+      ],
+      edges: [
+        { from: "s", to: "soft" },
+        { from: "soft", to: "hard" },
+        { from: "hard", to: "e" },
+      ],
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [continueGraph, { hi: 1 }, { tenantId: "t-quota-fail" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-fail-continue",
+      });
+      await expect(handle.result()).rejects.toThrow(
+        /workflow execution failed/i,
+      );
+    });
+    const push = statusPushes.find((p) => p.workflowId === "e2e-fail-continue");
+    expect(push?.failedNodeId).toBe("hard");
+    expect(push?.failedNodeId).not.toBe("soft");
+  });
+
   it("stopAndError → failureKind 'error'; a returned terminal (rejected) carries NO explicit kind (the activity derives it from status)", async () => {
     const stopGraph: GraphDef = {
       startNodeId: "s",
