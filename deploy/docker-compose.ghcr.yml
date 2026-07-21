@@ -26,6 +26,10 @@ services:
     image: ${IMAGE_BASE:-ghcr.io/tarazena}/naary-backend:${APP_VERSION:?set APP_VERSION to the release tag (e.g. v0.0.1)}
     build: !reset null
 
+  worker-heavy:
+    image: ${IMAGE_BASE:-ghcr.io/tarazena}/naary-backend:${APP_VERSION:?set APP_VERSION to the release tag (e.g. v0.0.1)}
+    build: !reset null
+
   web:
     image: ${IMAGE_BASE:-ghcr.io/tarazena}/naary-web:${APP_VERSION:?set APP_VERSION to the release tag (e.g. v0.0.1)}
     build: !reset null
