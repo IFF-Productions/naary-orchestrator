@@ -15,96 +15,35 @@ import {
   UnprocessableEntityException,
 } from "@nestjs/common";
 import type { GraphDef } from "@naary/dsl";
-import {
-  CONDITION_OPS,
-  INTEGRATION_PROVIDERS,
-  NODE_TYPES,
-  nodeCatalogPrompt,
-  validateGraph,
-} from "@naary/dsl";
+import { INTEGRATION_PROVIDERS, NODE_TYPES, validateGraph } from "@naary/dsl";
 import { ConnectionService } from "@naary/connections";
 import { redactString } from "@naary/observability";
 import { CredentialsService, MissingCredentialError } from "@naary/secrets";
 import { createGraphStreamExtractor } from "./graph-stream-extractor";
+import {
+  CLAUDE_CODE,
+  CLAUDE_CODE_TIMEOUT_MS,
+  claudeCodeAuthEnv,
+  GEN_DEFAULT_MODEL,
+  GEN_PROVIDERS,
+  readGenTokens,
+  SYSTEM_PROMPT,
+  type GenMeter,
+  type GenProvider,
+  type GenSource,
+  type GenTokens,
+  type StreamHooks,
+} from "./graph-generator.prompt";
+import {
+  describeProviderError,
+  mapProviderError,
+  parseGraphJson,
+  toGraphDef,
+  type GraphDraft,
+} from "./graph-generator.parse";
 
-/** Per-element hooks the streaming path fires as the free-form graph is parsed live. */
-interface StreamHooks {
-  onMeta?: (name: string) => void;
-  onNode?: (node: unknown) => void;
-  onEdge?: (edge: unknown) => void;
-}
-
-// Providers the generator can use, in preference order — when the caller doesn't pick one,
-// the first provider the tenant has a valid key for wins. Kept in sync with the worker's
-// buildModel() + MODEL_PRICING. The tenant brings their own key (BYOK).
-const GEN_PROVIDERS = ["anthropic", "openai", "google"] as const;
-type GenProvider = (typeof GEN_PROVIDERS)[number];
-const GEN_DEFAULT_MODEL: Record<GenProvider, string> = {
-  anthropic: "claude-opus-4-8",
-  openai: "gpt-4.1",
-  google: "gemini-2.5-pro",
-};
-
-/** Raw token counts a model call reported, normalized. `null` when the provider gave none
- *  (the claude-code subprocess always; the AI-SDK v6 usage-undefined bug sometimes) — the
- *  caller then ESTIMATES rather than recording zero (Tier-1 §6 billing fail-safe). */
-export interface GenTokens {
-  inputTokens: number;
-  outputTokens: number;
-  cachedInputTokens: number;
-}
-
-/** Per-turn meter for a metered generate/edit (the conversational builder). `provider`/`model`
- *  are ALWAYS a real PRICED pair (claude-code maps to anthropic/opus) so a cost can be computed
- *  even from an estimate; `tokens` is null when the provider reported no usage. */
-export interface GenMeter {
-  provider: GenProvider;
-  model: string;
-  tokens: GenTokens | null;
-}
-
-/** Normalize an AI-SDK usage object (v6 `inputTokens`/`outputTokens`, older
- *  `promptTokens`/`completionTokens`) → GenTokens, or null when it's absent/empty (the v6
- *  usage-undefined bug). Never throws — a metering read must not break a successful call. */
-function readGenTokens(raw: unknown): GenTokens | null {
-  if (!raw || typeof raw !== "object") return null;
-  const u = raw as Record<string, number | undefined>;
-  const inputTokens = u.inputTokens ?? u.promptTokens;
-  const outputTokens = u.outputTokens ?? u.completionTokens;
-  if (typeof inputTokens !== "number" && typeof outputTokens !== "number")
-    return null;
-  return {
-    inputTokens: inputTokens ?? 0,
-    outputTokens: outputTokens ?? 0,
-    cachedInputTokens: u.cachedInputTokens ?? 0,
-  };
-}
-
-/**
- * The Claude Code credential (its own BYOK slot since #296 — can be a subscription
- * setup-token, not just an API key) can ALSO power the builder: generation then runs
- * through the headless `claude -p` CLI instead of the Anthropic API, so it bills to the
- * tenant's Claude subscription. API-model providers are still preferred when configured
- * (faster, no subprocess); this is the fallback that makes a claude-code-only tenant work.
- */
-const CLAUDE_CODE = "claude-code" as const;
-type GenSource = GenProvider | typeof CLAUDE_CODE;
-
-/** Default subprocess ceiling (legacy JSON route): nginx proxies /api with its default 60s
- *  read timeout, so that route's CLI call must give up (with a clear error) before the proxy
- *  would turn the reply into a 504. The SSE route (POST /graphs/generate/stream) heartbeats
- *  past the proxy timeout and passes its own, much larger ceiling via generate() opts. */
-const CLAUDE_CODE_TIMEOUT_MS = 55_000;
-
-/** Exactly ONE auth env var for the CLI — a subscription setup-token (sk-ant-oat…) via
- *  CLAUDE_CODE_OAUTH_TOKEN, a plain API key via ANTHROPIC_API_KEY. Mirrors the worker's
- *  codeAgent driver `authEnv` (apps/worker/src/temporal/code-agent-drivers.ts). */
-function claudeCodeAuthEnv(key: string): Record<string, string> {
-  const k = key.trim();
-  return k.startsWith("sk-ant-oat")
-    ? { CLAUDE_CODE_OAUTH_TOKEN: k }
-    : { ANTHROPIC_API_KEY: k };
-}
+// Re-export the metering types so existing importers (builder/turn-metering) keep working.
+export type { GenMeter, GenTokens } from "./graph-generator.prompt";
 
 /** Build the AI SDK model handle for a provider (mirrors the worker's buildModel). */
 async function buildGenModel(provider: GenProvider, apiKey: string) {
@@ -115,50 +54,6 @@ async function buildGenModel(provider: GenProvider, apiKey: string) {
     return (await googleSdk()).createGoogleGenerativeAI({ apiKey })(model);
   return (await anthropicSdk()).createAnthropic({ apiKey })(model);
 }
-
-// The node types + operators the generator may use come from the shared @naary/dsl catalog
-// (NODE_TYPES / CONDITION_OPS), so adding a node/operator automatically teaches the AI builder
-// about it — no more hand-maintained list drifting behind the DSL (the old bug).
-
-// NOTE: we generate as plain-text JSON (parsed + validated below), NOT AI-SDK structured
-// output. Structured output (`Output.object`) returned a skeleton here — nodes with id+type
-// but empty edges and empty config, even on repair — so free-form generation driven by the
-// prompt (few-shot + fill rules) produces materially better graphs. validateGraph + the
-// node-type/connectivity checks + one repair retry are the real gate.
-
-const SYSTEM_PROMPT = `You design automation workflows as a JSON graph for a durable workflow engine.
-
-Rules:
-- Output a graph: { name, startNodeId, nodes:[{id,type,config?}], edges:[{from,to,condition?}] }.
-- Exactly ONE entry node (marked [entry] below) and it MUST be startNodeId.
-- Every edge.from/edge.to MUST reference an existing node id. Node ids are short, unique, lowercase.
-- Prefer the simplest graph that satisfies the request. End flows with an "end" node (or "respondToWebhook" for a webhook that returns a response).
-- Only use connection-based nodes (mcpTool/sqlQuery/sqlExec/sendEmail/hmac/jwt/totp) when the request implies them; leave connectionId as a short placeholder the user will set.
-- Do NOT invent node types. Use only the catalog below.
-- FILL IN each node's config with concrete, ready-to-run values inferred from the request, following the "config:" shape shown for that node type below. Write real agent systemPrompts (specific to the task), real url+method for httpRequest, real title+instructions for humanApproval, real subject+body for sendEmail, etc. Reference upstream outputs with {{ nodeId.path }} where a value comes from an earlier node.
-- Do NOT emit an empty config {} for a node whose catalog entry shows config keys. Only nodes with no "config:" shape (e.g. start, end, merge) may omit config. For connection-based nodes leave ONLY connectionId as a "<...>" placeholder; still fill the rest.
-- A conditional edge has condition:{path,op,value}; op MUST be one of: ${CONDITION_OPS.join(", ")}. Do NOT put a conditional edge INTO a "merge" node.
-- To branch, prefer an "if" (two-way) or "switch" (multi-way) node and put conditions on the edges leaving it (e.g. path:"<if-id>.result", op:"eq", value:true).
-
-Example of the expected quality — note filled configs AND complete edges (a trigger/end takes no config; every other node is ready to run):
-{
-  "name": "New-lead Slack alert",
-  "startNodeId": "hook",
-  "nodes": [
-    { "id": "hook", "type": "webhookTrigger", "config": {} },
-    { "id": "classify", "type": "agent", "config": { "provider": "anthropic", "model": "claude-opus-4-8", "systemPrompt": "You are a sales assistant. Read the incoming lead in {{ hook.body }} and reply with a one-line summary and a priority of 'high' or 'low'." } },
-    { "id": "notify", "type": "httpRequest", "config": { "method": "POST", "url": "https://hooks.slack.com/services/<your-webhook>", "body": { "text": "New lead: {{ classify.output }}" } } },
-    { "id": "done", "type": "end" }
-  ],
-  "edges": [
-    { "from": "hook", "to": "classify" },
-    { "from": "classify", "to": "notify" },
-    { "from": "notify", "to": "done" }
-  ]
-}
-
-Available nodes (each line shows the node's config: shape to fill in):
-${nodeCatalogPrompt()}`;
 
 /**
  * Test seam (mirrors the worker's __codeAgentDeps): run the `claude` CLI, resolving
@@ -968,117 +863,4 @@ export class GraphGeneratorService {
     }
     return parsed;
   }
-}
-
-/** Draft shape the model returns (loose; validateGraph + toGraphDef do the real checks). */
-interface GraphDraft {
-  name?: string;
-  startNodeId: string;
-  nodes: { id: string; type: string; config?: Record<string, unknown> }[];
-  edges: {
-    from: string;
-    to: string;
-    condition?: { path: string; op: string; value?: unknown };
-  }[];
-}
-
-/** Extract a graph object from the model's text: tolerate markdown fences / surrounding
- *  prose by taking the outermost {...}. Returns null if it isn't parseable graph-shaped JSON. */
-function parseGraphJson(text: string): GraphDraft | null {
-  if (!text) return null;
-  let s = text.trim();
-  const fenced = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenced) s = fenced[1].trim();
-  const start = s.indexOf("{");
-  const end = s.lastIndexOf("}");
-  if (start === -1 || end === -1 || end < start) return null;
-  try {
-    const obj = JSON.parse(s.slice(start, end + 1)) as unknown;
-    if (
-      !obj ||
-      typeof obj !== "object" ||
-      typeof (obj as GraphDraft).startNodeId !== "string" ||
-      !Array.isArray((obj as GraphDraft).nodes) ||
-      !Array.isArray((obj as GraphDraft).edges)
-    ) {
-      return null;
-    }
-    return obj as GraphDraft;
-  } catch {
-    return null;
-  }
-}
-
-/** Safe, key-free one-line summary of a provider error for logs. */
-async function describeProviderError(e: unknown): Promise<string> {
-  // Defensive import: `ai` is already cached (the generate call resolved it), but never let a
-  // failed import in this error-describing helper mask the error we're trying to describe.
-  const aiMod = await aiSdk().catch(() => undefined);
-  if (aiMod?.APICallError.isInstance(e)) {
-    const body =
-      typeof e.responseBody === "string" ? e.responseBody.slice(0, 300) : "";
-    return `APICallError status=${e.statusCode ?? "?"} url=${e.url ?? "?"} retryable=${e.isRetryable} msg=${e.message} body=${body}`;
-  }
-  if (e instanceof Error) return `${e.name}: ${e.message}`;
-  return String(e);
-}
-
-/** Narrow the loose model output to a GraphDef (validateGraph does deep checks). */
-function toGraphDef(out: {
-  startNodeId: string;
-  nodes: { id: string; type: string; config?: Record<string, unknown> }[];
-  edges: {
-    from: string;
-    to: string;
-    condition?: { path: string; op: string; value?: unknown };
-  }[];
-}): GraphDef {
-  return {
-    startNodeId: out.startNodeId,
-    nodes: out.nodes as GraphDef["nodes"],
-    edges: out.edges as GraphDef["edges"],
-  };
-}
-
-/** Map provider failures to HTTP responses (mirrors the worker's AUTH/QUOTA split). */
-async function mapProviderError(
-  e: unknown,
-  provider: string,
-): Promise<HttpException> {
-  // Defensive import: if `ai` can't load here (it's already cached from the generate call), don't
-  // let that mask the provider error — fall through to the generic 503 below.
-  const aiMod = await aiSdk().catch(() => undefined);
-  if (aiMod?.APICallError.isInstance(e)) {
-    const status = e.statusCode;
-    if (status === 401 || status === 403) {
-      return new BadRequestException(
-        `Your ${provider} API key was rejected. Update it in Integrations.`,
-      );
-    }
-    // Model renamed/removed → a 404 (or a 400 "model not found"). Actionable, not a
-    // generic 503: the fix is to update the generator's model id, not "try again".
-    if (
-      status === 404 ||
-      (status === 400 && /model/i.test(e.responseBody ?? ""))
-    ) {
-      return new UnprocessableEntityException(
-        `The ${provider} model "${GEN_DEFAULT_MODEL[provider as GenProvider] ?? "?"}" is unavailable (it may have been renamed). Update the generator model id.`,
-      );
-    }
-    // 429 = rate/quota; 529 = Anthropic "overloaded"; other 5xx = provider down.
-    if (status === 429 || status === 529) {
-      return new HttpException(
-        `${provider} is rate-limited or overloaded. Try again shortly.`,
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
-    if (typeof status === "number" && status >= 500) {
-      return new ServiceUnavailableException(
-        `${provider} is temporarily unavailable (upstream ${status}). Try again shortly.`,
-      );
-    }
-  }
-  return new ServiceUnavailableException(
-    "The model couldn't generate a workflow right now. Try again.",
-  );
 }
