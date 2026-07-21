@@ -21,18 +21,25 @@ const invitation = {
   update: vi.fn(),
   deleteMany: vi.fn(),
 };
+const tenantSettings = { findUnique: vi.fn() };
 vi.mock("@naary/db", () => ({
-  getPrisma: () => ({ membership, invitation }),
+  getPrisma: () => ({ membership, invitation, tenantSettings }),
 }));
 
 import type { Principal } from "../src/auth/tenant.decorator";
+import type { MailerService } from "../src/mail/mailer.service";
 import type { MembershipService } from "../src/membership/membership.service";
 import { MembersService } from "../src/members/members.service";
 
 const invalidate = vi.fn();
-const svc = new MembersService({
-  invalidate,
-} as unknown as MembershipService);
+const sendInvitation = vi.fn();
+const svc = new MembersService(
+  { invalidate } as unknown as MembershipService,
+  { sendInvitation } as unknown as MailerService,
+);
+
+/** The invite email is fire-and-forget (void) — flush microtasks so the async IIFE settles. */
+const flush = () => new Promise((r) => setImmediate(r));
 
 const now = new Date("2026-01-01T00:00:00.000Z");
 const asOwner: Principal = { tenantId: "t-1", userId: "u-own", role: "owner" };
@@ -47,7 +54,9 @@ beforeEach(() => {
   for (const m of [
     ...Object.values(membership),
     ...Object.values(invitation),
+    tenantSettings.findUnique,
     invalidate,
+    sendInvitation,
   ]) {
     m.mockReset();
   }
@@ -60,6 +69,8 @@ beforeEach(() => {
   invitation.findFirst.mockResolvedValue(null);
   invitation.findUnique.mockResolvedValue(null);
   invitation.deleteMany.mockResolvedValue({ count: 1 });
+  tenantSettings.findUnique.mockResolvedValue({ displayName: "Acme Prod" });
+  sendInvitation.mockResolvedValue(true);
 });
 
 describe("MembersService.list", () => {
@@ -111,6 +122,37 @@ describe("MembersService.invite", () => {
       role: "member",
       invitedBy: "u-own",
     });
+  });
+
+  it("sends an invitation email (#468) to the lowercased address with the workspace name", async () => {
+    invitation.create.mockResolvedValue({
+      id: "inv-1",
+      email: "new@x.com",
+      role: "member",
+      createdAt: now,
+    });
+    await svc.invite("t-1", asOwner, "  New@X.com ", "member");
+    await flush(); // fire-and-forget email
+    expect(sendInvitation).toHaveBeenCalledTimes(1);
+    expect(sendInvitation.mock.calls[0][0]).toMatchObject({
+      to: "new@x.com",
+      workspaceName: "Acme Prod",
+    });
+    expect(sendInvitation.mock.calls[0][0].signInUrl).toContain("/auth");
+  });
+
+  it("still succeeds when the invite email fails (best-effort, never blocks the invite)", async () => {
+    invitation.create.mockResolvedValue({
+      id: "inv-1",
+      email: "new@x.com",
+      role: "member",
+      createdAt: now,
+    });
+    sendInvitation.mockRejectedValue(new Error("smtp down"));
+    tenantSettings.findUnique.mockRejectedValue(new Error("db blip"));
+    const v = await svc.invite("t-1", asOwner, "new@x.com", "member");
+    await flush();
+    expect(v).toMatchObject({ id: "inv-1", status: "invited" }); // invite unaffected
   });
 
   it("409s when the email already belongs to an active member", async () => {

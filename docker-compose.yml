@@ -29,6 +29,16 @@ x-backend-env: &backend-env
   GITHUB_APP_ID: ${GITHUB_APP_ID:-}
   GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
   GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+  # Platform transactional email (#468 — invitation emails). OPT-IN: unset ⇒ the API's mailer
+  # is a no-op (invitations still work via accept-on-login, just no email is sent). SMTP_URL is a
+  # nodemailer connection URI (smtp://user:pass@host:port); MAIL_FROM is the sender. This is the
+  # APP's own sender — distinct from the per-tenant `smtp` connection the sendEmail node uses.
+  # Only the api reads these; harmless on the worker.
+  SMTP_URL: ${SMTP_URL:-}
+  MAIL_FROM: ${MAIL_FROM:-}
+  # Server-derived SPA base for links in transactional emails / connect callbacks (never a
+  # request param). Falls back to the first http(s) CORS_ORIGINS entry, else a relative path.
+  APP_BASE_URL: ${APP_BASE_URL:-}
   # Claim-check object storage (optional; unset = in-memory). Forwarded from .env
   # so a real S3 bucket can be used without editing this file.
   STORAGE_PROVIDER: ${STORAGE_PROVIDER:-}
