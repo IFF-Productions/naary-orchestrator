@@ -38,14 +38,18 @@ Response (the `signingSecret` is returned **only** here — store it):
 ```
 
 - `workflowId` is the **workflowKey** of a saved graph whose entry node is a Webhook trigger.
-- `provider` is one of `generic` | `github` | `atlassian` — it only selects which header carries
-  the **delivery id** used for de-duplication (see below). Use `generic` for your own callers.
+- `provider` is one of `generic` | `github` | `atlassian` — it selects which headers carry the
+  **HMAC signature** and the **delivery id** used for de-duplication (see below). The signing scheme
+  is identical for all three (`sha256=<hmac>` over the raw body); only the header names differ. Use
+  `generic` for your own callers.
 
 ---
 
 ## 2. Invoke the webhook
 
-Compute `sha256=<hmac>` over the **exact bytes** you send, and pass it as `X-Hub-Signature-256`.
+Compute `sha256=<hmac>` over the **exact bytes** you send, and pass it as `X-Hub-Signature-256`
+(for `generic` / `github`). An `atlassian` endpoint reads the same value from `X-Hub-Signature`
+(no `-256`) — that is Jira Cloud's native scheme, so signed Jira deliveries verify as-is.
 
 ```bash
 API=http://localhost:3000

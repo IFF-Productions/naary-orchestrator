@@ -274,10 +274,54 @@ describe("WebhookService.verifySignature (GitHub HMAC over raw body)", () => {
     expect(svc.verifySignature("github", RAW, undefined, SECRET)).toBe(false);
   });
 
-  it("fails closed for atlassian (scheme not implemented)", () => {
+  it("accepts, tampers, and rejects for atlassian (same sha256=<hex> scheme, #467)", () => {
     expect(
       svc.verifySignature("atlassian", RAW, sign(RAW, SECRET), SECRET),
+    ).toBe(true);
+    const tampered = Buffer.from('{"action":"closed","number":42}');
+    expect(
+      svc.verifySignature("atlassian", tampered, sign(RAW, SECRET), SECRET),
     ).toBe(false);
+    expect(
+      svc.verifySignature("atlassian", RAW, sign(RAW, "wrong"), SECRET),
+    ).toBe(false);
+    expect(svc.verifySignature("atlassian", RAW, undefined, SECRET)).toBe(
+      false,
+    );
+  });
+
+  // Wire-compatibility, NOT self-consistency: Atlassian's OWN published example
+  // (developer.atlassian.com/cloud/jira/platform/webhooks/). A round-trip test would
+  // pass even if our format were subtly wrong; this fails unless the bytes on the wire
+  // match a real Jira Cloud delivery. Secret "It's a Secret to Everybody", body
+  // "Hello World!" → the documented signature.
+  it("verifies Atlassian's published known-answer vector (wire format)", () => {
+    const secret = "It's a Secret to Everybody";
+    const body = Buffer.from("Hello World!", "utf8");
+    const header =
+      "sha256=a4771c39fbe90f317c7824e83ddef3caae9cb3d976c214ace1f2937e133263c9";
+    expect(svc.verifySignature("atlassian", body, header, secret)).toBe(true);
+    // A single-byte change to the body must break it.
+    expect(
+      svc.verifySignature(
+        "atlassian",
+        Buffer.from("Hello World?"),
+        header,
+        secret,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("WebhookService.signatureHeaderFor (per-provider signature header, #467)", () => {
+  it("maps github/generic to X-Hub-Signature-256, atlassian to X-Hub-Signature", () => {
+    expect(svc.signatureHeaderFor("github")).toBe("x-hub-signature-256");
+    expect(svc.signatureHeaderFor("generic")).toBe("x-hub-signature-256");
+    expect(svc.signatureHeaderFor("atlassian")).toBe("x-hub-signature");
+  });
+
+  it("defaults an unknown provider to the GitHub-style header", () => {
+    expect(svc.signatureHeaderFor("mystery")).toBe("x-hub-signature-256");
   });
 });
 

@@ -82,8 +82,11 @@ export class HooksController {
 
     // Audit S-4: reject unsigned requests BEFORE the DB read + AES-decrypt, so a
     // caller who only knows an endpoint id can't force per-request DB/crypto work.
-    // The signature header is the same for every provider (X-Hub-Signature-256).
-    if (!headers["x-hub-signature-256"]) {
+    // The header differs by provider — GitHub/generic use X-Hub-Signature-256,
+    // Atlassian uses X-Hub-Signature (#467) — and we don't know the provider until
+    // the endpoint loads, so the cheap gate accepts EITHER. The provider-correct
+    // header is then selected for the actual verify below (a mismatch fails closed).
+    if (!headers["x-hub-signature-256"] && !headers["x-hub-signature"]) {
       log.warn(
         { endpointId, durationMs: ms() },
         "webhook rejected: no signature",
@@ -101,9 +104,11 @@ export class HooksController {
     }
     const provider = endpoint.provider as WebhookProvider;
 
-    // HMAC over the exact received bytes (never the re-serialized JSON).
+    // HMAC over the exact received bytes (never the re-serialized JSON). The
+    // signature header is provider-specific (#467) — X-Hub-Signature-256 for
+    // GitHub/generic, X-Hub-Signature for Atlassian.
     const rawBody = req.rawBody ?? Buffer.alloc(0);
-    const signature = headers["x-hub-signature-256"];
+    const signature = headers[this.webhooks.signatureHeaderFor(provider)];
     if (
       !this.webhooks.verifySignature(
         provider,
