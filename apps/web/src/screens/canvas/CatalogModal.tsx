@@ -78,7 +78,7 @@ export function CatalogModal({
         style={{
           margin: "auto",
           width: "min(980px, calc(100vw - 40px))",
-          height: "min(660px, calc(100vh - 64px))",
+          height: "min(660px, calc(100dvh - 64px))",
           background: "var(--panel)",
           border: "1px solid var(--line-mid)",
           borderRadius: "var(--radius-xl)",
