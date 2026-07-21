@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getByPath } from "../src/mcp-args";
 import type { GraphDef } from "../src/types";
 import {
   collectUnresolved,
@@ -78,6 +79,28 @@ describe("resolveTemplateString", () => {
       "a",
       "b",
     ]);
+  });
+
+  it("array projection `[*]` over an item array (#478)", () => {
+    const c = {
+      start: {
+        items: [
+          { id: 1, sku: "A" },
+          { id: 2, sku: "B" },
+          { id: 3, sku: "C" },
+        ],
+      },
+    };
+    // Whole-string projection returns the TYPED array of the projected field.
+    expect(resolveTemplateString("{{ start.items[*].id }}", c)).toEqual([
+      1, 2, 3,
+    ]);
+    // Embedded → JSON array string.
+    expect(resolveTemplateString("ids={{ start.items[*].sku }}", c)).toBe(
+      'ids=["A","B","C"]',
+    );
+    // A numeric index selects one element; a further key drills in.
+    expect(resolveTemplateString("{{ start.items[1].sku }}", c)).toBe("B");
   });
 
   it("leaves `{{ $secrets.NAME }}` LITERAL — the workflow must never resolve a secret", () => {
@@ -388,5 +411,43 @@ describe("collectUnresolved (runtime: which source produced no output)", () => {
       },
     };
     expect(collectUnresolved(node, {}, ids)).toEqual([]);
+  });
+});
+
+describe("getByPath — bracket indices & array projection (#478)", () => {
+  const v = {
+    items: [
+      { id: 1, tags: ["x", "y"] },
+      { id: 2, tags: ["z"] },
+    ],
+    scalar: 7,
+  };
+
+  it("keeps plain dotted paths byte-for-byte identical (backward compat)", () => {
+    expect(getByPath(v, "items")).toBe(v.items);
+    expect(getByPath(v, "scalar")).toBe(7);
+    expect(getByPath(v, "nope.deep")).toBeUndefined();
+    expect(getByPath(v)).toBe(v); // no path → the value itself
+  });
+
+  it("numeric bracket index selects an array element, then drills in", () => {
+    expect(getByPath(v, "items[0].id")).toBe(1);
+    expect(getByPath(v, "items[1].tags[0]")).toBe("z");
+    expect(getByPath(v, "items[9].id")).toBeUndefined(); // out of range → undefined
+  });
+
+  it("`[*]` projects the rest of the path over each element", () => {
+    expect(getByPath(v, "items[*].id")).toEqual([1, 2]);
+    // Nested `[*]` nests (array of arrays) — the compositional rule.
+    expect(getByPath(v, "items[*].tags[*]")).toEqual([["x", "y"], ["z"]]);
+    // A missing field per element → undefined in that slot (never throws).
+    expect(getByPath(v, "items[*].missing")).toEqual([undefined, undefined]);
+  });
+
+  it("`[*]` / `[n]` over a non-array or nullish yields undefined, never throws", () => {
+    expect(getByPath(v, "scalar[*].id")).toBeUndefined();
+    expect(getByPath(v, "scalar[0]")).toBeUndefined();
+    expect(getByPath(v, "missing[*].id")).toBeUndefined();
+    expect(getByPath(null, "a[*].b")).toBeUndefined();
   });
 });

@@ -106,8 +106,11 @@ Slices 1–2 deliver the whole runtime capability; 3–4 are ergonomics.
 
 ## 10. Residual open questions
 
-- **Array iteration** (`{{ items[*].id }}`) — deferred; it entangles with the items-model work.
-  Template-lite handles a single path only.
+- ~~**Array iteration** (`{{ items[*].id }}`) — deferred; it entangles with the items-model work.
+  Template-lite handles a single path only.~~ **SHIPPED (#478).** `getByPath` now parses bracket
+  accessors: `a[n]` (index) and `a[*].b` (projection — maps `.b` over each element, returning an
+  array). Pure/total (non-array or missing → undefined, never throws), so it works uniformly in
+  templates, argument bindings, edge conditions, and array-node fields.
 - **Default/fallback** (`{{ a ?? "n/a" }}`) — tempting, but it's the first step onto the
   expression-language slope. Hold for Phase 3 unless demand is high.
 - **Type preservation across embedding** — a whole-string token keeps its type; a mixed string

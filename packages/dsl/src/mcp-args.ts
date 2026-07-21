@@ -1,16 +1,66 @@
 import type { McpToolNodeConfig } from "./types";
 
+/** One parsed path segment: an object key, an array index, or the `[*]` wildcard. */
+type PathSeg =
+  | { kind: "key"; key: string }
+  | { kind: "index"; index: number }
+  | { kind: "wildcard" };
+
+/** Matches a bracket accessor (`[*]` or `[<n>]`) OR a bare dotted key run. */
+const SEG_RE = /\[(\*|\d+)\]|([^.[\]]+)/g;
+
+/** Parse `a.b[*].c[0]` → key a · key b · wildcard · key c · index 0. Pure; never throws. */
+function parsePath(path: string): PathSeg[] {
+  const segs: PathSeg[] = [];
+  const re = new RegExp(SEG_RE.source, "g"); // own lastIndex
+  let m: RegExpExecArray | null;
+  // biome-ignore lint/suspicious/noAssignInExpressions: standard regex.exec loop
+  while ((m = re.exec(path)) !== null) {
+    if (m[1] === "*") segs.push({ kind: "wildcard" });
+    else if (m[1] !== undefined)
+      segs.push({ kind: "index", index: Number(m[1]) });
+    else segs.push({ kind: "key", key: m[2] });
+  }
+  return segs;
+}
+
+function walkSegs(value: unknown, segs: PathSeg[], i: number): unknown {
+  if (i >= segs.length) return value;
+  if (value == null) return undefined;
+  const seg = segs[i];
+  if (seg.kind === "wildcard") {
+    // Array projection (#478): map the REST of the path over each element, returning an
+    // array. `[*]` over a non-array yields undefined (a missing token, like a bad key) — so
+    // an author who writes `x[*].id` on a scalar gets empty, never a throw. Nested `[*]`
+    // nests (array of arrays), the least-surprising compositional rule.
+    if (!Array.isArray(value)) return undefined;
+    return value.map((el) => walkSegs(el, segs, i + 1));
+  }
+  if (seg.kind === "index") {
+    if (!Array.isArray(value)) return undefined;
+    return walkSegs(value[seg.index], segs, i + 1);
+  }
+  if (typeof value !== "object") return undefined;
+  return walkSegs((value as Record<string, unknown>)[seg.key], segs, i + 1);
+}
+
 /**
- * Read a dotted path out of a value. `getByPath(obj)` (no path) returns obj.
- * Pure + total — a missing segment yields undefined, never throws. Safe to run
- * inside the deterministic workflow.
+ * Read a dotted/bracketed path out of a value. `getByPath(obj)` (no path) returns obj.
+ * Supports object keys (`a.b`), array indices (`a[0]`), and the array-projection wildcard
+ * `a[*].b` (#478) — which maps `.b` over each element of the array `a`. Pure + total — a
+ * missing/mismatched segment yields undefined, never throws. Safe in the deterministic workflow.
  */
 export function getByPath(value: unknown, path?: string): unknown {
   if (!path) return value;
-  return path.split(".").reduce<unknown>((acc, key) => {
-    if (acc == null || typeof acc !== "object") return undefined;
-    return (acc as Record<string, unknown>)[key];
-  }, value);
+  // Fast path: a plain dotted path (no brackets) — the overwhelmingly common case, and byte-for-
+  // byte the pre-#478 behavior (empty segments included), so nothing that worked before shifts.
+  if (!path.includes("[")) {
+    return path.split(".").reduce<unknown>((acc, key) => {
+      if (acc == null || typeof acc !== "object") return undefined;
+      return (acc as Record<string, unknown>)[key];
+    }, value);
+  }
+  return walkSegs(value, parsePath(path), 0);
 }
 
 /**
