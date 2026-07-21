@@ -13,20 +13,21 @@ test.describe("integrations — GitHub App connect", () => {
   test("GitHub App card expands to a label field + Install button", async ({
     page,
   }) => {
-    await page.goto("/app/integrations");
+    // GitHub App lives on the "Apps & agents" tab now.
+    await page.goto("/app/integrations?tab=apps");
 
-    await expect(
-      page.getByText("Connect GitHub (App)", { exact: true }),
-    ).toBeVisible();
-
-    // The card is collapsed by default — expand it to reveal the form.
-    await page.getByRole("button", { name: /Connect GitHub \(App\)/ }).click();
+    // "Install GitHub App" opens a dialog with the connect form (the tab button is the only
+    // such button until the dialog mounts the form's submit).
+    await page
+      .getByRole("button", { name: "Install GitHub App" })
+      .first()
+      .click();
 
     // A label field (no token/PAT field — the app install itself is the credential)…
     await expect(page.getByPlaceholder("GitHub (prod)")).toBeVisible();
-    // …and the redirect-to-github Install button.
+    // …and the redirect-to-github Install button inside the dialog form.
     await expect(
-      page.getByRole("button", { name: "Install GitHub App" }),
+      page.getByRole("button", { name: "Install GitHub App" }).last(),
     ).toBeVisible();
   });
 });

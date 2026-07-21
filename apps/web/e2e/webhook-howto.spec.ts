@@ -3,11 +3,10 @@ import { expect, test } from "@playwright/test";
 // After registering a webhook, the Integrations screen shows the one-time secret
 // AND a ready-to-run signed curl (Slice: in-UI "how to trigger" docs).
 test("registering a webhook shows a copy-run signed curl", async ({ page }) => {
-  await page.goto("/app/integrations");
+  await page.goto("/app/integrations?tab=webhooks");
 
-  // The webhook form lives in a Collapsible that's closed by default (its body is
-  // not mounted until opened) — click the header to reveal the register form.
-  await page.getByRole("button", { name: /Register a webhook/ }).click();
+  // The registration form lives in a dialog now — "New webhook" opens it ("Register a webhook").
+  await page.getByRole("button", { name: "New webhook" }).click();
 
   // register against the seeded "default" workflow — CHOSEN from the dropdown of saved
   // workflows (no more typing a raw key). Scope to the select that has the "default" option

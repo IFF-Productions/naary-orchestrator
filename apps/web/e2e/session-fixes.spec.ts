@@ -92,18 +92,19 @@ test("run detail: the 'Run input' panel shows the payload that started the run",
   await page.getByRole("button", { name: "Run now" }).click();
   await expect(page).toHaveURL(/\/app\/runs\/.+/);
 
-  await expect(page.getByText("Run input")).toBeVisible();
-  // The seeded payload is rendered in the panel (proves it's the real trigger input).
+  // The redesigned run detail shows the entry payload as the trigger step's "Trigger input".
+  await expect(page.getByText("Trigger input")).toBeVisible();
+  // The seeded payload is rendered there (proves it's the real trigger input).
   await expect(page.getByText(/NAARY-42/)).toBeVisible();
 });
 
 test("webhook registration: pick the workflow from a dropdown of saved workflows", async ({
   page,
 }) => {
-  await page.goto("/app/integrations");
+  await page.goto("/app/integrations?tab=webhooks");
 
-  // Open the (collapsed-by-default) webhook register form.
-  await page.getByRole("button", { name: /Register a webhook/ }).click();
+  // Open the webhook registration dialog ("New webhook" → "Register a webhook").
+  await page.getByRole("button", { name: "New webhook" }).click();
 
   // The workflow is now a SELECT populated with real saved workflows — not a free-text
   // field (typing an unsaved/typo key was the "No graph seeded for '…'" 404 footgun).

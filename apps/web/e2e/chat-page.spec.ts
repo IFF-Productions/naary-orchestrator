@@ -13,8 +13,8 @@ test("hosted chat: register in Integrations, then message the public page anonym
   browser,
 }) => {
   // ---- register the chat (AUTHENTICATED app) ----
-  await page.goto("/app/integrations");
-  await page.getByRole("button", { name: /Register a chat/ }).click();
+  await page.goto("/app/integrations?tab=webhooks");
+  await page.getByRole("button", { name: "New chat" }).click();
   await page.getByPlaceholder("support-chat").fill("e2e-chat");
   await page.getByRole("button", { name: "Register", exact: true }).click();
 
@@ -38,9 +38,7 @@ test("hosted chat: register in Integrations, then message the public page anonym
     await expect(visitor.getByText("Hi there!")).toBeVisible();
 
     // ---- send a message; the graph echoes it back as the reply ----
-    await visitor
-      .getByPlaceholder(/Type a message/)
-      .fill("hello from the e2e chat");
+    await visitor.getByLabel("Chat message").fill("hello from the e2e chat");
     await visitor.getByRole("button", { name: "Send" }).click();
 
     // user turn + the echoed assistant reply both appear

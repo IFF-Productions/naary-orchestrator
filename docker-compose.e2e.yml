@@ -43,6 +43,14 @@ services:
     ports: !override
       - "127.0.0.1::9091"
 
+  # Heavy-worker pool (Queue-mode §3.3): the base file hardcodes container_name
+  # `naary-worker-heavy` + host port 9092 — reset both so this per-run stack can't collide
+  # with a co-located prod stack or another concurrent e2e run (same as every service above).
+  worker-heavy:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1::9091"
+
   web:
     container_name: !reset null
     ports: !override
