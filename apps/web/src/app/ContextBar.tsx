@@ -220,12 +220,16 @@ function AvatarMenu({ compact }: { compact: boolean }) {
 export function ContextBar({
   approvalsCount,
   compact,
+  phone,
   drawerOpen,
   onToggleDrawer,
 }: {
   approvalsCount: number;
   /** `<= 1024px`: hamburger + wrapped bar; workspace + variant move into the drawer. */
   compact: boolean;
+  /** `<= 640px`: stay a SINGLE line — trim to essentials (no brand tile / builder CTA,
+   *  count-only approvals) so the bar never wraps to two rows on a phone. */
+  phone: boolean;
   drawerOpen: boolean;
   onToggleDrawer: () => void;
 }) {
@@ -244,10 +248,11 @@ export function ContextBar({
         background: "var(--panel)",
         display: "flex",
         alignItems: "center",
-        // Wrap onto a second row on narrow (compact) widths rather than overflow.
-        flexWrap: compact ? "wrap" : "nowrap",
+        // On a phone the bar stays ONE line (nowrap + trimmed contents below). On the tablet
+        // range (compact but not phone) it may wrap onto a second row rather than overflow.
+        flexWrap: compact && !phone ? "wrap" : "nowrap",
         rowGap: 6,
-        gap: 12,
+        gap: phone ? 8 : 12,
         padding: compact ? "6px 12px" : "0 16px",
         position: "relative",
         zIndex: 10,
@@ -267,28 +272,34 @@ export function ContextBar({
         </button>
       )}
 
-      {/* Brand tile — ember flame on the identity gradient. */}
-      <div
-        style={{
-          width: 28,
-          height: 28,
-          borderRadius: 8,
-          flex: "none",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "var(--brand-radial)",
-          boxShadow: "0 0 14px -2px rgba(242, 98, 46, 0.6)",
-        }}
-      >
-        <Icon name="flame" size={16} style={{ color: "var(--brand-ink)" }} />
-      </div>
+      {/* Brand tile — ember flame on the identity gradient. Dropped on a phone: it's redundant
+          next to the hamburger and its 28px + gap is the space the bar needs to stay one line. */}
+      {!phone && (
+        <div
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 8,
+            flex: "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "var(--brand-radial)",
+            boxShadow: "0 0 14px -2px rgba(242, 98, 46, 0.6)",
+          }}
+        >
+          <Icon name="flame" size={16} style={{ color: "var(--brand-ink)" }} />
+        </div>
+      )}
 
       {/* Workspace + variant are CONTEXT that moves into the drawer top at <= 1024;
-          the environment switcher stays inline at every size (it's the hero of the bar). */}
+          the environment switcher stays inline at every size (it's the hero of the bar).
+          On a phone it may shrink (min-width:0) so the row never overflows. */}
       {!compact && <WorkspaceSwitcher />}
       {!compact && <Divider />}
-      <EnvironmentSwitcher />
+      <div style={{ minWidth: 0, display: "flex", flexShrink: 1 }}>
+        <EnvironmentSwitcher />
+      </div>
       {!compact && (
         <>
           <Divider />
@@ -301,7 +312,8 @@ export function ContextBar({
           marginLeft: "auto",
           display: "flex",
           alignItems: "center",
-          gap: 10,
+          gap: phone ? 4 : 10,
+          flex: "none",
         }}
       >
         {/* Live human-in-the-loop signal — approvals are the hero, never buried. Stays
@@ -326,7 +338,8 @@ export function ContextBar({
               borderRadius: "var(--radius-pill)",
               // ≥44px hit area on the wrapped (compact) bar.
               minHeight: compact ? 44 : undefined,
-              padding: compact ? "0 13px" : "5px 11px",
+              // Phone: a tight count-only pill so the bar stays one line.
+              padding: phone ? "0 10px" : compact ? "0 13px" : "5px 11px",
               boxSizing: "border-box",
               whiteSpace: "nowrap",
             }}
@@ -341,13 +354,18 @@ export function ContextBar({
                 flex: "none",
               }}
             />
-            {compact
-              ? `${approvalsCount} approval${approvalsCount === 1 ? "" : "s"}`
-              : `${approvalsCount} approval${approvalsCount === 1 ? "" : "s"} waiting`}
+            {/* Phone: count only; tablet: "N approvals"; desktop: "N approvals waiting". */}
+            {phone
+              ? approvalsCount
+              : compact
+                ? `${approvalsCount} approval${approvalsCount === 1 ? "" : "s"}`
+                : `${approvalsCount} approval${approvalsCount === 1 ? "" : "s"} waiting`}
           </button>
         )}
 
-        {mode === "builder" && (
+        {/* Primary CTA is dropped on a phone (it's reachable via the drawer → Canvas editor);
+            keeping it would push the bar to a second row. */}
+        {mode === "builder" && !phone && (
           <Button
             variant="primary"
             icon="plus"
