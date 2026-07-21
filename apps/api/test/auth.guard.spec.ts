@@ -332,6 +332,48 @@ describe("AuthGuard", () => {
     expect(verify).not.toHaveBeenCalled();
   });
 
+  it("stamps last-active for a Firebase user with a resolved workspace (#489)", async () => {
+    firebaseEnabled = true;
+    firebaseVerify.mockResolvedValue({
+      userId: "u-1",
+      email: "a@b.co",
+      emailVerified: true,
+    });
+    listForUser.mockResolvedValue([{ tenantId: "t-1", role: "admin" }]);
+    const req: FakeReq = {
+      headers: { authorization: "Bearer good.jwt" },
+      path: "/tenants/t-1/credentials",
+      params: { id: "t-1" },
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    // Fire-and-forget, but the CALL is synchronous within canActivate — assert it ran with
+    // (userId, activeTenant). This is the feature's behavioral contract, not just the mock.
+    expect(touchLastActive).toHaveBeenCalledWith("u-1", "t-1");
+  });
+
+  it("does NOT stamp last-active for an `nry_` API token (services never touch the Team screen) (#489)", async () => {
+    verify.mockResolvedValue({ tenantId: "t-1", environmentId: null });
+    const req: FakeReq = {
+      headers: { authorization: "Bearer nry_good" },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(touchLastActive).not.toHaveBeenCalled();
+  });
+
+  it("does NOT stamp last-active when NO workspace resolves (user-scoped, tenant-less) (#489)", async () => {
+    firebaseEnabled = true;
+    userScoped = true; // /me-style route: a tenant-less principal is allowed
+    firebaseVerify.mockResolvedValue({ userId: "u-1", emailVerified: true });
+    listForUser.mockResolvedValue([]); // no memberships, no claim → active is undefined
+    const req: FakeReq = {
+      headers: { authorization: "Bearer good.jwt" },
+      path: "/me",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(touchLastActive).not.toHaveBeenCalled();
+  });
+
   it("403s a Firebase user targeting a workspace they have NO membership in (attack #1)", async () => {
     firebaseEnabled = true;
     firebaseVerify.mockResolvedValue({
