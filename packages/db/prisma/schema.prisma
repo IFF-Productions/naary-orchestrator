@@ -841,6 +841,12 @@ model AuditEvent {
   method     String // HTTP method
   path       String // request path (no query)
   statusCode Int
+  // The actor's SELECTED environment context when they made the request (#464), resolved to a
+  // canonical Environment.id (the guard's env selection is a slug from the SPA but a uuid from an
+  // env-bound token — both normalize here). NULL when no env was selected. This is the actor's
+  // context, NOT a resource FK — tenant-global mutations carry whatever env was active. No FK: a
+  // historical record must not block env deletion.
+  environmentId String?
   createdAt  DateTime @default(now())
 
   @@index([tenantId, createdAt])

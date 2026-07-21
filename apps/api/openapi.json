@@ -14169,6 +14169,12 @@
             "type": "number",
             "example": 200
           },
+          "environmentId": {
+            "type": "string",
+            "nullable": true,
+            "example": "env_7c1de4",
+            "description": "Canonical Environment.id the actor had selected when acting; null when none. The actor's env context, not a resource FK."
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"

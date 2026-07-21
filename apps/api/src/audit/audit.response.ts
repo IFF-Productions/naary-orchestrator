@@ -1,4 +1,4 @@
-import { ApiProperty } from "@nestjs/swagger";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 
 /** One entry in the tenant's activity log. */
 export class AuditEventResponse {
@@ -16,5 +16,14 @@ export class AuditEventResponse {
   @ApiProperty({ example: "POST" }) method!: string;
   @ApiProperty({ example: "/graphs" }) path!: string;
   @ApiProperty({ example: 200 }) statusCode!: number;
+  @ApiPropertyOptional({
+    type: "string",
+    nullable: true,
+    example: "env_7c1de4",
+    description:
+      "Canonical Environment.id the actor had selected when acting; null when none. " +
+      "The actor's env context, not a resource FK.",
+  })
+  environmentId!: string | null;
   @ApiProperty({ format: "date-time" }) createdAt!: string;
 }

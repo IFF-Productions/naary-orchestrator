@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import type { Observable } from "rxjs";
 import { tap } from "rxjs/operators";
+import { EnvironmentsService } from "../environments/environments.service";
 import { actionFor, AuditService } from "./audit.service";
 
 const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -14,7 +15,7 @@ interface Req {
   method: string;
   path?: string;
   url?: string;
-  principal?: { tenantId: string; subject?: string };
+  principal?: { tenantId: string; subject?: string; environmentSel?: string };
 }
 
 /**
@@ -25,7 +26,10 @@ interface Req {
  */
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {
-  constructor(private readonly audit: AuditService) {}
+  constructor(
+    private readonly audit: AuditService,
+    private readonly environments: EnvironmentsService,
+  ) {}
 
   intercept(ctx: ExecutionContext, next: CallHandler): Observable<unknown> {
     const req = ctx.switchToHttp().getRequest<Req>();
@@ -40,16 +44,28 @@ export class AuditInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap(() => {
         if (!shouldLog || !req.principal) return;
+        const principal = req.principal;
         const res = ctx.switchToHttp().getResponse<{ statusCode?: number }>();
-        // Fire-and-forget: don't await inside the response path.
-        void this.audit.record({
-          tenantId: req.principal.tenantId,
-          actor: req.principal.subject ?? "api-token",
-          action: actionFor(req.method, path),
-          method: req.method,
-          path,
-          statusCode: res?.statusCode ?? 200,
-        });
+        // Fire-and-forget: don't await inside the response path. Resolve the actor's selected env
+        // to a canonical id (slug from the SPA / uuid from a bound token both normalize via
+        // resolveEnvId); a stale/unknown selection degrades to null — never surface it (this tap
+        // fires on non-env-scoped routes too, where no controller validated the header).
+        void (async () => {
+          const environmentId = principal.environmentSel
+            ? await this.environments
+                .resolveEnvId(principal.tenantId, principal.environmentSel)
+                .catch(() => null)
+            : null;
+          await this.audit.record({
+            tenantId: principal.tenantId,
+            actor: principal.subject ?? "api-token",
+            action: actionFor(req.method, path),
+            method: req.method,
+            path,
+            statusCode: res?.statusCode ?? 200,
+            environmentId,
+          });
+        })();
       }),
     );
   }

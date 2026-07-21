@@ -3,7 +3,8 @@
  * restyled per the design: type-accent icon tile, actor + action line, mono
  * method/path meta, relative time. Filter chips map to the event families the
  * data actually supports (derived from method+path — there is no stored type).
- * The design's env chip is omitted: audit rows carry no environment.
+ * The env chip (#464) shows the actor's selected environment when the row carries
+ * one (resolved id→name via `envName`); rows with no env context show nothing.
  */
 import type { AuditEvent } from "../../../lib/api";
 import { Icon, type IconName } from "../../../components";
@@ -30,11 +31,14 @@ export function AuditTab({
   filter,
   onFilter,
   now,
+  envName,
 }: {
   events: AuditEvent[] | null;
   filter: AuditFilterId;
   onFilter: (f: AuditFilterId) => void;
   now: number;
+  /** Resolve an Environment.id to its display name (#464); null when unknown/unmapped. */
+  envName?: (id: string) => string | null;
 }) {
   const rows = events ? filterAudit(events, filter) : [];
 
@@ -78,6 +82,8 @@ export function AuditTab({
         {rows.map((e, i) => {
           const cat = auditCategory(e);
           const ui = CATEGORY_UI[cat];
+          const env =
+            e.environmentId && envName ? envName(e.environmentId) : null;
           return (
             <div
               key={e.id}
@@ -137,6 +143,24 @@ export function AuditTab({
                   {e.method} {e.path} · {e.statusCode}
                 </div>
               </div>
+              {env && (
+                <span
+                  title={`Environment: ${env}`}
+                  style={{
+                    flex: "none",
+                    fontSize: "var(--text-2xs)",
+                    color: "var(--ink-2)",
+                    border: "1px solid var(--line-2)",
+                    background: "var(--card-2)",
+                    borderRadius: "var(--radius-pill)",
+                    padding: "2px 9px",
+                    textTransform: "capitalize",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {env}
+                </span>
+              )}
               <span
                 className="mono"
                 title={new Date(e.createdAt).toLocaleString()}
