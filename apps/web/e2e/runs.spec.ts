@@ -27,8 +27,9 @@ test("start a run, approve it, and see it complete", async ({ page }) => {
   await expect(approve).toBeHidden();
 
   // The log panel (curated Temporal history) shows the run's events. exact — the sidebar's
-  // "Insights & logs" nav link otherwise substring-matches "Logs".
-  await expect(page.getByText("Logs", { exact: true })).toBeVisible();
+  // "Insights & logs" nav link otherwise substring-matches. The panel heading is
+  // "Execution log" (RunDetail restructure, #525).
+  await expect(page.getByText("Execution log", { exact: true })).toBeVisible();
   await expect(page.getByText("Run started")).toBeVisible();
   await expect(page.getByText("Run completed")).toBeVisible();
   await expect(page.getByText("Signal: approval")).toBeVisible();
