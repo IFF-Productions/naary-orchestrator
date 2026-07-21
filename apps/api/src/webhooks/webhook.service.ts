@@ -30,6 +30,9 @@ export interface WebhookEndpointView {
   provider: string;
   workflowId: string;
   createdAt: Date;
+  /** Deliveries received in the last 7 days (#471). Count only — WebhookDelivery has no
+   *  status column, so a success RATE isn't derivable and isn't shown. */
+  deliveries7d: number;
 }
 
 @Injectable()
@@ -88,12 +91,29 @@ export class WebhookService {
    * secret is excluded at the query level (`select`) so it never leaves the DB
    * layer (Sec#8) — there is no path for it to reach the API response.
    */
-  list(tenantId: string): Promise<WebhookEndpointView[]> {
-    return getPrisma().webhookEndpoint.findMany({
+  async list(tenantId: string): Promise<WebhookEndpointView[]> {
+    const endpoints = await getPrisma().webhookEndpoint.findMany({
       where: { tenantId },
       orderBy: { createdAt: "desc" },
       select: { id: true, provider: true, workflowId: true, createdAt: true },
     });
+    if (endpoints.length === 0) return [];
+    // Deliveries in the last 7 days per endpoint (#471) — ONE grouped count over the
+    // (endpointId, createdAt) index, not an N+1 per-endpoint query.
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const grouped = await getPrisma().webhookDelivery.groupBy({
+      by: ["endpointId"],
+      where: {
+        endpointId: { in: endpoints.map((e) => e.id) },
+        createdAt: { gte: since },
+      },
+      _count: { _all: true },
+    });
+    const counts = new Map(grouped.map((g) => [g.endpointId, g._count._all]));
+    return endpoints.map((e) => ({
+      ...e,
+      deliveries7d: counts.get(e.id) ?? 0,
+    }));
   }
 
   /**
@@ -119,10 +139,17 @@ export class WebhookService {
       if (res.count === 0) return null; // not this tenant's / unknown
     }
     // Re-read tenant-scoped (also serves an empty patch as "fetch current, 404 if not owned").
-    return getPrisma().webhookEndpoint.findFirst({
+    const row = await getPrisma().webhookEndpoint.findFirst({
       where: { id: endpointId, tenantId },
       select: { id: true, provider: true, workflowId: true, createdAt: true },
     });
+    if (!row) return null;
+    // Keep the 7d count accurate on the returned row (a config change doesn't reset deliveries).
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const deliveries7d = await getPrisma().webhookDelivery.count({
+      where: { endpointId, createdAt: { gte: since } },
+    });
+    return { ...row, deliveries7d };
   }
 
   /**

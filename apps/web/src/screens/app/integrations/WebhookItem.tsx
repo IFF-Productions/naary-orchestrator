@@ -156,6 +156,10 @@ export function WebhookItem({
           >
             <EnvChip slug={env} />
             POST · {w.provider} · {w.workflowId}
+            {w.deliveries7d !== undefined &&
+              ` · ${w.deliveries7d} deliver${
+                w.deliveries7d === 1 ? "y" : "ies"
+              } (7d)`}
           </div>
         </div>
         {!editing && <UrlCopy url={webhookUrl(w.id)} />}

@@ -392,6 +392,10 @@ export function ProvidersTab({
                       }}
                     >
                       {c.type} · {c.serverUrl}
+                      {c.usedByNodeCount !== undefined &&
+                        ` · used by ${c.usedByNodeCount} node${
+                          c.usedByNodeCount === 1 ? "" : "s"
+                        }`}
                     </div>
                   </div>
                   <StatusPill

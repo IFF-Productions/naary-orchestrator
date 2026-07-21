@@ -22,6 +22,13 @@ export class WebhookEndpointResponse {
   @ApiProperty({ example: "github", enum: ["github", "atlassian", "generic"] })
   provider!: string;
   @ApiProperty({ example: "support-triage" }) workflowId!: string;
+  @ApiProperty({
+    example: 42,
+    description:
+      "Deliveries received in the last 7 days (#471). Count only — there is no stored " +
+      "delivery status, so a success rate isn't shown.",
+  })
+  deliveries7d!: number;
   @ApiProperty({ format: "date-time", example: "2026-07-04T12:00:00.000Z" })
   createdAt!: Date;
 }

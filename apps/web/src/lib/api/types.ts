@@ -171,6 +171,8 @@ export interface ConnectionRow {
   authMode: ConnectionAuthMode;
   scopes: string[];
   status: "connected" | "needs_reauth" | "error";
+  /** Nodes referencing this connection across the env's latest graphs (#471); 0 = unused. */
+  usedByNodeCount?: number;
   createdAt: string;
 }
 
@@ -179,6 +181,8 @@ export interface WebhookRow {
   id: string;
   provider: string;
   workflowId: string;
+  /** Deliveries received in the last 7 days (#471); count only (no success rate stored). */
+  deliveries7d?: number;
   createdAt: string;
 }
 

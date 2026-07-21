@@ -10,6 +10,8 @@ const m = vi.hoisted(() => ({
   update: vi.fn(),
   deliveryCreate: vi.fn(),
   deliveryDeleteMany: vi.fn(),
+  deliveryGroupBy: vi.fn(),
+  deliveryCount: vi.fn(),
   // In-memory TenantKey table — the envelope layer mints per-tenant DEKs through it.
   tenantKeys: new Map<string, object>(),
 }));
@@ -25,6 +27,8 @@ vi.mock("@naary/db", () => ({
     webhookDelivery: {
       create: m.deliveryCreate,
       deleteMany: m.deliveryDeleteMany,
+      groupBy: m.deliveryGroupBy,
+      count: m.deliveryCount,
     },
   }),
 }));
@@ -71,6 +75,8 @@ beforeEach(() => {
   m.update.mockReset().mockResolvedValue({});
   m.deliveryCreate.mockReset();
   m.deliveryDeleteMany.mockReset().mockResolvedValue({ count: 0 });
+  m.deliveryGroupBy.mockReset().mockResolvedValue([]);
+  m.deliveryCount.mockReset().mockResolvedValue(0);
 });
 
 describe("WebhookService.updateEndpoint", () => {
@@ -83,6 +89,7 @@ describe("WebhookService.updateEndpoint", () => {
       createdAt: new Date(),
     };
     m.findFirst.mockResolvedValue(view);
+    m.deliveryCount.mockResolvedValue(5); // #471: keep the 7d count on the returned row
 
     const out = await svc.updateEndpoint("t1", "ep_1", {
       workflowId: "wf-2",
@@ -93,7 +100,7 @@ describe("WebhookService.updateEndpoint", () => {
       where: { id: "ep_1", tenantId: "t1" },
       data: { workflowId: "wf-2", provider: "generic" },
     });
-    expect(out).toEqual(view);
+    expect(out).toEqual({ ...view, deliveries7d: 5 });
     // The re-read is tenant-scoped and excludes the secret.
     expect(m.findFirst.mock.calls[0][0].where).toEqual({
       id: "ep_1",
@@ -152,6 +159,11 @@ describe("WebhookService.list", () => {
     const now = new Date();
     m.findMany.mockResolvedValue([
       { id: "ep_1", provider: "github", workflowId: "wf-1", createdAt: now },
+      { id: "ep_2", provider: "generic", workflowId: "wf-2", createdAt: now },
+    ]);
+    // #471: ep_1 got 12 deliveries in the window; ep_2 got none (absent → 0).
+    m.deliveryGroupBy.mockResolvedValue([
+      { endpointId: "ep_1", _count: { _all: 12 } },
     ]);
 
     const rows = await svc.list("t1");
@@ -169,8 +181,27 @@ describe("WebhookService.list", () => {
     });
     expect(arg.select).not.toHaveProperty("signingSecret");
 
+    // The 7d count is scoped to the tenant's endpoints AND the time window.
+    const g = m.deliveryGroupBy.mock.calls[0][0];
+    expect(g.by).toEqual(["endpointId"]);
+    expect(g.where.endpointId).toEqual({ in: ["ep_1", "ep_2"] });
+    expect(g.where.createdAt.gte).toBeInstanceOf(Date);
+
     expect(rows).toEqual([
-      { id: "ep_1", provider: "github", workflowId: "wf-1", createdAt: now },
+      {
+        id: "ep_1",
+        provider: "github",
+        workflowId: "wf-1",
+        createdAt: now,
+        deliveries7d: 12,
+      },
+      {
+        id: "ep_2",
+        provider: "generic",
+        workflowId: "wf-2",
+        createdAt: now,
+        deliveries7d: 0,
+      },
     ]);
     expect(rows[0]).not.toHaveProperty("signingSecret");
   });

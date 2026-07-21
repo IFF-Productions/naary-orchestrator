@@ -62,6 +62,75 @@ beforeEach(() => {
   for (const spy of Object.values(del)) spy.mockReset();
 });
 
+describe("GraphsService.connectionUsageCounts (#471)", () => {
+  it("counts refs across node types + latest-version-only + env-scoped where", async () => {
+    // version desc, as the query orders. Two rows share workflowKey "refunds" → only the
+    // latest (v2) counts; the stale v1 (which references conn-A) must be ignored.
+    findMany.mockResolvedValue([
+      {
+        workflowKey: "refunds",
+        graph: {
+          nodes: [
+            {
+              id: "n1",
+              type: "httpRequest",
+              config: { connectionId: "conn-A" },
+            },
+            {
+              id: "n2",
+              type: "integration",
+              config: { connectionId: "conn-A", provider: "github" },
+            },
+            { id: "n3", type: "sqlQuery", config: { connectionId: "conn-B" } },
+            { id: "n4", type: "set", config: { value: 1 } }, // no connectionId
+          ],
+        },
+      },
+      {
+        workflowKey: "onboard",
+        graph: {
+          nodes: [
+            { id: "m1", type: "mcpTool", config: { connectionId: "conn-B" } },
+          ],
+        },
+      },
+      // STALE older version of "refunds" — references conn-C; must NOT count.
+      {
+        workflowKey: "refunds",
+        graph: {
+          nodes: [
+            {
+              id: "old",
+              type: "httpRequest",
+              config: { connectionId: "conn-C" },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const counts = await new GraphsService().connectionUsageCounts(
+      "t1",
+      "e-prod",
+    );
+
+    // conn-A: 2 nodes in refunds-v2; conn-B: 1 (refunds) + 1 (onboard); conn-C: 0 (stale only).
+    expect(counts).toEqual({ "conn-A": 2, "conn-B": 2 });
+    // Env-scoped: the query filters by BOTH tenant and env (prod must not count sandbox).
+    expect(findMany.mock.calls[0][0].where).toEqual({
+      tenantId: "t1",
+      environmentId: "e-prod",
+    });
+  });
+
+  it("returns an empty map (every connection reads as 0) when there are no graphs", async () => {
+    findMany.mockResolvedValue([]);
+    expect(await new GraphsService().connectionUsageCounts("t1", "e1")).toEqual(
+      {},
+    );
+  });
+});
+
 describe("GraphsService.upsert", () => {
   it("creates version 1 when no prior version exists", async () => {
     findFirst.mockResolvedValue(null);
@@ -520,8 +589,8 @@ describe("GraphsService G1 permission gates", () => {
 
   it("an actor WITHOUT wired permissions fails CLOSED (never silently skips authz)", async () => {
     const svc = new GraphsService(); // no PermissionsService — a wiring bug
-    await expect(
-      svc.getLatestNamed("t1", "e1", "wf", member),
-    ).rejects.toThrow(/PermissionsService is not wired/);
+    await expect(svc.getLatestNamed("t1", "e1", "wf", member)).rejects.toThrow(
+      /PermissionsService is not wired/,
+    );
   });
 });
