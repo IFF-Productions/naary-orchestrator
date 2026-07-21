@@ -94,6 +94,7 @@ export const BUILDER_MODES: NavMode[] = [
       { to: "/app/team", label: "Team", icon: "users" },
       { to: "/app/groups", label: "Groups", icon: "key" },
       { to: "/app/company", label: "Company", icon: "mode-admin" },
+      { to: "/app/workers", label: "Workers", icon: "grid" },
       { to: "/app/settings", label: "Settings", icon: "settings" },
     ],
   },

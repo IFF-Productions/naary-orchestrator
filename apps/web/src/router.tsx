@@ -201,6 +201,10 @@ export const router = createRouter([
                 ...lazy(() => import("./screens/app/Company"), "Company"),
               },
               {
+                path: "workers",
+                ...lazy(() => import("./screens/app/Workers"), "Workers"),
+              },
+              {
                 path: "settings",
                 ...lazy(() => import("./screens/app/Settings"), "Settings"),
               },
