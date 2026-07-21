@@ -450,4 +450,17 @@ describe("getByPath — bracket indices & array projection (#478)", () => {
     expect(getByPath(v, "missing[*].id")).toBeUndefined();
     expect(getByPath(null, "a[*].b")).toBeUndefined();
   });
+
+  it("rejects a malformed bracket path as unresolvable (not a silent dotted reinterpretation)", () => {
+    // `items[foo]` is not a valid accessor (index must be a number or `*`). It must NOT
+    // resolve as if it were `items.foo` — the whole path is unresolvable → undefined.
+    expect(getByPath({ items: { foo: 1 } }, "items[foo]")).toBeUndefined();
+    expect(getByPath(v, "items[foo].id")).toBeUndefined();
+    // Unbalanced / stray brackets are unresolvable too.
+    expect(getByPath(v, "items[0")).toBeUndefined();
+    expect(getByPath(v, "items].id")).toBeUndefined();
+    expect(getByPath(v, "items[].id")).toBeUndefined();
+    // Sanity: the well-formed sibling still resolves.
+    expect(getByPath(v, "items[0].id")).toBe(1);
+  });
 });
