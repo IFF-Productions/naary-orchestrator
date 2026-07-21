@@ -116,11 +116,13 @@ describe("GraphsService.connectionUsageCounts (#471)", () => {
 
     // conn-A: 2 nodes in refunds-v2; conn-B: 1 (refunds) + 1 (onboard); conn-C: 0 (stale only).
     expect(counts).toEqual({ "conn-A": 2, "conn-B": 2 });
+    const arg = findMany.mock.calls[0][0];
     // Env-scoped: the query filters by BOTH tenant and env (prod must not count sandbox).
-    expect(findMany.mock.calls[0][0].where).toEqual({
-      tenantId: "t1",
-      environmentId: "e-prod",
-    });
+    expect(arg.where).toEqual({ tenantId: "t1", environmentId: "e-prod" });
+    // Latest-only is pushed to the DB (DISTINCT ON workflowKey) so we don't fetch every
+    // historical version's body: distinct on workflowKey, workflowKey-led order + version desc.
+    expect(arg.distinct).toEqual(["workflowKey"]);
+    expect(arg.orderBy).toEqual([{ workflowKey: "asc" }, { version: "desc" }]);
   });
 
   it("returns an empty map (every connection reads as 0) when there are no graphs", async () => {

@@ -247,11 +247,14 @@ export class GraphsService {
     tenantId: string,
     environmentId: string,
   ): Promise<Record<string, number>> {
-    // version desc → the FIRST row seen per workflowKey is its latest; dedupe so an old
-    // version's nodes don't double-count.
+    // Fetch ONLY the latest body per workflowKey — `distinct` + workflowKey-led order pushes a
+    // Postgres DISTINCT ON, so we don't ship every historical version's graph JSON just to
+    // dedupe in memory. The `seen` guard below stays as a defensive backstop (a no-op once the
+    // DB deduped).
     const rows = await getPrisma().graphDefinition.findMany({
       where: { tenantId, environmentId },
-      orderBy: { version: "desc" },
+      orderBy: [{ workflowKey: "asc" }, { version: "desc" }],
+      distinct: ["workflowKey"],
       select: { workflowKey: true, graph: true },
     });
     const seen = new Set<string>();
