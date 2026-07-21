@@ -68,10 +68,20 @@ export async function execNode(
   engine: Engine,
   node: NodeDef,
 ): Promise<ExecutionStatus | null> {
-  const { ctx } = engine;
+  const { ctx, state } = engine;
   const s = Date.now(); // deterministic workflow time (see justification above)
   try {
     return await execNodeInner(engine, node);
+  } catch (e) {
+    // Record the ACTUAL throwing node (#525 fan-out fix). First-writer-wins (`??=`) so that,
+    // across concurrent fan-out branches, the node that threw FIRST is the one attributed —
+    // not whichever sibling last wrote the shared `currentNodeId`. Deterministic: Temporal
+    // replays activity completion order, so the same branch throws first on replay. Rethrow
+    // unchanged. A framework signal (ContinueAsNew/cancellation) also lands here, but the
+    // failure stamp is consumed ONLY on the genuine-throw path (run-graph gates on `threw`),
+    // so a stamp set here for a signal is inert.
+    state.failedNodeId ??= node.id;
+    throw e;
   } finally {
     const f = Date.now();
     const times = (ctx[NODE_TIMES_CTX_KEY] ??= {}) as Record<

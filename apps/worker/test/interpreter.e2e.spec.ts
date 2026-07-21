@@ -3993,6 +3993,47 @@ describe("runGraph interpreter — Slice 2: per-node timing + failure classifica
     expect(push?.executedNodeIds).not.toContain("agent");
   });
 
+  it("attributes a fan-out failure to the THROWING branch's node, not a racing sibling (#525)", async () => {
+    // s fans out to two concurrent branches: `boom` (agent, throws for t-quota-fail) and
+    // `sib` (a pure set that runs + writes ctx). Both branches run under one Promise.all and
+    // each sets the SHARED currentNodeId — so currentNodeId alone can't be trusted. The
+    // failedNodeId captured AT the throwing node must be `boom`, never `sib`.
+    const fanOutGraph: GraphDef = {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        { id: "sib", type: "set", config: { fields: { ran: true } } },
+        {
+          id: "boom",
+          type: "agent",
+          config: { provider: "anthropic", model: "claude-opus-4-8" },
+        },
+        { id: "e1", type: "end" },
+        { id: "e2", type: "end" },
+      ],
+      edges: [
+        { from: "s", to: "sib" },
+        { from: "s", to: "boom" },
+        { from: "sib", to: "e1" },
+        { from: "boom", to: "e2" },
+      ],
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [fanOutGraph, { hi: 1 }, { tenantId: "t-quota-fail" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-fail-fanout",
+      });
+      await expect(handle.result()).rejects.toThrow(
+        /workflow execution failed/i,
+      );
+    });
+    const push = statusPushes.find((p) => p.workflowId === "e2e-fail-fanout");
+    // The EXACT throwing node — the sibling `sib` must never be mis-attributed as the failure.
+    expect(push?.failedNodeId).toBe("boom");
+  });
+
   it("stopAndError → failureKind 'error'; a returned terminal (rejected) carries NO explicit kind (the activity derives it from status)", async () => {
     const stopGraph: GraphDef = {
       startNodeId: "s",
