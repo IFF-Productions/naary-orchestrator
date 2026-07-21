@@ -248,10 +248,11 @@ export function ContextBar({
         background: "var(--panel)",
         display: "flex",
         alignItems: "center",
-        // On a phone the bar stays ONE line (nowrap + trimmed contents below). On the tablet
-        // range (compact but not phone) it may wrap onto a second row rather than overflow.
-        flexWrap: compact && !phone ? "wrap" : "nowrap",
-        rowGap: 6,
+        // The bar is ALWAYS one line. Never wrap — the earlier `compact && !phone => wrap` split
+        // put a phone into two rows whenever the layout viewport read > 640 (Safari page-zoom /
+        // an un-narrow tablet). Instead the contents trim on `compact` and the env region shrinks,
+        // so a single row holds down to the narrowest phone.
+        flexWrap: "nowrap",
         gap: phone ? 8 : 12,
         padding: compact ? "6px 12px" : "0 16px",
         position: "relative",
@@ -272,9 +273,10 @@ export function ContextBar({
         </button>
       )}
 
-      {/* Brand tile — ember flame on the identity gradient. Dropped on a phone: it's redundant
-          next to the hamburger and its 28px + gap is the space the bar needs to stay one line. */}
-      {!phone && (
+      {/* Brand tile — ember flame on the identity gradient. Dropped whenever the hamburger shows
+          (compact): it's redundant next to it, and its 28px + gap is the room the bar reclaims to
+          stay one line across the whole small-screen range (incl. zoomed-out phones). */}
+      {!compact && (
         <div
           style={{
             width: 28,

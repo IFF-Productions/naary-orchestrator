@@ -101,6 +101,27 @@ export const ContextBarPhone: Story = {
   ),
 };
 
+/** Zoomed-out phone / narrow tablet (≤1024 but the layout viewport reads > 640, e.g. Safari
+ *  page-zoom): `compact` is true but `phone` is false. Regression guard for #511 follow-up — the
+ *  bar must STILL be a single row (it used to wrap here). */
+export const ContextBarZoomedPhone: Story = {
+  name: "Context bar · zoomed phone (compact, not phone)",
+  parameters: { viewport: { defaultViewport: "tablet" } },
+  render: () => (
+    <Providers>
+      <div style={{ background: "var(--bg)", minHeight: 220, maxWidth: 720 }}>
+        <ContextBar
+          approvalsCount={6}
+          compact
+          phone={false}
+          drawerOpen={false}
+          onToggleDrawer={() => {}}
+        />
+      </div>
+    </Providers>
+  ),
+};
+
 /** The five-mode rail — Build / Operate / Observe / Connect / Admin, approvals badged. */
 export const Rail: Story = {
   render: () => (

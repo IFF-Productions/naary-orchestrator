@@ -16,6 +16,7 @@ import {
   getActiveEnvironment,
   setActiveEnvironment,
 } from "../lib/api";
+import { BELOW_DRAWER_QUERY, useMediaQuery } from "../lib/useMediaQuery";
 import { useWorkspace } from "./WorkspaceProvider";
 
 /** Derive a valid slug from a display name (lowercase, spaces→hyphens, strip the rest, ≤32). */
@@ -41,6 +42,11 @@ const MAX_SEGMENTS = 4;
 
 export function EnvironmentSwitcher() {
   const { activeId: tenantId } = useWorkspace();
+  // The segmented pill control is wide + doesn't shrink — on the compact shell (<= 1024, phones
+  // incl. zoomed-out ones a strict phone query would miss) collapse to the single-button dropdown
+  // so the context bar stays ONE line and the env region can shrink (ellipsis). Hook stays above
+  // every early return (rules of hooks).
+  const belowDrawer = useMediaQuery(BELOW_DRAWER_QUERY);
   const [envs, setEnvs] = useState<Environment[]>([]);
   const [activeSlug, setActiveSlug] = useState<string | null>(
     getActiveEnvironment(),
@@ -193,7 +199,7 @@ export function EnvironmentSwitcher() {
   // Nothing to show until the workspace's environments resolve.
   if (!tenantId || envs.length === 0) return null;
   const active = envs.find((e) => e.slug === activeSlug) ?? envs[0];
-  const segmented = envs.length <= MAX_SEGMENTS;
+  const segmented = envs.length <= MAX_SEGMENTS && !belowDrawer;
 
   return (
     <div
