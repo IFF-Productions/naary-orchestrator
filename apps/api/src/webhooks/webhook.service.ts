@@ -16,6 +16,18 @@ const DELIVERY_HEADER: Record<WebhookProvider, string> = {
   atlassian: "x-atlassian-webhook-identifier",
 };
 
+/**
+ * Header carrying the HMAC signature over the raw body, per provider (#467).
+ * GitHub (and our generic scheme) send `X-Hub-Signature-256`; Atlassian's inbound
+ * webhooks send `X-Hub-Signature` (no `-256`) — but the SAME `sha256=<hex>`,
+ * HMAC-SHA256-over-raw-body value, so only the header name differs.
+ */
+const SIGNATURE_HEADER: Record<WebhookProvider, string> = {
+  github: "x-hub-signature-256",
+  generic: "x-hub-signature-256",
+  atlassian: "x-hub-signature",
+};
+
 export interface RegisteredWebhook {
   endpointId: string;
   /** Path to paste into the provider (GitHub/Jira). Host is deployment-specific. */
@@ -208,23 +220,27 @@ export class WebhookService {
     return DELIVERY_HEADER[provider as WebhookProvider] ?? "x-delivery-id";
   }
 
+  /** The request header this provider carries its HMAC signature in (#467). */
+  signatureHeaderFor(provider: string): string {
+    return (
+      SIGNATURE_HEADER[provider as WebhookProvider] ?? "x-hub-signature-256"
+    );
+  }
+
   /**
-   * Verify an HMAC-SHA256 signature over the RAW request bytes (GitHub's
-   * `X-Hub-Signature-256: sha256=<hex>` scheme; reused for the generic provider).
-   * Length-guarded timing-safe compare — never `===`. Atlassian's inbound scheme
-   * differs and is not implemented here (the reference flow is GitHub).
+   * Verify an HMAC-SHA256 signature over the RAW request bytes, `sha256=<hex>`
+   * scheme. GitHub sends it in `X-Hub-Signature-256`; Atlassian in `X-Hub-Signature`
+   * (#467) — the header differs (see {@link signatureHeaderFor}) but the value scheme
+   * is identical, so the verification is provider-agnostic. Wire-compatibility is
+   * pinned by Atlassian's own published test vector (see the spec). Length-guarded
+   * timing-safe compare — never `===`.
    */
   verifySignature(
-    provider: WebhookProvider,
+    _provider: WebhookProvider,
     rawBody: Buffer,
     signatureHeader: string | undefined,
     secret: string,
   ): boolean {
-    if (provider === "atlassian") {
-      // Atlassian inbound signing is not GitHub-style; verify against current
-      // docs before enabling. Treated as unsupported for now (fail closed).
-      return false;
-    }
     if (!signatureHeader) return false;
     const expected = `sha256=${createHmac("sha256", secret).update(rawBody).digest("hex")}`;
     const a = Buffer.from(expected);

@@ -78,8 +78,10 @@ today's flow assumes **Dynamic Client Registration + `.well-known` discovery** o
    public client with `token_endpoint_auth_method: "none"`).
 5. **Connection-save/"test" validation** — today a connection saves without any live check; an
    app grant should verify (list installations / call `/myself`) and set `status` accordingly.
-6. **(Optional) Atlassian inbound webhook verification** — currently a fail-closed stub
-   (`webhook.service.ts:125-129`). Needs Atlassian's scheme (or Connect lifecycle) implemented.
+6. ~~**(Optional) Atlassian inbound webhook verification** — currently a fail-closed stub.~~
+   **DONE (#467).** Atlassian's inbound scheme is GitHub-compatible (`sha256=<hmac>` over the raw
+   body) in a differently-named header (`X-Hub-Signature`), so `verifySignature` is now
+   provider-agnostic and the controller selects the header per provider.
 
 ## 3. Provider specifics
 

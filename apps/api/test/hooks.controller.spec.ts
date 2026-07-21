@@ -14,6 +14,7 @@ function makeDeps(graphNodes: { type: string }[]) {
     verifySignature: vi.fn().mockReturnValue(true),
     decryptSigningSecret: vi.fn().mockReturnValue("secret"),
     deliveryHeaderFor: vi.fn().mockReturnValue("x-github-delivery"),
+    signatureHeaderFor: vi.fn().mockReturnValue("x-hub-signature-256"),
     isDuplicateDelivery: vi.fn().mockResolvedValue(false),
     removeDelivery: vi.fn().mockResolvedValue(undefined),
   };
@@ -50,6 +51,30 @@ describe("HooksController.ingress", () => {
     ).rejects.toMatchObject({ status: 401 });
     expect(webhooks.getEndpoint).not.toHaveBeenCalled();
     expect(webhooks.decryptSigningSecret).not.toHaveBeenCalled();
+  });
+
+  it("#467: an Atlassian delivery signs via X-Hub-Signature and verifies that header", async () => {
+    const { controller, webhooks, req, res } = makeDeps([
+      { type: "webhookTrigger" },
+    ]);
+    webhooks.getEndpoint.mockResolvedValue({
+      ...endpoint,
+      provider: "atlassian",
+    });
+    webhooks.signatureHeaderFor.mockReturnValue("x-hub-signature");
+    // Atlassian carries the signature in X-Hub-Signature (no -256). The gate accepts
+    // it, and the actual verify is handed the value from the provider-correct header.
+    const headers = { "x-hub-signature": "sha256=cafebabe" };
+
+    await controller.ingress("ep-1", req as never, {}, headers, res as never);
+
+    expect(webhooks.signatureHeaderFor).toHaveBeenCalledWith("atlassian");
+    expect(webhooks.verifySignature).toHaveBeenCalledWith(
+      "atlassian",
+      req.rawBody,
+      "sha256=cafebabe",
+      "secret",
+    );
   });
 
   it("respondToWebhook graph → returns the node's response with its status + headers", async () => {
