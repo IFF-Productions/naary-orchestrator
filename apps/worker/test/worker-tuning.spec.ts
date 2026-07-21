@@ -1,5 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { envInt, workerIdentity, workerTuning } from "../src/worker-tuning";
+import { TASK_QUEUE, TASK_QUEUE_HEAVY } from "@naary/contracts";
+import {
+  envInt,
+  resolveTaskQueue,
+  workerIdentity,
+  workerTuning,
+} from "../src/worker-tuning";
+
+describe("resolveTaskQueue (Queue-mode §3.3)", () => {
+  it("defaults to the interactive queue when unset", () => {
+    expect(resolveTaskQueue({})).toBe(TASK_QUEUE);
+    expect(resolveTaskQueue({ WORKER_TASK_QUEUE: "" })).toBe(TASK_QUEUE);
+    expect(resolveTaskQueue({ WORKER_TASK_QUEUE: "   " })).toBe(TASK_QUEUE);
+  });
+  it("honors WORKER_TASK_QUEUE for a heavy worker", () => {
+    expect(resolveTaskQueue({ WORKER_TASK_QUEUE: TASK_QUEUE_HEAVY })).toBe(
+      "orchestrator-heavy",
+    );
+    expect(resolveTaskQueue({ WORKER_TASK_QUEUE: "  custom-q " })).toBe(
+      "custom-q",
+    );
+  });
+});
 
 describe("workerIdentity", () => {
   it("is host/pid/version shaped and stable within a process", () => {

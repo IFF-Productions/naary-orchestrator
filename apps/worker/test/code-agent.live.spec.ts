@@ -103,7 +103,13 @@ describe.skipIf(!LIVE)("LIVE codeAgent — real `claude -p` (read-only)", () => 
     const worker = await makeWorker();
     await worker.runUntil(async () => {
       const handle = await env.client.workflow.start(runGraph, {
-        args: [graph, { instruction: "explain" }, { tenantId: "t-live-cc" }],
+        // test:true keeps codeAgent on the default queue (Queue-mode §3.3): this single-worker
+        // harness polls only TASK_QUEUE, so the heavy-queue route would strand the activity.
+        args: [
+          graph,
+          { instruction: "explain" },
+          { tenantId: "t-live-cc", test: true },
+        ],
         taskQueue: TASK_QUEUE,
         workflowId: "live-code-agent-read",
       });

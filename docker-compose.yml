@@ -221,6 +221,45 @@ services:
       retries: 10
       start_period: 20s
 
+  # Heavy worker pool (Queue-mode §3.3): polls `orchestrator-heavy` so long/heavy activities
+  # (codeAgent) can't starve interactive latency on the main `orchestrator` queue. Same image +
+  # bundle as `worker` (registers all activities) — only the queue differs. MUST stay in the deploy:
+  # the workflow statically routes codeAgent here, so removing this pool would strand those runs.
+  # Fewer, longer activities ⇒ a low activity-slot default.
+  worker-heavy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: naary-backend
+    container_name: naary-worker-heavy
+    restart: unless-stopped
+    command: ['pnpm', '--filter', '@naary/worker', 'start']
+    environment:
+      <<: *backend-env
+      WORKER_TASK_QUEUE: orchestrator-heavy
+      # Heavy activities are few + long — a small slot cap keeps a burst from over-committing a box.
+      WORKER_MAX_ACTIVITIES: ${WORKER_HEAVY_MAX_ACTIVITIES:-4}
+      WORKER_MAX_WORKFLOW_TASKS: ${WORKER_MAX_WORKFLOW_TASKS:-}
+      WORKER_MAX_CACHED_WORKFLOWS: ${WORKER_MAX_CACHED_WORKFLOWS:-}
+      WORKER_SHUTDOWN_GRACE: ${WORKER_SHUTDOWN_GRACE:-}
+    ports:
+      - '9092:9091' # distinct host port; container still serves /metrics on 9091
+    depends_on:
+      temporal:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          '[ "$${METRICS_PORT:-9091}" = "0" ] || node -e "fetch(\"http://127.0.0.1:\"+(process.env.METRICS_PORT||9091)+\"/metrics\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
   # Web app — Vite SPA built to static files, served by nginx (proxies /api → api).
   # The Firebase web config is baked at BUILD time (Vite inlines VITE_* env), so it
   # is passed as build args from .env. Public values (Firebase web keys are not

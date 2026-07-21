@@ -4,6 +4,7 @@
 // is replay-safe. Each proxy block is a SINGLE module-level instance shared by
 // every workflow module — do not redefine these elsewhere.
 import * as wf from "@temporalio/workflow";
+import { TASK_QUEUE_HEAVY } from "@naary/contracts";
 import type { NodeRetryPolicy } from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
 // Do NOT drop `type` — that would pull I/O code into the sandbox.
@@ -87,6 +88,19 @@ export const { mapNode } = wf.proxyActivities<typeof activities>({
 // auto-retried. Its own block (like mapNode) keeps that long timeout off the shared 1-min
 // activities. The subprocess timeout (cfg.timeoutMs) is the real deadline within this.
 export const { callCodeAgent } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "40 minutes",
+  retry: { maximumAttempts: 1 },
+});
+
+// Heavy-queue variant of callCodeAgent (Queue-mode §3.3): IDENTICAL options — same 40-min
+// startToCloseTimeout and AT-MOST-ONCE (maximumAttempts:1, a write-capable node #444) — with ONLY
+// the taskQueue changed to orchestrator-heavy, so codeAgent runs on the dedicated pool and can't
+// starve interactive latency. The static route (handleCodeAgent) picks this vs callCodeAgent behind
+// wf.patched, so in-flight runs replay on their ORIGINAL queue.
+export const { callCodeAgent: callCodeAgentHeavy } = wf.proxyActivities<
+  typeof activities
+>({
+  taskQueue: TASK_QUEUE_HEAVY,
   startToCloseTimeout: "40 minutes",
   retry: { maximumAttempts: 1 },
 });
