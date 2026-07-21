@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
   Optional,
@@ -12,26 +11,15 @@ import {
 import {
   type Client,
   type Connection,
-  defaultPayloadConverter,
   WorkflowNotFoundError,
 } from "@temporalio/client";
 import {
-  APPROVAL_CTX_KEY,
-  NODE_TIMES_CTX_KEY,
-  approvalSignal,
   chatMessageSignal,
   chatReplyQuery,
   CHAT_SESSION_WORKFLOW,
-  resumeSignal,
   RUN_GRAPH_WORKFLOW,
-  stateQuery,
   TASK_QUEUE,
   webhookResponseQuery,
-  type ApprovalAwaitingRecord,
-  type ExecutionState,
-  type ExecutionStatus,
-  type NodeTimeEntry,
-  type ResumeInput,
   type WebhookResponse,
 } from "@naary/contracts";
 import type { GraphDef, NodeDef } from "@naary/dsl";
@@ -40,10 +28,7 @@ import { TracedClass } from "@naary/observability";
 import { getBudget } from "@naary/usage";
 import type { Principal } from "../auth/tenant.decorator";
 import { assertWithinMonthlyBudget } from "../budget/budget-guard";
-import {
-  PermissionsService,
-  buildViewTerms,
-} from "../permissions/permissions.service";
+import { PermissionsService } from "../permissions/permissions.service";
 import { assertWithinCompanyMonthlyBudget } from "../budget/company-budget-guard";
 import { executionsStarted } from "../common/metrics";
 import { EnvironmentsService } from "../environments/environments.service";
@@ -53,354 +38,63 @@ import {
   hashGraph,
 } from "../graphs/graphs.service";
 import { connectTemporal } from "../temporal/client";
-import { resumePath } from "./resume-token";
+import {
+  DEFAULT_MAX_STEPS_PER_RUN,
+  DEFAULT_WORKFLOW_KEY,
+  type AwaitingApproval,
+  type BatchDecisionResult,
+  type RunEvent,
+  type RunPage,
+  type RunStateView,
+  type RunSummary,
+} from "./executions.types";
+import { nodeTimesFrom, startSampleInput } from "./executions.helpers";
+import {
+  type ExecutionsDeps,
+  queryAwaiting,
+  queryHistory,
+  queryListPage,
+  queryOriginalTriggerInput,
+  queryPromptByWorkflowId,
+  queryRunGraph,
+  queryState,
+} from "./executions.queries";
+import {
+  opApprove,
+  opApproveBatch,
+  opDecideByToken,
+  opGetResumePath,
+  opRemindContext,
+  opResumeByToken,
+} from "./executions.approvals-ops";
+import {
+  accessApprovalPrompt,
+  accessAssertApprover,
+  accessAssertOwner,
+  accessAssertRun,
+  accessAssertRunAccess,
+  accessRunViewFilter,
+  accessToRunSummary,
+} from "./executions.access";
 
-/** Circuit breaker default when a tenant has no budget configured (safety net). */
-const DEFAULT_MAX_STEPS_PER_RUN = 50;
-
-/** workflowKey of the demo graph that POST /executions starts. */
-const DEFAULT_WORKFLOW_KEY = "default";
-
-/** A run in the list, with live status + accumulated cost from Temporal. */
-export interface RunSummary {
-  workflowId: string;
-  workflowKey: string | null;
-  /** App status (running | awaiting_approval | awaiting_webhook | awaiting_budget |
-   *  completed | rejected | budget_exceeded | circuit_open | invalid_graph) or a
-   *  Temporal close reason (failed | timed_out | terminated | canceled) or "unknown"
-   *  if unreachable. */
-  status:
-    | ExecutionStatus
-    | "failed"
-    | "timed_out"
-    | "terminated"
-    | "canceled"
-    | "unknown";
-  /** Accumulated run cost (from the workflow ctx), or null when unavailable. */
-  costUsd: number | null;
-  /** When the workflow started (Temporal), ISO. */
-  startedAt: string;
-  /** DB record time, ISO (kept for time-bucketed charts). */
-  createdAt: string;
-  /** When the run reached a terminal status (worker-stamped, Slice 2); null for
-   *  in-flight runs AND runs predating the stamp — consumers render "—". */
-  finishedAt: string | null;
-  /** finishedAt − createdAt in ms; null whenever finishedAt is null (never derived
-   *  from "now" — an in-flight age is not a duration). */
-  durationMs: number | null;
-  /** Compact failure classification (timeout | upstream_5xx | rate_limit | budget |
-   *  rejected | error) on terminal failures; null → fall back to the status. */
-  failureKind: string | null;
-  /** Soft-archived (hidden from the default Runs list). */
-  archived: boolean;
-  /** The GraphDefinition version this run snapshotted at start; null for
-   *  pre-migration rows (version wasn't recorded). */
-  graphVersion: number | null;
-}
-
-/** One page of runs plus the opaque cursor for the next page (null = no more). */
-export interface RunPage {
-  items: RunSummary[];
-  nextCursor: string | null;
-}
-
-/** Live run detail — like ExecutionState but with the widened status (a run can be
- *  Temporal-failed/terminated, which ExecutionStatus alone can't express). */
-export interface RunStateView {
-  status: RunSummary["status"];
-  currentNodeId: string;
-  ctx: Record<string, unknown>;
-  /** Per-node timing map the interpreter stamped into ctx (Slice 2), surfaced as a
-   *  first-class field so consumers don't grope the opaque ctx. Null when the run
-   *  predates the feature or the ctx is unavailable (Temporal-level failure). */
-  nodeTimes: Record<string, NodeTimeEntry> | null;
-  /** Live spend-so-far of this run in USD (Slice 3 — the interpreter's deterministic
-   *  cost accumulator, via the state query; closed runs fall back to ctx.__costUsd).
-   *  Null when unavailable (pre-feature worker / Temporal-level failure). */
-  spentUsd: number | null;
-  /** The per-run cap this run enforces (start snapshot, refreshed after a budget-pause
-   *  resume). Null when no cap is configured / the run is closed — consumers must not
-   *  fabricate a budget meter without it. */
-  perExecutionCapUsd: number | null;
-}
-
-/** Pull the interpreter's per-node timing map out of a run ctx (Slice 2), or null when
- *  absent (pre-feature run / empty ctx). Shape-checked, never fabricated. */
-function nodeTimesFrom(
-  ctx: Record<string, unknown>,
-): Record<string, NodeTimeEntry> | null {
-  const raw = ctx[NODE_TIMES_CTX_KEY];
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  return raw as Record<string, NodeTimeEntry>;
-}
-
-/** The run's accumulated spend mirrored into ctx (__costUsd), or null when the run
- *  metered nothing / predates the mirror. Shape-checked, never fabricated (Slice 3). */
-function costUsdFrom(ctx: Record<string, unknown>): number | null {
-  const c = ctx.__costUsd;
-  return typeof c === "number" && Number.isFinite(c) ? c : null;
-}
-
-/** Approver routing display summary on an awaiting row (Slice 1). */
-export interface ApproverSummary {
-  emails: string[];
-  groups: { id: string; name: string }[];
-}
-
-/** A run paused at a humanApproval node, enriched with the node's prompt (resolved
- *  from the stored graph) so the approvals inbox can show WHAT is being approved.
- *  The Slice-1 fields (contextFields/slaHours/dueAt/approvers/…) come from the
- *  awaiting record the worker snapshotted at pause time (ctx.__approval); they are
- *  null for gates without routing/SLA config (and for pre-Slice-1 paused runs). */
-export interface AwaitingApproval {
-  workflowId: string;
-  workflowKey: string | null;
-  nodeId: string;
-  title: string;
-  instructions: string | null;
-  createdAt: string;
-  /** When the gate paused (worker clock at pause time), ISO. */
-  pausedAt: string | null;
-  /** The gate's display-only SLA in hours. */
-  slaHours: number | null;
-  /** pausedAt + slaHours, computed server-side (null unless both exist). */
-  dueAt: string | null;
-  /** Resolved context fields (expressions evaluated at pause time). */
-  contextFields: Record<string, string> | null;
-  /** Who may decide (display summary; enforcement happens on the approve path). */
-  approvers: ApproverSummary | null;
-  /** Escalation display info (notify-only v1). */
-  escalateAfterHours: number | null;
-  escalateTo: string | null;
-}
-
-/** One run's outcome in a batch approve/reject — ok:false carries why it slipped. */
-export interface BatchDecisionResult {
-  workflowId: string;
-  ok: boolean;
-  error?: string;
-}
-
-/** Temporal closed-status name → our UI status string (COMPLETED handled via result()). */
-const TEMPORAL_CLOSED_STATUS: Record<string, RunSummary["status"]> = {
-  FAILED: "failed",
-  TIMED_OUT: "timed_out",
-  TERMINATED: "terminated",
-  CANCELLED: "canceled",
-  CANCELED: "canceled",
-  CONTINUED_AS_NEW: "running",
-};
-
-/** Temporal FAILURE states only (for reconciling a stuck-non-terminal PG row). */
-const TEMPORAL_FAILED_STATUS: Record<string, RunSummary["status"]> = {
-  FAILED: "failed",
-  TIMED_OUT: "timed_out",
-  TERMINATED: "terminated",
-  CANCELLED: "canceled",
-  CANCELED: "canceled",
-};
-
-/** One entry in a run's execution log (derived from a Temporal history event). */
-export interface RunEvent {
-  id: number;
-  /** Coarse kind for the UI icon/colour. */
-  kind:
-    | "started"
-    | "activity"
-    | "signal"
-    | "timer"
-    | "completed"
-    | "error"
-    | "continued";
-  label: string;
-  at: string | null;
-  detail?: string;
-}
-
-/** The subset of Temporal history-event fields we read (one attrs object is set). */
-interface RawHistoryEvent {
-  eventId?: number | string | { toString(): string };
-  eventTime?: {
-    seconds?: number | string | { toString(): string };
-    nanos?: number;
-  };
-  workflowExecutionStartedEventAttributes?: unknown;
-  activityTaskScheduledEventAttributes?: { activityType?: { name?: string } };
-  activityTaskCompletedEventAttributes?: unknown;
-  activityTaskFailedEventAttributes?: { failure?: { message?: string } };
-  workflowExecutionSignaledEventAttributes?: { signalName?: string };
-  timerStartedEventAttributes?: unknown;
-  timerFiredEventAttributes?: unknown;
-  workflowExecutionCompletedEventAttributes?: unknown;
-  workflowExecutionFailedEventAttributes?: { failure?: { message?: string } };
-  workflowExecutionContinuedAsNewEventAttributes?: unknown;
-}
-
-function mapHistoryEvent(e: RawHistoryEvent): RunEvent | null {
-  const id = Number(e.eventId ?? 0);
-  const at = e.eventTime?.seconds
-    ? new Date(
-        Number(e.eventTime.seconds) * 1000 + (e.eventTime.nanos ?? 0) / 1e6,
-      ).toISOString()
-    : null;
-  const base = { id, at };
-  if (e.workflowExecutionStartedEventAttributes)
-    return { ...base, kind: "started", label: "Run started" };
-  if (e.activityTaskScheduledEventAttributes)
-    return {
-      ...base,
-      kind: "activity",
-      label: `Activity: ${e.activityTaskScheduledEventAttributes.activityType?.name ?? "?"}`,
-    };
-  if (e.activityTaskCompletedEventAttributes)
-    return { ...base, kind: "activity", label: "Activity completed" };
-  if (e.activityTaskFailedEventAttributes)
-    return {
-      ...base,
-      kind: "error",
-      label: "Activity failed",
-      detail: e.activityTaskFailedEventAttributes.failure?.message,
-    };
-  if (e.workflowExecutionSignaledEventAttributes)
-    return {
-      ...base,
-      kind: "signal",
-      label: `Signal: ${e.workflowExecutionSignaledEventAttributes.signalName ?? "?"}`,
-    };
-  if (e.timerStartedEventAttributes)
-    return {
-      ...base,
-      kind: "timer",
-      label: "Timer started (approval timeout)",
-    };
-  if (e.timerFiredEventAttributes)
-    return { ...base, kind: "timer", label: "Timer fired" };
-  if (e.workflowExecutionCompletedEventAttributes)
-    return { ...base, kind: "completed", label: "Run completed" };
-  if (e.workflowExecutionFailedEventAttributes)
-    return {
-      ...base,
-      kind: "error",
-      label: "Run failed",
-      detail: e.workflowExecutionFailedEventAttributes.failure?.message,
-    };
-  if (e.workflowExecutionContinuedAsNewEventAttributes)
-    return { ...base, kind: "continued", label: "Continued as new" };
-  return null; // workflow-task / marker / version noise — skip
-}
+// Moved interfaces re-exported so existing import sites keep resolving them here.
+export type {
+  ApproverSummary,
+  AwaitingApproval,
+  BatchDecisionResult,
+  RunEvent,
+  RunPage,
+  RunStateView,
+  RunSummary,
+} from "./executions.types";
 
 /**
- * Keyset cursor over the Runs list's (createdAt DESC, workflowId DESC) order — an opaque
- * base64url of the last row's sort key. Offset-free, so a page boundary stays stable even
- * as new runs are inserted at the top of the list.
- */
-function encodeRunCursor(row: { createdAt: Date; workflowId: string }): string {
-  return Buffer.from(
-    JSON.stringify({ t: row.createdAt.toISOString(), id: row.workflowId }),
-    "utf8",
-  ).toString("base64url");
-}
-
-/** Decode + validate an opaque run cursor. A malformed/garbage cursor is a 400 (the
- *  public v1 boundary passes it through verbatim), never a Prisma error. */
-function decodeRunCursor(cursor: string): {
-  createdAt: Date;
-  workflowId: string;
-} {
-  try {
-    const parsed = JSON.parse(
-      Buffer.from(cursor, "base64url").toString("utf8"),
-    ) as { t?: unknown; id?: unknown };
-    if (typeof parsed.t !== "string" || typeof parsed.id !== "string") {
-      throw new Error("bad cursor");
-    }
-    const createdAt = new Date(parsed.t);
-    if (Number.isNaN(createdAt.getTime())) throw new Error("bad cursor");
-    return { createdAt, workflowId: parsed.id };
-  } catch {
-    throw new BadRequestException("Invalid cursor");
-  }
-}
-
-/** Run statuses that won't change again — the read-model is authoritative for these. */
-const TERMINAL_STATUSES = new Set([
-  "completed",
-  "rejected",
-  "budget_exceeded",
-  "circuit_open",
-  "invalid_graph",
-  "failed",
-  "timed_out",
-  "terminated",
-  "canceled",
-]);
-function isTerminalStatus(s: string): boolean {
-  return TERMINAL_STATUSES.has(s);
-}
-
-/** The awaiting-approval record the worker snapshotted at pause time (ctx.__approval),
- *  or null when the gate carries no Slice-1 fields / the run predates them. */
-function awaitingRecord(s: ExecutionState): ApprovalAwaitingRecord | null {
-  const rec = (s.ctx ?? {})[APPROVAL_CTX_KEY];
-  if (!rec || typeof rec !== "object" || Array.isArray(rec)) return null;
-  return rec as ApprovalAwaitingRecord;
-}
-
-/** dueAt = pausedAt + slaHours (server-side derivation — display-only, no timer). */
-function dueAtFrom(rec: ApprovalAwaitingRecord | null): string | null {
-  if (!rec?.pausedAt || typeof rec.slaHours !== "number" || rec.slaHours <= 0) {
-    return null;
-  }
-  const paused = Date.parse(rec.pausedAt);
-  if (Number.isNaN(paused)) return null;
-  return new Date(paused + rec.slaHours * 3_600_000).toISOString();
-}
-
-/** The Slice-1 display fields shared by the awaiting inbox row + the public prompt. */
-function awaitingFields(rec: ApprovalAwaitingRecord | null): {
-  pausedAt: string | null;
-  slaHours: number | null;
-  dueAt: string | null;
-  contextFields: Record<string, string> | null;
-  approvers: ApproverSummary | null;
-  escalateAfterHours: number | null;
-  escalateTo: string | null;
-} {
-  return {
-    pausedAt: rec?.pausedAt ?? null,
-    slaHours: rec?.slaHours ?? null,
-    dueAt: dueAtFrom(rec),
-    contextFields: rec?.contextFields ?? null,
-    approvers: rec?.approvers
-      ? {
-          emails: rec.approvers.emails ?? [],
-          groups: rec.approvers.groups ?? [],
-        }
-      : null,
-    escalateAfterHours: rec?.escalateAfterHours ?? null,
-    escalateTo: rec?.escalateTo ?? null,
-  };
-}
-
-/** The Start node's configured sample input (used as the default manual-run input). */
-function startSampleInput(
-  graph: GraphSnapshot["graph"],
-): Record<string, unknown> | undefined {
-  const start = graph.nodes.find((n) => n.id === graph.startNodeId);
-  const sample = (start?.config as { sampleInput?: unknown } | undefined)
-    ?.sampleInput;
-  return sample && typeof sample === "object" && !Array.isArray(sample)
-    ? (sample as Record<string, unknown>)
-    : undefined;
-}
-
-/**
- * Wraps the Temporal client: start an execution, signal approval, query state.
- * The client connects once at boot and closes on shutdown.
- *
- * Every run is recorded as an `Execution { workflowId, tenantId }` so the control
- * plane can authorize `approve`/`getState` against the caller's tenant — a raw
- * workflowId is never enough to act on a run.
+ * Wraps the Temporal client: start an execution, signal approval, query state (client
+ * connects once at boot, closes on shutdown). Every run is recorded as an
+ * `Execution { workflowId, tenantId }` so the control plane can authorize the caller's
+ * tenant — a raw workflowId is never enough. Read/approval/access method BODIES live in
+ * sibling modules (executions.{queries,approvals-ops,access}.ts), invoked as thin
+ * delegators here via {@link deps}.
  */
 @Injectable()
 @TracedClass()
@@ -425,27 +119,17 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     return this.permissions;
   }
 
-  /** In-service `run` assert (RBAC-GROUPS.md §4). Gates USER-principal-initiated starts
-   *  only — trigger paths (webhook/form/chat/schedule) carry no principal by design. */
+  /** In-service `run` assert (RBAC-GROUPS.md §4). See accessAssertRun. */
   private async assertRun(
     actor: Principal | undefined,
     workflowKey: string,
     environmentId: string,
   ): Promise<void> {
-    if (!actor) return;
-    await this.perms().assertCan(actor, "run", workflowKey, environmentId);
+    return accessAssertRun(this.deps(), actor, workflowKey, environmentId);
   }
 
-  /**
-   * G3 (§8.4) — gate a SINGLE run surface on the run's own workflow. `view` for the read
-   * surfaces (detail/history/graph), `run` for approve/cancel (run-control actions). No
-   * actor (trigger/internal caller, the company rollup path, the PUBLIC signed-link
-   * approval path) = never checked. Env-EXACT: the check resolves against the RUN'S OWN
-   * environment (a legacy env-less row falls back to the tenant default, the env its graph
-   * lived in — the same convention as approvalPrompt/rerun). A run with NO workflowKey
-   * (pre-key-tracking) can't be matched against key-scoped grants — it is visible only to
-   * UNRESTRICTED subjects (owner/admin, unrestricted tokens, the zero-grant cliff).
-   */
+  /** G3 (§8.4) — gate a single run surface on the run's own workflow. See
+   *  accessAssertRunAccess. */
   private async assertRunAccess(
     actor: Principal | undefined,
     action: "view" | "run",
@@ -455,55 +139,43 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       environmentId: string | null;
     },
   ): Promise<void> {
-    if (!actor) return;
-    const perms = this.perms();
-    // Bypassed subjects short-circuit here — no env resolution (no extra DB read) on the
-    // common owner/admin/unrestricted path.
-    const eff = await perms.getEffective(actor);
-    if (!eff.restricted) return;
-    if (row.workflowKey === null) {
-      throw new ForbiddenException(
-        `You don't have permission to ${action === "run" ? "act on" : "view"} this run. ` +
-          "Ask a workspace owner or admin for access.",
-      );
-    }
-    const envId =
-      row.environmentId ?? (await this.environments.defaultEnvId(row.tenantId));
-    await perms.assertCan(actor, action, row.workflowKey, envId);
+    return accessAssertRunAccess(this.deps(), actor, action, row);
   }
 
-  /**
-   * G3 (§8.4) — the Runs-list view filter for a RESTRICTED subject, as a Prisma where
-   * fragment, or null when the caller is unrestricted / absent (the query stays
-   * byte-identical — the common path). Pushed INTO the where clause (not post-filtered)
-   * so keyset pagination stays EXACT: every fetched row is viewable, pages run full, and
-   * the cursor math never sees hidden rows. Env-exact per §8.5: one OR term per tenant
-   * environment from the subject's effective view there ({all} ⇒ every key in that env,
-   * else the key list); rows with a NULL environmentId (pre-env rows) count as the
-   * DEFAULT env's; rows with a NULL workflowKey are visible only to unrestricted
-   * subjects, so a restricted subject's terms always constrain workflowKey.
-   */
+  /** G3 (§8.4) — the Runs-list view filter for a RESTRICTED subject. See
+   *  accessRunViewFilter. */
   private async runViewFilter(
     actor: Principal | undefined,
     tenantId: string,
   ): Promise<Record<string, unknown> | null> {
-    if (!actor) return null;
-    // The per-env terms come from the SHARED builder (permissions.service.ts) — the same
-    // semantics filter the usage/insights ledger, so the two surfaces can't drift.
-    const viewTerms = await buildViewTerms(this.perms(), actor, () =>
-      this.environments.list(tenantId),
-    );
-    if (viewTerms === null) return null;
-    const terms = viewTerms.map((t) => ({
-      ...(t.view.all
-        ? { workflowKey: { not: null } }
-        : { workflowKey: { in: t.view.keys } }),
-      ...(t.includesNullEnv
-        ? { OR: [{ environmentId: t.environmentId }, { environmentId: null }] }
-        : { environmentId: t.environmentId }),
-    }));
-    // No terms ⇒ nothing viewable anywhere: `OR: []` matches no rows (deny-by-default).
-    return { OR: terms };
+    return accessRunViewFilter(this.deps(), actor, tenantId);
+  }
+
+  /** The class members the extracted read/approval/access free functions reach through
+   *  `this`, as bound callbacks + the always-present collaborators. The private helpers
+   *  stay ON the class (this forwards to them), so `perms()`'s fail-closed throw remains
+   *  the single source of truth; `perms` is a LAZY thunk so it fires only when the moved
+   *  body actually consults it (never eagerly here — which would break the permission-less
+   *  test constructions before their actor guard). */
+  private deps(): ExecutionsDeps {
+    return {
+      client: this.client,
+      environments: this.environments,
+      graphs: this.graphs,
+      perms: () => this.perms(),
+      assertOwner: (workflowId, tenantId) =>
+        this.assertOwner(workflowId, tenantId),
+      assertRunAccess: (actor, action, row) =>
+        this.assertRunAccess(actor, action, row),
+      assertApprover: (actor, workflowId, tenantId) =>
+        this.assertApprover(actor, workflowId, tenantId),
+      runViewFilter: (actor, tenantId) => this.runViewFilter(actor, tenantId),
+      toRunSummary: (r) => this.toRunSummary(r),
+      approvalPrompt: (tenantId, environmentId, workflowKey, nodeId) =>
+        this.approvalPrompt(tenantId, environmentId, workflowKey, nodeId),
+      approve: (id, approved, tenantId, comment, actor) =>
+        this.approve(id, approved, tenantId, comment, actor),
+    };
   }
 
   async onModuleInit(): Promise<void> {
@@ -986,109 +658,17 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
      *  through decideByToken (HMAC-authorized), NOT here, and stays ungated. */
     actor?: Principal,
   ): Promise<void> {
-    const row = await this.assertOwner(id, tenantId);
-    await this.assertRunAccess(actor, "run", row);
-    // Slice 1: when the gate names approvers, the deciding principal must match them
-    // (owner/admin user principals bypass). No-op when the gate has no routing.
-    await this.assertApprover(actor, id, row.tenantId);
-    try {
-      await this.client.workflow
-        .getHandle(id)
-        .signal(approvalSignal, { approved, ...(comment ? { comment } : {}) });
-    } catch (e) {
-      // Signaling a CLOSED workflow (already completed / rejected / failed) returns
-      // gRPC NOT_FOUND → WorkflowNotFoundError. The execution row exists (assertOwner
-      // passed), so it's not a 404 — it's a 409: the run is no longer awaiting
-      // approval. Mirrors getState's WorkflowNotFoundError handling, with the right
-      // semantics for a write. (Previously this leaked an unhandled 500.)
-      if (e instanceof WorkflowNotFoundError) {
-        throw new ConflictException(
-          "Execution is not awaiting approval (already completed, rejected, or failed).",
-        );
-      }
-      throw e;
-    }
+    return opApprove(this.deps(), id, approved, tenantId, comment, actor);
   }
 
-  /**
-   * Decide-time approver enforcement (REDESIGN-FUNCTIONALITY-GAPS.md Slice 1). Reads the
-   * awaiting record the worker snapshotted at pause time (ctx.__approval via stateQuery —
-   * the RUN'S OWN config snapshot, immune to later graph edits). Semantics:
-   *  - gate has no `approvers` (or the run predates the snapshot) → unchanged behavior;
-   *  - workspace owner/admin USER principals bypass (consistent with RBAC-GROUPS §4 —
-   *    PermissionsService.subjectKey gates only `member` users and tokens);
-   *  - user principals match by email (case-insensitive) OR GroupMember membership (uid)
-   *    in a listed group;
-   *  - restricted `nry_` token principals match via GroupTokenMember (tokenId). A token
-   *    WITHOUT a tokenId stamp (unenforced workspace) has no group identity and no email,
-   *    so it cannot match a routed gate — fail CLOSED with the same 403;
-   *  - absent actor (internal callers; the PUBLIC signed-link path uses decideByToken and
-   *    stays HMAC-authorized) → never checked.
-   * A closed/undecidable run skips the check — the signal path right after produces the
-   * proper 409/404.
-   */
+  /** Decide-time approver enforcement (REDESIGN-FUNCTIONALITY-GAPS.md Slice 1). See
+   *  accessAssertApprover. */
   private async assertApprover(
     actor: Principal | undefined,
     workflowId: string,
     tenantId: string,
   ): Promise<void> {
-    if (!actor) return;
-    let state: ExecutionState;
-    try {
-      state = await this.client.workflow
-        .getHandle(workflowId)
-        .query(stateQuery);
-    } catch {
-      return; // closed/gone — the signal below yields the right 409/404
-    }
-    if (state.status !== "awaiting_approval") return;
-    const approvers = awaitingRecord(state)?.approvers;
-    if (!approvers) return;
-    const emails = (approvers.emails ?? []).filter((e) => !!e);
-    const groupIds = (approvers.groups ?? []).map((g) => g.id).filter(Boolean);
-    if (emails.length === 0 && groupIds.length === 0) return;
-    // Owner/admin USER principals bypass.
-    if (actor.userId && (actor.role === "owner" || actor.role === "admin")) {
-      return;
-    }
-    // Email match (user principals).
-    if (
-      actor.userId &&
-      actor.email &&
-      emails.some((e) => e.toLowerCase() === actor.email?.toLowerCase())
-    ) {
-      return;
-    }
-    // Group membership: uid via GroupMember, token via GroupTokenMember — tenant-scoped
-    // through the group relation so a same-id group of another tenant can never match.
-    if (groupIds.length > 0) {
-      const prisma = getPrisma();
-      if (actor.tokenId) {
-        const m = await prisma.groupTokenMember.findFirst({
-          where: {
-            tokenId: actor.tokenId,
-            groupId: { in: groupIds },
-            group: { tenantId },
-          },
-          select: { groupId: true },
-        });
-        if (m) return;
-      } else if (actor.userId) {
-        const m = await prisma.groupMember.findFirst({
-          where: {
-            userId: actor.userId,
-            groupId: { in: groupIds },
-            group: { tenantId },
-          },
-          select: { groupId: true },
-        });
-        if (m) return;
-      }
-    }
-    throw new ForbiddenException(
-      "This approval is restricted to its listed approvers. " +
-        "Ask one of them to decide, or a workspace owner/admin.",
-    );
+    return accessAssertApprover(this.deps(), actor, workflowId, tenantId);
   }
 
   /**
@@ -1104,20 +684,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     comment?: string,
     actor?: Principal,
   ): Promise<BatchDecisionResult[]> {
-    const unique = [...new Set(ids)];
-    const settled = await Promise.allSettled(
-      unique.map((id) => this.approve(id, approved, tenantId, comment, actor)),
-    );
-    return settled.map((r, i) =>
-      r.status === "fulfilled"
-        ? { workflowId: unique[i], ok: true }
-        : {
-            workflowId: unique[i],
-            ok: false,
-            error:
-              r.reason instanceof Error ? r.reason.message : String(r.reason),
-          },
-    );
+    return opApproveBatch(this.deps(), ids, approved, tenantId, comment, actor);
   }
 
   /**
@@ -1137,38 +704,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     workflowKey: string | null;
     title: string;
   }> {
-    const row = await this.assertOwner(id, tenantId);
-    await this.assertRunAccess(actor, "run", row);
-    let state: ExecutionState;
-    try {
-      state = await this.client.workflow.getHandle(id).query(stateQuery);
-    } catch (e) {
-      if (e instanceof WorkflowNotFoundError) {
-        throw new ConflictException(
-          "Run is not awaiting approval (already decided, completed, or timed out).",
-        );
-      }
-      throw e;
-    }
-    if (state.status !== "awaiting_approval") {
-      throw new ConflictException(
-        "Run is not awaiting approval (already decided, completed, or timed out).",
-      );
-    }
-    const prompt = await this.approvalPrompt(
-      tenantId,
-      row.environmentId,
-      row.workflowKey,
-      state.currentNodeId,
-    );
-    const environmentId =
-      row.environmentId ?? (await this.environments.defaultEnvId(tenantId));
-    return {
-      environmentId,
-      workflowId: id,
-      workflowKey: row.workflowKey,
-      title: prompt.title,
-    };
+    return opRemindContext(this.deps(), id, tenantId, actor);
   }
 
   /**
@@ -1179,18 +715,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
    * `approve`.
    */
   async resumeByToken(workflowId: string, payload: unknown): Promise<void> {
-    try {
-      await this.client.workflow
-        .getHandle(workflowId)
-        .signal(resumeSignal, { payload } satisfies ResumeInput);
-    } catch (e) {
-      if (e instanceof WorkflowNotFoundError) {
-        throw new ConflictException(
-          "Run is not awaiting a webhook resume (already resumed, completed, or timed out).",
-        );
-      }
-      throw e;
-    }
+    return opResumeByToken(this.deps(), workflowId, payload);
   }
 
   /** Approve/reject a paused run authorized by a signed link token (not a bearer) — the public
@@ -1201,44 +726,12 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     approved: boolean,
     comment?: string,
   ): Promise<void> {
-    const handle = this.client.workflow.getHandle(workflowId);
-    // GUARD (public signed link): only decide a run that is CURRENTLY awaiting approval. Temporal
-    // buffers a signal sent to a running-but-not-yet-paused run, so without this a stale link
-    // clicked later could be "saved up" and auto-satisfy a FUTURE humanApproval pause (a graph that
-    // loops or has multiple approvals). Query the live state first; anything but awaiting → 409.
-    let status: string;
-    try {
-      status = (await handle.query(stateQuery)).status;
-    } catch (e) {
-      if (e instanceof WorkflowNotFoundError) {
-        throw new ConflictException("Run not found or already closed.");
-      }
-      throw e;
-    }
-    if (status !== "awaiting_approval") {
-      throw new ConflictException(
-        "Run is not awaiting approval (already decided, completed, or timed out).",
-      );
-    }
-    try {
-      await handle.signal(approvalSignal, {
-        approved,
-        ...(comment ? { comment } : {}),
-      });
-    } catch (e) {
-      if (e instanceof WorkflowNotFoundError) {
-        throw new ConflictException(
-          "Run is not awaiting approval (already completed, rejected, or timed out).",
-        );
-      }
-      throw e;
-    }
+    return opDecideByToken(this.deps(), workflowId, approved, comment);
   }
 
   /** The relative resume-URL path for a run, for the owner's UI to display/copy. Tenant-scoped. */
   async getResumePath(workflowId: string, tenantId: string): Promise<string> {
-    await this.assertOwner(workflowId, tenantId);
-    return resumePath(workflowId);
+    return opGetResumePath(this.deps(), workflowId, tenantId);
   }
 
   /**
@@ -1319,64 +812,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
     actor?: Principal,
   ): Promise<AwaitingApproval[]> {
-    let rows = await getPrisma().execution.findMany({
-      where: { tenantId, status: "awaiting_approval" },
-      orderBy: { createdAt: "desc" },
-      take: 100,
-    });
-    // G3 (§8.4): a RESTRICTED subject's inbox is view-filtered to its workflows —
-    // BEFORE the per-run Temporal queries, so invisible runs cost nothing. Key-less
-    // legacy rows are visible only to unrestricted subjects (same rule as the list).
-    if (actor) {
-      const perms = this.perms();
-      const eff = await perms.getEffective(actor);
-      if (eff.restricted) {
-        const visible = await Promise.all(
-          rows.map(async (r) => {
-            if (r.workflowKey === null) return false;
-            const envId =
-              r.environmentId ??
-              (await this.environments.defaultEnvId(tenantId));
-            return perms.can(actor, "view", r.workflowKey, envId);
-          }),
-        );
-        rows = rows.filter((_, i) => visible[i]);
-      }
-    }
-    const items = await Promise.all(
-      rows.map(async (r): Promise<AwaitingApproval | null> => {
-        let currentNodeId = "";
-        let rec: ApprovalAwaitingRecord | null = null;
-        try {
-          const s = await this.client.workflow
-            .getHandle(r.workflowId)
-            .query(stateQuery);
-          // Decided/advanced since the read-model write, or closed → not awaiting.
-          if (s.status !== "awaiting_approval") return null;
-          currentNodeId = s.currentNodeId;
-          // Slice 1: the pause-time snapshot (contextFields/SLA/approvers) rides the ctx.
-          rec = awaitingRecord(s);
-        } catch {
-          return null; // closed/gone
-        }
-        const prompt = await this.approvalPrompt(
-          tenantId,
-          r.environmentId,
-          r.workflowKey,
-          currentNodeId,
-        );
-        return {
-          workflowId: r.workflowId,
-          workflowKey: r.workflowKey,
-          nodeId: currentNodeId,
-          title: prompt.title,
-          instructions: prompt.instructions,
-          createdAt: r.createdAt.toISOString(),
-          ...awaitingFields(rec),
-        };
-      }),
-    );
-    return items.filter((x): x is AwaitingApproval => x !== null);
+    return queryAwaiting(this.deps(), tenantId, actor);
   }
 
   /** Public (token-authed) approval prompt lookup by workflowId — for the signed-link decision page.
@@ -1388,89 +824,33 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     awaiting: boolean;
     title?: string;
     instructions?: string | null;
-    /** Workspace display name (TenantSettings.displayName) — "on behalf of …". Null if unset. */
     workspaceName?: string | null;
-    /** Resolved pause-time context fields (never secrets — see prepareApproval). */
     contextFields?: Record<string, string> | null;
     slaHours?: number | null;
     dueAt?: string | null;
   }> {
-    const row = await getPrisma().execution.findUnique({
-      where: { workflowId },
-    });
-    if (!row) return { awaiting: false };
-    try {
-      const s = await this.client.workflow
-        .getHandle(workflowId)
-        .query(stateQuery);
-      if (s.status !== "awaiting_approval") return { awaiting: false };
-      const prompt = await this.approvalPrompt(
-        row.tenantId,
-        row.environmentId,
-        row.workflowKey,
-        s.currentNodeId,
-      );
-      const rec = awaitingRecord(s);
-      // Best-effort workspace display name — the public trust line ("on behalf of Acme").
-      const settings = await getPrisma()
-        .tenantSettings.findUnique({
-          where: { tenantId: row.tenantId },
-          select: { displayName: true },
-        })
-        .catch(() => null);
-      return {
-        awaiting: true,
-        title: prompt.title,
-        instructions: prompt.instructions,
-        workspaceName: settings?.displayName ?? null,
-        contextFields: rec?.contextFields ?? null,
-        slaHours: rec?.slaHours ?? null,
-        dueAt: dueAtFrom(rec),
-      };
-    } catch {
-      return { awaiting: false };
-    }
+    return queryPromptByWorkflowId(this.deps(), workflowId);
   }
 
-  /** Resolve a humanApproval node's title/instructions from the tenant's stored graph. */
+  /** Resolve a humanApproval node's title/instructions from the tenant's stored graph.
+   *  See accessApprovalPrompt. */
   private async approvalPrompt(
     tenantId: string,
     environmentId: string | null,
     workflowKey: string | null,
     nodeId: string,
   ): Promise<{ title: string; instructions: string | null }> {
-    if (!workflowKey) return { title: "Approval required", instructions: null };
-    // Best-effort read of the graph for the node's title, IN THE RUN'S OWN ENV (Slice 6) — the run
-    // is env-tagged now, so a sandbox run's prompt reads the sandbox graph. A pre-Slice-6 run has no
-    // env tag → fall back to the tenant default (where its graph lived).
-    const envId =
-      environmentId ?? (await this.environments.defaultEnvId(tenantId));
-    const snap = await this.graphs
-      .getLatest(tenantId, envId, workflowKey)
-      .catch(() => null);
-    const node = snap?.graph.nodes.find((n) => n.id === nodeId);
-    const cfg = (node?.config ?? {}) as {
-      title?: string;
-      instructions?: string;
-    };
-    return {
-      title: cfg.title?.trim() || "Approval required",
-      instructions: cfg.instructions?.trim() || null,
-    };
+    return accessApprovalPrompt(
+      this.deps(),
+      tenantId,
+      environmentId,
+      workflowKey,
+      nodeId,
+    );
   }
 
-  /**
-   * Recent runs for the tenant (newest first). Reads the Execution READ-MODEL: the
-   * interpreter pushes status + accumulated cost to the row as a run progresses
-   * (see setExecutionStatus), so a terminal run needs ZERO Temporal calls — the
-   * key scaling win over the old per-run describe()+result() (which replayed each
-   * closed run's history).
-   *
-   * One reconcile: a run still marked non-terminal in PG that FAILED at the
-   * Temporal level (the workflow THREW, so it couldn't push a terminal status) is
-   * caught with a cheap describe() ONLY (no history replay). Genuinely
-   * running/awaiting runs keep their pushed status.
-   */
+  /** Recent runs for the tenant (newest first) — the non-paged convenience over
+   *  {@link listPage} (same read-model + Temporal-failure reconcile). */
   async list(
     tenantId: string,
     limit = 50,
@@ -1496,39 +876,10 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
      *  Absent for internal callers + the company rollup path (workspace-level reads). */
     actor?: Principal,
   ): Promise<RunPage> {
-    const take = Math.min(Math.max(opts.limit ?? 50, 1), 100);
-    // Default view hides archived runs; `archived: true` shows only the archived ones.
-    const base = { tenantId, archivedAt: opts.archived ? { not: null } : null };
-    // Keyset filter: rows strictly AFTER the cursor row in the (DESC, DESC) order.
-    const keyset = opts.cursor
-      ? {
-          ...base,
-          OR: (({ createdAt, workflowId }) => [
-            { createdAt: { lt: createdAt } },
-            { createdAt, workflowId: { lt: workflowId } },
-          ])(decodeRunCursor(opts.cursor)),
-        }
-      : base;
-    // View scoping composes via AND so it can't collide with the keyset's own OR. Null
-    // for unrestricted callers — their query is byte-identical to before G3.
-    const viewFilter = await this.runViewFilter(actor, tenantId);
-    const where = viewFilter ? { ...keyset, AND: [viewFilter] } : keyset;
-    const rows = await getPrisma().execution.findMany({
-      where,
-      // The workflowId tiebreak makes the order TOTAL, so a page boundary can't
-      // skip/duplicate rows that share a createdAt.
-      orderBy: [{ createdAt: "desc" }, { workflowId: "desc" }],
-      take: take + 1, // one extra row probes "is there a next page?"
-    });
-    const page = rows.slice(0, take);
-    const nextCursor =
-      rows.length > take ? encodeRunCursor(page[page.length - 1]) : null;
-    const items = await Promise.all(page.map((r) => this.toRunSummary(r)));
-    return { items, nextCursor };
+    return queryListPage(this.deps(), tenantId, opts, actor);
   }
 
-  /** Map one Execution read-model row to a RunSummary (with the non-terminal
-   *  Temporal-failure reconcile described on {@link list}). */
+  /** Map one Execution read-model row to a RunSummary. See accessToRunSummary. */
   private async toRunSummary(r: {
     workflowId: string;
     workflowKey: string | null;
@@ -1540,216 +891,44 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     archivedAt: Date | null;
     graphVersion: number | null;
   }): Promise<RunSummary> {
-    const createdAt = r.createdAt.toISOString();
-    const base = {
-      workflowId: r.workflowId,
-      workflowKey: r.workflowKey,
-      costUsd: r.costUsd !== null ? Number(r.costUsd) : null,
-      // startedAt currently mirrors the DB row time; createdAt reads the DB field
-      // directly (per its docstring) rather than aliasing startedAt, so a future
-      // real Temporal start time can diverge without silently moving createdAt.
-      startedAt: createdAt,
-      createdAt,
-      // Slice 2: worker-stamped terminal time → durationMs. Both null for runs that
-      // predate the stamp / closed only at the Temporal level — the UI keeps "—".
-      finishedAt: r.finishedAt ? r.finishedAt.toISOString() : null,
-      durationMs: r.finishedAt
-        ? Math.max(0, r.finishedAt.getTime() - r.createdAt.getTime())
-        : null,
-      failureKind: r.failureKind,
-      archived: r.archivedAt !== null,
-      graphVersion: r.graphVersion,
-    };
-    if (isTerminalStatus(r.status)) {
-      return { ...base, status: r.status as RunSummary["status"] };
-    }
-    // Non-terminal in PG → reconcile against Temporal (cheap describe only) so
-    // a workflow that threw (Temporal-FAILED) isn't shown as forever-running.
-    try {
-      const desc = await this.client.workflow
-        .getHandle(r.workflowId)
-        .describe();
-      const failed = TEMPORAL_FAILED_STATUS[desc.status.name];
-      return {
-        ...base,
-        status: failed ?? (r.status as RunSummary["status"]),
-      };
-    } catch {
-      return { ...base, status: r.status as RunSummary["status"] };
-    }
+    return accessToRunSummary(this.deps(), r);
   }
 
-  /**
-   * Live detail for a run. Mirrors list()'s truthful, never-500 status handling:
-   * describe() to learn the Temporal state, then a RUNNING run is queried, a
-   * COMPLETED run's terminal status + ctx come from result(), and a Temporal
-   * failure (FAILED/TIMED_OUT/TERMINATED/CANCELED) maps to a real status instead
-   * of throwing a 500. Only a truly-gone run is a 404.
-   */
+  /** Live detail for a run — truthful, never-500 status handling (RUNNING queried,
+   *  COMPLETED via result(), Temporal failure mapped, gone → 404). See queryState. */
   async getState(
     id: string,
     tenantId: string,
     actor?: Principal,
   ): Promise<RunStateView> {
-    const row = await this.assertOwner(id, tenantId);
-    // G3 (§8.4): the run detail (incl. its ctx/output) is view-gated on its workflow.
-    await this.assertRunAccess(actor, "view", row);
-    const handle = this.client.workflow.getHandle(id);
-    try {
-      const desc = await handle.describe();
-      if (desc.status.name === "RUNNING") {
-        // Wrap the query (mirrors list()): a transient replay/worker hiccup must
-        // degrade to "running", never 500.
-        try {
-          const s = await handle.query(stateQuery);
-          return {
-            status: s.status,
-            currentNodeId: s.currentNodeId,
-            ctx: s.ctx,
-            nodeTimes: nodeTimesFrom(s.ctx),
-            // Slice 3 live spend: the query's first-class figure; a pre-feature worker
-            // omits it → fall back to the ctx mirror; null when neither exists.
-            spentUsd: s.spentUsd ?? costUsdFrom(s.ctx),
-            perExecutionCapUsd: s.perExecutionCapUsd ?? null,
-          };
-        } catch {
-          return {
-            status: "running",
-            currentNodeId: "",
-            ctx: {},
-            nodeTimes: null,
-            spentUsd: null,
-            perExecutionCapUsd: null,
-          };
-        }
-      }
-      if (desc.status.name === "COMPLETED") {
-        try {
-          const r = (await handle.result()) as {
-            status: ExecutionStatus;
-            ctx: Record<string, unknown>;
-          };
-          return {
-            status: r.status,
-            currentNodeId: "",
-            ctx: r.ctx,
-            nodeTimes: nodeTimesFrom(r.ctx),
-            spentUsd: costUsdFrom(r.ctx),
-            perExecutionCapUsd: null, // closed — no live cap to meter against
-          };
-        } catch {
-          return {
-            status: "completed",
-            currentNodeId: "",
-            ctx: {},
-            nodeTimes: null,
-            spentUsd: null,
-            perExecutionCapUsd: null,
-          };
-        }
-      }
-      // Temporal-level failure (the workflow threw, was terminated, etc.) — there's
-      // no returned {status,ctx} to recover, so report the mapped close reason.
-      return {
-        status: TEMPORAL_CLOSED_STATUS[desc.status.name] ?? "unknown",
-        currentNodeId: "",
-        ctx: {},
-        nodeTimes: null,
-        spentUsd: null,
-        perExecutionCapUsd: null,
-      };
-    } catch (e) {
-      if (e instanceof WorkflowNotFoundError) {
-        throw new NotFoundException("Execution not found");
-      }
-      throw e;
-    }
+    return queryState(this.deps(), id, tenantId, actor);
   }
 
-  /**
-   * The run's execution log — a curated timeline from the workflow's Temporal
-   * history (the durable record of what happened). We map by event TYPE (which
-   * `*EventAttributes` is present) + read only plain fields (activity name, signal
-   * name, failure message — already sanitized at the activity) — no payload
-   * decoding, so nothing secret-bearing is surfaced.
-   */
+  /** The run's execution log — a curated timeline from Temporal history (maps by event
+   *  type + plain fields only, no payload decoding, so nothing secret leaks). See
+   *  queryHistory. */
   async history(
     id: string,
     tenantId: string,
     actor?: Principal,
   ): Promise<RunEvent[]> {
-    const row = await this.assertOwner(id, tenantId);
-    await this.assertRunAccess(actor, "view", row);
-    let h: { events?: unknown[] | null };
-    try {
-      h = await this.client.workflow.getHandle(id).fetchHistory();
-    } catch (e) {
-      if (e instanceof WorkflowNotFoundError) {
-        throw new NotFoundException("Execution not found");
-      }
-      throw e;
-    }
-    const out: RunEvent[] = [];
-    for (const raw of h.events ?? []) {
-      const ev = mapHistoryEvent(raw as RawHistoryEvent);
-      if (ev) out.push(ev);
-    }
-    return out;
+    return queryHistory(this.deps(), id, tenantId, actor);
   }
 
-  /**
-   * The trigger input a past run was STARTED with, read back from Temporal history
-   * (the durable source of truth). We decode the WorkflowExecutionStarted event's
-   * SECOND arg — `startGraph` starts the workflow with `[graph, input, runCtx]`, so
-   * `payloads[1]` is the input — using the default payload converter (this deployment
-   * configures no custom one). Works for ANY terminal state, including a FAILED run
-   * whose ctx `getState` can't return — which is exactly what a re-run needs. Returns
-   * undefined if the event/payload is missing or undecodable (caller falls back to the
-   * graph's default input). Nothing is surfaced to the user: the value is fed straight
-   * back into a new run, so no new payload exposure.
-   */
+  /** The trigger input a past run was STARTED with, read back from Temporal history
+   *  (payloads[1] of the started event) — works for any terminal state, incl. a FAILED
+   *  run whose ctx getState can't return, which is what a re-run needs. See
+   *  queryOriginalTriggerInput. */
   private async originalTriggerInput(
     id: string,
   ): Promise<Record<string, unknown> | undefined> {
-    let h: { events?: unknown[] | null };
-    try {
-      h = await this.client.workflow.getHandle(id).fetchHistory();
-    } catch (e) {
-      if (e instanceof WorkflowNotFoundError) {
-        throw new NotFoundException("Execution not found");
-      }
-      throw e;
-    }
-    const started = (h.events ?? []).find(
-      (ev) =>
-        (ev as { workflowExecutionStartedEventAttributes?: unknown })
-          .workflowExecutionStartedEventAttributes,
-    ) as
-      | {
-          workflowExecutionStartedEventAttributes?: {
-            input?: { payloads?: unknown[] };
-          };
-        }
-      | undefined;
-    const payloads =
-      started?.workflowExecutionStartedEventAttributes?.input?.payloads;
-    if (!payloads || payloads.length < 2) return undefined;
-    try {
-      const decoded = defaultPayloadConverter.fromPayload(payloads[1] as never);
-      return decoded == null ? undefined : (decoded as Record<string, unknown>);
-    } catch {
-      return undefined;
-    }
+    return queryOriginalTriggerInput(this.deps(), id);
   }
 
-  /**
-   * The graph a past run EXECUTED, read back from Temporal history (the durable source of
-   * truth). `startGraph` starts the workflow with `[graph, input, runCtx]`, so `payloads[0]`
-   * is the version-pinned snapshot the run actually walked — accurate even if the saved
-   * workflow was edited since (unlike fetching the latest by key). Owner-scoped; used by the
-   * run-detail canvas to draw the executed path. 404 if the run or its snapshot is gone.
-   * Read-only projection — the graph is definition data (no secrets), safe to return.
-   */
+  /** The version-pinned graph a past run EXECUTED, read back from Temporal history
+   *  (payloads[0] of the started event) — the exact snapshot it walked, even if the saved
+   *  workflow was edited since. Owner-scoped; 404 if the run/snapshot is gone. See
+   *  queryRunGraph. */
   async runGraph(
     id: string,
     tenantId: string,
@@ -1759,72 +938,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     version: number | null;
     workflowKey: string | null;
   }> {
-    const owned = await this.assertOwner(id, tenantId);
-    await this.assertRunAccess(actor, "view", owned);
-    let h: { events?: unknown[] | null };
-    try {
-      h = await this.client.workflow.getHandle(id).fetchHistory();
-    } catch (e) {
-      if (e instanceof WorkflowNotFoundError) {
-        throw new NotFoundException("Execution not found");
-      }
-      throw e;
-    }
-    const started = (h.events ?? []).find(
-      (ev) =>
-        (ev as { workflowExecutionStartedEventAttributes?: unknown })
-          .workflowExecutionStartedEventAttributes,
-    ) as
-      | {
-          workflowExecutionStartedEventAttributes?: {
-            input?: { payloads?: unknown[] };
-          };
-        }
-      | undefined;
-    const payloads =
-      started?.workflowExecutionStartedEventAttributes?.input?.payloads;
-    if (!payloads || payloads.length < 1) {
-      throw new NotFoundException("This run has no stored graph snapshot.");
-    }
-    let graph: unknown;
-    try {
-      // fromPayload can throw on a malformed/unknown payload — treat that as "no usable
-      // snapshot" (404), not an unhandled 500 (mirrors originalTriggerInput's guard).
-      graph = defaultPayloadConverter.fromPayload(payloads[0] as never);
-    } catch {
-      graph = undefined;
-    }
-    // Require a GraphDef-SHAPED object (nodes[] + edges[] + startNodeId), not just any object
-    // — an array or arbitrary payload would decode fine here but then throw in the web
-    // decompiler, which iterates graph.nodes AND graph.edges.
-    const g = graph as {
-      nodes?: unknown;
-      edges?: unknown;
-      startNodeId?: unknown;
-    } | null;
-    if (
-      g == null ||
-      typeof g !== "object" ||
-      Array.isArray(g) ||
-      !Array.isArray(g.nodes) ||
-      !Array.isArray(g.edges) ||
-      typeof g.startNodeId !== "string"
-    ) {
-      throw new NotFoundException("This run's graph snapshot is unavailable.");
-    }
-    // Version + workflowKey come from the Execution read-model row (the same source the
-    // Runs list uses, so the detail label matches the list) — not re-decoded from history.
-    // These let the detail view label the executed graph and drive the re-run-at-version
-    // picker. version is null for pre-migration runs; workflowKey null for very old rows.
-    const row = await getPrisma().execution.findUnique({
-      where: { workflowId: id },
-      select: { graphVersion: true, workflowKey: true },
-    });
-    return {
-      graph: g as Record<string, unknown>,
-      version: row?.graphVersion ?? null,
-      workflowKey: row?.workflowKey ?? null,
-    };
+    return queryRunGraph(this.deps(), id, tenantId, actor);
   }
 
   /**
@@ -1864,8 +978,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     return this.start(tenantId, envId, input, row.workflowKey, graphVersion);
   }
 
-  /** 404 if the execution is unknown, 403 if it belongs to another tenant. Returns the
-   *  row so callers can gate on its workflowKey/environmentId without a second read. */
+  /** 404 if the execution is unknown, 403 if it belongs to another tenant. See
+   *  accessAssertOwner. */
   private async assertOwner(
     workflowId: string,
     tenantId: string,
@@ -1874,13 +988,6 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     workflowKey: string | null;
     environmentId: string | null;
   }> {
-    const row = await getPrisma().execution.findUnique({
-      where: { workflowId },
-    });
-    if (!row) throw new NotFoundException("Execution not found");
-    if (row.tenantId !== tenantId) {
-      throw new ForbiddenException("Execution belongs to another tenant");
-    }
-    return row;
+    return accessAssertOwner(workflowId, tenantId);
   }
 }
