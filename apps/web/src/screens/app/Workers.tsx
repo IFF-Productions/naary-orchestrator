@@ -2,7 +2,7 @@
 // operator-only GET /workers registry (fed by each replica's WorkerHeartbeat). Owner/admin only —
 // a 403 renders an access notice rather than an error. Auto-refreshes so online/slots stay live.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { EmptyState, Icon, Skeleton } from "../../components";
+import { EmptyState, Skeleton } from "../../components";
 import {
   api,
   HttpError,

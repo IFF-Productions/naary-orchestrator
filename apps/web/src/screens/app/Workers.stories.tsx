@@ -4,8 +4,9 @@ import { ModeProvider } from "../../mode";
 import type { WorkerRow } from "../../lib/api";
 import { Workers } from "./Workers";
 
-// `now` can't be Date.now() in a story arg (must be stable), so lastSeen values are authored
-// relative to a fixed clock the mock advances naturally; the screen derives "Xs ago" live.
+// lastSeen values are authored relative to load time (Date.now() at module eval), so the screen's
+// own live clock renders them as small "Xs ago" deltas. The last replica is intentionally stale
+// (>45s ago) to exercise the offline/dimmed state.
 const FLEET: WorkerRow[] = [
   {
     identity: "worker-7f3a/12/v0.0.12",
