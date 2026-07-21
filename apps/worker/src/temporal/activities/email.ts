@@ -30,6 +30,16 @@ export interface SendEmailResult {
   costUsd: number;
 }
 
+/** SMTP round-trip bound. nodemailer's own connectionTimeout defaults to 2 minutes — far past
+ *  this activity's 60s start-to-close AND the API's ~60s request gateway, so an unreachable/slow
+ *  SMTP host makes a single-node "test" hang to the limit → a 504 instead of a clean error. We
+ *  fail fast, well under both. Kept on __emailDeps so tests can shrink it. */
+export const SMTP_TIMEOUT_MS = 15_000;
+
+/** Distinct type so the catch maps a timeout to a clear, user-actionable failure (vs the generic
+ *  "transient SMTP error"). Its message is secret-free (unlike raw nodemailer errors). */
+class SmtpTimeoutError extends Error {}
+
 // Injectable I/O seam for the sendEmail activity (swapped in unit tests so no real
 // SMTP/DNS is touched): the SMTP-URI resolver, the transport factory, and the host
 // SSRF check.
@@ -64,13 +74,30 @@ export async function callSendEmail(
       cfg.from ||
       (parsed.username ? decodeURIComponent(parsed.username) : undefined);
     const transport = __emailDeps.createTransport(uri);
-    const info = await transport.sendMail({
-      from,
-      to: cfg.to,
-      subject: cfg.subject,
-      ...(cfg.text !== undefined ? { text: cfg.text } : {}),
-      ...(cfg.html !== undefined ? { html: cfg.html } : {}),
-    });
+    // Bound the SMTP round-trip so an unresponsive host fails fast (see SMTP_TIMEOUT_MS) rather
+    // than hanging to the 60s start-to-close. transport.close() tears down the dangling socket.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let info: { messageId?: string };
+    try {
+      info = await Promise.race([
+        transport.sendMail({
+          from,
+          to: cfg.to,
+          subject: cfg.subject,
+          ...(cfg.text !== undefined ? { text: cfg.text } : {}),
+          ...(cfg.html !== undefined ? { html: cfg.html } : {}),
+        }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new SmtpTimeoutError("SMTP send timed out")),
+            SMTP_TIMEOUT_MS,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      transport.close?.();
+    }
     log.info(
       {
         activity: "callSendEmail",
@@ -112,6 +139,15 @@ export async function callSendEmail(
     }
     if (e instanceof BlockedEgressError) {
       throw ApplicationFailure.nonRetryable(e.message, "EGRESS_BLOCKED");
+    }
+    // The SMTP host didn't respond in time — a reachability/config problem the user must fix, so
+    // non-retryable (and it fails the node test fast with a clear message instead of a 504).
+    if (e instanceof SmtpTimeoutError) {
+      throw ApplicationFailure.nonRetryable(
+        "Email send timed out — the SMTP host did not respond. Check the connection's host and port.",
+        "SEND_EMAIL_TIMEOUT",
+        { connectionId: cfg.connectionId },
+      );
     }
     // Transient SMTP failure (timeout, greylisting, auth). Drop the original message
     // ENTIRELY — nodemailer errors can embed the host/URI/credentials — so nothing
