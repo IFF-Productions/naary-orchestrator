@@ -15,7 +15,7 @@ describe("resolveTaskQueue (Queue-mode §3.3)", () => {
   });
   it("honors WORKER_TASK_QUEUE for a heavy worker", () => {
     expect(resolveTaskQueue({ WORKER_TASK_QUEUE: TASK_QUEUE_HEAVY })).toBe(
-      "orchestrator-heavy",
+      TASK_QUEUE_HEAVY,
     );
     expect(resolveTaskQueue({ WORKER_TASK_QUEUE: "  custom-q " })).toBe(
       "custom-q",

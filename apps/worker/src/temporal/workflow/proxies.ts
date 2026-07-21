@@ -96,7 +96,9 @@ export const { callCodeAgent } = wf.proxyActivities<typeof activities>({
 // startToCloseTimeout and AT-MOST-ONCE (maximumAttempts:1, a write-capable node #444) — with ONLY
 // the taskQueue changed to orchestrator-heavy, so codeAgent runs on the dedicated pool and can't
 // starve interactive latency. The static route (handleCodeAgent) picks this vs callCodeAgent behind
-// wf.patched, so in-flight runs replay on their ORIGINAL queue.
+// wf.patched — which only preserves REPLAY determinism for histories that already ran the codeAgent
+// step (they keep their original queue). A run reaching codeAgent for the FIRST time after this
+// deploy — including one started earlier — takes this queue, so the heavy pool must already be up.
 export const { callCodeAgent: callCodeAgentHeavy } = wf.proxyActivities<
   typeof activities
 >({

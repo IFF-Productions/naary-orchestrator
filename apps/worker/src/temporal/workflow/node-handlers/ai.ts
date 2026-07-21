@@ -54,10 +54,12 @@ export const handleCodeAgent: NodeHandler = async ({
   // so a partial write must never auto-retry. The activity fetches the BYOK key.
   const caCfg = asNodeConfig(cfg, "codeAgent");
   // Heavy-queue routing (Queue-mode §3.3): codeAgent is the long/heavy node, so route it to the
-  // dedicated pool (orchestrator-heavy). STATIC per activity (not a runtime/env read — replay-safe),
-  // gated by wf.patched so runs started before this deploy replay on their ORIGINAL queue. Test-mode
-  // runs stay on the default queue (`!runCtx.test`) so the single-queue e2e/live worker isn't
-  // stranded (the heavy proxy's taskQueue is asserted directly in the unit test instead).
+  // dedicated pool (orchestrator-heavy). STATIC per activity (not a runtime/env read — replay-safe).
+  // wf.patched only preserves REPLAY determinism: a history that already ran this step keeps its
+  // original queue. A run reaching codeAgent for the FIRST time after this deploy (even one started
+  // earlier) DOES take the heavy queue — hence the hard deploy-order rule that the heavy pool be up
+  // first, else those activities strand. Test-mode runs stay on the default queue (`!runCtx.test`)
+  // so the single-queue e2e/live worker isn't stranded (the heavy proxy is asserted in the unit test).
   const callCa =
     wf.patched("heavy-queue-v1") && !runCtx.test
       ? callCodeAgentHeavy
