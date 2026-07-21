@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BlockedEgressError } from "@naary/connections";
 import { __emailDeps, callSendEmail } from "../src/temporal/activities";
+import { SMTP_TIMEOUT_MS } from "../src/temporal/activities/email";
 
 const URI = "smtps://mailer:s3cret@smtp.example.com:465";
 const meta = { tenantId: "t-1", executionId: "e-1", nodeId: "n-1" };
@@ -71,6 +72,29 @@ describe("callSendEmail", () => {
       undefined,
       meta,
     ).catch((e) => e);
+    expect(JSON.stringify(err)).not.toContain("s3cret");
+  });
+
+  it("a hung SMTP host times out fast (SEND_EMAIL_TIMEOUT), tears down the socket, no 60s hang", async () => {
+    vi.useFakeTimers();
+    // Connection never settles — the real-world cause of the /nodes/email/test 504.
+    sendMail.mockReturnValue(new Promise<never>(() => {}));
+    const close = vi.fn();
+    createTransport.mockReturnValue({ sendMail, close } as never);
+
+    const p = callSendEmail(
+      { connectionId: "smtp-1", from: "", to: "a@b.co", subject: "x" },
+      undefined,
+      meta,
+    ).catch((e) => e);
+    // Advance PAST the SMTP bound; the activity must reject rather than run to 60s.
+    await vi.advanceTimersByTimeAsync(SMTP_TIMEOUT_MS + 50);
+    const err = await p;
+    vi.useRealTimers();
+
+    expect(err.nonRetryable).toBe(true);
+    expect(err.type).toBe("SEND_EMAIL_TIMEOUT");
+    expect(close).toHaveBeenCalled(); // dangling socket torn down
     expect(JSON.stringify(err)).not.toContain("s3cret");
   });
 });
