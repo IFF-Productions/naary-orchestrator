@@ -9,7 +9,7 @@
  * API and SPA share a host). It is NEVER taken from a request parameter, so this can't be turned
  * into an open redirect.
  */
-function appBaseUrl(): string {
+export function appBaseUrl(): string {
   const candidates = [
     process.env.APP_BASE_URL ?? "",
     ...(process.env.CORS_ORIGINS ?? "").split(","),

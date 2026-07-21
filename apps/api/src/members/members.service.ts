@@ -6,6 +6,8 @@ import {
 } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
 import type { Principal } from "../auth/tenant.decorator";
+import { appBaseUrl } from "../connections/connect-return";
+import { MailerService } from "../mail/mailer.service";
 import { MembershipService } from "../membership/membership.service";
 
 /** `active` = a real Membership (uid-keyed authority); `invited` = a pending Invitation
@@ -59,7 +61,36 @@ function assertOwnerForElevated(
  */
 @Injectable()
 export class MembersService {
-  constructor(private readonly memberships: MembershipService) {}
+  constructor(
+    private readonly memberships: MembershipService,
+    private readonly mailer: MailerService,
+  ) {}
+
+  /**
+   * Best-effort invitation email (#468). Fire-and-forget: looks up the workspace name (best-effort)
+   * and sends via the platform mailer, which itself no-ops when SMTP isn't configured and never
+   * throws — so a mail problem can NEVER break the invite. Awaited nowhere on the request path.
+   */
+  private sendInviteEmail(tenantId: string, email: string): void {
+    void (async () => {
+      let workspaceName: string | undefined;
+      try {
+        const settings = await getPrisma().tenantSettings.findUnique({
+          where: { tenantId },
+        });
+        workspaceName = settings?.displayName ?? undefined;
+      } catch {
+        /* name is cosmetic — fall back to a generic label */
+      }
+      await this.mailer.sendInvitation({
+        to: email,
+        workspaceName,
+        // Server-derived base (never a request param) + the sign-in screen; empty base ⇒ a
+        // same-origin relative path, correct in the shared-host topology.
+        signInUrl: `${appBaseUrl()}/auth`,
+      });
+    })().catch(() => undefined);
+  }
 
   /** Active memberships ∪ pending invitations, flat with a `status` discriminator. */
   async list(tenantId: string): Promise<MemberView[]> {
@@ -121,6 +152,7 @@ export class MembersService {
           createdAt: new Date(),
         },
       });
+      this.sendInviteEmail(tenantId, norm);
       return invitedView(row);
     }
     try {
@@ -132,6 +164,7 @@ export class MembersService {
           invitedBy: caller.userId ?? caller.subject ?? "api-token",
         },
       });
+      this.sendInviteEmail(tenantId, norm);
       return invitedView(row);
     } catch (err) {
       // P2002 = the (tenantId, email) unique hit in a race with a concurrent invite.
