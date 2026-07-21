@@ -230,8 +230,8 @@ export function CanvasTopBar({
         )}
       </div>
 
-      {/* validity + issues — hidden on a phone to keep the bar to one clean row (validity is
-          re-surfaced on save; issues open from the same overflow menu). */}
+      {/* validity + issues — hidden on a phone to keep the bar to one clean row. Both are shown
+          on the wider (tablet/desktop) layouts; a save still surfaces validity errors via toast. */}
       {!phone && (
         <StatusPill
           state={generating ? "running" : graphValid ? "done" : "error"}
@@ -288,15 +288,16 @@ export function CanvasTopBar({
         </span>
       )}
 
-      {/* right cluster — flex:none so Save / Save & run / the "…" menu never shrink or clip on a
-          phone (the workflow name shrinks first instead). */}
+      {/* right cluster. On a phone it's flex:none so Save / Save & run / the "…" menu never
+          shrink or clip (the workflow name shrinks first instead); on wider layouts it keeps the
+          original min-width:0 so it can still shrink if needed. */}
       <div
         style={{
           marginLeft: "auto",
           display: "flex",
           alignItems: "center",
           gap: phone ? 6 : 10,
-          flex: "none",
+          ...(phone ? { flex: "none" } : { minWidth: 0 }),
         }}
       >
         {!phone && status && (
