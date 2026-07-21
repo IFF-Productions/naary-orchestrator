@@ -364,7 +364,13 @@ function RunView({ id }: { id: string }) {
   const states = useMemo(
     () =>
       state && graph
-        ? computeStepStates(graph, state.ctx, state.currentNodeId, state.status)
+        ? computeStepStates(
+            graph,
+            state.ctx,
+            state.currentNodeId,
+            state.status,
+            state.executedNodeIds,
+          )
         : {},
     [state, graph],
   );
@@ -470,8 +476,11 @@ function RunView({ id }: { id: string }) {
           ? state.ctx.__input
           : undefined,
       isTriggerInput,
+      // The failed node carries the run's failure detail (#525): the run died HERE, so this
+      // is the node's error. Other nodes have none.
+      error: st === "error" ? errorDetail : null,
     };
-  }, [state, selectedId, nodeById, states, graph, waitingAge]);
+  }, [state, selectedId, nodeById, states, graph, waitingAge, errorDetail]);
 
   const nodeOutputs = state
     ? Object.entries(state.ctx).filter(([k]) => isNodeOutputKey(k))
@@ -521,7 +530,7 @@ function RunView({ id }: { id: string }) {
       )}
       {detail && (
         // Keyed by step so picking a different step fades the swapped detail in.
-        <StepDetailCard key={detail.id} step={detail} events={events} />
+        <StepDetailCard key={detail.id} step={detail} />
       )}
       <RegionTraceSection ctx={state.ctx} />
     </div>
@@ -727,46 +736,65 @@ function RunView({ id }: { id: string }) {
 
       {/* ===== Two-pane body: executed-path graph · hero + timeline + detail ===== */}
       {!error && state && graph && (
-        <div
-          style={{
-            display: stacked ? "flex" : "grid",
-            flexDirection: stacked ? "column" : undefined,
-            gridTemplateColumns: stacked
-              ? undefined
-              : "minmax(320px, 42fr) minmax(360px, 58fr)",
-            gap: 18,
-            alignItems: stacked ? undefined : "start",
-          }}
-        >
-          {/* Stacked (<= 1024): hero (approval decide-in-place) on top, then the
+        <>
+          <div
+            style={{
+              display: stacked ? "flex" : "grid",
+              flexDirection: stacked ? "column" : undefined,
+              gridTemplateColumns: stacked
+                ? undefined
+                : "minmax(320px, 42fr) minmax(360px, 58fr)",
+              gap: 18,
+              alignItems: stacked ? undefined : "start",
+            }}
+          >
+            {/* Stacked (<= 1024): hero (approval decide-in-place) on top, then the
               executed-path graph capped, then the timeline/detail inspector. */}
-          {stacked ? (
-            <>
-              {heroBlock}
-              <RunGraph
-                graph={graph}
-                states={states}
-                waitingAge={waitingAge}
-                selectedId={selectedId}
-                onSelect={setPickedStep}
-                height={360}
-              />
-              {inspectorBlock}
-            </>
-          ) : (
-            <>
-              <RunGraph
-                graph={graph}
-                states={states}
-                waitingAge={waitingAge}
-                selectedId={selectedId}
-                onSelect={setPickedStep}
-                height={470}
-              />
-              {rightColumn}
-            </>
-          )}
-        </div>
+            {stacked ? (
+              <>
+                {heroBlock}
+                <RunGraph
+                  graph={graph}
+                  states={states}
+                  waitingAge={waitingAge}
+                  selectedId={selectedId}
+                  onSelect={setPickedStep}
+                  height={360}
+                />
+                {inspectorBlock}
+              </>
+            ) : (
+              <>
+                <RunGraph
+                  graph={graph}
+                  states={states}
+                  waitingAge={waitingAge}
+                  selectedId={selectedId}
+                  onSelect={setPickedStep}
+                  height={470}
+                />
+                {rightColumn}
+              </>
+            )}
+          </div>
+          {/* Run-level durable log (#525): the FULL curated Temporal history lives here, ONCE —
+            not repeated under every step. A tapped step shows only its own output/error. */}
+          <Card style={{ padding: "18px 20px" }}>
+            <SectionTitle>Execution log</SectionTitle>
+            <LogPanel events={events} />
+            <div
+              className="mono"
+              style={{
+                marginTop: 8,
+                fontSize: "var(--text-2xs)",
+                color: "var(--ink-3)",
+              }}
+            >
+              full run history · durable · state checkpointed · resumable for
+              30d
+            </div>
+          </Card>
+        </>
       )}
 
       {/* ===== Fallback for pre-snapshot runs (no graph): hero + raw outputs + log ===== */}

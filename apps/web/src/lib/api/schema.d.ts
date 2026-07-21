@@ -1783,6 +1783,14 @@ export interface components {
       status: string;
       /** @example agent-1 */
       currentNodeId: string;
+      /**
+       * @description Node ids known to have run — populated for a failed run whose ctx came back empty (#525); empty when the ctx itself carries the outputs.
+       * @example [
+       *   "trigger",
+       *   "http-1"
+       * ]
+       */
+      executedNodeIds: string[];
       /** @description Accumulated workflow context. */
       ctx: {
         [key: string]: unknown;

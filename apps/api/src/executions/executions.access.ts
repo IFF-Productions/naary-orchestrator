@@ -261,6 +261,9 @@ export async function accessAssertOwner(
   tenantId: string;
   workflowKey: string | null;
   environmentId: string | null;
+  /** #525 — the node a thrown run died on, and the nodes that had run (empty-ctx recovery). */
+  failedNodeId: string | null;
+  executedNodeIds: string[];
 }> {
   const row = await getPrisma().execution.findUnique({
     where: { workflowId },

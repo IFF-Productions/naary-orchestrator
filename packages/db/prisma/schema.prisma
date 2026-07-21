@@ -76,6 +76,12 @@ model Execution {
   // (the default view); non-null = archived + when. Purely a read-model flag — no Temporal
   // interaction, and the worker's status/cost pushes never touch it.
   archivedAt  DateTime?
+  // Run-detail failed-run recovery (#525): a THROWN workflow's ctx isn't queryable after close,
+  // so the interpreter stamps, on the failure path, which node it died on + which nodes had run.
+  // Node IDs ONLY — never ctx output content (privacy checklist). failedNodeId NULL unless the
+  // run threw; executedNodeIds empty for non-thrown/pre-feature runs (the UI falls back to ctx).
+  failedNodeId    String?
+  executedNodeIds String[]
 
   // Runs list = `where {tenantId, archivedAt IS [NOT] NULL} orderBy createdAt desc`.
   // For the DEFAULT view (archivedAt IS NULL — an equality), (tenantId, archivedAt, createdAt)

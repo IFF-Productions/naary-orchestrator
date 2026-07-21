@@ -358,6 +358,8 @@ const mockActivities = {
     status: string;
     costUsd?: number;
     failureKind?: string;
+    failedNodeId?: string;
+    executedNodeIds?: string[];
   }): Promise<void> => {
     statusPushes.push(meta);
   },
@@ -390,6 +392,8 @@ const statusPushes: {
   status: string;
   costUsd?: number;
   failureKind?: string;
+  failedNodeId?: string;
+  executedNodeIds?: string[];
 }[] = [];
 const loadVariablesCalls: { tenantId: string; environmentId?: string }[] = [];
 // Mutable so each test can fix the env's variable set (default: one var proving resolution).
@@ -3946,6 +3950,47 @@ describe("runGraph interpreter — Slice 2: per-node timing + failure classifica
     });
     const push = statusPushes.find((p) => p.workflowId === "e2e-fail-quota");
     expect(push).toMatchObject({ status: "failed", failureKind: "rate_limit" });
+  });
+
+  it("a THROWN failure stamps the FAILED node + the nodes that already ran (#525)", async () => {
+    // start → pre (set, runs + writes ctx.pre) → agent (throws for t-quota-fail) → end.
+    // The agent dies BEFORE writing its output, so the run-detail UI can't tell from ctx
+    // that it failed here — the interpreter must stamp it.
+    const failNodeGraph: GraphDef = {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        { id: "pre", type: "set", config: { fields: { ok: true } } },
+        {
+          id: "agent",
+          type: "agent",
+          config: { provider: "anthropic", model: "claude-opus-4-8" },
+        },
+        { id: "e", type: "end" },
+      ],
+      edges: [
+        { from: "s", to: "pre" },
+        { from: "pre", to: "agent" },
+        { from: "agent", to: "e" },
+      ],
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [failNodeGraph, { hi: 1 }, { tenantId: "t-quota-fail" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-fail-node",
+      });
+      await expect(handle.result()).rejects.toThrow(
+        /workflow execution failed/i,
+      );
+    });
+    const push = statusPushes.find((p) => p.workflowId === "e2e-fail-node");
+    // The node the run died on — the agent, NOT the last node that completed (pre).
+    expect(push?.failedNodeId).toBe("agent");
+    // The nodes that had already run (wrote ctx) — pre ran; the agent didn't finish.
+    expect(push?.executedNodeIds).toContain("pre");
+    expect(push?.executedNodeIds).not.toContain("agent");
   });
 
   it("stopAndError → failureKind 'error'; a returned terminal (rejected) carries NO explicit kind (the activity derives it from status)", async () => {

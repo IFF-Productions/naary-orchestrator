@@ -191,6 +191,15 @@ export class RunStateResponse {
   status!: string;
   @ApiProperty({ example: "agent-1" }) currentNodeId!: string;
   @ApiProperty({
+    type: "array",
+    items: { type: "string" },
+    example: ["trigger", "http-1"],
+    description:
+      "Node ids known to have run — populated for a failed run whose ctx came back empty (#525); " +
+      "empty when the ctx itself carries the outputs.",
+  })
+  executedNodeIds!: string[];
+  @ApiProperty({
     type: "object",
     additionalProperties: true,
     description: "Accumulated workflow context.",

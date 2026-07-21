@@ -379,6 +379,14 @@ export async function runGraph(
           status: "failed",
           costUsd: state.costUsd,
           failureKind: classifyFailure(threw),
+          // Run-detail recovery (#525): a thrown run's ctx isn't queryable after close, so
+          // record the node it died on (currentNodeId — set BEFORE each node runs, so it points
+          // at the failing node) and the node ids that had already produced output. Node ids
+          // only, never their ctx output content (privacy checklist).
+          failedNodeId: state.currentNodeId,
+          executedNodeIds: graph.nodes
+            .filter((n) => n.id in ctx)
+            .map((n) => n.id),
         });
       } catch {
         /* best-effort — never mask the original failure */
