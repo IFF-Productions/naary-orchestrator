@@ -28,6 +28,16 @@ export const FLAG_CATALOG = {
     default: false,
     description: "Roll out the redesigned node inspector on the canvas.",
   },
+  "canvas-import-tools": {
+    key: "canvas-import-tools",
+    // KILL-SWITCH: default ON so the import affordances stay visible everywhere Flagsmith
+    // isn't wired (local dev + any deploy without a provider) — the flag can only HIDE a
+    // shipped feature, never surprise-reveal one. The SPA gates the HTTP/GraphQL node's
+    // cURL / OpenAPI-import / GraphQL-introspect buttons on it (#491).
+    default: true,
+    description:
+      "Show the canvas HTTP/GraphQL node import tools (cURL import, OpenAPI import, GraphQL introspect).",
+  },
 } as const satisfies Record<string, FlagSpec>;
 
 /** Union of known flag keys — call sites get compile-time checking of the key. */

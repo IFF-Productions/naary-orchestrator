@@ -38,10 +38,11 @@ describe("fail-safe defaults (no provider configured)", () => {
 
   it("getAllFlags() returns every catalog key at its code default", async () => {
     const all = await getAllFlags("tenant-1");
-    expect(all).toEqual({
-      "chat-rag": FLAG_CATALOG["chat-rag"].default,
-      "new-canvas-inspector": FLAG_CATALOG["new-canvas-inspector"].default,
-    });
+    // Derived from the catalog so adding a flag doesn't require touching this assertion.
+    const expected = Object.fromEntries(
+      Object.entries(FLAG_CATALOG).map(([k, spec]) => [k, spec.default]),
+    );
+    expect(all).toEqual(expected);
   });
 });
 

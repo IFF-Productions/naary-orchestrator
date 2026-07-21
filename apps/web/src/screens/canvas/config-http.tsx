@@ -29,35 +29,40 @@ export function renderHttpRequestSection(c: ConfigSectionCtx) {
     nodeKinds,
     connections,
     pins,
+    showImportTools,
   } = c;
   return (
     <>
       {kind === "httpRequest" && (
         <>
-          <CurlImportButton
-            onApply={(c) =>
-              onChange({
-                method: c.method,
-                url: c.url,
-                headers: c.headers ?? {},
-                query: c.query ?? {},
-                body: c.body,
-              })
-            }
-          />
-          <OpenApiImportButton
-            onApply={(c) =>
-              // Always write query/headers (empty when the operation declares none) so a
-              // re-import is idempotent — mirrors the cURL import above; a conditional
-              // spread would retain stale values from a previous import/edit.
-              onChange({
-                method: c.method,
-                url: c.url,
-                query: c.query ?? {},
-                headers: c.headers ?? {},
-              })
-            }
-          />
+          {showImportTools && (
+            <>
+              <CurlImportButton
+                onApply={(c) =>
+                  onChange({
+                    method: c.method,
+                    url: c.url,
+                    headers: c.headers ?? {},
+                    query: c.query ?? {},
+                    body: c.body,
+                  })
+                }
+              />
+              <OpenApiImportButton
+                onApply={(c) =>
+                  // Always write query/headers (empty when the operation declares none) so a
+                  // re-import is idempotent — mirrors the cURL import above; a conditional
+                  // spread would retain stale values from a previous import/edit.
+                  onChange({
+                    method: c.method,
+                    url: c.url,
+                    query: c.query ?? {},
+                    headers: c.headers ?? {},
+                  })
+                }
+              />
+            </>
+          )}
           <Labeled label="Method">
             <select
               value={str("method") || "GET"}
@@ -387,10 +392,12 @@ export function renderHttpRequestSection(c: ConfigSectionCtx) {
             })}
           </Labeled>
 
-          <GraphQLIntrospectButton
-            url={str("url")}
-            onInsertQuery={(query) => onChange({ query })}
-          />
+          {showImportTools && (
+            <GraphQLIntrospectButton
+              url={str("url")}
+              onInsertQuery={(query) => onChange({ query })}
+            />
+          )}
 
           <Labeled label="Query">
             {exprText("query", {
