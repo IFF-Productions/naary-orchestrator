@@ -72,6 +72,19 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # Heavy task-queue worker (codeAgent's `orchestrator-heavy` queue, #453) — same prod
+  # treatment as `worker`: the local-Temporal dependency is dropped (Temporal is Cloud,
+  # so the base `depends_on: temporal` would reference the profile-gated-off service and
+  # break `compose config`), the published metrics port is closed, Sentry env labeled.
+  worker-heavy:
+    container_name: !reset null
+    environment:
+      SENTRY_ENVIRONMENT: production
+    ports: !override []
+    depends_on: !override
+      migrate:
+        condition: service_completed_successfully
+
   web:
     container_name: !reset null
     ports: !override [] # cloudflared forwards to web:80 inside the compose network

@@ -34,3 +34,8 @@ services:
   worker:
     environment:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env (Neon POOLED endpoint)}
+
+  # Heavy queue worker (#453) also talks to the app DB → point it at Neon, same as worker.
+  worker-heavy:
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env (Neon POOLED endpoint)}
