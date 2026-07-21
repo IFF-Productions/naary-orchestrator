@@ -1227,6 +1227,16 @@ export interface components {
       contentHash: string;
       /** Format: date-time */
       createdAt: string;
+      /**
+       * @description Who saved this version (email / 'api-token'); null for promoted or pre-feature rows (#488).
+       * @example ada@acme.io
+       */
+      savedBy?: string | null;
+      /**
+       * @description Optional commit note recorded on save; null when none (#488).
+       * @example Add retry to the HTTP node
+       */
+      saveMessage?: string | null;
     };
     GraphDetailResponse: {
       workflowKey: string;
@@ -1253,6 +1263,11 @@ export interface components {
       graph: {
         [key: string]: unknown;
       };
+      /**
+       * @description Optional commit note recorded on this version (#488, shown in version history).
+       * @example Add retry to the HTTP node
+       */
+      message?: string;
     };
     SaveGraphResponse: {
       workflowKey: string;

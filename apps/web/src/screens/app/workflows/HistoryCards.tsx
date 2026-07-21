@@ -2,11 +2,11 @@
  * Version-history + recent-runs cards (workflow detail, redesign).
  *
  * Version history = the ACTIVE env's real snapshot list (GET /graphs/:key/versions):
- * vN · short content hash · created time. The backend stores no commit message or
- * author on a save, so none is invented — the only "who" we have is the promotion
- * lineage actor, shown on versions that arrived via promote. Env badges mark the
- * version whose content is currently live in each environment (matched by
- * contentHash, since version numbers are per-env counters).
+ * vN · short content hash · who saved it + when, and an optional commit message (#488;
+ * `savedBy`/`saveMessage`). Versions that arrived via PROMOTE show the promotion lineage
+ * actor instead (their savedBy is null by design). Env badges mark the version whose
+ * content is currently live in each environment (matched by contentHash, since version
+ * numbers are per-env counters).
  *
  * Recent runs = the latest real runs of this workflow from the runs list.
  */
@@ -120,8 +120,27 @@ export function VersionHistoryCard({
                 >
                   {promo
                     ? `promoted by ${promo.actor} · ${ago(v.createdAt)}`
-                    : ago(v.createdAt)}
+                    : v.savedBy
+                      ? `saved by ${v.savedBy} · ${ago(v.createdAt)}`
+                      : ago(v.createdAt)}
                 </div>
+                {v.saveMessage && (
+                  <div
+                    style={{
+                      fontSize: "var(--text-xs)",
+                      color: "var(--ink-2)",
+                      marginTop: 3,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                    }}
+                    title={v.saveMessage}
+                  >
+                    “{v.saveMessage}”
+                  </div>
+                )}
               </div>
               <span style={{ display: "flex", gap: 5, flex: "none" }}>
                 {badgesFor(v).map((s) => {

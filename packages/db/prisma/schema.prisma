@@ -140,6 +140,12 @@ model GraphDefinition {
   contentHash String // sha256 of canonical(graph)
   version     Int // monotonically increasing per (tenantId, environmentId, workflowKey)
   createdAt   DateTime @default(now())
+  // Version-history WHO/WHY (#488). savedBy = a display string for the actor who saved this
+  // version (email for a user, "api-token" for a token); NULL for internal/promote copy-in +
+  // pre-feature rows (a promoted version's "who" comes from the Promotion lineage instead).
+  // saveMessage = an optional commit note (API/CLI-settable). when = createdAt above.
+  savedBy     String?
+  saveMessage String?
 
   @@unique([tenantId, environmentId, workflowKey, version])
   @@index([tenantId, environmentId, workflowKey])

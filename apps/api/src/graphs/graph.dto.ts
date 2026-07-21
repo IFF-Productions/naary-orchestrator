@@ -56,6 +56,16 @@ export class SaveGraphDto {
   })
   @IsObject()
   graph!: Record<string, unknown>;
+
+  @ApiPropertyOptional({
+    example: "Add retry to the HTTP node",
+    description:
+      "Optional commit note recorded on this version (#488, shown in version history).",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(280)
+  message?: string;
 }
 
 /** Promote a workflow's definition from the ACTIVE env (X-Environment-Id) to a target env. */

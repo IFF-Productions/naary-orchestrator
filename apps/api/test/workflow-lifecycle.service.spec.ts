@@ -43,6 +43,7 @@ describe("saveWorkflow", () => {
       "K",
       GRAPH,
       undefined,
+      undefined, // #488 saveMessage (none)
     );
     expect(schedules.syncPollSchedule).toHaveBeenCalledWith(
       "t-1",
@@ -175,6 +176,7 @@ describe("G1 permission gates", () => {
       "K",
       GRAPH,
       member,
+      undefined, // #488 saveMessage (none)
     );
   });
 

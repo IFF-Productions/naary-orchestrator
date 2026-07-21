@@ -48,6 +48,8 @@ export class WorkflowLifecycleService {
     name: string,
     graph: GraphDef,
     actor?: Principal,
+    /** Optional commit note for this version (#488). */
+    saveMessage?: string,
   ): Promise<GraphSnapshot> {
     const snap = await this.graphs.upsert(
       tenantId,
@@ -56,6 +58,7 @@ export class WorkflowLifecycleService {
       name,
       graph,
       actor,
+      saveMessage,
     );
     await this.schedules
       .syncPollSchedule(tenantId, environmentId, workflowKey, graph)

@@ -388,6 +388,7 @@ export class GraphsController {
       body.name,
       graph,
       principal,
+      body.message,
     );
     return {
       workflowKey: body.workflowKey,

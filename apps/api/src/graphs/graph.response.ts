@@ -1,4 +1,4 @@
-import { ApiProperty } from "@nestjs/swagger";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 
 /** One organizational tag chip on a workflow row (tags are never permissions). */
 export class GraphTagResponse {
@@ -60,6 +60,22 @@ export class GraphVersionResponse {
   @ApiProperty({ description: "sha256 of the canonical graph." })
   contentHash!: string;
   @ApiProperty({ format: "date-time" }) createdAt!: string;
+  @ApiPropertyOptional({
+    type: "string",
+    nullable: true,
+    example: "ada@acme.io",
+    description:
+      "Who saved this version (email / 'api-token'); null for promoted or pre-feature rows (#488).",
+  })
+  savedBy!: string | null;
+  @ApiPropertyOptional({
+    type: "string",
+    nullable: true,
+    example: "Add retry to the HTTP node",
+    description:
+      "Optional commit note recorded on save; null when none (#488).",
+  })
+  saveMessage!: string | null;
 }
 
 /** A workflow's bound error-handler key (null = none). */
