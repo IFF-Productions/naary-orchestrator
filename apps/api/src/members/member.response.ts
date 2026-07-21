@@ -28,4 +28,13 @@ export class MemberResponse {
   })
   status!: "active" | "invited";
   @ApiProperty({ format: "date-time" }) createdAt!: string;
+  @ApiPropertyOptional({
+    type: "string",
+    format: "date-time",
+    nullable: true,
+    description:
+      "Last authenticated request in this workspace (active rows only). null = not seen " +
+      "since tracking began; absent on invited rows.",
+  })
+  lastActiveAt?: string | null;
 }

@@ -365,6 +365,9 @@ export interface Member {
   role: string;
   status: "active" | "invited";
   createdAt: string;
+  /** Last authenticated request in this workspace (active rows only). null = not seen
+   *  since tracking began; absent on invited rows. */
+  lastActiveAt?: string | null;
 }
 export interface TenantSettings {
   displayName: string | null;

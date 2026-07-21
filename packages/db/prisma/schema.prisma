@@ -514,12 +514,16 @@ model Environment {
 // table is the source of truth. (The guard does NOT enforce against this yet — added
 // in a later slice; today it's populated + read by /me/workspaces only.)
 model Membership {
-  id        String   @id @default(uuid())
-  userId    String // Firebase uid
-  tenantId  String
-  role      String   @default("member") // 'owner' | 'admin' | 'member'
-  email     String? // the user's email at join time (directory convenience)
-  createdAt DateTime @default(now())
+  id           String    @id @default(uuid())
+  userId       String // Firebase uid
+  tenantId     String
+  role         String    @default("member") // 'owner' | 'admin' | 'member'
+  email        String? // the user's email at join time (directory convenience)
+  createdAt    DateTime  @default(now())
+  // Last time this user made an authenticated request in this workspace (the guard stamps
+  // it, DB-side-throttled). NULL = never seen since the column was added. Telemetry only —
+  // never an authz input.
+  lastActiveAt DateTime?
 
   @@unique([userId, tenantId])
   @@index([userId])

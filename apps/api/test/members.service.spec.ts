@@ -76,7 +76,13 @@ beforeEach(() => {
 describe("MembersService.list", () => {
   it("returns Membership rows ∪ pending invitations with a status discriminator", async () => {
     membership.findMany.mockResolvedValue([
-      { userId: "u-1", email: "a@x.com", role: "owner", createdAt: now },
+      {
+        userId: "u-1",
+        email: "a@x.com",
+        role: "owner",
+        createdAt: now,
+        lastActiveAt: now,
+      },
     ]);
     invitation.findMany.mockResolvedValue([
       { id: "inv-1", email: "b@x.com", role: "member", createdAt: now },
@@ -89,6 +95,7 @@ describe("MembersService.list", () => {
         role: "owner",
         status: "active",
         createdAt: now.toISOString(),
+        lastActiveAt: now.toISOString(),
       },
       {
         id: "inv-1",

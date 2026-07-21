@@ -23,6 +23,9 @@ export interface MemberView {
   role: string;
   status: MemberStatus;
   createdAt: string;
+  /** Last authenticated request in this workspace (#489). Active rows only; null = not seen
+   *  since the column was added. Absent on invited rows (they have no membership yet). */
+  lastActiveAt?: string | null;
 }
 
 /** Roles only the workspace OWNER may grant or revoke (design RBAC-GROUPS.md §4). */
@@ -274,6 +277,7 @@ function activeView(r: {
   email: string | null;
   role: string;
   createdAt: Date;
+  lastActiveAt: Date | null;
 }): MemberView {
   return {
     id: r.userId,
@@ -282,6 +286,7 @@ function activeView(r: {
     role: r.role,
     status: "active",
     createdAt: r.createdAt.toISOString(),
+    lastActiveAt: r.lastActiveAt ? r.lastActiveAt.toISOString() : null,
   };
 }
 

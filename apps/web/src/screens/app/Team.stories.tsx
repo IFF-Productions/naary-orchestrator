@@ -2,6 +2,10 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { http, HttpResponse } from "msw";
 import { Team } from "./Team";
 
+/** Relative "last active" fixture — minutes ago from render time, so the story shows the
+ *  live "5m/2h/1d ago" buckets rather than stale absolute dates (#489). */
+const minsAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+
 /** RBAC U1 member rows: active memberships ∪ pending invitations. */
 const MEMBERS = [
   {
@@ -11,6 +15,7 @@ const MEMBERS = [
     role: "owner",
     status: "active",
     createdAt: "2026-01-12T09:00:00Z",
+    lastActiveAt: minsAgo(3), // "3m ago"
   },
   {
     id: "u-james",
@@ -19,6 +24,7 @@ const MEMBERS = [
     role: "admin",
     status: "active",
     createdAt: "2026-02-03T09:00:00Z",
+    lastActiveAt: minsAgo(95), // "1h ago"
   },
   {
     id: "u-sam",
@@ -27,6 +33,7 @@ const MEMBERS = [
     role: "member",
     status: "active",
     createdAt: "2026-03-19T09:00:00Z",
+    lastActiveAt: minsAgo(60 * 26), // "1d ago"
   },
   {
     id: "u-ada",
@@ -35,6 +42,7 @@ const MEMBERS = [
     role: "member",
     status: "active",
     createdAt: "2026-05-02T09:00:00Z",
+    lastActiveAt: "2026-04-30T09:00:00Z", // old → absolute date
   },
   {
     id: "u-dana",
@@ -43,6 +51,7 @@ const MEMBERS = [
     role: "member",
     status: "active",
     createdAt: "2026-06-21T09:00:00Z",
+    lastActiveAt: null, // "Never" — invited-then-joined but not yet seen since tracking
   },
   {
     id: "inv-1",
