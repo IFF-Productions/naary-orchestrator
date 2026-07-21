@@ -9,6 +9,15 @@ import { defineQuery, defineSignal } from "@temporalio/workflow";
 
 export const TASK_QUEUE = "orchestrator";
 
+/** Dedicated queue for long/heavy activities (Queue-mode §3.3) so they can't starve interactive
+ *  latency. A separate worker pool polls it (docker-compose `worker-heavy`, or a process with
+ *  WORKER_TASK_QUEUE=orchestrator-heavy). The workflow statically routes codeAgent here, behind a
+ *  wf.patched gate that preserves REPLAY determinism only (a history that already ran codeAgent
+ *  keeps its original queue). A run reaching codeAgent for the first time after this deploy takes
+ *  this queue — so, hard deploy ordering: a heavy poller MUST be up before the routing code, else
+ *  those activities strand. */
+export const TASK_QUEUE_HEAVY = "orchestrator-heavy";
+
 /** Workflow type name — lets the client start runGraph by name if desired. */
 export const RUN_GRAPH_WORKFLOW = "runGraph";
 

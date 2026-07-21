@@ -17,7 +17,6 @@ initMetrics({ component: "worker" });
 import { createServer } from "node:http";
 import { hostname } from "node:os";
 import { NativeConnection, Worker } from "@temporalio/worker";
-import { TASK_QUEUE } from "@naary/contracts";
 import { disconnectPrisma } from "@naary/db";
 import { createLogger } from "@naary/logging";
 import { metricsContentType, renderMetrics } from "@naary/metrics";
@@ -28,7 +27,11 @@ import * as activities from "./temporal/activities";
 import { logActivities } from "./temporal/log-activities";
 import { countActivities } from "./temporal/activity-gauge";
 import { startHeartbeat } from "./worker-heartbeat";
-import { workerIdentity, workerTuning } from "./worker-tuning";
+import {
+  resolveTaskQueue,
+  workerIdentity,
+  workerTuning,
+} from "./worker-tuning";
 
 // Structured logger for worker BOOT code only. NOT imported by workflows.ts —
 // logging is I/O and would break deterministic replay (CLAUDE.md Tier-1 rule 2).
@@ -76,6 +79,10 @@ async function run(): Promise<void> {
 
   const metricsServer = startMetricsServer();
 
+  // The queue this process polls (Queue-mode §3.3): default `orchestrator`; a heavy worker sets
+  // WORKER_TASK_QUEUE=orchestrator-heavy. One queue per process → one heartbeat identity.
+  const taskQueue = resolveTaskQueue();
+
   // Connection options (TLS / API-key / namespace) from env, defaulting to the
   // local dev server — Temporal Cloud needs only env, no code change.
   const { address, namespace, tls, apiKey, metadata } =
@@ -90,7 +97,7 @@ async function run(): Promise<void> {
     const worker = await Worker.create({
       connection,
       namespace,
-      taskQueue: TASK_QUEUE,
+      taskQueue,
       // Identify this replica on every Temporal poller (Queue-mode Slice 1) so the fleet can be
       // told apart; the registry keys on it. Capacity/drain knobs come from env (unset → defaults).
       identity: workerIdentity(),
@@ -118,7 +125,7 @@ async function run(): Promise<void> {
     });
     log.info(
       {
-        taskQueue: TASK_QUEUE,
+        taskQueue,
         address,
         namespace,
         identity: workerIdentity(),
@@ -130,7 +137,7 @@ async function run(): Promise<void> {
     // (never affects execution). maxActivities = the configured cap, else the SDK default (100).
     const heartbeat = startHeartbeat(
       {
-        taskQueue: TASK_QUEUE,
+        taskQueue,
         host: hostname(),
         maxActivities:
           workerTuning().maxConcurrentActivityTaskExecutions ?? 100,

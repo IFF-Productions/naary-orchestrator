@@ -4,6 +4,14 @@
  */
 import { hostname } from "node:os";
 import type { WorkerOptions } from "@temporalio/worker";
+import { TASK_QUEUE } from "@naary/contracts";
+
+/** The task queue THIS worker process polls (Queue-mode §3.3). Default `orchestrator`; a heavy
+ *  worker sets WORKER_TASK_QUEUE=orchestrator-heavy. ONE queue per process keeps the heartbeat
+ *  identity (workerIdentity) 1:1 with a queue and the process-global slot gauge accurate. */
+export function resolveTaskQueue(env: NodeJS.ProcessEnv = process.env): string {
+  return env.WORKER_TASK_QUEUE?.trim() || TASK_QUEUE;
+}
 
 /** Temporal's Duration, derived from WorkerOptions rather than imported from
  *  @temporalio/common — common isn't a direct dep, and adding it would create a second

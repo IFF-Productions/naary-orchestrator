@@ -9,6 +9,7 @@ import {
   getIntegrationAction,
   asNodeConfig,
 } from "@naary/dsl";
+import * as wf from "@temporalio/workflow";
 import type { NodeOutputMap } from "@naary/dsl";
 import type * as activities from "../../activities";
 import {
@@ -16,6 +17,7 @@ import {
   runAgentTooled,
   callMcpTool,
   callCodeAgent,
+  callCodeAgentHeavy,
   callIntegrationRead,
   callIntegrationWrite,
   retryOverride,
@@ -44,13 +46,25 @@ export const handleCodeAgent: NodeHandler = async ({
   cfg,
   ctx,
   node,
+  runCtx,
   metaFor,
 }) => {
   // The prompt's {{…}} is already resolved in `cfg`. No retryOverride: this node is
   // AT-MOST-ONCE (its proxy block pins maximumAttempts:1) — later slices commit/PR,
   // so a partial write must never auto-retry. The activity fetches the BYOK key.
   const caCfg = asNodeConfig(cfg, "codeAgent");
-  const caResult = await callCodeAgent(
+  // Heavy-queue routing (Queue-mode §3.3): codeAgent is the long/heavy node, so route it to the
+  // dedicated pool (orchestrator-heavy). STATIC per activity (not a runtime/env read — replay-safe).
+  // wf.patched only preserves REPLAY determinism: a history that already ran this step keeps its
+  // original queue. A run reaching codeAgent for the FIRST time after this deploy (even one started
+  // earlier) DOES take the heavy queue — hence the hard deploy-order rule that the heavy pool be up
+  // first, else those activities strand. Test-mode runs stay on the default queue (`!runCtx.test`)
+  // so the single-queue e2e/live worker isn't stranded (the heavy proxy is asserted in the unit test).
+  const callCa =
+    wf.patched("heavy-queue-v1") && !runCtx.test
+      ? callCodeAgentHeavy
+      : callCodeAgent;
+  const caResult = await callCa(
     {
       tool: caCfg.tool,
       prompt: caCfg.prompt,
