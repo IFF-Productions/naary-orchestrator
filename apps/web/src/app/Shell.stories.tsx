@@ -72,6 +72,27 @@ export const ContextBarStory: Story = {
         <ContextBar
           approvalsCount={6}
           compact={false}
+          phone={false}
+          drawerOpen={false}
+          onToggleDrawer={() => {}}
+        />
+      </div>
+    </Providers>
+  ),
+};
+
+/** Phone (≤640): the bar must stay a SINGLE row — hamburger · env · count-only approvals ·
+ *  theme · notifications · avatar (no brand tile / builder CTA). */
+export const ContextBarPhone: Story = {
+  name: "Context bar · phone",
+  parameters: { viewport: { defaultViewport: "mobile1" } },
+  render: () => (
+    <Providers>
+      <div style={{ background: "var(--bg)", minHeight: 220, maxWidth: 390 }}>
+        <ContextBar
+          approvalsCount={6}
+          compact
+          phone
           drawerOpen={false}
           onToggleDrawer={() => {}}
         />
@@ -192,6 +213,7 @@ export const FullChrome: Story = {
         <ContextBar
           approvalsCount={6}
           compact={false}
+          phone={false}
           drawerOpen={false}
           onToggleDrawer={() => {}}
         />

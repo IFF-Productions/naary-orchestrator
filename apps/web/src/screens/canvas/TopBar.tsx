@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Icon, StatusPill } from "../../components";
 import type { GraphSummary } from "../../lib/api";
+import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 
 export interface TopBarEnv {
   name: string;
@@ -90,6 +91,7 @@ export function CanvasTopBar({
   onRun: () => void;
 }) {
   const navigate = useNavigate();
+  const phone = useMediaQuery(PHONE_QUERY);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -119,47 +121,78 @@ export function CanvasTopBar({
         background: "var(--panel)",
         display: "flex",
         alignItems: "center",
-        gap: 12,
-        padding: "0 16px",
+        gap: phone ? 8 : 12,
+        padding: phone ? "0 10px" : "0 16px",
         position: "relative",
         zIndex: 8,
         minWidth: 0,
       }}
     >
-      {/* flame tile → back to the app */}
-      <button
-        type="button"
-        aria-label="Back to Naary"
-        title="Back to Naary"
-        onClick={() => navigate("/app")}
-        style={{
-          width: 28,
-          height: 28,
-          flex: "none",
-          borderRadius: 8,
-          border: "none",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background:
-            "radial-gradient(120% 120% at 50% 120%, #ffb347, #f2622e 55%, #c8331f)",
-          boxShadow: "0 0 14px -2px rgba(242, 98, 46, 0.6)",
-          cursor: "pointer",
-          color: "#fff3ec",
-          padding: 0,
-        }}
-      >
-        <Icon name="flame" size={16} />
-      </button>
+      {/* Back to the app. On desktop it's the brand flame tile; on a phone it's an explicit,
+          labeled "Exit" pill so a user dropped onto the full-screen canvas (e.g. via Simple mode's
+          "Open in Builder") is never trapped — the app nav isn't on this route. */}
+      {phone ? (
+        <button
+          type="button"
+          aria-label="Exit to app"
+          title="Exit to app"
+          onClick={() => navigate("/app")}
+          style={{
+            flex: "none",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            height: 40,
+            padding: "0 12px",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--line-2)",
+            background: "var(--card)",
+            color: "var(--ink)",
+            fontSize: "var(--text-sm)",
+            fontWeight: "var(--weight-semibold)",
+            cursor: "pointer",
+          }}
+        >
+          <Icon name="arrow-left" size={16} />
+          Exit
+        </button>
+      ) : (
+        <button
+          type="button"
+          aria-label="Back to Naary"
+          title="Back to Naary"
+          onClick={() => navigate("/app")}
+          style={{
+            width: 28,
+            height: 28,
+            flex: "none",
+            borderRadius: 8,
+            border: "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background:
+              "radial-gradient(120% 120% at 50% 120%, #ffb347, #f2622e 55%, #c8331f)",
+            boxShadow: "0 0 14px -2px rgba(242, 98, 46, 0.6)",
+            cursor: "pointer",
+            color: "#fff3ec",
+            padding: 0,
+          }}
+        >
+          <Icon name="flame" size={16} />
+        </button>
+      )}
 
-      {/* name (editable, styled as plain bold text) + mono meta */}
+      {/* name (editable, styled as plain bold text) + mono meta. On a phone the name shrinks
+          FIRST (so the right cluster's Save/Run stay put) and the mono key·version meta is
+          hidden to save the row. */}
       <div
         style={{
           display: "flex",
           alignItems: "baseline",
           gap: 8,
           minWidth: 0,
-          flex: "0 1 auto",
+          flex: phone ? "1 1 auto" : "0 1 auto",
         }}
       >
         <input
@@ -178,32 +211,40 @@ export function CanvasTopBar({
             fontFamily: "var(--font-sans)",
             borderRadius: 7,
             padding: "4px 6px",
-            minWidth: 60,
-            maxWidth: 260,
+            minWidth: phone ? 0 : 60,
+            maxWidth: phone ? "100%" : 260,
+            width: phone ? "100%" : undefined,
           }}
         />
-        <span style={{ color: "var(--ink-3)", flex: "none" }}>/</span>
-        <span
-          className="mono"
-          style={{ ...monoLabel, fontSize: 11, whiteSpace: "nowrap" }}
-          title="workflow key · saved version"
-        >
-          {activeKey} · {version != null ? `v${version}` : "draft"}
-        </span>
+        {!phone && (
+          <>
+            <span style={{ color: "var(--ink-3)", flex: "none" }}>/</span>
+            <span
+              className="mono"
+              style={{ ...monoLabel, fontSize: 11, whiteSpace: "nowrap" }}
+              title="workflow key · saved version"
+            >
+              {activeKey} · {version != null ? `v${version}` : "draft"}
+            </span>
+          </>
+        )}
       </div>
 
-      {/* validity + issues */}
-      <StatusPill
-        state={generating ? "running" : graphValid ? "done" : "error"}
-        label={
-          generating
-            ? "building…"
-            : graphValid
-              ? "valid"
-              : (graphError ?? "invalid")
-        }
-      />
-      {!generating && issuesCount > 0 && (
+      {/* validity + issues — hidden on a phone to keep the bar to one clean row (validity is
+          re-surfaced on save; issues open from the same overflow menu). */}
+      {!phone && (
+        <StatusPill
+          state={generating ? "running" : graphValid ? "done" : "error"}
+          label={
+            generating
+              ? "building…"
+              : graphValid
+                ? "valid"
+                : (graphError ?? "invalid")
+          }
+        />
+      )}
+      {!phone && !generating && issuesCount > 0 && (
         <button
           type="button"
           onClick={onToggleIssues}
@@ -217,7 +258,7 @@ export function CanvasTopBar({
       )}
 
       {/* active environment chip (real active env — colored by convention) */}
-      {env && (
+      {!phone && env && (
         <span
           title={`Active environment: ${env.name}`}
           style={{
@@ -247,17 +288,18 @@ export function CanvasTopBar({
         </span>
       )}
 
-      {/* right cluster */}
+      {/* right cluster — flex:none so Save / Save & run / the "…" menu never shrink or clip on a
+          phone (the workflow name shrinks first instead). */}
       <div
         style={{
           marginLeft: "auto",
           display: "flex",
           alignItems: "center",
-          gap: 10,
-          minWidth: 0,
+          gap: phone ? 6 : 10,
+          flex: "none",
         }}
       >
-        {status && (
+        {!phone && status && (
           <span
             title={status}
             style={{
@@ -274,7 +316,7 @@ export function CanvasTopBar({
         )}
 
         {/* RUN CAP — only when the budget policy really sets a per-execution cap */}
-        {runCapUsd != null && runCapUsd > 0 && (
+        {!phone && runCapUsd != null && runCapUsd > 0 && (
           <span
             title="Per-execution budget cap (Usage & budgets policy)"
             style={{ textAlign: "right", flex: "none" }}
@@ -304,9 +346,13 @@ export function CanvasTopBar({
           </span>
         )}
 
-        <Button variant="secondary" disabled={busy} onClick={onToggleAi}>
-          {showAi ? "Close AI" : "✨ Build with AI"}
-        </Button>
+        {/* Build with AI is hidden on a phone (dense power feature; AI authoring lives in Simple
+            mode + the overflow menu) so Save / Save & run stay on the single row. */}
+        {!phone && (
+          <Button variant="secondary" disabled={busy} onClick={onToggleAi}>
+            {showAi ? "Close AI" : "✨ Build with AI"}
+          </Button>
+        )}
 
         {/* overflow menu: import / export / run input / workflow switcher */}
         <div ref={menuRef} style={{ position: "relative", flex: "none" }}>

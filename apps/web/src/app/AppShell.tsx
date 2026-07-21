@@ -9,7 +9,11 @@
  */
 import { useEffect, useState } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { BELOW_DRAWER_QUERY, useMediaQuery } from "../lib/useMediaQuery";
+import {
+  BELOW_DRAWER_QUERY,
+  PHONE_QUERY,
+  useMediaQuery,
+} from "../lib/useMediaQuery";
 import { useActiveEnvironment } from "../lib/useActiveEnvironment";
 import { type Environment, api } from "../lib/api";
 import { useMode } from "../mode";
@@ -27,6 +31,7 @@ import { useApprovalsCount } from "./useApprovalsCount";
 export function AppShell() {
   // <= 1024: the nav rail becomes a hamburger slide-out drawer and the context bar wraps.
   const smallShell = useMediaQuery(BELOW_DRAWER_QUERY);
+  const phone = useMediaQuery(PHONE_QUERY);
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   // Dismissible "Builder is best on a larger screen" hint — per session (AppShell never
@@ -134,6 +139,7 @@ export function AppShell() {
       <ContextBar
         approvalsCount={approvalsCount}
         compact={smallShell}
+        phone={phone}
         drawerOpen={drawerOpen}
         onToggleDrawer={() => setDrawerOpen((o) => !o)}
       />
