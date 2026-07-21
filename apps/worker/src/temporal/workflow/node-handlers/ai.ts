@@ -24,10 +24,56 @@ import {
 } from "../proxies";
 import type { NodeHandler } from "./contract";
 
-export const handleAgent: NodeHandler = async ({ cfg, ctx, node, metaFor }) => {
+export const handleAgent: NodeHandler = async ({
+  cfg,
+  ctx,
+  node,
+  runCtx,
+  metaFor,
+}) => {
   // tenantId flows in workflow args (not a secret); the activity fetches
   // the tenant's key by tenantId. executionId is deterministic.
   const agentCfg = cfg as unknown as activities.AgentConfig;
+
+  // Claude Code as an Agent provider: run the agent's instruction through the Claude Code CLI
+  // (the codeAgent activity, read-mode plan run) instead of a raw LLM call. The provider check is
+  // FIRST so wf.patched is only reached on this NEW path — existing agent histories keep the exact
+  // runAgent command sequence (replay-safe). Billing flows through the code-agent activity's own
+  // recordUsage (same as a codeAgent node), so there's no double/under-count.
+  if (
+    agentCfg.provider === "claude-code" &&
+    wf.patched("agent-claude-code-v1")
+  ) {
+    // The CLI's `-p` prompt is the PRIMARY instruction slot (systemPrompt only appends to the
+    // CLI's own system prompt), so the agent's systemPrompt IS the prompt; the upstream input is
+    // appended as data. This mirrors how a codeAgent node's `prompt` is meant to be filled, NOT
+    // runAgent's system/user split (which would demote the real instruction).
+    const parts: string[] = [];
+    if (agentCfg.systemPrompt) parts.push(agentCfg.systemPrompt);
+    if (ctx.__input !== undefined && ctx.__input !== null)
+      parts.push(`Input:\n${JSON.stringify(ctx.__input)}`);
+    const prompt = parts.join("\n\n") || "Respond to the input.";
+    // Same heavy-queue + test-mode split as handleCodeAgent (this IS a codeAgent run).
+    const callCa =
+      wf.patched("heavy-queue-v1") && !runCtx.test
+        ? callCodeAgentHeavy
+        : callCodeAgent;
+    const caResult = await callCa(
+      { tool: "claude", prompt, model: agentCfg.model },
+      ctx.__input,
+      metaFor(node.id),
+    );
+    // Normalize to the AGENT output shape so downstream `agent.output.*` expressions keep working:
+    // the Claude Code result text becomes `output.text` (like a schema-less agent's free text).
+    ctx[node.id] = {
+      status: "ok",
+      output: { text: caResult.output.result },
+      model: agentCfg.model ?? "claude-code",
+      costUsd: caResult.costUsd,
+    } satisfies NodeOutputMap["agent"];
+    return { costUsd: caResult.costUsd };
+  }
+
   // Tooled agents (#449) run a multi-step loop with nested MCP calls → a longer deadline
   // and AT-MOST-ONCE by default (runAgentTooled), so a retried activity never replays an
   // already-executed tool. An explicit NodeDef.retry still wins (and gets the long timeout).

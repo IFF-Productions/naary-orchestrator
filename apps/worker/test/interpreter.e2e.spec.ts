@@ -31,6 +31,7 @@ const WORKFLOWS_PATH = path.join(__dirname, "../src/temporal/workflows.ts");
 // activity is unit-tested in agent.activity.spec.ts; live run is deferred until
 // a provider key is supplied.) Captures the meta to prove tenantId threading.
 const agentCalls: activities.AgentMeta[] = [];
+const codeAgentCalls: activities.CodeAgentActivityConfig[] = [];
 const mockActivities = {
   runAgent: async (
     _cfg: activities.AgentConfig,
@@ -62,6 +63,23 @@ const mockActivities = {
       output: { category: "billing", urgency: 3 },
       model: "claude-opus-4-8",
       costUsd: 0.01,
+    };
+  },
+  // Claude-Code-as-Agent-provider routing: an agent node with provider "claude-code" runs the
+  // codeAgent activity instead of runAgent. Capture the mapped config to prove the mapping.
+  callCodeAgent: async (
+    cfg: activities.CodeAgentActivityConfig,
+    _input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.CodeAgentResult> => {
+    codeAgentCalls.push(cfg);
+    return {
+      status: "ok",
+      output: {
+        result: "PLAN: summarize the input",
+        tool: cfg.tool ?? "claude",
+      },
+      costUsd: 0.02,
     };
   },
   callMcpTool: async (
@@ -1120,6 +1138,63 @@ describe("runGraph interpreter — unresolved-input diagnostic (ctx.__unresolved
         },
       ]);
       expect(diag.ok).toBeUndefined();
+    });
+  });
+});
+
+describe("runGraph interpreter — Claude Code as an Agent provider", () => {
+  it("routes an agent with provider 'claude-code' to the codeAgent activity (prompt = instruction + input)", async () => {
+    codeAgentCalls.length = 0;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const graph: GraphDef = {
+        startNodeId: "trigger",
+        nodes: [
+          { id: "trigger", type: "webhookTrigger" },
+          {
+            id: "agent",
+            type: "agent",
+            config: {
+              provider: "claude-code",
+              model: "claude-opus-4-8",
+              systemPrompt: "Summarize the input in one line.",
+            },
+          },
+          { id: "end", type: "end" },
+        ],
+        edges: [
+          { from: "trigger", to: "agent" },
+          { from: "agent", to: "end" },
+        ],
+      };
+      const handle = await env.client.workflow.start(runGraph, {
+        // test:true keeps codeAgent on the DEFAULT queue (the single-queue e2e has no
+        // orchestrator-heavy worker) — same as the codeAgent node's own e2e path.
+        args: [graph, { msg: "hello world" }, { tenantId: "t-cc", test: true }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-agent-claude-code",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const final = await handle.query(stateQuery);
+
+      // The codeAgent activity ran (NOT runAgent), with the agent's instruction as the PRIMARY
+      // `-p` prompt and the upstream input appended — never runAgent's system/user split.
+      expect(codeAgentCalls).toHaveLength(1);
+      expect(codeAgentCalls[0].tool).toBe("claude");
+      expect(codeAgentCalls[0].prompt).toContain(
+        "Summarize the input in one line.",
+      );
+      expect(codeAgentCalls[0].prompt).toContain("hello world");
+
+      // Output is normalized to the AGENT shape so downstream `agent.output.text` keeps working.
+      const out = final.ctx.agent as {
+        output: { text: string };
+        model: string;
+        costUsd: number;
+      };
+      expect(out.output.text).toBe("PLAN: summarize the input");
+      expect(out.model).toBe("claude-opus-4-8");
+      expect(out.costUsd).toBe(0.02);
     });
   });
 });
