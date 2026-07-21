@@ -147,7 +147,7 @@ export function CategoryRail({
             left: 66,
             top: 10,
             width: 288,
-            maxHeight: "min(560px, calc(100vh - 140px))",
+            maxHeight: "min(560px, calc(100dvh - 140px))",
             overflowY: "auto",
             background: "var(--panel)",
             border: "1px solid var(--line-mid)",

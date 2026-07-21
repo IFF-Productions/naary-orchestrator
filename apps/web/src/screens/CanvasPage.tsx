@@ -1467,7 +1467,10 @@ export function CanvasPage() {
       style={{
         display: "flex",
         flexDirection: "column",
-        height: "100vh",
+        // dvh, NOT vh: on iOS/iPadOS Safari `100vh` counts the area behind the browser toolbar,
+        // so a 100vh root is TALLER than the visible viewport and the whole page scrolls past the
+        // screen. `100dvh` (dynamic viewport height) is the actually-visible height — no page scroll.
+        height: "100dvh",
         background: "var(--bg)",
         color: "var(--ink)",
         position: "relative",
@@ -1757,7 +1760,7 @@ export function CanvasPage() {
                 ? {
                     // Capped viewport when the inspector shares the column; full height otherwise.
                     flex: showDock ? "none" : 1,
-                    height: showDock ? "min(52vh, 460px)" : undefined,
+                    height: showDock ? "min(52dvh, 460px)" : undefined,
                     minHeight: 0,
                     width: "100%",
                     position: "relative",
