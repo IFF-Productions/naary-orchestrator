@@ -100,6 +100,8 @@ export class GraphsService {
      *  needs `edit`; a NEW key needs `canCreate` (its own verb, 'all'-scope only, §8.3).
      *  Absent for internal callers (promote's copy-in, seeds) — those are pre-authorized. */
     actor?: Principal,
+    /** Optional commit note for this version (#488, API/CLI-settable). */
+    saveMessage?: string,
   ): Promise<GraphSnapshot> {
     // Reject a malformed graph BEFORE it can be persisted/started (QA#8): the
     // interpreter also guards at runtime (terminal invalid_graph), but catching it
@@ -144,6 +146,11 @@ export class GraphsService {
       };
     }
     const version = (latest?.version ?? 0) + 1;
+    // #488: record WHO saved (a display string — email for a user, "api-token" for a token; NULL
+    // for internal/promote copy-in, which is actor-less by design) and the optional WHY.
+    const savedBy = actor
+      ? (actor.email ?? actor.subject ?? "api-token")
+      : null;
     const row = await getPrisma().graphDefinition.create({
       data: {
         tenantId,
@@ -153,6 +160,8 @@ export class GraphsService {
         graph: graph as object,
         contentHash,
         version,
+        savedBy,
+        saveMessage: saveMessage?.trim() || null,
       },
     });
     return {
@@ -363,17 +372,33 @@ export class GraphsService {
     environmentId: string,
     workflowKey: string,
     actor?: Principal,
-  ): Promise<{ version: number; contentHash: string; createdAt: string }[]> {
+  ): Promise<
+    {
+      version: number;
+      contentHash: string;
+      createdAt: string;
+      savedBy: string | null;
+      saveMessage: string | null;
+    }[]
+  > {
     await this.assertActor(actor, "view", workflowKey, environmentId);
     const rows = await getPrisma().graphDefinition.findMany({
       where: { tenantId, environmentId, workflowKey },
       orderBy: { version: "desc" },
-      select: { version: true, contentHash: true, createdAt: true },
+      select: {
+        version: true,
+        contentHash: true,
+        createdAt: true,
+        savedBy: true,
+        saveMessage: true,
+      },
     });
     return rows.map((r) => ({
       version: r.version,
       contentHash: r.contentHash,
       createdAt: r.createdAt.toISOString(),
+      savedBy: r.savedBy ?? null,
+      saveMessage: r.saveMessage ?? null,
     }));
   }
 

@@ -92,18 +92,27 @@ export const GRAPHS_BY_ENV: Record<
  *  story: sandbox v8 == UAT v4 (1 behind), sandbox v6 == prod v3 (3 behind). */
 export const VERSIONS_BY_ENV: Record<
   string,
-  { version: number; contentHash: string; createdAt: string }[]
+  {
+    version: number;
+    contentHash: string;
+    createdAt: string;
+    savedBy?: string | null;
+    saveMessage?: string | null;
+  }[]
 > = {
   "e-sb": [
     {
       version: 9,
       contentHash: "sha-i9",
       createdAt: at("2026-07-19T08:00:00Z"),
+      savedBy: "ada@acme.io",
+      saveMessage: "Add retry + timeout to the HTTP node",
     },
     {
       version: 8,
       contentHash: "sha-h8",
       createdAt: at("2026-07-18T08:30:00Z"),
+      savedBy: "sam@acme.io",
     },
     {
       version: 7,

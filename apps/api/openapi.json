@@ -14309,6 +14309,18 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "savedBy": {
+            "type": "string",
+            "nullable": true,
+            "example": "ada@acme.io",
+            "description": "Who saved this version (email / 'api-token'); null for promoted or pre-feature rows (#488)."
+          },
+          "saveMessage": {
+            "type": "string",
+            "nullable": true,
+            "example": "Add retry to the HTTP node",
+            "description": "Optional commit note recorded on save; null when none (#488)."
           }
         },
         "required": [
@@ -14371,6 +14383,11 @@
             "type": "object",
             "additionalProperties": true,
             "description": "The graph: { nodes, edges, startNodeId }."
+          },
+          "message": {
+            "type": "string",
+            "example": "Add retry to the HTTP node",
+            "description": "Optional commit note recorded on this version (#488, shown in version history)."
           }
         },
         "required": [

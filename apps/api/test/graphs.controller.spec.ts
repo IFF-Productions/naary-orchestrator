@@ -70,6 +70,7 @@ describe("GraphsController", () => {
       "Canvas draft",
       validGraph,
       undefined,
+      undefined, // #488 message (none in this body)
     );
   });
 

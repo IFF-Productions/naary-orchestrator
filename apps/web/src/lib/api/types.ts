@@ -80,11 +80,15 @@ export interface DashboardItem {
   /** 12-col grid span: 4 (third), 6 (half), or 12 (full). */
   span: number;
 }
-/** One stored version of a workflow (identity only) — for the re-run-at-version picker. */
+/** One stored version of a workflow — for the re-run-at-version picker + version history. */
 export interface GraphVersion {
   version: number;
   contentHash: string;
   createdAt: string;
+  /** Who saved this version (email / "api-token"); null for promoted or pre-feature rows (#488). */
+  savedBy?: string | null;
+  /** Optional commit note recorded on save; null when none (#488). */
+  saveMessage?: string | null;
 }
 export interface NamedGraph {
   workflowKey: string;

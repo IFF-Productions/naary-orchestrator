@@ -153,6 +153,52 @@ describe("GraphsService.upsert", () => {
       workflowKey: "default",
       version: 1,
     });
+    // No actor → savedBy null (internal/seed save); no message.
+    expect(create.mock.calls[0][0].data).toMatchObject({
+      savedBy: null,
+      saveMessage: null,
+    });
+  });
+
+  it("records who saved (email) + the commit message from an actor (#488)", async () => {
+    findFirst.mockResolvedValue(null);
+    create.mockImplementation(async ({ data }) => ({ ...data }));
+    // An actor triggers the §4 save gate — wire a permitting PermissionsService (new key ⇒
+    // assertCanCreate) so the fail-closed seam doesn't throw before the write.
+    const perms = { assertCanCreate: vi.fn(), assertCan: vi.fn() } as never;
+
+    await new GraphsService(perms).upsert(
+      "t1",
+      "e1",
+      "default",
+      "Demo",
+      graph,
+      { tenantId: "t1", subject: "uid-9", email: "ada@acme.io" } as never,
+      "  Add retry  ",
+    );
+
+    expect(create.mock.calls[0][0].data).toMatchObject({
+      savedBy: "ada@acme.io", // prefers email over the raw uid for display
+      saveMessage: "Add retry", // trimmed
+    });
+  });
+
+  it("falls back to 'api-token' for an actor with no email/subject (#488)", async () => {
+    findFirst.mockResolvedValue(null);
+    create.mockImplementation(async ({ data }) => ({ ...data }));
+    const perms = { assertCanCreate: vi.fn(), assertCan: vi.fn() } as never;
+
+    await new GraphsService(perms).upsert(
+      "t1",
+      "e1",
+      "default",
+      "Demo",
+      graph,
+      { tenantId: "t1", role: "owner" } as never,
+    );
+
+    expect(create.mock.calls[0][0].data.savedBy).toBe("api-token");
+    expect(create.mock.calls[0][0].data.saveMessage).toBeNull();
   });
 
   it("is a no-op (same version) when the content hash is unchanged", async () => {
@@ -309,18 +355,39 @@ describe("GraphsService.listVersions", () => {
   it("lists every version newest-first, identity only (no graph bodies)", async () => {
     const now = new Date("2026-07-13T00:00:00.000Z");
     findMany.mockResolvedValue([
-      { version: 3, contentHash: "h3", createdAt: now },
-      { version: 2, contentHash: "h2", createdAt: now },
-      { version: 1, contentHash: "h1", createdAt: now },
+      {
+        version: 3,
+        contentHash: "h3",
+        createdAt: now,
+        savedBy: "ada@acme.io",
+        saveMessage: "tweak retry",
+      },
+      {
+        version: 2,
+        contentHash: "h2",
+        createdAt: now,
+        savedBy: null,
+        saveMessage: null,
+      },
+      {
+        version: 1,
+        contentHash: "h1",
+        createdAt: now,
+        savedBy: null,
+        saveMessage: null,
+      },
     ]);
 
     const out = await new GraphsService().listVersions("t1", "e1", "refunds");
 
     expect(out.map((v) => v.version)).toEqual([3, 2, 1]);
+    // #488: who/when/why ride along on each version row.
     expect(out[0]).toEqual({
       version: 3,
       contentHash: "h3",
       createdAt: now.toISOString(),
+      savedBy: "ada@acme.io",
+      saveMessage: "tweak retry",
     });
     const arg = findMany.mock.calls[0][0];
     expect(arg.where).toEqual({
