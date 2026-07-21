@@ -500,6 +500,8 @@ export interface AuditEvent {
   method: string;
   path: string;
   statusCode: number;
+  /** Canonical Environment.id the actor had selected (#464); null when none. */
+  environmentId?: string | null;
   createdAt: string;
 }
 

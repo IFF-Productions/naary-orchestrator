@@ -8,6 +8,8 @@ export interface AuditEventView {
   method: string;
   path: string;
   statusCode: number;
+  /** Canonical Environment.id the actor had selected (#464); null when none. */
+  environmentId: string | null;
   createdAt: string;
 }
 
@@ -18,6 +20,8 @@ export interface RecordAuditInput {
   method: string;
   path: string;
   statusCode: number;
+  /** Canonical Environment.id (already resolved by the caller); omit/null for none. */
+  environmentId?: string | null;
 }
 
 /** Append-only activity log. Writes are best-effort (an audit failure must never
@@ -45,6 +49,7 @@ export class AuditService {
       method: r.method,
       path: r.path,
       statusCode: r.statusCode,
+      environmentId: r.environmentId ?? null,
       createdAt: r.createdAt.toISOString(),
     }));
   }

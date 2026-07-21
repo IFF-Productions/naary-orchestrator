@@ -4,16 +4,33 @@ import { of } from "rxjs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuditInterceptor } from "../src/audit/audit.interceptor";
 import { actionFor, type AuditService } from "../src/audit/audit.service";
+import type { EnvironmentsService } from "../src/environments/environments.service";
 
 const record = vi.fn();
+/** Fake env resolver: id-first-then-slug, mirroring the real resolveEnvId, over a tiny table.
+ *  A slug ("sandbox") and its id ("env-sandbox") both resolve to the same canonical id. */
+const resolveEnvId = vi.fn(async (_tenantId: string, sel?: string | null) => {
+  const table: Record<string, string> = {
+    "env-sandbox": "env-sandbox",
+    sandbox: "env-sandbox",
+    prod: "env-prod",
+  };
+  const hit = table[(sel ?? "").trim().toLowerCase()] ?? table[sel ?? ""];
+  if (!hit) throw new Error(`Unknown environment '${sel}'.`);
+  return hit;
+});
+
 function makeInterceptor(): AuditInterceptor {
-  return new AuditInterceptor({ record } as unknown as AuditService);
+  return new AuditInterceptor(
+    { record } as unknown as AuditService,
+    { resolveEnvId } as unknown as EnvironmentsService,
+  );
 }
 
 function ctx(req: {
   method: string;
   path: string;
-  principal?: { tenantId: string; subject?: string };
+  principal?: { tenantId: string; subject?: string; environmentSel?: string };
 }): ExecutionContext {
   return {
     switchToHttp: () => ({
@@ -32,7 +49,10 @@ async function run(interceptor: AuditInterceptor, c: ExecutionContext) {
   });
 }
 
-beforeEach(() => record.mockReset());
+beforeEach(() => {
+  record.mockReset();
+  resolveEnvId.mockClear();
+});
 
 describe("AuditInterceptor", () => {
   it("records a successful mutating request with actor + derived action", async () => {
@@ -90,6 +110,72 @@ describe("AuditInterceptor", () => {
       }),
     );
     expect(record).not.toHaveBeenCalled();
+  });
+
+  // #464 — the actor's selected env is resolved to a canonical id and stamped. The resolve
+  // happens in an async tap, so let its microtask settle before asserting.
+  const settle = () => new Promise<void>((r) => setTimeout(r, 0));
+
+  it("stamps the resolved environmentId from a SLUG selection (SPA case)", async () => {
+    await run(
+      makeInterceptor(),
+      ctx({
+        method: "POST",
+        path: "/graphs",
+        principal: {
+          tenantId: "t-1",
+          subject: "u-9",
+          environmentSel: "sandbox",
+        },
+      }),
+    );
+    await settle();
+    expect(resolveEnvId).toHaveBeenCalledWith("t-1", "sandbox");
+    expect(record.mock.calls[0][0].environmentId).toBe("env-sandbox");
+  });
+
+  it("resolves a bound-token UUID selection to the SAME canonical id as the slug", async () => {
+    await run(
+      makeInterceptor(),
+      ctx({
+        method: "POST",
+        path: "/graphs",
+        principal: { tenantId: "t-1", environmentSel: "env-sandbox" },
+      }),
+    );
+    await settle();
+    // The uuid form and the slug form both normalise to the one canonical id — so audit rows
+    // from a CI token and from a browser tag the same environment identically.
+    expect(record.mock.calls[0][0].environmentId).toBe("env-sandbox");
+  });
+
+  it("stamps null when NO env is selected (no default-tagging of env-less actions)", async () => {
+    await run(
+      makeInterceptor(),
+      ctx({
+        method: "POST",
+        path: "/tenants/t-1/members",
+        principal: { tenantId: "t-1", subject: "u-9" },
+      }),
+    );
+    await settle();
+    expect(resolveEnvId).not.toHaveBeenCalled();
+    expect(record.mock.calls[0][0].environmentId).toBeNull();
+  });
+
+  it("degrades a STALE/unknown env selection to null (never surfaces the throw)", async () => {
+    await run(
+      makeInterceptor(),
+      ctx({
+        method: "POST",
+        path: "/graphs",
+        principal: { tenantId: "t-1", environmentSel: "ghost-env" },
+      }),
+    );
+    await settle();
+    // resolveEnvId threw NotFound — the best-effort tap swallows it and still records the row.
+    expect(record).toHaveBeenCalledOnce();
+    expect(record.mock.calls[0][0].environmentId).toBeNull();
   });
 });
 

@@ -231,6 +231,7 @@ const AUDIT = [
     method: "POST",
     path: "/tenants/t1/graphs",
     statusCode: 201,
+    environmentId: "env-prod",
     createdAt: ago(0.05),
   },
   {
@@ -240,6 +241,7 @@ const AUDIT = [
     method: "POST",
     path: "/executions/wh-t1-9d2c71/approve",
     statusCode: 202,
+    environmentId: "env-prod",
     createdAt: ago(1),
   },
   {
@@ -249,6 +251,7 @@ const AUDIT = [
     method: "POST",
     path: "/executions",
     statusCode: 201,
+    environmentId: "env-sandbox",
     createdAt: ago(3),
   },
   {
@@ -258,6 +261,7 @@ const AUDIT = [
     method: "PUT",
     path: "/tenants/t1/credentials",
     statusCode: 200,
+    environmentId: "env-sandbox",
     createdAt: ago(5),
   },
   {
@@ -267,6 +271,7 @@ const AUDIT = [
     method: "POST",
     path: "/tenants/t1/schedules",
     statusCode: 201,
+    environmentId: "env-uat",
     createdAt: ago(26),
   },
   {
@@ -296,6 +301,13 @@ const handlers = [
     HttpResponse.json(INSIGHTS),
   ),
   http.get("*/api/tenants/:t/audit", () => HttpResponse.json(AUDIT)),
+  http.get("*/api/tenants/:t/environments", () =>
+    HttpResponse.json([
+      { id: "env-prod", name: "Production", slug: "prod", isDefault: true },
+      { id: "env-sandbox", name: "Sandbox", slug: "sandbox", isDefault: false },
+      { id: "env-uat", name: "UAT", slug: "uat", isDefault: false },
+    ]),
+  ),
 ];
 
 const meta: Meta<typeof Observability> = {

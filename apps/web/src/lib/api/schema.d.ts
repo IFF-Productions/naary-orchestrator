@@ -1168,6 +1168,11 @@ export interface components {
       path: string;
       /** @example 200 */
       statusCode: number;
+      /**
+       * @description Canonical Environment.id the actor had selected when acting; null when none. The actor's env context, not a resource FK.
+       * @example env_7c1de4
+       */
+      environmentId?: string | null;
       /** Format: date-time */
       createdAt: string;
     };

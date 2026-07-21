@@ -17,6 +17,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   api,
   type AuditEvent,
+  type Environment,
   type InsightsReport,
   type RunSummary,
   UnauthorizedError,
@@ -59,6 +60,7 @@ export function Observability() {
   const [tenantId, setTenantId] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
   const [audit, setAudit] = useState<AuditEvent[] | null>(null);
+  const [envById, setEnvById] = useState<Map<string, string>>(new Map());
   const [insights, setInsights] = useState<InsightsReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,13 +72,17 @@ export function Observability() {
         const me = await api.getMe();
         if (!live) return;
         setTenantId(me.tenantId);
-        const [r, a] = await Promise.all([
+        const [r, a, envs] = await Promise.all([
           api.listRuns(),
           api.getAuditLog(me.tenantId),
+          // Env id→name for the audit env chip (#464). Best-effort: a failure just
+          // means the chip shows nothing, never breaks the log.
+          api.listEnvironments(me.tenantId).catch(() => [] as Environment[]),
         ]);
         if (!live) return;
         setRuns(r);
         setAudit(a);
+        setEnvById(new Map(envs.map((e) => [e.id, e.name])));
         setError(null);
       } catch (e) {
         if (!live) return;
@@ -225,6 +231,7 @@ export function Observability() {
           filter={auditFilter}
           onFilter={setAuditFilter}
           now={now0}
+          envName={(id) => envById.get(id) ?? null}
         />
       )}
     </div>
