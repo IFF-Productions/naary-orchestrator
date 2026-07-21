@@ -10,8 +10,9 @@ test("create, pause, and delete a schedule", async ({ page }) => {
 
   await page.goto("/app/schedules");
 
-  // Create for the seeded "default" workflow (the create flow lives in a dialog).
-  await page.getByRole("button", { name: "New schedule" }).click();
+  // Create for the seeded "default" workflow (the create flow lives in a dialog). first() —
+  // when the list is empty the screen shows both a header and an empty-state "New schedule".
+  await page.getByRole("button", { name: "New schedule" }).first().click();
   await page.getByRole("combobox").selectOption("default");
   await page.getByPlaceholder("0 9 * * 1-5").fill(cron);
   await page.getByRole("button", { name: "Create schedule" }).click();

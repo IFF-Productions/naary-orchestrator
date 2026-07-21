@@ -1,58 +1,59 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * BYOK model-provider cards on the Integrations screen.
+ * BYOK model-provider cards on the Integrations screen (redesigned: cards → a key DIALOG).
  *
- * No real provider key is needed: we assert the UI gating only — the supported
- * provider (Anthropic) exposes an "Add key" affordance with an inline form, and
- * unsupported providers (OpenAI/Google) render "Coming soon" instead. Proving an
- * agent run succeeds with a real key is BYOK and intentionally out of scope here.
+ * No real provider key is needed: we assert the UI only — each model provider (Anthropic /
+ * OpenAI / Google) exposes an "Add key" affordance that opens a key dialog with a
+ * provider-named password field + Save. Proving an agent run succeeds with a real key is
+ * BYOK and intentionally out of scope here.
  */
 test.describe("integrations — model provider keys", () => {
-  test("Anthropic offers an inline key form; others show Coming soon", async ({
+  test("a model provider opens a key dialog with a password field", async ({
     page,
   }) => {
     await page.goto("/app/integrations");
 
+    // Providers (BYOK) is the default tab.
     await expect(
-      page.getByText("Model providers", { exact: true }),
+      page.getByRole("tab", { name: "Providers (BYOK)" }),
     ).toBeVisible();
 
-    // All three providers are supported (BYOK) → each exposes a key affordance.
-    // The first card is Anthropic; open its inline form.
+    // Each model provider exposes an "Add key" affordance; open the first (Anthropic).
     const keyButton = page
       .getByRole("button", { name: /Add key|Update key/ })
       .first();
     await expect(keyButton).toBeVisible();
 
-    // Clicking the affordance opens an inline (password) key form.
+    // Clicking it opens a key dialog with the provider-named (password) field + Save.
     await keyButton.click();
     await expect(page.getByPlaceholder("Anthropic API key")).toBeVisible();
     await expect(page.getByRole("button", { name: "Save key" })).toBeVisible();
 
-    // Cancel collapses the form again.
+    // Cancel closes the dialog.
     await page.getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByPlaceholder("Anthropic API key")).toHaveCount(0);
   });
 });
 
 /**
- * Connection management — the "Connect a database" card (postgres/mssql) that
- * feeds the SQL Query node. UI gating only (no real DB / no mutation): the card
- * exposes engine/host/DSN fields, and the engine selector swaps the DSN hint.
+ * Connection management — the "SQL databases" card opens a "Connect a database" dialog
+ * (postgres/mysql/mssql) that feeds the SQL Query node. UI only (no real DB / no mutation):
+ * the dialog exposes engine/host/DSN fields, and the engine selector swaps the DSN hint.
  */
 test.describe("integrations — database connections", () => {
-  test("Connect a database card exposes engine/host/DSN; engine toggles the DSN hint", async ({
+  test("the SQL databases card opens a dialog with engine/host/DSN; engine toggles the DSN hint", async ({
     page,
   }) => {
     await page.goto("/app/integrations");
 
+    await expect(page.getByText("SQL databases")).toBeVisible();
+
+    // Open the SQL databases connection dialog (the first "Add connection" group).
+    await page.getByRole("button", { name: "Add connection" }).first().click();
     await expect(
       page.getByText("Connect a database", { exact: true }),
     ).toBeVisible();
-
-    // The form is a collapsible now — expand it to reveal the fields.
-    await page.getByRole("button", { name: /Connect a database/ }).click();
 
     // Non-secret host + the secret DSN field (its placeholder is the postgres DSN).
     await expect(page.getByPlaceholder("localhost:5432")).toBeVisible();

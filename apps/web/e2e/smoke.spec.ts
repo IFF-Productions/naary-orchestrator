@@ -13,7 +13,11 @@ test("authenticated app shell renders", async ({ page }) => {
   // The shell chrome: nav links + the sign-out control (now inside the avatar
   // menu in the context bar).
   await expect(page.getByRole("link", { name: "Overview" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Workflows" })).toBeVisible();
+  // exact — a screen may also link to /app/workflows ("All workflows →"), so an
+  // unscoped substring match is ambiguous against the sidebar nav link.
+  await expect(
+    page.getByRole("link", { name: "Workflows", exact: true }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Account" }).click();
   await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
 });

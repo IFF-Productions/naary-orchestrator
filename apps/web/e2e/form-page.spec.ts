@@ -13,8 +13,8 @@ test("hosted form: register in Integrations, then submit the public page anonymo
   browser,
 }) => {
   // ---- register the form (AUTHENTICATED app) ----
-  await page.goto("/app/integrations");
-  await page.getByRole("button", { name: /Register a form/ }).click();
+  await page.goto("/app/integrations?tab=webhooks");
+  await page.getByRole("button", { name: "New form" }).click();
   await page.getByPlaceholder("contact-form").fill("e2e-form");
   await page.getByRole("button", { name: "Register", exact: true }).click();
 
@@ -44,7 +44,7 @@ test("hosted form: register in Integrations, then submit the public page anonymo
     await visitor.getByRole("button", { name: "Send it" }).click();
 
     // ---- completion screen ----
-    await expect(visitor.getByText("Thanks — we've got it.")).toBeVisible({
+    await expect(visitor.getByText("Request received")).toBeVisible({
       timeout: 15_000,
     });
   } finally {
