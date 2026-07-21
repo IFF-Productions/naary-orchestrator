@@ -287,6 +287,20 @@ export class AuthGuard implements CanActivate {
       role: roleOf(active),
       environmentSel,
     };
+
+    // Record last-active for the Team screen (#489). Fire-and-forget + NON-authorizing: it must
+    // add no latency and never 500 an authed request, so we do NOT await it (unlike the
+    // best-effort backfills above, which the membership read depends on). DB-side throttled, so
+    // this is a cheap no-op write in steady state. `nry_` tokens (services) never reach here.
+    void this.memberships
+      .touchLastActive(user.userId, active)
+      .catch((err) =>
+        this.logger.warn(
+          `last-active stamp failed for user=${user.userId} tenant=${active}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        ),
+      );
     return true;
   }
 }

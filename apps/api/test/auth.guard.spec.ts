@@ -18,6 +18,7 @@ const firebaseVerify = vi.fn();
 const listForUser = vi.fn();
 const ensureMembership = vi.fn();
 const acceptPendingInvitations = vi.fn();
+const touchLastActive = vi.fn();
 const isTenantEnforced = vi.fn();
 const getAllAndOverride = vi.fn();
 let firebaseEnabled = false;
@@ -35,6 +36,7 @@ function makeGuard(): AuthGuard {
     listForUser,
     ensureMembership,
     acceptPendingInvitations,
+    touchLastActive,
   } as unknown as MembershipService;
   const permissions = {
     isTenantEnforced,
@@ -69,6 +71,7 @@ beforeEach(() => {
   listForUser.mockReset().mockResolvedValue([]);
   ensureMembership.mockReset().mockResolvedValue(undefined);
   acceptPendingInvitations.mockReset().mockResolvedValue(undefined);
+  touchLastActive.mockReset().mockResolvedValue(undefined);
   isTenantEnforced.mockReset().mockResolvedValue(false);
   firebaseEnabled = false;
   userScoped = false;

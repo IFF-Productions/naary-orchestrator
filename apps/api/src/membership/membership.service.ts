@@ -6,6 +6,10 @@ import { type MembershipCache, type UserMembership } from "./membership-cache";
 /** DI token for the swappable cache (in-memory today; Redis behind REDIS_URL later). */
 export const MEMBERSHIP_CACHE = Symbol("MEMBERSHIP_CACHE");
 
+/** Coalesce last-active writes: at most one UPDATE per user+workspace per this window, so the
+ *  hot auth path never writes on every request. Enforced DB-side by the conditional WHERE. */
+const LAST_ACTIVE_THROTTLE_MS = 5 * 60 * 1000;
+
 /**
  * Reads a user's workspaces + roles through the cache (design §6). The DB is the source
  * of truth; the cache is a per-user read-through with explicit invalidation on every
@@ -30,6 +34,28 @@ export class MembershipService {
     });
     this.cache.set(userId, rows);
     return rows;
+  }
+
+  /**
+   * Record that this user just made an authenticated request in this workspace (#489, the
+   * Team screen's "Last active"). Fire-and-forget from the guard — NEVER await it on the hot
+   * path, and it must never affect authz.
+   *
+   * DB-side throttled: the conditional WHERE writes only when the stored value is NULL or older
+   * than {@link LAST_ACTIVE_THROTTLE_MS}, so a burst of requests coalesces to one UPDATE per
+   * window (no read-then-write, no per-request write). `updateMany` because we key by the
+   * (userId, tenantId) unique pair without needing the row id; a zero-row result is normal.
+   */
+  async touchLastActive(userId: string, tenantId: string): Promise<void> {
+    const staleBefore = new Date(Date.now() - LAST_ACTIVE_THROTTLE_MS);
+    await getPrisma().membership.updateMany({
+      where: {
+        userId,
+        tenantId,
+        OR: [{ lastActiveAt: null }, { lastActiveAt: { lt: staleBefore } }],
+      },
+      data: { lastActiveAt: new Date() },
+    });
   }
 
   /**

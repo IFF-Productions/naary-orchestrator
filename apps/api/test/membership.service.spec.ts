@@ -3,13 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const findMany = vi.fn();
 const upsert = vi.fn();
 const create = vi.fn();
+const updateMany = vi.fn();
 const settingsUpsert = vi.fn();
 const settingsUpdateMany = vi.fn();
 const invFindMany = vi.fn();
 const invUpdate = vi.fn();
 vi.mock("@naary/db", () => ({
   getPrisma: () => ({
-    membership: { findMany, upsert, create },
+    membership: { findMany, upsert, create, updateMany },
     tenantSettings: { upsert: settingsUpsert, updateMany: settingsUpdateMany },
     invitation: { findMany: invFindMany, update: invUpdate },
   }),
@@ -28,6 +29,7 @@ beforeEach(() => {
   findMany.mockReset();
   upsert.mockReset().mockResolvedValue({});
   create.mockReset().mockResolvedValue({});
+  updateMany.mockReset().mockResolvedValue({ count: 1 });
   settingsUpsert.mockReset().mockResolvedValue({});
   settingsUpdateMany.mockReset().mockResolvedValue({ count: 0 });
   invFindMany.mockReset().mockResolvedValue([]);
@@ -127,6 +129,42 @@ describe("MembershipService", () => {
 });
 
 // --- Accept-on-login (RBAC-GROUPS.md §5, slice U1) ---
+describe("MembershipService.touchLastActive (#489)", () => {
+  it("writes lastActiveAt only when NULL or older than the throttle window (DB-side WHERE)", async () => {
+    const svc = makeService();
+    const before = Date.now();
+    await svc.touchLastActive("u-1", "t-1");
+    const after = Date.now();
+
+    expect(updateMany).toHaveBeenCalledTimes(1);
+    const arg = updateMany.mock.calls[0][0];
+    // Keyed by the (userId, tenantId) unique pair — no row-id read needed.
+    expect(arg.where.userId).toBe("u-1");
+    expect(arg.where.tenantId).toBe("t-1");
+    // The throttle lives in the WHERE: NULL OR stale-past-the-window; a fresh row matches
+    // nothing, so a burst coalesces to at most one write per window.
+    expect(arg.where.OR).toHaveLength(2);
+    expect(arg.where.OR[0]).toEqual({ lastActiveAt: null });
+    const staleBefore = arg.where.OR[1].lastActiveAt.lt as Date;
+    // The cutoff is ~5 minutes in the past (300_000ms), computed at call time.
+    const cutoff = staleBefore.getTime();
+    expect(cutoff).toBeGreaterThanOrEqual(before - 5 * 60 * 1000 - 5);
+    expect(cutoff).toBeLessThanOrEqual(after - 5 * 60 * 1000 + 5);
+    // The write stamps "now".
+    const stamped = (arg.data.lastActiveAt as Date).getTime();
+    expect(stamped).toBeGreaterThanOrEqual(before - 5);
+    expect(stamped).toBeLessThanOrEqual(after + 5);
+  });
+
+  it("never throws to the caller path when the DB write itself rejects is the guard's job — here it simply propagates a rejection the guard swallows", async () => {
+    const svc = makeService();
+    updateMany.mockRejectedValueOnce(new Error("db down"));
+    // The service does not swallow — the AUTH GUARD does (fire-and-forget .catch). This asserts
+    // the method surfaces the error rather than hiding it, so the guard's warn-log fires.
+    await expect(svc.touchLastActive("u-1", "t-1")).rejects.toThrow("db down");
+  });
+});
+
 describe("MembershipService.acceptPendingInvitations", () => {
   const invite = {
     id: "inv-1",

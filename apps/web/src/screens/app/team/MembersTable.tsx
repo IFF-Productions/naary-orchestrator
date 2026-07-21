@@ -1,11 +1,12 @@
 /**
  * Members tab — role legend chips, the member table (avatar · role chip ·
- * "Can approve" · joined · kebab) and pending invitations as the comp's footer
+ * "Can approve" · last active · kebab) and pending invitations as the comp's footer
  * rows (dashed envelope avatar, "Invite pending · role", revoke).
  *
+ * "Last active" (#489) is Membership.lastActiveAt, stamped by the auth guard on each
+ * authenticated request in the workspace (5-min-throttled); "Never" until first seen.
+ *
  * OMITTED vs the comp (data honesty):
- *  - "Last active" — the backend stores no activity timestamp; we show "Joined"
- *    (Membership.createdAt) instead, which is real.
  *  - "Resend" on pending invites — no resend endpoint exists (invitees join by
  *    signing in with the invited email; nothing is re-sendable). Revoke only.
  */
@@ -17,6 +18,7 @@ import {
   displayName,
   groupsOf,
   initials,
+  lastActive,
   ROLE_AVATAR,
   roleColor,
   roleCounts,
@@ -322,7 +324,7 @@ export function MembersTable({
             <span>Member</span>
             <span>Role</span>
             <span>Can approve</span>
-            <span>Joined</span>
+            <span>Last active</span>
             <span />
           </div>
 
@@ -420,8 +422,11 @@ export function MembersTable({
                     {approve.detail}
                   </div>
                 </div>
-                <div style={{ fontSize: 11.5, color: "var(--ink-faint)" }}>
-                  {shortDate(m.createdAt)}
+                <div
+                  style={{ fontSize: 11.5, color: "var(--ink-faint)" }}
+                  title={`Joined ${shortDate(m.createdAt)}`}
+                >
+                  {lastActive(m.lastActiveAt)}
                 </div>
                 {menu.length > 0 ? (
                   <KebabMenu items={menu} label={`Actions for ${m.email}`} />

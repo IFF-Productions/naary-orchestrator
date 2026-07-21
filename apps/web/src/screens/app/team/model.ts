@@ -210,3 +210,24 @@ export function shortDate(iso: string): string {
       : { month: "short", day: "numeric", year: "numeric" };
   return d.toLocaleDateString(undefined, opts);
 }
+
+/**
+ * Relative "last active" label (#489). null/undefined ⇒ "Never" (honest — we haven't seen
+ * this member since tracking began), otherwise a coarse "5m/2h/3d ago", falling back to an
+ * absolute {@link shortDate} past a week. Coarse on purpose: the backend throttles the write
+ * to a 5-minute granularity, so anything finer would be false precision.
+ */
+export function lastActive(iso: string | null | undefined): string {
+  if (!iso) return "Never";
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "—";
+  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (secs < 60) return "Just now";
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return shortDate(iso);
+}
