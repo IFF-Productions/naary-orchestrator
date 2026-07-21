@@ -3,6 +3,7 @@ import type { Node } from "@xyflow/react";
 import type { NodeType } from "@naary/dsl";
 import { ExpressionField } from "../../components/ExpressionField";
 import type { ConnectionRow, TestNodeResult } from "../../lib/api";
+import { useFlag } from "../../workspace/FlagsProvider";
 import {
   ACCENT,
   NODE_DESCRIPTION,
@@ -43,6 +44,8 @@ export interface ConfigSectionCtx {
   nodeKinds: Record<string, string>;
   connections: ConnectionRow[];
   pins: Record<string, unknown>;
+  /** Feature-gated (#491): show the HTTP/GraphQL node import tools (cURL/OpenAPI/introspect). */
+  showImportTools: boolean;
 }
 
 /** Per-type config editor for the selected node — matches the design's inspector.
@@ -84,6 +87,8 @@ export function ConfigPanel({
 }) {
   const kind = node.data.kind;
   const config = node.data.config ?? {};
+  // Kill-switch flag (defaults ON where Flagsmith isn't wired) gating the node import tools (#491).
+  const showImportTools = useFlag("canvas-import-tools");
   const str = (k: string) => (config[k] as string | undefined) ?? "";
   const num = (k: string) => config[k] as number | undefined;
   const obj = (k: string) =>
@@ -124,6 +129,7 @@ export function ConfigPanel({
     nodeKinds,
     connections,
     pins,
+    showImportTools,
   };
 
   return (

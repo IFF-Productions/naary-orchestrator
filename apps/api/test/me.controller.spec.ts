@@ -26,6 +26,8 @@ describe("MeController", () => {
     expect(flags).toEqual({
       "chat-rag": false,
       "new-canvas-inspector": false,
+      // Kill-switch: safe default is ON so the gated feature stays visible without a provider.
+      "canvas-import-tools": true,
     });
   });
 });

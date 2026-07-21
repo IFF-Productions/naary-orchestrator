@@ -47,6 +47,13 @@ export const workspacesApi = {
       body: JSON.stringify({ dashboard }),
     });
   },
+  // This workspace's feature flags (flag key → enabled), evaluated server-side for the
+  // caller's tenant only. The SPA gates UI on these (#491); unwrap the { flags } envelope.
+  getFlags(): Promise<Record<string, boolean>> {
+    return http<{ flags: Record<string, boolean> }>("/me/flags").then(
+      (r) => r.flags,
+    );
+  },
   // Create a new workspace owned by the caller. The tenantId is server-generated (never
   // sent from the client); requires a verified-email Firebase user (server-enforced).
   // `name` (optional) seeds the workspace display name.

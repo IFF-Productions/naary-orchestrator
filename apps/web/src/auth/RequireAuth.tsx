@@ -10,6 +10,7 @@ import { Button } from "../components";
 import { hasToken } from "../lib/auth";
 import { NotAvailable } from "../screens/NotAvailable";
 import { CreateWorkspace } from "../workspace/CreateWorkspace";
+import { FlagsProvider } from "../workspace/FlagsProvider";
 import {
   WorkspaceProvider,
   useWorkspace,
@@ -68,5 +69,11 @@ function WorkspaceGate() {
     );
   }
   if (needsWorkspace) return <CreateWorkspace />;
-  return <Outlet />;
+  // A workspace is resolved here → mount the flags fetch under it (re-fetches on switch via
+  // WorkspaceProvider's key remount). Fail-safe, so it never gates the app render (#491).
+  return (
+    <FlagsProvider>
+      <Outlet />
+    </FlagsProvider>
+  );
 }
