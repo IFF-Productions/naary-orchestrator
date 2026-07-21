@@ -9,6 +9,15 @@ type PathSeg =
 /** Matches a bracket accessor (`[*]` or `[<n>]`) OR a bare dotted key run. */
 const SEG_RE = /\[(\*|\d+)\]|([^.[\]]+)/g;
 
+/**
+ * Full-path grammar for a bracketed path: a key or bracket accessor, then any run of
+ * `.key` / `[<n>]` / `[*]`. Anything else (a stray `[`, unbalanced brackets, non-numeric
+ * index like `a[foo]`) fails to match — so we reject it as unresolvable rather than
+ * best-effort reinterpreting `a[foo].b` as the dotted `a.foo.b` (Copilot review, #478).
+ */
+const BRACKET_PATH_RE =
+  /^(?:[^.[\]]+|\[(?:\*|\d+)\])(?:\.[^.[\]]+|\[(?:\*|\d+)\])*$/;
+
 /** Parse `a.b[*].c[0]` → key a · key b · wildcard · key c · index 0. Pure; never throws. */
 function parsePath(path: string): PathSeg[] {
   const segs: PathSeg[] = [];
@@ -31,8 +40,8 @@ function walkSegs(value: unknown, segs: PathSeg[], i: number): unknown {
   if (seg.kind === "wildcard") {
     // Array projection (#478): map the REST of the path over each element, returning an
     // array. `[*]` over a non-array yields undefined (a missing token, like a bad key) — so
-    // an author who writes `x[*].id` on a scalar gets empty, never a throw. Nested `[*]`
-    // nests (array of arrays), the least-surprising compositional rule.
+    // `x[*].id` on a scalar resolves to undefined, never a throw. Nested `[*]` nests (array
+    // of arrays), the least-surprising compositional rule.
     if (!Array.isArray(value)) return undefined;
     return value.map((el) => walkSegs(el, segs, i + 1));
   }
@@ -48,7 +57,8 @@ function walkSegs(value: unknown, segs: PathSeg[], i: number): unknown {
  * Read a dotted/bracketed path out of a value. `getByPath(obj)` (no path) returns obj.
  * Supports object keys (`a.b`), array indices (`a[0]`), and the array-projection wildcard
  * `a[*].b` (#478) — which maps `.b` over each element of the array `a`. Pure + total — a
- * missing/mismatched segment yields undefined, never throws. Safe in the deterministic workflow.
+ * missing/mismatched segment (or a malformed bracket path) yields undefined, never throws.
+ * Safe in the deterministic workflow.
  */
 export function getByPath(value: unknown, path?: string): unknown {
   if (!path) return value;
@@ -60,6 +70,10 @@ export function getByPath(value: unknown, path?: string): unknown {
       return (acc as Record<string, unknown>)[key];
     }, value);
   }
+  // A bracket appears → require the WHOLE path to match the accessor grammar. A malformed
+  // path (stray/unbalanced bracket, non-numeric index) is unresolvable → undefined, rather
+  // than silently dropping the brackets and resolving a different path.
+  if (!BRACKET_PATH_RE.test(path)) return undefined;
   return walkSegs(value, parsePath(path), 0);
 }
 

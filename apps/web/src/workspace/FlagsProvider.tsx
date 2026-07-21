@@ -14,6 +14,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useState,
 } from "react";
 import { api } from "../lib/api";
@@ -75,10 +76,13 @@ export function FlagsProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Memoize the resolved map so the context value is referentially STABLE across unrelated
+  // parent re-renders — a fresh object each render would re-render every useFlag consumer
+  // (React context compares by reference). Only a real fetch result flips the reference.
+  const value = useMemo(() => resolveFlags(fetched), [fetched]);
+
   return (
-    <FlagsContext.Provider value={resolveFlags(fetched)}>
-      {children}
-    </FlagsContext.Provider>
+    <FlagsContext.Provider value={value}>{children}</FlagsContext.Provider>
   );
 }
 
