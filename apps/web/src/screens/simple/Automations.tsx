@@ -205,7 +205,9 @@ export function Automations() {
     <div
       style={{
         padding: phone ? "16px 16px 40px" : "22px 28px 40px",
-        maxWidth: 760,
+        // The Automations LIST is a responsive card grid — let it use the FULL content width
+        // (the grid's auto-fill keeps each card ~300–380px and just flows into more columns on
+        // wide screens). Simple-mode FORMS/detail stay narrow; only this list spans full width.
         animation: "naaryFadeUp .25s ease",
       }}
     >
@@ -293,7 +295,10 @@ export function Automations() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+          // auto-FIT (not auto-fill) so a few cards stretch to consume the full content width
+          // instead of leaving empty grid tracks on the right; still flows to more columns as
+          // the list grows. Min 300px keeps cards readable before wrapping on narrow screens.
+          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
           gap: 12,
         }}
       >
