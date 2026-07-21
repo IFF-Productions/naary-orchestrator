@@ -26,6 +26,7 @@ import { integrationsApi } from "./api/integrations";
 import { notificationsApi } from "./api/notifications";
 import { permissionsApi } from "./api/permissions";
 import { runsApi } from "./api/runs";
+import { workersApi } from "./api/workers";
 import { workspacesApi } from "./api/workspaces";
 
 export {
@@ -39,6 +40,7 @@ export {
   UnauthorizedError,
 } from "./api/http";
 export * from "./api/types";
+export type { WorkerRow } from "./api/workers";
 
 export const api = {
   ...graphsApi,
@@ -49,4 +51,5 @@ export const api = {
   ...permissionsApi,
   ...configApi,
   ...integrationsApi,
+  ...workersApi,
 };
