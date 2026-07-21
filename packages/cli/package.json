@@ -1,6 +1,6 @@
 {
   "name": "@naary/cli",
-  "version": "0.0.16",
+  "version": "0.0.17",
   "private": true,
   "description": "naary — a thin, dependency-free HTTP client over the public /api/v1 surface (runs, workflows, approvals). Node built-ins only; imports NO server code.",
   "main": "dist/index.js",
