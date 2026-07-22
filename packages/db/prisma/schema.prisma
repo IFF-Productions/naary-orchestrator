@@ -904,6 +904,26 @@ model BuilderSession {
   @@index([tenantId, status, updatedAt])
 }
 
+// Tenant-wide ($secrets) secrets (#459): a named secret that applies to EVERY environment, unlike
+// TenantCredential-backed env secrets. Same `secret:<NAME>` key namespace + same per-tenant envelope
+// encryption (AAD `${tenantId}:${key}`, env-independent — so ciphertext is crypto-identical to an env
+// secret). A SEPARATE table (not a null-env TenantCredential row) because TenantCredential's env FK is
+// NOT NULL and its unique is (tenantId, environmentId, provider) — a null env would break both. At
+// read time an env-specific secret of the same NAME OVERRIDES the tenant-wide one (env wins).
+model TenantSecret {
+  id         String   @id @default(uuid())
+  tenantId   String
+  key        String // same namespace as env secrets, e.g. `secret:MY_KEY`
+  ciphertext String // base64 AES-256-GCM ciphertext
+  iv         String // base64 nonce
+  authTag    String // base64 GCM auth tag
+  keyVersion Int      @default(3) // at-rest format: 3 = per-tenant DEK (TenantKey envelope)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([tenantId, key])
+}
+
 model BuilderTurn {
   id        String   @id @default(uuid())
   sessionId String

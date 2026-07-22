@@ -56,12 +56,17 @@ export const __mcpDeps = {
   resolveMcpTarget,
   callMcpTool: mcpCall,
   // Environment Secrets ($secrets): decrypt one named secret for the run's env (in-memory only).
+  // Env-specific value WINS over the tenant-wide one (#459 override precedence).
   getSecret: (
     tenantId: string,
     environmentId: string,
     name: string,
   ): Promise<string | null> =>
-    getSecretStore().get(tenantId, environmentId, `secret:${name}`),
+    getSecretStore().getWithGlobalFallback(
+      tenantId,
+      environmentId,
+      `secret:${name}`,
+    ),
 };
 
 /**

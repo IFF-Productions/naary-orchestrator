@@ -733,6 +733,19 @@ export interface paths {
     /** Delete a secret (active environment) */
     delete: operations["EnvSecretsController_remove"];
   };
+  "/env-secrets/global": {
+    /**
+     * List tenant-wide secret names (all environments)
+     * @description Names only — the value is write-only and never returned. An env-specific secret of the same name overrides these.
+     */
+    get: operations["EnvSecretsController_listGlobal"];
+  };
+  "/env-secrets/global/{name}": {
+    /** Set a tenant-wide secret value (all environments) */
+    put: operations["EnvSecretsController_setGlobal"];
+    /** Delete a tenant-wide secret (all environments) */
+    delete: operations["EnvSecretsController_removeGlobal"];
+  };
   "/introspect/openapi": {
     /** Introspect an OpenAPI/Swagger spec (JSON) → operation list */
     post: operations["IntrospectController_openapi"];
@@ -8726,6 +8739,111 @@ export interface operations {
   };
   /** Delete a secret (active environment) */
   EnvSecretsController_remove: {
+    parameters: {
+      path: {
+        name: string;
+      };
+    };
+    responses: {
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * List tenant-wide secret names (all environments)
+   * @description Names only — the value is write-only and never returned. An env-specific secret of the same name overrides these.
+   */
+  EnvSecretsController_listGlobal: {
+    responses: {
+      200: {
+        content: {
+          "application/json": components["schemas"]["EnvSecretResponse"][];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /** Set a tenant-wide secret value (all environments) */
+  EnvSecretsController_setGlobal: {
+    parameters: {
+      path: {
+        name: string;
+      };
+    };
+    responses: {
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /** Delete a tenant-wide secret (all environments) */
+  EnvSecretsController_removeGlobal: {
     parameters: {
       path: {
         name: string;

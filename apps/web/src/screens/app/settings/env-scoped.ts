@@ -52,4 +52,24 @@ export const envScoped = {
       ...inEnv(envId),
     });
   },
+
+  // Tenant-wide (global) secrets (#459) — apply to EVERY environment, so NO env header. An env-specific
+  // secret of the same name overrides the global one at run time. Values stay write-only (names out).
+  /** Tenant-wide secret NAMES (values are write-only, never returned). */
+  listGlobalSecrets(): Promise<{ name: string }[]> {
+    return http<{ name: string }[]>(`/env-secrets/global`);
+  },
+  /** Set/replace one tenant-wide secret's value (204). */
+  setGlobalSecret(name: string, value: string): Promise<void> {
+    return http<void>(`/env-secrets/global/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    });
+  },
+  /** Delete one tenant-wide secret (idempotent). */
+  deleteGlobalSecret(name: string): Promise<void> {
+    return http<void>(`/env-secrets/global/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+  },
 };
