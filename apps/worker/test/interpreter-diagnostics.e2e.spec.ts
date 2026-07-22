@@ -79,6 +79,40 @@ describe("runGraph interpreter — unresolved-input diagnostic (ctx.__unresolved
   });
 });
 
+describe("runGraph interpreter — per-run debug flag (ctx.__debug)", () => {
+  it("sets ctx.__debug only when the run opts in (byte-identical ctx otherwise)", async () => {
+    const worker = await makeWorker(env);
+    await worker.runUntil(async () => {
+      const graph: GraphDef = {
+        startNodeId: "trigger",
+        nodes: [
+          { id: "trigger", type: "webhookTrigger" },
+          { id: "end", type: "end" },
+        ],
+        edges: [{ from: "trigger", to: "end" }],
+      };
+      // debug:true in the run ctx → the interpreter seeds ctx.__debug so the Run Detail can show
+      // its debug view without any new state-query/API field.
+      const on = await env.client.workflow.start(runGraph, {
+        args: [graph, {}, { tenantId: "t-dbg", debug: true }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-debug-on",
+      });
+      expect((await on.result()).status).toBe("completed");
+      expect((await on.query(stateQuery)).ctx.__debug).toBe(true);
+
+      // A normal run never carries __debug — its ctx stays byte-identical to pre-feature.
+      const off = await env.client.workflow.start(runGraph, {
+        args: [graph, {}, { tenantId: "t-dbg" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-debug-off",
+      });
+      expect((await off.result()).status).toBe("completed");
+      expect((await off.query(stateQuery)).ctx.__debug).toBeUndefined();
+    });
+  });
+});
+
 describe("runGraph interpreter — Claude Code as an Agent provider", () => {
   it("routes an agent with provider 'claude-code' to the codeAgent activity (prompt = instruction + input)", async () => {
     codeAgentCalls.length = 0;

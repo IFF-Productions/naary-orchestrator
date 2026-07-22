@@ -54,6 +54,12 @@ export async function runGraph(
   const ctx: Record<string, unknown> = resume
     ? { ...resume.ctx }
     : { __input: input, ...(runCtx.seededCtx ?? {}) };
+  // Per-run debug (opt-in): a bounded flag in ctx so the Run Detail can surface the debug view
+  // WITHOUT any new state-query/API field — ctx already rides getState. Pure state (no Temporal
+  // command), replay-safe like __unresolved/__regionTrace; only set when the run opted in, so a
+  // normal run's ctx is byte-identical. The rich per-node detail the UI shows is derived from the
+  // node OUTPUTS already in ctx (model/tokens/cost/httpStatus) — nothing sensitive is added here.
+  if (runCtx.debug && !resume) ctx.__debug = true;
 
   // Fan-in join state (Slice N5). `mergeParents` maps a merge node id → its inbound
   // parents' ids in DECLARED edge order (its length is the expected in-degree);
@@ -76,6 +82,9 @@ export async function runGraph(
     environmentId: runCtx.environmentId,
     executionId: wf.workflowInfo().workflowId,
     nodeId,
+    // Per-run verbose logging: only present when the run opted in, so a normal run's meta is
+    // byte-identical to before (data-only threading, activity-side logging — no patched() needed).
+    ...(runCtx.debug ? { debug: true } : {}),
   });
 
   // Items model (design ITEMS-MODEL-CURRENT-ITEM.md): precompute the splitOut→region map. Pure +

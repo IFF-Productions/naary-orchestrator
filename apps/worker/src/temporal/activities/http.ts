@@ -35,6 +35,7 @@ import {
   type AgentMeta,
   getSecretStore,
   makeSecretResolver,
+  runLog,
   toSanitizedRetryable,
 } from "./shared";
 
@@ -192,7 +193,25 @@ export async function callHttpRequest(
   void input; // entry-node input flows via bindings, not directly into the request
   const startedAt = process.hrtime.bigint();
   let host = "unknown";
+  // Per-run debug logging (opt-in). Method + target host only — never the full URL/query (a secret
+  // could sit in a query param) and never headers/body.
+  const rlog = runLog(log, meta);
   try {
+    rlog.debug(
+      {
+        method: cfg.method,
+        host: (() => {
+          try {
+            return new URL(cfg.url).host;
+          } catch {
+            return "unknown";
+          }
+        })(),
+        connectionId: cfg.connectionId,
+        paginated: cfg.pagination?.mode,
+      },
+      "http node starting",
+    );
     const store = getObjectStore();
 
     // Auth comes ONLY from the connection, resolved in-memory here (never in config,

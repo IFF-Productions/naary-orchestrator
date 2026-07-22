@@ -32,6 +32,10 @@ export interface RunGraphCtx {
   environmentId?: string;
   /** The saved-graph key this run executes — recorded for the Runs list. */
   workflowKey?: string;
+  /** Per-run verbose logging (opt-in at start). Threaded to each activity's meta so a single run's
+   *  activities log at DEBUG while others stay at LOG_LEVEL. Non-secret; only set when true, so a
+   *  run started without it keeps byte-identical args (replay-safe, no patched()). */
+  debug?: boolean;
   perExecutionCapUsd?: number;
   maxStepsPerRun?: number;
   /** The tenant's onBudgetExceeded policy SNAPSHOTTED at start (Slice 3). Drives the
