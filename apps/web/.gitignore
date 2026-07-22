@@ -9,3 +9,7 @@ playwright-report/
 
 # Storybook build output
 storybook-static/
+
+# Generated OpenAPI client types — regenerated from apps/api/openapi.json before
+# every dev/build/typecheck (gen:api-types). Untracked to avoid churn (#499).
+src/lib/api/schema.d.ts
