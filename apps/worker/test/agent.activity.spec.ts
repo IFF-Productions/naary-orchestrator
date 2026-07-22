@@ -164,6 +164,19 @@ describe("runAgent", () => {
     expect(recorded.usage.outputTokens).toBeGreaterThan(0);
   });
 
+  it("maps 'No output generated' to NON-retryable AGENT_NO_OUTPUT, not a retry storm (#543)", async () => {
+    // The AI SDK throws NoOutputGeneratedError when a structured-output call yields nothing the
+    // schema accepts. It's deterministic (same prompt+schema), so it must NOT retry as AGENT_TRANSIENT.
+    const err = Object.assign(new Error("No output generated."), {
+      name: "AI_NoOutputGeneratedError",
+    });
+    generateText.mockRejectedValue(err);
+
+    const rejection = await runAgent(CFG, { msg: "x" }, META).catch((e) => e);
+    expect(rejection.nonRetryable).toBe(true);
+    expect(rejection.type).toBe("AGENT_NO_OUTPUT");
+  });
+
   it("maps provider 401 to a NON-retryable failure and records NO charge", async () => {
     const { APICallError } = await import("ai");
     generateText.mockRejectedValue(

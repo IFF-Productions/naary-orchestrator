@@ -603,6 +603,25 @@ export async function runAgent(
         );
       }
     }
+    // The model returned no output matching the agent's configured `outputSchema` (AI SDK
+    // NoOutputGeneratedError). This is NOT transient — the same prompt+schema will fail again, so
+    // retrying only burns tokens/cost and, as a retryable AGENT_TRANSIENT, alerts high-priority in
+    // Sentry (#543). Fail fast + NON-retryably with an actionable message instead. Detected by name/
+    // message (robust across ai versions) plus the SDK's own isInstance when it exposes the class.
+    const noOutput =
+      (
+        aiMod as {
+          NoOutputGeneratedError?: { isInstance?: (x: unknown) => boolean };
+        }
+      )?.NoOutputGeneratedError?.isInstance?.(e) === true ||
+      (e as { name?: string })?.name === "AI_NoOutputGeneratedError" ||
+      (e instanceof Error && e.message.includes("No output generated"));
+    if (noOutput) {
+      throw ApplicationFailure.nonRetryable(
+        "The agent's model returned no output matching its configured schema — adjust the prompt or simplify/remove the output schema.",
+        "AGENT_NO_OUTPUT",
+      );
+    }
     // Genuine transient error: rethrow a SANITIZED retryable failure (the raw
     // AI-SDK error can carry the key in request headers) so Temporal retries
     // without that material ever reaching durable history/logs.
