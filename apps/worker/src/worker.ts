@@ -3,7 +3,9 @@ import { initMetrics } from "@naary/metrics";
 import {
   captureError,
   flushSentry,
+  initOtlp,
   initSentry,
+  shutdownOtlp,
   traceActivities,
 } from "@naary/observability";
 
@@ -13,6 +15,9 @@ import {
 initSentry({ component: "worker" });
 // Tag metrics with the component + collect default Node/process metrics.
 initMetrics({ component: "worker" });
+// Wire the OTLP metric exporter (Datadog/OTLP). No-op unless OTEL_EXPORTER_OTLP_ENDPOINT
+// is set; attributes are scrubbed on egress (see @naary/observability otlp.ts).
+initOtlp({ component: "worker" });
 
 import { createServer } from "node:http";
 import { hostname } from "node:os";
@@ -154,6 +159,7 @@ async function run(): Promise<void> {
     await connection.close();
     await disconnectPrisma(); // close the pg pool the activities opened (Arch§4.9)
     await flushSentry();
+    await shutdownOtlp(); // flush buffered OTLP metrics before exit (batched ~60s)
   }
 }
 

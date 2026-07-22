@@ -52,6 +52,12 @@ x-backend-env: &backend-env
   SENTRY_PROFILES_SAMPLE_RATE: ${SENTRY_PROFILES_SAMPLE_RATE:-0}
   # Release stamp for errors/traces (the deploy sets this to the deployed tag).
   SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+  # OTLP metrics export (Datadog via OTLP, #462) — OFF unless OTEL_EXPORTER_OTLP_ENDPOINT
+  # is set. Attributes are scrubbed on egress. HEADERS carries the intake auth (e.g.
+  # "DD-API-KEY=..."); PROTOCOL is http/protobuf for the http exporter.
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+  OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-}
   # Structured JSON logging verbosity (trace|debug|info|warn|error|fatal).
   LOG_LEVEL: ${LOG_LEVEL:-info}
   # Prometheus /metrics — the worker serves it on this port; the api serves it on

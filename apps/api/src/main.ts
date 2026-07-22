@@ -2,13 +2,16 @@ import "./env"; // MUST be first — loads + validates .env before @naary/* modu
 import "reflect-metadata";
 import { initFlags } from "@naary/flags";
 import { initMetrics } from "@naary/metrics";
-import { initSentry } from "@naary/observability";
+import { initOtlp, initSentry } from "@naary/observability";
 
 // Init Sentry before anything else so early errors are captured. No-op unless
 // SENTRY_DSN is set; events are scrubbed of secrets (see @naary/observability).
 initSentry({ component: "api" });
 // Tag metrics with the component + collect default Node/process metrics.
 initMetrics({ component: "api" });
+// Wire the OTLP metric exporter (Datadog/OTLP). No-op unless OTEL_EXPORTER_OTLP_ENDPOINT
+// is set; attributes are scrubbed on egress (see @naary/observability otlp.ts).
+initOtlp({ component: "api" });
 // Wire the feature-flag provider (Flagsmith). Fail-safe + non-blocking: no
 // FLAGSMITH_ENVIRONMENT_KEY ⇒ code defaults; a slow/down Flagsmith never stalls boot.
 initFlags();
