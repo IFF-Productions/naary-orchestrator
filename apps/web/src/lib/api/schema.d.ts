@@ -3237,6 +3237,15 @@ export interface components {
        */
       costUsd?: number | null;
       /**
+       * @description Tappable quick-reply suggestions the builder offers after an assistant turn; selecting one becomes the next user message. Empty on user turns.
+       * @example [
+       *   "Add an approval step",
+       *   "Add error handling",
+       *   "Looks good — save it"
+       * ]
+       */
+      options?: string[];
+      /**
        * Format: date-time
        * @example 2026-08-02T14:00:00.000Z
        */

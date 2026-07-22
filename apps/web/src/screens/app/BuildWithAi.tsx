@@ -8,8 +8,9 @@
  * screen's honest flow is: describe → Building (typing dots until the first
  * frame, then the plan card + live stage) → Draft ready → refine by chatting →
  * "Open in canvas" saves the draft via POST /graphs and navigates to the editor.
- * The design's clarifying-question quick-replies are intentionally absent — the
- * API has no question/option turn shape to back them.
+ * After each edit the newest assistant turn carries deterministic quick-reply
+ * options (#487): tapping one becomes the next turn (or, for the accept option,
+ * opens the draft in canvas). See ConversationPanel for the chip rendering.
  *
  * This module is the route container (session lifecycle + turn SSE); the
  * presentational shell lives in ./build-ai/BuildWithAiView.
@@ -33,6 +34,7 @@ function turnsToMessages(s: BuilderSession): ChatMsg[] {
     role: t.role === "assistant" ? "assistant" : "user",
     text: t.content,
     costUsd: t.costUsd,
+    options: t.options ?? [],
   }));
 }
 

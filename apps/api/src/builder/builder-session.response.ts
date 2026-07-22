@@ -21,6 +21,19 @@ export class BuilderTurnResponse {
       "Metered cost of an assistant turn (BYOK); null for user turns.",
   })
   costUsd?: number | null;
+  @ApiProperty({
+    required: false,
+    type: [String],
+    example: [
+      "Add an approval step",
+      "Add error handling",
+      "Looks good — save it",
+    ],
+    description:
+      "Tappable quick-reply suggestions the builder offers after an assistant turn; " +
+      "selecting one becomes the next user message. Empty on user turns.",
+  })
+  options?: string[];
   @ApiProperty({ format: "date-time", example: "2026-08-02T14:00:00.000Z" })
   createdAt!: string;
 }

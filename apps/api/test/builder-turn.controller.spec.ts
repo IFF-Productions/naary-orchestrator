@@ -129,6 +129,10 @@ describe("POST /builder/sessions/:id/turns — edit-mode streaming", () => {
       "Updated “My Flow” — 2 nodes, 1 edge.",
     );
     expect(applied.costUsd).toBeGreaterThan(0);
+    // Deterministic quick-reply options attached to the turn (#487) — always the accept option,
+    // plus any gap suggestions (EDIT_GRAPH is a bare 2-node/1-edge graph → all gaps present).
+    expect(applied.options).toContain("Looks good — save it");
+    expect(applied.options).toContain("Add an approval step");
     expect(applied.titleIfUnset).toBe("Add Slack");
     expect(res.writableEnded).toBe(true);
   });

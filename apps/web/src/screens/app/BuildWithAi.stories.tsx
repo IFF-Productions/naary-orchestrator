@@ -94,6 +94,9 @@ const READY: BuildWithAiState = {
       role: "assistant",
       text: "Built “Refund approval flow” — 5 nodes, 5 connections.",
       costUsd: 0.0123,
+      // Tappable quick replies on the newest assistant turn (#487) — the last chip
+      // ("Looks good — save it") maps to Open in canvas; the rest become the next turn.
+      options: ["Add error handling", "Add a retry", "Looks good — save it"],
     },
   ],
   streamNodes: NODES,

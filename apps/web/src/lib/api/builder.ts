@@ -28,8 +28,16 @@ export interface BuilderTurn {
   content: string;
   /** Metered BYOK cost of an assistant turn; null/absent on user turns. */
   costUsd?: number | null;
+  /** Tappable quick-reply suggestions on an assistant turn (#487); selecting one
+   *  becomes the next user turn. Empty/absent on user turns. */
+  options?: string[];
   createdAt: string;
 }
+
+/** The accept-flavored quick reply — the UI maps a tap on this to "Open in canvas"
+ *  (save), not another edit turn. Keep in sync with `SAVE_OPTION` in
+ *  apps/api/src/builder/turn-metering.ts. */
+export const SAVE_OPTION = "Looks good — save it";
 
 /** A full builder session: status + working draft + conversation. */
 export interface BuilderSession {
