@@ -1,7 +1,8 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { All, BadRequestException, Controller, Req, Res } from "@nestjs/common";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { ApiExcludeController } from "@nestjs/swagger";
 import type { GraphDef } from "@naary/dsl";
 import { ApiTokenService } from "../auth/api-token.service";
@@ -64,9 +65,22 @@ function rpcError(
  * verified with the SAME ApiTokenService the guard uses, yielding the session's tenantId — the
  * one and only tenant scope for every tool call.
  *
- * Stateless (sessionIdGenerator: undefined): a fresh server + transport per POST, closed when
- * the response ends. The read-only tools need no server→client stream or session state, so GET
- * (SSE) / DELETE (session close) are 405 for now — a later slice enables them for streaming.
+ * Stateful Streamable HTTP (ticket #469): a POST carrying an MCP `initialize` request opens a
+ * SESSION — the transport mints an `mcp-session-id`, we build the tenant-scoped server ONCE and
+ * keep the { transport, server, tenantId } tuple in a per-instance map. Subsequent requests carry
+ * that id:
+ *   - POST  → dispatch to the session's transport (tool calls, notifications).
+ *   - GET   → open the server→client SSE stream on the same transport (was 405).
+ *   - DELETE→ terminate the session on the same transport (session close; was 405).
+ * A first POST with no session id must be an `initialize` (otherwise 400); any other method with
+ * no/unknown session id is rejected. Tenant scope is frozen at initialize and re-checked on every
+ * subsequent request: a session id belonging to another tenant is indistinguishable from an
+ * unknown one (both 404) so a session can never cross tenants.
+ *
+ * The session map is in-memory and per-API-instance — inherent to the SDK's Streamable HTTP model
+ * (this is the NestJS control plane, not the Temporal worker; Tier-1 rule 7 is about the latter).
+ * A multi-instance API would need sticky routing; an idle session with no DELETE leaks its map
+ * entry until process exit (follow-up: an idle-timeout sweep).
  *
  * Params are typed as Node's IncomingMessage/ServerResponse (what the SDK transport expects);
  * the Express objects Nest passes at runtime extend them.
@@ -77,6 +91,21 @@ function rpcError(
 @ApiExcludeController()
 @Controller("mcp")
 export class McpController {
+  /**
+   * Live MCP sessions, keyed by the transport's `mcp-session-id`. Each entry owns the tenant it was
+   * initialized for; GET/DELETE/subsequent-POST must present a matching tenant or the session is
+   * treated as unknown (404). Populated on `onsessioninitialized`, evicted on the transport's
+   * `onclose` (fires on DELETE / terminate).
+   */
+  private readonly sessions = new Map<
+    string,
+    {
+      transport: StreamableHTTPServerTransport;
+      server: ReturnType<typeof buildMcpServer>;
+      tenantId: string;
+    }
+  >();
+
   constructor(
     private readonly tokens: ApiTokenService,
     private readonly graphs: GraphsService,
@@ -92,16 +121,20 @@ export class McpController {
     @Req() req: McpRequest,
     @Res() res: ServerResponse,
   ): Promise<void> {
-    if (req.method !== "POST") {
+    const method = req.method ?? "";
+    if (method !== "POST" && method !== "GET" && method !== "DELETE") {
+      // PUT/PATCH/etc. are not part of the Streamable HTTP transport.
       rpcError(
         405,
         -32000,
-        "Method not allowed — this MCP server is POST-only for now.",
+        "Method not allowed — the MCP endpoint speaks POST, GET (SSE) and DELETE.",
         res,
       );
       return;
     }
 
+    // Every method authenticates: the token yields the tenant scope AND, for a request bound to
+    // an existing session, the tenant we match the session against.
     const auth = await this.authenticate(req);
     if (!auth) {
       rpcError(
@@ -114,6 +147,50 @@ export class McpController {
     }
     const { tenantId } = auth;
 
+    const sessionId = this.sessionIdHeader(req);
+
+    // A request carrying a session id must resolve to a live session OWNED BY THIS TENANT. A
+    // missing session (or one belonging to another tenant) is a single, indistinguishable 404 —
+    // never leak that a foreign session id exists.
+    if (sessionId) {
+      const session = this.sessions.get(sessionId);
+      if (!session || session.tenantId !== tenantId) {
+        rpcError(404, -32001, "Unknown MCP session.", res);
+        return;
+      }
+      await session.transport.handleRequest(req, res, req.body);
+      return;
+    }
+
+    // No session id. Only a POST that is an `initialize` may open one; a bare GET/DELETE (or a
+    // non-initialize POST) has nothing to dispatch to.
+    if (method !== "POST" || !isInitializeRequest(req.body)) {
+      rpcError(
+        400,
+        -32000,
+        method === "POST"
+          ? "Missing mcp-session-id — send an `initialize` request first to open a session."
+          : "Missing mcp-session-id header.",
+        res,
+      );
+      return;
+    }
+
+    await this.openSession(auth, req, res);
+  }
+
+  /**
+   * Open a new MCP session for an `initialize` POST: build the tenant-scoped server once, hand it a
+   * session-minting transport, and register the { transport, server, tenantId } tuple keyed by the
+   * generated session id so later GET/DELETE/POST on this session resolve to it.
+   */
+  private async openSession(
+    auth: { id: string; tenantId: string; environmentId: string | null },
+    req: McpRequest,
+    res: ServerResponse,
+  ): Promise<void> {
+    const { tenantId } = auth;
+
     // A token bound to an environment operates in it; an unbound token falls back to the
     // tenant's default env (design §Slice 4 — endpoint/token's env wins).
     const envId =
@@ -123,7 +200,7 @@ export class McpController {
     // workspace with ≥1 WorkflowGrant this token is a RESTRICTED subject (member+tokenId)
     // and every tool call below threads it as the actor — same first-grant cliff, same
     // union-of-groups resolution as v1/SPA callers. Zero grants ⇒ no actor (full access,
-    // today's behavior).
+    // today's behavior). Scope is FROZEN here for the session's lifetime.
     const actor: Principal | undefined =
       (await this.permissions.isTenantEnforced(tenantId))
         ? { tenantId, role: "member", tokenId: auth.id }
@@ -153,16 +230,30 @@ export class McpController {
         this.executions.approve(runId, approved, tenantId, note, actor),
       exposedWorkflows,
     });
+
     const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
+      sessionIdGenerator: () => randomUUID(),
+      // Register the session under the tenant it was born in the moment the id is minted.
+      onsessioninitialized: (sid) => {
+        this.sessions.set(sid, { transport, server, tenantId });
+      },
     });
-    // Tear down when the client disconnects — no lingering server/transport per request.
-    res.on("close", () => {
-      void transport.close();
+    // The session — not the response — owns the teardown: fires on DELETE / terminate, evicting
+    // the map entry and closing the server. (A POST response ending does NOT end the session.)
+    transport.onclose = () => {
+      const sid = transport.sessionId;
+      if (sid) this.sessions.delete(sid);
       void server.close();
-    });
+    };
+
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
+  }
+
+  /** The `mcp-session-id` request header, normalized to a single string (or undefined). */
+  private sessionIdHeader(req: McpRequest): string | undefined {
+    const raw = req.headers["mcp-session-id"];
+    return Array.isArray(raw) ? raw[0] : raw;
   }
 
   /**
