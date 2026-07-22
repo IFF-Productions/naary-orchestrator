@@ -98,24 +98,40 @@ export class ExecutionsController {
   }
 
   /** Recent runs for the authenticated tenant (newest first). `?archived=true`
-   *  returns the soft-archived runs instead of the active (default) list. */
+   *  returns the soft-archived runs instead of the active (default) list. `?q=` searches
+   *  runs by contained data (trigger input) plus their id/workflowKey (#463). */
   @ApiEndpoint({
     summary: "List recent runs",
     description:
-      "Recent runs for the tenant (newest first). `archived=true` shows the archived runs instead.",
+      "Recent runs for the tenant (newest first). `archived=true` shows the archived runs instead. " +
+      "`q` searches runs by the data they contain (the run's trigger input) as well as their id/workflow.",
     ok: [RunListItemResponse],
   })
   // OPTIONAL: without this the Nest plugin marks `archived` required+string in the spec, forcing every
   // generated client to send it. It's optional — omit for the default (active) list.
   @ApiQuery({ name: "archived", required: false, type: Boolean })
+  @ApiQuery({
+    name: "q",
+    required: false,
+    type: String,
+    description:
+      "Free-text substring search over the run's contained data (trigger input) + id/workflow.",
+  })
   @Get()
   listRuns(
     @TenantId() tenantId: string,
     @Query("archived") archived?: string,
+    @Query("q") q?: string,
     @CurrentPrincipal() principal?: Principal,
   ): Promise<RunListItemResponse[]> {
     // G3 (§8.4): a restricted member/token sees only runs of workflows it may view.
-    return this.executions.list(tenantId, 50, archived === "true", principal);
+    return this.executions.list(
+      tenantId,
+      50,
+      archived === "true",
+      principal,
+      q,
+    );
   }
 
   /** The tenant's runs paused for approval, each with its prompt (the inbox). Must

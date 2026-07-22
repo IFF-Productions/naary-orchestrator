@@ -187,13 +187,13 @@ export const runsApi = {
     );
   },
   // Recent runs for the tenant. `archived` returns the hidden runs instead of the default list;
-  // the query param is optional (omit it for the default list).
-  async listRuns(archived = false): Promise<RunListItem[]> {
-    return unwrap(
-      await client.GET("/executions", {
-        params: { query: archived ? { archived: true } : {} },
-      }),
-    );
+  // `q` searches runs by the data they contain (trigger input) + their id/workflow (#463). Both
+  // query params are optional (omit for the default list).
+  async listRuns(archived = false, q = ""): Promise<RunListItem[]> {
+    const query: { archived?: boolean; q?: string } = {};
+    if (archived) query.archived = true;
+    if (q.trim()) query.q = q.trim();
+    return unwrap(await client.GET("/executions", { params: { query } }));
   },
   // PUBLIC (anonymous — no auth): approve/reject a run via a signed link token.
   // Links minted from Slice 1 on carry an `exp` claim signed into the token — it must be

@@ -53,7 +53,11 @@ export function Runs() {
   // On phone the 8-column grid can't fit — each run renders as a stacked card instead.
   const phone = useMediaQuery(PHONE_QUERY);
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
+  // The search box drives a SERVER-side search over the run's contained data (trigger input) plus
+  // its id/workflow (#463). `query` is the live input; `debouncedQuery` is what's sent (see effect
+  // below) so we don't refetch on every keystroke.
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [filter, setFilter] = useState("All");
   const [starting, setStarting] = useState(false);
   // Set of in-flight archive/restore ids — a Set (not a single id) so archiving two rows in
@@ -75,10 +79,10 @@ export function Runs() {
   // other view) can't clobber the current one.
   const loadSeq = useRef(0);
 
-  async function load(archived = showArchived) {
+  async function load(archived = showArchived, q = debouncedQuery) {
     const seq = ++loadSeq.current;
     try {
-      const rows = await api.listRuns(archived);
+      const rows = await api.listRuns(archived, q);
       if (seq !== loadSeq.current) return; // superseded by a newer load
       setRuns(rows);
       setError(null);
@@ -98,9 +102,19 @@ export function Runs() {
     }
   }
 
+  // Debounce the search box so a server search fires ~300ms after typing stops, not per keystroke.
   useEffect(() => {
-    void load(false);
-  }, []);
+    const t = setTimeout(() => setDebouncedQuery(query), 300);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  // Single source of loads: (re)fetch whenever the view (archived) or the debounced search changes.
+  // The seq guard in load() drops out-of-order responses. biome-ignore: `load` is a stable closure
+  // recreated each render; keying on the two inputs is the intended trigger.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — load reads latest state.
+  useEffect(() => {
+    void load(showArchived, debouncedQuery);
+  }, [showArchived, debouncedQuery]);
 
   function toggleArchivedView() {
     const next = !showArchived;
@@ -108,7 +122,7 @@ export function Runs() {
     setRuns(null);
     setSelected(new Set()); // selection is per-view
     setNotice(null);
-    void load(next);
+    // The load effect (keyed on showArchived) does the refetch — no explicit load() here.
   }
 
   function toggleSelect(id: string, e: ReactMouseEvent) {
@@ -224,14 +238,10 @@ export function Runs() {
   }
 
   const activeFilter = FILTERS.find((f) => f.label === filter) ?? FILTERS[0];
-  const rows = (runs ?? [])
-    .filter((r) => activeFilter.match(r.status))
-    .filter(
-      (r) =>
-        !query ||
-        r.workflowId.includes(query) ||
-        (r.workflowKey ?? "").includes(query),
-    );
+  // The search box is served SERVER-side now (#463): the fetched `runs` are already filtered by
+  // contained data + id/workflow, so we only apply the status tab client-side. (A client `query`
+  // filter here would wrongly hide data-only matches the server returned.)
+  const rows = (runs ?? []).filter((r) => activeFilter.match(r.status));
 
   // Selection derived state. Select-all applies to the CURRENTLY VISIBLE rows. Approve/Deny are
   // only meaningful for runs paused on a humanApproval node (awaiting_approval).
@@ -519,7 +529,9 @@ export function Runs() {
             className="bare mono"
             style={{ height: 32, fontSize: "var(--text-xs)" }}
             placeholder={
-              simple ? "run id or automation…" : "run id or workflow…"
+              simple
+                ? "search runs by data or id…"
+                : "search runs by data, id, or workflow…"
             }
             value={query}
             onChange={(e) => setQuery(e.target.value)}

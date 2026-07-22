@@ -106,7 +106,16 @@ export interface ExecutionsDeps {
 export async function queryListPage(
   deps: ExecutionsDeps,
   tenantId: string,
-  opts: { limit?: number; cursor?: string; archived?: boolean } = {},
+  opts: {
+    limit?: number;
+    cursor?: string;
+    archived?: boolean;
+    /** Free-text substring search (issue #463) over the run's stored TRIGGER-INPUT projection
+     *  (`searchText`) plus its id/workflowKey. Case-insensitive; served by a pg_trgm GIN index.
+     *  Empty/whitespace → ignored (the plain list). Composes via AND, so tenant scope is never
+     *  widened. */
+    q?: string;
+  } = {},
   actor?: Principal,
 ): Promise<RunPage> {
   const take = Math.min(Math.max(opts.limit ?? 50, 1), 100);
@@ -122,10 +131,26 @@ export async function queryListPage(
         ])(decodeRunCursor(opts.cursor)),
       }
     : base;
-  // View scoping composes via AND so it can't collide with the keyset's own OR. Null
-  // for unrestricted callers — their query is byte-identical to before G3.
+  // Extra predicates compose via AND (never widening the tenant-scoped `keyset`, and not colliding
+  // with the keyset's own cursor OR). Both the G3 view filter and the #463 data search live here.
+  const andClauses: Record<string, unknown>[] = [];
+  // View scoping — null for unrestricted callers (their query is byte-identical to before G3).
   const viewFilter = await deps.runViewFilter(actor, tenantId);
-  const where = viewFilter ? { ...keyset, AND: [viewFilter] } : keyset;
+  if (viewFilter) andClauses.push(viewFilter);
+  // Data search (#463): match the trigger-input projection OR the run id / workflowKey, so one box
+  // finds a run by what it CONTAINS or by its identity. `mode: insensitive` emits ILIKE, which the
+  // pg_trgm GIN index on searchText serves. Never prompt/completion text — searchText is input only.
+  const q = opts.q?.trim();
+  if (q) {
+    andClauses.push({
+      OR: [
+        { searchText: { contains: q, mode: "insensitive" } },
+        { workflowId: { contains: q, mode: "insensitive" } },
+        { workflowKey: { contains: q, mode: "insensitive" } },
+      ],
+    });
+  }
+  const where = andClauses.length ? { ...keyset, AND: andClauses } : keyset;
   const rows = await getPrisma().execution.findMany({
     where,
     // The workflowId tiebreak makes the order TOTAL, so a page boundary can't
