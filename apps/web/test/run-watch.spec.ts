@@ -5,6 +5,7 @@ import {
   computeCanvasRunStates,
   STEP_TO_NODE_RUN_STATE,
 } from "../src/screens/canvas/run-watch";
+import { computeStepStates } from "../src/screens/app/run-detail/run-view-model";
 
 /** Minimal linear graph: start → a → b → end (enough for computeStepStates). */
 const GRAPH = {
@@ -91,5 +92,29 @@ describe("computeCanvasRunStates (#490 canvas live run-watch)", () => {
     expect(STEP_TO_NODE_RUN_STATE.error).toBe("error");
     expect(STEP_TO_NODE_RUN_STATE.waiting).toBe("waiting");
     expect(STEP_TO_NODE_RUN_STATE.skipped).toBe("skipped");
+  });
+});
+
+describe("computeStepStates — terminal end node", () => {
+  it("marks a completed run's end node done, though it writes no ctx output", () => {
+    // The REAL interpreter's `end` node returns null (never sets ctx[end]); on completion
+    // currentNodeId === end. Without the success-terminus case it fell through to "skipped"
+    // — the "end node never runs" bug. Note the ctx below has NO `end` key (unlike the
+    // canvas test above, whose synthetic ctx masked this).
+    const out = computeStepStates(
+      GRAPH,
+      { start: {}, a: {}, b: {} },
+      "end",
+      "completed",
+    );
+    expect(out.end).toBe("done");
+    expect(out.a).toBe("done");
+    expect(out.b).toBe("done");
+  });
+
+  it("does NOT mark end done on a failed run that never reached it", () => {
+    const out = computeStepStates(GRAPH, { start: {}, a: {} }, "a", "failed");
+    expect(out.a).toBe("error");
+    expect(out.end).not.toBe("done");
   });
 });

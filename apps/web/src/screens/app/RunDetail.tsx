@@ -783,7 +783,9 @@ function RunView({ id }: { id: string }) {
           </div>
           {/* Run-level durable log (#525): the FULL curated Temporal history lives here, ONCE —
             not repeated under every step. A tapped step shows only its own output/error. */}
-          <Card style={{ padding: "18px 20px" }}>
+          {/* marginTop matches the two-pane grid's gap so the log isn't flush against the
+            node-details column on desktop (the grid + this Card are fragment siblings). */}
+          <Card style={{ padding: "18px 20px", marginTop: 18 }}>
             <SectionTitle>Execution log</SectionTitle>
             <LogPanel events={events} />
             <div
