@@ -8,6 +8,7 @@ import {
 } from "../../../lib/api";
 import { PHONE_QUERY, useMediaQuery } from "../../../lib/useMediaQuery";
 import { CodeAgentCard } from "./CodeAgentCard";
+import { CodeAgentCredentialCard } from "./CodeAgentCredentialCard";
 import { ConnectForm, GithubAppForm } from "./connection-forms";
 import { cardShell, EnvChip, IconTile, introStyle } from "./shared";
 
@@ -269,6 +270,45 @@ export function AppsTab({
           hasKey={credentials.some((c) => c.provider === "claude-code")}
           keyValid={credentials.some(
             (c) => c.provider === "claude-code" && c.isValid,
+          )}
+          onSaved={() => void onChanged()}
+        />
+
+        {/* ---- Other coding-agent CLIs (dedicated credential; save-only until the CLI is
+               installed on the worker — no live test yet). ---- */}
+        <CodeAgentCredentialCard
+          tenant={tenant}
+          provider="cursor"
+          label="Cursor"
+          badge="◆"
+          placeholder="CURSOR_API_KEY"
+          hint={
+            <>
+              The Code Agent node — runs the <code>cursor-agent</code> CLI. Uses
+              a dedicated Cursor API key.
+            </>
+          }
+          hasKey={credentials.some((c) => c.provider === "cursor")}
+          keyValid={credentials.some(
+            (c) => c.provider === "cursor" && c.isValid,
+          )}
+          onSaved={() => void onChanged()}
+        />
+        <CodeAgentCredentialCard
+          tenant={tenant}
+          provider="copilot"
+          label="GitHub Copilot"
+          badge="⌥"
+          placeholder="github_pat_… or an OAuth token (not a classic ghp_ PAT)"
+          hint={
+            <>
+              The Code Agent node — runs the <code>copilot</code> CLI. Uses a
+              dedicated GitHub token (fine-grained PAT / OAuth).
+            </>
+          }
+          hasKey={credentials.some((c) => c.provider === "copilot")}
+          keyValid={credentials.some(
+            (c) => c.provider === "copilot" && c.isValid,
           )}
           onSaved={() => void onChanged()}
         />
