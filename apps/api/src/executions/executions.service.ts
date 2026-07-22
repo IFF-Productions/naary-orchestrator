@@ -207,6 +207,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     /** The user-facing caller (SPA/v1/MCP manual start). Absent for internal/trigger
      *  callers — those are workspace-level automation (§0) and are never gated. */
     actor?: Principal,
+    /** Opt into per-run verbose (DEBUG) activity logging for THIS run only. */
+    debug = false,
   ): Promise<{ workflowId: string }> {
     await this.assertRun(actor, workflowKey, environmentId);
     const snapshot =
@@ -237,6 +239,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       tenantId,
       environmentId,
       workflowKey,
+      debug,
     );
   }
 
@@ -566,6 +569,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
     environmentId: string,
     workflowKey: string,
+    /** Per-run verbose logging — only the manual `start()` path forwards true; triggers omit it. */
+    debug = false,
   ): Promise<{ workflowId: string }> {
     const workflowId = `${prefix}-${randomUUID()}`;
     const budget = await getBudget(tenantId);
@@ -608,6 +613,9 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           graphContentHash: snapshot.contentHash,
           graphVersion: snapshot.version,
           ...(errorWorkflowKey ? { errorWorkflowKey } : {}),
+          // Per-run verbose logging (opt-in): only set when true so a normal run's args stay
+          // byte-identical. Threaded to each activity's meta → DEBUG-level logs for THIS run only.
+          ...(debug ? { debug: true } : {}),
         },
       ],
       taskQueue: TASK_QUEUE,

@@ -4,6 +4,7 @@
 // (it is the dependency root — no circular imports).
 import { ApplicationFailure } from "@temporalio/activity";
 import { getDefaultEnvironmentId } from "@naary/db";
+import type { Logger } from "@naary/logging";
 import { CredentialsService, SecretStore } from "@naary/secrets";
 
 // The AI SDK (`ai`, `@ai-sdk/*`) and `jose` are ESM-only; this file is CommonJS (activities run
@@ -60,6 +61,30 @@ export interface AgentMeta {
   environmentId?: string;
   executionId: string;
   nodeId: string;
+  /** Per-run verbose logging (opt-in at start). When true, `runLog(base, meta)` returns a
+   *  DEBUG-level child logger so this ONE run emits its `.debug()` lines while every other run stays
+   *  at the process LOG_LEVEL. Non-secret flag, threaded through the run ctx → meta (Tier-1 §4). */
+  debug?: boolean;
+}
+
+/**
+ * Per-run debug logging. Returns a child of `base` that ALSO logs at DEBUG — but only when the run
+ * was started with `debug` on; otherwise returns `base` unchanged (normal LOG_LEVEL). The child
+ * carries the run's correlation ids so its extra lines are filterable by execution/node. Adopt as
+ * `const rlog = runLog(log, meta)` and use `rlog.debug(...)` for detail that should appear only for a
+ * debug run. Log ONLY safe metadata (ids, names, counts, sizes) — never args/prompts/values
+ * (CLAUDE.md Tier-1 §4; the logger additionally scrubs every field).
+ */
+export function runLog(base: Logger, meta: AgentMeta): Logger {
+  if (!meta.debug) return base;
+  return base.child(
+    {
+      executionId: meta.executionId,
+      nodeId: meta.nodeId,
+      tenantId: meta.tenantId,
+    },
+    { level: "debug" },
+  );
 }
 
 // Constructed lazily so importing this module doesn't require ENCRYPTION_KEY

@@ -76,6 +76,7 @@ export class ExecutionsController {
       body.workflowKey,
       undefined,
       principal,
+      body.debug ?? false,
     );
   }
 

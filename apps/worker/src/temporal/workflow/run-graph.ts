@@ -76,6 +76,9 @@ export async function runGraph(
     environmentId: runCtx.environmentId,
     executionId: wf.workflowInfo().workflowId,
     nodeId,
+    // Per-run verbose logging: only present when the run opted in, so a normal run's meta is
+    // byte-identical to before (data-only threading, activity-side logging — no patched() needed).
+    ...(runCtx.debug ? { debug: true } : {}),
   });
 
   // Items model (design ITEMS-MODEL-CURRENT-ITEM.md): precompute the splitOut→region map. Pure +

@@ -35,6 +35,7 @@ import {
   getCredentials,
   googleSdk,
   openaiSdk,
+  runLog,
   toSanitizedRetryable,
 } from "./shared";
 import { sendNotification } from "./notifications";
@@ -247,6 +248,8 @@ export async function runAgent(
   meta: AgentMeta,
 ): Promise<AgentResult> {
   const startedAt = process.hrtime.bigint();
+  // Per-run debug logging (opt-in via the run's `debug` flag) — safe metadata only, never the prompt.
+  const rlog = runLog(log, meta);
   // Released in `finally` (Arch§4.3) — whether the call succeeds or throws — so a
   // failed/retried activity never leaves a dangling reservation.
   let reservationId: string | undefined;
@@ -273,6 +276,19 @@ export async function runAgent(
     // Per-node output cap (sizes both the budget estimate and the actual call) and
     // optional sampling temperature.
     const maxOutputTokens = cfg.maxOutputTokens ?? MAX_OUTPUT_TOKENS;
+    // Debug-run only: the node's resolved shape — never the prompt text or key (safe metadata only).
+    rlog.debug(
+      {
+        provider,
+        model,
+        maxOutputTokens,
+        temperature: cfg.temperature,
+        systemPromptChars: cfg.systemPrompt?.length ?? 0,
+        tools: cfg.tools?.length ?? 0,
+        structuredOutput: cfg.outputSchema !== undefined,
+      },
+      "agent node starting",
+    );
     const budget = await __agentDeps.getBudget(meta.tenantId);
     if (budget) {
       const estimateFor = (m: string) =>

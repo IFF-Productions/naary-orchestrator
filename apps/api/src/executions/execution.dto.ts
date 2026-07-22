@@ -33,6 +33,15 @@ export class StartExecutionDto {
   @IsOptional()
   @IsString()
   workflowKey?: string;
+
+  @ApiPropertyOptional({
+    example: true,
+    description:
+      "Verbose per-run logging: the worker logs this run's activities at DEBUG level (others stay at LOG_LEVEL). Filter the logs by the returned workflowId. Off by default.",
+  })
+  @IsOptional()
+  @IsBoolean()
+  debug?: boolean;
 }
 
 /** Re-run a past run. By default re-runs against the workflow's LATEST graph; pass
