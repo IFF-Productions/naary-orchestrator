@@ -20,6 +20,7 @@ import {
   RUN_GRAPH_WORKFLOW,
   TASK_QUEUE,
   webhookResponseQuery,
+  type Citation,
   type WebhookResponse,
 } from "@naary/contracts";
 import type { GraphDef, NodeDef } from "@naary/dsl";
@@ -394,7 +395,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     input: { message: string; sessionId: string; chatId: string },
     workflowKey: string,
     opts: { timeoutMs?: number; pollMs?: number } = {},
-  ): Promise<{ replied: boolean; reply?: unknown }> {
+  ): Promise<{ replied: boolean; reply?: unknown; citations?: Citation[] }> {
     await this.assertActive(tenantId, environmentId, workflowKey);
     // Stable, deterministic session id — the SAME id for every message of this conversation, so
     // signalWithStart routes them to one workflow. sessionId is sanitized (opaque, ≤200 chars).
@@ -444,7 +445,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     sessionWorkflowId: string,
     turnId: string,
     opts: { timeoutMs?: number; pollMs?: number } = {},
-  ): Promise<{ replied: boolean; reply?: unknown }> {
+  ): Promise<{ replied: boolean; reply?: unknown; citations?: Citation[] }> {
     const timeoutMs = opts.timeoutMs ?? 30_000;
     const pollMs = opts.pollMs ?? 150;
     const handle = this.client.workflow.getHandle(sessionWorkflowId);
@@ -453,7 +454,11 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       try {
         const state = await handle.query(chatReplyQuery, turnId);
         if (state.status === "replied")
-          return { replied: true, reply: state.reply };
+          return {
+            replied: true,
+            reply: state.reply,
+            citations: state.citations, // RAG sources for this turn (issue #482)
+          };
         // The turn ran but the graph set no synchronous response — terminal, stop early and report
         // "started" (matches the non-durable path) rather than waiting out the full timeout.
         if (state.status === "no_reply") return { replied: false };

@@ -1,6 +1,6 @@
 // Public interpreter types (split out of workflows.ts — moved verbatim, zero
 // behavior change). Type-only module: erased at runtime, nothing to replay.
-import type { ExecutionStatus } from "@naary/contracts";
+import type { Citation, ExecutionStatus } from "@naary/contracts";
 
 export interface RunGraphResult {
   status: ExecutionStatus;
@@ -10,6 +10,10 @@ export interface RunGraphResult {
    *  parent mid-flight, so the durable chat session reads the reply from here (design §2.1b,
    *  option i). Undefined when the graph produced no synchronous response. */
   reply?: unknown;
+  /** RAG sources the run retrieved (issue #482), read off the same `respondToWebhook` moment as
+   *  `reply` — so a CHILD durable-session run can surface "Sources" without a query. Undefined when
+   *  the run set no response or ran no vectorQuery. */
+  citations?: Citation[];
 }
 
 /** Non-secret execution context. `tenantId` is fine in workflow args/history;

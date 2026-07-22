@@ -148,12 +148,32 @@ export const budgetResumeSignal =
 /** Live execution state, readable without disturbing the run. */
 export const stateQuery = defineQuery<ExecutionState>("state");
 
+/** A single RAG source surfaced to the hosted chat as a "citation" (issue #482). Derived from a
+ *  vectorQuery node's retrieved chunks — the tenant's OWN indexed documents, returned to the same
+ *  tenant's chat, so surfacing them to that chat is in-tenant (never cross-tenant). A privacy-safe
+ *  subset: the chunk `snippet` (truncated) + similarity `score`, tagged with the `source` collection.
+ *  Citations ride ONLY the chat/webhook response — never the usage ledger, telemetry, or history
+ *  beyond the reply body that already lands there. */
+export interface Citation {
+  /** Where the chunk came from — the vectorQuery node's `collection` (its logical namespace). */
+  source?: string;
+  /** A snippet of the matched chunk text (truncated for payload safety). */
+  snippet: string;
+  /** Cosine similarity of the match (1 = identical), when available. */
+  score?: number;
+}
+
 /** The HTTP response a `respondToWebhook` node sets for the webhook ingress to
  *  return synchronously. Undefined until (and unless) such a node runs. */
 export interface WebhookResponse {
   statusCode: number;
   body?: unknown;
   headers?: Record<string, string>;
+  /** RAG sources retrieved during the run (issue #482), for the hosted chat's "Sources" list.
+   *  Present only when the graph ran a vectorQuery node that matched chunks. The webhook ingress
+   *  ignores this field (it returns only body/statusCode/headers) — only the chat controller reads
+   *  it — so a plain webhook's external caller never receives retrieved chunk text. */
+  citations?: Citation[];
 }
 
 /** Read the pending webhook response (undefined until a respondToWebhook node
@@ -184,6 +204,9 @@ export const chatMessageSignal =
 export interface ChatReplyState {
   status: "pending" | "replied" | "no_reply" | "unknown";
   reply?: unknown;
+  /** RAG sources for this turn (issue #482) — derived from the turn's vectorQuery matches. Present
+   *  only alongside a `replied` status when the turn ran a vectorQuery that matched chunks. */
+  citations?: Citation[];
 }
 
 /** Read a turn's reply by `turnId` — the API polls this after signaling (turn-id keyed, so two

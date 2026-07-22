@@ -266,6 +266,22 @@ export interface ChatDefinition {
   greeting?: string;
 }
 
+/** A RAG source ("citation") the hosted chat used to answer (issue #482) — a privacy-safe subset of
+ *  a vectorQuery match: the source collection, a truncated snippet, and the similarity score. */
+export interface Citation {
+  source?: string;
+  snippet: string;
+  score?: number;
+}
+
+/** The hosted chat's reply to a message. `citations` is the run's RAG sources — always present
+ *  (an empty array when the chat graph ran no retrieval step). */
+export interface ChatReply {
+  status: string;
+  reply?: unknown;
+  citations: Citation[];
+}
+
 /** Approver routing summary on an awaiting row (Slice 1 — display; enforced server-side). */
 export interface ApproverSummary {
   emails: string[];

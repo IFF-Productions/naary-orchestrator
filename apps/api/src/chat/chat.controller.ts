@@ -56,18 +56,23 @@ export class ChatController {
     // from and appends to the ChatMessage table), so the controller just signals + waits. Without a
     // sessionId there's nothing to key a session on, so fall through to the per-message path (B).
     if (result.sessionId && isDurableSession(snapshot.graph)) {
-      const { replied, reply } = await this.executions.sendChatSessionMessage(
-        endpoint.tenantId,
-        endpoint.environmentId,
-        snapshot,
-        {
-          message: result.message,
-          sessionId: result.sessionId,
-          chatId,
-        },
-        endpoint.workflowId,
-      );
-      return replied ? { status: "replied", reply } : { status: "started" };
+      const { replied, reply, citations } =
+        await this.executions.sendChatSessionMessage(
+          endpoint.tenantId,
+          endpoint.environmentId,
+          snapshot,
+          {
+            message: result.message,
+            sessionId: result.sessionId,
+            chatId,
+          },
+          endpoint.workflowId,
+        );
+      // citations[] = the RAG sources the turn retrieved (issue #482); [] when the turn ran no
+      // vectorQuery, so the chat UI can always read a "Sources" array (empty ⇒ no sources shown).
+      return replied
+        ? { status: "replied", reply, citations: citations ?? [] }
+        : { status: "started", citations: [] };
     }
 
     // Cross-message memory (design §2.1b, B): load the session's history and thread it into the run
@@ -84,7 +89,7 @@ export class ChatController {
       { message: result.message, sessionId: result.sessionId, history },
       endpoint.workflowId,
     );
-    if (!response) return { status: "started" }; // ran but didn't reply in time — don't persist
+    if (!response) return { status: "started", citations: [] }; // ran but didn't reply in time — don't persist
 
     const reply = response.body ?? null;
     // Persist the turn so the next message sees it. Best-effort — a store hiccup must not fail the
@@ -100,8 +105,10 @@ export class ChatController {
         replyText,
       )
       .catch(() => undefined);
-    // No workflowId leaked (it embeds the tenantId).
-    return { status: "replied", reply };
+    // No workflowId leaked (it embeds the tenantId). citations[] = the run's RAG sources (issue
+    // #482) — [] when the graph ran no vectorQuery. Scoped to THIS chat response only; never
+    // persisted to the ChatMessage history (appendTurn stores reply text only).
+    return { status: "replied", reply, citations: response.citations ?? [] };
   }
 
   /** Shared resolution: endpoint → current graph snapshot → public definition. 404 on any miss. */

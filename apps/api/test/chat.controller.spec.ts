@@ -15,8 +15,11 @@ const CHAT_GRAPH: GraphDef = {
 function makeController(opts: {
   endpoint?: unknown;
   graph?: GraphDef | null;
-  awaitResult?: { workflowId: string; response?: { body?: unknown } };
-  sessionResult?: { replied: boolean; reply?: unknown };
+  awaitResult?: {
+    workflowId: string;
+    response?: { body?: unknown; citations?: unknown[] };
+  };
+  sessionResult?: { replied: boolean; reply?: unknown; citations?: unknown[] };
 }) {
   const chats = {
     getEndpoint: vi.fn().mockResolvedValue(opts.endpoint),
@@ -102,7 +105,11 @@ describe("ChatController (public)", () => {
       message: "hello",
       sessionId: "s-1",
     });
-    expect(out).toEqual({ status: "replied", reply: { reply: "Hi there" } });
+    expect(out).toEqual({
+      status: "replied",
+      reply: { reply: "Hi there" },
+      citations: [],
+    });
     expect(JSON.stringify(out)).not.toContain("t-1");
     expect(executions.startChatAwaitResponse).toHaveBeenCalledWith(
       "t-1",
@@ -170,7 +177,7 @@ describe("ChatController (public)", () => {
       message: "hi",
       sessionId: "s-1",
     });
-    expect(out).toEqual({ status: "started" });
+    expect(out).toEqual({ status: "started", citations: [] });
     expect(chats.appendTurn).not.toHaveBeenCalled();
   });
 
@@ -180,7 +187,7 @@ describe("ChatController (public)", () => {
       awaitResult: { workflowId: "chat-1" }, // no response
     });
     const out = await controller.message("c-1", { message: "hello" });
-    expect(out).toEqual({ status: "started" });
+    expect(out).toEqual({ status: "started", citations: [] });
   });
 
   it("routes to the durable session workflow when the chatTrigger opted in (option A)", async () => {
@@ -193,7 +200,11 @@ describe("ChatController (public)", () => {
       message: "hi",
       sessionId: "s-1",
     });
-    expect(out).toEqual({ status: "replied", reply: "durable answer" });
+    expect(out).toEqual({
+      status: "replied",
+      reply: "durable answer",
+      citations: [],
+    });
     expect(executions.sendChatSessionMessage).toHaveBeenCalledWith(
       "t-1",
       "e-1",
@@ -217,7 +228,7 @@ describe("ChatController (public)", () => {
       message: "hi",
       sessionId: "s-1",
     });
-    expect(out).toEqual({ status: "started" });
+    expect(out).toEqual({ status: "started", citations: [] });
   });
 
   it("falls back to the per-message path (B) when durable is set but there's no sessionId", async () => {
@@ -227,9 +238,55 @@ describe("ChatController (public)", () => {
       awaitResult: { workflowId: "chat-1", response: { body: "b-answer" } },
     });
     const out = await controller.message("c-1", { message: "hi" }); // no sessionId
-    expect(out).toEqual({ status: "replied", reply: "b-answer" });
+    expect(out).toEqual({
+      status: "replied",
+      reply: "b-answer",
+      citations: [],
+    });
     expect(executions.sendChatSessionMessage).not.toHaveBeenCalled();
     expect(executions.startChatAwaitResponse).toHaveBeenCalled();
+  });
+
+  it("surfaces RAG citations from the run's response on the reply (issue #482)", async () => {
+    const citations = [
+      { source: "docs", snippet: "Refunds take 5 days.", score: 0.9 },
+    ];
+    const { controller } = makeController({
+      endpoint: ENDPOINT,
+      awaitResult: {
+        workflowId: "chat-1",
+        response: { body: "You get a refund.", citations },
+      },
+    });
+    const out = await controller.message("c-1", {
+      message: "refund?",
+      sessionId: "s-1",
+    });
+    expect(out).toEqual({
+      status: "replied",
+      reply: "You get a refund.",
+      citations,
+    });
+  });
+
+  it("surfaces citations from the durable session turn too (issue #482)", async () => {
+    const citations = [
+      { source: "kb", snippet: "Business hours 9-5.", score: 0.8 },
+    ];
+    const { controller } = makeController({
+      endpoint: ENDPOINT,
+      graph: DURABLE_GRAPH,
+      sessionResult: { replied: true, reply: "We're open 9-5.", citations },
+    });
+    const out = await controller.message("c-1", {
+      message: "hours?",
+      sessionId: "s-1",
+    });
+    expect(out).toEqual({
+      status: "replied",
+      reply: "We're open 9-5.",
+      citations,
+    });
   });
 
   it("POST 400s on a blank message and never starts a run", async () => {
