@@ -90,6 +90,11 @@ export function computeStepStates(
     if (n.id === currentNodeId && failure) out[n.id] = "error";
     else if (n.id === currentNodeId && !terminal)
       out[n.id] = paused ? "waiting" : "running";
+    // The node the run ENDED on after completing successfully still ran — but a terminal
+    // `end` node is a passthrough that writes no ctx output, so it isn't in `executed`.
+    // Without this it would fall through to "skipped"; on a completed run its currentNodeId
+    // is that end node, so mark it done (also makes the STEPS count include it).
+    else if (n.id === currentNodeId && terminal && !failure) out[n.id] = "done";
     else if (executed.has(n.id)) out[n.id] = "done";
     else if (reachable.has(n.id) && (!terminal || failure))
       // Ahead of a live run, or downstream of the node a failed run died on —
