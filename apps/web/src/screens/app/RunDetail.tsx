@@ -25,6 +25,7 @@ import {
 import { usePermissions } from "../../lib/usePermissions";
 import { envAccent } from "../../workspace/EnvironmentSwitcher";
 import { RerunMenu, VersionBadge } from "./RerunMenu";
+import { DebugLogSection } from "./run-detail/DebugLogSection";
 import { NodeOutputBody } from "./run-detail/NodeOutputBody";
 import { RegionTraceSection } from "./run-detail/RegionTraceSection";
 import { RunGraph } from "./run-detail/RunGraph";
@@ -786,6 +787,11 @@ function RunView({ id }: { id: string }) {
           <Card style={{ padding: "18px 20px" }}>
             <SectionTitle>Execution log</SectionTitle>
             <LogPanel events={events} />
+            {/* Debug-run only (interpreter sets ctx.__debug when started with debug:true): the
+                safe per-node detail, inline in the exec log. */}
+            {state.ctx.__debug === true && (
+              <DebugLogSection steps={timelineSteps} ctx={state.ctx} />
+            )}
             <div
               className="mono"
               style={{
