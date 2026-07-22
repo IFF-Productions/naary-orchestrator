@@ -15286,6 +15286,11 @@
             "type": "string",
             "example": "support-triage",
             "description": "Which stored graph to run (its workflowKey). Defaults to 'default'."
+          },
+          "debug": {
+            "type": "boolean",
+            "example": true,
+            "description": "Verbose per-run logging: the worker logs this run's activities at DEBUG level (others stay at LOG_LEVEL). Filter the logs by the returned workflowId. Off by default."
           }
         }
       },
