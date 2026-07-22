@@ -150,6 +150,90 @@ export class SecretStore {
     });
   }
 
+  // --- Tenant-wide (global) secrets (#459) -----------------------------------------------------
+  // A named secret that applies to EVERY environment, backed by the SEPARATE TenantSecret table
+  // (not a null-env TenantCredential row — that would break its env FK + unique). Same key namespace
+  // and the SAME env-independent AAD `${tenantId}:${key}`, so a global secret's ciphertext is
+  // crypto-identical to an env secret of the same name — only the row's table/lookup dimension differs.
+
+  /** Create or replace a TENANT-WIDE secret (upsert by `{ tenantId, key }`). */
+  async putGlobal(
+    tenantId: string,
+    key: string,
+    plaintext: string,
+  ): Promise<void> {
+    const enc = await this.keys.encrypt(
+      tenantId,
+      plaintext,
+      this.aad(tenantId, key),
+    );
+    await getPrisma().tenantSecret.upsert({
+      where: { tenantId_key: { tenantId, key } },
+      create: {
+        tenantId,
+        key,
+        ciphertext: enc.ciphertext,
+        iv: enc.iv,
+        authTag: enc.authTag,
+        keyVersion: enc.keyVersion ?? 1,
+      },
+      update: {
+        ciphertext: enc.ciphertext,
+        iv: enc.iv,
+        authTag: enc.authTag,
+        keyVersion: enc.keyVersion ?? 1,
+      },
+    });
+  }
+
+  /** Decrypt a TENANT-WIDE secret (null if not set). Routed by keyVersion, same as `get`. */
+  async getGlobal(tenantId: string, key: string): Promise<string | null> {
+    const row = await getPrisma().tenantSecret.findUnique({
+      where: { tenantId_key: { tenantId, key } },
+    });
+    if (!row) return null;
+    return this.keys.decrypt(
+      tenantId,
+      {
+        ciphertext: row.ciphertext,
+        iv: row.iv,
+        authTag: row.authTag,
+        keyVersion: row.keyVersion,
+      },
+      this.aad(tenantId, key),
+    );
+  }
+
+  /** List TENANT-WIDE secret KEYS (not values) with `keyPrefix` stripped, key-sorted. Never decrypts —
+   *  the read behind the write-only management UI, so ciphertext never leaves the DB. */
+  async listGlobalKeys(tenantId: string, keyPrefix: string): Promise<string[]> {
+    const rows = await getPrisma().tenantSecret.findMany({
+      where: { tenantId, key: { startsWith: keyPrefix } },
+      select: { key: true },
+      orderBy: { key: "asc" },
+    });
+    return rows.map((r) => r.key.slice(keyPrefix.length));
+  }
+
+  /** Delete a TENANT-WIDE secret (no-op if absent). */
+  async removeGlobal(tenantId: string, key: string): Promise<void> {
+    await getPrisma().tenantSecret.deleteMany({
+      where: { tenantId, key },
+    });
+  }
+
+  /** Resolve a secret with per-env OVERRIDE precedence (#459): the env-specific value WINS; only when
+   *  there is no env secret of this name does the tenant-wide value apply. This is the security-critical
+   *  behavior — a tenant-wide secret must never shadow a per-env override. */
+  async getWithGlobalFallback(
+    tenantId: string,
+    environmentId: string,
+    key: string,
+  ): Promise<string | null> {
+    const env = await this.get(tenantId, environmentId, key);
+    return env !== null ? env : this.getGlobal(tenantId, key);
+  }
+
   /** Remove a tenant's secret for `key` across ALL environments. For GLOBALLY-UNIQUE keys only
    *  (e.g. `conn:<connectionId>` — a connection id can't collide across envs), so this deletes the
    *  single matching row without needing to know its env. Lets a caller purge a connection's secret

@@ -8,6 +8,11 @@ const store = {
   put: vi.fn(),
   remove: vi.fn(),
   get: vi.fn(), // present so a leak (calling get) would be visible; the service must not call it
+  // Tenant-wide (global) secret store methods (#459).
+  listGlobalKeys: vi.fn(),
+  putGlobal: vi.fn(),
+  removeGlobal: vi.fn(),
+  getGlobal: vi.fn(), // present so a leak (decrypting to list) would be visible
 };
 const svc = new EnvSecretsService(store as never);
 
@@ -68,6 +73,57 @@ describe("EnvSecretsService.remove", () => {
     expect(store.remove).toHaveBeenCalledWith(
       "t-1",
       "env-prod",
+      "secret:GITHUB_TOKEN",
+    );
+  });
+});
+
+describe("EnvSecretsService global (tenant-wide) methods — no env, still write-only (#459)", () => {
+  it("listGlobal returns NAMES only (never decrypts), no env argument", async () => {
+    store.listGlobalKeys.mockResolvedValue(["API_KEY", "GITHUB_TOKEN"]);
+
+    const out = await svc.listGlobal("t-1");
+
+    expect(out).toEqual(["API_KEY", "GITHUB_TOKEN"]);
+    expect(store.listGlobalKeys).toHaveBeenCalledWith("t-1", "secret:");
+    expect(store.getGlobal).not.toHaveBeenCalled();
+  });
+
+  it("setGlobal stores under the secret: namespace (trims the name), no env", async () => {
+    await svc.setGlobal("t-1", "  GITHUB_TOKEN  ", "ghp_abc");
+
+    expect(store.putGlobal).toHaveBeenCalledWith(
+      "t-1",
+      "secret:GITHUB_TOKEN",
+      "ghp_abc",
+    );
+  });
+
+  it.each(["with space", "1leading", "has.dot", "a-b", ""])(
+    "setGlobal rejects an invalid name %j with 400 and never writes",
+    async (badName) => {
+      await expect(svc.setGlobal("t-1", badName, "v")).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(store.putGlobal).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([["" as unknown], [123], [null], [{}], [undefined]])(
+    "setGlobal rejects a non-string / empty value %j with 400 and never writes",
+    async (badValue) => {
+      await expect(
+        svc.setGlobal("t-1", "TOKEN", badValue),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(store.putGlobal).not.toHaveBeenCalled();
+    },
+  );
+
+  it("removeGlobal removes the namespaced key (trims the name)", async () => {
+    await svc.removeGlobal("t-1", "  GITHUB_TOKEN  ");
+
+    expect(store.removeGlobal).toHaveBeenCalledWith(
+      "t-1",
       "secret:GITHUB_TOKEN",
     );
   });

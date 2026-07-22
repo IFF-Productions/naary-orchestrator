@@ -110,13 +110,18 @@ export const __httpDeps = {
     return conn ? { serverUrl: conn.serverUrl, authMode: conn.authMode } : null;
   },
   // Environment Secrets ($secrets): decrypt one named secret for a run's env (in-memory only).
-  // Null = not configured. Swappable so tests never touch the encrypted store.
+  // Null = not configured. Env-specific value WINS over the tenant-wide one (#459 override
+  // precedence). Swappable so tests never touch the encrypted store.
   getSecret: (
     tenantId: string,
     environmentId: string,
     name: string,
   ): Promise<string | null> =>
-    getSecretStore().get(tenantId, environmentId, `secret:${name}`),
+    getSecretStore().getWithGlobalFallback(
+      tenantId,
+      environmentId,
+      `secret:${name}`,
+    ),
 };
 
 /**

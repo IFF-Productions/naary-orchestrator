@@ -68,4 +68,41 @@ export class EnvSecretsController {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
     await this.secrets.remove(tenantId, envId, name);
   }
+
+  // --- Tenant-wide (global) secrets (#459) — NO env resolution: these apply across EVERY environment.
+  // An env-specific secret of the same NAME overrides the tenant-wide one at run time. Same write-only
+  // contract (names out, values never). Sub-path `/global` so it can't collide with the `:name` routes.
+
+  @ApiEndpoint({
+    summary: "List tenant-wide secret names (all environments)",
+    description:
+      "Names only — the value is write-only and never returned. An env-specific secret of the same name overrides these.",
+    ok: [EnvSecretResponse],
+  })
+  @Get("global")
+  async listGlobal(@TenantId() tenantId: string): Promise<EnvSecretResponse[]> {
+    const names = await this.secrets.listGlobal(tenantId);
+    return names.map((name) => ({ name }));
+  }
+
+  @ApiEndpoint({ summary: "Set a tenant-wide secret value (all environments)" })
+  @Put("global/:name")
+  @HttpCode(204)
+  async setGlobal(
+    @TenantId() tenantId: string,
+    @Param("name") name: string,
+    @Body() body: { value?: unknown },
+  ): Promise<void> {
+    await this.secrets.setGlobal(tenantId, name, body?.value);
+  }
+
+  @ApiEndpoint({ summary: "Delete a tenant-wide secret (all environments)" })
+  @Delete("global/:name")
+  @HttpCode(204)
+  async removeGlobal(
+    @TenantId() tenantId: string,
+    @Param("name") name: string,
+  ): Promise<void> {
+    await this.secrets.removeGlobal(tenantId, name);
+  }
 }

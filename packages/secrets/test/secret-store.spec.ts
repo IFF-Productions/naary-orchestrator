@@ -3,6 +3,8 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const creds = new Map<string, any>();
 const tenantKeys = new Map<string, any>();
+// In-memory TenantSecret table (tenant-wide/global secrets, #459), keyed `${tenantId}::${key}`.
+const globals = new Map<string, any>();
 vi.mock("@naary/db", () => ({
   getPrisma: () => ({
     tenantKey: {
@@ -15,6 +17,42 @@ vi.mock("@naary/db", () => ({
           });
         tenantKeys.set(data.tenantId, data);
         return data;
+      },
+    },
+    tenantSecret: {
+      upsert: async ({ where, create, update }: any) => {
+        const w = where.tenantId_key;
+        const k = `${w.tenantId}::${w.key}`;
+        const row = { ...(globals.get(k) ?? create), ...update };
+        globals.set(k, row);
+        return row;
+      },
+      findUnique: async ({ where }: any) => {
+        const w = where.tenantId_key;
+        return globals.get(`${w.tenantId}::${w.key}`) ?? null;
+      },
+      findMany: async ({ where, orderBy }: any) => {
+        const rows = [...globals.values()].filter(
+          (r) =>
+            r.tenantId === where.tenantId &&
+            (where.key?.startsWith === undefined ||
+              String(r.key).startsWith(where.key.startsWith)),
+        );
+        if (orderBy?.key === "asc")
+          rows.sort((a, b) => String(a.key).localeCompare(String(b.key)));
+        return rows.map((r) => ({ key: r.key }));
+      },
+      deleteMany: async ({ where }: any) => {
+        let count = 0;
+        for (const [k, r] of globals)
+          if (
+            r.tenantId === where.tenantId &&
+            (where.key === undefined || r.key === where.key)
+          ) {
+            globals.delete(k);
+            count++;
+          }
+        return { count };
       },
     },
     tenantCredential: {
@@ -67,6 +105,7 @@ beforeAll(() => {
 beforeEach(() => {
   creds.clear();
   tenantKeys.clear();
+  globals.clear();
 });
 
 describe("SecretStore", () => {
@@ -112,5 +151,72 @@ describe("SecretStore", () => {
     expect(await store.get("t1", "e1", "conn:c1")).toBeNull();
     expect(await store.get("t1", "e2", "conn:c1")).toBeNull();
     expect(await store.get("t2", "e1", "conn:c1")).toBe(SECRET); // other tenant untouched
+  });
+});
+
+describe("SecretStore — tenant-wide (global) secrets (#459)", () => {
+  it("putGlobal stores ciphertext (not plaintext) and getGlobal round-trips; env-independent", async () => {
+    const store = makeStore();
+    await store.putGlobal("t1", "secret:API_KEY", SECRET);
+
+    const row = globals.get("t1::secret:API_KEY");
+    expect(row.ciphertext).toBeTypeOf("string");
+    expect(JSON.stringify(row)).not.toContain(SECRET); // encrypted at rest
+
+    expect(await store.getGlobal("t1", "secret:API_KEY")).toBe(SECRET);
+    // No env dimension: the same call resolves regardless of any environment.
+    expect(await store.getGlobal("t1", "secret:MISSING")).toBeNull();
+  });
+
+  it("listGlobalKeys strips the prefix, sorts, and NEVER returns values", async () => {
+    const store = makeStore();
+    await store.putGlobal("t1", "secret:ZED", "z-value");
+    await store.putGlobal("t1", "secret:ALPHA", "a-value");
+    await store.putGlobal("t1", "conn:c1", "not-a-secret"); // different prefix, excluded
+    await store.putGlobal("t2", "secret:OTHER", "other-tenant"); // other tenant excluded
+
+    const names = await store.listGlobalKeys("t1", "secret:");
+
+    expect(names).toEqual(["ALPHA", "ZED"]); // prefix stripped + sorted
+    expect(JSON.stringify(names)).not.toContain("z-value");
+    expect(JSON.stringify(names)).not.toContain("a-value");
+  });
+
+  it("removeGlobal deletes the tenant-wide secret (idempotent)", async () => {
+    const store = makeStore();
+    await store.putGlobal("t1", "secret:API_KEY", SECRET);
+    await store.removeGlobal("t1", "secret:API_KEY");
+    expect(await store.getGlobal("t1", "secret:API_KEY")).toBeNull();
+    await store.removeGlobal("t1", "secret:API_KEY"); // no-op, must not throw
+  });
+
+  it("getWithGlobalFallback: ENV value WINS when both exist (per-env override precedence)", async () => {
+    const store = makeStore();
+    await store.put("t1", "e1", "secret:TOKEN", "ENV_VALUE");
+    await store.putGlobal("t1", "secret:TOKEN", "GLOBAL_VALUE");
+
+    expect(await store.getWithGlobalFallback("t1", "e1", "secret:TOKEN")).toBe(
+      "ENV_VALUE",
+    );
+  });
+
+  it("getWithGlobalFallback: GLOBAL value applies when only the global exists", async () => {
+    const store = makeStore();
+    await store.putGlobal("t1", "secret:TOKEN", "GLOBAL_VALUE");
+
+    expect(await store.getWithGlobalFallback("t1", "e1", "secret:TOKEN")).toBe(
+      "GLOBAL_VALUE",
+    );
+    // Another env with no override also falls back to the same global value.
+    expect(await store.getWithGlobalFallback("t1", "e2", "secret:TOKEN")).toBe(
+      "GLOBAL_VALUE",
+    );
+  });
+
+  it("getWithGlobalFallback: null when NEITHER an env nor a global secret exists", async () => {
+    const store = makeStore();
+    expect(
+      await store.getWithGlobalFallback("t1", "e1", "secret:NOPE"),
+    ).toBeNull();
   });
 });
