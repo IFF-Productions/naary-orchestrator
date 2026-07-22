@@ -1,7 +1,8 @@
 // Shared styles, URL helpers, env chip, icon tile, kebab menu and copy button
 // for the Integrations screen.
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon, type IconName } from "../../../components";
 
 export const monoLabel: React.CSSProperties = {
@@ -160,9 +161,36 @@ export interface KebabItem {
 /** Row-level "⋮" actions menu (rotate / edit / remove …). */
 export function KebabMenu({ items }: { items: KebabItem[] }) {
   const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  // The dropdown is PORTALED to <body> with fixed positioning anchored to the button. The row
+  // sits inside `cardShell` (overflow:hidden), which would otherwise CLIP an absolutely-positioned
+  // menu — the "3-dots menu is hidden/not viewable" bug. Fixed + portal escapes every ancestor's
+  // overflow. Right-aligned under the button; re-anchored on scroll/resize.
+  const [pos, setPos] = useState<{ top: number; right: number }>({
+    top: 0,
+    right: 0,
+  });
+  const place = useCallback(() => {
+    const el = btnRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+  }, []);
+  useLayoutEffect(() => {
+    if (!open) return;
+    place();
+    // Capture-phase scroll catches scrolling in ANY ancestor scroll container, not just window.
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open, place]);
   return (
     <div style={{ position: "relative", flex: "none" }}>
       <button
+        ref={btnRef}
         type="button"
         className="btn btn-sm btn-secondary btn-icon"
         aria-label="Actions"
@@ -171,68 +199,70 @@ export function KebabMenu({ items }: { items: KebabItem[] }) {
       >
         <Icon name="more" size={14} />
       </button>
-      {open && (
-        <>
-          <div
-            style={{ position: "fixed", inset: 0, zIndex: 30 }}
-            onClick={() => setOpen(false)}
-          />
-          <div
-            className="menu-pop"
-            style={{
-              position: "absolute",
-              right: 0,
-              top: "calc(100% + 4px)",
-              zIndex: 31,
-              minWidth: 170,
-              background: "var(--card)",
-              border: "1px solid var(--line-mid)",
-              borderRadius: "var(--radius-md)",
-              boxShadow: "var(--shadow-card)",
-              padding: 4,
-            }}
-          >
-            {items.map((it) => (
-              <button
-                key={it.label}
-                type="button"
-                disabled={it.disabled}
-                onClick={() => {
-                  setOpen(false);
-                  it.onClick();
-                }}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "7px 10px",
-                  border: "none",
-                  background: "transparent",
-                  borderRadius: "var(--radius-sm)",
-                  cursor: it.disabled ? "default" : "pointer",
-                  transition: "background .12s ease",
-                  fontFamily: "inherit",
-                  fontSize: "var(--text-sm)",
-                  fontWeight: "var(--weight-medium)",
-                  color: it.disabled
-                    ? "var(--ink-3)"
-                    : it.danger
-                      ? "var(--state-error)"
-                      : "var(--ink-soft)",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "var(--hover)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "transparent";
-                }}
-              >
-                {it.label}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+      {open &&
+        createPortal(
+          <>
+            <div
+              style={{ position: "fixed", inset: 0, zIndex: 60 }}
+              onClick={() => setOpen(false)}
+            />
+            <div
+              className="menu-pop"
+              style={{
+                position: "fixed",
+                top: pos.top,
+                right: pos.right,
+                zIndex: 61,
+                minWidth: 170,
+                background: "var(--card)",
+                border: "1px solid var(--line-mid)",
+                borderRadius: "var(--radius-md)",
+                boxShadow: "var(--shadow-card)",
+                padding: 4,
+              }}
+            >
+              {items.map((it) => (
+                <button
+                  key={it.label}
+                  type="button"
+                  disabled={it.disabled}
+                  onClick={() => {
+                    setOpen(false);
+                    it.onClick();
+                  }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "7px 10px",
+                    border: "none",
+                    background: "transparent",
+                    borderRadius: "var(--radius-sm)",
+                    cursor: it.disabled ? "default" : "pointer",
+                    transition: "background .12s ease",
+                    fontFamily: "inherit",
+                    fontSize: "var(--text-sm)",
+                    fontWeight: "var(--weight-medium)",
+                    color: it.disabled
+                      ? "var(--ink-3)"
+                      : it.danger
+                        ? "var(--state-error)"
+                        : "var(--ink-soft)",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "var(--hover)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                  }}
+                >
+                  {it.label}
+                </button>
+              ))}
+            </div>
+          </>,
+          document.body,
+        )}
     </div>
   );
 }
