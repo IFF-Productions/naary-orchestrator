@@ -1,12 +1,13 @@
 /**
- * Per-run DEBUG detail, shown INSIDE the Execution log — only when the run was started with
- * `debug: true` (the interpreter sets `ctx.__debug`; see run-graph.ts). One mono line per executed
- * node with SAFE metadata only: state, duration, and an ALLOWLIST of non-content output fields
- * (model, httpStatus, tokens, cost, …). It never dumps a node's output body — no prompts, URLs,
- * bodies, or values (CLAUDE.md Tier-1 §4 / privacy: the ledger stores tokens+cost, never content).
- * All values are already present in the run state the screen holds — nothing new is fetched.
+ * Per-run DEBUG rows for the Execution log — shown only when the run was started with `debug: true`
+ * (the interpreter sets `ctx.__debug`; see run-graph.ts). One synthetic row per executed node,
+ * INTERLEAVED into the curated Temporal timeline by the node's finish time, carrying SAFE metadata
+ * only: an ALLOWLIST of non-content output fields (model, httpStatus, tokens, cost, …). It never
+ * dumps a node's output body — no prompts, URLs, headers, bodies, or values (CLAUDE.md Tier-1 §4 /
+ * privacy). All values are already in the run state the screen holds — nothing new is fetched.
  */
-import { STEP_FG, STEP_WORD, type StepState } from "./run-view-model";
+import { type NodeTime, nodeTimeOf } from "./run-view-model";
+import type { LogEntry } from "./RunLog";
 import type { TimelineStep } from "./StepTimeline";
 
 /** Non-content output fields safe to surface. Anything not listed is NEVER shown. */
@@ -47,79 +48,32 @@ export function safeFields(output: unknown): string[] {
   return out;
 }
 
-export function DebugLogSection({
-  steps,
-  ctx,
-}: {
-  steps: TimelineStep[];
-  ctx: Record<string, unknown>;
-}) {
-  // Only nodes that actually ran (or failed) carry useful debug detail.
-  const rows = steps.filter(
-    (s) => s.state === "done" || s.state === "error" || s.state === "running",
-  );
-  return (
-    <div style={{ marginTop: 14 }}>
-      <div
-        className="mono"
-        style={{
-          fontSize: "var(--text-2xs)",
-          letterSpacing: ".04em",
-          textTransform: "uppercase",
-          color: "var(--ink-3)",
-          marginBottom: 8,
-        }}
-      >
-        Debug · per-node detail
-      </div>
-      <div
-        style={{
-          border: "1px solid var(--line-mid)",
-          background: "var(--bg)",
-          borderRadius: 10,
-          padding: "12px 14px",
-          fontFamily: "var(--font-mono)",
-          fontSize: 11.5,
-          lineHeight: 1.85,
-          maxHeight: 260,
-          overflowY: "auto",
-        }}
-      >
-        {rows.length === 0 ? (
-          <span style={{ color: "var(--ink-3)" }}>No node detail yet.</span>
-        ) : (
-          rows.map((s) => {
-            const fields = safeFields(ctx[s.id]);
-            const parts = [
-              `${s.label} (${s.id})`,
-              ...(s.duration ? [s.duration] : []),
-              ...fields,
-            ];
-            return (
-              <div key={s.id} style={{ display: "flex", gap: 10 }}>
-                <span
-                  style={{
-                    color: STEP_FG[s.state as StepState] ?? "var(--ink-3)",
-                    flex: "none",
-                    minWidth: 56,
-                  }}
-                >
-                  {STEP_WORD[s.state as StepState] ?? s.state}
-                </span>
-                <span
-                  style={{
-                    color: "var(--ink-2)",
-                    minWidth: 0,
-                    overflowWrap: "anywhere",
-                  }}
-                >
-                  {parts.join("  ·  ")}
-                </span>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
+/**
+ * Build the synthetic debug log rows for a debug run: one per executed node, stamped with the node's
+ * finish time so the caller can merge-sort them into the real event timeline. A node with no timing
+ * yet gets `at: null` (the caller sorts those last). Nodes that didn't run are skipped.
+ */
+export function buildDebugEvents(
+  steps: TimelineStep[],
+  ctx: Record<string, unknown>,
+  nodeTimes: Record<string, unknown> | null | undefined,
+): LogEntry[] {
+  return steps
+    .filter(
+      (s) => s.state === "done" || s.state === "error" || s.state === "running",
+    )
+    .map((s) => {
+      const t: NodeTime | null = nodeTimeOf(nodeTimes, s.id);
+      const parts = [
+        `${s.label} (${s.id})`,
+        ...(s.duration ? [s.duration] : []),
+        ...safeFields(ctx[s.id]),
+      ];
+      return {
+        id: `dbg-${s.id}`,
+        at: t ? new Date(t.f).toISOString() : null,
+        kind: "debug",
+        label: parts.join("  ·  "),
+      };
+    });
 }
