@@ -50,6 +50,30 @@ describe("compileGraph", () => {
     expect(graph?.nodes.find((n) => n.id === "e")?.config).toBeUndefined();
   });
 
+  it("lifts a custom name from config-space (__name) to NodeDef.name, out of config", () => {
+    const nodes: CanvasNode[] = [
+      { id: "s", type: "start", position: at(0) },
+      {
+        id: "a",
+        type: "agent",
+        position: at(1),
+        config: { systemPrompt: "triage", __name: "  Classify ticket  " },
+      },
+      // Blank/whitespace name ⇒ no name field (falls back to the derived label).
+      { id: "e", type: "end", position: at(2), config: { __name: "   " } },
+    ];
+    const { graph } = compileGraph(nodes, [
+      { id: "e1", source: "s", target: "a" },
+      { id: "e2", source: "a", target: "e" },
+    ]);
+    const a = graph?.nodes.find((n) => n.id === "a");
+    expect(a?.name).toBe("Classify ticket"); // trimmed, lifted to the top level
+    expect(a?.config).toEqual({ systemPrompt: "triage" }); // __name never rides in DSL config
+    const e = graph?.nodes.find((n) => n.id === "e");
+    expect(e?.name).toBeUndefined(); // blank name omitted
+    expect(e?.config).toBeUndefined(); // and the config (only __name) drops to empty
+  });
+
   it("treats formTrigger as an entry node (its config carries through)", () => {
     const nodes: CanvasNode[] = [
       {

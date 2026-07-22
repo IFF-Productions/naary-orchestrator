@@ -65,9 +65,17 @@ export function compileGraph(
     const cfg = n.config ? { ...n.config } : undefined;
     const onError = cfg?.onError;
     const retry = cfg?.retry as NodeDef["retry"] | undefined;
+    // Custom display name (n8n rename) — edited in config-space, lifted to the first-class
+    // NodeDef.name. Trim; a blank name is "no custom name" (omit). Never rides in DSL config.
+    const rawName = cfg?.__name;
+    const name =
+      typeof rawName === "string" && rawName.trim()
+        ? rawName.trim()
+        : undefined;
     if (cfg) {
       delete cfg.onError;
       delete cfg.retry;
+      delete cfg.__name;
     }
     const retryOut =
       retry && Object.values(retry).some((v) => v !== undefined && v !== "")
@@ -76,6 +84,7 @@ export function compileGraph(
     return {
       id: n.id,
       type: n.type,
+      ...(name ? { name } : {}),
       ...(cfg && Object.keys(cfg).length > 0 ? { config: cfg } : {}),
       ...(onError === "continue" ? { onError: "continue" as const } : {}),
       ...(retryOut ? { retry: retryOut } : {}),

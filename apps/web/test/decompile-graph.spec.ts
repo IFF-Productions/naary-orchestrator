@@ -41,6 +41,37 @@ describe("decompileGraph", () => {
     ]);
   });
 
+  it("surfaces a NodeDef.name back into config-space as __name (round-trips)", () => {
+    const named: GraphDef = {
+      startNodeId: "start",
+      nodes: [
+        { id: "start", type: "start" },
+        {
+          id: "agent",
+          type: "agent",
+          name: "Classify ticket",
+          config: { systemPrompt: "x" },
+        },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "start", to: "agent" },
+        { from: "agent", to: "end" },
+      ],
+    };
+    const { nodes } = decompileGraph(named);
+    // The editor works in config-space, so name comes back as __name alongside real config.
+    expect(nodes.find((n) => n.id === "agent")?.config).toEqual({
+      systemPrompt: "x",
+      __name: "Classify ticket",
+    });
+    // …and compiling again lifts it straight back to NodeDef.name.
+    const { graph } = compileGraph(nodes, decompileGraph(named).edges);
+    expect(graph?.nodes.find((n) => n.id === "agent")?.name).toBe(
+      "Classify ticket",
+    );
+  });
+
   it("auto-layouts left→right by BFS depth from the start node", () => {
     const { nodes } = decompileGraph(GRAPH);
     const x = (id: string) => nodes.find((n) => n.id === id)?.position.x ?? -1;
