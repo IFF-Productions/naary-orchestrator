@@ -18,7 +18,11 @@ import {
   connectionSecretKey,
 } from "./connection.service";
 import { assertEgressAllowed } from "./egress";
-import { AuthConfigError, NeedsReauthError } from "./errors";
+import {
+  AuthConfigError,
+  ConnectCallbackError,
+  NeedsReauthError,
+} from "./errors";
 import { safeFetch } from "./safe-fetch";
 
 const GITHUB_API = "https://api.github.com";
@@ -295,7 +299,12 @@ export async function completeGithubAppInstall(opts: {
 }): Promise<{ connectionId: string }> {
   if (!opts.state || !opts.installationId) {
     // Fail closed: GitHub must echo BOTH. A bare redirect (no state) is not a trusted install.
-    throw new Error("Missing installation_id or state");
+    // User-recoverable (a scanner hit, or an install begun outside our start flow) — the API
+    // maps this to a 4xx, not a paging 500. Still fails closed: no connection is created.
+    throw new ConnectCallbackError(
+      "missing_params",
+      "Missing installation_id or state",
+    );
   }
   const store = opts.store ?? new SecretStore();
   const connections = opts.connections ?? new ConnectionService();
@@ -310,7 +319,11 @@ export async function completeGithubAppInstall(opts: {
     environmentId,
     installStateKey(opts.state),
   );
-  if (!raw) throw new Error("Unknown or expired GitHub install state");
+  if (!raw)
+    throw new ConnectCallbackError(
+      "unknown_or_expired",
+      "Unknown or expired GitHub install state",
+    );
   // Consume immediately (single-use, before any create) so a leaked state can't be replayed.
   await store.remove(tenantId, environmentId, installStateKey(opts.state));
   const s = JSON.parse(raw) as InstallStateBlob;
@@ -320,7 +333,7 @@ export async function completeGithubAppInstall(opts: {
     throw new Error("GitHub install state tenant mismatch");
   }
   if (typeof s.expiresAt === "number" && s.expiresAt < now()) {
-    throw new Error("GitHub install state expired");
+    throw new ConnectCallbackError("expired", "GitHub install state expired");
   }
 
   let conn: ConnectionView | undefined;

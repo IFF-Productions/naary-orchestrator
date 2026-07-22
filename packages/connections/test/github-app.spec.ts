@@ -1,6 +1,10 @@
 import { generateKeyPairSync } from "node:crypto";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthConfigError, NeedsReauthError } from "../src/errors";
+import {
+  AuthConfigError,
+  ConnectCallbackError,
+  NeedsReauthError,
+} from "../src/errors";
 import {
   __ghAppDeps,
   __resetGithubAppCache,
@@ -277,13 +281,20 @@ describe("startGithubAppInstall / completeGithubAppInstall", () => {
     ).rejects.toThrow(/not configured/);
   });
 
-  it("callback fails closed on a missing installation_id or state (CSRF)", async () => {
-    await expect(
-      completeGithubAppInstall({ state: "", installationId: "99" }),
-    ).rejects.toThrow(/Missing/);
-    await expect(
-      completeGithubAppInstall({ state: "t1.e1.abc", installationId: "" }),
-    ).rejects.toThrow(/Missing/);
+  it("callback fails closed on a missing installation_id or state (CSRF → recoverable, not a 500)", async () => {
+    // The typed `missing_params` reason is what lets the controller map this to a 4xx/redirect
+    // instead of a Sentry-paging 500 (issues #419/#426).
+    for (const args of [
+      { state: "", installationId: "99" },
+      { state: "t1.e1.abc", installationId: "" },
+    ]) {
+      await expect(completeGithubAppInstall(args)).rejects.toBeInstanceOf(
+        ConnectCallbackError,
+      );
+      await expect(completeGithubAppInstall(args)).rejects.toMatchObject({
+        reason: "missing_params",
+      });
+    }
   });
 
   it("callback rejects an unknown/replayed state and never creates a connection", async () => {
@@ -299,7 +310,10 @@ describe("startGithubAppInstall / completeGithubAppInstall", () => {
         store,
         connections: conns,
       }),
-    ).rejects.toThrow(/Unknown or expired/);
+    ).rejects.toMatchObject({
+      name: "ConnectCallbackError",
+      reason: "unknown_or_expired",
+    });
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -325,7 +339,10 @@ describe("startGithubAppInstall / completeGithubAppInstall", () => {
         connections: conns,
         now: () => FIXED_NOW + 11 * 60 * 1000, // 11 min later — past the 10-min TTL
       }),
-    ).rejects.toThrow(/expired/);
+    ).rejects.toMatchObject({
+      name: "ConnectCallbackError",
+      reason: "expired",
+    });
     expect(create).not.toHaveBeenCalled();
   });
 

@@ -26,3 +26,27 @@ export class AuthConfigError extends Error {
     this.name = "AuthConfigError";
   }
 }
+
+/** Why an interactive connect callback couldn't complete — all USER-RECOVERABLE. */
+export type ConnectCallbackReason =
+  | "missing_params" // the provider hit our callback without the params we require
+  | "unknown_or_expired" // the single-use state isn't in the store (spent, swept, or never issued)
+  | "expired"; // the state was found but past its TTL
+
+/**
+ * A user-recoverable failure of an interactive connect callback (GitHub App install or
+ * OAuth consent): the single-use `state` is absent, unknown, or past its TTL. These are
+ * NOT server faults — the user just restarts the connect flow — so the API maps them to a
+ * 4xx (never a 500), keeping them OUT of high-priority error alerting. Genuine faults
+ * (store/provider errors) and security signals (tenant/issuer mismatch, a tampered state)
+ * are deliberately NOT this error, so they stay a loud 500 that pages. Callbacks still fail
+ * CLOSED on any of these — no connection is created. */
+export class ConnectCallbackError extends Error {
+  constructor(
+    public readonly reason: ConnectCallbackReason,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ConnectCallbackError";
+  }
+}

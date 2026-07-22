@@ -17,6 +17,7 @@ import {
 import type { Response } from "express";
 import { Public } from "../auth/public.decorator";
 import { ApiEndpoint } from "../swagger/api-decorators";
+import { reportConnectCallbackFailure } from "./connect-callback-error";
 import { connectReturnUrl } from "./connect-return";
 import { OAuthStartResponse } from "./connection.response";
 
@@ -80,12 +81,13 @@ export class OAuthController {
     @Query("iss") iss?: string,
   ): Promise<void> {
     // Browser-facing: 302 back to the SPA rather than rendering JSON / a 500. A replayed or expired
-    // single-use `state` is benign; catching it here keeps it out of Sentry as an unhandled 500.
+    // single-use `state` is benign (stays a warn); a genuine fault still alerts, so an outage
+    // during consent isn't masked by the redirect (see reportConnectCallbackFailure).
     try {
       await completeConsent({ state, code, iss });
       res.redirect(connectReturnUrl({ ok: true, tab: "providers" }));
     } catch (err) {
-      this.logger.warn(`OAuth callback failed: ${(err as Error).message}`);
+      reportConnectCallbackFailure(err, this.logger, "OAuth callback");
       res.redirect(
         connectReturnUrl({ ok: false, tab: "providers", error: "oauth" }),
       );

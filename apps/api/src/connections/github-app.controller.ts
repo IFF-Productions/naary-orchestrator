@@ -10,6 +10,7 @@ import {
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiResponse } from "@nestjs/swagger";
 import {
+  ConnectCallbackError,
   completeGithubAppInstall,
   startGithubAppInstall,
 } from "@naary/connections";
@@ -18,6 +19,7 @@ import { Public } from "../auth/public.decorator";
 import { EnvironmentSel } from "../auth/tenant.decorator";
 import { EnvironmentsService } from "../environments/environments.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
+import { reportConnectCallbackFailure } from "./connect-callback-error";
 import { connectReturnUrl } from "./connect-return";
 import { GithubAppInstallStartResponse } from "./connection.response";
 import { GithubAppInstallStartDto } from "./github-app-install.dto";
@@ -87,15 +89,31 @@ export class GithubAppController {
     @Query("setup_action") setupAction?: string,
   ): Promise<void> {
     // Browser-facing redirect target: never render a raw JSON body or a 500. On success bounce to
-    // the integrations page; on failure do the same with an error flag and log the cause. The
-    // common failure (a single-use `state` replayed after a successful install, or the 10-min TTL
-    // expiring) is BENIGN — catching it here also keeps it out of Sentry as an unhandled 500.
+    // the integrations page; on failure do the same with an error flag. The common failure (a
+    // single-use `state` replayed after a successful install, or the 10-min TTL expiring) is
+    // BENIGN and stays a warn; a genuine fault still alerts (see reportConnectCallbackFailure).
     try {
       await completeGithubAppInstall({ state, installationId, setupAction });
       res.redirect(connectReturnUrl({ ok: true, tab: "apps" }));
     } catch (err) {
-      this.logger.warn(
-        `GitHub App install callback failed: ${(err as Error).message}`,
+      // An install that reached us WITH an installation_id but NO state is the case worth watching:
+      // an out-of-band install (from github.com) or GitHub not echoing our state. Still benign to
+      // the user (they just retry from Naary), but a signal the connect flow may be misconfigured.
+      if (
+        err instanceof ConnectCallbackError &&
+        err.reason === "missing_params" &&
+        installationId &&
+        !state
+      ) {
+        this.logger.warn(
+          "GitHub App install callback: installation_id present but no state — an out-of-band " +
+            "install or state not echoed; check the connect flow if this recurs",
+        );
+      }
+      reportConnectCallbackFailure(
+        err,
+        this.logger,
+        "GitHub App install callback",
       );
       res.redirect(
         connectReturnUrl({ ok: false, tab: "apps", error: "github_app" }),
