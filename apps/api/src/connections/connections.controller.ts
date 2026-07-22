@@ -51,14 +51,28 @@ export class ConnectionsController {
   async list(
     @Param("id") tenantId: string,
     @EnvironmentSel() envSel?: string,
-  ): Promise<Array<ConnectionView & { usedByNodeCount: number }>> {
+  ): Promise<
+    Array<
+      ConnectionView & {
+        usedByNodeCount: number;
+        credentialLast4: string | null;
+      }
+    >
+  > {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    // Connections + their reference counts (#471) in parallel — both env-scoped to `envId`.
-    const [conns, usage] = await Promise.all([
+    // Connections + their reference counts + credential last-4 (#471) in parallel — all env-scoped
+    // to `envId`. The last-4 is decrypted in the service and only the 4-char fragment reaches here;
+    // the full token never crosses this boundary.
+    const [conns, usage, last4] = await Promise.all([
       this.connections.list(tenantId, envId),
       this.graphs.connectionUsageCounts(tenantId, envId),
+      this.connections.credentialLast4Map(tenantId, envId),
     ]);
-    return conns.map((c) => ({ ...c, usedByNodeCount: usage[c.id] ?? 0 }));
+    return conns.map((c) => ({
+      ...c,
+      usedByNodeCount: usage[c.id] ?? 0,
+      credentialLast4: last4[c.id] ?? null,
+    }));
   }
 
   @ApiEndpoint({

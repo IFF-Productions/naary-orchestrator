@@ -123,6 +123,77 @@ describe("ConnectionService", () => {
     expect(JSON.stringify(list)).not.toContain(PAT);
   });
 
+  it("credentialLast4Map exposes only the last 4 chars of a bearer secret, never the full token (#471)", async () => {
+    const svc = new ConnectionService(fakeStore);
+    const bearer = await svc.create("t1", "e1", {
+      type: "github",
+      label: "gh",
+      serverUrl: "u",
+      authMode: "pat",
+      token: PAT, // "glpat-secret-token-value-123"
+    });
+
+    const map = await svc.credentialLast4Map("t1", "e1");
+
+    expect(map[bearer.id]).toBe(PAT.slice(-4)); // "-123"
+    expect(map[bearer.id]).toHaveLength(4);
+    // The full secret must NEVER appear in the returned metadata.
+    expect(JSON.stringify(map)).not.toContain(PAT);
+    expect(JSON.stringify(map)).not.toContain("glpat-secret-token-value");
+  });
+
+  it("credentialLast4Map returns null for connection-string / tokenless / short secrets (#471)", async () => {
+    const svc = new ConnectionService(fakeStore);
+    // A DB connection string — its tail is a URL fragment, not a credential → null (no decrypt hint).
+    const dsn = await svc.create("t1", "e1", {
+      type: "postgres",
+      label: "db",
+      serverUrl: "db.internal:5432",
+      authMode: "connection_string",
+      token: "postgres://user:pass@db.internal:5432/app?sslmode=require",
+    });
+    // OAuth stores a JSON grant blob under conn:<id>, not a raw token — excluded, so even WITH a
+    // stored value the last-4 is null (never surface `…"}` JSON punctuation).
+    const oauth = await svc.create("t1", "e1", {
+      type: "custom",
+      label: "oauth",
+      serverUrl: "u",
+      authMode: "oauth",
+      token: JSON.stringify({
+        refreshToken: "rt-secret-abcd",
+        accessToken: "at",
+      }),
+    });
+    // github_app stores `{ installationId }` — a non-secret id blob → also excluded.
+    const app = await svc.create("t1", "e1", {
+      type: "github",
+      label: "gh-app",
+      serverUrl: "u",
+      authMode: "github_app",
+      token: JSON.stringify({ installationId: "12345678" }),
+    });
+    // A bearer connection whose secret is shorter than 4 chars → null (don't reveal a whole secret).
+    const short = await svc.create("t1", "e1", {
+      type: "custom",
+      label: "short",
+      serverUrl: "u",
+      authMode: "api_token",
+      token: "ab",
+    });
+
+    const map = await svc.credentialLast4Map("t1", "e1");
+
+    expect(map[dsn.id]).toBeNull();
+    expect(map[oauth.id]).toBeNull();
+    expect(map[app.id]).toBeNull();
+    expect(map[short.id]).toBeNull();
+    // Neither the connection string nor the JSON grants leak through the metadata at all.
+    expect(JSON.stringify(map)).not.toContain("sslmode=require");
+    expect(JSON.stringify(map)).not.toContain("pass");
+    expect(JSON.stringify(map)).not.toContain("rt-secret-abcd");
+    expect(JSON.stringify(map)).not.toContain("12345678");
+  });
+
   it("throws MissingConnectionTokenError when a PAT connection has no token", async () => {
     const svc = new ConnectionService(fakeStore);
     const view = await svc.create("t1", "e1", {

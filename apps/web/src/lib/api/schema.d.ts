@@ -2482,6 +2482,11 @@ export interface components {
        * @example 3
        */
       usedByNodeCount: number;
+      /**
+       * @description Last 4 characters of the stored raw bearer token (#471, pat/api_token modes) — a 'which key is this?' hint, like a card's last-4; NEVER the full token. null for connection-string (DB/SMTP) secrets, oauth/github_app (which store a JSON grant, not a token), connections with no stored token yet, or secrets shorter than 4 chars.
+       * @example xyz1
+       */
+      credentialLast4: string | null;
       /** Format: date-time */
       createdAt: string;
     };

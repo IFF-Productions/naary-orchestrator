@@ -180,6 +180,9 @@ export interface ConnectionRow {
   status: "connected" | "needs_reauth" | "error";
   /** Nodes referencing this connection across the env's latest graphs (#471); 0 = unused. */
   usedByNodeCount?: number;
+  /** Last 4 chars of the stored bearer credential (#471) — a "which key is this?" hint, never the
+   *  full token. null for connection-string (DB/SMTP), tokenless, or too-short secrets. */
+  credentialLast4?: string | null;
   createdAt: string;
 }
 
