@@ -36,6 +36,10 @@ export interface CodeAgentEnvelope {
   usage?: { costUsd?: number; inputTokens?: number; outputTokens?: number };
   /** True when the CLI reported a failure even on a 0 exit (Claude: `is_error`). */
   isError: boolean;
+  /** On a failure, the CLI's own reason code so the run + its Sentry issue are diagnosable
+   *  (#551) — e.g. Claude's `error_max_turns` / `error_during_execution`, or `no_envelope`
+   *  when the process died before emitting JSON. Undefined on success / when the CLI gave none. */
+  failureSubtype?: string;
 }
 
 export interface CliAgentDriver {
@@ -106,6 +110,7 @@ const claudeDriver: CliAgentDriver = {
     let env: {
       result?: string;
       is_error?: boolean;
+      subtype?: string;
       session_id?: string;
       total_cost_usd?: number;
       total_usage?: { input_tokens?: number; output_tokens?: number };
@@ -116,12 +121,23 @@ const claudeDriver: CliAgentDriver = {
       env = null;
     }
     if (!env) {
-      return { result: "", isError: true };
+      // No parseable JSON: the process died (panic/OOM/killed) before emitting its envelope.
+      return { result: "", isError: true, failureSubtype: "no_envelope" };
     }
+    const isError = env.is_error === true || exitCode !== 0;
     return {
       result: typeof env.result === "string" ? env.result : "",
       sessionId: env.session_id,
-      isError: env.is_error === true || exitCode !== 0,
+      isError,
+      // The CLI's own reason on failure (Claude sets `subtype`); fall back to a nonzero-exit
+      // marker so a failure is never reasonless.
+      failureSubtype: isError
+        ? typeof env.subtype === "string" && env.subtype
+          ? env.subtype
+          : exitCode !== 0
+            ? `exit_${exitCode}`
+            : "unknown"
+        : undefined,
       usage: {
         costUsd: env.total_cost_usd,
         inputTokens: env.total_usage?.input_tokens,
