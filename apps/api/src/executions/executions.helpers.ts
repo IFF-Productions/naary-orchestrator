@@ -181,3 +181,27 @@ export function startSampleInput(
     ? (sample as Record<string, unknown>)
     : undefined;
 }
+
+/** Max length of the searchable trigger-input projection stored on the Execution row (#463) — caps
+ *  the pg_trgm index size and honors the payload rule (long inputs truncate, never reject). */
+const SEARCH_TEXT_MAX = 8_192;
+
+/**
+ * Build the searchable projection of a run's TRIGGER INPUT (issue #463 "search executions by
+ * contained data"). The input is the user-supplied structured data a run was started with — NOT LLM
+ * prompt/completion text and NOT node outputs — so it is safe to index (privacy rule / usage-ledger
+ * invariant). We serialize it to plain text and length-cap it; the `?q=` substring search runs
+ * against this string. Returns undefined for empty/undecodable input so the column stays NULL (a
+ * NULL never matches a search — no false hits, and it's the honest "nothing to index" signal).
+ */
+export function projectSearchText(input: unknown): string | undefined {
+  if (input == null) return undefined;
+  let text: string;
+  try {
+    text = typeof input === "string" ? input : JSON.stringify(input);
+  } catch {
+    return undefined; // circular / non-serializable — skip rather than fail the run start
+  }
+  if (!text || text === "{}" || text === "[]") return undefined;
+  return text.length > SEARCH_TEXT_MAX ? text.slice(0, SEARCH_TEXT_MAX) : text;
+}

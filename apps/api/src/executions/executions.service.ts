@@ -49,7 +49,11 @@ import {
   type RunStateView,
   type RunSummary,
 } from "./executions.types";
-import { nodeTimesFrom, startSampleInput } from "./executions.helpers";
+import {
+  nodeTimesFrom,
+  projectSearchText,
+  startSampleInput,
+} from "./executions.helpers";
 import {
   type ExecutionsDeps,
   queryAwaiting,
@@ -581,6 +585,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
 
     // Record ownership so approve/getState can be authorized by tenant, plus the
     // snapshotted version for the Runs list / run detail (the memo/history also hold it).
+    // searchText projects the run's TRIGGER INPUT for "search by contained data" (#463) — input
+    // only, never node outputs / completion text (privacy rule). null when there's nothing to index.
     await getPrisma().execution.create({
       data: {
         workflowId,
@@ -588,6 +594,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         environmentId, // tag the run with its env (Slice 6)
         workflowKey,
         graphVersion: snapshot.version,
+        searchText: projectSearchText(input) ?? null,
       },
     });
     executionsStarted.inc({ workflowKey });
@@ -888,8 +895,14 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     limit = 50,
     archived = false,
     actor?: Principal,
+    /** Free-text substring search over the run's trigger-input projection + id/key (#463). */
+    q?: string,
   ): Promise<RunSummary[]> {
-    const { items } = await this.listPage(tenantId, { limit, archived }, actor);
+    const { items } = await this.listPage(
+      tenantId,
+      { limit, archived, q },
+      actor,
+    );
     return items;
   }
 
@@ -902,7 +915,12 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
    */
   async listPage(
     tenantId: string,
-    opts: { limit?: number; cursor?: string; archived?: boolean } = {},
+    opts: {
+      limit?: number;
+      cursor?: string;
+      archived?: boolean;
+      q?: string;
+    } = {},
     /** The user-facing caller (SPA Runs screen / v1 GET /runs). G3 (§8.4): a RESTRICTED
      *  subject's rows are view-filtered IN the where clause, so pagination stays exact.
      *  Absent for internal callers + the company rollup path (workspace-level reads). */

@@ -146,3 +146,93 @@ describe("listPage", () => {
     expect(out[0]).toMatchObject({ workflowId: "wf-1", status: "completed" });
   });
 });
+
+// Issue #463: search runs by contained data (the run's trigger-input projection) + id/workflow.
+describe("listPage data search (#463)", () => {
+  it("a blank/whitespace q is ignored — the plain tenant-scoped list, no search AND clause", async () => {
+    findMany.mockResolvedValue([]);
+    await makeService().listPage("t-1", { q: "   " });
+    expect(findMany.mock.calls[0][0].where).toEqual({
+      tenantId: "t-1",
+      archivedAt: null,
+    });
+  });
+
+  it("q builds a case-insensitive OR over searchText + id + workflowKey, AND-ed under the tenant scope", async () => {
+    findMany.mockResolvedValue([]);
+    await makeService().listPage("t-1", { q: "needle" });
+    const where = findMany.mock.calls[0][0].where;
+    // Tenant scope is NEVER widened — it stays a top-level equality outside the search OR.
+    expect(where.tenantId).toBe("t-1");
+    expect(where.archivedAt).toBeNull();
+    expect(where.AND).toEqual([
+      {
+        OR: [
+          { searchText: { contains: "needle", mode: "insensitive" } },
+          { workflowId: { contains: "needle", mode: "insensitive" } },
+          { workflowKey: { contains: "needle", mode: "insensitive" } },
+        ],
+      },
+    ]);
+  });
+
+  // The security invariant: a search must return the CALLER's matching runs and NEVER another
+  // tenant's — even when both tenants have a run containing the same needle. We back findMany with
+  // a realistic two-tenant dataset and evaluate the where (tenant equality + the search OR) against
+  // it, exactly as Postgres would.
+  it("is tenant-scoped: A's run matches for A; B searching the same needle gets nothing", async () => {
+    const db = [
+      {
+        ...row("wf-a", "2026-07-03T00:00:00Z"),
+        tenantId: "t-A",
+        searchText: JSON.stringify({ ticket: "needle-123", who: "alice" }),
+      },
+      {
+        ...row("wf-b", "2026-07-02T00:00:00Z"),
+        tenantId: "t-B",
+        searchText: JSON.stringify({ ticket: "needle-123", who: "bob" }),
+      },
+    ];
+    const matchContains = (
+      val: string | null,
+      clause: { contains: string } | undefined,
+    ) =>
+      clause == null
+        ? false
+        : (val ?? "").toLowerCase().includes(clause.contains.toLowerCase());
+    // Minimal evaluator for the where this feature emits: tenant equality + archived + the AND[].OR.
+    findMany.mockImplementation(({ where }) =>
+      Promise.resolve(
+        db
+          .filter((r) => r.tenantId === where.tenantId)
+          .filter((r) =>
+            where.archivedAt == null
+              ? r.archivedAt === null
+              : r.archivedAt !== null,
+          )
+          .filter((r) =>
+            (where.AND ?? []).every(
+              (and: { OR: Record<string, { contains: string }>[] }) =>
+                and.OR.some(
+                  (o) =>
+                    matchContains(r.searchText, o.searchText) ||
+                    matchContains(r.workflowId, o.workflowId) ||
+                    matchContains(r.workflowKey, o.workflowKey),
+                ),
+            ),
+          ),
+      ),
+    );
+
+    const forA = await makeService().listPage("t-A", { q: "needle" });
+    expect(forA.items.map((i) => i.workflowId)).toEqual(["wf-a"]);
+
+    const forB = await makeService().listPage("t-B", { q: "needle" });
+    expect(forB.items.map((i) => i.workflowId)).toEqual(["wf-b"]);
+
+    // The leak check: a tenant with NO run containing the needle gets an empty result, never
+    // another tenant's matching run.
+    const forC = await makeService().listPage("t-C", { q: "needle" });
+    expect(forC.items).toEqual([]);
+  });
+});

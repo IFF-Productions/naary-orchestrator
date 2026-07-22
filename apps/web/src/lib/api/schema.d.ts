@@ -271,7 +271,7 @@ export interface paths {
   "/executions": {
     /**
      * List recent runs
-     * @description Recent runs for the tenant (newest first). `archived=true` shows the archived runs instead.
+     * @description Recent runs for the tenant (newest first). `archived=true` shows the archived runs instead. `q` searches runs by the data they contain (the run's trigger input) as well as their id/workflow.
      */
     get: operations["ExecutionsController_listRuns"];
     /**
@@ -5437,12 +5437,14 @@ export interface operations {
   };
   /**
    * List recent runs
-   * @description Recent runs for the tenant (newest first). `archived=true` shows the archived runs instead.
+   * @description Recent runs for the tenant (newest first). `archived=true` shows the archived runs instead. `q` searches runs by the data they contain (the run's trigger input) as well as their id/workflow.
    */
   ExecutionsController_listRuns: {
     parameters: {
       query?: {
         archived?: boolean;
+        /** @description Free-text substring search over the run's contained data (trigger input) + id/workflow. */
+        q?: string;
       };
     };
     responses: {

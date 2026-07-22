@@ -54,6 +54,14 @@ model Execution {
   // truth) so the Runs list is a single PG read — no per-run Temporal RPCs.
   status      String   @default("running")
   costUsd     Decimal? @db.Decimal(12, 6)
+  // Searchable projection of the run's TRIGGER INPUT (issue #463 "search executions by contained
+  // data") — the user-supplied structured data the run was started with, serialized + length-capped
+  // at start (see startGraph). It is NOT LLM prompt/completion text and NOT node outputs (those are
+  // Temporal-only and, for agent nodes, ARE completion text the privacy rule forbids indexing). Null
+  // for pre-migration rows and for worker-created scheduled runs (their input is typically static).
+  // Substring search (`?q=`) runs against this column, served by a pg_trgm GIN index that the
+  // migration hand-authors (not expressible in the Prisma schema without preview extensions).
+  searchText  String?
   createdAt   DateTime @default(now())
   // When the run reached a TERMINAL status (Slice 2 — per-node timing + cost). Stamped
   // in-activity (setExecutionStatus) on the terminal push, so durationMs = finishedAt −

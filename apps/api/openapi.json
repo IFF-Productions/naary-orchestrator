@@ -4051,7 +4051,7 @@
         ]
       },
       "get": {
-        "description": "Recent runs for the tenant (newest first). `archived=true` shows the archived runs instead.",
+        "description": "Recent runs for the tenant (newest first). `archived=true` shows the archived runs instead. `q` searches runs by the data they contain (the run's trigger input) as well as their id/workflow.",
         "operationId": "ExecutionsController_listRuns",
         "parameters": [
           {
@@ -4060,6 +4060,15 @@
             "in": "query",
             "schema": {
               "type": "boolean"
+            }
+          },
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Free-text substring search over the run's contained data (trigger input) + id/workflow.",
+            "schema": {
+              "type": "string"
             }
           }
         ],
