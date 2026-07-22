@@ -130,4 +130,26 @@ describe("computeCost", () => {
       );
     }
   });
+
+  it("prices the cursor/copilot code-agent slots (proxy) so cost is NEVER $0 (Tier-1 rule 6)", () => {
+    // #568 review: without a pricing row, a cursor/copilot run recorded $0 → silently evaded USD
+    // budget enforcement. They proxy the Anthropic table (the codeAgent model default is a Claude
+    // model), so the default-model cost is real + non-zero.
+    const tokens = { inputTokens: 100_000, outputTokens: 50_000 };
+    for (const provider of ["cursor", "copilot"]) {
+      const cost = computeCost({
+        provider,
+        model: "claude-opus-4-8",
+        ...tokens,
+      });
+      expect(cost).toBeGreaterThan(0);
+      expect(cost).toBe(
+        computeCost({
+          provider: "anthropic",
+          model: "claude-opus-4-8",
+          ...tokens,
+        }),
+      );
+    }
+  });
 });

@@ -58,6 +58,13 @@ export const MODEL_PRICING: Record<string, Record<string, ModelPrice>> = {
   // update applies to both. Without this key, every codeAgent run died in recordUsage
   // with UnknownModelPricingError after the CLI call had already succeeded.
   "claude-code": ANTHROPIC_MODELS,
+  // The other code-agent CLI slots (cursor/copilot BYOK credentials). Their per-model pricing
+  // varies (each CLI can run several vendors' models) and isn't published as a stable table, and
+  // the codeAgent activity defaults the priced model to a Claude one — so PROXY to the Anthropic
+  // table. This is a deliberate fallback ESTIMATE (Tier-1 rule 6: never record $0 — a zero-cost
+  // code-agent run would silently evade USD budget enforcement). Refine with real tables later.
+  cursor: ANTHROPIC_MODELS,
+  copilot: ANTHROPIC_MODELS,
   // OpenAI list prices, USD per million tokens (cached-input = the discounted
   // prompt-cache read rate). As of 2026-06-25. Source: OpenAI API pricing.
   openai: {
