@@ -17,6 +17,7 @@ import {
   collectUnresolved,
   resolveSubWorkflowInput,
   resolveWebhookResponse,
+  collectCitations,
   asNodeConfig,
   type UnresolvedRef,
 } from "@naary/dsl";
@@ -450,6 +451,12 @@ async function execNodeInner(
       // webhookResponseQuery, which the ingress polls.
       const rwCfg = asNodeConfig(cfg, "respondToWebhook");
       state.webhookResponse = resolveWebhookResponse(rwCfg, ctx);
+      // Attach RAG citations (issue #482) so the hosted chat can show "Sources". Pure graph+ctx
+      // read (no command, no I/O) → replay-safe without patched(), like the __regionTrace/timing
+      // ctx writes. Only set when a vectorQuery matched — a plain webhook/chat stays citation-free,
+      // and the webhook ingress ignores this field regardless (it returns only body/status/headers).
+      const citations = collectCitations(engine.graph, ctx);
+      if (citations.length > 0) state.webhookResponse.citations = citations;
       ctx[node.id] = {
         statusCode: state.webhookResponse.statusCode,
       } satisfies NodeOutputMap["respondToWebhook"];

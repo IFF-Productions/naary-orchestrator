@@ -101,6 +101,7 @@ export {
   resolveWebhookResponse,
   type ResolvedWebhookResponse,
 } from "./respond-webhook";
+export { collectCitations, type DerivedCitation } from "./citations";
 export { walk } from "./walk";
 export { canonicalize } from "./canonical";
 export {

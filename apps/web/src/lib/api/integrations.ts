@@ -7,6 +7,7 @@ import type { GraphQLSchemaSummary, OpenApiSummary } from "@naary/dsl";
 import { http, introspectFetch } from "./http";
 import type {
   ChatDefinition,
+  ChatReply,
   ChatRow,
   ConnectionInput,
   ConnectionRow,
@@ -216,7 +217,7 @@ export const integrationsApi = {
     chatId: string,
     message: string,
     sessionId: string,
-  ): Promise<{ status: string; reply?: unknown }> {
+  ): Promise<ChatReply> {
     return http(`/chat/${encodeURIComponent(chatId)}`, {
       method: "POST",
       body: JSON.stringify({ message, sessionId }),

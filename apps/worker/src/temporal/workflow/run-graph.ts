@@ -406,5 +406,10 @@ export async function runGraph(
     reply: state.webhookResponse
       ? (state.webhookResponse.body ?? null)
       : undefined,
+    // RAG citations (issue #482) ride the reply — set at the respondToWebhook moment (node-exec),
+    // so a durable chat-session child reads "Sources" straight off RunGraphResult.
+    ...(state.webhookResponse?.citations
+      ? { citations: state.webhookResponse.citations }
+      : {}),
   };
 }

@@ -30,6 +30,17 @@ export class ChatDefinitionResponse {
   greeting?: string;
 }
 
+/** One RAG source (citation) the chat run used to answer (issue #482) — a privacy-safe subset of a
+ *  vectorQuery match: the source collection, a truncated snippet, and the similarity score. */
+export class ChatCitationResponse {
+  @ApiProperty({ required: false, example: "docs" })
+  source?: string;
+  @ApiProperty({ example: "Refunds are processed within 5 business days…" })
+  snippet!: string;
+  @ApiProperty({ required: false, example: 0.87 })
+  score?: number;
+}
+
 /** The agent's reply to a chat message. */
 export class ChatReplyResponse {
   @ApiProperty({ example: "started" }) status!: string;
@@ -38,6 +49,12 @@ export class ChatReplyResponse {
     description: "The reply body (from the graph's respondToWebhook node).",
   })
   reply?: unknown;
+  @ApiProperty({
+    type: [ChatCitationResponse],
+    description:
+      "RAG sources the run retrieved (issue #482), for the chat UI's 'Sources' list. Empty when the chat graph ran no vectorQuery (retrieval) step.",
+  })
+  citations!: ChatCitationResponse[];
 }
 
 /** Acknowledgement that a chat endpoint was deleted. */

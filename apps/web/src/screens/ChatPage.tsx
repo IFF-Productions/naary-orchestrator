@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Icon, Logo } from "../components";
-import { api, type ChatDefinition } from "../lib/api";
+import { api, type ChatDefinition, type Citation } from "../lib/api";
 import {
   EMBER_BUTTON,
   EMBER_TINT_BD,
@@ -20,11 +20,92 @@ import {
  *
  * Redesign: "Naary Public Pages" hosted-chat card — 440px, brand tile + Online dot header,
  * flame-avatar bot bubbles with a top-left notch, ember-tinted user bubbles, typing dots while
- * the graph runs, ember send button. The chat response is `{ status, reply? }` only — it carries
- * no citation/source data and the definition has no starter prompts, so those design elements
- * are omitted rather than faked.
+ * the graph runs, ember send button.
+ *
+ * Sources (issue #482): the chat response now carries `citations[]` — the RAG sources (vectorQuery
+ * matches) the run used to answer. When a reply has citations we render a "Sources" list under the
+ * assistant bubble; a reply with no retrieval step has an empty array and shows nothing.
  */
-type Turn = { role: "user" | "assistant"; text: string };
+type Turn = {
+  role: "user" | "assistant";
+  text: string;
+  /** RAG sources for an assistant reply (issue #482) — empty/omitted when there was no retrieval. */
+  citations?: Citation[];
+};
+
+/**
+ * "Sources" list under an assistant reply (issue #482) — the RAG chunks the run retrieved to answer.
+ * Each source shows its collection (when known) + similarity score and a truncated snippet. Rendered
+ * only when a reply actually has citations, so a non-RAG chat is visually unchanged.
+ */
+function Sources({ citations }: { citations: Citation[] }) {
+  return (
+    <div
+      style={{
+        border: "1px solid var(--line-mid)",
+        borderRadius: 10,
+        background: "var(--card-2)",
+        padding: "8px 11px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: 0.4,
+          textTransform: "uppercase",
+          color: "var(--ink-3)",
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+        }}
+      >
+        <Icon name="template" size={11} strokeWidth={2} />
+        Sources
+      </div>
+      {citations.map((c, i) => (
+        <div
+          key={i}
+          style={{
+            fontSize: 11,
+            lineHeight: 1.5,
+            color: "var(--ink-soft)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              marginBottom: 2,
+            }}
+          >
+            <span style={{ fontWeight: 600, color: "var(--ink)" }}>
+              {c.source ?? `Source ${i + 1}`}
+            </span>
+            {typeof c.score === "number" && (
+              <span style={{ fontSize: 10, color: "var(--ink-3)" }}>
+                {Math.round(c.score * 100)}% match
+              </span>
+            )}
+          </div>
+          <div
+            style={{
+              color: "var(--ink-3)",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}
+          >
+            {c.snippet}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function ChatPage() {
   const { chatId } = useParams<{ chatId: string }>();
@@ -82,7 +163,10 @@ export function ChatPage() {
               : typeof (res.reply as { reply?: unknown }).reply === "string"
                 ? String((res.reply as { reply?: unknown }).reply)
                 : JSON.stringify(res.reply);
-      setTurns((t) => [...t, { role: "assistant", text: reply }]);
+      setTurns((t) => [
+        ...t,
+        { role: "assistant", text: reply, citations: res.citations },
+      ]);
     } catch {
       setTurns((t) => [
         ...t,
@@ -206,19 +290,30 @@ export function ChatPage() {
                   <div
                     style={{
                       maxWidth: "76%",
-                      background: "var(--card)",
-                      border: "1px solid var(--line-mid)",
-                      borderRadius: 12,
-                      borderTopLeftRadius: 4,
-                      padding: "11px 14px",
-                      fontSize: 12.5,
-                      lineHeight: 1.55,
-                      color: "var(--ink-soft)",
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 7,
                     }}
                   >
-                    {t.text}
+                    <div
+                      style={{
+                        background: "var(--card)",
+                        border: "1px solid var(--line-mid)",
+                        borderRadius: 12,
+                        borderTopLeftRadius: 4,
+                        padding: "11px 14px",
+                        fontSize: 12.5,
+                        lineHeight: 1.55,
+                        color: "var(--ink-soft)",
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                      }}
+                    >
+                      {t.text}
+                    </div>
+                    {t.citations && t.citations.length > 0 && (
+                      <Sources citations={t.citations} />
+                    )}
                   </div>
                 </div>
               ) : (

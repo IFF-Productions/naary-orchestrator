@@ -3,7 +3,7 @@
 // Temporal workflow code — same Tier-1 rules as run-graph.ts.
 import * as wf from "@temporalio/workflow";
 import { chatMessageSignal, chatReplyQuery } from "@naary/contracts";
-import type { ChatReplyState, ChatTurnInput } from "@naary/contracts";
+import type { Citation, ChatReplyState, ChatTurnInput } from "@naary/contracts";
 import type { GraphDef } from "@naary/dsl";
 import { loadChatHistory, appendChatTurn } from "./proxies";
 import { runGraph } from "./run-graph";
@@ -33,8 +33,9 @@ export interface ChatSessionInput {
 interface ChatSessionResume {
   history: { role: string; text: string }[];
   /** Bounded recent turnId→reply window, carried so a client still polling across a CAN boundary
-   *  can still read its reply (advisor: a CAN must not orphan an un-polled reply). */
-  recentReplies: { turnId: string; reply: unknown }[];
+   *  can still read its reply (advisor: a CAN must not orphan an un-polled reply). `citations` are
+   *  the turn's RAG sources (issue #482), carried alongside the reply. */
+  recentReplies: { turnId: string; reply: unknown; citations?: Citation[] }[];
   /** History already seeded from the durable table — don't reload on a CAN resume. */
   seeded: boolean;
 }
@@ -88,7 +89,11 @@ export async function chatSession(
     if (hit) {
       return hit.reply === undefined
         ? { status: "no_reply" }
-        : { status: "replied", reply: hit.reply };
+        : {
+            status: "replied",
+            reply: hit.reply,
+            ...(hit.citations ? { citations: hit.citations } : {}),
+          };
     }
     const inFlight =
       processing === turnId || queue.some((q) => q.turnId === turnId);
@@ -122,6 +127,7 @@ export async function chatSession(
     // input, not workflow-generated). A per-turn failure must not kill the session — record an error
     // reply and carry on.
     let replyBody: unknown;
+    let citations: Citation[] | undefined;
     try {
       const child = await wf.executeChild(runGraph, {
         workflowId: `${wf.workflowInfo().workflowId}-turn-${turn.turnId}`,
@@ -132,6 +138,7 @@ export async function chatSession(
         ],
       });
       replyBody = child.reply;
+      citations = child.citations; // RAG sources for this turn (issue #482)
     } catch (e) {
       if (e instanceof wf.ContinueAsNew || wf.isCancellation(e)) throw e;
       replyBody = { error: "The chat run failed." };
@@ -139,7 +146,11 @@ export async function chatSession(
 
     // Always record the turn's outcome so chatReplyQuery resolves promptly (a `undefined` reply →
     // `no_reply`, so the API poll returns "started" instead of waiting out the timeout).
-    recentReplies.push({ turnId: turn.turnId, reply: replyBody });
+    recentReplies.push({
+      turnId: turn.turnId,
+      reply: replyBody,
+      ...(citations ? { citations } : {}),
+    });
     if (recentReplies.length > MAX_CHAT_RECENT_REPLIES) recentReplies.shift();
     processing = undefined;
 
