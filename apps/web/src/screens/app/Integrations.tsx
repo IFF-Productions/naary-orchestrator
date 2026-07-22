@@ -241,7 +241,10 @@ export function Integrations() {
               tenant={tenant}
               env={env}
               credentials={credentials.filter(
-                (c) => c.provider !== "claude-code",
+                // code-agent CLI slots are rendered on the Apps tab (dedicated cards), not as
+                // model-provider (BYOK) keys here.
+                (c) =>
+                  !["claude-code", "cursor", "copilot"].includes(c.provider),
               )}
               connections={(connections ?? []).filter(
                 (c) => !APP_CONNECTION_TYPES.includes(c.type),
