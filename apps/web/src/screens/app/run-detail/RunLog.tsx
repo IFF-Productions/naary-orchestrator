@@ -15,7 +15,18 @@ const LOG_KIND_COLOR: Record<string, string> = {
   completed: "var(--state-done)",
   error: "var(--state-error)",
   continued: "var(--ink-3)",
+  debug: "var(--ink-3)", // synthetic per-node debug rows (debug runs only), muted vs real events
 };
+
+/** One log row. A superset of RunEvent so synthetic client-side debug rows (string id, kind
+ *  "debug") can be interleaved with the server's curated Temporal events by timestamp. */
+export interface LogEntry {
+  id: string | number;
+  at: string | null;
+  kind: string;
+  label: string;
+  detail?: string;
+}
 
 /**
  * Poll the run's curated history until a terminal event appears (the closing
@@ -50,8 +61,9 @@ export function useRunHistory(id: string): RunEvent[] | null {
   return events;
 }
 
-/** The design's log panel: dark mono well, timestamped rows coloured by kind. */
-export function LogPanel({ events }: { events: RunEvent[] | null }) {
+/** The design's log panel: dark mono well, timestamped rows coloured by kind. Accepts LogEntry so
+ *  the caller can interleave synthetic debug rows (a debug run) with the curated Temporal events. */
+export function LogPanel({ events }: { events: LogEntry[] | null }) {
   return (
     <div
       style={{
@@ -71,8 +83,11 @@ export function LogPanel({ events }: { events: RunEvent[] | null }) {
       ) : events.length === 0 ? (
         <span style={{ color: "var(--ink-3)" }}>No events yet.</span>
       ) : (
-        events.map((ev) => (
-          <div key={ev.id} style={{ display: "flex", gap: 10 }}>
+        events.map((ev, i) => (
+          <div
+            key={`${ev.kind}-${ev.id}-${i}`}
+            style={{ display: "flex", gap: 10 }}
+          >
             <span style={{ color: "var(--ink-3)", flex: "none" }}>
               {ev.at ? new Date(ev.at).toLocaleTimeString() : "—"}
             </span>

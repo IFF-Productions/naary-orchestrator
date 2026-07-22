@@ -25,11 +25,11 @@ import {
 import { usePermissions } from "../../lib/usePermissions";
 import { envAccent } from "../../workspace/EnvironmentSwitcher";
 import { RerunMenu, VersionBadge } from "./RerunMenu";
-import { DebugLogSection } from "./run-detail/DebugLogSection";
+import { buildDebugEvents } from "./run-detail/DebugLogSection";
 import { NodeOutputBody } from "./run-detail/NodeOutputBody";
 import { RegionTraceSection } from "./run-detail/RegionTraceSection";
 import { RunGraph } from "./run-detail/RunGraph";
-import { LogPanel, useRunHistory } from "./run-detail/RunLog";
+import { type LogEntry, LogPanel, useRunHistory } from "./run-detail/RunLog";
 import {
   computeStepStates,
   fmtAge,
@@ -447,6 +447,20 @@ function RunView({ id }: { id: string }) {
     [order, nodeById, states, waitingAge, state],
   );
 
+  // Execution-log rows: the curated Temporal events, PLUS — on a debug run (ctx.__debug) — one
+  // synthetic per-node debug row, interleaved by finish time (nodes with no timing sort last).
+  const logEntries: LogEntry[] | null = useMemo(() => {
+    if (!events) return events;
+    if (state?.ctx.__debug !== true) return events;
+    const debug = buildDebugEvents(timelineSteps, state.ctx, state.nodeTimes);
+    return [...events, ...debug].sort((a, b) => {
+      // null timestamps (untimed nodes) sort to the end; otherwise chronological by ISO string.
+      if (!a.at) return 1;
+      if (!b.at) return -1;
+      return a.at.localeCompare(b.at);
+    });
+  }, [events, timelineSteps, state]);
+
   const detail: StepDetail | null = useMemo(() => {
     if (!state || !selectedId) return null;
     const n = nodeById.get(selectedId);
@@ -788,12 +802,9 @@ function RunView({ id }: { id: string }) {
             node-details column on desktop (the grid + this Card are fragment siblings). */}
           <Card style={{ padding: "18px 20px", marginTop: 18 }}>
             <SectionTitle>Execution log</SectionTitle>
-            <LogPanel events={events} />
-            {/* Debug-run only (interpreter sets ctx.__debug when started with debug:true): the
-                safe per-node detail, inline in the exec log. */}
-            {state.ctx.__debug === true && (
-              <DebugLogSection steps={timelineSteps} ctx={state.ctx} />
-            )}
+            {/* On a debug run the per-node debug rows are interleaved into the timeline (logEntries);
+                a normal run just shows the curated Temporal events. */}
+            <LogPanel events={logEntries} />
             <div
               className="mono"
               style={{

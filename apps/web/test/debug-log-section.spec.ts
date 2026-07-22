@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { safeFields } from "../src/screens/app/run-detail/DebugLogSection";
+import {
+  buildDebugEvents,
+  safeFields,
+} from "../src/screens/app/run-detail/DebugLogSection";
+import type { TimelineStep } from "../src/screens/app/run-detail/StepTimeline";
+
+const step = (p: Partial<TimelineStep> & { id: string }): TimelineStep => ({
+  label: p.id,
+  icon: "workflow",
+  accent: "var(--ink-3)",
+  state: "done",
+  duration: null,
+  durationMs: null,
+  cost: null,
+  ...p,
+});
 
 describe("DebugLogSection.safeFields — allowlist (never leak node output content)", () => {
   it("surfaces only allowlisted metadata from an agent output", () => {
@@ -41,5 +56,37 @@ describe("DebugLogSection.safeFields — allowlist (never leak node output conte
     expect(safeFields("plain string output")).toEqual([]);
     expect(safeFields([1, 2, 3])).toEqual([]);
     expect(safeFields(null)).toEqual([]);
+  });
+});
+
+describe("buildDebugEvents — synthetic per-node rows for the timeline", () => {
+  it("emits one row per EXECUTED node, stamped with finish time + safe fields", () => {
+    const steps: TimelineStep[] = [
+      step({ id: "agent", label: "Agent", state: "done", duration: "340ms" }),
+      step({ id: "skipped", state: "skipped" }), // not executed → no row
+      step({ id: "pending", state: "pending" }), // not executed → no row
+    ];
+    const ctx = { agent: { model: "opus", costUsd: 0.02, text: "SECRET" } };
+    const nodeTimes = { agent: { s: 1000, f: 1340 } };
+
+    const rows = buildDebugEvents(steps, ctx, nodeTimes);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].kind).toBe("debug");
+    expect(rows[0].at).toBe(new Date(1340).toISOString()); // finish time → sortable into timeline
+    expect(rows[0].label).toBe(
+      "Agent (agent)  ·  340ms  ·  model=opus  ·  cost=$0.0200",
+    );
+    expect(rows[0].label).not.toContain("SECRET"); // content never leaks
+  });
+
+  it("gives an untimed executed node a null `at` (caller sorts those last)", () => {
+    const rows = buildDebugEvents(
+      [step({ id: "n", state: "done" })],
+      {},
+      null, // no nodeTimes
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].at).toBeNull();
   });
 });
