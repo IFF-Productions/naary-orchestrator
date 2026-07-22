@@ -148,7 +148,10 @@ describe("McpController — Streamable HTTP session lifecycle (#469)", () => {
         : null,
     ),
   };
-  const graphs = { list: vi.fn(async () => []) };
+  const graphs = {
+    list: vi.fn(async () => []),
+    listMcpExposed: vi.fn(async () => []),
+  };
   const executions = {};
   const generator = {};
   const environments = { defaultEnvId: vi.fn(async () => "env-1") };

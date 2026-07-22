@@ -37,6 +37,7 @@ export interface NodeOutputMap {
   scheduleTrigger: unknown;
   formTrigger: unknown;
   chatTrigger: unknown;
+  mcpServerTrigger: unknown;
   pollTrigger: { changed: boolean; body: unknown };
 
   // --- AI / tools (structured, cost-accumulating) ---

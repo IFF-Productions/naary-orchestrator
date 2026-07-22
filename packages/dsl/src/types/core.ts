@@ -11,6 +11,7 @@ export type NodeType =
   | "scheduleTrigger" // entry node: runs the graph on a cron schedule (control-plane synced)
   | "formTrigger" // entry node: started by a hosted public form; output is the submitted fields
   | "chatTrigger" // entry node: started by a hosted chat message; output is { message, sessionId }
+  | "mcpServerTrigger" // entry node: hosts the workflow as a tool on naary's MCP server; output is the invocation args
   | "agent"
   | "codeAgent" // runs an agentic coding CLI (Claude Code/Cursor/Copilot) as a BYOK activity
   | "mcpTool" // Slice #4: calls a remote MCP server tool via a connection

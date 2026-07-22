@@ -78,6 +78,13 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
       "Started by a hosted chat message; its output IS { message, sessionId }.",
     config: "{ title?, description?, placeholder?, greeting? }",
   },
+  mcpServerTrigger: {
+    group: "trigger",
+    entry: true,
+    summary:
+      "Hosts this workflow as a tool on naary's MCP server; an external agent invokes it and its output IS the invocation args.",
+    config: "{ toolName?, description? }",
+  },
   // --- AI ---
   agent: {
     group: "ai",

@@ -12,6 +12,7 @@ import {
   handleScheduleTrigger,
   handleFormTrigger,
   handleChatTrigger,
+  handleMcpServerTrigger,
   handleErrorTrigger,
   handleNoOp,
 } from "./passthrough";
@@ -62,6 +63,7 @@ export const NODE_HANDLERS: Partial<Record<NodeDef["type"], NodeHandler>> = {
   scheduleTrigger: handleScheduleTrigger,
   formTrigger: handleFormTrigger,
   chatTrigger: handleChatTrigger,
+  mcpServerTrigger: handleMcpServerTrigger,
   errorTrigger: handleErrorTrigger,
   noOp: handleNoOp,
   // pure transforms + parser/random/clock nodes

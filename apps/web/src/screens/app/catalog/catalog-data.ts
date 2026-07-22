@@ -144,6 +144,7 @@ const NODE_IPATH: Partial<Record<NodeType, string>> = {
   pollTrigger: "M4 4v6h6M20 20v-6h-6M19 9a8 8 0 0 0-14-3M5 15a8 8 0 0 0 14 3",
   formTrigger: "M6 4h12v16H6zM9 9h6M9 13h6",
   chatTrigger: "M5 6h14v10H9l-4 3z",
+  mcpServerTrigger: "M12 3v6m0 6v6M5 12h6m2 0h6M7 7l3 3m4 4 3 3",
   errorTrigger:
     "M12 8v5m0 3h.01M10.3 4l-7 12a2 2 0 0 0 1.7 3h14a2 2 0 0 0 1.7-3l-7-12a2 2 0 0 0-3.4 0z",
   agent: "M12 3l2.1 4.6L19 9l-3.4 3.3.8 4.7L12 15l-4.4 2 .8-4.7L5 9z",

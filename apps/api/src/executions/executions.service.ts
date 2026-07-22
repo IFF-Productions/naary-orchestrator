@@ -330,6 +330,41 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Start a run triggered by an external MCP client invoking the workflow's hosted tool
+   * (docs/design/MCP-SERVER.md §5, flavor B). The tool-call arguments become the trigger output.
+   * Like the form/webhook ingress this is an AUTOMATIC external trigger, so it is activation-gated
+   * (refused when the workflow is INACTIVE) — unlike the generic `run_workflow`/manual `start()`,
+   * which is the operator "Run" path. `tenantId`/`environmentId` come from the MCP token, never a
+   * tool argument (Tier-1 rule 4 tenant isolation).
+   */
+  async startMcpTrigger(
+    tenantId: string,
+    environmentId: string,
+    input: Record<string, unknown> | undefined,
+    workflowKey: string,
+  ): Promise<{ workflowId: string }> {
+    await this.assertActive(tenantId, environmentId, workflowKey);
+    const snapshot = await this.graphs.getLatest(
+      tenantId,
+      environmentId,
+      workflowKey,
+    );
+    if (!snapshot) {
+      throw new NotFoundException(
+        `No '${workflowKey}' graph for this tenant — save one first`,
+      );
+    }
+    return this.startGraph(
+      `mcp-${tenantId}`,
+      snapshot,
+      input ?? {},
+      tenantId,
+      environmentId,
+      workflowKey,
+    );
+  }
+
+  /**
    * Start a webhook run AND wait (bounded) for a `respondToWebhook` node to set a
    * synchronous response. Polls the response query until it's set, the run closes,
    * or the timeout elapses — then returns whatever it has. Any query hiccup or a

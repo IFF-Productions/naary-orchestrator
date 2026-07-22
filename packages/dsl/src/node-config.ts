@@ -47,6 +47,7 @@ import type {
   MergeConfig,
   FormTriggerConfig,
   ChatTriggerConfig,
+  McpServerTriggerConfig,
   NumberConfig,
   PollTriggerConfig,
   RandomConfig,
@@ -77,6 +78,7 @@ export interface NodeConfigMap {
   scheduleTrigger: ScheduleTriggerConfig;
   formTrigger: FormTriggerConfig;
   chatTrigger: ChatTriggerConfig;
+  mcpServerTrigger: McpServerTriggerConfig;
   agent: AgentConfig;
   codeAgent: CodeAgentConfig;
   mcpTool: McpToolConfig;

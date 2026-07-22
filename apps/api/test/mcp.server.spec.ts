@@ -192,4 +192,38 @@ describe("MCP server", () => {
       issue: 7,
     });
   });
+
+  it("exposes an opted-in workflow under its configured toolName + description, via the GATED start", async () => {
+    const ctx = await connect({
+      runExposedWorkflow: vi.fn().mockResolvedValue({ runId: "exec-gated-1" }),
+      exposedWorkflows: [
+        {
+          workflowKey: "refund-flow",
+          name: "Refund Flow",
+          version: 2,
+          toolName: "run_refund",
+          toolDescription: "Process a customer refund.",
+        },
+      ],
+    });
+    const tools = (await ctx.client.listTools()).tools;
+    const tool = tools.find((t) => t.name === "run_refund");
+    expect(tool).toBeTruthy();
+    expect(tool?.description).toBe("Process a customer refund.");
+    // A configured toolName REPLACES the derived run_<key> name.
+    expect(tools.map((t) => t.name)).not.toContain("run_refund-flow");
+
+    const res = parse(
+      await ctx.client.callTool({
+        name: "run_refund",
+        arguments: { input: { orderId: "o-1" } },
+      }),
+    );
+    expect(res).toEqual({ runId: "exec-gated-1" });
+    // Routed through the activation-GATED start (startMcpTrigger), NOT the ungated run_workflow.
+    expect(ctx.deps.runExposedWorkflow).toHaveBeenCalledWith("refund-flow", {
+      orderId: "o-1",
+    });
+    expect(ctx.deps.runWorkflow).not.toHaveBeenCalled();
+  });
 });
