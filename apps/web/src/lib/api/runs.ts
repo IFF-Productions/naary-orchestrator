@@ -87,6 +87,12 @@ export const runsApi = {
       }),
     );
   },
+  // Cancel many runs at once (terminates each). Per-run outcome, like archiveBatch.
+  async cancelBatch(ids: string[]): Promise<BatchDecisionItem[]> {
+    return unwrap(
+      await client.POST("/executions/cancel-batch", { body: { ids } }),
+    );
+  },
   // Cancel a running run (terminates the workflow). 409 if already finished.
   async cancelRun(id: string): Promise<AcceptedResponse> {
     return unwrap(

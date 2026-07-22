@@ -308,6 +308,13 @@ export interface paths {
      */
     post: operations["ExecutionsController_archiveBatch"];
   };
+  "/executions/cancel-batch": {
+    /**
+     * Cancel many runs at once
+     * @description Terminates each listed run independently and tenant-scoped; a per-run outcome is returned so an already-finished / not-owned / unknown id doesn't fail the whole batch.
+     */
+    post: operations["ExecutionsController_cancelBatch"];
+  };
   "/executions/{id}/approve": {
     /**
      * Approve or reject a paused run
@@ -1737,6 +1744,16 @@ export interface components {
        * @example true
        */
       archived: boolean;
+    };
+    CancelBatchDto: {
+      /**
+       * @description workflowIds of the running/paused runs to cancel together.
+       * @example [
+       *   "run-8f3a1c2e",
+       *   "run-1b7d9f04"
+       * ]
+       */
+      ids: string[];
     };
     ApproveDto: {
       /**
@@ -5613,6 +5630,48 @@ export interface operations {
     requestBody: {
       content: {
         "application/json": components["schemas"]["ArchiveBatchDto"];
+      };
+    };
+    responses: {
+      200: {
+        content: {
+          "application/json": components["schemas"]["BatchDecisionItemResponse"][];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Cancel many runs at once
+   * @description Terminates each listed run independently and tenant-scoped; a per-run outcome is returned so an already-finished / not-owned / unknown id doesn't fail the whole batch.
+   */
+  ExecutionsController_cancelBatch: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CancelBatchDto"];
       };
     };
     responses: {

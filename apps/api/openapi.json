@@ -4430,6 +4430,87 @@
         ]
       }
     },
+    "/executions/cancel-batch": {
+      "post": {
+        "description": "Terminates each listed run independently and tenant-scoped; a per-run outcome is returned so an already-finished / not-owned / unknown id doesn't fail the whole batch.",
+        "operationId": "ExecutionsController_cancelBatch",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelBatchDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BatchDecisionItemResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Cancel many runs at once",
+        "tags": [
+          "Executions"
+        ]
+      }
+    },
     "/executions/{id}/approve": {
       "post": {
         "description": "Signals the run's humanApproval decision (accepted async).",
@@ -15297,6 +15378,25 @@
         "required": [
           "ids",
           "archived"
+        ]
+      },
+      "CancelBatchDto": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "example": [
+              "run-8f3a1c2e",
+              "run-1b7d9f04"
+            ],
+            "description": "workflowIds of the running/paused runs to cancel together.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "ids"
         ]
       },
       "ApproveDto": {

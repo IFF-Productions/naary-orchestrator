@@ -20,6 +20,7 @@ import {
   ApproveBatchDto,
   ApproveDto,
   ArchiveBatchDto,
+  CancelBatchDto,
   RerunDto,
   StartExecutionDto,
 } from "./execution.dto";
@@ -170,6 +171,23 @@ export class ExecutionsController {
     @Body() body: ArchiveBatchDto,
   ): Promise<BatchDecisionResult[]> {
     return this.executions.archiveBatch(body.ids, tenantId, body.archived);
+  }
+
+  /** Cancel many runs at once. Literal route before `:id`, like approve/archive-batch. */
+  @ApiEndpoint({
+    summary: "Cancel many runs at once",
+    description:
+      "Terminates each listed run independently and tenant-scoped; a per-run outcome is returned so an already-finished / not-owned / unknown id doesn't fail the whole batch.",
+    ok: [BatchDecisionItemResponse],
+  })
+  @Post("cancel-batch")
+  @HttpCode(200)
+  cancelBatch(
+    @TenantId() tenantId: string,
+    @Body() body: CancelBatchDto,
+    @CurrentPrincipal() principal?: Principal,
+  ): Promise<BatchDecisionResult[]> {
+    return this.executions.cancelBatch(body.ids, tenantId, principal);
   }
 
   @ApiEndpoint({
