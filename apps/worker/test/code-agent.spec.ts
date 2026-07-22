@@ -276,16 +276,25 @@ describe("callCodeAgent activity", () => {
     );
   });
 
-  it("a CLI-reported failure (is_error) bills the attempt, then throws CODE_AGENT_FAILED", async () => {
+  it("a CLI-reported failure carries the reason into the type + message (#551), bills the attempt", async () => {
+    // The CLI's `subtype` is threaded into the error type (so Sentry groups by reason, not one
+    // undiagnosable CODE_AGENT_FAILED bucket) and the message (so the run detail says why).
     exec.mockResolvedValue({
-      stdout: envelope({ is_error: true }),
+      stdout: envelope({ is_error: true, subtype: "error_max_turns" }),
       exitCode: 0,
     });
-    await expect(callCodeAgent(CFG, {}, META)).rejects.toMatchObject({
-      type: "CODE_AGENT_FAILED",
-      nonRetryable: true,
-    });
+    const err = await callCodeAgent(CFG, {}, META).catch((e) => e);
+    expect(err.nonRetryable).toBe(true);
+    expect(err.type).toBe("CODE_AGENT_FAILED:error_max_turns");
+    expect(err.message).toContain("error_max_turns");
     expect(recordUsage).toHaveBeenCalledOnce(); // billed even on failure
+  });
+
+  it("a failure with no CLI subtype still fails (reason falls back), never reasonless", async () => {
+    exec.mockResolvedValue({ stdout: "not json", exitCode: 1 }); // process died pre-envelope
+    const err = await callCodeAgent(CFG, {}, META).catch((e) => e);
+    expect(err.type).toBe("CODE_AGENT_FAILED:no_envelope");
+    expect(err.nonRetryable).toBe(true);
   });
 
   it("maps a missing credential to a non-retryable AUTH failure", async () => {

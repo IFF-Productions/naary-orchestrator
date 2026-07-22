@@ -116,3 +116,16 @@ export class ArchiveBatchDto {
   @IsBoolean()
   archived!: boolean;
 }
+
+export class CancelBatchDto {
+  @ApiProperty({
+    type: [String],
+    example: ["run-8f3a1c2e", "run-1b7d9f04"],
+    description: "workflowIds of the running/paused runs to cancel together.",
+  })
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(200)
+  @IsString({ each: true })
+  ids!: string[];
+}

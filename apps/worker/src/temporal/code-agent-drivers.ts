@@ -71,6 +71,10 @@ export interface CodeAgentEnvelope {
   /** Compact, secret-free step-by-step execution trace (from `stream-json`). Absent when
    *  the CLI wasn't run in streaming mode or emitted nothing parseable. */
   trace?: TraceStep[];
+  /** On a failure, the CLI's own reason code so the run + its Sentry issue are diagnosable
+   *  (#551) — e.g. Claude's `error_max_turns` / `error_during_execution`, or `no_envelope`
+   *  when the process died before emitting JSON. Undefined on success / when the CLI gave none. */
+  failureSubtype?: string;
 }
 
 export interface CliAgentDriver {
@@ -151,6 +155,7 @@ const claudeDriver: CliAgentDriver = {
     interface ResultMsg {
       result?: string;
       is_error?: boolean;
+      subtype?: string;
       session_id?: string;
       total_cost_usd?: number;
       // stream-json names this `usage`; the older `json` mode used `total_usage` — accept either.
@@ -222,8 +227,13 @@ const claudeDriver: CliAgentDriver = {
 
     if (!final) {
       // No `result` line ⇒ the process died before finishing. Preserve today's `no_envelope`
-      // failure behavior; still surface whatever partial trace we captured (useful to debug it).
-      return { result: "", isError: true, ...(trace.length ? { trace } : {}) };
+      // failure behavior (#551 diagnosability); still surface whatever partial trace we captured.
+      return {
+        result: "",
+        isError: true,
+        failureSubtype: "no_envelope",
+        ...(trace.length ? { trace } : {}),
+      };
     }
 
     const isError = final.is_error === true || exitCode !== 0;
@@ -241,6 +251,15 @@ const claudeDriver: CliAgentDriver = {
       result: resultText,
       sessionId: final.session_id,
       isError,
+      // The CLI's own reason on failure (Claude sets `subtype`); fall back to a nonzero-exit
+      // marker so a failure is never reasonless (#551 — feeds the Sentry fingerprint).
+      failureSubtype: isError
+        ? typeof final.subtype === "string" && final.subtype
+          ? final.subtype
+          : exitCode !== 0
+            ? `exit_${exitCode}`
+            : "unknown"
+        : undefined,
       usage: {
         costUsd: final.total_cost_usd,
         inputTokens: usage?.input_tokens,

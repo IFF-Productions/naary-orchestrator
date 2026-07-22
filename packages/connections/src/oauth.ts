@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { getPrisma } from "@naary/db";
 import { SecretStore } from "@naary/secrets";
 import { ConnectionService, connectionSecretKey } from "./connection.service";
 import { assertEgressAllowed } from "./egress";
@@ -27,6 +28,16 @@ export interface OAuthConfig {
   scopes?: string[];
   /** Long-lived; set after consent. Used to mint short-lived access tokens. */
   refreshToken?: string;
+  /**
+   * Last minted access token, persisted (encrypted, alongside the refresh token) so a
+   * DIFFERENT process — which has a cold in-process cache — can find a still-fresh token
+   * after blocking on the distributed refresh lock and SKIP a duplicate refresh. Written
+   * on every successful refresh; read back inside the lock as the cross-process
+   * double-check. A revoke removes the whole secret, so this can't outlive the grant.
+   */
+  accessToken?: string;
+  /** Epoch-ms expiry of {@link accessToken} (now + expires_in at mint time). */
+  accessExpiresAt?: number;
   /** Atlassian 3LO: the resolved cloud (site) id — needed for every Jira/Confluence
    *  API call (`https://api.atlassian.com/ex/{jira|confluence}/<cloudId>`). Rides this
    *  encrypted conn:<id> blob (design APP-AUTH.md §4), not a column; never logged. */
@@ -131,9 +142,12 @@ async function refreshGrant(
   return (await res.json()) as TokenResponse;
 }
 
-// In-process access-token cache + per-connection refresh lock. NOTE: process-local
-// only — multiple worker processes can still race a refresh (documented limitation;
-// a distributed lock / Temporal serialization point is the real fix).
+// In-process access-token cache + per-connection refresh coalescing. This is the
+// FAST PATH only — cross-process correctness now comes from the Postgres advisory lock
+// below (`refreshWithDistributedLock`), which serializes refreshes across every
+// worker/API process keyed on the connection id. `inflight` still coalesces concurrent
+// callers WITHIN one process (so we take the DB lock at most once per process per
+// refresh), and holds even when the lock fails open.
 //
 // `checkedAt` bounds a cross-process revoke: a token minted here stays valid for its
 // full lifetime (~1h), but a revoke/`needs_reauth` happens in the API process and can't
@@ -154,11 +168,86 @@ const revalidating = new Map<string, Promise<boolean>>();
 /** Re-check a cached connection's status at most this often (revoke-staleness bound). */
 const REVALIDATE_MS = 60_000;
 
+/**
+ * Serialize `critical` across ALL processes for one connection id. The default runs it
+ * under a Postgres transaction-scoped advisory lock; injectable so tests can stub the
+ * DB/lock seam. It must invoke `critical` EXACTLY once (never retry it — that would risk
+ * a double refresh).
+ */
+export type RefreshLock = <T>(
+  connectionId: string,
+  critical: () => Promise<T>,
+) => Promise<T>;
+
+/** How long to wait for the cross-process lock before failing open (see below). */
+const LOCK_WAIT_MS = 5_000;
+const LOCK_POLL_MS = 100;
+/**
+ * Interactive-transaction cap = the lock wait PLUS headroom for the refresh POST that
+ * runs inside the same txn. Prisma's default is 5s, which our poll alone can exhaust —
+ * an explicit, generous timeout keeps the txn from aborting a refresh mid-flight.
+ */
+const LOCK_TXN_TIMEOUT_MS = LOCK_WAIT_MS + 15_000;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Distributed per-connection refresh lock via `pg_advisory_xact_lock`. A second
+ * process blocks here while the first refreshes, then runs `critical` and finds the
+ * freshly-persisted access token (double-checked locking) instead of re-refreshing.
+ *
+ * FAIL-SAFE (Tier-1: a lock/DB hiccup must never deadlock a run):
+ *  - We `pg_try_advisory_xact_lock` in a bounded poll (≤ LOCK_WAIT_MS) rather than the
+ *    blocking `pg_advisory_xact_lock`, so the wait is bounded independent of any
+ *    `lock_timeout` semantics, and the HTTP refresh runs INSIDE the same txn the lock is
+ *    scoped to (the lock releases at COMMIT, right after the token is persisted).
+ *  - If the lock can't be taken in time, or the DB is unreachable / not configured, we
+ *    fall open and run `critical` WITHOUT the distributed lock — degrading to the
+ *    in-process (`inflight`) serialization the fast path already provides. Availability
+ *    over the optimization; at worst two processes do one extra sequential refresh.
+ *  - `acquired` guards against re-running `critical` on its OWN error (e.g. NeedsReauth):
+ *    only an acquisition/DB failure (acquired === false) falls open.
+ *
+ * Portability: `pg_advisory_xact_lock` + `hashtext` are Postgres-specific (fine — we're
+ * Postgres-only). `hashtext` is int4, so distinct connection ids can hash-collide →
+ * occasional false contention (over-serialized, never incorrect).
+ */
+const refreshWithDistributedLock: RefreshLock = async (
+  connectionId,
+  critical,
+) => {
+  if (!process.env.DATABASE_URL) return critical(); // no DB (dev/test) → in-process only
+  let acquired = false;
+  try {
+    return await getPrisma().$transaction(
+      async (tx) => {
+        const deadline = Date.now() + LOCK_WAIT_MS;
+        for (;;) {
+          const rows = await tx.$queryRaw<{ locked: boolean }[]>`
+          SELECT pg_try_advisory_xact_lock(hashtext(${connectionId})) AS locked`;
+          if (rows[0]?.locked) break;
+          if (Date.now() >= deadline) {
+            throw new Error("oauth refresh lock timeout"); // → fall open below
+          }
+          await sleep(LOCK_POLL_MS);
+        }
+        acquired = true;
+        return await critical();
+      },
+      { timeout: LOCK_TXN_TIMEOUT_MS },
+    );
+  } catch (e) {
+    if (acquired) throw e; // critical's own failure — never retry it
+    return critical(); // acquisition/DB failure → fail open (in-process serialization)
+  }
+};
+
 export interface OAuthDeps {
   store?: SecretStore;
   connections?: ConnectionService;
   fetchFn?: FetchFn;
   now?: () => number;
+  /** Override the cross-process refresh lock (tests inject a stub for the DB seam). */
+  refreshLock?: RefreshLock;
 }
 
 /** Reset the in-process caches — for tests only. */
@@ -212,10 +301,17 @@ export async function getOAuthAccessToken(
   const existing = inflight.get(connectionId);
   if (existing) return existing;
 
-  const p = (async () => {
-    const store = deps.store ?? new SecretStore();
-    const connections = deps.connections ?? new ConnectionService();
-    const fetchFn = deps.fetchFn ?? fetch;
+  const store = deps.store ?? new SecretStore();
+  const connections = deps.connections ?? new ConnectionService();
+  const fetchFn = deps.fetchFn ?? fetch;
+  const refreshLock = deps.refreshLock ?? refreshWithDistributedLock;
+
+  const p = refreshLock(connectionId, async () => {
+    // --- inside the distributed lock: double-checked locking ---
+    // Another holder (this process or another) may have just refreshed while we blocked.
+    // 1) same-process: a fresh entry in the in-process cache.
+    const hot = accessCache.get(connectionId);
+    if (hot && hot.expiresAt > now() + 30_000) return hot.token;
 
     const raw = await store.get(
       tenantId,
@@ -224,6 +320,21 @@ export async function getOAuthAccessToken(
     );
     if (!raw) throw new NeedsReauthError(connectionId);
     const cfg = JSON.parse(raw) as OAuthConfig;
+
+    // 2) cross-process: a still-fresh access token persisted by another process's
+    // refresh. Adopt it (warming this process's cache) and SKIP the refresh.
+    if (
+      cfg.accessToken &&
+      cfg.accessExpiresAt &&
+      cfg.accessExpiresAt > now() + 30_000
+    ) {
+      accessCache.set(connectionId, {
+        token: cfg.accessToken,
+        expiresAt: cfg.accessExpiresAt,
+        checkedAt: now(), // adopted just now → revalidation clock still governs revokes
+      });
+      return cfg.accessToken;
+    }
 
     let tokens: TokenResponse;
     try {
@@ -235,23 +346,30 @@ export async function getOAuthAccessToken(
       throw e;
     }
 
-    // Rotation: persist the new refresh token before using the access token.
-    if (tokens.refresh_token && tokens.refresh_token !== cfg.refreshToken) {
-      await store.put(
-        tenantId,
-        environmentId,
-        connectionSecretKey(connectionId),
-        JSON.stringify({ ...cfg, refreshToken: tokens.refresh_token }),
-      );
-    }
+    // Persist the minted access token (+ rotated refresh token) on EVERY refresh so a
+    // cold second process can adopt it via the cross-process double-check above. The new
+    // refresh token is persisted here, BEFORE we return the access token (rotation
+    // invariant). One encrypted write per ~hourly refresh — negligible.
+    const expiresAt = now() + (tokens.expires_in ?? 3600) * 1000;
+    await store.put(
+      tenantId,
+      environmentId,
+      connectionSecretKey(connectionId),
+      JSON.stringify({
+        ...cfg,
+        refreshToken: tokens.refresh_token ?? cfg.refreshToken,
+        accessToken: tokens.access_token,
+        accessExpiresAt: expiresAt,
+      }),
+    );
 
     accessCache.set(connectionId, {
       token: tokens.access_token,
-      expiresAt: now() + (tokens.expires_in ?? 3600) * 1000,
+      expiresAt,
       checkedAt: now(), // just minted → connection is live; start the revalidation clock
     });
     return tokens.access_token;
-  })().finally(() => inflight.delete(connectionId));
+  }).finally(() => inflight.delete(connectionId));
 
   inflight.set(connectionId, p);
   return p;

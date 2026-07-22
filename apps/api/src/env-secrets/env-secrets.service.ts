@@ -57,4 +57,36 @@ export class EnvSecretsService {
       PREFIX + (name ?? "").trim(),
     );
   }
+
+  // --- Tenant-wide (global) secrets (#459) — same namespace + validation, but NO env. A tenant-wide
+  // secret applies in every environment; an env-specific secret of the same NAME overrides it (the
+  // worker resolves env-first via getWithGlobalFallback). Still WRITE-ONLY: names in, values never out.
+
+  /** The tenant-wide secret NAMES (never the values), key-sorted. */
+  listGlobal(tenantId: string): Promise<string[]> {
+    return this.store.listGlobalKeys(tenantId, PREFIX);
+  }
+
+  /** Create or replace a TENANT-WIDE secret's value. Same NAME + value validation as `set`. */
+  async setGlobal(
+    tenantId: string,
+    name: string,
+    value: unknown,
+  ): Promise<void> {
+    const n = (name ?? "").trim();
+    if (!NAME_RE.test(n)) {
+      throw new BadRequestException(
+        "Secret name must be a valid identifier (letters, digits, underscore; not starting with a digit) — it's referenced as {{ $secrets.NAME }}.",
+      );
+    }
+    if (typeof value !== "string" || value.length === 0) {
+      throw new BadRequestException("Secret value must be a non-empty string.");
+    }
+    await this.store.putGlobal(tenantId, PREFIX + n, value);
+  }
+
+  /** Delete a TENANT-WIDE secret (no-op if absent). */
+  async removeGlobal(tenantId: string, name: string): Promise<void> {
+    await this.store.removeGlobal(tenantId, PREFIX + (name ?? "").trim());
+  }
 }

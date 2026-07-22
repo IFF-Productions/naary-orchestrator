@@ -172,6 +172,31 @@ export function Runs() {
     }
   }
 
+  // Cancel every selected run that's still running/paused. cancelBatch tolerates already-terminal
+  // (or not-owned) runs — they come back ok:false — so we report how many actually cancelled.
+  async function bulkCancel() {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    setNotice(null);
+    setError(null);
+    try {
+      const results = await api.cancelBatch(ids);
+      const okCount = results.filter((r) => r.ok).length;
+      const failed = results.length - okCount;
+      setNotice(
+        `${okCount} cancelled` +
+          (failed > 0 ? `, ${failed} were already finished.` : "."),
+      );
+      setSelected(new Set());
+      await load(); // statuses changed — refresh
+    } catch {
+      setError("Bulk cancel failed — please retry.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   // Archive (active view) or restore (archived view). Either way the run leaves the
   // current list — it moves to the other view — so we drop it optimistically.
   async function toggleArchive(
@@ -214,6 +239,10 @@ export function Runs() {
     rows.length > 0 && rows.every((r) => selected.has(r.workflowId));
   const approvableSelected = (runs ?? []).filter(
     (r) => selected.has(r.workflowId) && r.status === "awaiting_approval",
+  ).length;
+  // Cancellable = selected runs that aren't already terminal (running or paused).
+  const cancellableSelected = (runs ?? []).filter(
+    (r) => selected.has(r.workflowId) && !isTerminal(r.status),
   ).length;
   function toggleSelectAll() {
     setSelected((s) => {
@@ -387,6 +416,21 @@ export function Runs() {
                 onClick={() => void bulkDecide(false)}
               >
                 Deny{approvableSelected > 0 ? ` (${approvableSelected})` : ""}
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                icon="x"
+                disabled={bulkBusy || cancellableSelected === 0}
+                title={
+                  cancellableSelected === 0
+                    ? "None of the selected runs are still running"
+                    : `Cancel ${cancellableSelected} running/paused run(s)`
+                }
+                onClick={() => void bulkCancel()}
+              >
+                Cancel
+                {cancellableSelected > 0 ? ` (${cancellableSelected})` : ""}
               </Button>
             </>
           )}

@@ -276,10 +276,17 @@ export async function callCodeAgent(
     if (envlp.isError) {
       // The CLI ran but reported a failure (checked even on exit 0). Usage was already
       // recorded (bill the attempt); surface a terminal node failure — at-most-once means
-      // we never auto-retry it anyway.
+      // we never auto-retry it anyway. #551: carry the CLI's reason (subtype) into BOTH the
+      // message (so the run detail says WHY) and the error type (so its Sentry issue groups by
+      // reason — captureActivityFailure fingerprints by activity+type — instead of every kind
+      // of coding-run failure collapsing into one undiagnosable alert). Subtype is a bounded CLI
+      // enum, never user text, so it's safe in history/telemetry.
+      const sub = envlp.failureSubtype;
       throw ApplicationFailure.nonRetryable(
-        "The coding CLI reported a failed run.",
-        "CODE_AGENT_FAILED",
+        sub
+          ? `The coding CLI reported a failed run (${sub}).`
+          : "The coding CLI reported a failed run.",
+        sub ? `CODE_AGENT_FAILED:${sub}` : "CODE_AGENT_FAILED",
       );
     }
 

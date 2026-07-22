@@ -805,6 +805,33 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Cancel (terminate) many runs in one call. Each is cancelled INDEPENDENTLY and tenant-scoped
+   * (via `cancel` → assertOwner), so an already-terminal, not-owned, or unknown run yields a
+   * per-run `ok:false` instead of failing the whole batch — same best-effort contract as
+   * approveBatch/archiveBatch. De-duped.
+   */
+  async cancelBatch(
+    ids: string[],
+    tenantId: string,
+    actor?: Principal,
+  ): Promise<BatchDecisionResult[]> {
+    const unique = [...new Set(ids)];
+    const settled = await Promise.allSettled(
+      unique.map((id) => this.cancel(id, tenantId, actor)),
+    );
+    return settled.map((r, i) =>
+      r.status === "fulfilled"
+        ? { workflowId: unique[i], ok: true }
+        : {
+            workflowId: unique[i],
+            ok: false,
+            error:
+              r.reason instanceof Error ? r.reason.message : String(r.reason),
+          },
+    );
+  }
+
+  /**
    * The tenant's runs currently paused for human approval, each enriched with the
    * approval node's prompt (title/instructions) resolved from the stored graph — so
    * the inbox shows WHAT is being approved, not just that something is waiting.
