@@ -108,21 +108,12 @@ export interface AgentResult {
   totalTokens?: number;
 }
 
-// Slice #2 ships one structured-output schema. It can't ride in JSON graph
-// config, so it lives here; per-node schema routing is a later slice. Using the
-// AI SDK's jsonSchema<T> (vs zod) gives an explicit output type and avoids a
-// TS2589 deep-instantiation blow-up in generateText's generics.
-const DEFAULT_OUTPUT_SCHEMA = {
-  type: "object",
-  properties: {
-    category: { type: "string" },
-    urgency: { type: "number" },
-  },
-  required: ["category", "urgency"],
-  additionalProperties: false,
-} as const;
-// The AI SDK's `jsonSchema()` wrapper is applied lazily inside runAgent (the `ai` package is
-// ESM-only, loaded via dynamic import) — this stays a plain JSON-schema object with no SDK dep.
+// Structured output is fully node-config-driven (#450): an agent returns a structured object
+// ONLY when its config sets an explicit `outputSchema`, otherwise free text `{ text }`. There is
+// no hardcoded fallback schema — the old default `{category,urgency}` was a Slice-#2 leftover that
+// silently coerced every schema-less agent (e.g. "summarize this") into a classifier shape. The AI
+// SDK's `jsonSchema()` wrapper is applied lazily inside runAgent (the `ai` package is ESM-only,
+// loaded via dynamic import); the schema stays a plain JSON-schema object with no SDK dep.
 
 /**
  * Map a connection/MCP transport error to the SAME non-retryable ApplicationFailure the
@@ -437,21 +428,15 @@ export async function runAgent(
       });
     }
 
-    // Structured output is applied when there are no tools (historical behaviour), OR when a
-    // tooled agent explicitly configures an `outputSchema`. A tooled agent WITHOUT a schema
-    // returns free text — forcing the default {category,urgency} shape onto "fetch-and-summarize"
-    // would be nonsense, and tools-returns-text is the well-trodden AI-SDK path.
-    const wantStructured = !tooled || cfg.outputSchema !== undefined;
+    // Structured output is applied ONLY when the node configures an `outputSchema` (#450) — for
+    // both plain and tooled agents alike. No schema ⇒ free text `{ text }`, the well-trodden
+    // AI-SDK path; there is no hardcoded fallback shape.
+    const wantStructured = cfg.outputSchema !== undefined;
     const outputOpt = wantStructured
       ? {
           output: Output.object({
-            // Per-node schema when configured (QA#9), else the default shape. `as const` literals
-            // widen to the mutable JSONSchema7 the SDK expects (runtime schema unchanged).
             schema: jsonSchema<Record<string, unknown>>(
-              (cfg.outputSchema ??
-                DEFAULT_OUTPUT_SCHEMA) as unknown as Parameters<
-                typeof jsonSchema
-              >[0],
+              cfg.outputSchema as unknown as Parameters<typeof jsonSchema>[0],
             ),
           }),
         }

@@ -20,6 +20,15 @@ const CFG = {
   provider: "anthropic",
   model: "claude-opus-4-8",
   systemPrompt: "classify",
+  // Explicit schema — since #450, structured output is applied ONLY when a node configures
+  // `outputSchema` (no hardcoded default). These billing/usage tests exercise the structured
+  // path, so they carry the schema they always implicitly relied on.
+  outputSchema: {
+    type: "object",
+    properties: { category: { type: "string" }, urgency: { type: "number" } },
+    required: ["category", "urgency"],
+    additionalProperties: false,
+  },
 };
 const SEED_KEY = "tenant-anthropic-key-value";
 
@@ -83,6 +92,27 @@ describe("runAgent", () => {
         ...recorded.usage,
       }),
     ).toBeCloseTo(0.0175, 9);
+  });
+
+  it("a schema-less agent returns FREE TEXT { text } — no hardcoded default shape (#450)", async () => {
+    // The pre-#450 behaviour forced every schema-less agent into a `{category,urgency}` shape.
+    // Now: no outputSchema ⇒ no Output.object is applied and the model's free text is returned.
+    generateText.mockResolvedValue({
+      text: "A concise summary of the input.",
+      totalUsage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+    });
+    const noSchemaCfg = {
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      systemPrompt: "summarize the input",
+    };
+
+    const result = await runAgent(noSchemaCfg, { msg: "summarize me" }, META);
+
+    const opts = generateText.mock.calls[0][0];
+    expect(opts.output).toBeUndefined(); // structured output NOT forced
+    expect(result.output).toEqual({ text: "A concise summary of the input." });
+    expect(result.output).not.toHaveProperty("category");
   });
 
   it("maps ai@7 nested usage details to the cache-read + reasoning ledger buckets", async () => {
@@ -497,6 +527,9 @@ describe("runAgent — in-loop tools (#449)", () => {
 
   const TOOLED_CFG = {
     ...CFG,
+    // This suite exercises the schema-LESS tooled path (tools ⇒ free-text final answer). CFG now
+    // carries a schema (#450), so drop it here; the "with an outputSchema" test re-adds one.
+    outputSchema: undefined,
     tools: [
       {
         connectionId: "conn-1",
