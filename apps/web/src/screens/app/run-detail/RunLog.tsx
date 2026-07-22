@@ -83,11 +83,10 @@ export function LogPanel({ events }: { events: LogEntry[] | null }) {
       ) : events.length === 0 ? (
         <span style={{ color: "var(--ink-3)" }}>No events yet.</span>
       ) : (
-        events.map((ev, i) => (
-          <div
-            key={`${ev.kind}-${ev.id}-${i}`}
-            style={{ display: "flex", gap: 10 }}
-          >
+        events.map((ev) => (
+          // Stable key: kind + id (Temporal eventId is unique; synthetic debug ids are `dbg-<node>`).
+          // No array index — that made keys shift on re-sort/new events, remounting rows (#566 review).
+          <div key={`${ev.kind}-${ev.id}`} style={{ display: "flex", gap: 10 }}>
             <span style={{ color: "var(--ink-3)", flex: "none" }}>
               {ev.at ? new Date(ev.at).toLocaleTimeString() : "—"}
             </span>

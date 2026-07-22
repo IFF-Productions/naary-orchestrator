@@ -455,6 +455,9 @@ function RunView({ id }: { id: string }) {
     const debug = buildDebugEvents(timelineSteps, state.ctx, state.nodeTimes);
     return [...events, ...debug].sort((a, b) => {
       // null timestamps (untimed nodes) sort to the end; otherwise chronological by ISO string.
+      // Both-null must return 0 (a consistent comparator) — returning 1 there is a contract
+      // violation that can produce unstable ordering (#566 review).
+      if (!a.at && !b.at) return 0;
       if (!a.at) return 1;
       if (!b.at) return -1;
       return a.at.localeCompare(b.at);
@@ -875,7 +878,8 @@ function RunView({ id }: { id: string }) {
           <RegionTraceSection ctx={state.ctx} />
           <Card style={{ padding: "18px 20px" }}>
             <SectionTitle>Execution log</SectionTitle>
-            <LogPanel events={events} />
+            {/* Same merged rows as the graph layout — consistent across both (#566 review). */}
+            <LogPanel events={logEntries} />
           </Card>
         </div>
       )}
