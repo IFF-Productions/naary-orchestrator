@@ -119,8 +119,10 @@ describe("computeItemsRegions — fail closed (adversarial)", () => {
     expect(validateGraph(graph).valid).toBe(false);
   });
 
-  // HIGH-2: fan-out after loopEnd (≥2 out-edges) would silently drop all but the first.
-  it("rejects a loopEnd with two outgoing edges (fan-out after the loop)", () => {
+  // #477: fan-out AFTER loopEnd (≥2 out-edges) is now ALLOWED — the interpreter fans the
+  // walk out over loopEnd's successors (each fed the collected array), gated by
+  // wf.patched("loop-fanout-v1"). The region still brackets splitOut…loopEnd cleanly.
+  it("accepts a loopEnd with two outgoing edges (fan-out after the loop, #477)", () => {
     const graph: GraphDef = {
       startNodeId: "s",
       nodes: [
@@ -139,10 +141,12 @@ describe("computeItemsRegions — fail closed (adversarial)", () => {
         { from: "le", to: "b" },
       ],
     };
-    expect(computeItemsRegions(graph).error).toMatch(
-      /at most one outgoing edge/,
-    );
-    expect(validateGraph(graph).valid).toBe(false);
+    const res = computeItemsRegions(graph);
+    expect(res.error).toBeNull();
+    // The region is still the linear splitOut…loopEnd bracket; loopEnd's two out-edges are outside it.
+    expect(res.regions).toHaveLength(1);
+    expect(res.regions[0]).toMatchObject({ splitOutId: "sp", loopEndId: "le" });
+    expect(validateGraph(graph).valid).toBe(true);
   });
 
   const cases: { name: string; graph: GraphDef; match: RegExp }[] = [

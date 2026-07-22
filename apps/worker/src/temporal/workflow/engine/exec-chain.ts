@@ -459,7 +459,22 @@ export async function execChain(
           }
         }
         state.currentNodeId = region.loopEndId;
-        current = nextNodes(graph, region.loopEndId, ctx)[0]; // linear exit → single next
+        const loopExits = nextNodes(graph, region.loopEndId, ctx);
+        // Fan-out AFTER a loop (#477): loopEnd → N successors, each fed loopEnd's collected array.
+        // ORDER IS LOAD-BEARING (replay safety): `loopExits.length > 1` MUST short-circuit before
+        // `patched()`. A pre-patch run's graph was forced to ≤1 loopEnd exit by the old validator, so
+        // `length > 1` is always false for it ⇒ it never CALLS this new patched() marker on replay and
+        // stays deterministic (mirrors the A4 ordering rule above). Do not reorder the operands. The
+        // fan-out mirrors the top-level branch fan-out (below): each successor runs to its own terminal
+        // concurrently; branches are NOT top-level (no mid-flight continueAsNew).
+        if (loopExits.length > 1 && wf.patched("loop-fanout-v1")) {
+          const results = await Promise.all(
+            loopExits.map((nx) => engine.execChain(nx, false)),
+          );
+          for (const r of results) if (r !== null) return r; // array (edge) order
+          return null;
+        }
+        current = loopExits[0]; // linear exit → single next (undefined = end)
         continue;
       }
     }

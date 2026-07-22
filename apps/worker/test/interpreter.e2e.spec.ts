@@ -1237,6 +1237,70 @@ describe("runGraph interpreter — items model (splitOut region)", () => {
     });
   });
 
+  it("#477: fans out AFTER the loop — both loopEnd successors run, each fed the collected array", async () => {
+    // start → sp(items) → map{doubled ← sp.n} → loopEnd(collects map) ──┬─→ branchA{picked ← le[0]}
+    //                                                                    └─→ branchB{picked ← le[2]}
+    // Proves loopEnd fan-out (gated by wf.patched("loop-fanout-v1")): the walk fans out over
+    // loopEnd's two successors and each sees `ctx.le` (the per-item collected array), not just the first.
+    const fanoutGraph: GraphDef = {
+      startNodeId: "start",
+      nodes: [
+        { id: "start", type: "start" },
+        {
+          id: "sp",
+          type: "splitOut",
+          config: { from: "__input", path: "items" },
+        },
+        {
+          id: "map",
+          type: "set",
+          config: { fieldBindings: { doubled: { from: "sp", path: "n" } } },
+        },
+        { id: "le", type: "loopEnd", config: { from: "map" } },
+        {
+          id: "branchA",
+          type: "set",
+          config: { fieldBindings: { picked: { from: "le", path: "[0]" } } },
+        },
+        {
+          id: "branchB",
+          type: "set",
+          config: { fieldBindings: { picked: { from: "le", path: "[2]" } } },
+        },
+      ],
+      edges: [
+        { from: "start", to: "sp" },
+        { from: "sp", to: "map" },
+        { from: "map", to: "le" },
+        { from: "le", to: "branchA" },
+        { from: "le", to: "branchB" },
+      ],
+    };
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          fanoutGraph,
+          { items: [{ n: 1 }, { n: 2 }, { n: 3 }] },
+          { tenantId: "t-loop-fanout" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-loop-fanout",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const final = await handle.query(stateQuery);
+      // loopEnd collected all three iterations …
+      expect(final.ctx.le).toEqual([
+        { doubled: 1 },
+        { doubled: 2 },
+        { doubled: 3 },
+      ]);
+      // … and BOTH downstream branches ran, each reading the collected array (not just branchA).
+      expect(final.ctx.branchA).toEqual({ picked: { doubled: 1 } });
+      expect(final.ctx.branchB).toEqual({ picked: { doubled: 3 } });
+    });
+  });
+
   it("A4: routes each item down an if/else branch and rejoins at a merge (per-item sub-DAG)", async () => {
     // sp → if(sp.big) → true:setBig / false:setSmall → merge → loopEnd(collects merge).
     const a4Graph: GraphDef = {
