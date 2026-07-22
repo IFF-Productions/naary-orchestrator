@@ -220,8 +220,11 @@ describe("claude driver (pure)", () => {
     expect(over).toBeUndefined();
   });
 
-  it("resolves only claude today; cursor/copilot throw", () => {
-    expect(() => resolveDriver("cursor")).toThrow(/isn't available/);
+  it("resolves claude; a dropped/unknown tool (e.g. a stale 'cursor' graph) throws cleanly", () => {
+    expect(resolveDriver("claude").tool).toBe("claude");
+    expect(resolveDriver(undefined).tool).toBe("claude"); // default
+    // cursor/copilot were dropped (#446/#447); a stale saved graph still errors, never crashes.
+    expect(() => resolveDriver("cursor")).toThrow(/unknown coding-CLI tool/);
   });
 });
 

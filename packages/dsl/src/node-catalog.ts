@@ -94,8 +94,7 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
   },
   codeAgent: {
     group: "ai",
-    summary:
-      "Runs an agentic coding CLI (Claude Code/Cursor/Copilot); output at <id>.output.",
+    summary: "Runs an agentic coding CLI (Claude Code); output at <id>.output.",
     config: '{ tool?:"claude", prompt, maxTurns?, maxBudgetUsd? }',
   },
   mcpTool: {

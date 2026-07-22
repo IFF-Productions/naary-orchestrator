@@ -19,8 +19,9 @@ export interface McpToolNodeConfig {
  * "claude"); the credential is the tenant's key for that tool's provider.
  */
 export interface CodeAgentNodeConfig {
-  /** Which coding-CLI driver to run. Defaults to "claude". */
-  tool?: "claude" | "cursor" | "copilot";
+  /** Which coding-CLI driver to run. Defaults to "claude" (the only implemented driver — cursor/
+   *  copilot were dropped in the audit, #446/#447, rather than ship a broken option). */
+  tool?: "claude";
   /** The task prompt. `{{ nodeId.path }}` upstream templating is resolved before the activity. */
   prompt: string;
   /** Appended to the CLI's system prompt (e.g. house rules). */

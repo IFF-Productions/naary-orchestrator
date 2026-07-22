@@ -218,7 +218,9 @@ const CONFIG_SCHEMAS = {
     cacheSystemPrompt: z.boolean().optional(),
   }),
   codeAgent: z.object({
-    tool: z.enum(["claude", "cursor", "copilot"]).optional(),
+    // Only "claude" is implemented; cursor/copilot were dropped (audit #446/#447) rather than ship
+    // a broken option. Re-add when a real driver exists.
+    tool: z.enum(["claude"]).optional(),
     prompt: z.string(),
     systemPrompt: z.string().optional(),
     model: z.string().optional(),

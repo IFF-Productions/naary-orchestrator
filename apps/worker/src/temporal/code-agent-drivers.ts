@@ -12,7 +12,10 @@
  * drivers land in later slices.
  */
 
-export type CodeAgentTool = "claude" | "cursor" | "copilot";
+// Only the Claude Code driver is implemented. Cursor/Copilot were dropped (audit #446/#447): they
+// were never wired (they mapped to `undefined` and threw), so offering them just let a run pick a
+// broken tool. Re-add a value here + a driver below when a real headless CLI adapter exists.
+export type CodeAgentTool = "claude";
 
 export interface CodeAgentRunOpts {
   prompt: string;
@@ -279,19 +282,20 @@ function safeStringify(v: unknown): string {
   }
 }
 
-/** Registry of available drivers. Cursor/Copilot are additive adapters (later slices). */
-const DRIVERS: Record<CodeAgentTool, CliAgentDriver | undefined> = {
+/** Registry of available drivers. Keyed by string (not CodeAgentTool) so a STALE saved graph whose
+ *  config still carries a dropped tool (e.g. "cursor") resolves to undefined → a clean error below,
+ *  never a crash. Add an entry when a new driver ships. */
+const DRIVERS: Record<string, CliAgentDriver | undefined> = {
   claude: claudeDriver,
-  cursor: undefined,
-  copilot: undefined,
 };
 
-/** Resolve the driver for a tool (default "claude"). Throws if the tool has no driver yet. */
-export function resolveDriver(tool: CodeAgentTool | undefined): CliAgentDriver {
+/** Resolve the driver for a tool (default "claude"). Throws a clear error for an unknown/dropped
+ *  tool — tolerant of any runtime string so a stale saved graph fails gracefully, not with a crash. */
+export function resolveDriver(tool: string | undefined): CliAgentDriver {
   const driver = DRIVERS[tool ?? "claude"];
   if (!driver) {
     throw new Error(
-      `codeAgent: the "${tool}" driver isn't available yet (only "claude" today).`,
+      `codeAgent: unknown coding-CLI tool "${tool}" (only "claude" is available).`,
     );
   }
   return driver;
