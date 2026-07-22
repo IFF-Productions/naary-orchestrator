@@ -7558,6 +7558,142 @@
         ]
       }
     },
+    "/tenants/{id}/connections/{connectionId}/atlassian/oauth/start": {
+      "post": {
+        "description": "Returns the auth.atlassian.com authorize URL for the browser to begin interactive consent.",
+        "operationId": "AtlassianOAuthController_start",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "connectionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthStartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Start Atlassian (Jira/Confluence) OAuth 3LO consent",
+        "tags": [
+          "AtlassianOAuth"
+        ]
+      }
+    },
+    "/atlassian/oauth/callback": {
+      "get": {
+        "description": "Public: Atlassian redirects the BROWSER here with a single-use `state` and `code`; exchanges the code, persists the encrypted refresh token, resolves the site cloudId, then 302-redirects back to the SPA integrations page (`?connected=1` on success, `?connect_error=…` otherwise).",
+        "operationId": "AtlassianOAuthController_callback",
+        "parameters": [
+          {
+            "name": "state",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the SPA integrations page."
+          }
+        },
+        "summary": "Atlassian OAuth callback (provider redirect target)",
+        "tags": [
+          "AtlassianOAuth"
+        ]
+      }
+    },
     "/tenants/{id}/members": {
       "get": {
         "description": "Active memberships ∪ pending invitations; `status` discriminates ('active' | 'invited').",

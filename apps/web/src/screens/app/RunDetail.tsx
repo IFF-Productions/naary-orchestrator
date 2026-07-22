@@ -675,12 +675,16 @@ function RunView({ id }: { id: string }) {
                 icon="workflow"
                 onClick={() =>
                   navigate(
-                    `/app/canvas?key=${encodeURIComponent(runWorkflowKey)}`,
+                    // #490 — carry the runId so the canvas live-watches this run,
+                    // overlaying each node's real state (live, or final if terminal).
+                    `/app/canvas?key=${encodeURIComponent(
+                      runWorkflowKey,
+                    )}&runId=${encodeURIComponent(id)}`,
                   )
                 }
                 style={stacked ? { minHeight: 44 } : undefined}
               >
-                Open in canvas
+                {active ? "Watch on canvas" : "Open in canvas"}
               </Button>
             )}
             {active && (

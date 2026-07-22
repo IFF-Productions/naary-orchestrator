@@ -199,6 +199,61 @@ body.naary-dragging
   font-variant-numeric: tabular-nums;
 }
 
+/* #490 — live run-watch pill (top-center of the canvas while ?runId= is active). */
+.naary-watch-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px 7px 14px;
+  border-radius: var(--radius-pill, 999px);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-raised);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium, 500);
+  white-space: nowrap;
+}
+.naary-watch-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--state-running, #3b82f6);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-running, #3b82f6) 60%, transparent);
+  animation: naaryWatchPulse 1.6s ease-out infinite;
+}
+@keyframes naaryWatchPulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-running, #3b82f6) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+.naary-watch-live {
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+}
+.naary-watch-stop {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink-2);
+  border-radius: var(--radius-pill, 999px);
+  padding: 4px 11px;
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition:
+    border-color 0.14s ease,
+    background 0.14s ease;
+}
+.naary-watch-stop:hover {
+  border-color: var(--line-2);
+  background: var(--hover);
+}
+
 /* ---- Three-pane layout (top bar · icon rail · inspector dock) ---- */
 
 /* Indeterminate progress sweep — the node card's bottom strip + the dock's
