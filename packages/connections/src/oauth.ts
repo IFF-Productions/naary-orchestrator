@@ -3,7 +3,7 @@ import { getPrisma } from "@naary/db";
 import { SecretStore } from "@naary/secrets";
 import { ConnectionService, connectionSecretKey } from "./connection.service";
 import { assertEgressAllowed } from "./egress";
-import { NeedsReauthError } from "./errors";
+import { ConnectCallbackError, NeedsReauthError } from "./errors";
 
 const b64url = (b: Buffer) => b.toString("base64url");
 
@@ -529,6 +529,11 @@ export async function completeConsent(opts: {
   connections?: ConnectionService;
   fetchFn?: FetchFn;
 }): Promise<{ connectionId: string }> {
+  if (!opts.state || !opts.code) {
+    // Fail closed: the provider must echo BOTH state (its CSRF credential) and code. A bare hit
+    // or a consent-denied redirect (no code) is user-recoverable — a 4xx, not a paging 500.
+    throw new ConnectCallbackError("missing_params", "Missing code or state");
+  }
   const store = opts.store ?? new SecretStore();
   const connections = opts.connections ?? new ConnectionService();
   // The callback can't send X-Environment-Id — recover both from the state string (set at consent
@@ -537,7 +542,11 @@ export async function completeConsent(opts: {
   const environmentId = envFromState(opts.state);
 
   const raw = await store.get(tenantId, environmentId, stateKey(opts.state));
-  if (!raw) throw new Error("Unknown or expired OAuth state");
+  if (!raw)
+    throw new ConnectCallbackError(
+      "unknown_or_expired",
+      "Unknown or expired OAuth state",
+    );
   const s = JSON.parse(raw) as {
     connectionId: string;
     codeVerifier: string;
@@ -554,7 +563,7 @@ export async function completeConsent(opts: {
   // replayed (Sec#3). Remove before any token exchange.
   if (typeof s.expiresAt === "number" && s.expiresAt < Date.now()) {
     await store.remove(tenantId, environmentId, stateKey(opts.state));
-    throw new Error("OAuth state expired");
+    throw new ConnectCallbackError("expired", "OAuth state expired");
   }
   if (opts.iss && s.issuer && opts.iss !== s.issuer) {
     throw new Error("Issuer mismatch (RFC 9207)");
