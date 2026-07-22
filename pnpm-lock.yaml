@@ -83,6 +83,9 @@ importers:
       '@naary/secrets':
         specifier: workspace:*
         version: link:../../packages/secrets
+      '@naary/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
       '@naary/temporal-config':
         specifier: workspace:*
         version: link:../../packages/temporal-config

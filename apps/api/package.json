@@ -25,6 +25,7 @@
     "@naary/notifications": "workspace:*",
     "@naary/observability": "workspace:*",
     "@naary/secrets": "workspace:*",
+    "@naary/storage": "workspace:*",
     "@naary/temporal-config": "workspace:*",
     "@naary/usage": "workspace:*",
     "@nestjs/common": "^11.1.28",

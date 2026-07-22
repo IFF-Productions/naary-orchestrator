@@ -1,6 +1,7 @@
 // Node-output rendering (items table / JSON) for the RunDetail screen.
 import { useState } from "react";
 import { type Column, CodeBlock, StatusPill, Table } from "../../../components";
+import { CodeAgentTrace, extractCodeAgentTrace } from "./CodeAgentTrace";
 
 /* ---- Items table (items-model A5) ----------------------------------------------
  * A node whose output is an array of objects — e.g. a Loop End's collected per-item
@@ -44,12 +45,27 @@ export function cellText(v: unknown): string {
   return String(v);
 }
 
+/** Drop the (verbose) codeAgent trace from the JSON dump — it's rendered separately as a
+ *  step-by-step log, so leaving it in the JSON would double it up and bury the rest. */
+function stripTrace(output: unknown): unknown {
+  if (!output || typeof output !== "object") return output;
+  const inner = (output as { output?: unknown }).output;
+  if (!inner || typeof inner !== "object" || !("trace" in inner)) return output;
+  const { trace: _trace, ...restInner } = inner as Record<string, unknown>;
+  return { ...(output as Record<string, unknown>), output: restInner };
+}
+
 /** One node's output: an items table when it's an array of objects (with a JSON
- *  toggle), otherwise raw JSON exactly as before. */
+ *  toggle), otherwise raw JSON — plus, for a codeAgent node, its step-by-step trace. */
 export function NodeOutputBody({ output }: { output: unknown }) {
   const [asJson, setAsJson] = useState(false);
-  const tabular = isItemsArray(output);
-  const rows = tabular ? (output as Record<string, unknown>[]) : [];
+  // codeAgent trace (if any) renders as its own collapsible log; strip it from the JSON below.
+  const trace = extractCodeAgentTrace(output);
+  const display = trace !== undefined ? stripTrace(output) : output;
+  const traceEl = trace !== undefined ? <CodeAgentTrace trace={trace} /> : null;
+
+  const tabular = isItemsArray(display);
+  const rows = tabular ? (display as Record<string, unknown>[]) : [];
   const cols = tabular ? itemsColumns(rows) : [];
   const shown = rows.slice(0, MAX_TABLE_ROWS);
 
@@ -62,11 +78,17 @@ export function NodeOutputBody({ output }: { output: unknown }) {
         overflow: "auto",
       }}
     >
-      {JSON.stringify(output, null, 2)}
+      {JSON.stringify(display, null, 2)}
     </CodeBlock>
   );
 
-  if (!tabular) return jsonBlock;
+  if (!tabular)
+    return (
+      <>
+        {traceEl}
+        {jsonBlock}
+      </>
+    );
 
   // Row identity is the array index (rows can be structurally equal), so wrap each
   // row with its ordinal and key the table off that.
