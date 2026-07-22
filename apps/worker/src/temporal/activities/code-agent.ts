@@ -93,7 +93,13 @@ export const __codeAgentDeps = {
         {
           env: opts.env,
           timeout: opts.timeoutMs,
-          maxBuffer: 24 * 1024 * 1024,
+          // `--output-format stream-json --verbose` streams the FULL NDJSON — every assistant
+          // message AND every tool_result (which carries read file contents) — so a read run over
+          // a real codebase emits far more stdout than the old single-envelope `json` mode did.
+          // Buffer generously: on overflow execFile DISCARDS stdout and fails the run with no
+          // trace AND no result (a regression), so we'd rather hold the bytes. We keep only a
+          // bounded, truncated slice of this (see the driver's trace caps) — the buffer is transient.
+          maxBuffer: 256 * 1024 * 1024,
         },
         (err, stdout) => {
           if (err) {
