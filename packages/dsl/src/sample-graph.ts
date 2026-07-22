@@ -1,6 +1,22 @@
 import type { GraphDef } from "./types";
 
 /**
+ * The `{category, urgency}` structured-output schema these classifier/summarizer samples ask for
+ * in their prompts. Declared explicitly now that the agent activity has no hardcoded default
+ * (#450): a schema-less agent returns free text, so a sample that wants structured fields must
+ * carry the schema. (This is exactly the shape the removed default used to force.)
+ */
+const CLASSIFY_SCHEMA = {
+  type: "object",
+  properties: {
+    category: { type: "string" },
+    urgency: { type: "number" },
+  },
+  required: ["category", "urgency"],
+  additionalProperties: false,
+} as const;
+
+/**
  * The hardcoded, linear graph: start → agent → humanApproval → end.
  * (Loaded from Postgres in a later slice; hardcoded here on purpose.)
  *
@@ -19,6 +35,7 @@ export const sampleGraph: GraphDef = {
         model: "claude-opus-4-8",
         systemPrompt:
           "Classify the user's message. Respond with a category and an urgency from 1-5.",
+        outputSchema: CLASSIFY_SCHEMA,
       },
     },
     { id: "approval", type: "humanApproval" },
@@ -48,6 +65,7 @@ export const webhookSampleGraph: GraphDef = {
         model: "claude-opus-4-8",
         systemPrompt:
           "Summarize the inbound event. Respond with a category and an urgency from 1-5.",
+        outputSchema: CLASSIFY_SCHEMA,
       },
     },
     { id: "approval", type: "humanApproval" },
@@ -166,6 +184,7 @@ export const httpEnrichGraph: GraphDef = {
         model: "claude-opus-4-8",
         systemPrompt:
           "Summarize the fetched JSON. Respond with a category and an urgency from 1-5.",
+        outputSchema: CLASSIFY_SCHEMA,
       },
     },
     { id: "end", type: "end" },
@@ -214,6 +233,7 @@ export const sqlEnrichGraph: GraphDef = {
         model: "claude-opus-4-8",
         systemPrompt:
           "Summarize the user record. Respond with a category and an urgency from 1-5.",
+        outputSchema: CLASSIFY_SCHEMA,
       },
     },
     { id: "end", type: "end" },
