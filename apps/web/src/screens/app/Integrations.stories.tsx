@@ -45,6 +45,7 @@ const CONNECTIONS = [
     authMode: "api_token",
     scopes: [],
     status: "connected",
+    credentialLast4: "a1b2",
     createdAt: now,
   },
   {
@@ -56,6 +57,7 @@ const CONNECTIONS = [
     scopes: ["repo", "issues", "checks"],
     status: "connected",
     usedByNodeCount: 1,
+    credentialLast4: null, // github_app stores an installation grant, not a token → no last-4
     createdAt: now,
   },
   {
@@ -67,6 +69,7 @@ const CONNECTIONS = [
     scopes: ["tools:call"],
     status: "needs_reauth",
     usedByNodeCount: 0, // unused → safe to delete
+    credentialLast4: null, // pre-consent OAuth → no stored token yet
     createdAt: now,
   },
 ];

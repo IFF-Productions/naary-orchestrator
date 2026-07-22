@@ -396,6 +396,7 @@ export function ProvidersTab({
                         ` · used by ${c.usedByNodeCount} node${
                           c.usedByNodeCount === 1 ? "" : "s"
                         }`}
+                      {c.credentialLast4 && ` · ••••${c.credentialLast4}`}
                     </div>
                   </div>
                   <StatusPill

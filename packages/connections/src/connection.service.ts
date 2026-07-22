@@ -23,6 +23,37 @@ const DB_ENGINES: ReadonlySet<string> = new Set<DbEngine>([
   "mysql",
 ]);
 
+/**
+ * Auth modes whose stored secret is a single, clean bearer token — the only ones a last-4 is
+ * meaningful for (#471). Deliberately NARROW:
+ *   - `pat` / `api_token` store the raw token string (see {@link ConnectionService.create}) — last-4
+ *     is the credential's tail, exactly like a card's last-4.
+ *   - `connection_string` stores a full DSN/SMTP URI whose tail (`…require`, `…:465`) is a URL
+ *     fragment, not a key — excluded.
+ *   - `oauth` / `github_app` store a JSON GRANT blob (`{refreshToken,accessToken}` / `{installationId}`,
+ *     see oauth.ts / github-app.ts), not a bearer string — a "last-4" there would be JSON punctuation
+ *     or a non-secret installation-id fragment, so they're excluded too.
+ */
+const BEARER_AUTH_MODES: ReadonlySet<string> = new Set<AuthMode>([
+  "api_token",
+  "pat",
+]);
+
+/**
+ * Display last-4 of a connection's stored credential (#471): the final 4 chars of a raw bearer token
+ * (pat/api_token), for at-a-glance "which key is this?" identification — like a card's last-4, NEVER
+ * the whole secret. `null` when the auth mode isn't a raw-token mode, there's no stored token yet, or
+ * the secret is shorter than 4 chars (don't reveal a whole short secret).
+ */
+export function credentialLast4(
+  authMode: string,
+  secret: string | null,
+): string | null {
+  if (!BEARER_AUTH_MODES.has(authMode)) return null;
+  if (!secret || secret.length < 4) return null;
+  return secret.slice(-4);
+}
+
 export interface CreateConnectionInput {
   type: ConnectionType;
   label: string;
@@ -151,6 +182,47 @@ export class ConnectionService {
       where: { id, tenantId },
       data: { serverUrl },
     });
+  }
+
+  /**
+   * Map of connectionId → the last 4 chars of its stored credential (#471), for the Integrations
+   * screen's "which key is this?" hint. Env-scoped. The secret is decrypted in memory here and only
+   * the last-4 (a non-secret display fragment) ever leaves — the full token is NEVER returned or
+   * logged (mirrors the ConnectionView "no token" invariant). `null` for non-bearer / tokenless /
+   * short secrets, and — fail-safe — for any row whose secret can't be decrypted (a corrupt/rotated
+   * ciphertext must not 500 the whole list). Decrypts run in parallel across the (small) connection
+   * set.
+   */
+  async credentialLast4Map(
+    tenantId: string,
+    environmentId: string,
+  ): Promise<Record<string, string | null>> {
+    const rows = await getPrisma().connection.findMany({
+      where: { tenantId, environmentId },
+      select: { id: true, authMode: true },
+    });
+    const out: Record<string, string | null> = {};
+    await Promise.all(
+      rows.map(async (r) => {
+        // Skip the decrypt entirely for non-raw-token modes (DB/SMTP connection strings, and
+        // oauth/github_app which store a JSON grant blob rather than a bearer token).
+        if (!BEARER_AUTH_MODES.has(r.authMode)) {
+          out[r.id] = null;
+          return;
+        }
+        try {
+          const secret = await this.store.get(
+            tenantId,
+            environmentId,
+            connectionSecretKey(r.id),
+          );
+          out[r.id] = credentialLast4(r.authMode, secret);
+        } catch {
+          out[r.id] = null; // undecryptable → no hint, never a hard failure
+        }
+      }),
+    );
+    return out;
   }
 }
 

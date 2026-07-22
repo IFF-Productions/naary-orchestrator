@@ -50,6 +50,17 @@ export class ConnectionResponse {
       "connection (#471). 0 = unreferenced (safe to delete).",
   })
   usedByNodeCount!: number;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: "xyz1",
+    description:
+      "Last 4 characters of the stored raw bearer token (#471, pat/api_token modes) — a 'which " +
+      "key is this?' hint, like a card's last-4; NEVER the full token. null for connection-string " +
+      "(DB/SMTP) secrets, oauth/github_app (which store a JSON grant, not a token), connections " +
+      "with no stored token yet, or secrets shorter than 4 chars.",
+  })
+  credentialLast4!: string | null;
   @ApiProperty({ format: "date-time" }) createdAt!: Date;
 }
 
