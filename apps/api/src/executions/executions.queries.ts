@@ -11,6 +11,7 @@ import {
   type ExecutionStatus,
 } from "@naary/contracts";
 import { getPrisma } from "@naary/db";
+import { getObjectStore, resolveClaimChecks } from "@naary/storage";
 import type { Principal } from "../auth/tenant.decorator";
 import type { EnvironmentsService } from "../environments/environments.service";
 import type { GraphsService } from "../graphs/graphs.service";
@@ -139,6 +140,28 @@ export async function queryListPage(
   return { items, nextCursor };
 }
 
+/**
+ * Resolve any claim-check references in the run ctx (large node outputs offloaded to object
+ * storage — e.g. a codeAgent `trace` / write-mode `diff`) so the UI receives the real value.
+ * This is the correct boundary for it: the API is an I/O zone, unlike the worker (re-inflating
+ * there would defeat the offload) or the browser (can't read object storage). BEST-EFFORT: a
+ * missing/unreachable object (e.g. a dev in-memory store that lives in the worker process, or an
+ * expired object) must never 500 the run detail — fall back to the raw ctx, which the UI renders
+ * gracefully (the reference stays visible as an "offloaded" marker).
+ */
+async function resolveCtxRefs(
+  ctx: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  try {
+    return (await resolveClaimChecks(ctx, getObjectStore())) as Record<
+      string,
+      unknown
+    >;
+  } catch {
+    return ctx;
+  }
+}
+
 export async function queryState(
   deps: ExecutionsDeps,
   id: string,
@@ -156,10 +179,11 @@ export async function queryState(
       // degrade to "running", never 500.
       try {
         const s = await handle.query(stateQuery);
+        const ctx = await resolveCtxRefs(s.ctx);
         return {
           status: s.status,
           currentNodeId: s.currentNodeId,
-          ctx: s.ctx,
+          ctx,
           executedNodeIds: [], // live ctx carries the outputs — the UI derives from it
           nodeTimes: nodeTimesFrom(s.ctx),
           // Slice 3 live spend: the query's first-class figure; a pre-feature worker
@@ -185,10 +209,11 @@ export async function queryState(
           status: ExecutionStatus;
           ctx: Record<string, unknown>;
         };
+        const ctx = await resolveCtxRefs(r.ctx);
         return {
           status: r.status,
           currentNodeId: "",
-          ctx: r.ctx,
+          ctx,
           executedNodeIds: [], // completed ctx carries every node's output
           nodeTimes: nodeTimesFrom(r.ctx),
           spentUsd: costUsdFrom(r.ctx),

@@ -1,7 +1,16 @@
 import { ApplicationFailure } from "@temporalio/activity";
 import { MissingCredentialError } from "@naary/secrets";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveDriver } from "../src/temporal/code-agent-drivers";
+import {
+  __setObjectStore,
+  isClaimCheck,
+  MemoryObjectStore,
+} from "@naary/storage";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  MAX_TRACE_FIELD_CHARS,
+  MAX_TRACE_STEPS,
+  resolveDriver,
+} from "../src/temporal/code-agent-drivers";
 import { __codeAgentDeps, callCodeAgent } from "../src/temporal/activities";
 
 const META = { tenantId: "t1", executionId: "wf-1", nodeId: "n1" };
@@ -11,16 +20,76 @@ const getDecryptedKey = vi.fn();
 const recordUsage = vi.fn();
 const exec = vi.fn();
 
-/** A well-formed `claude -p --output-format json` envelope. */
+/** A well-formed final `type:"result"` message — the last line of a `stream-json` stream (and,
+ *  when it's the whole stdout, a complete minimal stream on its own). `usage` mirrors the real
+ *  stream-json shape (the older `json` mode used `total_usage`; the parser accepts either). */
 const envelope = (over: Record<string, unknown> = {}) =>
   JSON.stringify({
+    type: "result",
+    subtype: "success",
     result: "Looks fine — no issues found.",
     is_error: false,
     session_id: "sess-abc",
     total_cost_usd: 0.0123,
-    total_usage: { input_tokens: 1200, output_tokens: 340 },
+    usage: { input_tokens: 1200, output_tokens: 340 },
     ...over,
   });
+
+/** A multi-line `stream-json` NDJSON stream: system init, assistant text + tool_use, a
+ *  tool_result, then the final result — the real shape `claude -p --output-format stream-json
+ *  --verbose` emits (confirmed against the CLI). */
+const streamLog = (over: Record<string, unknown> = {}) =>
+  [
+    JSON.stringify({ type: "system", subtype: "init", session_id: "sess-abc" }),
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ type: "text", text: "Let me look at the auth module." }],
+      },
+    }),
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "t1",
+            name: "Read",
+            input: { file_path: "src/auth.ts" },
+          },
+        ],
+      },
+    }),
+    JSON.stringify({
+      type: "user",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "t1",
+            content: "…file contents…",
+            is_error: false,
+          },
+        ],
+      },
+    }),
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "t2",
+            name: "Grep",
+            input: { pattern: "login" },
+          },
+        ],
+      },
+    }),
+    "", // blank line — must be tolerated
+    "not-json-garbage", // partial/garbage line — must be tolerated
+    envelope(over),
+  ].join("\n");
 
 beforeEach(() => {
   getDecryptedKey.mockReset().mockResolvedValue("sk-ant-xxx");
@@ -30,6 +99,11 @@ beforeEach(() => {
   __codeAgentDeps.getDefaultEnvId = (() => Promise.resolve("e1")) as never;
   __codeAgentDeps.recordUsage = recordUsage as never;
   __codeAgentDeps.exec = exec as never;
+});
+
+afterEach(() => {
+  // Reset the claim-check object store the offload test injects, back to the lazy default.
+  __setObjectStore(undefined);
 });
 
 describe("claude driver (pure)", () => {
@@ -45,6 +119,9 @@ describe("claude driver (pure)", () => {
     const t = args.indexOf("--allowedTools");
     expect(args[t + 1]).toBe("Read,Grep,Glob");
     expect(args.join(" ")).not.toContain("Bash");
+    // streaming trace: stream-json REQUIRES --verbose in -p mode
+    expect(args[args.indexOf("--output-format") + 1]).toBe("stream-json");
+    expect(args).toContain("--verbose");
     // caps threaded through
     expect(args).toEqual(expect.arrayContaining(["--max-turns", "5"]));
     expect(args).toEqual(expect.arrayContaining(["--max-budget-usd", "2"]));
@@ -72,6 +149,75 @@ describe("claude driver (pure)", () => {
     expect(d.parse(envelope({ is_error: true }), 0).isError).toBe(true);
     expect(d.parse(envelope(), 1).isError).toBe(true); // non-zero exit
     expect(d.parse("not json", 0).isError).toBe(true);
+  });
+
+  it("parses a multi-line stream-json stream → compact trace + final result (tolerating blank/garbage lines)", () => {
+    const env = d.parse(streamLog(), 0);
+    // Final envelope fields still read from the `type:"result"` line.
+    expect(env.isError).toBe(false);
+    expect(env.result).toContain("no issues");
+    expect(env.sessionId).toBe("sess-abc");
+    expect(env.usage?.inputTokens).toBe(1200);
+    // Trace: assistant reasoning, the two tool calls (NAME + input summary), then the result.
+    const trace = env.trace ?? [];
+    const assistant = trace.find((s) => s.kind === "assistant");
+    expect(assistant?.text).toContain("auth module");
+    const tools = trace.filter((s) => s.kind === "tool");
+    expect(tools.map((t) => t.tool)).toEqual(["Read", "Grep"]);
+    expect(tools[0].toolInput).toContain("src/auth.ts");
+    expect(tools[1].toolInput).toContain("login");
+    const result = trace.find((s) => s.kind === "result");
+    expect(result?.text).toContain("no issues");
+    // No tool_result BODY leaks into the trace (kept compact / blob-free).
+    expect(JSON.stringify(trace)).not.toContain("file contents");
+  });
+
+  it("flags is_error on the stream's final result (even on exit 0)", () => {
+    const env = d.parse(streamLog({ is_error: true }), 0);
+    expect(env.isError).toBe(true);
+    expect(env.trace?.find((s) => s.kind === "result")?.isError).toBe(true);
+  });
+
+  it("with NO result line (process died) keeps no_envelope failure — but surfaces the partial trace", () => {
+    const partial = streamLog()
+      .split("\n")
+      .filter((l) => !l.includes('"type":"result"'))
+      .join("\n");
+    const env = d.parse(partial, 0);
+    expect(env.result).toBe("");
+    expect(env.isError).toBe(true);
+    // The partial trace is still captured (useful to debug the crash).
+    expect((env.trace ?? []).some((s) => s.kind === "tool")).toBe(true);
+  });
+
+  it("caps the trace at MAX_TRACE_STEPS and truncates over-long fields", () => {
+    const longText = "x".repeat(MAX_TRACE_FIELD_CHARS + 500);
+    const lines = [
+      JSON.stringify({ type: "system", subtype: "init" }),
+      // One over-long assistant field to prove per-field truncation.
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "text", text: longText }] },
+      }),
+      // Far more than the cap to prove the step cap + truncation marker.
+      ...Array.from({ length: MAX_TRACE_STEPS + 50 }, () =>
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "step" }] },
+        }),
+      ),
+      envelope(),
+    ].join("\n");
+    const env = d.parse(lines, 0);
+    const trace = env.trace ?? [];
+    // Bounded: never more than the cap + the synthetic truncation marker.
+    expect(trace.length).toBeLessThanOrEqual(MAX_TRACE_STEPS + 1);
+    expect(trace.some((s) => s.kind === "truncated")).toBe(true);
+    // Every field is within the per-field bound.
+    const over = trace.find(
+      (s) => (s.text?.length ?? 0) > MAX_TRACE_FIELD_CHARS + 40,
+    );
+    expect(over).toBeUndefined();
   });
 
   it("resolves only claude today; cursor/copilot throw", () => {
@@ -116,7 +262,7 @@ describe("callCodeAgent activity", () => {
 
   it("fail-safe usage: estimates tokens (incl. the prompt, never zero) when the CLI omits usage", async () => {
     exec.mockResolvedValue({
-      stdout: envelope({ total_usage: undefined, total_cost_usd: undefined }),
+      stdout: envelope({ usage: undefined, total_cost_usd: undefined }),
       exitCode: 0,
     });
     // A long prompt so the estimate MUST reflect it (regression: prompt was omitted).
@@ -204,5 +350,40 @@ describe("callCodeAgent activity", () => {
       type: "CODE_AGENT_WRITE_CONFIG",
       nonRetryable: true,
     });
+  });
+
+  it("surfaces a small trace INLINE on the node output", async () => {
+    exec.mockResolvedValue({ stdout: streamLog(), exitCode: 0 });
+    const out = await callCodeAgent(CFG, {}, META);
+    expect(Array.isArray(out.output.trace)).toBe(true);
+    const tools = (
+      out.output.trace as { kind: string; tool?: string }[]
+    ).filter((s) => s.kind === "tool");
+    expect(tools.map((t) => t.tool)).toEqual(["Read", "Grep"]);
+  });
+
+  it("OFFLOADS a large trace as a claim-check ref (keeps Temporal history under the payload cap)", async () => {
+    __setObjectStore(new MemoryObjectStore());
+    // A trace whose serialization exceeds the 1MB claim-check threshold: MAX_TRACE_STEPS
+    // full-width assistant steps (each ~MAX_TRACE_FIELD_CHARS) → well over 1MB.
+    const big = "y".repeat(MAX_TRACE_FIELD_CHARS);
+    const lines = [
+      ...Array.from({ length: MAX_TRACE_STEPS }, () =>
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: big }] },
+        }),
+      ),
+      envelope(),
+    ].join("\n");
+    exec.mockResolvedValue({ stdout: lines, exitCode: 0 });
+    const out = await callCodeAgent(CFG, {}, META);
+    // The trace became a claim-check REFERENCE, not an inline blob.
+    expect(isClaimCheck(out.output.trace)).toBe(true);
+    expect((out.output.trace as { __claimCheck: string }).__claimCheck).toMatch(
+      /^mem:\/\//,
+    );
+    // The heavy trace text is NOT inline in the returned payload (it went to the store).
+    expect(JSON.stringify(out.output)).not.toContain(big);
   });
 });

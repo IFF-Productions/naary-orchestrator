@@ -25,6 +25,38 @@ export interface CodeAgentRunOpts {
   write?: boolean;
 }
 
+/**
+ * One COMPACT, SECRET-FREE step of the agent's execution trace — distilled from the CLI's
+ * streaming (`stream-json`) NDJSON so a run is debuggable without shipping the raw stream.
+ * Bounded by design: every string field is truncated (see `MAX_TRACE_FIELD_CHARS`) and the
+ * whole trace is capped (`MAX_TRACE_STEPS`), so a huge run can't blow the Temporal payload.
+ * The CLI never emits the auth token; we also never echo env into a step.
+ */
+export interface TraceStep {
+  /** `assistant` = the model's text/reasoning; `tool` = a tool call (Read/Grep/Glob/…);
+   *  `result` = the final summary; `truncated` = a synthetic marker when the cap was hit. */
+  kind: "assistant" | "tool" | "result" | "truncated";
+  /** Assistant reasoning text, the final result text, or the truncation note (truncated). */
+  text?: string;
+  /** Tool NAME for `kind:"tool"` — e.g. Read/Grep/Glob/Edit/Write. */
+  tool?: string;
+  /** SHORT summary of the tool input (e.g. the file path / grep pattern), truncated. */
+  toolInput?: string;
+  /** True on the final `result` step when the CLI reported a failure (mirrors `isError`). */
+  isError?: boolean;
+}
+
+/** Trace bounds — keep the offloaded/inline trace comfortably small. */
+export const MAX_TRACE_STEPS = 500;
+export const MAX_TRACE_FIELD_CHARS = 2000;
+
+/** Truncate a string field to the per-field cap (a secret-free bound on a single step). */
+function truncateField(s: string): string {
+  return s.length > MAX_TRACE_FIELD_CHARS
+    ? `${s.slice(0, MAX_TRACE_FIELD_CHARS)}… [truncated]`
+    : s;
+}
+
 /** Normalized result the activity + workflow understand, regardless of which CLI ran. */
 export interface CodeAgentEnvelope {
   /** The model's final text (a plan/summary in read-only mode). */
@@ -36,6 +68,9 @@ export interface CodeAgentEnvelope {
   usage?: { costUsd?: number; inputTokens?: number; outputTokens?: number };
   /** True when the CLI reported a failure even on a 0 exit (Claude: `is_error`). */
   isError: boolean;
+  /** Compact, secret-free step-by-step execution trace (from `stream-json`). Absent when
+   *  the CLI wasn't run in streaming mode or emitted nothing parseable. */
+  trace?: TraceStep[];
 }
 
 export interface CliAgentDriver {
@@ -62,7 +97,7 @@ export interface CliAgentDriver {
   parse(stdout: string, exitCode: number): CodeAgentEnvelope;
 }
 
-/** Claude Code — the reference driver. `claude -p --output-format json`, plan mode. */
+/** Claude Code — the reference driver. `claude -p --output-format stream-json --verbose`, plan mode. */
 const claudeDriver: CliAgentDriver = {
   tool: "claude",
   binary: "claude",
@@ -83,8 +118,12 @@ const claudeDriver: CliAgentDriver = {
     const args = [
       "-p",
       opts.prompt,
+      // stream-json emits the FULL agentic trace as NDJSON (one message per line) so we can
+      // capture what the agent read/grepped + its reasoning. `--verbose` is REQUIRED by Claude
+      // Code alongside stream-json in `-p` mode (it refuses the combination otherwise).
       "--output-format",
-      "json",
+      "stream-json",
+      "--verbose",
       // Read (default): plan mode + a clamped read-only toolset. Write (Slice 2c, sandbox only):
       // acceptEdits + Edit/Write so the model can change files; still NO Bash in either mode.
       "--permission-mode",
@@ -101,35 +140,125 @@ const claudeDriver: CliAgentDriver = {
     return args;
   },
   parse(stdout, exitCode) {
-    // `claude -p --output-format json` emits a single JSON envelope. A non-zero exit with
-    // no parseable envelope is a hard failure; check `is_error` even on exit 0.
-    let env: {
+    // `claude -p --output-format stream-json --verbose` emits NDJSON: one JSON message per line —
+    // `system` (init), `assistant` (text + tool_use blocks), `user` (tool_result blocks), and a
+    // final `type:"result"` message (the same envelope the old `--output-format json` mode emitted:
+    // result/is_error/session_id/total_cost_usd/usage). We walk the lines to collect a COMPACT,
+    // bounded, secret-free `trace` and read the final result message for the normalized fields.
+    const trace: TraceStep[] = [];
+    let truncated = false;
+    /** The final `type:"result"` message — the run's outcome envelope. */
+    interface ResultMsg {
       result?: string;
       is_error?: boolean;
       session_id?: string;
       total_cost_usd?: number;
+      // stream-json names this `usage`; the older `json` mode used `total_usage` — accept either.
+      usage?: { input_tokens?: number; output_tokens?: number };
       total_usage?: { input_tokens?: number; output_tokens?: number };
-    } | null = null;
-    try {
-      env = JSON.parse(stdout.trim());
-    } catch {
-      env = null;
     }
-    if (!env) {
-      return { result: "", isError: true };
+    /** Set once the `type:"result"` line is seen; null if the process died first. */
+    let final: ResultMsg | null = null;
+
+    const pushStep = (step: TraceStep): void => {
+      if (truncated) return;
+      if (trace.length >= MAX_TRACE_STEPS) {
+        truncated = true;
+        trace.push({
+          kind: "truncated",
+          text: `Trace truncated at ${MAX_TRACE_STEPS} steps — more steps ran but were dropped to bound the payload.`,
+        });
+        return;
+      }
+      trace.push(step);
+    };
+
+    for (const line of stdout.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue; // tolerate blank lines
+      let msg: unknown;
+      try {
+        msg = JSON.parse(trimmed);
+      } catch {
+        continue; // tolerate a garbage/partial line
+      }
+      if (!msg || typeof msg !== "object") continue;
+      const m = msg as {
+        type?: string;
+        message?: { content?: unknown };
+        [k: string]: unknown;
+      };
+      if (m.type === "assistant") {
+        // The model's turn: text (reasoning/plan) + tool_use (a Read/Grep/Glob/… call).
+        const content = Array.isArray(m.message?.content)
+          ? m.message.content
+          : [];
+        for (const block of content as Array<Record<string, unknown>>) {
+          if (block?.type === "text" && typeof block.text === "string") {
+            const text = block.text.trim();
+            if (text)
+              pushStep({ kind: "assistant", text: truncateField(text) });
+          } else if (
+            block?.type === "tool_use" &&
+            typeof block.name === "string"
+          ) {
+            // Capture the tool NAME + a short input summary (file path / pattern). Never the
+            // tool_result body (file contents) — keep the trace compact and free of large blobs.
+            const input =
+              block.input === undefined ? "" : safeStringify(block.input);
+            pushStep({
+              kind: "tool",
+              tool: truncateField(block.name),
+              ...(input ? { toolInput: truncateField(input) } : {}),
+            });
+          }
+        }
+      } else if (m.type === "result") {
+        // The final outcome envelope (same fields as the old single-JSON mode).
+        final = m as ResultMsg;
+      }
+      // `system` init and `user` tool_result lines carry no compact-trace value — skipped.
     }
+
+    if (!final) {
+      // No `result` line ⇒ the process died before finishing. Preserve today's `no_envelope`
+      // failure behavior; still surface whatever partial trace we captured (useful to debug it).
+      return { result: "", isError: true, ...(trace.length ? { trace } : {}) };
+    }
+
+    const isError = final.is_error === true || exitCode !== 0;
+    const resultText = typeof final.result === "string" ? final.result : "";
+    // Append the final result as a trace step so the log reads end-to-end.
+    if (resultText || isError) {
+      pushStep({
+        kind: "result",
+        ...(resultText ? { text: truncateField(resultText) } : {}),
+        ...(isError ? { isError: true } : {}),
+      });
+    }
+    const usage = final.usage ?? final.total_usage;
     return {
-      result: typeof env.result === "string" ? env.result : "",
-      sessionId: env.session_id,
-      isError: env.is_error === true || exitCode !== 0,
+      result: resultText,
+      sessionId: final.session_id,
+      isError,
       usage: {
-        costUsd: env.total_cost_usd,
-        inputTokens: env.total_usage?.input_tokens,
-        outputTokens: env.total_usage?.output_tokens,
+        costUsd: final.total_cost_usd,
+        inputTokens: usage?.input_tokens,
+        outputTokens: usage?.output_tokens,
       },
+      ...(trace.length ? { trace } : {}),
     };
   },
 };
+
+/** JSON.stringify that never throws (circular refs) — for a tool-input summary only. */
+function safeStringify(v: unknown): string {
+  try {
+    return typeof v === "string" ? v : JSON.stringify(v);
+  } catch {
+    return "";
+  }
+}
 
 /** Registry of available drivers. Cursor/Copilot are additive adapters (later slices). */
 const DRIVERS: Record<CodeAgentTool, CliAgentDriver | undefined> = {

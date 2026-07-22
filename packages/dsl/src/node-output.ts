@@ -56,6 +56,20 @@ export interface NodeOutputMap {
        *  `{ __claimCheck, bytes }` when large (shape mirrors @naary/storage's ClaimCheck; inlined
        *  so the DSL stays dependency-free). Absent in read mode. */
       diff?: string | { __claimCheck: string; bytes: number };
+      /** Compact step-by-step execution trace (what the agent read/grepped + its reasoning), from
+       *  the CLI's streaming output — inline `TraceStep[]`, or a claim-check reference when large
+       *  (same offload as `diff`; the TraceStep + ClaimCheck shapes are inlined here so the DSL
+       *  stays dependency-free — they mirror @naary/worker's `TraceStep` and @naary/storage's
+       *  `ClaimCheck`). Absent when the run produced no parseable trace. */
+      trace?:
+        | Array<{
+            kind: "assistant" | "tool" | "result" | "truncated";
+            text?: string;
+            tool?: string;
+            toolInput?: string;
+            isError?: boolean;
+          }>
+        | { __claimCheck: string; bytes: number };
       /** Opened pull request (write mode + `openPr`): its number, html URL, and head branch.
        *  Present only when the diff was non-empty and the PR was opened (or already existed).
        *  Absent in read mode, when `openPr` is off, or when there were no changes to commit. */

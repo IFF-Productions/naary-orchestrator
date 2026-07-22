@@ -12,7 +12,11 @@ import {
   runCostUsd,
   secondsSince,
 } from "../../metrics";
-import { type CodeAgentTool, resolveDriver } from "../code-agent-drivers";
+import {
+  type CodeAgentTool,
+  resolveDriver,
+  type TraceStep,
+} from "../code-agent-drivers";
 import { codeAgentWriteEnv, runCodeAgentWrite } from "../code-agent-write";
 import { type AgentMeta, estimateTokens, getCredentials } from "./shared";
 
@@ -55,6 +59,11 @@ export interface CodeAgentResult {
     tool: string;
     sessionId?: string;
     diff?: string | ClaimCheck;
+    /** Compact step-by-step execution trace (what the agent read/grepped, its reasoning) from
+     *  the CLI's `stream-json` stream. Inline `TraceStep[]`, or a `ClaimCheck` reference when
+     *  large (offloaded with the SAME claim-check mechanism as `diff`, resolved at the API
+     *  boundary) so it never bloats Temporal history. */
+    trace?: TraceStep[] | ClaimCheck;
     /** Opened (or already-existing) PR when write mode + `openPr` produced changes (#444). */
     pr?: { number: number; url: string; branch: string };
   };
@@ -297,6 +306,16 @@ export async function callCodeAgent(
           })) as string | ClaimCheck)
         : undefined;
 
+    // The full agentic trace can be large on a long run — offload it with the SAME claim-check
+    // mechanism as the diff (small traces stay inline). Keeps Temporal history under the ~2MB cap;
+    // the API resolves the reference at its read boundary before the UI renders it.
+    const traceOut =
+      envlp.trace !== undefined && envlp.trace.length > 0
+        ? ((await maybeOffload(envlp.trace, getObjectStore(), {
+            keyPrefix: `codeagent-trace/${meta.tenantId}`,
+          })) as TraceStep[] | ClaimCheck)
+        : undefined;
+
     return {
       status: "ok",
       output: {
@@ -304,6 +323,7 @@ export async function callCodeAgent(
         tool: driver.tool,
         sessionId: envlp.sessionId,
         ...(diffOut !== undefined ? { diff: diffOut } : {}),
+        ...(traceOut !== undefined ? { trace: traceOut } : {}),
         ...(pr !== undefined ? { pr } : {}),
       },
       costUsd,
