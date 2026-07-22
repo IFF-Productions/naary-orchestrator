@@ -100,6 +100,26 @@ export function validateClaudeCodeKey(token: string): Promise<boolean> {
 }
 
 /**
+ * Cursor Agent CLI credential (`CURSOR_API_KEY`), the dedicated `cursor` code-agent slot. Format-only
+ * — Cursor keys are opaque with no stable public prefix to assert, so accept any non-trivial value
+ * and let the real `cursor-agent` run (the Integrations "Run test") be the truth (mirrors claude-code).
+ */
+export function validateCursorKey(token: string): Promise<boolean> {
+  return Promise.resolve(token.trim().length >= 8);
+}
+
+/**
+ * GitHub Copilot CLI credential (`COPILOT_GITHUB_TOKEN`), the dedicated `copilot` code-agent slot.
+ * Format-only: GitHub's docs say the CLI accepts a fine-grained PAT / OAuth token but NOT a classic
+ * `ghp_` PAT — so reject that explicitly (a real paste error we CAN catch) and accept anything else,
+ * leaving end-to-end verification to a live run.
+ */
+export function validateCopilotKey(token: string): Promise<boolean> {
+  const t = token.trim();
+  return Promise.resolve(t.length > 0 && !t.startsWith("ghp_"));
+}
+
+/**
  * Validate a tenant's Google (Gemini) key with a cheap 1-token call — mirrors the others
  * (4xx bad/exhausted key ⇒ invalid; 5xx/network ⇒ sanitized transient). gemini-2.5-flash is
  * the cheapest model to probe with.

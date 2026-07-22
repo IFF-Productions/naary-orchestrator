@@ -4,6 +4,8 @@ import { TenantKeyService, getTenantKeyService } from "./tenant-keys";
 import {
   validateAnthropicKey,
   validateClaudeCodeKey,
+  validateCopilotKey,
+  validateCursorKey,
   validateGoogleKey,
   validateOpenAiKey,
 } from "./provider-validate";
@@ -38,6 +40,10 @@ const defaultValidator: ProviderValidator = (provider, apiKey) => {
   // The Claude Code CLI credential (API key OR subscription setup-token) — format check only;
   // the Integrations "Run test" is its real verification. Distinct slot from `anthropic`.
   if (provider === "claude-code") return validateClaudeCodeKey(apiKey);
+  // The other code-agent CLI slots (dedicated, separate from any model key). Format-only, like
+  // claude-code — a live run is the real check. See code-agent-drivers.ts (cursor/copilot).
+  if (provider === "cursor") return validateCursorKey(apiKey);
+  if (provider === "copilot") return validateCopilotKey(apiKey);
   throw new Error(`Unsupported provider: ${provider}`);
 };
 
