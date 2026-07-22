@@ -34,18 +34,26 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
   && npm cache clean --force
 
 # GitHub Copilot CLI (`copilot`) — the codeAgent copilot driver's read-mode binary. npm-installed
-# (Node 22+, which this base is). Pinnable via the ARG for reproducibility.
-ARG COPILOT_CLI_VERSION=latest
+# (Node 22+, which this base is). PINNED for a reproducible build (like CLAUDE_CODE_VERSION); bump
+# intentionally, or override via --build-arg.
+ARG COPILOT_CLI_VERSION=1.0.73
 RUN npm install -g "@github/copilot@${COPILOT_CLI_VERSION}" \
   && npm cache clean --force
 
 # Cursor Agent CLI (`cursor-agent`) — the codeAgent cursor driver's read-mode binary. The official
-# installer drops the binary in ~/.local/bin (added to PATH below). BEST-EFFORT: if the installer
-# ever changes/misbehaves, the build still succeeds and cursor-agent is simply absent — the driver
-# then errors cleanly at exec, so this never breaks the shared api/worker image build. Verify the
-# binary is present + the parse matches before relying on the cursor node in production.
-RUN curl https://cursor.com/install -fsS | bash \
-  || echo "WARN: cursor-agent install skipped — cursor codeAgent driver unavailable until fixed"
+# installer drops the binary in ~/.local/bin (added to PATH below). `-fsSL` follows redirects. By
+# default BEST-EFFORT: if the installer ever changes/misbehaves the build still succeeds and
+# cursor-agent is simply absent — the driver then errors cleanly at exec, so this never breaks the
+# shared api/worker image build. Set --build-arg REQUIRE_CURSOR_CLI=true to make it FATAL (e.g. a
+# CI job that must guarantee the binary is present). Verify the parse matches before production use.
+ARG REQUIRE_CURSOR_CLI=false
+RUN if curl -fsSL https://cursor.com/install | bash; then \
+      echo "cursor-agent installed"; \
+    elif [ "$REQUIRE_CURSOR_CLI" = "true" ]; then \
+      echo "ERROR: cursor-agent install failed and REQUIRE_CURSOR_CLI=true"; exit 1; \
+    else \
+      echo "WARN: cursor-agent install skipped — cursor codeAgent driver unavailable until fixed"; \
+    fi
 ENV PATH="/root/.local/bin:${PATH}"
 
 # pnpm via corepack, pinned to the version in package.json's packageManager.
