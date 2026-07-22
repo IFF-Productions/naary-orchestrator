@@ -34,6 +34,14 @@ export const handleChatTrigger: NodeHandler = async ({ node, ctx }) => {
   return;
 };
 
+export const handleMcpServerTrigger: NodeHandler = async ({ node, ctx }) => {
+  // Entry node: the run was started by an external MCP client invoking this workflow's hosted
+  // tool (the API's /mcp endpoint maps the tool-call arguments to the run input). The invocation
+  // args ARE the run input → this node's output (like webhookTrigger's output IS the event).
+  ctx[node.id] = ctx.__input;
+  return;
+};
+
 export const handleErrorTrigger: NodeHandler = async ({ node, ctx }) => {
   // Entry node of an error-handler graph — its output is the failure context
   // the interpreter passed as this run's input.

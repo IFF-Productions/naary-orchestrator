@@ -205,6 +205,46 @@ describe("validateGraphConfigs (save gate — lenient on missing, strict on pres
     ).toEqual([]);
   });
 
+  it("validates an mcpServerTrigger node: empty draft saves, valid config passes, bad types reject", () => {
+    // Opt-in trigger with no config yet (both fields optional) must still save.
+    expect(
+      validateGraphConfigs(
+        graph([{ id: "m", type: "mcpServerTrigger", config: {} }]),
+      ),
+    ).toEqual([]);
+    // A fully-configured tool passes.
+    expect(
+      validateGraphConfigs(
+        graph([
+          {
+            id: "m",
+            type: "mcpServerTrigger",
+            config: {
+              toolName: "run_refund",
+              description: "Process a customer refund.",
+            },
+          },
+        ]),
+      ),
+    ).toEqual([]);
+    // Wrong-typed fields are caught at save time.
+    const errs = validateGraphConfigs(
+      graph([
+        {
+          id: "m",
+          type: "mcpServerTrigger",
+          config: { toolName: 42, description: false },
+        },
+      ]),
+    );
+    expect(errs).toHaveLength(1);
+    expect(errs[0].nodeId).toBe("m");
+    expect(errs[0].issues.map((i) => i.path).sort()).toEqual([
+      "description",
+      "toolName",
+    ]);
+  });
+
   it("skips config-less nodes and reports nodeId/type on failure", () => {
     const errs = validateGraphConfigs(
       graph([

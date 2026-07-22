@@ -141,6 +141,41 @@ export function renderTriggerSections(c: ConfigSectionCtx) {
         </>
       )}
 
+      {kind === "mcpServerTrigger" && (
+        <>
+          <Labeled label="Tool name (optional)">
+            <input
+              value={str("toolName")}
+              onChange={(e) => onChange({ toolName: e.target.value })}
+              style={inputStyle}
+              placeholder="run_refund"
+            />
+          </Labeled>
+          <Labeled label="Description (optional)">
+            <input
+              value={str("description")}
+              onChange={(e) => onChange({ description: e.target.value })}
+              style={inputStyle}
+              placeholder="Process a customer refund."
+            />
+          </Labeled>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
+            This workflow is hosted as a tool on naary's MCP server. An external
+            AI agent (Claude Desktop, Cursor, an SDK agent) that connects sees
+            it as <code>{str("toolName") || "run_<workflowKey>"}</code> and
+            invoking it starts a durable run — the tool-call arguments arrive as{" "}
+            <code>{node.id}</code>. Blank tool name ⇒ a name is derived from the
+            workflow key. The workflow must be Active to be invocable.
+          </div>
+        </>
+      )}
+
       {kind === "formTrigger" &&
         (() => {
           const fields = (

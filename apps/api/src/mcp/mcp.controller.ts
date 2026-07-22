@@ -206,11 +206,13 @@ export class McpController {
         ? { tenantId, role: "member", tokenId: auth.id }
         : undefined;
 
-    // Fetch the tenant's workflows up front so each can be exposed as its own tool (flavor B).
+    // Flavor B (design §5): expose only workflows that OPT IN via an `mcpServerTrigger` entry
+    // node — each becomes its own tool (its configured toolName/description). Opt-in, not
+    // expose-all: a workflow without the node is still runnable via the generic run_workflow.
     // Best-effort — a listing hiccup just means no per-workflow tools this session.
     // View-FILTERED for a restricted token (never expose tools it can't see).
     const exposedWorkflows = await this.graphs
-      .list(tenantId, envId, actor)
+      .listMcpExposed(tenantId, envId, actor)
       .catch(() => []);
 
     // Deps are pre-scoped to the token's tenantId — a tool can't reach another tenant.
@@ -223,6 +225,13 @@ export class McpController {
       runWorkflow: (workflowKey, input) =>
         this.executions
           .start(tenantId, envId, input, workflowKey, undefined, actor)
+          .then((r) => ({ runId: r.workflowId })),
+      // Per-workflow (flavor B) tools are AUTOMATIC external triggers → activation-gated
+      // (refused when the workflow is inactive, like the form/webhook ingress), unlike the
+      // operator-facing run_workflow above which mirrors the ungated manual "Run".
+      runExposedWorkflow: (workflowKey, input) =>
+        this.executions
+          .startMcpTrigger(tenantId, envId, input, workflowKey)
           .then((r) => ({ runId: r.workflowId })),
       createWorkflow: (args) =>
         this.createWorkflow(tenantId, envId, args, actor),

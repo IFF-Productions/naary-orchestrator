@@ -55,6 +55,7 @@ import type {
   NumberNodeConfig,
   FormTriggerNodeConfig,
   ChatTriggerNodeConfig,
+  McpServerTriggerNodeConfig,
   PollTriggerNodeConfig,
   RandomNodeConfig,
   RenameKeysNodeConfig,
@@ -155,6 +156,10 @@ const CONFIG_SCHEMAS = {
     greeting: z.string().optional(),
     /** Opt in to the durable per-session workflow (§2.1b, option A). */
     durableSession: z.boolean().optional(),
+  }),
+  mcpServerTrigger: z.object({
+    toolName: z.string().optional(),
+    description: z.string().optional(),
   }),
   pollTrigger: z.object({
     url: z.string(),
@@ -714,6 +719,9 @@ export function nodeConfigJsonSchema(type: NodeType): Record<string, unknown> {
 export type StartConfig = z.infer<typeof CONFIG_SCHEMAS.start>;
 export type FormTriggerConfig = z.infer<typeof CONFIG_SCHEMAS.formTrigger>;
 export type ChatTriggerConfig = z.infer<typeof CONFIG_SCHEMAS.chatTrigger>;
+export type McpServerTriggerConfig = z.infer<
+  typeof CONFIG_SCHEMAS.mcpServerTrigger
+>;
 export type ScheduleTriggerConfig = z.infer<
   typeof CONFIG_SCHEMAS.scheduleTrigger
 >;
@@ -781,6 +789,7 @@ const _configParity: {
   scheduleTrigger: Exact<ScheduleTriggerConfig, ScheduleTriggerNodeConfig>;
   formTrigger: Exact<FormTriggerConfig, FormTriggerNodeConfig>;
   chatTrigger: Exact<ChatTriggerConfig, ChatTriggerNodeConfig>;
+  mcpServerTrigger: Exact<McpServerTriggerConfig, McpServerTriggerNodeConfig>;
   pollTrigger: Exact<PollTriggerConfig, PollTriggerNodeConfig>;
   codeAgent: Exact<CodeAgentConfig, CodeAgentNodeConfig>;
   mcpTool: Exact<McpToolConfig, McpToolNodeConfig>;
@@ -833,6 +842,7 @@ const _configParity: {
   scheduleTrigger: true,
   formTrigger: true,
   chatTrigger: true,
+  mcpServerTrigger: true,
   pollTrigger: true,
   codeAgent: true,
   mcpTool: true,

@@ -21,6 +21,7 @@ import { TracedClass } from "@naary/observability";
 // classic `moduleResolution: node`, which doesn't honor package `exports` subpaths for types.
 import { validateGraphConfigs } from "@naary/dsl/dist/registry";
 import type { Principal } from "../auth/tenant.decorator";
+import { extractMcpServerTool } from "../mcp/mcp-exposed";
 import { NotificationsService } from "../notifications/notifications.service";
 import {
   PermissionsService,
@@ -49,6 +50,19 @@ export interface GraphSummary {
   active: boolean;
   /** Organizational tags (tenant-wide per workflowKey — NOT env-scoped). Never permissions. */
   tags: { id: string; name: string; color: string | null }[];
+}
+
+/** A workflow opted in to being hosted as an MCP tool (its entry node is an `mcpServerTrigger`),
+ *  plus the tool name/description read from that node. Consumed by the MCP server (flavor B). */
+export interface McpExposedWorkflowInfo {
+  workflowKey: string;
+  name: string;
+  version: number;
+  updatedAt: string;
+  /** The node's configured MCP tool name; absent ⇒ server derives `run_<workflowKey>`. */
+  toolName?: string;
+  /** The node's configured tool description shown to the calling agent. */
+  toolDescription?: string;
 }
 
 /**
@@ -241,6 +255,48 @@ export class GraphsService {
       }
     }
     return [...latest.values()];
+  }
+
+  /**
+   * The tenant's workflows that OPT IN to being hosted as MCP tools (docs/design/MCP-SERVER.md §5,
+   * flavor B) — i.e. whose LATEST graph's ENTRY node is an `mcpServerTrigger` (matched like the
+   * form endpoint's entry check, not "contains one anywhere"). Composes on `list()` so RBAC view
+   * filtering + env scoping are reused, then enriches the subset with one batched `distinct` body
+   * fetch (the `connectionUsageCounts` pattern — no N+1) to read each entry node's tool config.
+   */
+  async listMcpExposed(
+    tenantId: string,
+    environmentId: string,
+    actor?: Principal,
+  ): Promise<McpExposedWorkflowInfo[]> {
+    const summaries = await this.list(tenantId, environmentId, actor);
+    if (summaries.length === 0) return [];
+    const keys = summaries.map((s) => s.workflowKey);
+    const rows = await getPrisma().graphDefinition.findMany({
+      where: { tenantId, environmentId, workflowKey: { in: keys } },
+      orderBy: [{ workflowKey: "asc" }, { version: "desc" }],
+      distinct: ["workflowKey"],
+      select: { workflowKey: true, graph: true },
+    });
+    const bodies = new Map(
+      rows.map((r) => [r.workflowKey, r.graph as GraphDef | null]),
+    );
+    const out: McpExposedWorkflowInfo[] = [];
+    for (const s of summaries) {
+      const graph = bodies.get(s.workflowKey);
+      if (!graph) continue;
+      // Pure ENTRY-node opt-in check (unit-tested in mcp-exposed.spec.ts).
+      const tool = extractMcpServerTool(graph);
+      if (!tool) continue;
+      out.push({
+        workflowKey: s.workflowKey,
+        name: s.name,
+        version: s.version,
+        updatedAt: s.updatedAt,
+        ...tool,
+      });
+    }
+    return out;
   }
 
   /**

@@ -20,6 +20,9 @@ function makeService(isActive: boolean) {
   const graphs = {
     isActive: vi.fn().mockResolvedValue(isActive),
     getErrorHandler: vi.fn().mockResolvedValue(null),
+    // startMcpTrigger resolves the snapshot itself (unlike startForm/startWebhook which are
+    // handed one) — only reached when the gate PASSES.
+    getLatest: vi.fn().mockResolvedValue(snapshot),
   };
   const service = new ExecutionsService(
     graphs as never,
@@ -52,6 +55,21 @@ describe("automatic-trigger activation gate", () => {
       service.startForm("t-1", "e-1", snapshot as never, {}, "w"),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it("startMcpTrigger is REFUSED (409) for a deactivated workflow — no run started", async () => {
+    const { service, start } = makeService(false);
+    await expect(
+      service.startMcpTrigger("t-1", "e-1", { orderId: "o-1" }, "w"),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("startMcpTrigger proceeds for an ACTIVE workflow (gate checked in the endpoint's env)", async () => {
+    const { service, start, graphs } = makeService(true);
+    await service.startMcpTrigger("t-1", "e-1", { orderId: "o-1" }, "w");
+    expect(start).toHaveBeenCalledOnce();
+    expect(graphs.isActive).toHaveBeenCalledWith("t-1", "e-1", "w");
   });
 
   it("an ACTIVE workflow is not blocked by the gate (it proceeds to start)", async () => {

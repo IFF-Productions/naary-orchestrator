@@ -43,11 +43,35 @@ export interface McpCreateWorkflowArgs {
   workflowKey?: string;
 }
 
+/**
+ * A saved workflow OPTED IN (via an `mcpServerTrigger` entry node) to being hosted as its own MCP
+ * tool. `toolName`/`toolDescription` come from that node's config; when absent the server falls
+ * back to the derived `run_<workflowKey>` name + a generic description (the pre-node flavor-B
+ * behavior), so an exposed workflow with an un-configured node still works.
+ */
+export interface McpExposedWorkflow extends McpWorkflowSummary {
+  /** The node's configured MCP tool name (sanitized + de-collided on the server). */
+  toolName?: string;
+  /** The node's configured tool description shown to the calling agent. */
+  toolDescription?: string;
+}
+
 export interface McpToolDeps {
   tenantId: string;
   listWorkflows: () => Promise<McpWorkflowSummary[]>;
   getRun: (runId: string) => Promise<McpRunState>;
   runWorkflow: (
+    workflowKey: string,
+    input?: Record<string, unknown>,
+  ) => Promise<{ runId: string }>;
+  /**
+   * Start a run of a workflow exposed as its OWN tool (flavor B). Unlike the generic
+   * `run_workflow` (an operator tool, ungated like the manual "Run" button), this is an
+   * AUTOMATIC external trigger and is activation-gated (refused when the workflow is inactive,
+   * mirroring the form/webhook ingress). Optional — falls back to `runWorkflow` when a caller
+   * (e.g. a unit test) doesn't wire a distinct gated path.
+   */
+  runExposedWorkflow?: (
     workflowKey: string,
     input?: Record<string, unknown>,
   ) => Promise<{ runId: string }>;
@@ -57,15 +81,17 @@ export interface McpToolDeps {
   approve: (runId: string, approved: boolean, note?: string) => Promise<void>;
   /**
    * Saved workflows to expose as their OWN callable tools (design flavor B — the "Server-Trigger"
-   * model). Each becomes `run_<workflowKey>` so an agent can call a specific flow by name, not
-   * just via the generic run_workflow. Same capability + tenant scope as run_workflow — no new
-   * access is granted.
+   * model, docs/design/MCP-SERVER.md §5). A workflow OPTS IN by having an `mcpServerTrigger` entry
+   * node; each becomes a tool (its configured `toolName`, or the derived `run_<workflowKey>`) so an
+   * agent can call a specific flow by name. Same tenant scope as run_workflow — no new access is
+   * granted; invoking it starts a durable run.
    */
-  exposedWorkflows: McpWorkflowSummary[];
+  exposedWorkflows: McpExposedWorkflow[];
 }
 
-/** MCP tool names must be [A-Za-z0-9_-]. Slugify a workflowKey and de-collide within the set. */
-function toolNamesFor(workflows: McpWorkflowSummary[]): Map<string, string> {
+/** MCP tool names must be [A-Za-z0-9_-]. Use the node's configured `toolName` when set (sanitized),
+ *  else derive `run_<workflowKey>`; de-collide within the reserved + workflow set either way. */
+function toolNamesFor(workflows: McpExposedWorkflow[]): Map<string, string> {
   const used = new Set<string>([
     "list_node_types",
     "list_workflows",
@@ -76,10 +102,8 @@ function toolNamesFor(workflows: McpWorkflowSummary[]): Map<string, string> {
   ]);
   const out = new Map<string, string>();
   for (const wf of workflows) {
-    const base = `run_${wf.workflowKey.replace(/[^A-Za-z0-9_-]/g, "_")}`.slice(
-      0,
-      60,
-    );
+    const raw = wf.toolName?.trim() ? wf.toolName : `run_${wf.workflowKey}`;
+    const base = raw.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 60) || "run_tool";
     let name = base;
     let n = 2;
     while (used.has(name)) name = `${base}_${n++}`;
@@ -225,19 +249,24 @@ export function buildMcpServer(deps: McpToolDeps): McpServer {
     },
   );
 
-  // Flavor B — expose each saved workflow as its own `run_<key>` tool (capped to keep the tool
-  // list sane). A call starts a durable run; poll get_run for the result.
+  // Flavor B — expose each OPTED-IN workflow (one with an `mcpServerTrigger` entry node) as its
+  // own tool (capped to keep the tool list sane). A call starts a durable, activation-gated run;
+  // poll get_run for the result. The gated start is refused when the workflow is inactive.
+  const runExposed = deps.runExposedWorkflow ?? deps.runWorkflow;
   const CAP = 40;
   const exposed = deps.exposedWorkflows.slice(0, CAP);
   const names = toolNamesFor(exposed);
   for (const wf of exposed) {
     const name = names.get(wf.workflowKey);
     if (!name) continue;
-    server.tool(
-      name,
+    const description =
+      wf.toolDescription?.trim() ||
       `Run the "${wf.name}" workflow (key: ${wf.workflowKey}) as a durable run. Returns ` +
         `{ runId } immediately — poll get_run to await it (it may pause for approval or run for ` +
-        `a while). Equivalent to run_workflow with this workflowKey.`,
+        `a while). Equivalent to run_workflow with this workflowKey.`;
+    server.tool(
+      name,
+      description,
       {
         input: z
           .record(z.string(), z.unknown())
@@ -246,8 +275,7 @@ export function buildMcpServer(deps: McpToolDeps): McpServer {
             "Optional JSON input passed to the workflow's trigger node.",
           ),
       },
-      async ({ input }) =>
-        jsonResult(await deps.runWorkflow(wf.workflowKey, input)),
+      async ({ input }) => jsonResult(await runExposed(wf.workflowKey, input)),
     );
   }
 

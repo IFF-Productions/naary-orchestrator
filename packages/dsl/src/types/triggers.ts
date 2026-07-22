@@ -67,6 +67,27 @@ export interface ChatTriggerNodeConfig {
 }
 
 /**
+ * MCP Server Trigger — an ENTRY node that OPTS this workflow IN to being hosted as a callable
+ * tool on naary's MCP server (design docs/design/MCP-SERVER.md §5, "flavor B"). naary is already
+ * an MCP *client* (the `mcpTool` node); this is the inverse — an external MCP client (Claude
+ * Desktop, Cursor, an SDK agent) connecting to naary's `/mcp` endpoint sees this workflow as its
+ * own tool (`toolName`) and invoking it starts a durable run. The invocation's JSON arguments
+ * become this node's output (like `webhookTrigger`'s output IS the event). Presence of this node
+ * as the graph's entry is the opt-in: without it, a workflow is NOT advertised as a per-workflow
+ * MCP tool (it is still runnable via the generic `run_workflow` operator tool).
+ */
+export interface McpServerTriggerNodeConfig {
+  /**
+   * The MCP tool name external agents call (sanitized to [A-Za-z0-9_-] and de-collided on the
+   * server). Omitted ⇒ the server derives `run_<workflowKey>` — the same default flavor B used
+   * before this node existed.
+   */
+  toolName?: string;
+  /** Tool description shown to the calling agent (what this workflow does / when to call it). */
+  description?: string;
+}
+
+/**
  * Poll Trigger — an ENTRY node that fetches a URL and only signals downstream when
  * the source has CHANGED since the last poll. The change is detected against a
  * per-(tenant, workflow, node) cursor persisted across runs (side-effecting, so the
