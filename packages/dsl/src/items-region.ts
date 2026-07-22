@@ -237,11 +237,12 @@ function walkLinearRegion(n: NodeDef, d: LinearDeps): LinearResult {
   if (inTo(loopEndId).length !== 1) {
     return a4(`loopEnd '${loopEndId}' must have exactly one incoming edge`);
   }
-  if (outFrom(loopEndId).length > 1) {
-    return hard(
-      `loopEnd '${loopEndId}' must have at most one outgoing edge (fan-out after a loop is not supported in v1)`,
-    );
-  }
+  // Fan-out AFTER a loop (loopEnd → N successors) is allowed (#477): loopEnd's outgoing edges
+  // leave the region (the region brackets splitOut…loopEnd), so its successors are ordinary
+  // top-level nodes the walker fans out over — each receives loopEnd's collected array. The
+  // interpreter gates the runtime fan-out behind `wf.patched("loop-fanout-v1")`; a graph with
+  // >1 loopEnd exit could not be saved before this change, so no in-flight run has one and the
+  // marker is never evaluated on their replay (byte-identical). No out-degree cap here.
   const loopEnd = nodeById.get(loopEndId);
   const collectFrom = String(
     (loopEnd?.config as { from?: unknown } | undefined)?.from ?? "",
