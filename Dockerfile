@@ -20,9 +20,10 @@
 FROM node:22-bookworm-slim
 
 # Prisma's engine + TLS to Postgres need openssl; ca-certificates for HTTPS to
-# LLM/MCP providers from the worker. node:slim ships without openssl.
+# LLM/MCP providers from the worker. node:slim ships without openssl. curl is for
+# the Cursor CLI installer below.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && apt-get install -y --no-install-recommends openssl ca-certificates curl \
   && rm -rf /var/lib/apt/lists/*
 
 # The `claude` CLI for the codeAgent node's read-only (Slice 1) path, which runs `claude -p`
@@ -31,6 +32,21 @@ RUN apt-get update \
 ARG CLAUDE_CODE_VERSION=2.1.210
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
   && npm cache clean --force
+
+# GitHub Copilot CLI (`copilot`) — the codeAgent copilot driver's read-mode binary. npm-installed
+# (Node 22+, which this base is). Pinnable via the ARG for reproducibility.
+ARG COPILOT_CLI_VERSION=latest
+RUN npm install -g "@github/copilot@${COPILOT_CLI_VERSION}" \
+  && npm cache clean --force
+
+# Cursor Agent CLI (`cursor-agent`) — the codeAgent cursor driver's read-mode binary. The official
+# installer drops the binary in ~/.local/bin (added to PATH below). BEST-EFFORT: if the installer
+# ever changes/misbehaves, the build still succeeds and cursor-agent is simply absent — the driver
+# then errors cleanly at exec, so this never breaks the shared api/worker image build. Verify the
+# binary is present + the parse matches before relying on the cursor node in production.
+RUN curl https://cursor.com/install -fsS | bash \
+  || echo "WARN: cursor-agent install skipped — cursor codeAgent driver unavailable until fixed"
+ENV PATH="/root/.local/bin:${PATH}"
 
 # pnpm via corepack, pinned to the version in package.json's packageManager.
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
