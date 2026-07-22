@@ -13,6 +13,7 @@
  * code; activities + API only.
  */
 import * as Sentry from "@sentry/node";
+import { otlpCount, otlpDistribution, otlpGauge } from "./otlp";
 
 /** Low-cardinality metric dimensions. Never tenant/run ids. */
 export type MetricAttributes = Record<string, string | number | boolean>;
@@ -35,6 +36,9 @@ export function metricCount(
   value = 1,
   attributes?: MetricAttributes,
 ): void {
+  // OTLP sink is independent of Sentry (gated on OTEL_EXPORTER_OTLP_ENDPOINT); it
+  // no-ops when unconfigured. Fire it before the Sentry guard so either sink works alone.
+  otlpCount(name, value, attributes);
   if (!active()) return;
   try {
     Sentry.metrics.count(name, value, opts(attributes));
@@ -50,6 +54,7 @@ export function metricDistribution(
   attributes?: MetricAttributes,
   unit?: string,
 ): void {
+  otlpDistribution(name, value, attributes, unit);
   if (!active()) return;
   try {
     Sentry.metrics.distribution(name, value, opts(attributes, unit));
@@ -65,6 +70,7 @@ export function metricGauge(
   attributes?: MetricAttributes,
   unit?: string,
 ): void {
+  otlpGauge(name, value, attributes, unit);
   if (!active()) return;
   try {
     Sentry.metrics.gauge(name, value, opts(attributes, unit));

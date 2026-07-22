@@ -28,6 +28,14 @@ export {
   type MetricAttributes,
 } from "./metrics";
 export {
+  initOtlp,
+  isOtlpEnabled,
+  shutdownOtlp,
+  otlpCount,
+  otlpDistribution,
+  otlpGauge,
+} from "./otlp";
+export {
   SENTRY_TRACE_HEADER,
   BAGGAGE_HEADER,
   getSentryTraceHeaders,

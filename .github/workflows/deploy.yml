@@ -27,6 +27,9 @@ name: Deploy
 #   SENTRY_DSN / SENTRY_TRACES_SAMPLE_RATE / SENTRY_PROFILES_SAMPLE_RATE — backend (api/
 #   worker) Sentry env, exported on the box for compose; unset ⇒ the box's /opt/naary/.env
 #   value (if any) still applies. SENTRY_RELEASE defaults to the deployed tag.
+#   OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_HEADERS / OTEL_EXPORTER_OTLP_PROTOCOL —
+#   backend (api/worker) OTLP metrics export (Datadog/OTLP, #462), same box-.env-override
+#   path as the Sentry env; unset ⇒ OTLP export stays OFF. HEADERS carries the intake auth.
 #
 # Deploys via a GITHUB-HOSTED runner (unlike ci.yml/e2e.yml): it only needs SSH egress,
 # and keeping prod credentials off the shared self-hosted runner is the safer split.
@@ -168,6 +171,11 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SENTRY_TRACES_SAMPLE_RATE: ${{ secrets.SENTRY_TRACES_SAMPLE_RATE }}
           SENTRY_PROFILES_SAMPLE_RATE: ${{ secrets.SENTRY_PROFILES_SAMPLE_RATE }}
+          # OTLP metrics export (Datadog/OTLP, #462) — OFF unless the endpoint is set.
+          # HEADERS carries the intake auth (DD-API-KEY); flows the same secret path.
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_EXPORTER_OTLP_ENDPOINT }}
+          OTEL_EXPORTER_OTLP_HEADERS: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
+          OTEL_EXPORTER_OTLP_PROTOCOL: ${{ secrets.OTEL_EXPORTER_OTLP_PROTOCOL }}
         run: |
           install -d -m 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
@@ -179,7 +187,7 @@ jobs:
             deploy/docker-compose.prod.yml deploy/docker-compose.neon.yml deploy/docker-compose.ghcr.yml \
             | $SSH "mkdir -p /opt/naary && tar xzf - -C /opt/naary"
 
-          $SSH "DEPLOY_REF='$DEPLOY_REF' IMAGE_BASE='$IMAGE_BASE' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' SENTRY_DSN='$SENTRY_DSN' SENTRY_TRACES_SAMPLE_RATE='$SENTRY_TRACES_SAMPLE_RATE' SENTRY_PROFILES_SAMPLE_RATE='$SENTRY_PROFILES_SAMPLE_RATE' bash -s" <<'REMOTE'
+          $SSH "DEPLOY_REF='$DEPLOY_REF' IMAGE_BASE='$IMAGE_BASE' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' SENTRY_DSN='$SENTRY_DSN' SENTRY_TRACES_SAMPLE_RATE='$SENTRY_TRACES_SAMPLE_RATE' SENTRY_PROFILES_SAMPLE_RATE='$SENTRY_PROFILES_SAMPLE_RATE' OTEL_EXPORTER_OTLP_ENDPOINT='$OTEL_EXPORTER_OTLP_ENDPOINT' OTEL_EXPORTER_OTLP_HEADERS='$OTEL_EXPORTER_OTLP_HEADERS' OTEL_EXPORTER_OTLP_PROTOCOL='$OTEL_EXPORTER_OTLP_PROTOCOL' bash -s" <<'REMOTE'
           set -euo pipefail
           cd /opt/naary
           # Boxes cloud-init'd by the pre-GHCR template staged the .env one level up.
@@ -206,6 +214,10 @@ jobs:
           [ -n "${SENTRY_DSN:-}" ] || unset SENTRY_DSN
           [ -n "${SENTRY_TRACES_SAMPLE_RATE:-}" ] || unset SENTRY_TRACES_SAMPLE_RATE
           [ -n "${SENTRY_PROFILES_SAMPLE_RATE:-}" ] || unset SENTRY_PROFILES_SAMPLE_RATE
+          # An unset OTLP secret must not blank a manually-set box .env value (same as Sentry).
+          [ -n "${OTEL_EXPORTER_OTLP_ENDPOINT:-}" ] || unset OTEL_EXPORTER_OTLP_ENDPOINT
+          [ -n "${OTEL_EXPORTER_OTLP_HEADERS:-}" ] || unset OTEL_EXPORTER_OTLP_HEADERS
+          [ -n "${OTEL_EXPORTER_OTLP_PROTOCOL:-}" ] || unset OTEL_EXPORTER_OTLP_PROTOCOL
           export SENTRY_RELEASE="${SENTRY_RELEASE:-$DEPLOY_REF}"
 
           # docker-rollout (https://github.com/wowu/docker-rollout): start-first rolling

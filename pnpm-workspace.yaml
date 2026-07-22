@@ -75,6 +75,15 @@ minimumReleaseAgeExclude:
   - '@temporalio/worker@1.20.3'
   - '@temporalio/workflow@1.20.3'
   - vite@8.1.5
+  - '@opentelemetry/api-logs@0.221.0'
+  - '@opentelemetry/core@2.10.0'
+  - '@opentelemetry/exporter-metrics-otlp-http@0.221.0'
+  - '@opentelemetry/otlp-exporter-base@0.221.0'
+  - '@opentelemetry/otlp-transformer@0.221.0'
+  - '@opentelemetry/resources@2.10.0'
+  - '@opentelemetry/sdk-logs@0.221.0'
+  - '@opentelemetry/sdk-metrics@2.10.0'
+  - '@opentelemetry/sdk-trace@2.10.0'
 
 # Force patched versions of transitive deps flagged by Dependabot (pnpm 11 reads
 # overrides from here, not package.json). All are minor/patch bumps:
