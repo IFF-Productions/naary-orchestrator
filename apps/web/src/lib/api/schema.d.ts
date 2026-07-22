@@ -534,6 +534,20 @@ export interface paths {
      */
     get: operations["GithubAppController_callback"];
   };
+  "/tenants/{id}/connections/{connectionId}/atlassian/oauth/start": {
+    /**
+     * Start Atlassian (Jira/Confluence) OAuth 3LO consent
+     * @description Returns the auth.atlassian.com authorize URL for the browser to begin interactive consent.
+     */
+    post: operations["AtlassianOAuthController_start"];
+  };
+  "/atlassian/oauth/callback": {
+    /**
+     * Atlassian OAuth callback (provider redirect target)
+     * @description Public: Atlassian redirects the BROWSER here with a single-use `state` and `code`; exchanges the code, persists the encrypted refresh token, resolves the site cloudId, then 302-redirects back to the SPA integrations page (`?connected=1` on success, `?connect_error=…` otherwise).
+     */
+    get: operations["AtlassianOAuthController_callback"];
+  };
   "/tenants/{id}/members": {
     /**
      * List workspace members and pending invitations
@@ -7263,6 +7277,74 @@ export interface operations {
         installation_id: string;
         state: string;
         setup_action: string;
+      };
+    };
+    responses: {
+      /** @description Redirect to the SPA integrations page. */
+      302: {
+        content: never;
+      };
+    };
+  };
+  /**
+   * Start Atlassian (Jira/Confluence) OAuth 3LO consent
+   * @description Returns the auth.atlassian.com authorize URL for the browser to begin interactive consent.
+   */
+  AtlassianOAuthController_start: {
+    parameters: {
+      path: {
+        id: string;
+        connectionId: string;
+      };
+    };
+    responses: {
+      200: {
+        content: {
+          "application/json": components["schemas"]["OAuthStartResponse"];
+        };
+      };
+      /** @description Validation error / malformed request. */
+      400: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Missing or invalid credentials (bearer token). */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Authenticated but not permitted for this workspace. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Resource not found. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected server error. */
+      500: {
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  /**
+   * Atlassian OAuth callback (provider redirect target)
+   * @description Public: Atlassian redirects the BROWSER here with a single-use `state` and `code`; exchanges the code, persists the encrypted refresh token, resolves the site cloudId, then 302-redirects back to the SPA integrations page (`?connected=1` on success, `?connect_error=…` otherwise).
+   */
+  AtlassianOAuthController_callback: {
+    parameters: {
+      query: {
+        state: string;
+        code: string;
+        error: string;
       };
     };
     responses: {

@@ -134,6 +134,24 @@ export class ConnectionService {
       data: { status },
     });
   }
+
+  /**
+   * Persist a resolved serverUrl on the connection. Used by the Atlassian 3LO
+   * callback to point the connection at its cloud-derived API base
+   * (`https://api.atlassian.com/ex/jira/<cloudId>`) once consent resolves the site.
+   * Tenant-scoped updateMany (Arch§3.7), same as {@link setStatus}. The value is a
+   * public API host — never a secret.
+   */
+  async setServerUrl(
+    tenantId: string,
+    id: string,
+    serverUrl: string,
+  ): Promise<void> {
+    await getPrisma().connection.updateMany({
+      where: { id, tenantId },
+      data: { serverUrl },
+    });
+  }
 }
 
 /**

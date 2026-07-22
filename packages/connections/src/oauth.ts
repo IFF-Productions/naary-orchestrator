@@ -20,10 +20,17 @@ export interface OAuthConfig {
   tokenEndpoint: string;
   authorizationEndpoint?: string;
   issuer?: string;
-  resource: string;
+  /** RFC 8707 resource indicator (MCP path). OPTIONAL: fixed-client 3LO providers
+   *  (e.g. Atlassian) leave it undefined so `refreshGrant` never sends a `resource`
+   *  param their `/oauth/token` doesn't expect (`form()` drops undefined fields). */
+  resource?: string;
   scopes?: string[];
   /** Long-lived; set after consent. Used to mint short-lived access tokens. */
   refreshToken?: string;
+  /** Atlassian 3LO: the resolved cloud (site) id — needed for every Jira/Confluence
+   *  API call (`https://api.atlassian.com/ex/{jira|confluence}/<cloudId>`). Rides this
+   *  encrypted conn:<id> blob (design APP-AUTH.md §4), not a column; never logged. */
+  cloudId?: string;
 }
 
 interface TokenResponse {
