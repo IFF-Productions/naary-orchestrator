@@ -220,10 +220,132 @@ describe("claude driver (pure)", () => {
     expect(over).toBeUndefined();
   });
 
-  it("resolves only claude today; cursor/copilot throw", () => {
-    expect(() => resolveDriver("cursor")).toThrow(/isn't available/);
+  it("resolves claude/cursor/copilot; an unknown tool throws cleanly", () => {
+    expect(resolveDriver("claude").tool).toBe("claude");
+    expect(resolveDriver("cursor").tool).toBe("cursor");
+    expect(resolveDriver("copilot").tool).toBe("copilot");
+    expect(resolveDriver(undefined).tool).toBe("claude"); // default
+    expect(() => resolveDriver("nope")).toThrow(/unknown coding-CLI tool/);
   });
 });
+
+describe("cursorDriver (cursor-agent)", () => {
+  const d = resolveDriver("cursor");
+
+  it("authenticates via CURSOR_API_KEY", () => {
+    expect(d.authEnv("cur_abc ")).toEqual({ CURSOR_API_KEY: "cur_abc" });
+  });
+
+  it("READ mode: headless json, no --force (cursor only PROPOSES edits)", () => {
+    const args = d.buildArgs({ prompt: "review this", model: "sonnet-4" });
+    expect(args).toEqual([
+      "-p",
+      "review this",
+      "--output-format",
+      "json",
+      "--model",
+      "sonnet-4",
+    ]);
+    expect(args).not.toContain("--force");
+  });
+
+  it("WRITE mode: adds --force; folds systemPrompt into the prompt", () => {
+    const args = d.buildArgs({
+      prompt: "do it",
+      systemPrompt: "house rules",
+      write: true,
+    });
+    expect(args[0]).toBe("-p");
+    expect(args[1]).toBe("house rules\n\ndo it");
+    expect(args).toContain("--force");
+  });
+
+  it("parses the single json result object", () => {
+    const env = d.parse(
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "the plan",
+        session_id: "s-1",
+      }),
+      0,
+    );
+    expect(env).toMatchObject({
+      result: "the plan",
+      sessionId: "s-1",
+      isError: false,
+    });
+  });
+
+  it("flags is_error / a non-zero exit / a missing envelope", () => {
+    expect(
+      d.parse('{"type":"result","is_error":true,"result":"x"}', 0),
+    ).toMatchObject({ isError: true });
+    expect(d.parse('{"type":"result","result":"x"}', 1).isError).toBe(true);
+    expect(d.parse("boom (not json)", 1)).toMatchObject({
+      isError: true,
+      failureSubtype: "no_envelope",
+    });
+  });
+});
+
+describe("copilotDriver (copilot)", () => {
+  const d = resolveDriver("copilot");
+
+  it("authenticates via the dedicated COPILOT_GITHUB_TOKEN", () => {
+    expect(d.authEnv("ght_x ")).toEqual({ COPILOT_GITHUB_TOKEN: "ght_x" });
+  });
+
+  it("READ mode: read allowed, write + shell denied (no-Bash parity)", () => {
+    const args = d.buildArgs({ prompt: "explain" });
+    expect(args.slice(0, 4)).toEqual([
+      "-p",
+      "explain",
+      "--output-format",
+      "json",
+    ]);
+    // read allowed; write + shell denied
+    expect(argPairs(args, "--allow-tool")).toEqual(["read"]);
+    expect(argPairs(args, "--deny-tool")).toEqual(["write", "shell"]);
+  });
+
+  it("WRITE mode: allows write, still denies shell", () => {
+    const args = d.buildArgs({ prompt: "fix", write: true });
+    expect(argPairs(args, "--allow-tool")).toEqual(["read", "write"]);
+    expect(argPairs(args, "--deny-tool")).toEqual(["shell"]);
+  });
+
+  it("parses the terminal JSONL object defensively (result across field names)", () => {
+    const jsonl = [
+      JSON.stringify({ type: "start" }),
+      JSON.stringify({ type: "assistant", content: "thinking" }),
+      JSON.stringify({ type: "result", response: "the answer" }),
+    ].join("\n");
+    expect(d.parse(jsonl, 0)).toMatchObject({
+      result: "the answer",
+      isError: false,
+    });
+  });
+
+  it("flags an error object / non-zero exit / missing envelope", () => {
+    expect(d.parse('{"error":"boom"}', 0).isError).toBe(true);
+    expect(d.parse('{"result":"x"}', 3).isError).toBe(true);
+    expect(d.parse("", 1)).toMatchObject({
+      isError: true,
+      failureSubtype: "no_envelope",
+    });
+  });
+});
+
+/** Collect the value after each occurrence of `flag` in an argv (order preserved). */
+function argPairs(args: string[], flag: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === flag && i + 1 < args.length) out.push(args[i + 1]);
+  }
+  return out;
+}
 
 describe("callCodeAgent activity", () => {
   it("fetches the DEDICATED claude-code credential (not the anthropic key) + passes an API key as ANTHROPIC_API_KEY", async () => {
