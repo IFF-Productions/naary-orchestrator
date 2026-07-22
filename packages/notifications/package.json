@@ -1,6 +1,6 @@
 {
   "name": "@naary/notifications",
-  "version": "0.0.21",
+  "version": "0.0.22",
   "private": true,
   "description": "Pure notification formatters (Slack Block Kit + Teams Adaptive Card). Client-safe: no env, no crypto, no I/O — links are passed in as data so token/URL minting stays worker-side.",
   "main": "dist/index.js",
