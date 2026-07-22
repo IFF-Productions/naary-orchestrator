@@ -50,12 +50,14 @@ import {
   type BudgetView,
   type ConnectionRow,
   type Environment,
+  type ExecutionState,
   type GraphSummary,
   type TestNodeResult,
   UnauthorizedError,
   type WebhookRow,
 } from "../lib/api";
 import { compileGraph } from "../lib/compile-graph";
+import { isTerminal, runStatusUi } from "../lib/run-status";
 import { decompileGraph } from "../lib/decompile-graph";
 import { canSaveWorkflow } from "../lib/permissions-logic";
 import {
@@ -104,6 +106,7 @@ import {
 import { edgeTypes, type EdgeRunState } from "./canvas/NaaryEdge";
 import type { NodeRunState } from "./canvas/NodeCard";
 import { flattenOutput } from "./canvas/output-fields";
+import { computeCanvasRunStates } from "./canvas/run-watch";
 import { CanvasTopBar } from "./canvas/TopBar";
 
 /** Client-side record of a single-node test run (the EXISTING test machinery's result
@@ -287,6 +290,13 @@ export function CanvasPage() {
 
   const keyParam = searchParams.get("key");
   const templateParam = searchParams.get("template");
+  // #490 — live run-watch: with ?runId= present, the canvas becomes a live view of
+  // that run, overlaying each node's real execution state (done/running/error/
+  // waiting/queued) until the run reaches a terminal status. View-oriented: node
+  // drag/connect are disabled while watching so the overlay isn't fought by edits.
+  const runId = searchParams.get("runId");
+  const watching = Boolean(runId);
+  const [watchState, setWatchState] = useState<ExecutionState | null>(null);
 
   // Registered webhook endpoints, tenant connections, environments and the budget
   // policy (a webhookTrigger node shows its hook URL; connection-based nodes pick a
@@ -543,6 +553,49 @@ export function CanvasPage() {
     };
   }, [keyParam, templateParam]);
 
+  // #490 — poll the watched run's real state every 1.5s (same cadence + api call
+  // as RunDetail), stopping the moment it's terminal and on unmount. Reuses the
+  // interpreter's authoritative state; the overlay derives from it purely.
+  useEffect(() => {
+    if (!runId) {
+      setWatchState(null);
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const tick = async () => {
+      let next: ExecutionState | null = null;
+      try {
+        next = await api.getState(runId);
+      } catch {
+        /* transient — retry on the next tick */
+      }
+      if (cancelled) return;
+      if (next) setWatchState(next);
+      // Closed runs don't change — stop polling once terminal.
+      if (!next || !isTerminal(next.status)) {
+        timer = setTimeout(tick, 1500);
+      }
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [runId]);
+
+  // Leave watch mode: drop ?runId= (keeps ?key=), restoring the editable canvas.
+  const stopWatching = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("runId");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
   const onNodesChange = useCallback(
     (changes: Parameters<typeof applyNodeChanges>[0]) =>
       setNodes((ns) => applyNodeChanges(changes, ns) as Node<NaaryData>[]),
@@ -574,6 +627,18 @@ export function CanvasPage() {
     }));
     return compileGraph(canvasNodes, canvasEdges);
   }, [nodes, edges]);
+
+  // #490 — per-node live run state (done/running/error/waiting/queued/skipped) for the
+  // watched run, keyed by node id. Derived PURELY from the compiled graph + polled state
+  // via the shared run-view-model logic (RunDetail and the canvas agree exactly). Null
+  // when not watching or the graph isn't compilable — the overlay then does nothing.
+  const watchRunStates = useMemo(
+    () =>
+      watching && watchState && graph
+        ? computeCanvasRunStates(graph, watchState)
+        : null,
+    [watching, watchState, graph],
+  );
 
   // Non-blocking lint: references to a node not in the graph — both `{{ nodeId.path }}` string
   // tokens AND structured `{from,path}` bindings (fieldBindings etc.). Each names WHICH source is
@@ -695,9 +760,13 @@ export function CanvasPage() {
           ? undefined
           : issuesByNode.get(n.id)?.join("\n");
         const run = nodeRuns[n.id];
-        const runState = runStateFor(n);
+        // #490 — while watching a run, the live run state fully OVERRIDES authoring
+        // (test-run / no-input) state so the overlay isn't fought by editor logic.
+        const runState = watchRunStates
+          ? (watchRunStates[n.id] ?? "idle")
+          : runStateFor(n);
         const runMs =
-          run?.status === "done" && run.output !== undefined
+          !watchRunStates && run?.status === "done" && run.output !== undefined
             ? run.ms
             : undefined;
         if (
@@ -710,7 +779,15 @@ export function CanvasPage() {
         }
         return { ...n, data: { ...n.data, pinned, warning, runState, runMs } };
       }),
-    [nodes, pins, issuesByNode, generating, nodeRuns, runStateFor],
+    [
+      nodes,
+      pins,
+      issuesByNode,
+      generating,
+      nodeRuns,
+      runStateFor,
+      watchRunStates,
+    ],
   );
 
   // Edge display state derives from the endpoint nodes' test-run state: a running
@@ -1785,6 +1862,10 @@ export function CanvasPage() {
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
+              // #490 — watch mode is a live VIEW: disable node drag/connect so the
+              // run overlay isn't fought by edits (restored when watching stops).
+              nodesDraggable={!watching}
+              nodesConnectable={!watching}
               onInit={(inst) => {
                 rfRef.current = inst;
               }}
@@ -1792,6 +1873,33 @@ export function CanvasPage() {
             >
               <Background gap={26} size={1.1} />
               <Controls />
+              {watching && (
+                <Panel position="top-center">
+                  <div
+                    className="naary-watch-pill"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <span className="naary-watch-dot" aria-hidden="true" />
+                    <span>
+                      Watching run ·{" "}
+                      {watchState
+                        ? runStatusUi(watchState.status).label
+                        : "connecting…"}
+                    </span>
+                    {watchState && !isTerminal(watchState.status) && (
+                      <span className="naary-watch-live">live · 1.5s</span>
+                    )}
+                    <button
+                      type="button"
+                      className="naary-watch-stop"
+                      onClick={stopWatching}
+                    >
+                      Stop watching
+                    </button>
+                  </div>
+                </Panel>
+              )}
               {generating && (
                 <Panel position="top-center">
                   <div
