@@ -18088,6 +18088,18 @@
             "example": 0.0123,
             "description": "Metered cost of an assistant turn (BYOK); null for user turns."
           },
+          "options": {
+            "example": [
+              "Add an approval step",
+              "Add error handling",
+              "Looks good — save it"
+            ],
+            "description": "Tappable quick-reply suggestions the builder offers after an assistant turn; selecting one becomes the next user message. Empty on user turns.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",

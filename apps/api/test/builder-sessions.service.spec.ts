@@ -150,6 +150,7 @@ describe("BuilderSessionsService.get — tenant-scoped", () => {
             role: "assistant",
             content: "Added a Slack node",
             costUsd: { toNumber: () => 0.0123 },
+            options: ["Add an approval step", "Looks good — save it"],
             createdAt: NOW,
           },
         ],
@@ -165,6 +166,12 @@ describe("BuilderSessionsService.get — tenant-scoped", () => {
     expect(out.turns).toHaveLength(2);
     expect(out.turns[1].costUsd).toBe(0.0123);
     expect(out.turns[0].costUsd).toBeNull();
+    // Assistant-turn quick-reply options flow through the mapper (#487); user turn defaults to [].
+    expect(out.turns[1].options).toEqual([
+      "Add an approval step",
+      "Looks good — save it",
+    ]);
+    expect(out.turns[0].options).toEqual([]);
   });
 
   it("404s when the id isn't this workspace's (no cross-tenant read)", async () => {
@@ -304,6 +311,7 @@ describe("BuilderSessionsService.applyTurn — atomic, status-guarded", () => {
       userMessage: "Add Slack",
       graph: graph as never,
       assistantSummary: "Updated — 1 node, 0 edges.",
+      options: ["Add an approval step", "Looks good — save it"],
       costUsd: 0.0123,
       titleIfUnset: "Add Slack",
     });
@@ -319,7 +327,7 @@ describe("BuilderSessionsService.applyTurn — atomic, status-guarded", () => {
       where: { id: "s-1", tenantId: "t-1", title: null },
       data: { title: "Add Slack" },
     });
-    // User turn then assistant turn (with a Decimal cost).
+    // User turn then assistant turn (with a Decimal cost). The user turn carries NO options.
     expect(builderTurn.create).toHaveBeenCalledTimes(2);
     expect(builderTurn.create).toHaveBeenNthCalledWith(1, {
       data: { sessionId: "s-1", role: "user", content: "Add Slack" },
@@ -327,6 +335,11 @@ describe("BuilderSessionsService.applyTurn — atomic, status-guarded", () => {
     const assistant = builderTurn.create.mock.calls[1][0];
     expect(assistant.data.role).toBe("assistant");
     expect(assistant.data.content).toBe("Updated — 1 node, 0 edges.");
+    // Quick-reply options ride ONLY on the assistant turn (#487).
+    expect(assistant.data.options).toEqual([
+      "Add an approval step",
+      "Looks good — save it",
+    ]);
     expect(assistant.data.costUsd.toNumber()).toBeCloseTo(0.0123, 6);
   });
 
@@ -337,6 +350,7 @@ describe("BuilderSessionsService.applyTurn — atomic, status-guarded", () => {
       userMessage: "tweak",
       graph: graph as never,
       assistantSummary: "…",
+      options: [],
       costUsd: 0.01,
     });
 
@@ -354,6 +368,7 @@ describe("BuilderSessionsService.applyTurn — atomic, status-guarded", () => {
       userMessage: "late",
       graph: graph as never,
       assistantSummary: "…",
+      options: [],
       costUsd: 0.01,
     });
 

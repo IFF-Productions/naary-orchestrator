@@ -4,6 +4,8 @@ import type { GenMeter } from "../src/graphs/graph-generator.service";
 import {
   deriveTitle,
   estimateTurnCostUsd,
+  SAVE_OPTION,
+  suggestNextOptions,
   summarizeChange,
 } from "../src/builder/turn-metering";
 
@@ -74,5 +76,62 @@ describe("deriveTitle", () => {
   it("trims, collapses whitespace, and caps at 120 chars", () => {
     expect(deriveTitle("  Add a  Slack   step ")).toBe("Add a Slack step");
     expect(deriveTitle("x".repeat(200))).toHaveLength(120);
+  });
+});
+
+describe("suggestNextOptions — deterministic quick replies (#487), bounded + total", () => {
+  const g = (nodes: unknown[]): GraphDef =>
+    ({ startNodeId: "n1", nodes, edges: [] }) as unknown as GraphDef;
+
+  it("suggests every gap for a bare graph, then the accept option last", () => {
+    const out = suggestNextOptions(
+      g([{ id: "n1", type: "agent", config: {} }]),
+    );
+    expect(out).toEqual([
+      "Add an approval step",
+      "Add an email notification",
+      "Add error handling",
+      SAVE_OPTION,
+    ]);
+  });
+
+  it("drops a suggestion once the graph already has that node type", () => {
+    const out = suggestNextOptions(
+      g([
+        { id: "n1", type: "humanApproval" },
+        { id: "n2", type: "sendEmail", config: {} },
+        { id: "n3", type: "stopAndError", config: {} },
+      ]),
+    );
+    // All three gaps are filled → only the accept option remains.
+    expect(out).toEqual([SAVE_OPTION]);
+  });
+
+  it("treats a continue-on-error node as error handling", () => {
+    const out = suggestNextOptions(
+      g([{ id: "n1", type: "httpRequest", config: {}, onError: "continue" }]),
+    );
+    expect(out).not.toContain("Add error handling");
+    expect(out).toContain(SAVE_OPTION);
+  });
+
+  it("is total — an empty/undefined graph still returns the accept option and never throws", () => {
+    expect(suggestNextOptions({ nodes: [] } as unknown as GraphDef)).toContain(
+      SAVE_OPTION,
+    );
+    expect(suggestNextOptions({} as unknown as GraphDef)).toEqual([
+      "Add an approval step",
+      "Add an email notification",
+      "Add error handling",
+      SAVE_OPTION,
+    ]);
+  });
+
+  it("caps edit suggestions at three plus the accept (bounded)", () => {
+    const out = suggestNextOptions(
+      g([{ id: "n1", type: "agent", config: {} }]),
+    );
+    expect(out.length).toBeLessThanOrEqual(4);
+    expect(out[out.length - 1]).toBe(SAVE_OPTION);
   });
 });

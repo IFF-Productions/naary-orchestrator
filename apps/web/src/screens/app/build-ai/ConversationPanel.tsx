@@ -7,7 +7,10 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../../../components";
-import type { BuilderSessionSummary } from "../../../lib/api/builder";
+import {
+  type BuilderSessionSummary,
+  SAVE_OPTION,
+} from "../../../lib/api/builder";
 import type { PlanLine } from "./model";
 
 export interface ChatMsg {
@@ -16,6 +19,8 @@ export interface ChatMsg {
   text: string;
   /** Real metered BYOK cost of an assistant turn (from the session API). */
   costUsd?: number | null;
+  /** Tappable quick-reply suggestions (#487); rendered on the LAST assistant turn only. */
+  options?: string[];
 }
 
 export type BuildPhase = "idle" | "streaming" | "ready";
@@ -94,6 +99,8 @@ export function ConversationPanel({
   const streaming = phase === "streaming";
   const ready = phase === "ready";
   const building = streaming && !!plan;
+  // Quick-reply chips belong to the newest assistant turn only, and never mid-build (#487).
+  const lastMsgId = messages[messages.length - 1]?.id;
 
   // Keep the thread pinned to the newest message / plan line.
   useEffect(() => {
@@ -355,6 +362,62 @@ export function ConversationPanel({
                       turn cost ${m.costUsd.toFixed(4)}
                     </div>
                   )}
+                  {/* Quick-reply chips — newest assistant turn, not while building/saving. */}
+                  {m.id === lastMsgId &&
+                    !streaming &&
+                    !opening &&
+                    m.options &&
+                    m.options.length > 0 && (
+                      <div
+                        style={{
+                          display: "flex",
+                          flexWrap: "wrap",
+                          gap: 7,
+                          marginTop: 9,
+                        }}
+                      >
+                        {m.options.map((opt) => {
+                          const isSave = opt === SAVE_OPTION;
+                          return (
+                            <button
+                              key={opt}
+                              type="button"
+                              className="bwa-chip"
+                              onClick={() =>
+                                isSave ? onOpenInCanvas() : onSend(opt)
+                              }
+                              style={{
+                                border: `1px solid ${
+                                  isSave ? "var(--brand)" : "var(--line-mid)"
+                                }`,
+                                background: isSave
+                                  ? "var(--brand-soft)"
+                                  : "var(--card)",
+                                color: isSave
+                                  ? "var(--brand-2)"
+                                  : "var(--ink-soft)",
+                                borderRadius: "var(--radius-pill)",
+                                padding: "6px 12px",
+                                fontSize: "var(--text-sm)",
+                                cursor: "pointer",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 6,
+                              }}
+                            >
+                              {isSave && (
+                                <Icon
+                                  name="check"
+                                  size={12}
+                                  strokeWidth={2.2}
+                                />
+                              )}
+                              {opt}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                 </div>
               </div>
             ) : (

@@ -32,6 +32,7 @@ import { CloseSessionDto, OpenSessionDto, SendTurnDto } from "./builder.dto";
 import {
   deriveTitle,
   estimateTurnCostUsd,
+  suggestNextOptions,
   summarizeChange,
 } from "./turn-metering";
 
@@ -230,6 +231,7 @@ export class BuilderSessionsController {
         userMessage: message,
         graph: result.graph,
         assistantSummary: summarizeChange(result.name, result.graph),
+        options: suggestNextOptions(result.graph),
         costUsd,
         titleIfUnset: session.title ? undefined : deriveTitle(message),
       });

@@ -53,3 +53,29 @@ export function summarizeChange(name: string, graph: GraphDef): string {
 export function deriveTitle(message: string): string {
   return message.trim().replace(/\s+/g, " ").slice(0, 120);
 }
+
+/** The accept-flavored quick reply — the web treats a tap on this as "Open in canvas" (save),
+ *  NOT as another edit turn. Keep this literal in sync with `SAVE_OPTION` in
+ *  apps/web/src/lib/api/builder.ts. */
+export const SAVE_OPTION = "Looks good — save it";
+
+/**
+ * Deterministic "what next?" quick replies for the just-produced draft (#487). Cheap and total —
+ * presence/absence of node types only, never a second model call, never throws. Each is a short
+ * next-step instruction that simply becomes the next user turn (the builder interprets it), except
+ * SAVE_OPTION which the UI maps to saving. Bounded: at most three edit suggestions + the accept.
+ */
+export function suggestNextOptions(graph: GraphDef): string[] {
+  const nodes = graph?.nodes ?? [];
+  const types = new Set(nodes.map((n) => n.type));
+  const suggestions: string[] = [];
+  // A human-in-the-loop checkpoint — the product's differentiator.
+  if (!types.has("humanApproval")) suggestions.push("Add an approval step");
+  // A notification on completion (we detect + word this as email, the type we actually check).
+  if (!types.has("sendEmail")) suggestions.push("Add an email notification");
+  // Inline error handling: a per-node continue-on-error branch or an explicit fail node.
+  const hasErrorHandling =
+    types.has("stopAndError") || nodes.some((n) => n.onError === "continue");
+  if (!hasErrorHandling) suggestions.push("Add error handling");
+  return [...suggestions.slice(0, 3), SAVE_OPTION];
+}

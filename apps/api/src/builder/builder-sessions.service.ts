@@ -13,6 +13,7 @@ interface TurnRow {
   role: string;
   content: string;
   costUsd: { toNumber(): number } | null;
+  options?: string[];
   createdAt: Date;
 }
 
@@ -37,6 +38,7 @@ function toTurn(row: TurnRow): BuilderTurnResponse {
     content: row.content,
     // Prisma Decimal → number; JS number is fine for a per-turn USD cost we only display.
     costUsd: row.costUsd == null ? null : row.costUsd.toNumber(),
+    options: row.options ?? [],
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -167,6 +169,7 @@ export class BuilderSessionsService {
       userMessage: string;
       graph: GraphDef;
       assistantSummary: string;
+      options: string[];
       costUsd: number;
       titleIfUnset?: string;
     },
@@ -195,6 +198,8 @@ export class BuilderSessionsService {
           sessionId: id,
           role: "assistant",
           content: input.assistantSummary,
+          // Tappable quick-reply suggestions (#487) — only ever on the assistant turn.
+          options: input.options,
           // Decimal(12,6) — fix to 6 places so we never lose sub-cent precision to float.
           costUsd: new Prisma.Decimal(input.costUsd.toFixed(6)),
         },
