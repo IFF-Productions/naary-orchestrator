@@ -307,4 +307,108 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     ]);
     expect(fetchFn).toHaveBeenCalledOnce();
   });
+
+  // A PERSISTING secret store: get returns the current config, put replaces it — the
+  // encrypted, DB-backed store BOTH processes read/write. (The `fakeStore` above has a
+  // no-op put, so it can't model cross-process sharing.)
+  function persistingStore(initial: OAuthConfig) {
+    let cur = JSON.stringify(initial);
+    const put = vi.fn(async (_t: string, _e: string, _k: string, v: string) => {
+      cur = v;
+    });
+    return {
+      store: {
+        get: async () => cur,
+        put,
+        remove: async () => {},
+        prunePrefixOlderThan: async () => 0,
+      } as never,
+      put,
+      read: () => JSON.parse(cur) as OAuthConfig,
+    };
+  }
+
+  it("distributed lock: a cold second process adopts the persisted token — ONE refresh across both", async () => {
+    // Two worker processes share one connection. inflight coalesces concurrent callers
+    // WITHIN a process, so genuine cross-process contention can only be modelled by a
+    // COLD in-process cache (a second process) hitting the SAME persisted store while a
+    // serializing lock (the advisory-lock seam) orders them. We stub that lock and reset
+    // the in-process caches between the two calls to stand in for the second process.
+    const { store, put } = persistingStore(baseCfg);
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(
+        okJson({
+          access_token: "AT1",
+          refresh_token: "RT-rotated",
+          expires_in: 3600,
+        }),
+      );
+    // Serialize critical sections exactly like pg_advisory_xact_lock does across procs.
+    let chain: Promise<unknown> = Promise.resolve();
+    const refreshLock = vi.fn(
+      (_id: string, critical: () => Promise<unknown>) => {
+        const run = chain.then(critical);
+        chain = run.then(
+          () => {},
+          () => {},
+        );
+        return run;
+      },
+    ) as never;
+
+    // Process A (cold cache) → actually refreshes and persists AT1 into the shared store.
+    const a = await getOAuthAccessToken("t1", "e1", CONN, {
+      store,
+      fetchFn,
+      connections: {} as never,
+      refreshLock,
+    });
+    expect(a).toBe("AT1");
+    // The minted access token is now persisted for other processes to adopt.
+    expect(put).toHaveBeenCalledOnce();
+
+    // Process B: a DIFFERENT worker → cold in-process cache, same persisted store.
+    __resetOAuthCaches();
+    const b = await getOAuthAccessToken("t1", "e1", CONN, {
+      store,
+      fetchFn,
+      connections: {} as never,
+      refreshLock,
+    });
+
+    // B blocked on the lock, then re-read the config INSIDE the lock, found AT1 still
+    // fresh, and SKIPPED the refresh (double-checked locking).
+    expect(b).toBe("AT1");
+    expect(fetchFn).toHaveBeenCalledOnce(); // exactly one refresh across both processes
+    expect(refreshLock).toHaveBeenCalledTimes(2); // but both took the distributed lock
+    expect(put).toHaveBeenCalledOnce(); // B persisted nothing — it adopted A's token
+  });
+
+  it("distributed lock: does NOT adopt a persisted token that is already expiring", async () => {
+    // A stale persisted access token (expiry within the 30s skew margin) must fall
+    // through to a real refresh, not be served.
+    const stale: OAuthConfig = {
+      ...baseCfg,
+      accessToken: "AT-stale",
+      accessExpiresAt: 100, // long past
+    };
+    const { store } = persistingStore(stale);
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(okJson({ access_token: "AT-new", expires_in: 3600 }));
+    const refreshLock = vi.fn((_id: string, c: () => Promise<unknown>) =>
+      c(),
+    ) as never;
+
+    const token = await getOAuthAccessToken("t1", "e1", CONN, {
+      store,
+      fetchFn,
+      connections: {} as never,
+      refreshLock,
+      now: () => 1_000_000,
+    });
+    expect(token).toBe("AT-new");
+    expect(fetchFn).toHaveBeenCalledOnce();
+  });
 });
