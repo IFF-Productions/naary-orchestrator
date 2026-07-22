@@ -3,7 +3,28 @@ import {
   defaultConfigFor,
   NODE_DESCRIPTION,
   NODE_KINDS,
+  nodeDisplayLabel,
 } from "../src/lib/graph-model";
+
+describe("nodeDisplayLabel (custom name overrides the derived label)", () => {
+  it("uses a trimmed config __name when set, else the derived type label", () => {
+    expect(nodeDisplayLabel("agent", { __name: "  Classify ticket " })).toBe(
+      "Classify ticket",
+    );
+    // Blank/whitespace or absent __name → the derived label, not an empty title.
+    expect(nodeDisplayLabel("agent", { __name: "   " })).toBe(
+      nodeDisplayLabel("agent"),
+    );
+    expect(nodeDisplayLabel("agent")).toBeTruthy();
+    // A custom name overrides even the provider-derived integration label.
+    expect(
+      nodeDisplayLabel("integration", {
+        provider: "github",
+        __name: "Open issue",
+      }),
+    ).toBe("Open issue");
+  });
+});
 
 describe("node registry (simpler-UX metadata)", () => {
   it("every node kind has a non-empty, plain-language description", () => {

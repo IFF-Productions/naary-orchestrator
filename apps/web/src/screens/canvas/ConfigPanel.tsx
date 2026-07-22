@@ -195,6 +195,19 @@ export function ConfigPanel({
         {NODE_DESCRIPTION[kind]}
       </div>
 
+      {/* Rename (n8n's node name) — a display-only label. References/expressions key on the id
+          (shown in the header + placeholder), so renaming never breaks anything. Stored in
+          config-space (`__name`) and lifted to NodeDef.name on save (compile-graph). */}
+      <Labeled label="Name">
+        <input
+          value={str("__name")}
+          onChange={(e) => onChange({ __name: e.target.value })}
+          placeholder={nodeDisplayLabel(kind, { ...config, __name: undefined })}
+          aria-label="Node name"
+          style={inputStyle}
+        />
+      </Labeled>
+
       {/* Insert-reference helper (design EXPRESSIONS.md §5): use {{ nodeId.path }} in any string
           field to splice an upstream output. Chips copy a starter token to paste at the cursor. */}
       {upstreamIds.length > 0 && (

@@ -278,6 +278,10 @@ export function nodeDisplayLabel(
   type: NodeType,
   config?: Record<string, unknown> | null,
 ): string {
+  // A user-set custom name (config-space `__name`, lifted to NodeDef.name on save) wins over the
+  // derived type label — so a renamed node reads the same on the canvas, the inspector, and runs.
+  const custom = (config as { __name?: unknown } | undefined)?.__name;
+  if (typeof custom === "string" && custom.trim()) return custom.trim();
   if (type === "integration") {
     const provider = (config as { provider?: string } | undefined)?.provider;
     return (

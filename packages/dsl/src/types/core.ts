@@ -61,6 +61,13 @@ export type NodeType =
 export interface NodeDef {
   id: string;
   type: NodeType;
+  /**
+   * Optional author-set display name (n8n's node name). DISPLAY ONLY — execution, edge
+   * conditions, and `{{ … }}` expressions all key on the immutable `id`, never `name`, so
+   * renaming a node can't break references or the interpreter. Absent ⇒ the UI shows the
+   * derived type label. The canvas edits it in config-space (`config.__name`) and lifts it here.
+   */
+  name?: string;
   /** Node-specific configuration, e.g. the agent node's canned output. */
   config?: Record<string, unknown>;
   /**

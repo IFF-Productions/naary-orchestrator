@@ -26,11 +26,12 @@ export function decompileGraph(graph: GraphDef): {
     // `onError` + `retry` are first-class NodeDef fields; surface them back into config-space
     // so the canvas editor (which works in config) shows/edits them.
     const config =
-      n.onError || n.retry || n.config
+      n.onError || n.retry || n.name || n.config
         ? {
             ...n.config,
             ...(n.onError ? { onError: n.onError } : {}),
             ...(n.retry ? { retry: n.retry } : {}),
+            ...(n.name ? { __name: n.name } : {}),
           }
         : undefined;
     return {
