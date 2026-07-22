@@ -279,19 +279,162 @@ function safeStringify(v: unknown): string {
   }
 }
 
-/** Registry of available drivers. Cursor/Copilot are additive adapters (later slices). */
-const DRIVERS: Record<CodeAgentTool, CliAgentDriver | undefined> = {
-  claude: claudeDriver,
-  cursor: undefined,
-  copilot: undefined,
+/* -------------------------- shared JSON-envelope parsing -------------------------- */
+
+/** Every parseable JSON OBJECT (not array) in the stdout, in order. Tolerates blank/garbage lines
+ *  so a single-object (`json`) or line-delimited (`stream-json`/JSONL) stream both work. */
+function jsonObjects(stdout: string): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  for (const line of stdout.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    try {
+      const o = JSON.parse(t);
+      if (o && typeof o === "object" && !Array.isArray(o)) {
+        out.push(o as Record<string, unknown>);
+      }
+    } catch {
+      /* tolerate a non-JSON / partial line */
+    }
+  }
+  return out;
+}
+
+/** First present, non-empty STRING among `keys` (defensive read across CLI schema variants). */
+function firstString(
+  o: Record<string, unknown>,
+  keys: string[],
+): string | undefined {
+  for (const k of keys) {
+    const v = o[k];
+    if (typeof v === "string" && v) return v;
+  }
+  return undefined;
+}
+
+/**
+ * Cursor Agent CLI (`cursor-agent`). Docs: cursor.com/docs/cli. Headless `-p`, `--output-format json`
+ * emits ONE object `{ type:"result", subtype, is_error, result, session_id, duration_ms }`. Auth via
+ * CURSOR_API_KEY. WRITE mode passes `--force` (apply edits); READ mode omits it — cursor then only
+ * PROPOSES changes (nothing is applied), the plan-mode equivalent. Cursor's json result carries no
+ * token/cost, so `usage` is left undefined and the activity's char/4 billing fallback covers it.
+ */
+const cursorDriver: CliAgentDriver = {
+  tool: "cursor",
+  binary: "cursor-agent",
+  image: "naary-cursor-sandbox",
+  credentialProvider: "cursor",
+  authEnv(key) {
+    return { CURSOR_API_KEY: key.trim() };
+  },
+  capabilities: { headless: true, resume: false, structuredQuestions: false },
+  buildArgs(opts) {
+    // Cursor has no system-prompt flag — fold it into the prompt.
+    const prompt = opts.systemPrompt
+      ? `${opts.systemPrompt}\n\n${opts.prompt}`
+      : opts.prompt;
+    const args = ["-p", prompt, "--output-format", "json"];
+    if (opts.write) args.push("--force"); // apply edits (sandbox); read = propose-only (default)
+    if (opts.model) args.push("--model", opts.model);
+    return args;
+  },
+  parse(stdout, exitCode) {
+    const objs = jsonObjects(stdout);
+    const obj = objs[objs.length - 1]; // cursor `json` = a single result object (last, to tolerate noise)
+    if (!obj) {
+      return { result: "", isError: true, failureSubtype: "no_envelope" };
+    }
+    const isError = obj.is_error === true || exitCode !== 0;
+    const resultText = firstString(obj, ["result"]) ?? "";
+    return {
+      result: resultText,
+      sessionId: firstString(obj, ["session_id"]),
+      isError,
+      failureSubtype: isError
+        ? (firstString(obj, ["subtype"]) ??
+          (exitCode !== 0 ? `exit_${exitCode}` : "unknown"))
+        : undefined,
+    };
+  },
 };
 
-/** Resolve the driver for a tool (default "claude"). Throws if the tool has no driver yet. */
-export function resolveDriver(tool: CodeAgentTool | undefined): CliAgentDriver {
-  const driver = DRIVERS[tool ?? "claude"];
+/**
+ * GitHub Copilot CLI (`copilot`). Docs: docs.github.com/copilot/reference/copilot-cli-reference.
+ * Headless `-p`, `--output-format json` (JSONL). Auth env precedence COPILOT_GITHUB_TOKEN > GH_TOKEN
+ * > GITHUB_TOKEN — we inject the dedicated highest-precedence var. Tool clamp (parity with the claude
+ * driver's no-Bash invariant): `read` always; `write` only in write mode; `shell` NEVER. NB the exact
+ * terminal-object schema isn't fully documented, so the result/error read is DEFENSIVE across field
+ * names — verify against the installed CLI version before relying on this in production.
+ */
+const copilotDriver: CliAgentDriver = {
+  tool: "copilot",
+  binary: "copilot",
+  image: "naary-copilot-sandbox",
+  credentialProvider: "copilot",
+  authEnv(key) {
+    return { COPILOT_GITHUB_TOKEN: key.trim() };
+  },
+  capabilities: { headless: true, resume: false, structuredQuestions: false },
+  buildArgs(opts) {
+    const prompt = opts.systemPrompt
+      ? `${opts.systemPrompt}\n\n${opts.prompt}`
+      : opts.prompt;
+    const args = [
+      "-p",
+      prompt,
+      "--output-format",
+      "json",
+      "--allow-tool",
+      "read",
+    ];
+    if (opts.write) args.push("--allow-tool", "write");
+    else args.push("--deny-tool", "write");
+    args.push("--deny-tool", "shell"); // no shell in either mode (claude-parity)
+    if (opts.model) args.push("--model", opts.model);
+    return args;
+  },
+  parse(stdout, exitCode) {
+    const objs = jsonObjects(stdout);
+    // The final object carrying a result-ish field is the outcome; else the last object (for a
+    // reasoned failure). Field names vary by version, so read defensively.
+    const RESULT_KEYS = ["result", "response", "content", "text", "message"];
+    const obj =
+      [...objs].reverse().find((o) => firstString(o, RESULT_KEYS)) ??
+      objs[objs.length - 1];
+    if (!obj) {
+      return { result: "", isError: true, failureSubtype: "no_envelope" };
+    }
+    const isError =
+      obj.is_error === true ||
+      obj.isError === true ||
+      (obj.error != null && obj.error !== false) ||
+      exitCode !== 0;
+    return {
+      result: firstString(obj, RESULT_KEYS) ?? "",
+      isError,
+      failureSubtype: isError
+        ? exitCode !== 0
+          ? `exit_${exitCode}`
+          : "unknown"
+        : undefined,
+    };
+  },
+};
+
+/** Registry of available drivers. Add an entry + the driver above when a new CLI is adapted. */
+const DRIVERS: Record<CodeAgentTool, CliAgentDriver> = {
+  claude: claudeDriver,
+  cursor: cursorDriver,
+  copilot: copilotDriver,
+};
+
+/** Resolve the driver for a tool (default "claude"). Tolerant of any runtime string so a stale
+ *  saved graph naming a removed tool fails cleanly instead of crashing. */
+export function resolveDriver(tool: string | undefined): CliAgentDriver {
+  const driver = DRIVERS[(tool ?? "claude") as CodeAgentTool];
   if (!driver) {
     throw new Error(
-      `codeAgent: the "${tool}" driver isn't available yet (only "claude" today).`,
+      `codeAgent: unknown coding-CLI tool "${tool}" (expected claude/cursor/copilot).`,
     );
   }
   return driver;

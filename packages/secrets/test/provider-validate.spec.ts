@@ -23,6 +23,8 @@ vi.mock("@ai-sdk/google", () => ({
 import {
   validateAnthropicKey,
   validateClaudeCodeKey,
+  validateCopilotKey,
+  validateCursorKey,
   validateGoogleKey,
   validateOpenAiKey,
 } from "../src/provider-validate";
@@ -124,6 +126,34 @@ describe("validateClaudeCodeKey (format-only — no network probe)", () => {
   it("never calls the model (an OAuth token can't be probed via x-api-key)", async () => {
     generateTextMock.mockClear();
     await validateClaudeCodeKey("sk-ant-oat-abc");
+    expect(generateTextMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("validateCursorKey (format-only — real check is a live run)", () => {
+  it("accepts any non-trivial value (trims); rejects empty/too-short", async () => {
+    expect(await validateCursorKey("key_cursor_abcdef")).toBe(true);
+    expect(await validateCursorKey("  key_cursor_abcdef  ")).toBe(true);
+    expect(await validateCursorKey("")).toBe(false);
+    expect(await validateCursorKey("short")).toBe(false); // < 8 → likely a paste error
+  });
+  it("never calls the model", async () => {
+    generateTextMock.mockClear();
+    await validateCursorKey("key_cursor_abcdef");
+    expect(generateTextMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("validateCopilotKey (format-only — rejects the unsupported classic PAT)", () => {
+  it("accepts a fine-grained PAT / OAuth token; rejects a classic ghp_ PAT + empty", async () => {
+    expect(await validateCopilotKey("github_pat_11ABC")).toBe(true);
+    expect(await validateCopilotKey("gho_oauthtoken")).toBe(true);
+    expect(await validateCopilotKey("ghp_classicPAT")).toBe(false); // docs: classic PAT unsupported
+    expect(await validateCopilotKey("")).toBe(false);
+  });
+  it("never calls the model", async () => {
+    generateTextMock.mockClear();
+    await validateCopilotKey("github_pat_11ABC");
     expect(generateTextMock).not.toHaveBeenCalled();
   });
 });
