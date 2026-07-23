@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Get,
   NotFoundException,
   Param,
@@ -11,6 +12,7 @@ import { Throttle } from "@nestjs/throttler";
 import { Public } from "../auth/public.decorator";
 import { ExecutionsService } from "../executions/executions.service";
 import { GraphsService } from "../graphs/graphs.service";
+import { TurnstileConfigService } from "../turnstile/turnstile-config.service";
 import {
   extractChatDefinition,
   isDurableSession,
@@ -32,22 +34,46 @@ export class ChatController {
     private readonly chats: ChatService,
     private readonly graphs: GraphsService,
     private readonly executions: ExecutionsService,
+    private readonly turnstile: TurnstileConfigService,
   ) {}
 
   /** Serve the public chat definition (title/greeting/…). 404 if unknown or the graph's entry
-   *  node isn't a chatTrigger. */
+   *  node isn't a chatTrigger. Includes `turnstileSiteKey` when the tenant has an active bot gate
+   *  for this env (so the widget renders). */
   @Get(":chatId")
   async definition(@Param("chatId") chatId: string) {
-    const { def } = await this.resolve(chatId);
-    return def;
+    const { endpoint, def } = await this.resolve(chatId);
+    const turnstileSiteKey = await this.turnstile.publicSiteKey(
+      endpoint.tenantId,
+      endpoint.environmentId,
+    );
+    return turnstileSiteKey ? { ...def, turnstileSiteKey } : def;
   }
 
-  /** Accept a message: validate, run the chat graph, and return the graph's reply (synchronously,
-   *  via the respondToWebhook mechanism). 200 with `{ status, reply? }`. */
+  /** Accept a message: verify the Turnstile challenge (if the tenant enabled it), validate, run the
+   *  chat graph, and return the graph's reply (synchronously, via the respondToWebhook mechanism).
+   *  200 with `{ status, reply? }`. */
   @Throttle({ default: { limit: 20, ttl: 60_000 } }) // 20 msgs / min / IP (per-IP; budget cap is the real backstop)
   @Post(":chatId")
-  async message(@Param("chatId") chatId: string, @Body() body: unknown) {
+  async message(
+    @Param("chatId") chatId: string,
+    @Body() body: { turnstileToken?: unknown } & Record<string, unknown>,
+  ) {
     const { endpoint, snapshot } = await this.resolve(chatId);
+    // Bot gate ABOVE the durable/per-message fork — both paths spend budget, so gate once. Every
+    // message needs its own solved (single-use) token. validateMessage ignores turnstileToken.
+    const token =
+      typeof body?.turnstileToken === "string"
+        ? body.turnstileToken
+        : undefined;
+    const allowed = await this.turnstile.verify(
+      endpoint.tenantId,
+      endpoint.environmentId,
+      token,
+    );
+    if (!allowed) {
+      throw new ForbiddenException("Bot verification failed — please retry.");
+    }
     const result = validateMessage(body);
     if (!result.ok) throw new BadRequestException(result.error);
 

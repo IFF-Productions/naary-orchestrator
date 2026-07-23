@@ -10,6 +10,7 @@ import {
   PublicFrame,
   PublicNotice,
 } from "./public/PublicShell";
+import { TurnstileWidget } from "./public/TurnstileWidget";
 
 /**
  * PUBLIC hosted chat (Chat Trigger program). Reached at `/c/:chatId`, OUTSIDE RequireAuth — an
@@ -116,6 +117,9 @@ export function ChatPage() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  // Turnstile: a solved (single-use) token, re-armed after every message.
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileReset, setTurnstileReset] = useState(0);
   const sessionId = useRef<string>(
     typeof crypto !== "undefined" && crypto.randomUUID
       ? crypto.randomUUID()
@@ -146,11 +150,18 @@ export function ChatPage() {
   async function send() {
     const text = input.trim();
     if (!text || !chatId || sending) return;
+    // If bot-gated, require a solved challenge for THIS message (single-use token).
+    if (def?.turnstileSiteKey && !turnstileToken) return;
     setInput("");
     setTurns((t) => [...t, { role: "user", text }]);
     setSending(true);
     try {
-      const res = await api.sendChatMessage(chatId, text, sessionId.current);
+      const res = await api.sendChatMessage(
+        chatId,
+        text,
+        sessionId.current,
+        turnstileToken ?? undefined,
+      );
       // "started" = the workflow ran but didn't respond synchronously (no Respond node / timed out).
       // Show that explicitly rather than a permanent "…" that looks like it's still typing.
       const reply =
@@ -174,10 +185,18 @@ export function ChatPage() {
       ]);
     } finally {
       setSending(false);
+      // The token was single-use — consumed by this message. Re-arm the widget for the next one.
+      if (def?.turnstileSiteKey) {
+        setTurnstileToken(null);
+        setTurnstileReset((n) => n + 1);
+      }
     }
   }
 
-  const canSend = input.trim().length > 0 && !sending;
+  const canSend =
+    input.trim().length > 0 &&
+    !sending &&
+    (!def?.turnstileSiteKey || !!turnstileToken);
 
   return (
     <PublicFrame>
@@ -398,6 +417,22 @@ export function ChatPage() {
               padding: "12px 16px",
             }}
           >
+            {def.turnstileSiteKey && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  marginBottom: 4,
+                }}
+              >
+                <TurnstileWidget
+                  siteKey={def.turnstileSiteKey}
+                  onToken={setTurnstileToken}
+                  onReset={() => setTurnstileToken(null)}
+                  resetSignal={turnstileReset}
+                />
+              </div>
+            )}
             <div
               style={{
                 border: "1px solid var(--line-2)",

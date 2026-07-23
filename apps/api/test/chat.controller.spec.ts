@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BadRequestException, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from "@nestjs/common";
 import type { GraphDef } from "@naary/dsl";
 import { ChatController } from "../src/chat/chat.controller";
 
@@ -20,6 +24,9 @@ function makeController(opts: {
     response?: { body?: unknown; citations?: unknown[] };
   };
   sessionResult?: { replied: boolean; reply?: unknown; citations?: unknown[] };
+  /** Turnstile: site key on the definition (null = no gate) + verify() verdict (default allow). */
+  siteKey?: string | null;
+  verify?: boolean;
 }) {
   const chats = {
     getEndpoint: vi.fn().mockResolvedValue(opts.endpoint),
@@ -41,12 +48,17 @@ function makeController(opts: {
       .fn()
       .mockResolvedValue(opts.sessionResult ?? { replied: false }),
   };
+  const turnstile = {
+    publicSiteKey: vi.fn().mockResolvedValue(opts.siteKey ?? null),
+    verify: vi.fn().mockResolvedValue(opts.verify ?? true),
+  };
   const controller = new ChatController(
     chats as never,
     graphs as never,
     executions as never,
+    turnstile as never,
   );
-  return { controller, chats, graphs, executions };
+  return { controller, chats, graphs, executions, turnstile };
 }
 
 const DURABLE_GRAPH: GraphDef = {
@@ -303,5 +315,36 @@ describe("ChatController (public)", () => {
       controller.message("nope", { message: "hi" }),
     ).rejects.toBeInstanceOf(NotFoundException);
     expect(executions.startChatAwaitResponse).not.toHaveBeenCalled();
+  });
+
+  it("GET advertises turnstileSiteKey when the tenant's bot gate is active", async () => {
+    const withGate = await makeController({
+      endpoint: ENDPOINT,
+      siteKey: "0xSITEKEY",
+    }).controller.definition("c-1");
+    expect((withGate as { turnstileSiteKey?: string }).turnstileSiteKey).toBe(
+      "0xSITEKEY",
+    );
+    const noGate = await makeController({
+      endpoint: ENDPOINT,
+    }).controller.definition("c-1");
+    expect(noGate).not.toHaveProperty("turnstileSiteKey");
+  });
+
+  it("POST 403s (no run) when the Turnstile challenge fails — before the durable/per-message fork", async () => {
+    const { controller, executions, turnstile } = makeController({
+      endpoint: ENDPOINT,
+      verify: false,
+    });
+    await expect(
+      controller.message("c-1", {
+        message: "hi",
+        sessionId: "s-1",
+        turnstileToken: "bad",
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(turnstile.verify).toHaveBeenCalledWith("t-1", "e-1", "bad");
+    expect(executions.startChatAwaitResponse).not.toHaveBeenCalled();
+    expect(executions.sendChatSessionMessage).not.toHaveBeenCalled();
   });
 });
