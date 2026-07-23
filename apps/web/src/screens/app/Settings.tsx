@@ -14,6 +14,7 @@ import { ExperienceSection } from "./settings/ExperienceSection";
 import { NotificationsSection } from "./settings/NotificationsSection";
 import { SecretsSection } from "./settings/SecretsSection";
 import { TemplatesSection } from "./settings/TemplatesSection";
+import { TurnstileSection } from "./settings/TurnstileSection";
 import { VariablesSection } from "./settings/VariablesSection";
 
 const SECTIONS = [
@@ -36,6 +37,11 @@ const SECTIONS = [
     id: "notifications",
     label: "Notifications",
     icon: "M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0",
+  },
+  {
+    id: "botprotection",
+    label: "Bot protection",
+    icon: "M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7zM9.5 12l1.8 1.8L15 10",
   },
   {
     id: "experience",
@@ -216,6 +222,7 @@ export function Settings() {
           {section === "notifications" && (
             <NotificationsSection tenantId={tenantId} envs={envs} />
           )}
+          {section === "botprotection" && <TurnstileSection envs={envs} />}
           {section === "experience" && (
             <ExperienceSection tenantId={tenantId} />
           )}

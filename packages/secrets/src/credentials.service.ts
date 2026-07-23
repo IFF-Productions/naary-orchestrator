@@ -124,8 +124,9 @@ export class CredentialsService {
   }
 
   /** The env's configured *model* providers — names + validity only, NEVER key material. This table
-   *  is namespaced: connection tokens under `conn:` and user Environment Secrets under `secret:` are
-   *  NOT model providers, so both are excluded (a provider name never contains a `:`). */
+   *  is namespaced: connection tokens under `conn:`, user Environment Secrets under `secret:`, and
+   *  the Turnstile secret under `turnstile:` are NOT model providers, so all are excluded (a provider
+   *  name never contains a `:`). */
   async listProviders(
     tenantId: string,
     environmentId: string,
@@ -137,6 +138,7 @@ export class CredentialsService {
         NOT: [
           { provider: { startsWith: "conn:" } },
           { provider: { startsWith: "secret:" } },
+          { provider: { startsWith: "turnstile:" } },
         ],
       },
       select: { provider: true, isValid: true },
