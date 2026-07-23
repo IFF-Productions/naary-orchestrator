@@ -233,11 +233,27 @@ export async function queryState(
         const r = (await handle.result()) as {
           status: ExecutionStatus;
           ctx: Record<string, unknown>;
+          currentNodeId?: string;
         };
         const ctx = await resolveCtxRefs(r.ctx);
+        // The node the run ENDED on (the `end` passthrough on a clean completion). Without it the
+        // detail view marks that terminal node "skipped" instead of "done" (it writes no ctx
+        // output). New runs carry it in the result — CHEAP, read straight from the completion
+        // payload, no replay. A run that completed BEFORE this shipped has no such field; recover
+        // it with a one-off query of the closed workflow (a history replay). Best-effort and gated
+        // on the field being absent, so only legacy runs ever pay the replay, and it NEVER fails
+        // the detail view — an unavailable/aged-out history just leaves "" (the prior behaviour).
+        let currentNodeId = r.currentNodeId ?? "";
+        if (!currentNodeId) {
+          try {
+            currentNodeId = (await handle.query(stateQuery)).currentNodeId;
+          } catch {
+            /* closed-workflow query unavailable — keep "" (pre-fix behaviour) */
+          }
+        }
         return {
           status: r.status,
-          currentNodeId: "",
+          currentNodeId,
           ctx,
           executedNodeIds: [], // completed ctx carries every node's output
           nodeTimes: nodeTimesFrom(r.ctx),

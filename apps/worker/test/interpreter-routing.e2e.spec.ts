@@ -583,4 +583,30 @@ describe("runGraph interpreter — per-node execution matrix", () => {
       expect(result.ctx.trig).toEqual(event);
     },
   );
+
+  // ── C. Terminal node id in the result (bug: `end` shown "skipped" on completed runs) ───────
+  it("returns the terminal node id it ENDED on, so the detail view marks `end` done not skipped", async () => {
+    // The run walks trigger → nop → end; the interpreter must finish with currentNodeId === "end"
+    // (the last node it entered), and RunGraphResult must carry it. An `end` passthrough writes no
+    // ctx output, so the run-detail view relies on this to mark it done — without it, the API's
+    // COMPLETED branch had only "" and the view fell through to "skipped".
+    const worker = await makeWorker(env);
+    const result = await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          oneNodeGraph("nop", "noOp"),
+          { anything: 1 },
+          { tenantId: "t-matrix" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-matrix-terminal-node",
+      });
+      return (await handle.result()) as {
+        status: string;
+        currentNodeId: string;
+      };
+    });
+    expect(result.status).toBe("completed");
+    expect(result.currentNodeId).toBe("end");
+  });
 });
