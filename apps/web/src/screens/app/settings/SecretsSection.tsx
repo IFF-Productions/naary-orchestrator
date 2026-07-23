@@ -15,6 +15,7 @@ import {
   ErrorLine,
   LockGlyph,
   panelStyle,
+  RowMenu,
   SectionHeader,
   SectionIntro,
 } from "./shared";
@@ -52,8 +53,7 @@ export function SecretsSection({ envs }: { envs: Environment[] }) {
   }>({ name: "", value: "" });
   const [globalEditFor, setGlobalEditFor] = useState<string | null>(null);
   const [globalEditValue, setGlobalEditValue] = useState("");
-  // Which row's kebab menu is open / which row is in "update value" mode.
-  const [menuFor, setMenuFor] = useState<string | null>(null);
+  // Which row is in "update value" mode (the kebab menu owns its own open state).
   const [editFor, setEditFor] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   // "Add secret" draft — name + write-only value + target environment.
@@ -407,63 +407,24 @@ export function SecretsSection({ envs }: { envs: Environment[] }) {
                 >
                   ••••••••
                 </span>
-                <div style={{ position: "relative", flex: "none" }}>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon="more"
-                    iconOnly
-                    aria-label={`Actions for ${row.name} (${row.env.name})`}
-                    disabled={busy}
-                    onClick={() => setMenuFor((m) => (m === key ? null : key))}
-                  />
-                  {menuFor === key && (
-                    <>
-                      <div
-                        style={{ position: "fixed", inset: 0, zIndex: 30 }}
-                        onClick={() => setMenuFor(null)}
-                      />
-                      <div
-                        className="menu-pop"
-                        style={{
-                          position: "absolute",
-                          right: 0,
-                          top: 32,
-                          zIndex: 31,
-                          minWidth: 150,
-                          background: "var(--card)",
-                          border: "1px solid var(--line-2)",
-                          borderRadius: "var(--radius-md)",
-                          boxShadow: "var(--shadow-card)",
-                          padding: 4,
-                        }}
-                      >
-                        <button
-                          type="button"
-                          className="naary-set-menu-item"
-                          onClick={() => {
-                            setMenuFor(null);
-                            setEditFor(key);
-                            setEditValue("");
-                          }}
-                        >
-                          Update value…
-                        </button>
-                        <button
-                          type="button"
-                          className="naary-set-menu-item"
-                          style={{ color: "var(--state-error)" }}
-                          onClick={() => {
-                            setMenuFor(null);
-                            void removeSecret(row);
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
+                <RowMenu
+                  label={`Actions for ${row.name} (${row.env.name})`}
+                  disabled={busy}
+                  items={[
+                    {
+                      label: "Update value…",
+                      onClick: () => {
+                        setEditFor(key);
+                        setEditValue("");
+                      },
+                    },
+                    {
+                      label: "Delete",
+                      danger: true,
+                      onClick: () => void removeSecret(row),
+                    },
+                  ]}
+                />
               </div>
               {editing && (
                 <div
