@@ -204,9 +204,11 @@
   display: block;
 }
 .input {
-  display: flex;
-  align-items: center;
-  gap: 9px;
+  /* A BARE <input> (forms.tsx Input) — NOT a flex container. `display:flex` here breaks the
+     text insertion caret in Chromium (the blinking cursor vanishes / text baseline shifts), and
+     the flex/gap were vestigial anyway — a replaced <input> has no children to lay out. The
+     icon+input inline layout lives on `.input-wrap` (a real DIV) with an inner `.bare` input. */
+  display: block;
   width: 100%;
   height: 38px;
   background: var(--surface);
@@ -214,6 +216,7 @@
   border-radius: var(--radius-sm);
   padding: 0 11px;
   color: var(--ink);
+  caret-color: var(--ink);
   font-family: var(--font-sans);
   font-size: 13px;
   transition: border-color 0.14s ease, box-shadow 0.14s ease;
