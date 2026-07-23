@@ -42,6 +42,14 @@ export interface FormTriggerNodeConfig {
   /** Submit-button label (default "Submit"). */
   submitLabel?: string;
   fields: FormFieldDef[];
+  /**
+   * Optional reference to a `kind: "form"` content template (Settings › Content templates). When
+   * set, the hosted form's inputs come from the template's `field` blocks instead of the inline
+   * `fields` above — the form analog of `sendEmail`'s `templateId`. A deleted/missing template
+   * falls back to the inline `fields` (mirrors the email path). title/description/submitLabel stay
+   * on the node. Env-scoped like the email template reference.
+   */
+  templateId?: string;
 }
 
 /**

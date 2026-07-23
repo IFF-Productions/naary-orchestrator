@@ -77,6 +77,91 @@ describe("extractFormDefinition", () => {
     );
     expect(def).not.toHaveProperty("secretInternal");
   });
+
+  // --- Slice 4b: fields sourced from a referenced form template's blocks ---
+
+  it("derives fields from a referenced template's `field` blocks (content blocks ignored)", () => {
+    const blocks = [
+      { id: "b1", type: "heading", level: 1, text: "Ignored heading" },
+      {
+        id: "b2",
+        type: "field",
+        key: "email",
+        label: "Email",
+        fieldType: "email",
+        required: true,
+      },
+      { id: "b3", type: "divider" },
+      {
+        id: "b4",
+        type: "field",
+        key: "tier",
+        label: "Tier",
+        fieldType: "select",
+        required: false,
+        options: ["A", "B"],
+      },
+    ] as never;
+    const def = extractFormDefinition(
+      // Inline fields present but IGNORED while a template drives the form.
+      formGraph({ title: "T", templateId: "tpl-1", fields: FIELDS }),
+      "f-1",
+      blocks,
+    );
+    expect(def).toEqual({
+      formId: "f-1",
+      title: "T",
+      fields: [
+        { key: "email", label: "Email", type: "email", required: true },
+        { key: "tier", label: "Tier", type: "select", options: ["A", "B"] },
+      ],
+    });
+  });
+
+  it("falls back to the inline fields when the template is deleted/missing (null blocks)", () => {
+    const def = extractFormDefinition(
+      formGraph({ templateId: "gone", fields: FIELDS }),
+      "f-1",
+      null,
+    );
+    expect(def?.fields).toEqual(FIELDS);
+  });
+
+  it("round-trips: template-derived fields validate a submission (GET/POST agree)", () => {
+    const blocks = [
+      {
+        id: "b1",
+        type: "field",
+        key: "email",
+        label: "Email",
+        fieldType: "email",
+        required: true,
+      },
+      {
+        id: "b2",
+        type: "field",
+        key: "note",
+        label: "Note",
+        fieldType: "text",
+        required: false,
+      },
+    ] as never;
+    const def = extractFormDefinition(
+      formGraph({ templateId: "tpl-1", fields: [] }),
+      "f-1",
+      blocks,
+    );
+    // The SAME derived field set that GET serves is what POST validates against.
+    const res = validateSubmission(def?.fields ?? [], {
+      email: "a@b.com",
+      note: "hi",
+      injected: "DROP TABLE", // unknown key must be stripped
+    });
+    expect(res).toEqual({
+      ok: true,
+      data: { email: "a@b.com", note: "hi" },
+    });
+  });
 });
 
 describe("validateSubmission", () => {

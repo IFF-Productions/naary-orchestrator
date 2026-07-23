@@ -3,6 +3,7 @@ import type { ConfigSectionCtx } from "./ConfigPanel";
 import { Button } from "../../components";
 import { api } from "../../lib/api";
 import { inputStyle, Labeled } from "./fields";
+import { TemplateSelect } from "./TemplateSelect";
 
 export function renderTriggerSections(c: ConfigSectionCtx) {
   const {
@@ -216,6 +217,28 @@ export function renderTriggerSections(c: ConfigSectionCtx) {
                   placeholder="Submit"
                 />
               </Labeled>
+
+              <Labeled label="Form template (optional)">
+                <TemplateSelect
+                  kind="form"
+                  value={str("templateId")}
+                  onChange={(id) => onChange({ templateId: id })}
+                />
+              </Labeled>
+              {str("templateId") && (
+                <div
+                  style={{
+                    fontSize: "var(--text-xs)",
+                    color: "var(--ink-3)",
+                    marginTop: -6,
+                  }}
+                >
+                  The template's fields drive this form — the inline fields
+                  below are ignored while a template is selected (they're the
+                  fallback if it's deleted). Manage templates in Settings ›
+                  Content templates.
+                </div>
+              )}
 
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 <div

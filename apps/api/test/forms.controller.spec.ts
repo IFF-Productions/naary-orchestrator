@@ -25,6 +25,8 @@ function makeController(opts: {
   endpoint?: unknown;
   graph?: GraphDef | null;
   startForm?: ReturnType<typeof vi.fn>;
+  /** Template blocks returned by loadFormBlocks (null = deleted/missing → inline fallback). */
+  templateBlocks?: unknown[] | null;
 }) {
   const forms = { getEndpoint: vi.fn().mockResolvedValue(opts.endpoint) };
   const graphs = {
@@ -38,12 +40,16 @@ function makeController(opts: {
     startForm:
       opts.startForm ?? vi.fn().mockResolvedValue({ workflowId: "form-1" }),
   };
+  const templates = {
+    loadFormBlocks: vi.fn().mockResolvedValue(opts.templateBlocks ?? null),
+  };
   const controller = new FormsController(
     forms as never,
     graphs as never,
     executions as never,
+    templates as never,
   );
-  return { controller, forms, graphs, executions };
+  return { controller, forms, graphs, executions, templates };
 }
 
 const ENDPOINT = {
@@ -89,6 +95,74 @@ describe("FormsController (public)", () => {
       await expect(controller.definition("f-1")).rejects.toBeInstanceOf(
         NotFoundException,
       );
+    });
+
+    it("sources fields from the referenced template, scoped to the endpoint's (tenant, env)", async () => {
+      const graph: GraphDef = {
+        startNodeId: "form",
+        nodes: [
+          {
+            id: "form",
+            type: "formTrigger",
+            config: {
+              title: "Contact",
+              templateId: "tpl-1",
+              fields: [{ key: "inline", label: "Inline", type: "text" }],
+            } as never,
+          },
+        ],
+        edges: [],
+      };
+      const { controller, templates } = makeController({
+        endpoint: ENDPOINT,
+        graph,
+        templateBlocks: [
+          {
+            id: "b1",
+            type: "field",
+            key: "email",
+            label: "Email",
+            fieldType: "email",
+            required: true,
+          },
+        ],
+      });
+      const def = await controller.definition("f-1");
+      // Template-derived fields REPLACE the inline ones.
+      expect(def.fields).toEqual([
+        { key: "email", label: "Email", type: "email", required: true },
+      ]);
+      expect(templates.loadFormBlocks).toHaveBeenCalledWith(
+        "t-1",
+        "e-1",
+        "tpl-1",
+      );
+    });
+
+    it("falls back to inline fields when the referenced template is deleted (null blocks)", async () => {
+      const graph: GraphDef = {
+        startNodeId: "form",
+        nodes: [
+          {
+            id: "form",
+            type: "formTrigger",
+            config: {
+              templateId: "gone",
+              fields: [{ key: "email", label: "Email", type: "email" }],
+            } as never,
+          },
+        ],
+        edges: [],
+      };
+      const { controller } = makeController({
+        endpoint: ENDPOINT,
+        graph,
+        templateBlocks: null,
+      });
+      const def = await controller.definition("f-1");
+      expect(def.fields).toEqual([
+        { key: "email", label: "Email", type: "email" },
+      ]);
     });
   });
 

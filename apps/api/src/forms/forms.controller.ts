@@ -10,9 +10,14 @@ import {
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import { Public } from "../auth/public.decorator";
+import { ContentTemplatesService } from "../content-templates/content-templates.service";
 import { ExecutionsService } from "../executions/executions.service";
 import { GraphsService } from "../graphs/graphs.service";
-import { extractFormDefinition, validateSubmission } from "./form-definition";
+import {
+  extractFormDefinition,
+  formTemplateId,
+  validateSubmission,
+} from "./form-definition";
 import { FormService } from "./form.service";
 
 /**
@@ -36,6 +41,7 @@ export class FormsController {
     private readonly forms: FormService,
     private readonly graphs: GraphsService,
     private readonly executions: ExecutionsService,
+    private readonly templates: ContentTemplatesService,
   ) {}
 
   /** Serve the public form definition (title/description/fields). 404 if the endpoint is unknown
@@ -80,7 +86,18 @@ export class FormsController {
       endpoint.workflowId,
     );
     if (!snapshot) throw new NotFoundException("Unknown form");
-    const def = extractFormDefinition(snapshot.graph, formId);
+    // Slice 4b: if the formTrigger references a form template, its `field` blocks source the form's
+    // inputs. A deleted/missing/non-form template yields null → extractFormDefinition falls back to
+    // the node's inline fields. Both routes resolve through here, so GET and POST see the same set.
+    const templateId = formTemplateId(snapshot.graph);
+    const templateBlocks = templateId
+      ? await this.templates.loadFormBlocks(
+          endpoint.tenantId,
+          endpoint.environmentId,
+          templateId,
+        )
+      : undefined;
+    const def = extractFormDefinition(snapshot.graph, formId, templateBlocks);
     if (!def) throw new NotFoundException("Unknown form");
     return { endpoint, snapshot, def };
   }

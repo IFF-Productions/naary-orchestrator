@@ -148,6 +148,9 @@ const CONFIG_SCHEMAS = {
         options: z.array(z.string()).optional(),
       }),
     ),
+    // Optional form content-template reference (fields come from its `field` blocks; see the
+    // FormTriggerNodeConfig doc). Deleted/missing → fall back to inline `fields`.
+    templateId: z.string().optional(),
   }),
   chatTrigger: z.object({
     title: z.string().optional(),
