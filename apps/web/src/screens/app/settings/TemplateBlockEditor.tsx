@@ -21,7 +21,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { renderEmailHtml, type TemplateBlock } from "@naary/dsl";
 import { useMemo } from "react";
-import { Icon } from "../../../components";
+import { Icon, SafeHtml } from "../../../components";
 
 type PaletteItem = { type: TemplateBlock["type"]; label: string; icon: string };
 
@@ -381,16 +381,11 @@ function FormPreview({ blocks }: { blocks: TemplateBlock[] }) {
             return <Tag key={b.id}>{b.text}</Tag>;
           }
           case "text":
-            return (
-              // Render through renderEmailHtml, which allowlist-SANITIZES the author markup — a
-              // stored/authored `<script>`/`on*=` in a form template can't run in this preview
-              // (editing another user's stored template would otherwise be stored XSS).
-              // eslint-disable-next-line react/no-danger
-              <div
-                key={b.id}
-                dangerouslySetInnerHTML={{ __html: renderEmailHtml([b], {}) }}
-              />
-            );
+            // renderEmailHtml escapes interpolated {{ }} values but NOT the author's own markup, and
+            // env-scoped templates are shared across workspace users — so SafeHtml sanitizes the
+            // author HTML (DOMPurify) before rendering, or a stored `<img onerror=…>` runs in a
+            // co-worker's browser when they open the template.
+            return <SafeHtml key={b.id} html={renderEmailHtml([b], {})} />;
           case "button":
             return (
               <button key={b.id} type="button" disabled style={previewInput}>
@@ -583,7 +578,10 @@ export function TemplateBlockEditor({
             <FormPreview blocks={blocks} />
           </div>
         ) : (
-          <div
+          // renderEmailHtml escapes interpolated values; the author's OWN block markup is raw, and a
+          // shared env-scoped template can carry another user's markup — SafeHtml sanitizes it
+          // (DOMPurify) so the preview can't run a stored `<script>`/`on*=` payload.
+          <SafeHtml
             style={{
               border: "1px solid var(--line)",
               borderRadius: "var(--radius-md)",
@@ -593,10 +591,7 @@ export function TemplateBlockEditor({
               minHeight: 120,
               overflow: "auto",
             }}
-            // renderEmailHtml HTML-escapes interpolated values; only the author's OWN block markup
-            // is raw — their content previewing to themselves.
-            // eslint-disable-next-line react/no-danger
-            dangerouslySetInnerHTML={{ __html: previewHtml }}
+            html={previewHtml}
           />
         )}
         <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 6 }}>
