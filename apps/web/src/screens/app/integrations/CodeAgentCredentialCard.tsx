@@ -169,7 +169,13 @@ export function CodeAgentCredentialCard({
           variant={hasKey ? "secondary" : "primary"}
           icon="key"
           disabled={!tenant}
-          onClick={() => setOpen((v) => !v)}
+          // Never keep the secret in state across an open/close — clear it on every toggle
+          // (not just via Cancel), so closing the editor drops the entered value (#569 review).
+          onClick={() => {
+            setToken("");
+            setErr(null);
+            setOpen((v) => !v);
+          }}
         >
           {hasKey ? "Update credential" : "Set credential"}
         </Button>
