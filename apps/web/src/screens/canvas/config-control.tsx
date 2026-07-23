@@ -12,6 +12,7 @@ import {
   textareaStyle,
 } from "./fields";
 import { RowHead } from "./PinSection";
+import { TemplateSelect } from "./TemplateSelect";
 
 export function renderControlSections(c: ConfigSectionCtx) {
   const {
@@ -66,6 +67,25 @@ export function renderControlSections(c: ConfigSectionCtx) {
           <Labeled label="Subject">
             {exprText("subject", { placeholder: "Your workflow finished" })}
           </Labeled>
+          <Labeled label="Email template (optional)">
+            <TemplateSelect
+              value={str("templateId")}
+              onChange={(id) => onChange({ templateId: id })}
+            />
+          </Labeled>
+          {str("templateId") && (
+            <div
+              style={{
+                fontSize: "var(--text-xs)",
+                color: "var(--ink-3)",
+                marginTop: -6,
+              }}
+            >
+              A template renders the body — the inline body below is ignored.
+              Its subject (if set) overrides the Subject above. Manage templates
+              in Settings › Email templates.
+            </div>
+          )}
           <Labeled label="Body (text)">
             {exprText("text", {
               multiline: true,
