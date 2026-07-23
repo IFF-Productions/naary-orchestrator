@@ -17356,12 +17356,20 @@
           "hasSecret": {
             "type": "boolean",
             "description": "Whether a secret key is stored (write-only — the value is never returned)."
+          },
+          "allowedHostnames": {
+            "description": "Allowed solved-Turnstile hostnames (empty ⇒ any). A submission's hostname must match.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
           "siteKey",
           "enabled",
-          "hasSecret"
+          "hasSecret",
+          "allowedHostnames"
         ]
       },
       "RegisterChatDto": {

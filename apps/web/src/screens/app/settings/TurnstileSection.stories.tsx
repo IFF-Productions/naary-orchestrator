@@ -35,6 +35,7 @@ const handlers = [
         siteKey: "0x4AAAAAAABkMYinukE8nzYS",
         enabled: true,
         hasSecret: true,
+        allowedHostnames: ["naar-y.com", "forms.naar-y.com"],
       });
     }
     return HttpResponse.json(null); // Sandbox: not configured yet

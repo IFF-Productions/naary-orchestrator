@@ -162,6 +162,8 @@ export interface TurnstileConfig {
   siteKey: string;
   enabled: boolean;
   hasSecret: boolean;
+  /** Allowed solved-Turnstile hostnames (empty ⇒ any). */
+  allowedHostnames: string[];
 }
 
 /** Save payload — site key required; secret key write-only (omit to keep the existing one). */
@@ -169,4 +171,6 @@ export interface TurnstileConfigInput {
   siteKey: string;
   secretKey?: string;
   enabled: boolean;
+  /** Allowed domains (solved hostnames); omit to leave unchanged, [] to clear. */
+  allowedHostnames?: string[];
 }

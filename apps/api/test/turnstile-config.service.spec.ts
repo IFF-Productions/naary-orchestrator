@@ -45,10 +45,16 @@ describe("TurnstileConfigService", () => {
     turnstileConfig.findUnique.mockResolvedValue({
       siteKey: "site",
       enabled: true,
+      allowedHostnames: ["example.com"],
     });
     secrets.get.mockResolvedValue("the-secret"); // a secret IS stored
     const view = await service.get(T, E);
-    expect(view).toEqual({ siteKey: "site", enabled: true, hasSecret: true });
+    expect(view).toEqual({
+      siteKey: "site",
+      enabled: true,
+      hasSecret: true,
+      allowedHostnames: ["example.com"],
+    });
     // the plaintext secret must not appear anywhere in the returned view
     expect(JSON.stringify(view)).not.toContain("the-secret");
   });
@@ -153,12 +159,23 @@ describe("TurnstileConfigService.verify", () => {
     __turnstileDeps.fetch = realFetch;
   });
 
-  function enforced(secrets: { get: ReturnType<typeof vi.fn> }) {
+  function enforced(
+    secrets: { get: ReturnType<typeof vi.fn> },
+    allowedHostnames: string[] = [],
+  ) {
     turnstileConfig.findUnique.mockResolvedValue({
       siteKey: "sk",
       enabled: true,
+      allowedHostnames,
     });
     secrets.get.mockResolvedValue("the-secret");
+  }
+
+  function siteverifyReturns(json: Record<string, unknown>) {
+    __turnstileDeps.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => json,
+    }) as never;
   }
 
   it("ALLOWS (no siteverify) when the gate isn't enforced", async () => {
@@ -227,5 +244,41 @@ describe("TurnstileConfigService.verify", () => {
       json: async () => ({}),
     }) as never;
     expect(await service.verify(T, E, "tok")).toBe(true);
+  });
+
+  // #615 — allowed-hostnames check (server-side "allowed domains", also kills token-replay).
+  it("ALLOWS a solved hostname that IS on the allowlist", async () => {
+    const { service, secrets } = makeService();
+    enforced(secrets, ["example.com"]);
+    siteverifyReturns({ success: true, hostname: "example.com" });
+    expect(await service.verify(T, E, "good")).toBe(true);
+  });
+
+  it("DENIES a solved hostname NOT on the allowlist (replay from another site)", async () => {
+    const { service, secrets } = makeService();
+    enforced(secrets, ["example.com"]);
+    siteverifyReturns({ success: true, hostname: "attacker.test" });
+    expect(await service.verify(T, E, "lifted")).toBe(false);
+  });
+
+  it("DENIES when the allowlist is set but siteverify returns no hostname", async () => {
+    const { service, secrets } = makeService();
+    enforced(secrets, ["example.com"]);
+    siteverifyReturns({ success: true });
+    expect(await service.verify(T, E, "x")).toBe(false);
+  });
+
+  it("matches the allowlist case-insensitively", async () => {
+    const { service, secrets } = makeService();
+    enforced(secrets, ["example.com"]);
+    siteverifyReturns({ success: true, hostname: "EXAMPLE.COM" });
+    expect(await service.verify(T, E, "x")).toBe(true);
+  });
+
+  it("an EMPTY allowlist allows any solved hostname (no restriction)", async () => {
+    const { service, secrets } = makeService();
+    enforced(secrets, []);
+    siteverifyReturns({ success: true, hostname: "anywhere.test" });
+    expect(await service.verify(T, E, "x")).toBe(true);
   });
 });
