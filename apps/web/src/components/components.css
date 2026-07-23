@@ -72,6 +72,19 @@
   }
 }
 
+/* Touch targets app-wide (<= 1024 = the redesign's touch/drawer range): EVERY icon-only button
+   gets a >= 44px hit area, not only the context bar. Covers the dense table/list-row action
+   buttons, toolbar icons, and modal/toast close buttons, which otherwise stay 34px (28px when
+   `.btn-sm`) — below the 44px touch minimum. `.btn-icon.btn-sm` is named explicitly so it beats
+   the 28px base rule's (0,2,0) specificity (a media query adds none). #511 responsive follow-up. */
+@media (max-width: 1024px) {
+  .btn-icon,
+  .btn-icon.btn-sm {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 .btn-primary {
   background: linear-gradient(180deg, var(--brand-2), var(--brand));
   border-color: color-mix(in srgb, var(--brand) 50%, transparent);
