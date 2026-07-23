@@ -80,9 +80,9 @@ describe("extractFormDefinition", () => {
 
   // --- Slice 4b: fields sourced from a referenced form template's blocks ---
 
-  it("derives fields from a referenced template's `field` blocks (content blocks ignored)", () => {
+  it("derives fields from a template AND serves its ordered blocks (content interleaved)", () => {
     const blocks = [
-      { id: "b1", type: "heading", level: 1, text: "Ignored heading" },
+      { id: "b1", type: "heading", level: 1, text: "Welcome" },
       {
         id: "b2",
         type: "field",
@@ -111,10 +111,75 @@ describe("extractFormDefinition", () => {
     expect(def).toEqual({
       formId: "f-1",
       title: "T",
+      // fields (validation authority) come from the field blocks…
       fields: [
         { key: "email", label: "Email", type: "email", required: true },
         { key: "tier", label: "Tier", type: "select", options: ["A", "B"] },
       ],
+      // …and the FULL ordered block list is served for interleaved rendering.
+      blocks: [
+        { id: "b1", type: "heading", level: 1, text: "Welcome" },
+        {
+          id: "b2",
+          type: "field",
+          key: "email",
+          label: "Email",
+          fieldType: "email",
+          required: true,
+        },
+        { id: "b3", type: "divider" },
+        {
+          id: "b4",
+          type: "field",
+          key: "tier",
+          label: "Tier",
+          fieldType: "select",
+          required: false,
+          options: ["A", "B"],
+        },
+      ],
+    });
+  });
+
+  it("inline (no-template) form carries NO blocks — just the flat fields", () => {
+    const def = extractFormDefinition(
+      formGraph({ title: "Inline", fields: FIELDS }),
+      "f-1",
+    );
+    expect(def).not.toHaveProperty("blocks");
+  });
+
+  it("tightly projects served blocks — an unknown/authoring key is stripped", () => {
+    const blocks = [
+      {
+        id: "b1",
+        type: "heading",
+        level: 2,
+        text: "Hi",
+        secretInternal: "x", // must NOT reach the browser
+      },
+      {
+        id: "b2",
+        type: "field",
+        key: "email",
+        label: "Email",
+        fieldType: "email",
+        required: true,
+        adminOnly: true, // must NOT reach the browser
+      },
+    ] as never;
+    const def = extractFormDefinition(
+      formGraph({ templateId: "tpl-1", fields: [] }),
+      "f-1",
+      blocks,
+    );
+    expect(JSON.stringify(def)).not.toContain("secretInternal");
+    expect(JSON.stringify(def)).not.toContain("adminOnly");
+    expect(def?.blocks?.[0]).toEqual({
+      id: "b1",
+      type: "heading",
+      level: 2,
+      text: "Hi",
     });
   });
 

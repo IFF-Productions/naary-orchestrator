@@ -2,7 +2,7 @@
  * Every shared type of the API client — the view models the SPA renders. All of
  * these remain importable from the ../api barrel (`import type { X } from "../lib/api"`).
  */
-import type { GraphDef } from "@naary/dsl";
+import type { GraphDef, TemplateBlock } from "@naary/dsl";
 
 export type ExecutionStatus =
   | "running"
@@ -245,6 +245,10 @@ export interface FormDefinition {
   description?: string;
   submitLabel?: string;
   fields: FormFieldView[];
+  /** Present only when a form template drives this form: the template's ordered blocks, so the page
+   *  renders content (heading/text/image/…) interleaved with fields. Absent for inline forms (render
+   *  the flat `fields`). `fields` stays authoritative for validation. */
+  blocks?: TemplateBlock[];
 }
 
 /** A registered hosted-chat endpoint (no secret — the opaque id is the only capability). */
