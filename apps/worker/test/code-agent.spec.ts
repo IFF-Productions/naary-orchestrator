@@ -278,6 +278,18 @@ describe("cursorDriver (cursor-agent)", () => {
     });
   });
 
+  it("parses a PRETTY-PRINTED (multi-line) json object (#568 review — not a false no_envelope)", () => {
+    const pretty = JSON.stringify(
+      { type: "result", is_error: false, result: "multi\nline" },
+      null,
+      2,
+    );
+    expect(pretty).toContain("\n"); // genuinely multi-line
+    const env = d.parse(pretty, 0);
+    expect(env).toMatchObject({ result: "multi\nline", isError: false });
+    expect(env.failureSubtype).toBeUndefined(); // NOT a spurious no_envelope
+  });
+
   it("flags is_error / a non-zero exit / a missing envelope", () => {
     expect(
       d.parse('{"type":"result","is_error":true,"result":"x"}', 0),

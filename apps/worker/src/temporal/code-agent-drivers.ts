@@ -281,11 +281,24 @@ function safeStringify(v: unknown): string {
 
 /* -------------------------- shared JSON-envelope parsing -------------------------- */
 
-/** Every parseable JSON OBJECT (not array) in the stdout, in order. Tolerates blank/garbage lines
- *  so a single-object (`json`) or line-delimited (`stream-json`/JSONL) stream both work. */
+/** Every parseable JSON OBJECT (not array) in the stdout, in order. Handles all three shapes a CLI
+ *  might emit: a single object (`--output-format json`), a PRETTY-PRINTED single object spanning
+ *  multiple lines, and line-delimited JSONL / stream-json. */
 function jsonObjects(stdout: string): Record<string, unknown>[] {
+  const trimmed = stdout.trim();
+  if (!trimmed) return [];
+  // Fast path: the WHOLE stdout is one JSON object — covers a pretty-printed (multi-line) result,
+  // which a per-line parse would miss entirely (→ a spurious "no_envelope" on a successful run).
+  try {
+    const o = JSON.parse(trimmed);
+    if (o && typeof o === "object" && !Array.isArray(o)) {
+      return [o as Record<string, unknown>];
+    }
+  } catch {
+    /* not a single whole-object → fall back to line-by-line (JSONL / stream-json) */
+  }
   const out: Record<string, unknown>[] = [];
-  for (const line of stdout.split("\n")) {
+  for (const line of trimmed.split("\n")) {
     const t = line.trim();
     if (!t) continue;
     try {
