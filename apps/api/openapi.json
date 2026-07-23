@@ -18050,7 +18050,7 @@
             "example": "Order shipped"
           },
           "subject": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "Your order {{ order.id }} shipped"
           },

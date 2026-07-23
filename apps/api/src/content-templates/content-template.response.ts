@@ -6,7 +6,11 @@ export class ContentTemplateResponse {
   @ApiProperty({ enum: ["email", "form"], example: "email" })
   kind!: "email" | "form";
   @ApiProperty({ example: "Order shipped" }) name!: string;
-  @ApiProperty({ nullable: true, example: "Your order {{ order.id }} shipped" })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: "Your order {{ order.id }} shipped",
+  })
   subject!: string | null;
   @ApiProperty({
     type: "array",
