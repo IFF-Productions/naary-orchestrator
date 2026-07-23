@@ -83,6 +83,21 @@ if (dsn) {
       }),
       // Browser profiling — only bundled into the running config when opted in.
       ...(profilesSampleRate > 0 ? [Sentry.browserProfilingIntegration()] : []),
+      // User Feedback: NO floating auto-widget (autoInject:false) — a "Send feedback" button in the
+      // nav drawer opens it (see lib/feedback + NavRail). Theme-following; no Sentry branding. The
+      // message a user types is their own report, so it is intentionally NOT run through the secret
+      // scrubber (that path is beforeSend* for events — feedback rides its own envelope).
+      Sentry.feedbackIntegration({
+        autoInject: false,
+        colorScheme: "system",
+        showBranding: false,
+        // Frame it as feedback (not the default "Report a Bug"), matching the drawer button.
+        formTitle: "Send feedback",
+        submitButtonLabel: "Send feedback",
+        messagePlaceholder:
+          "What's working well, what's confusing, or what's broken?",
+        successMessageText: "Thanks — your feedback was sent.",
+      }),
     ],
     // Opt-in sample rate; default 0.1 so production isn't fully traced. Override with
     // VITE_SENTRY_TRACES_SAMPLE_RATE at build time.

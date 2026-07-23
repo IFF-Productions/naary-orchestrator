@@ -4,9 +4,42 @@
  * icon-only 70px rail on manual desktop collapse; full-width labels inside the slide-out
  * drawer (<= 1024). Items carry live badges (approvals waiting) and a chevron.
  */
+import { useEffect, useRef } from "react";
 import { NavLink } from "react-router-dom";
 import { Icon } from "../components";
+import { attachFeedback, feedbackAvailable } from "../lib/feedback";
 import type { NavItem, NavMode } from "./nav-model";
+
+/** "Send feedback" — opens the Sentry User Feedback dialog. Hidden unless Sentry is configured
+ *  (a build-time DSN), since there's nowhere to send it otherwise. Icon-only in the collapsed
+ *  rail; icon + label in the expanded rail and the touch drawer. */
+function FeedbackButton({ rail }: { rail: boolean }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    return attachFeedback(ref.current);
+  }, []);
+  if (!feedbackAvailable) return null;
+  return (
+    <button
+      ref={ref}
+      type="button"
+      title="Send feedback"
+      aria-label="Send feedback"
+      className={
+        rail ? "btn btn-ghost btn-icon btn-sm" : "btn btn-ghost btn-sm"
+      }
+      style={
+        rail
+          ? undefined
+          : { width: "100%", justifyContent: "flex-start", gap: 9 }
+      }
+    >
+      <Icon name="chat" size={14} />
+      {!rail && <span>Send feedback</span>}
+    </button>
+  );
+}
 
 function Badge({ value, color }: { value: number; color: string }) {
   return (
@@ -188,6 +221,16 @@ export function NavRail({
       ))}
 
       <div style={{ flex: 1 }} />
+      {/* Send feedback — opens the Sentry User Feedback dialog; hidden when Sentry is off. */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: rail ? "center" : "stretch",
+          paddingTop: 8,
+        }}
+      >
+        <FeedbackButton rail={rail} />
+      </div>
       {/* Manual collapse — DESKTOP only (tablet's rail is automatic; phone uses a drawer). */}
       {showCollapseToggle && (
         <div
