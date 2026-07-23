@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BadRequestException, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from "@nestjs/common";
 import type { GraphDef } from "@naary/dsl";
 import { FormsController } from "../src/forms/forms.controller";
 
@@ -27,6 +31,10 @@ function makeController(opts: {
   startForm?: ReturnType<typeof vi.fn>;
   /** Template blocks returned by loadFormBlocks (null = deleted/missing → inline fallback). */
   templateBlocks?: unknown[] | null;
+  /** Turnstile: site key advertised on the definition (null = no gate). */
+  siteKey?: string | null;
+  /** Turnstile: verify() verdict on submit (default allow). */
+  verify?: boolean;
 }) {
   const forms = { getEndpoint: vi.fn().mockResolvedValue(opts.endpoint) };
   const graphs = {
@@ -43,13 +51,18 @@ function makeController(opts: {
   const templates = {
     loadFormBlocks: vi.fn().mockResolvedValue(opts.templateBlocks ?? null),
   };
+  const turnstile = {
+    publicSiteKey: vi.fn().mockResolvedValue(opts.siteKey ?? null),
+    verify: vi.fn().mockResolvedValue(opts.verify ?? true),
+  };
   const controller = new FormsController(
     forms as never,
     graphs as never,
     executions as never,
     templates as never,
+    turnstile as never,
   );
-  return { controller, forms, graphs, executions, templates };
+  return { controller, forms, graphs, executions, templates, turnstile };
 }
 
 const ENDPOINT = {
@@ -164,6 +177,19 @@ describe("FormsController (public)", () => {
         { key: "email", label: "Email", type: "email" },
       ]);
     });
+
+    it("advertises turnstileSiteKey when the tenant's bot gate is active", async () => {
+      const withGate = await makeController({
+        endpoint: ENDPOINT,
+        siteKey: "0xSITEKEY",
+      }).controller.definition("f-1");
+      expect(withGate.turnstileSiteKey).toBe("0xSITEKEY");
+      // …and omits it when no gate is configured.
+      const noGate = await makeController({
+        endpoint: ENDPOINT,
+      }).controller.definition("f-1");
+      expect(noGate).not.toHaveProperty("turnstileSiteKey");
+    });
   });
 
   describe("POST submit", () => {
@@ -207,6 +233,41 @@ describe("FormsController (public)", () => {
         NotFoundException,
       );
       expect(startForm).not.toHaveBeenCalled();
+    });
+
+    it("403s (no run) when the Turnstile challenge fails", async () => {
+      const startForm = vi.fn();
+      const { controller, turnstile } = makeController({
+        endpoint: ENDPOINT,
+        startForm,
+        verify: false, // gate denies
+      });
+      await expect(
+        controller.submit("f-1", { email: "a@b.com", turnstileToken: "bad" }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      // verified with the endpoint's (tenant, env) + the submitted token
+      expect(turnstile.verify).toHaveBeenCalledWith("t-1", "e-1", "bad");
+      expect(startForm).not.toHaveBeenCalled();
+    });
+
+    it("passes the gate, then strips turnstileToken from the data (never reaches the run)", async () => {
+      const startForm = vi.fn().mockResolvedValue({ workflowId: "form-t-1-9" });
+      const { controller } = makeController({
+        endpoint: ENDPOINT,
+        startForm,
+        verify: true,
+      });
+      await controller.submit("f-1", {
+        email: "a@b.com",
+        turnstileToken: "good",
+      });
+      expect(startForm).toHaveBeenCalledWith(
+        "t-1",
+        "e-1",
+        { graph: FORM_GRAPH },
+        { email: "a@b.com" }, // turnstileToken stripped (not a declared field)
+        "contact-form",
+      );
     });
   });
 });

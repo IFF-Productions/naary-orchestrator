@@ -184,10 +184,13 @@ export const integrationsApi = {
   submitForm(
     formId: string,
     data: Record<string, unknown>,
+    turnstileToken?: string,
   ): Promise<{ status: string }> {
     return http(`/forms/${encodeURIComponent(formId)}`, {
       method: "POST",
-      body: JSON.stringify(data),
+      // The token rides in the body as `turnstileToken`; the server verifies it, then
+      // validateSubmission strips it (it's not a declared field, so it never reaches the workflow).
+      body: JSON.stringify(turnstileToken ? { ...data, turnstileToken } : data),
     });
   },
   // --- Hosted chats (public chatTrigger endpoints) ---

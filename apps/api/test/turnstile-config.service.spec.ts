@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the Prisma accessor before importing the service.
 const turnstileConfig = {
@@ -9,7 +9,10 @@ const turnstileConfig = {
 vi.mock("@naary/db", () => ({ getPrisma: () => ({ turnstileConfig }) }));
 
 import type { SecretStore } from "@naary/secrets";
-import { TurnstileConfigService } from "../src/turnstile/turnstile-config.service";
+import {
+  __turnstileDeps,
+  TurnstileConfigService,
+} from "../src/turnstile/turnstile-config.service";
 
 function makeService() {
   const secrets = {
@@ -108,5 +111,121 @@ describe("TurnstileConfigService", () => {
       where: { tenantId: T, environmentId: E },
     });
     expect(secrets.remove).toHaveBeenCalledWith(T, E, "turnstile:secret");
+  });
+});
+
+describe("TurnstileConfigService.publicSiteKey", () => {
+  it("returns the site key only when enabled AND a secret is stored", async () => {
+    const { service, secrets } = makeService();
+    turnstileConfig.findUnique.mockResolvedValue({
+      siteKey: "sk",
+      enabled: true,
+    });
+    secrets.get.mockResolvedValue("secret");
+    expect(await service.publicSiteKey(T, E)).toBe("sk");
+  });
+
+  it("returns null when disabled or unconfigured or secret-less", async () => {
+    const { service, secrets } = makeService();
+    // disabled
+    turnstileConfig.findUnique.mockResolvedValue({
+      siteKey: "sk",
+      enabled: false,
+    });
+    secrets.get.mockResolvedValue("secret");
+    expect(await service.publicSiteKey(T, E)).toBeNull();
+    // enabled but no secret
+    turnstileConfig.findUnique.mockResolvedValue({
+      siteKey: "sk",
+      enabled: true,
+    });
+    secrets.get.mockResolvedValue(null);
+    expect(await service.publicSiteKey(T, E)).toBeNull();
+    // no row
+    turnstileConfig.findUnique.mockResolvedValue(null);
+    expect(await service.publicSiteKey(T, E)).toBeNull();
+  });
+});
+
+describe("TurnstileConfigService.verify", () => {
+  const realFetch = __turnstileDeps.fetch;
+  afterEach(() => {
+    __turnstileDeps.fetch = realFetch;
+  });
+
+  function enforced(secrets: { get: ReturnType<typeof vi.fn> }) {
+    turnstileConfig.findUnique.mockResolvedValue({
+      siteKey: "sk",
+      enabled: true,
+    });
+    secrets.get.mockResolvedValue("the-secret");
+  }
+
+  it("ALLOWS (no siteverify) when the gate isn't enforced", async () => {
+    const { service, secrets } = makeService();
+    turnstileConfig.findUnique.mockResolvedValue({
+      siteKey: "sk",
+      enabled: false,
+    });
+    secrets.get.mockResolvedValue("x");
+    const fetchSpy = vi.fn();
+    __turnstileDeps.fetch = fetchSpy as never;
+    expect(await service.verify(T, E, "tok")).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("ALLOWS when enabled but no secret (can't enforce)", async () => {
+    const { service, secrets } = makeService();
+    turnstileConfig.findUnique.mockResolvedValue({
+      siteKey: "sk",
+      enabled: true,
+    });
+    secrets.get.mockResolvedValue(null);
+    expect(await service.verify(T, E, "tok")).toBe(true);
+  });
+
+  it("DENIES when enforced and no token", async () => {
+    const { service, secrets } = makeService();
+    enforced(secrets);
+    expect(await service.verify(T, E, undefined)).toBe(false);
+  });
+
+  it("verifies with Cloudflare and DENIES on success:false", async () => {
+    const { service, secrets } = makeService();
+    enforced(secrets);
+    __turnstileDeps.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: false }),
+    }) as never;
+    expect(await service.verify(T, E, "bad")).toBe(false);
+  });
+
+  it("ALLOWS on success:true", async () => {
+    const { service, secrets } = makeService();
+    enforced(secrets);
+    __turnstileDeps.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true }),
+    }) as never;
+    expect(await service.verify(T, E, "good")).toBe(true);
+  });
+
+  it("FAILS OPEN on a network error (Cloudflare outage must not brick the form)", async () => {
+    const { service, secrets } = makeService();
+    enforced(secrets);
+    __turnstileDeps.fetch = vi
+      .fn()
+      .mockRejectedValue(new Error("network")) as never;
+    expect(await service.verify(T, E, "tok")).toBe(true);
+  });
+
+  it("FAILS OPEN on a 5xx from Cloudflare", async () => {
+    const { service, secrets } = makeService();
+    enforced(secrets);
+    __turnstileDeps.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({}),
+    }) as never;
+    expect(await service.verify(T, E, "tok")).toBe(true);
   });
 });

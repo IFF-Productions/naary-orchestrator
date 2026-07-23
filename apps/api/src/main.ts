@@ -47,6 +47,9 @@ async function bootstrap(): Promise<void> {
   app.useLogger(appLogger);
 
   // Security headers (Sec#5). API serves JSON only, so the helmet defaults are fine.
+  // NB (Turnstile, docs/design/TURNSTILE-BOT-PROTECTION.md): the SPA is served separately with no
+  // CSP today, so nothing blocks the Cloudflare widget script. IF a SPA-side CSP is ever added, it
+  // must allow `https://challenges.cloudflare.com` in `script-src` + `frame-src`.
   app.use(helmet());
 
   // Explicit CORS allowlist (Sec#5): the web app calls the API cross-origin in a

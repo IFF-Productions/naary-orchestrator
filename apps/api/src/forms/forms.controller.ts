@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Get,
   HttpCode,
   NotFoundException,
@@ -13,6 +14,7 @@ import { Public } from "../auth/public.decorator";
 import { ContentTemplatesService } from "../content-templates/content-templates.service";
 import { ExecutionsService } from "../executions/executions.service";
 import { GraphsService } from "../graphs/graphs.service";
+import { TurnstileConfigService } from "../turnstile/turnstile-config.service";
 import {
   extractFormDefinition,
   formTemplateId,
@@ -42,23 +44,47 @@ export class FormsController {
     private readonly graphs: GraphsService,
     private readonly executions: ExecutionsService,
     private readonly templates: ContentTemplatesService,
+    private readonly turnstile: TurnstileConfigService,
   ) {}
 
   /** Serve the public form definition (title/description/fields). 404 if the endpoint is unknown
-   *  or its current graph's entry node isn't a formTrigger. */
+   *  or its current graph's entry node isn't a formTrigger. Includes `turnstileSiteKey` when the
+   *  tenant has an active Turnstile gate for this env (so the page renders the widget). */
   @Get(":formId")
   async definition(@Param("formId") formId: string) {
-    const { def } = await this.resolve(formId);
-    return def;
+    const { endpoint, def } = await this.resolve(formId);
+    const turnstileSiteKey = await this.turnstile.publicSiteKey(
+      endpoint.tenantId,
+      endpoint.environmentId,
+    );
+    return turnstileSiteKey ? { ...def, turnstileSiteKey } : def;
   }
 
-  /** Accept an anonymous submission: validate against the declared fields, then start the run
-   *  with the sanitized data as the trigger output. 202 (fire-and-forget, like webhook ingress). */
+  /** Accept an anonymous submission: verify the Turnstile challenge (if the tenant enabled it),
+   *  validate + strip against the declared fields, then start the run with the sanitized data as the
+   *  trigger output. 202 (fire-and-forget, like webhook ingress). */
   @Throttle({ default: { limit: 10, ttl: 60_000 } }) // 10 submissions / min / IP (per-IP; see class doc)
   @Post(":formId")
   @HttpCode(202)
-  async submit(@Param("formId") formId: string, @Body() body: unknown) {
+  async submit(
+    @Param("formId") formId: string,
+    @Body() body: { turnstileToken?: unknown } & Record<string, unknown>,
+  ) {
     const { endpoint, snapshot, def } = await this.resolve(formId);
+    // Bot gate BEFORE validation/startForm — an unsolved challenge never spends the tenant's budget.
+    const token =
+      typeof body?.turnstileToken === "string"
+        ? body.turnstileToken
+        : undefined;
+    const allowed = await this.turnstile.verify(
+      endpoint.tenantId,
+      endpoint.environmentId,
+      token,
+    );
+    if (!allowed) {
+      throw new ForbiddenException("Bot verification failed — please retry.");
+    }
+    // `turnstileToken` is not a declared field, so validateSubmission strips it (never reaches ctx).
     const result = validateSubmission(def.fields, body);
     if (!result.ok) throw new BadRequestException(result.error);
     await this.executions.startForm(
