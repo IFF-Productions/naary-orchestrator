@@ -23,16 +23,29 @@ import { renderEmailHtml, type TemplateBlock } from "@naary/dsl";
 import { useMemo } from "react";
 import { Icon } from "../../../components";
 
-/** Content block types offered in the palette (form `field` blocks are Slice 4). */
-const PALETTE: { type: TemplateBlock["type"]; label: string; icon: string }[] =
-  [
-    { type: "heading", label: "Heading", icon: "edit" },
-    { type: "text", label: "Text", icon: "template" },
-    { type: "button", label: "Button", icon: "bolt" },
-    { type: "image", label: "Image", icon: "eye" },
-    { type: "divider", label: "Divider", icon: "none" },
-    { type: "spacer", label: "Spacer", icon: "expand" },
-  ];
+type PaletteItem = { type: TemplateBlock["type"]; label: string; icon: string };
+
+/** Content blocks — layout/copy, shared by email + form templates. */
+const CONTENT_BLOCKS: PaletteItem[] = [
+  { type: "heading", label: "Heading", icon: "edit" },
+  { type: "text", label: "Text", icon: "template" },
+  { type: "button", label: "Button", icon: "bolt" },
+  { type: "image", label: "Image", icon: "eye" },
+  { type: "divider", label: "Divider", icon: "none" },
+  { type: "spacer", label: "Spacer", icon: "expand" },
+];
+
+/** The input-field block — FORM templates only (an email skips it). */
+const FIELD_BLOCK: PaletteItem = {
+  type: "field",
+  label: "Field",
+  icon: "plus",
+};
+
+/** The palette for a template kind: forms lead with the field block; emails are content-only. */
+function paletteFor(kind: "email" | "form"): PaletteItem[] {
+  return kind === "form" ? [FIELD_BLOCK, ...CONTENT_BLOCKS] : CONTENT_BLOCKS;
+}
 
 /** A fresh block of `type` with a unique id and sensible defaults. */
 function newBlock(type: TemplateBlock["type"]): TemplateBlock {
@@ -194,6 +207,73 @@ function BlockFields({
           style={{ ...inputStyle, width: 100 }}
         />
       );
+    case "field":
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              value={block.label}
+              onChange={(e) => onChange({ label: e.target.value })}
+              style={inputStyle}
+              placeholder="Label (shown to the person)"
+            />
+            <input
+              value={block.key}
+              onChange={(e) => onChange({ key: e.target.value })}
+              style={{ ...inputStyle, fontFamily: "var(--font-mono)" }}
+              placeholder="key (in the run input)"
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <select
+              value={block.fieldType}
+              onChange={(e) =>
+                onChange({
+                  fieldType: e.target.value as (typeof block)["fieldType"],
+                })
+              }
+              style={{ ...inputStyle, width: 130 }}
+            >
+              <option value="text">Text</option>
+              <option value="textarea">Long text</option>
+              <option value="number">Number</option>
+              <option value="email">Email</option>
+              <option value="select">Select</option>
+            </select>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 12,
+                color: "var(--ink-2)",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={block.required}
+                onChange={(e) => onChange({ required: e.target.checked })}
+              />
+              Required
+            </label>
+          </div>
+          {block.fieldType === "select" && (
+            <input
+              value={(block.options ?? []).join(", ")}
+              onChange={(e) =>
+                onChange({
+                  options: e.target.value
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                })
+              }
+              style={inputStyle}
+              placeholder="Options, comma-separated (e.g. Low, Medium, High)"
+            />
+          )}
+        </div>
+      );
     default:
       return (
         <div style={{ fontSize: 12, color: "var(--ink-3)" }}>No options.</div>
@@ -279,12 +359,104 @@ function SortableRow({
   );
 }
 
+/** Preview of a FORM template: content blocks render as their visual, `field` blocks as the actual
+ *  (disabled) input the hosted form will show. Mirrors the public FormPage's control set. */
+function FormPreview({ blocks }: { blocks: TemplateBlock[] }) {
+  const previewInput: React.CSSProperties = {
+    width: "100%",
+    padding: "8px 10px",
+    borderRadius: 6,
+    border: "1px solid #d0d3d9",
+    background: "#fff",
+    color: "#111",
+    fontSize: 13,
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {blocks.map((b) => {
+        switch (b.type) {
+          case "heading": {
+            const Tag = `h${b.level >= 1 && b.level <= 3 ? b.level : 2}` as
+              "h1" | "h2" | "h3";
+            return <Tag key={b.id}>{b.text}</Tag>;
+          }
+          case "text":
+            return (
+              // Render through renderEmailHtml, which allowlist-SANITIZES the author markup — a
+              // stored/authored `<script>`/`on*=` in a form template can't run in this preview
+              // (editing another user's stored template would otherwise be stored XSS).
+              // eslint-disable-next-line react/no-danger
+              <div
+                key={b.id}
+                dangerouslySetInnerHTML={{ __html: renderEmailHtml([b], {}) }}
+              />
+            );
+          case "button":
+            return (
+              <button key={b.id} type="button" disabled style={previewInput}>
+                {b.label}
+              </button>
+            );
+          case "image":
+            return (
+              <img
+                key={b.id}
+                src={b.src}
+                alt={b.alt ?? ""}
+                style={{ maxWidth: "100%" }}
+              />
+            );
+          case "divider":
+            return <hr key={b.id} />;
+          case "spacer":
+            return (
+              <div
+                key={b.id}
+                style={{ height: Math.max(0, Math.min(200, b.size)) }}
+              />
+            );
+          case "field":
+            return (
+              <label
+                key={b.id}
+                style={{ display: "flex", flexDirection: "column", gap: 4 }}
+              >
+                <span style={{ fontSize: 12.5, fontWeight: 600 }}>
+                  {b.label}
+                  {b.required && <span style={{ color: "#c00" }}> *</span>}
+                </span>
+                {b.fieldType === "textarea" ? (
+                  <textarea disabled rows={3} style={previewInput} />
+                ) : b.fieldType === "select" ? (
+                  <select disabled style={previewInput}>
+                    {(b.options ?? []).map((o) => (
+                      <option key={o}>{o}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    disabled
+                    type={b.fieldType === "number" ? "number" : b.fieldType}
+                    style={previewInput}
+                  />
+                )}
+              </label>
+            );
+        }
+      })}
+    </div>
+  );
+}
+
 export function TemplateBlockEditor({
   blocks,
   onChange,
+  kind = "email",
 }: {
   blocks: TemplateBlock[];
   onChange: (blocks: TemplateBlock[]) => void;
+  /** email → content blocks + HTML preview; form → adds the field block + a form preview. */
+  kind?: "email" | "form";
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -326,7 +498,7 @@ export function TemplateBlockEditor({
             marginBottom: 12,
           }}
         >
-          {PALETTE.map((p) => (
+          {paletteFor(kind).map((p) => (
             <button
               key={p.type}
               type="button"
@@ -349,7 +521,8 @@ export function TemplateBlockEditor({
               fontSize: 12.5,
             }}
           >
-            Add blocks above to build the email. Drag the handle to reorder.
+            Add blocks above to build the {kind === "form" ? "form" : "email"}.
+            Drag the handle to reorder.
           </div>
         ) : (
           <DndContext
@@ -396,23 +569,40 @@ export function TemplateBlockEditor({
         >
           Preview
         </div>
-        <div
-          style={{
-            border: "1px solid var(--line)",
-            borderRadius: "var(--radius-md)",
-            padding: 16,
-            background: "#fff",
-            color: "#111",
-            minHeight: 120,
-            overflow: "auto",
-          }}
-          // The preview uses renderEmailHtml, which HTML-escapes interpolated values; only the
-          // author's OWN block markup is raw — this is their content previewing to themselves.
-          // eslint-disable-next-line react/no-danger
-          dangerouslySetInnerHTML={{ __html: previewHtml }}
-        />
+        {kind === "form" ? (
+          <div
+            style={{
+              border: "1px solid var(--line)",
+              borderRadius: "var(--radius-md)",
+              padding: 16,
+              background: "#fff",
+              color: "#111",
+              minHeight: 120,
+            }}
+          >
+            <FormPreview blocks={blocks} />
+          </div>
+        ) : (
+          <div
+            style={{
+              border: "1px solid var(--line)",
+              borderRadius: "var(--radius-md)",
+              padding: 16,
+              background: "#fff",
+              color: "#111",
+              minHeight: 120,
+              overflow: "auto",
+            }}
+            // renderEmailHtml HTML-escapes interpolated values; only the author's OWN block markup
+            // is raw — their content previewing to themselves.
+            // eslint-disable-next-line react/no-danger
+            dangerouslySetInnerHTML={{ __html: previewHtml }}
+          />
+        )}
         <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 6 }}>
-          ‹field› markers fill from the run's data when the email is sent.
+          {kind === "form"
+            ? "How the hosted form will look. Fields become the run's input."
+            : "‹field› markers fill from the run's data when the email is sent."}
         </div>
       </div>
     </div>

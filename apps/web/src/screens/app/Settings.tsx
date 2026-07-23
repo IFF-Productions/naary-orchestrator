@@ -29,7 +29,7 @@ const SECTIONS = [
   },
   {
     id: "templates",
-    label: "Email templates",
+    label: "Content templates",
     icon: "M4 5h16v4H4zM4 11h7v8H4zM13 11h7v8h-7z",
   },
   {
