@@ -6,8 +6,26 @@
  * request to a specific environment by overriding that header — `http()` spreads
  * `init.headers` after the ambient ones, so the override wins.
  */
+import type { TemplateBlock } from "@naary/dsl";
 import { http } from "../../../lib/api/http";
 import type { Variable } from "../../../lib/api";
+
+/** A Form/Email content template (docs/design/TEMPLATE-EDITOR.md), as the API returns it. */
+export interface ContentTemplate {
+  id: string;
+  kind: "email" | "form";
+  name: string;
+  subject: string | null;
+  blocks: TemplateBlock[];
+}
+
+/** Create/update payload — everything but the id + scope. */
+export interface ContentTemplateInput {
+  kind: "email" | "form";
+  name: string;
+  subject?: string | null;
+  blocks: TemplateBlock[];
+}
 
 function inEnv(envId: string): { headers: Record<string, string> } {
   return { headers: { "x-environment-id": envId } };
@@ -70,6 +88,46 @@ export const envScoped = {
   deleteGlobalSecret(name: string): Promise<void> {
     return http<void>(`/env-secrets/global/${encodeURIComponent(name)}`, {
       method: "DELETE",
+    });
+  },
+
+  // Form/Email content templates (docs/design/TEMPLATE-EDITOR.md) — env-scoped block content a
+  // sendEmail node renders. DISTINCT from the built-in workflow starter-templates (`/templates`).
+  /** All content templates in ONE environment. */
+  listTemplates(envId: string): Promise<ContentTemplate[]> {
+    return http<ContentTemplate[]>(`/content-templates`, inEnv(envId));
+  },
+  /** Create a template in ONE environment. */
+  createTemplate(
+    envId: string,
+    input: ContentTemplateInput,
+  ): Promise<ContentTemplate> {
+    return http<ContentTemplate>(`/content-templates`, {
+      method: "POST",
+      body: JSON.stringify(input),
+      ...inEnv(envId),
+    });
+  },
+  /** Update a template in ONE environment. */
+  updateTemplate(
+    envId: string,
+    id: string,
+    input: ContentTemplateInput,
+  ): Promise<ContentTemplate> {
+    return http<ContentTemplate>(
+      `/content-templates/${encodeURIComponent(id)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(input),
+        ...inEnv(envId),
+      },
+    );
+  },
+  /** Delete a template from ONE environment (idempotent). */
+  deleteTemplate(envId: string, id: string): Promise<void> {
+    return http<void>(`/content-templates/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      ...inEnv(envId),
     });
   },
 };
