@@ -71,6 +71,40 @@ describe("renderEmailHtml", () => {
     expect(html).toContain("<span>x</span>");
   });
 
+  it("rejects control/whitespace scheme obfuscation the browser would normalize (#587 review)", () => {
+    // Browsers strip tab/newline/leading-control from a URL before parsing the scheme, so these
+    // resolve to `javascript:` in the client even though the literal string isn't. The renderer
+    // must normalize the SAME way and reject them (a plain string match on "javascript:" would miss).
+    const payloads = [
+      "java\nscript:alert(1)",
+      "java\tscript:alert(1)",
+      "javascript:alert(1)",
+      "  javascript:alert(1)",
+      "JavaScript:alert(1)",
+    ];
+    for (const href of payloads) {
+      const html = renderEmailHtml(
+        [{ id: "1", type: "button", label: "go", href }],
+        {},
+      );
+      // No anchor emitted (rendered as a plain span), and no live javascript: URL survives.
+      expect(html.toLowerCase()).not.toContain("javascript:");
+      expect(html).not.toContain("<a ");
+      expect(html).toContain("<span>go</span>");
+    }
+  });
+
+  it("never throws on a circular ctx object — renders a safe marker (#587 review)", () => {
+    const circular: Record<string, unknown> = { a: 1 };
+    circular.self = circular; // JSON.stringify would throw
+    // Must not throw — email rendering has to be total.
+    const html = renderEmailHtml(
+      [{ id: "1", type: "text", html: "<p>{{ node }}</p>" }],
+      { node: circular },
+    );
+    expect(html).toContain("[unserializable]");
+  });
+
   it("preserves {{ $secrets.NAME }} verbatim for in-activity resolution (never rendered here)", () => {
     const html = renderEmailHtml(
       [{ id: "1", type: "text", html: "key: {{ $secrets.API_KEY }}" }],

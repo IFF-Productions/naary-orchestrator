@@ -52,7 +52,16 @@ export function escapeHtml(value: string): string {
 /** Coerce a resolved ctx value to a string (null/undefined → "", object → JSON). */
 function toStr(v: unknown): string {
   if (v == null) return "";
-  if (typeof v === "object") return JSON.stringify(v);
+  if (typeof v === "object") {
+    // Total by contract: JSON.stringify THROWS on a circular structure — a run's ctx can hold one
+    // (a self-referencing node output). Never break email rendering over it; fall back to a marker.
+    try {
+      return JSON.stringify(v) ?? "";
+    } catch {
+      return "[unserializable]";
+    }
+  }
+  // Primitives incl. bigint (typeof "bigint" → here, String(1n) = "1", no throw).
   return String(v);
 }
 
@@ -94,13 +103,18 @@ function renderRichHtml(html: string, ctx: Record<string, unknown>): string {
  *  `vbscript:`), then attribute-escape. Returns "" for a rejected/empty URL so the caller can drop
  *  the element. Relative URLs and http(s)/mailto pass. */
 function renderUrl(s: string, ctx: Record<string, unknown>): string {
-  const raw = interpolate(s, ctx, (v) => v).trim();
-  if (raw === "") return "";
-  if (/^[a-z0-9.+-]*\s*:/i.test(raw)) {
-    // has a scheme — allow only a safe set (case/space-insensitive at the start)
-    if (!/^\s*(https?|mailto):/i.test(raw)) return "";
-  }
-  return escapeHtml(raw);
+  const raw = interpolate(s, ctx, (v) => v);
+  // Browsers STRIP ASCII tab/newline from anywhere in a URL and ignore leading C0 controls/space
+  // when parsing the scheme — so `java\tscript:` or `\x01javascript:` would execute even though the
+  // literal string isn't `javascript:`. Normalize the SAME way (drop all C0 controls, trim) BEFORE
+  // the scheme gate, and emit the normalized value so the href can't be re-read differently than
+  // what we validated. (#587 review — control/whitespace scheme-obfuscation bypass.)
+  const url = raw.replace(/[\u0000-\u001f]+/g, "").trim();
+  if (url === "") return "";
+  // An explicit scheme is allowed only from a safe set; a relative/anchor URL (no scheme) passes.
+  const scheme = /^([a-z][a-z0-9.+-]*):/i.exec(url);
+  if (scheme && !/^(?:https?|mailto)$/i.test(scheme[1])) return "";
+  return escapeHtml(url);
 }
 
 /** Clamp a spacer height to a sane pixel range (author number, but keep the markup bounded). */
