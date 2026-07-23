@@ -4,7 +4,7 @@ import {
   type NestModule,
 } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
-import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
+import { ThrottlerModule } from "@nestjs/throttler";
 import { AuditModule } from "./audit/audit.module";
 import { AuthModule } from "./auth/auth.module";
 import { DbLifecycleService } from "./common/db-lifecycle.service";
@@ -27,6 +27,7 @@ import { CompaniesModule } from "./companies/companies.module";
 import { VariablesModule } from "./variables/variables.module";
 import { ContentTemplatesModule } from "./content-templates/content-templates.module";
 import { EnvSecretsModule } from "./env-secrets/env-secrets.module";
+import { ClientIpThrottlerGuard } from "./throttle/client-ip-throttler.guard";
 import { TurnstileConfigModule } from "./turnstile/turnstile-config.module";
 import { IntrospectModule } from "./introspect/introspect.module";
 import { EnvironmentsModule } from "./environments/environments.module";
@@ -83,7 +84,9 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
   ],
   controllers: [MetricsController],
   providers: [
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Key rate limits on the REAL client IP (behind nginx/cloudflared), not the proxy's — else the
+    // global limiter + per-route @Throttle on public form/chat collapse into one bucket (#596).
+    { provide: APP_GUARD, useClass: ClientIpThrottlerGuard },
     DbLifecycleService,
   ],
 })
