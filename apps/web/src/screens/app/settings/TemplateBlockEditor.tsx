@@ -378,9 +378,14 @@ function FormPreview({ blocks }: { blocks: TemplateBlock[] }) {
           }
           case "text":
             return (
-              // author's own content, previewing to themselves
+              // Render through renderEmailHtml, which allowlist-SANITIZES the author markup — a
+              // stored/authored `<script>`/`on*=` in a form template can't run in this preview
+              // (editing another user's stored template would otherwise be stored XSS).
               // eslint-disable-next-line react/no-danger
-              <div key={b.id} dangerouslySetInnerHTML={{ __html: b.html }} />
+              <div
+                key={b.id}
+                dangerouslySetInnerHTML={{ __html: renderEmailHtml([b], {}) }}
+              />
             );
           case "button":
             return (
