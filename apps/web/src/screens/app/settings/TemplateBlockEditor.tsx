@@ -655,7 +655,10 @@ export function TemplateBlockEditor({
               minHeight: 120,
             }}
           >
-            <FormPreview blocks={blocks} />
+            {/* Chipify like the email preview so a {{ token }} shows as ‹token› instead of resolving
+                to blank (a form has no run ctx). The PUBLIC form page renders raw — end users never
+                see chips. */}
+            <FormPreview blocks={previewBlocks(blocks)} />
           </div>
         ) : (
           // renderEmailHtml escapes interpolated values; the author's OWN block markup is raw, and a
