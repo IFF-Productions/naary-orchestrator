@@ -96,6 +96,11 @@ export {
   type ResolvedHash,
 } from "./signing";
 export { resolveSendEmail, type ResolvedSendEmail } from "./send-email";
+export {
+  type TemplateBlock,
+  renderEmailHtml,
+  escapeHtml,
+} from "./template-blocks";
 export { resolveRss, type ResolvedRss } from "./rss";
 export {
   resolveWebhookResponse,
