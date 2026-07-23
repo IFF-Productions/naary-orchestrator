@@ -412,6 +412,9 @@ export async function runGraph(
   return {
     status: state.status,
     ctx,
+    // The terminal node the walk ended on (see RunGraphResult.currentNodeId). On a clean
+    // completion this is the `end` passthrough; the run-detail view marks it done from here.
+    currentNodeId: state.currentNodeId,
     reply: state.webhookResponse
       ? (state.webhookResponse.body ?? null)
       : undefined,

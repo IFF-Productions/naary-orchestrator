@@ -5,6 +5,12 @@ import type { Citation, ExecutionStatus } from "@naary/contracts";
 export interface RunGraphResult {
   status: ExecutionStatus;
   ctx: Record<string, unknown>;
+  /** The node the run ENDED on (its terminal node — e.g. an `end` passthrough, or the node a
+   *  failed run died on). Carried in the RESULT so a COMPLETED run's detail view can mark that
+   *  terminal node "done" instead of "skipped": a live stateQuery isn't used on a closed run
+   *  (it would force a history replay), and an `end` node writes no ctx output, so without this
+   *  the view-model has nothing to attribute the final node to (bug: end node shows skipped). */
+  currentNodeId: string;
   /** The `respondToWebhook` body, if the graph set one. Normally consumed via the
    *  webhookResponseQuery (the ingress polls it), but a CHILD run can't be queried by its
    *  parent mid-flight, so the durable chat session reads the reply from here (design §2.1b,
