@@ -9,7 +9,12 @@
  * enforced, per-type coercion runs, and oversized values are rejected — so nothing an anonymous
  * caller sends reaches the interpreter unchecked.
  */
-import type { FormFieldDef, FormTriggerNodeConfig, GraphDef } from "@naary/dsl";
+import type {
+  FormFieldDef,
+  FormTriggerNodeConfig,
+  GraphDef,
+  TemplateBlock,
+} from "@naary/dsl";
 
 /** Public view of a form — safe to serve to an anonymous browser. Carries NO tenant/workflow ids. */
 export interface FormDefinition {
@@ -28,20 +33,66 @@ export const MAX_FIELD_LENGTH = 10_000;
  *  enough that a `type: "email"` field can't carry arbitrary multi-line junk. */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** The formTrigger entry node's referenced form-template id, if any (Slice 4b). Returns undefined
+ *  when the entry isn't a formTrigger or carries no `templateId` — the caller then serves inline
+ *  fields with no template lookup. Pure; the actual template load is I/O in the controller. */
+export function formTemplateId(graph: GraphDef): string | undefined {
+  const entry = graph.nodes.find((n) => n.id === graph.startNodeId);
+  if (!entry || entry.type !== "formTrigger") return undefined;
+  const cfg = (entry.config ?? {}) as Partial<FormTriggerNodeConfig>;
+  return typeof cfg.templateId === "string" && cfg.templateId
+    ? cfg.templateId
+    : undefined;
+}
+
+/** Project a form template's `field` blocks to the public FormFieldDef list (content blocks —
+ *  heading/text/image — are ignored; they'd render as author-controlled HTML to an anonymous
+ *  visitor, a separate sanitization concern deferred to a follow-up). The block model has no
+ *  `placeholder`, so it's simply absent from a template-sourced field. */
+function fieldsFromBlocks(blocks: TemplateBlock[]): FormFieldDef[] {
+  const out: FormFieldDef[] = [];
+  for (const b of blocks) {
+    if (b.type !== "field") continue;
+    out.push({
+      key: b.key,
+      label: b.label,
+      type: b.fieldType,
+      ...(b.required ? { required: true } : {}),
+      ...(b.fieldType === "select" && Array.isArray(b.options)
+        ? { options: b.options }
+        : {}),
+    });
+  }
+  return out;
+}
+
 /**
  * Read the public form definition from a graph. The graph's ENTRY node must be a `formTrigger`
  * (a form endpoint whose graph was later re-pointed at a webhook/other entry is not a form) —
  * returns null otherwise so the caller 404s. Sanitizes the served field list to the known keys
  * so no unexpected config rides out to the browser.
+ *
+ * `templateBlocks` (Slice 4b): the blocks of the node's referenced form template, loaded by the
+ * controller. When non-null the served fields come from its `field` blocks; when null (no
+ * reference, or a deleted/missing/non-form template) it falls back to the node's inline `fields`,
+ * mirroring how `sendEmail` falls back to its inline body. title/description/submitLabel always
+ * come from the node config (a form template carries none). Both the GET-definition and
+ * POST-submit routes call this so the served and validated field sets are always identical.
  */
 export function extractFormDefinition(
   graph: GraphDef,
   formId: string,
+  templateBlocks?: TemplateBlock[] | null,
 ): FormDefinition | null {
   const entry = graph.nodes.find((n) => n.id === graph.startNodeId);
   if (!entry || entry.type !== "formTrigger") return null;
   const cfg = (entry.config ?? {}) as Partial<FormTriggerNodeConfig>;
-  const fields: FormFieldDef[] = Array.isArray(cfg.fields) ? cfg.fields : [];
+  const fields: FormFieldDef[] =
+    templateBlocks != null
+      ? fieldsFromBlocks(templateBlocks)
+      : Array.isArray(cfg.fields)
+        ? cfg.fields
+        : [];
   return {
     formId,
     ...(cfg.title ? { title: cfg.title } : {}),

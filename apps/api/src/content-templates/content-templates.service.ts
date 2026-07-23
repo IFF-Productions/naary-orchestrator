@@ -75,6 +75,24 @@ export class ContentTemplatesService {
     return toView(row);
   }
 
+  /**
+   * Load a FORM template's blocks by id, scoped to (tenant, env). Returns null when the template
+   * is missing/deleted or is an email template — the form ingress then falls back to the node's
+   * inline fields (mirrors the worker `loadTemplate` null-on-missing contract). Non-throwing so a
+   * public form never 404s just because its referenced template was removed.
+   */
+  async loadFormBlocks(
+    tenantId: string,
+    environmentId: string,
+    id: string,
+  ): Promise<TemplateBlock[] | null> {
+    const row = await getPrisma().template.findFirst({
+      where: { id, tenantId, environmentId, kind: "form" },
+      select: { blocks: true },
+    });
+    return row ? (row.blocks as TemplateBlock[]) : null;
+  }
+
   async create(
     tenantId: string,
     environmentId: string,
