@@ -378,7 +378,8 @@ function FormPreview({ blocks }: { blocks: TemplateBlock[] }) {
         // preview and the hosted form can't diverge). Only `field` blocks differ: the preview shows
         // a disabled control, the public page a live input.
         if (b.type !== "field") {
-          return <TemplateContentBlock key={b.id} block={b} />;
+          // `preview` so a button/link block can't navigate out of the editor when clicked.
+          return <TemplateContentBlock key={b.id} block={b} preview />;
         }
         return (
           <label
@@ -558,6 +559,8 @@ export function TemplateBlockEditor({
               color: "#111",
               minHeight: 120,
               overflow: "auto",
+              // A preview: don't let a rendered <a> navigate the author out of the editor.
+              pointerEvents: "none",
             }}
             html={previewHtml}
           />

@@ -8,10 +8,20 @@
 import { renderEmailHtml, type TemplateBlock } from "@naary/dsl";
 import { SafeHtml } from "./SafeHtml";
 
-export function TemplateContentBlock({ block }: { block: TemplateBlock }) {
+export function TemplateContentBlock({
+  block,
+  preview,
+}: {
+  block: TemplateBlock;
+  /** In an editor PREVIEW, disable pointer interaction so a `button`/link block (rendered as a live
+   *  `<a href>`) can't navigate the author away from the editor. The public form page omits this so
+   *  its links work. */
+  preview?: boolean;
+}) {
   // Fields are rendered by the caller (interactive), not as static content.
   if (block.type === "field") return null;
   // renderEmailHtml escapes interpolated {{ }} values (empty here — a form has no run ctx) and
   // scheme-gates href/src; SafeHtml then strips any author-supplied scripts/handlers.
-  return <SafeHtml html={renderEmailHtml([block], {})} />;
+  const html = <SafeHtml html={renderEmailHtml([block], {})} />;
+  return preview ? <div style={{ pointerEvents: "none" }}>{html}</div> : html;
 }
