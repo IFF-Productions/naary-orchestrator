@@ -16,6 +16,7 @@ import { TemplateBlockEditor } from "./TemplateBlockEditor";
 
 interface Draft {
   id: string | null;
+  kind: "email" | "form";
   name: string;
   subject: string;
   blocks: TemplateBlock[];
@@ -75,9 +76,10 @@ export function TemplatesSection({ envs }: { envs: Environment[] }) {
     setError(null);
     try {
       const input = {
-        kind: "email" as const,
+        kind: draft.kind,
         name,
-        subject: draft.subject.trim() || null,
+        // A subject is email-only; a form has no subject.
+        subject: draft.kind === "email" ? draft.subject.trim() || null : null,
         blocks: draft.blocks,
       };
       if (draft.id) await envScoped.updateTemplate(envId, draft.id, input);
@@ -107,7 +109,7 @@ export function TemplatesSection({ envs }: { envs: Environment[] }) {
   return (
     <div style={{ animation: "naaryFadeUp .25s ease" }}>
       <SectionHeader
-        title="Email templates"
+        title="Content templates"
         action={
           !draft && (
             <Button
@@ -115,7 +117,13 @@ export function TemplatesSection({ envs }: { envs: Environment[] }) {
               icon="plus"
               disabled={!envId}
               onClick={() =>
-                setDraft({ id: null, name: "", subject: "", blocks: [] })
+                setDraft({
+                  id: null,
+                  kind: "email",
+                  name: "",
+                  subject: "",
+                  blocks: [],
+                })
               }
             >
               New template
@@ -124,9 +132,10 @@ export function TemplatesSection({ envs }: { envs: Environment[] }) {
         }
       />
       <SectionIntro>
-        Reusable email bodies built from blocks — reference one from a{" "}
-        <strong>Send email</strong> node to send readable, on-brand email
-        instead of a raw data dump. Scoped per environment.
+        Reusable content built from blocks in one editor — an{" "}
+        <strong>email</strong> body a <strong>Send email</strong> node renders
+        (readable email, not a data dump), or a <strong>form</strong> a{" "}
+        <strong>Form trigger</strong> hosts. Scoped per environment.
       </SectionIntro>
 
       {error && <ErrorLine>{error}</ErrorLine>}
@@ -153,6 +162,22 @@ export function TemplatesSection({ envs }: { envs: Environment[] }) {
 
       {draft ? (
         <div style={{ ...panelStyle, padding: 16 }}>
+          {/* Kind toggle (new templates only — a kind can't switch once saved). */}
+          {!draft.id && (
+            <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+              {(["email", "form"] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  className={`btn btn-sm ${draft.kind === k ? "btn-secondary" : "btn-ghost"}`}
+                  onClick={() => setDraft({ ...draft, kind: k })}
+                  style={{ textTransform: "capitalize" }}
+                >
+                  {k === "email" ? "Email" : "Form"}
+                </button>
+              ))}
+            </div>
+          )}
           <div
             style={{
               display: "flex",
@@ -168,18 +193,21 @@ export function TemplatesSection({ envs }: { envs: Environment[] }) {
                 placeholder="Template name (e.g. Order shipped)"
               />
             </div>
-            <div style={{ flex: 1, minWidth: 160 }}>
-              <TextInput
-                value={draft.subject}
-                onChange={(e) =>
-                  setDraft({ ...draft, subject: e.target.value })
-                }
-                placeholder="Subject — {{ order.id }} allowed"
-              />
-            </div>
+            {draft.kind === "email" && (
+              <div style={{ flex: 1, minWidth: 160 }}>
+                <TextInput
+                  value={draft.subject}
+                  onChange={(e) =>
+                    setDraft({ ...draft, subject: e.target.value })
+                  }
+                  placeholder="Subject — {{ order.id }} allowed"
+                />
+              </div>
+            )}
           </div>
 
           <TemplateBlockEditor
+            kind={draft.kind}
             blocks={draft.blocks}
             onChange={(blocks) => setDraft({ ...draft, blocks })}
           />
@@ -237,6 +265,7 @@ export function TemplatesSection({ envs }: { envs: Environment[] }) {
                   onClick={() =>
                     setDraft({
                       id: t.id,
+                      kind: t.kind,
                       name: t.name,
                       subject: t.subject ?? "",
                       blocks: t.blocks,
