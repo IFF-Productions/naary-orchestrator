@@ -1,6 +1,7 @@
 import * as Sentry from "@sentry/react";
 import { createBrowserRouter, Navigate, Outlet } from "react-router-dom";
 import { AppShell } from "./app/AppShell";
+import { RouteError } from "./app/RouteError";
 import { RequireBuilder } from "./app/RequireBuilder";
 import { RequireAuth } from "./auth/RequireAuth";
 import { LoadingBlock } from "./components";
@@ -36,6 +37,9 @@ export const router = createRouter([
     // to render instead of warning. Renders its matched child via <Outlet/>.
     element: <Outlet />,
     HydrateFallback: RootHydrateFallback,
+    // Catches lazy-chunk load failures (a stale client after a new deploy → reload for fresh
+    // assets) and any other route render/loader error, instead of React Router's dev message.
+    errorElement: <RouteError />,
     children: [
       { path: "/", element: <Navigate to="/app" replace /> },
       {
