@@ -512,6 +512,7 @@ model Environment {
   tenantCredentials   TenantCredential[]
   variables           Variable[]
   templates            Template[]
+  turnstileConfigs     TurnstileConfig[]
   notificationChannels NotificationChannel[]
   pinnedData           PinnedData[]
   errorHandlers        ErrorHandler[]
@@ -704,6 +705,25 @@ model Template {
   environment Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
 
   @@unique([tenantId, environmentId, name])
+  @@index([tenantId, environmentId])
+}
+
+// Cloudflare Turnstile bot-protection config for a tenant's public form/chat pages
+// (docs/design/TURNSTILE-BOT-PROTECTION.md). Env-scoped like Variable. Holds only the PUBLIC site
+// key + an enable toggle; the SECRET key lives encrypted in the SecretStore (TenantCredential,
+// `turnstile:secret`), never here. `enabled` is a distinct toggle so a tenant can pause the gate
+// without clearing keys (Slice 2 ingress enforces when enabled AND both keys present).
+model TurnstileConfig {
+  tenantId      String
+  environmentId String
+  siteKey       String
+  enabled       Boolean  @default(true)
+  updatedAt     DateTime @default(now()) @updatedAt
+
+  // Restrict (like Variable): an env can't be deleted out from under its config.
+  environment Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
+
+  @@id([tenantId, environmentId])
   @@index([tenantId, environmentId])
 }
 

@@ -130,4 +130,43 @@ export const envScoped = {
       ...inEnv(envId),
     });
   },
+
+  // Cloudflare Turnstile bot-protection config (docs/design/TURNSTILE-BOT-PROTECTION.md) — env-scoped.
+  // The secret key is write-only: GET returns siteKey + enabled + hasSecret, never the secret.
+  /** The env's Turnstile config, or null if none set. */
+  getTurnstile(envId: string): Promise<TurnstileConfig | null> {
+    return http<TurnstileConfig | null>(`/turnstile-config`, inEnv(envId));
+  },
+  /** Create/update the env's Turnstile config (secret key omitted ⇒ keep the existing one). */
+  setTurnstile(
+    envId: string,
+    input: TurnstileConfigInput,
+  ): Promise<TurnstileConfig> {
+    return http<TurnstileConfig>(`/turnstile-config`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+      ...inEnv(envId),
+    });
+  },
+  /** Remove the env's Turnstile config + its stored secret (idempotent). */
+  deleteTurnstile(envId: string): Promise<void> {
+    return http<void>(`/turnstile-config`, {
+      method: "DELETE",
+      ...inEnv(envId),
+    });
+  },
 };
+
+/** Public Turnstile config as the API returns it — never the secret key. */
+export interface TurnstileConfig {
+  siteKey: string;
+  enabled: boolean;
+  hasSecret: boolean;
+}
+
+/** Save payload — site key required; secret key write-only (omit to keep the existing one). */
+export interface TurnstileConfigInput {
+  siteKey: string;
+  secretKey?: string;
+  enabled: boolean;
+}

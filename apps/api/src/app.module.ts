@@ -27,6 +27,7 @@ import { CompaniesModule } from "./companies/companies.module";
 import { VariablesModule } from "./variables/variables.module";
 import { ContentTemplatesModule } from "./content-templates/content-templates.module";
 import { EnvSecretsModule } from "./env-secrets/env-secrets.module";
+import { TurnstileConfigModule } from "./turnstile/turnstile-config.module";
 import { IntrospectModule } from "./introspect/introspect.module";
 import { EnvironmentsModule } from "./environments/environments.module";
 import { NotificationsModule } from "./notifications/notifications.module";
@@ -66,6 +67,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     VariablesModule,
     ContentTemplatesModule,
     EnvSecretsModule,
+    TurnstileConfigModule,
     IntrospectModule,
     SettingsModule,
     PreferencesModule,
