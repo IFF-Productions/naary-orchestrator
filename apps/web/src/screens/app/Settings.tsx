@@ -13,6 +13,7 @@ import {
 import { ExperienceSection } from "./settings/ExperienceSection";
 import { NotificationsSection } from "./settings/NotificationsSection";
 import { SecretsSection } from "./settings/SecretsSection";
+import { TemplatesSection } from "./settings/TemplatesSection";
 import { VariablesSection } from "./settings/VariablesSection";
 
 const SECTIONS = [
@@ -25,6 +26,11 @@ const SECTIONS = [
     id: "variables",
     label: "Variables",
     icon: "M8 3H7a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-1",
+  },
+  {
+    id: "templates",
+    label: "Email templates",
+    icon: "M4 5h16v4H4zM4 11h7v8H4zM13 11h7v8h-7z",
   },
   {
     id: "notifications",
@@ -206,6 +212,7 @@ export function Settings() {
         <div key={section} className="naary-set-fade">
           {section === "secrets" && <SecretsSection envs={envs} />}
           {section === "variables" && <VariablesSection envs={envs} />}
+          {section === "templates" && <TemplatesSection envs={envs} />}
           {section === "notifications" && (
             <NotificationsSection tenantId={tenantId} envs={envs} />
           )}
