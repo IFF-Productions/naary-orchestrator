@@ -52,7 +52,12 @@ export function TemplatesSection({ envs }: { envs: Environment[] }) {
         setLoaded(true);
         setError(null);
       } catch (e) {
-        if (live) setError(friendlyError(e, "Could not load templates."));
+        if (live) {
+          // Leave the "Loading…" state even on error, and don't keep a stale list under the error.
+          setTemplates([]);
+          setLoaded(true);
+          setError(friendlyError(e, "Could not load templates."));
+        }
       }
     })();
     return () => {

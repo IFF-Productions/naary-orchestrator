@@ -69,7 +69,11 @@ function newBlock(type: TemplateBlock["type"]): TemplateBlock {
 /** Replace `{{ path }}` with a visible ‹path› marker so placeholders show in the preview instead of
  *  resolving to empty (there's no run ctx at authoring time). */
 function chip(s: string): string {
-  return s.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_m, p) => `‹${p.trim()}›`);
+  // Mirror the renderer's token grammar: an escaped `\{{` is a LITERAL `{{` (not a token), so it
+  // must show as `{{`, not `\‹…›`. Same EMBED_RE shape the runtime resolves with (#589 review).
+  return s.replace(/\\\{\{|\{\{\s*([^{}]+?)\s*\}\}/g, (m, p?: string) =>
+    m === "\\{{" ? "{{" : `‹${(p ?? "").trim()}›`,
+  );
 }
 
 /** Blocks with `{{ }}` chipified in their string fields — for the preview only. */
