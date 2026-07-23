@@ -23,6 +23,15 @@ export interface FormDefinition {
   description?: string;
   submitLabel?: string;
   fields: FormFieldDef[];
+  /**
+   * The template's ordered blocks, present ONLY when a form template drives this form (Slice 4c).
+   * Lets the public page render content blocks (heading/text/image/…) INTERLEAVED with the input
+   * fields, matching what the block editor previews — instead of fields-only. Each block is
+   * re-projected to its known union shape (see `projectPublicBlock`) so no unexpected/authoring key
+   * rides out to the browser. `fields` stays authoritative for submission validation; the field
+   * blocks here and `fields` are derived from the SAME array, so they can't drift.
+   */
+  blocks?: TemplateBlock[];
 }
 
 /** Cap on a single submitted value's length — an anonymous caller can't push a megabyte string
@@ -45,10 +54,10 @@ export function formTemplateId(graph: GraphDef): string | undefined {
     : undefined;
 }
 
-/** Project a form template's `field` blocks to the public FormFieldDef list (content blocks —
- *  heading/text/image — are ignored; they'd render as author-controlled HTML to an anonymous
- *  visitor, a separate sanitization concern deferred to a follow-up). The block model has no
- *  `placeholder`, so it's simply absent from a template-sourced field. */
+/** Project a form template's `field` blocks to the public FormFieldDef list — the authoritative set
+ *  the POST route validates against. Content blocks are skipped here (they carry no submittable
+ *  value); the public page still RENDERS them via the served `blocks` array (Slice 4c). The block
+ *  model has no `placeholder`, so it's simply absent from a template-sourced field. */
 function fieldsFromBlocks(blocks: TemplateBlock[]): FormFieldDef[] {
   const out: FormFieldDef[] = [];
   for (const b of blocks) {
@@ -64,6 +73,46 @@ function fieldsFromBlocks(blocks: TemplateBlock[]): FormFieldDef[] {
     });
   }
   return out;
+}
+
+/**
+ * Re-project one template block to only the known keys of its union variant — a tight allowlist so
+ * no authoring/unknown key ever rides out to the anonymous browser (mirrors the field re-projection;
+ * stored blocks are already zod-validated on write, this is defense-in-depth). Field blocks are
+ * included so the public page can render inputs INTERLEAVED with content in the authored order.
+ */
+function projectPublicBlock(b: TemplateBlock): TemplateBlock {
+  switch (b.type) {
+    case "heading":
+      return { id: b.id, type: "heading", level: b.level, text: b.text };
+    case "text":
+      return { id: b.id, type: "text", html: b.html };
+    case "image":
+      return {
+        id: b.id,
+        type: "image",
+        src: b.src,
+        ...(b.alt ? { alt: b.alt } : {}),
+      };
+    case "button":
+      return { id: b.id, type: "button", label: b.label, href: b.href };
+    case "divider":
+      return { id: b.id, type: "divider" };
+    case "spacer":
+      return { id: b.id, type: "spacer", size: b.size };
+    case "field":
+      return {
+        id: b.id,
+        type: "field",
+        key: b.key,
+        label: b.label,
+        fieldType: b.fieldType,
+        required: b.required,
+        ...(b.fieldType === "select" && Array.isArray(b.options)
+          ? { options: b.options }
+          : {}),
+      };
+  }
 }
 
 /**
@@ -109,6 +158,11 @@ export function extractFormDefinition(
         ? { options: f.options }
         : {}),
     })),
+    // A template drives this form → serve its ordered blocks (projected) so the page can render
+    // content interleaved with fields. Inline forms carry no blocks (the flat `fields` render).
+    ...(templateBlocks != null
+      ? { blocks: templateBlocks.map(projectPublicBlock) }
+      : {}),
   };
 }
 

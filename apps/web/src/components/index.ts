@@ -40,3 +40,4 @@ export {
 export { Card, SectionLabel, Logo } from "./layout";
 export { Spinner, LoadingBlock } from "./Spinner";
 export { SafeHtml, sanitizeHtml } from "./SafeHtml";
+export { TemplateContentBlock } from "./TemplateContentBlock";

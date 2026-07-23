@@ -1,5 +1,7 @@
+import type { TemplateBlock } from "@naary/dsl";
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { TemplateContentBlock } from "../components";
 import { api, type FormDefinition, type FormFieldView } from "../lib/api";
 import {
   ButtonSpinner,
@@ -210,14 +212,32 @@ export function FormPage() {
               }}
               style={{ padding: "22px 28px" }}
             >
-              {def.fields.map((f) => (
-                <FormField
-                  key={f.key}
-                  field={f}
-                  value={values[f.key] ?? ""}
-                  onChange={(v) => set(f.key, v)}
-                />
-              ))}
+              {/* A template drives this form → render its blocks in the authored order (content
+                  interleaved with inputs), matching the block editor's preview. Otherwise the flat
+                  field list (an inline formTrigger form). */}
+              {def.blocks
+                ? def.blocks.map((b) =>
+                    b.type === "field" ? (
+                      <FormField
+                        key={b.id}
+                        field={fieldViewFromBlock(b)}
+                        value={values[b.key] ?? ""}
+                        onChange={(v) => set(b.key, v)}
+                      />
+                    ) : (
+                      <div key={b.id} style={{ marginBottom: 14 }}>
+                        <TemplateContentBlock block={b} />
+                      </div>
+                    ),
+                  )
+                : def.fields.map((f) => (
+                    <FormField
+                      key={f.key}
+                      field={f}
+                      value={values[f.key] ?? ""}
+                      onChange={(v) => set(f.key, v)}
+                    />
+                  ))}
 
               {error && (
                 <div
@@ -263,6 +283,20 @@ export function FormPage() {
       </div>
     </PublicFrame>
   );
+}
+
+/** Map a template `field` block to the FormFieldView the renderer + submit path already use. The
+ *  block model has no `placeholder`, so it's simply absent. Narrowed to `field` by the caller. */
+function fieldViewFromBlock(
+  b: Extract<TemplateBlock, { type: "field" }>,
+): FormFieldView {
+  return {
+    key: b.key,
+    label: b.label,
+    type: b.fieldType,
+    ...(b.required ? { required: true } : {}),
+    ...(b.fieldType === "select" && b.options ? { options: b.options } : {}),
+  };
 }
 
 const fieldLabelStyle: React.CSSProperties = {

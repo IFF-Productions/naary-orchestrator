@@ -21,7 +21,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { renderEmailHtml, type TemplateBlock } from "@naary/dsl";
 import { useMemo } from "react";
-import { Icon, SafeHtml } from "../../../components";
+import { Icon, SafeHtml, TemplateContentBlock } from "../../../components";
 
 type PaletteItem = { type: TemplateBlock["type"]; label: string; icon: string };
 
@@ -374,70 +374,39 @@ function FormPreview({ blocks }: { blocks: TemplateBlock[] }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {blocks.map((b) => {
-        switch (b.type) {
-          case "heading": {
-            const Tag = `h${b.level >= 1 && b.level <= 3 ? b.level : 2}` as
-              "h1" | "h2" | "h3";
-            return <Tag key={b.id}>{b.text}</Tag>;
-          }
-          case "text":
-            // renderEmailHtml escapes interpolated {{ }} values but NOT the author's own markup, and
-            // env-scoped templates are shared across workspace users — so SafeHtml sanitizes the
-            // author HTML (DOMPurify) before rendering, or a stored `<img onerror=…>` runs in a
-            // co-worker's browser when they open the template.
-            return <SafeHtml key={b.id} html={renderEmailHtml([b], {})} />;
-          case "button":
-            return (
-              <button key={b.id} type="button" disabled style={previewInput}>
-                {b.label}
-              </button>
-            );
-          case "image":
-            return (
-              <img
-                key={b.id}
-                src={b.src}
-                alt={b.alt ?? ""}
-                style={{ maxWidth: "100%" }}
-              />
-            );
-          case "divider":
-            return <hr key={b.id} />;
-          case "spacer":
-            return (
-              <div
-                key={b.id}
-                style={{ height: Math.max(0, Math.min(200, b.size)) }}
-              />
-            );
-          case "field":
-            return (
-              <label
-                key={b.id}
-                style={{ display: "flex", flexDirection: "column", gap: 4 }}
-              >
-                <span style={{ fontSize: 12.5, fontWeight: 600 }}>
-                  {b.label}
-                  {b.required && <span style={{ color: "#c00" }}> *</span>}
-                </span>
-                {b.fieldType === "textarea" ? (
-                  <textarea disabled rows={3} style={previewInput} />
-                ) : b.fieldType === "select" ? (
-                  <select disabled style={previewInput}>
-                    {(b.options ?? []).map((o) => (
-                      <option key={o}>{o}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    disabled
-                    type={b.fieldType === "number" ? "number" : b.fieldType}
-                    style={previewInput}
-                  />
-                )}
-              </label>
-            );
+        // Content blocks go through the SHARED renderer (same as the public form page — so the
+        // preview and the hosted form can't diverge). Only `field` blocks differ: the preview shows
+        // a disabled control, the public page a live input.
+        if (b.type !== "field") {
+          // `preview` so a button/link block can't navigate out of the editor when clicked.
+          return <TemplateContentBlock key={b.id} block={b} preview />;
         }
+        return (
+          <label
+            key={b.id}
+            style={{ display: "flex", flexDirection: "column", gap: 4 }}
+          >
+            <span style={{ fontSize: 12.5, fontWeight: 600 }}>
+              {b.label}
+              {b.required && <span style={{ color: "#c00" }}> *</span>}
+            </span>
+            {b.fieldType === "textarea" ? (
+              <textarea disabled rows={3} style={previewInput} />
+            ) : b.fieldType === "select" ? (
+              <select disabled style={previewInput}>
+                {(b.options ?? []).map((o) => (
+                  <option key={o}>{o}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                disabled
+                type={b.fieldType === "number" ? "number" : b.fieldType}
+                style={previewInput}
+              />
+            )}
+          </label>
+        );
       })}
     </div>
   );
@@ -590,6 +559,8 @@ export function TemplateBlockEditor({
               color: "#111",
               minHeight: 120,
               overflow: "auto",
+              // A preview: don't let a rendered <a> navigate the author out of the editor.
+              pointerEvents: "none",
             }}
             html={previewHtml}
           />
