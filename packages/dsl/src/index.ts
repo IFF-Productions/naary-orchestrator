@@ -100,6 +100,8 @@ export {
   type TemplateBlock,
   renderEmailHtml,
   escapeHtml,
+  templateBlockSchema,
+  templateBlocksSchema,
 } from "./template-blocks";
 export { resolveRss, type ResolvedRss } from "./rss";
 export {

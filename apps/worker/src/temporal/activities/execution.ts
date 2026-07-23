@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { ApplicationFailure } from "@temporalio/activity";
 import { canonicalize } from "@naary/dsl";
-import type { GraphDef } from "@naary/dsl";
+import type { GraphDef, TemplateBlock } from "@naary/dsl";
 import { getDefaultEnvironmentId, getPrisma } from "@naary/db";
 import { getBudget } from "@naary/usage";
 
@@ -57,6 +57,24 @@ export async function loadVariables(meta: {
   const out: Record<string, string> = {};
   for (const r of rows) out[r.key] = r.value;
   return out;
+}
+
+/** Load a content template's subject + blocks by id, scoped to (tenant, env) so a run can only
+ *  render its own workspace's templates (docs/design/TEMPLATE-EDITOR.md). Returns null when the
+ *  template was deleted/renamed away — the sendEmail handler then falls back to the node's inline
+ *  html/text. Read-only (idempotent), so its proxy can retry. The blocks were validated on write. */
+export async function loadTemplate(
+  templateId: string,
+  meta: { tenantId: string; environmentId?: string },
+): Promise<{ subject: string | null; blocks: TemplateBlock[] } | null> {
+  const environmentId =
+    meta.environmentId ?? (await getDefaultEnvironmentId(meta.tenantId));
+  const row = await getPrisma().template.findFirst({
+    where: { id: templateId, tenantId: meta.tenantId, environmentId },
+    select: { subject: true, blocks: true },
+  });
+  if (!row) return null;
+  return { subject: row.subject, blocks: row.blocks as TemplateBlock[] };
 }
 
 /** Statuses that end a run — the terminal push also stamps `finishedAt` (Slice 2). */

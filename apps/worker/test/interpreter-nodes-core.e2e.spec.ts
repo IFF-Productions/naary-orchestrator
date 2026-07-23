@@ -551,6 +551,70 @@ describe("runGraph interpreter — per-node behavior: data, http, sql, sub-workf
     });
   });
 
+  it("sendEmail with templateId: renders the loaded blocks against ctx (readable html, not a dump)", async () => {
+    emailCalls.length = 0;
+    // The referenced template's blocks are loaded in-activity (mocked) and rendered by the handler.
+    harnessState.loadTemplateResult = {
+      subject: "Hi {{ trigger.name }}",
+      blocks: [
+        {
+          id: "h",
+          type: "heading",
+          level: 1,
+          text: "Order {{ trigger.order }}",
+        },
+        { id: "t", type: "text", html: "<p>Thanks, {{ trigger.name }}.</p>" },
+      ],
+    };
+    const templateGraph: GraphDef = {
+      startNodeId: "trigger",
+      nodes: [
+        { id: "trigger", type: "webhookTrigger" },
+        {
+          id: "notify",
+          type: "sendEmail",
+          config: {
+            connectionId: "smtp-1",
+            subject: "INLINE",
+            text: "INLINE BODY",
+            templateId: "tmpl-1",
+            fieldBindings: { to: { from: "trigger", path: "email" } },
+          },
+        },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "trigger", to: "notify" },
+        { from: "notify", to: "end" },
+      ],
+    };
+    const worker = await makeWorker(env);
+    try {
+      await worker.runUntil(async () => {
+        const handle = await env.client.workflow.start(runGraph, {
+          args: [
+            templateGraph,
+            { email: "a@b.co", name: "Ada", order: 42 },
+            { tenantId: "t-email" },
+          ],
+          taskQueue: TASK_QUEUE,
+          workflowId: "e2e-email-template",
+        });
+        const result = await handle.result();
+        expect(result.status).toBe("completed");
+        const sent = emailCalls[0];
+        // the template subject + body override the inline ones, rendered against ctx
+        expect(sent.subject).toBe("Hi Ada");
+        expect(sent.html).toContain("<h1>Order 42</h1>");
+        expect(sent.html).toContain("<p>Thanks, Ada.</p>");
+        // the inline plain-text body is dropped — the template html IS the body
+        expect(sent.text).toBeUndefined();
+      });
+    } finally {
+      harnessState.loadTemplateResult = null; // don't leak into other specs
+    }
+  });
+
   it("totp: generates a code from the signing connection (seed + clock in-activity)", async () => {
     totpCalls.length = 0;
     const worker = await makeWorker(env);

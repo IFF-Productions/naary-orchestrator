@@ -46,6 +46,7 @@ export type { AgentMeta } from "./activities/shared";
 export {
   recordExecution,
   loadVariables,
+  loadTemplate,
   setExecutionStatus,
   refreshBudget,
   loadChatHistory,

@@ -20,12 +20,17 @@ import type * as activities from "../src/temporal/activities";
 // an ESM import binding is illegal, so they hang off this one exported object.)
 export const harnessState: {
   loadVariablesResult: Record<string, string>;
+  loadTemplateResult: {
+    subject: string | null;
+    blocks: import("@naary/dsl").TemplateBlock[];
+  } | null;
   pollChanged: boolean;
   pauseAgentFailures: number;
   refreshBudgetResult: activities.BudgetSnapshot | null;
   httpResponse: activities.HttpRequestResult;
 } = {
   loadVariablesResult: { slackChannel: "#alerts" },
+  loadTemplateResult: null,
   pollChanged: true,
   pauseAgentFailures: 0,
   refreshBudgetResult: null,
@@ -318,7 +323,12 @@ const mockActivities = {
     meta: activities.PollMeta,
   ): Promise<activities.PollResult> => {
     pollCalls.push(meta);
-    return { status: "ok", changed: harnessState.pollChanged, body: { v: 1 }, costUsd: 0 };
+    return {
+      status: "ok",
+      changed: harnessState.pollChanged,
+      body: { v: 1 },
+      costUsd: 0,
+    };
   },
   sendNotification: async (
     input: activities.NotificationInput,
@@ -406,6 +416,15 @@ const mockActivities = {
     loadVariablesCalls.push(meta);
     return harnessState.loadVariablesResult;
   },
+  // Content templates: return the template blocks a sendEmail node renders (null = deleted → the
+  // handler falls back to the inline body). Default null, so specs not using templates are unaffected.
+  loadTemplate: async (
+    _templateId: string,
+    _meta: { tenantId: string; environmentId?: string },
+  ): Promise<{
+    subject: string | null;
+    blocks: import("@naary/dsl").TemplateBlock[];
+  } | null> => harnessState.loadTemplateResult,
   // Items model A3: the batched per-item map. Echo each item's input so the test can prove the
   // interpreter passed the CURRENT ITEM per iteration (not the run input N times).
   mapNode: async (

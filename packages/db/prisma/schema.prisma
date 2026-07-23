@@ -511,6 +511,7 @@ model Environment {
   connections         Connection[]
   tenantCredentials   TenantCredential[]
   variables           Variable[]
+  templates            Template[]
   notificationChannels NotificationChannel[]
   pinnedData           PinnedData[]
   errorHandlers        ErrorHandler[]
@@ -681,6 +682,28 @@ model Variable {
   environment Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
 
   @@id([tenantId, environmentId, key])
+  @@index([tenantId, environmentId])
+}
+
+// A reusable Form/Email template (docs/design/TEMPLATE-EDITOR.md). `blocks` is a TemplateBlock[]
+// (JSON) authored in the block editor; the SAME array renders to an email (content blocks) or
+// drives a form (field blocks). Env-scoped like Variable — a sandbox and a prod template are
+// separate rows. NOT a secret (non-secret copy; `{{ $secrets.X }}` still resolves in-activity).
+model Template {
+  id            String   @id @default(cuid())
+  tenantId      String
+  environmentId String
+  kind          String // "email" | "form"
+  name          String
+  subject       String? // email only (also templated with {{ }})
+  blocks        Json // TemplateBlock[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @default(now()) @updatedAt
+
+  // Restrict (like Variable): an env can't be deleted out from under its templates.
+  environment Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, environmentId, name])
   @@index([tenantId, environmentId])
 }
 

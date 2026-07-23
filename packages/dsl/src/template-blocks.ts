@@ -12,6 +12,7 @@
  * with context-aware escaping: HTML-escape in text/rich positions, and scheme-check +
  * attribute-escape for `href`/`src`.
  */
+import { z } from "zod";
 import { getByPath } from "./mcp-args";
 import { isSecretRef } from "./template";
 
@@ -34,6 +35,44 @@ export type TemplateBlock =
       required: boolean;
       options?: string[];
     };
+
+/** Runtime validator for a block — the API validates `Template.blocks` on save against this, so a
+ *  stored template can never carry a malformed block the renderer would choke on. */
+export const templateBlockSchema = z.discriminatedUnion("type", [
+  z.object({
+    id: z.string(),
+    type: z.literal("heading"),
+    level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    text: z.string(),
+  }),
+  z.object({ id: z.string(), type: z.literal("text"), html: z.string() }),
+  z.object({
+    id: z.string(),
+    type: z.literal("image"),
+    src: z.string(),
+    alt: z.string().optional(),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal("button"),
+    label: z.string(),
+    href: z.string(),
+  }),
+  z.object({ id: z.string(), type: z.literal("divider") }),
+  z.object({ id: z.string(), type: z.literal("spacer"), size: z.number() }),
+  z.object({
+    id: z.string(),
+    type: z.literal("field"),
+    key: z.string(),
+    label: z.string(),
+    fieldType: z.enum(["text", "textarea", "number", "email", "select"]),
+    required: z.boolean(),
+    options: z.array(z.string()).optional(),
+  }),
+]);
+
+/** `Template.blocks` — an ordered array of validated blocks. */
+export const templateBlocksSchema = z.array(templateBlockSchema);
 
 /** `{{ path }}` token OR an escaped literal `\{{` — the SAME shape the runtime resolves with, so a
  *  template can't render differently than it authors. Fresh instance per use (owns its lastIndex). */

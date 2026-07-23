@@ -575,6 +575,11 @@ const CONFIG_SCHEMAS = {
     subject: z.string().optional(),
     text: z.string().optional(),
     html: z.string().optional(),
+    // A reusable email Template (docs/design/TEMPLATE-EDITOR.md). When set, the worker loads the
+    // template's blocks + subject and renders them (via renderEmailHtml, `{{ }}` against ctx) into
+    // the html/subject — overriding the inline html/subject. The stored id (never the blocks) rides
+    // the graph; the blocks are loaded in-activity by (tenant, env, id).
+    templateId: z.string().optional(),
     fieldBindings: z.record(z.string(), argBinding).optional(),
     costUsd: z.number().optional(),
   }),

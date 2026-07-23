@@ -15,6 +15,7 @@ export const {
   callMcpTool,
   recordExecution,
   loadVariables,
+  loadTemplate,
   setExecutionStatus,
   computeDateTime,
   resolveSubWorkflowGraph,
