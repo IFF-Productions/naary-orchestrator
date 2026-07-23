@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { TemplateContentBlock } from "../components";
 import { api, type FormDefinition, type FormFieldView } from "../lib/api";
+import { TurnstileWidget } from "./public/TurnstileWidget";
 import {
   ButtonSpinner,
   EMBER_BUTTON,
@@ -38,6 +39,9 @@ export function FormPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Turnstile: a solved (single-use) token, and a counter to re-arm the widget after a failed submit.
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileReset, setTurnstileReset] = useState(0);
 
   const load = useCallback(async () => {
     if (!formId) return;
@@ -68,6 +72,11 @@ export function FormPage() {
       setError(`Please fill in "${missing.label}".`);
       return;
     }
+    // If the form is bot-gated, require a solved challenge before spending a round-trip.
+    if (def.turnstileSiteKey && !turnstileToken) {
+      setError("Please complete the verification.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -77,14 +86,22 @@ export function FormPage() {
         const raw = (values[f.key] ?? "").trim();
         if (raw !== "") data[f.key] = raw;
       }
-      await api.submitForm(formId, data);
+      await api.submitForm(formId, data, turnstileToken ?? undefined);
       setSubmitted(true);
     } catch (e) {
-      // A 400 means the server rejected a value (e.g. a malformed email past the light check).
+      const msg = e instanceof Error ? e.message : "";
+      // The Turnstile token is single-use — a failed submit consumed it, so re-arm the widget for a
+      // retry (the visitor re-solves; managed mode is usually silent).
+      if (def.turnstileSiteKey) {
+        setTurnstileToken(null);
+        setTurnstileReset((n) => n + 1);
+      }
       setError(
-        e instanceof Error && /400/.test(e.message)
-          ? "Some answers weren't valid — please check and try again."
-          : "Could not submit the form. Please try again.",
+        /403/.test(msg)
+          ? "Verification failed — please complete the check and try again."
+          : /400/.test(msg)
+            ? "Some answers weren't valid — please check and try again."
+            : "Could not submit the form. Please try again.",
       );
     } finally {
       setSubmitting(false);
@@ -239,6 +256,15 @@ export function FormPage() {
                     />
                   ))}
 
+              {def.turnstileSiteKey && (
+                <TurnstileWidget
+                  siteKey={def.turnstileSiteKey}
+                  onToken={setTurnstileToken}
+                  onReset={() => setTurnstileToken(null)}
+                  resetSignal={turnstileReset}
+                />
+              )}
+
               {error && (
                 <div
                   style={{
@@ -253,7 +279,9 @@ export function FormPage() {
 
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={
+                  submitting || Boolean(def.turnstileSiteKey && !turnstileToken)
+                }
                 style={{
                   ...EMBER_BUTTON,
                   width: "100%",
@@ -263,6 +291,8 @@ export function FormPage() {
                   fontWeight: 700,
                   fontFamily: "var(--font-sans)",
                   cursor: submitting ? "default" : "pointer",
+                  opacity:
+                    def.turnstileSiteKey && !turnstileToken ? 0.6 : undefined,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",

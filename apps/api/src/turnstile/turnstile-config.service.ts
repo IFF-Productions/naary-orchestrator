@@ -6,6 +6,18 @@ import { SecretStore } from "@naary/secrets";
  *  like `conn:`/`secret:`) under which the Turnstile SECRET key is encrypted at rest. */
 const SECRET_KEY = "turnstile:secret";
 
+/** Cloudflare's server-side token verification endpoint. */
+const SITEVERIFY_URL =
+  "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+/** Bound the siteverify round-trip so a hung Cloudflare doesn't hold the ingress request. */
+const SITEVERIFY_TIMEOUT_MS = 5_000;
+
+/** Injectable I/O seam (swapped in tests so no real Cloudflare call is made). */
+export const __turnstileDeps = {
+  fetch: (url: string, init: RequestInit): Promise<Response> =>
+    fetch(url, init),
+};
+
 /** Public view of a tenant/env Turnstile config — NEVER carries the secret key (only whether one is
  *  set). The site key is public (rendered in the browser widget), so it IS returned. */
 export interface TurnstileConfigView {
@@ -87,5 +99,67 @@ export class TurnstileConfigService {
       where: { tenantId, environmentId },
     });
     await this.secrets.remove(tenantId, environmentId, SECRET_KEY);
+  }
+
+  /**
+   * The public site key to render the widget on this env's public form/chat page, or null when the
+   * gate isn't active — disabled, unconfigured, OR enabled-but-no-secret (we only advertise the
+   * widget when we can actually verify a token, else the page would gate a submit we'd let through).
+   * Anonymous callers reach this via the public form/chat GET definition.
+   */
+  async publicSiteKey(
+    tenantId: string,
+    environmentId: string,
+  ): Promise<string | null> {
+    const row = await getPrisma().turnstileConfig.findUnique({
+      where: { tenantId_environmentId: { tenantId, environmentId } },
+    });
+    if (!row || !row.enabled) return null;
+    const secret = await this.secrets.get(tenantId, environmentId, SECRET_KEY);
+    return secret ? row.siteKey : null;
+  }
+
+  /**
+   * Gate check for an anonymous submission. Returns `true` to ALLOW, `false` to DENY (→ the caller
+   * 403s). Not enforced (disabled / no config / no secret) ⇒ allow. Enforced + missing token ⇒ deny.
+   * Otherwise verify with Cloudflare: a `success:false` (invalid/expired/reused) ⇒ deny; a
+   * timeout/network/5xx ⇒ **fail-open** (allow) — this gate is defense-in-depth and the tenant budget
+   * cap is the real cost backstop, so a Cloudflare blip must not brick every public form. No
+   * `remoteip` is sent (behind a proxy it's the proxy's address, which can turn valid solves into
+   * failures). The secret is decrypted in-request, used, never logged.
+   */
+  async verify(
+    tenantId: string,
+    environmentId: string,
+    token: string | undefined,
+  ): Promise<boolean> {
+    const row = await getPrisma().turnstileConfig.findUnique({
+      where: { tenantId_environmentId: { tenantId, environmentId } },
+    });
+    if (!row || !row.enabled) return true; // not enforced
+    const secret = await this.secrets.get(tenantId, environmentId, SECRET_KEY);
+    if (!secret) return true; // enabled but unconfigured — can't enforce (UI prevents this)
+    if (!token) return false; // enforced, but the client sent no challenge
+    return this.siteverify(secret, token);
+  }
+
+  /** POST the token to Cloudflare; true = solved. Fail-open on any transport failure (see `verify`). */
+  private async siteverify(secret: string, token: string): Promise<boolean> {
+    const body = new URLSearchParams();
+    body.set("secret", secret);
+    body.set("response", token);
+    try {
+      const res = await __turnstileDeps.fetch(SITEVERIFY_URL, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+        signal: AbortSignal.timeout(SITEVERIFY_TIMEOUT_MS),
+      });
+      if (!res.ok) return true; // 5xx/4xx from Cloudflare → fail-open
+      const json = (await res.json()) as { success?: boolean };
+      return json?.success === true;
+    } catch {
+      return true; // timeout / network → fail-open
+    }
   }
 }

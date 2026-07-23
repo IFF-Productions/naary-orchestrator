@@ -32,6 +32,10 @@ export interface FormDefinition {
    * blocks here and `fields` are derived from the SAME array, so they can't drift.
    */
   blocks?: TemplateBlock[];
+  /** Cloudflare Turnstile public site key — present only when the tenant has an ACTIVE bot gate for
+   *  this env (added by the controller, not this pure extractor). The page renders the widget and
+   *  sends the solved token back on submit. */
+  turnstileSiteKey?: string;
 }
 
 /** Cap on a single submitted value's length — an anonymous caller can't push a megabyte string

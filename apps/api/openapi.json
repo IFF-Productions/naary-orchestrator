@@ -7191,6 +7191,195 @@
         ]
       }
     },
+    "/turnstile-config": {
+      "get": {
+        "description": "Site key + enabled + hasSecret. The secret is never returned.",
+        "operationId": "TurnstileConfigController_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnstileConfigResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the Turnstile config (active environment)",
+        "tags": [
+          "TurnstileConfig"
+        ]
+      },
+      "put": {
+        "description": "Site key required; secret key write-only (omit to keep the existing one).",
+        "operationId": "TurnstileConfigController_set",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnstileConfigResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set the Turnstile config (active environment)",
+        "tags": [
+          "TurnstileConfig"
+        ]
+      },
+      "delete": {
+        "operationId": "TurnstileConfigController_remove",
+        "parameters": [],
+        "responses": {
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove the Turnstile config (active environment)",
+        "tags": [
+          "TurnstileConfig"
+        ]
+      }
+    },
     "/chat/{chatId}": {
       "get": {
         "operationId": "ChatController_definition",
@@ -11202,195 +11391,6 @@
         "summary": "Delete a tenant-wide secret (all environments)",
         "tags": [
           "EnvSecrets"
-        ]
-      }
-    },
-    "/turnstile-config": {
-      "get": {
-        "description": "Site key + enabled + hasSecret. The secret is never returned.",
-        "operationId": "TurnstileConfigController_get",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TurnstileConfigResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get the Turnstile config (active environment)",
-        "tags": [
-          "TurnstileConfig"
-        ]
-      },
-      "put": {
-        "description": "Site key required; secret key write-only (omit to keep the existing one).",
-        "operationId": "TurnstileConfigController_set",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TurnstileConfigResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Set the Turnstile config (active environment)",
-        "tags": [
-          "TurnstileConfig"
-        ]
-      },
-      "delete": {
-        "operationId": "TurnstileConfigController_remove",
-        "parameters": [],
-        "responses": {
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Remove the Turnstile config (active environment)",
-        "tags": [
-          "TurnstileConfig"
         ]
       }
     },
@@ -17342,6 +17342,28 @@
           "blocks"
         ]
       },
+      "TurnstileConfigResponse": {
+        "type": "object",
+        "properties": {
+          "siteKey": {
+            "type": "string",
+            "description": "Cloudflare Turnstile public site key."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the bot gate is enforced on this env's public pages."
+          },
+          "hasSecret": {
+            "type": "boolean",
+            "description": "Whether a secret key is stored (write-only — the value is never returned)."
+          }
+        },
+        "required": [
+          "siteKey",
+          "enabled",
+          "hasSecret"
+        ]
+      },
       "RegisterChatDto": {
         "type": "object",
         "properties": {
@@ -18269,28 +18291,6 @@
         },
         "required": [
           "name"
-        ]
-      },
-      "TurnstileConfigResponse": {
-        "type": "object",
-        "properties": {
-          "siteKey": {
-            "type": "string",
-            "description": "Cloudflare Turnstile public site key."
-          },
-          "enabled": {
-            "type": "boolean",
-            "description": "Whether the bot gate is enforced on this env's public pages."
-          },
-          "hasSecret": {
-            "type": "boolean",
-            "description": "Whether a secret key is stored (write-only — the value is never returned)."
-          }
-        },
-        "required": [
-          "siteKey",
-          "enabled",
-          "hasSecret"
         ]
       },
       "SettingsResponse": {

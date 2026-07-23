@@ -249,6 +249,9 @@ export interface FormDefinition {
    *  renders content (heading/text/image/…) interleaved with fields. Absent for inline forms (render
    *  the flat `fields`). `fields` stays authoritative for validation. */
   blocks?: TemplateBlock[];
+  /** Cloudflare Turnstile site key — present only when the tenant has an active bot gate for this
+   *  env; the page renders the widget and sends the solved token on submit. */
+  turnstileSiteKey?: string;
 }
 
 /** A registered hosted-chat endpoint (no secret — the opaque id is the only capability). */
