@@ -1,9 +1,138 @@
 // Shared primitives for the redesigned Settings screen sections (redesign:
 // _design-reference/redesign/Naary Settings.dc.html). Sections render inside a
 // bordered panel with hover rows; environments are echoed as color-coded chips.
-import type { CSSProperties, ReactNode } from "react";
+import {
+  type CSSProperties,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
+import { Button } from "../../../components";
 import type { Environment } from "../../../lib/api";
 import { envAccent } from "../../../workspace/EnvironmentSwitcher";
+
+/* ---------------- Row action menu ---------------- */
+
+/** One item in a {@link RowMenu}. */
+export interface RowMenuItem {
+  label: string;
+  onClick: () => void;
+  /** Render in the destructive color (e.g. Delete). */
+  danger?: boolean;
+}
+
+/**
+ * Kebab (⋮) action menu for a settings row. The menu is rendered in a PORTAL with fixed positioning
+ * anchored to the trigger, because the settings `panelStyle` uses `overflow: hidden` (for its rounded
+ * corners) which otherwise CLIPS an in-flow absolutely-positioned menu — the bug where "Update value…"
+ * was cut off inside the row on mobile. Closes on outside-click, Escape, or scroll/resize (so it can't
+ * float detached from its row).
+ */
+export function RowMenu({
+  label,
+  items,
+  disabled,
+}: {
+  label: string;
+  items: RowMenuItem[];
+  disabled?: boolean;
+}) {
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; right: number }>({
+    top: 0,
+    right: 0,
+  });
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    // Capture scroll from any ancestor; close so the fixed menu can't drift off its row.
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  function toggle() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const r = anchorRef.current?.getBoundingClientRect();
+    if (r) {
+      setPos({
+        top: r.bottom + 4,
+        right: Math.max(8, window.innerWidth - r.right),
+      });
+    }
+    setOpen(true);
+  }
+
+  return (
+    <div ref={anchorRef} style={{ position: "relative", flex: "none" }}>
+      <Button
+        variant="ghost"
+        size="sm"
+        icon="more"
+        iconOnly
+        aria-label={label}
+        disabled={disabled}
+        onClick={toggle}
+      />
+      {open &&
+        createPortal(
+          <>
+            {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+            <div
+              style={{ position: "fixed", inset: 0, zIndex: 40 }}
+              onClick={() => setOpen(false)}
+            />
+            <div
+              className="menu-pop"
+              style={{
+                position: "fixed",
+                top: pos.top,
+                right: pos.right,
+                zIndex: 41,
+                minWidth: 150,
+                background: "var(--card)",
+                border: "1px solid var(--line-2)",
+                borderRadius: "var(--radius-md)",
+                boxShadow: "var(--shadow-card)",
+                padding: 4,
+              }}
+            >
+              {items.map((it) => (
+                <button
+                  key={it.label}
+                  type="button"
+                  className="naary-set-menu-item"
+                  style={
+                    it.danger ? { color: "var(--state-error)" } : undefined
+                  }
+                  onClick={() => {
+                    setOpen(false);
+                    it.onClick();
+                  }}
+                >
+                  {it.label}
+                </button>
+              ))}
+            </div>
+          </>,
+          document.body,
+        )}
+    </div>
+  );
+}
 
 /* ---------------- Section chrome ---------------- */
 
