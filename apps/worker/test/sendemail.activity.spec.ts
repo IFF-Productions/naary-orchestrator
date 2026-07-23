@@ -50,6 +50,38 @@ describe("callSendEmail", () => {
     );
   });
 
+  it("sanitizes outbound HTML at the egress sink (strips script/handlers, keeps safe markup + styles)", async () => {
+    await callSendEmail(
+      {
+        connectionId: "smtp-1",
+        from: "",
+        to: "user@corp.co",
+        subject: "hi",
+        html:
+          "<h2>Hi</h2><div><strong>Bold</strong> " +
+          '<a href="https://x.com">link</a>' +
+          '<img src="https://x.com/a.png" alt="a" style="max-width:100%" />' +
+          '<div style="height:24px"></div>' +
+          "<script>alert(1)</script>" +
+          '<img src="x" onerror="alert(2)">' +
+          '<a href="javascript:alert(3)">bad</a></div>',
+      },
+      undefined,
+      meta,
+    );
+    const sent = sendMail.mock.calls[0][0].html as string;
+    // Dangerous vectors gone
+    expect(sent).not.toMatch(/<script/i);
+    expect(sent).not.toMatch(/onerror/i);
+    expect(sent).not.toMatch(/javascript:/i);
+    // Safe markup + the two inline styles renderEmailHtml emits survive
+    expect(sent).toMatch(/<h2>Hi<\/h2>/);
+    expect(sent).toMatch(/<strong>Bold<\/strong>/);
+    expect(sent).toMatch(/<a href="https:\/\/x\.com">link<\/a>/);
+    expect(sent).toMatch(/max-width:\s*100%/);
+    expect(sent).toMatch(/height:\s*24px/);
+  });
+
   it("rejects a private/reserved SMTP host (SSRF guard) — non-retryable, no creds leak", async () => {
     assertHostPublic.mockRejectedValue(
       new BlockedEgressError("host resolves to a private/reserved address"),

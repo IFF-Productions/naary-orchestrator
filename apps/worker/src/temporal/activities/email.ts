@@ -16,6 +16,7 @@ import {
   runCostUsd,
   secondsSince,
 } from "../../metrics";
+import { sanitizeEmailHtml } from "./sanitize-email-html";
 import { type AgentMeta } from "./shared";
 
 // Activities run in the worker PROCESS (a side-effect zone), so structured
@@ -85,7 +86,11 @@ export async function callSendEmail(
           to: cfg.to,
           subject: cfg.subject,
           ...(cfg.text !== undefined ? { text: cfg.text } : {}),
-          ...(cfg.html !== undefined ? { html: cfg.html } : {}),
+          // Sanitize outbound HTML at the egress sink (author markup rode through renderEmailHtml
+          // unsanitized). Defense-in-depth — see sanitize-email-html.ts.
+          ...(cfg.html !== undefined
+            ? { html: sanitizeEmailHtml(cfg.html) }
+            : {}),
         }),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
