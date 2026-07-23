@@ -20,8 +20,15 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { renderEmailHtml, type TemplateBlock } from "@naary/dsl";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { Icon, SafeHtml, TemplateContentBlock } from "../../../components";
+import {
+  fieldToken,
+  link,
+  type Splice,
+  wrap,
+  wrapList,
+} from "../../../lib/rich-text-splice";
 
 type PaletteItem = { type: TemplateBlock["type"]; label: string; icon: string };
 
@@ -117,6 +124,117 @@ const inputStyle: React.CSSProperties = {
   fontSize: 12.5,
 };
 
+/**
+ * The `text` block editor: a `<textarea>` with a small formatting toolbar. Deliberately NOT a
+ * contentEditable WYSIWYG — the textarea keeps `{{ node.field }}` tokens intact as literal text
+ * (a rich editor would fight caret/token issues), and the live preview already renders the real
+ * formatted result (renderEmailHtml + SafeHtml). Each toolbar button splices HTML around the
+ * selection via the pure helpers, then restores the returned caret range after React re-renders.
+ */
+function RichTextField({
+  html,
+  onChange,
+}: {
+  html: string;
+  onChange: (html: string) => void;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  function apply(fn: (value: string, start: number, end: number) => Splice) {
+    const el = ref.current;
+    if (!el) return;
+    const r = fn(el.value, el.selectionStart, el.selectionEnd);
+    onChange(r.value);
+    // Restore the selection AFTER React commits the new value — otherwise the caret jumps to the end.
+    requestAnimationFrame(() => {
+      const node = ref.current;
+      if (!node) return;
+      node.focus();
+      node.setSelectionRange(r.selStart, r.selEnd);
+    });
+  }
+
+  const tools: {
+    label: string;
+    title: string;
+    run: () => void;
+    style?: React.CSSProperties;
+  }[] = [
+    {
+      label: "B",
+      title: "Bold",
+      run: () => apply((v, s, e) => wrap(v, s, e, "<strong>", "</strong>")),
+      style: { fontWeight: 700 },
+    },
+    {
+      label: "i",
+      title: "Italic",
+      run: () => apply((v, s, e) => wrap(v, s, e, "<em>", "</em>")),
+      style: { fontStyle: "italic" },
+    },
+    { label: "Link", title: "Insert link", run: () => apply(link) },
+    {
+      label: "• List",
+      title: "Bulleted list",
+      run: () => apply((v, s, e) => wrapList(v, s, e, "ul")),
+    },
+    {
+      label: "1. List",
+      title: "Numbered list",
+      run: () => apply((v, s, e) => wrapList(v, s, e, "ol")),
+    },
+    {
+      label: "{{ }}",
+      title: "Insert a field placeholder",
+      run: () => apply(fieldToken),
+    },
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        {tools.map((t) => (
+          <button
+            key={t.label}
+            type="button"
+            title={t.title}
+            // `title` alone isn't a reliable accessible name — announce "Bold"/"Italic" etc.
+            aria-label={t.title}
+            // Prevent the click from stealing focus / collapsing the textarea selection before `run`.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={t.run}
+            style={{
+              padding: "3px 8px",
+              borderRadius: "var(--radius-sm)",
+              border: "1px solid var(--line-2)",
+              background: "var(--surface)",
+              color: "var(--ink-2)",
+              fontSize: 12,
+              cursor: "pointer",
+              fontFamily: "var(--font-sans)",
+              ...t.style,
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <textarea
+        ref={ref}
+        value={html}
+        onChange={(e) => onChange(e.target.value)}
+        rows={4}
+        style={{
+          ...inputStyle,
+          fontFamily: "var(--font-mono)",
+          resize: "vertical",
+        }}
+        placeholder="<p>Hi {{ trigger.name }}, …</p>"
+      />
+    </div>
+  );
+}
+
 /** One block's inline editor — the fields for its type. */
 function BlockFields({
   block,
@@ -150,16 +268,9 @@ function BlockFields({
       );
     case "text":
       return (
-        <textarea
-          value={block.html}
-          onChange={(e) => onChange({ html: e.target.value })}
-          rows={3}
-          style={{
-            ...inputStyle,
-            fontFamily: "var(--font-mono)",
-            resize: "vertical",
-          }}
-          placeholder="<p>Hi {{ trigger.name }}, …</p>"
+        <RichTextField
+          html={block.html}
+          onChange={(html) => onChange({ html })}
         />
       );
     case "button":
