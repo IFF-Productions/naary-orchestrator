@@ -41,6 +41,36 @@ describe("resolveSendEmail", () => {
     expect(r.subject).toBe("STATIC");
   });
 
+  it("binding a whole agent/node output to the body renders readably, not a JSON dump (bug)", () => {
+    // Binding `text` to the WHOLE agent output (an object) used to JSON.stringify → a raw dump in
+    // the email. Now: a wrapper with a readable string field is unwrapped to the message.
+    const c2 = {
+      agent: { text: "Dear customer,\n\nYour order shipped." },
+      node: { name: "Ada", total: 42 },
+    };
+    const wrapped = resolveSendEmail(
+      {
+        connectionId: "smtp-1",
+        to: "a@b.co",
+        fieldBindings: { text: { from: "agent", path: "" } },
+      },
+      c2,
+    );
+    expect(wrapped.text).toBe("Dear customer,\n\nYour order shipped.");
+    expect(wrapped.text).not.toContain("{"); // not a JSON blob
+
+    // An object with no text-wrapper key → readable "key: value" lines, still no raw JSON braces.
+    const lines = resolveSendEmail(
+      {
+        connectionId: "smtp-1",
+        to: "a@b.co",
+        fieldBindings: { text: { from: "node", path: "" } },
+      },
+      c2,
+    );
+    expect(lines.text).toBe("name: Ada\ntotal: 42");
+  });
+
   it("never carries an SMTP URI (only connectionId)", () => {
     const r = resolveSendEmail({ connectionId: "smtp-1", to: "a@b.co" }, ctx);
     expect(Object.keys(r)).not.toContain("uri");
