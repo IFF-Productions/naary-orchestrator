@@ -14,12 +14,50 @@ export interface ResolvedSendEmail {
   costUsd?: number;
 }
 
-/** Coerce a resolved field value to a string (objects → JSON, nullish → ""). */
+/** Node/agent outputs that wrap a single readable string under a conventional key — binding the
+ *  WHOLE output to an email field should yield that message, not a JSON blob. See TEMPLATE-EDITOR.md. */
+const BODY_TEXT_KEYS = [
+  "text",
+  "html",
+  "body",
+  "content",
+  "message",
+  "markdown",
+] as const;
+
+/**
+ * Coerce a resolved field value to a string for an email field. A string passes through; a
+ * primitive stringifies. For an OBJECT (the "I bound my whole agent/node output to the body" case
+ * that used to render a raw `JSON.stringify` dump — the reported bug), render readably:
+ *   - a wrapper with a single readable string (e.g. `{ text }`, `{ html }`, `{ body }`) → that string;
+ *   - otherwise `key: value` lines (nested values compacted), not a one-line JSON blob;
+ *   - an array → its items, one per line.
+ * The real fix for readable email is a template (TEMPLATE-EDITOR.md); this is the graceful fallback
+ * so an accidental object binding still sends something legible. Pure + deterministic.
+ */
 function toField(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "string") return value;
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
+  if (typeof value !== "object") return String(value);
+  if (Array.isArray(value)) return value.map(toField).join("\n");
+  const obj = value as Record<string, unknown>;
+  for (const k of BODY_TEXT_KEYS) {
+    const v = obj[k];
+    if (typeof v === "string" && v.trim() !== "") return v;
+  }
+  const entries = Object.entries(obj);
+  if (entries.length === 0) return "";
+  return entries
+    .map(([k, v]) => {
+      const rendered =
+        typeof v === "string"
+          ? v
+          : v !== null && typeof v === "object"
+            ? JSON.stringify(v)
+            : String(v);
+      return `${k}: ${rendered}`;
+    })
+    .join("\n");
 }
 
 /**

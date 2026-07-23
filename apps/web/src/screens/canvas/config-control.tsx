@@ -72,6 +72,24 @@ export function renderControlSections(c: ConfigSectionCtx) {
               placeholder: "Plain-text body…",
             })}
           </Labeled>
+          <Labeled label="Body (HTML) — optional">
+            {exprText("html", {
+              multiline: true,
+              placeholder:
+                "<p>Hi {{ trigger.name }},</p><p>{{ agent.text }}</p>",
+            })}
+          </Labeled>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
+            Write a readable body with <code>{"{{ node.field }}"}</code>{" "}
+            placeholders — that renders real email. Binding a whole node output
+            below instead can produce a JSON dump; prefer placeholders.
+          </div>
           <BindingsEditor
             bindings={
               obj("fieldBindings") as Record<string, BindingRow> | undefined
