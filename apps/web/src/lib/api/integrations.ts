@@ -220,10 +220,17 @@ export const integrationsApi = {
     chatId: string,
     message: string,
     sessionId: string,
+    turnstileToken?: string,
   ): Promise<ChatReply> {
     return http(`/chat/${encodeURIComponent(chatId)}`, {
       method: "POST",
-      body: JSON.stringify({ message, sessionId }),
+      // The server verifies turnstileToken then ignores it (validateMessage only reads message +
+      // sessionId). Each message needs a fresh single-use token.
+      body: JSON.stringify(
+        turnstileToken
+          ? { message, sessionId, turnstileToken }
+          : { message, sessionId },
+      ),
     });
   },
 };

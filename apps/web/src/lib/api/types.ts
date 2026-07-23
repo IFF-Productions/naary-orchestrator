@@ -274,6 +274,9 @@ export interface ChatDefinition {
   description?: string;
   placeholder?: string;
   greeting?: string;
+  /** Cloudflare Turnstile site key — present only when the tenant has an active bot gate for this
+   *  env; the widget renders and each message sends a fresh solved token. */
+  turnstileSiteKey?: string;
 }
 
 /** A RAG source ("citation") the hosted chat used to answer (issue #482) — a privacy-safe subset of

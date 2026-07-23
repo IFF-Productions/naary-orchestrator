@@ -14,6 +14,10 @@ export interface ChatDefinition {
   description?: string;
   placeholder?: string;
   greeting?: string;
+  /** Cloudflare Turnstile site key — present only when the tenant has an ACTIVE bot gate for this
+   *  env (added by the controller, not this pure extractor). The widget renders and each message
+   *  sends a fresh solved token (single-use). */
+  turnstileSiteKey?: string;
 }
 
 /** A single chat message. Bounded so an anonymous caller can't push a megabyte into the run. */
