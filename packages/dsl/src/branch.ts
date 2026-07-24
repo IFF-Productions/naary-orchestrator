@@ -37,9 +37,13 @@ function hasNestedQuantifier(pattern: string): boolean {
       const inner: boolean = cur;
       cur = stack.pop() ?? false;
       const next = stripped[i + 1];
+      // An OUTER `?` is NOT dangerous: `(a+)?` matches the group 0-or-1× → linear
+      // backtracking, not exponential. Only `*`/`+`/`{n,}` around a quantified group
+      // drive catastrophic backtracking.
       if (inner && (next === "*" || next === "+" || next === "{")) return true;
       cur = cur || inner;
-    } else if (c === "*" || c === "+" || c === "{") {
+    } else if (c === "*" || c === "+" || c === "{" || c === "?") {
+      // `?` counts as an INNER quantifier: `(a?)+` is a classic exponential form.
       cur = true;
     }
   }

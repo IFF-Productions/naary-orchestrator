@@ -172,7 +172,19 @@ describe("evaluateCondition", () => {
         evil,
       ),
     ).toBe(false);
+    // `?` inside a quantified group is also exponential — `(a?)+` over "aaaa…!".
+    expect(
+      evaluateCondition({ path: "n.s", op: "regex", value: "(a?)+$" }, evil),
+    ).toBe(false);
     expect(Date.now() - start).toBeLessThan(100);
+  });
+
+  it("regex guard: an OUTER `?` on a quantified group stays allowed (linear, safe)", () => {
+    // `(a+)?` backtracks linearly, so the guard must NOT over-reject it.
+    const s = { n: { v: "aaa" } };
+    expect(
+      evaluateCondition({ path: "n.v", op: "regex", value: "^(a+)?$" }, s),
+    ).toBe(true);
   });
 
   it("regex guard: over-long pattern or input fails closed (#598)", () => {
