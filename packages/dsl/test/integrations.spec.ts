@@ -444,6 +444,227 @@ describe("integration catalog — request construction", () => {
     expect(req.path).toBe("/meetings/8391234567");
     expect(req.body).toBeUndefined();
   });
+
+  it("Front add_comment → path conversationId + body/author_id in the JSON body", () => {
+    const req = buildIntegrationRequest("front", "add_comment", {
+      conversationId: "cnv_123",
+      body: "internal note",
+      author_id: "tea_1",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/conversations/cnv_123/comments");
+    expect(req.body).toEqual({ body: "internal note", author_id: "tea_1" });
+  });
+
+  it("Front get_conversation → GET /conversations/{conversationId}, no body", () => {
+    const req = buildIntegrationRequest("front", "get_conversation", {
+      conversationId: "cnv_123",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/conversations/cnv_123");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Sentry update_issue → PUT /issues/{issueId}/ (trailing slash) with { status } body", () => {
+    const req = buildIntegrationRequest("sentry", "update_issue", {
+      issueId: "1234567890",
+      status: "resolved",
+    });
+    expect(req.method).toBe("PUT");
+    expect(req.path).toBe("/issues/1234567890/");
+    expect(req.body).toEqual({ status: "resolved" });
+  });
+
+  it("Sentry list_issues → GET path with org/project slugs (trailing slash), no body", () => {
+    const req = buildIntegrationRequest("sentry", "list_issues", {
+      organizationSlug: "acme",
+      projectSlug: "backend",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/projects/acme/backend/issues/");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Vercel list_deployments → GET with projectId + limit query params", () => {
+    const req = buildIntegrationRequest("vercel", "list_deployments", {
+      projectId: "prj_abc",
+      limit: 20,
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/v6/deployments?projectId=prj_abc&limit=20");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Vercel delete_deployment → DELETE with id in the versioned path", () => {
+    const req = buildIntegrationRequest("vercel", "delete_deployment", {
+      deploymentId: "dpl_123",
+    });
+    expect(req.method).toBe("DELETE");
+    expect(req.path).toBe("/v13/deployments/dpl_123");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Netlify get_site → GET /sites/{siteId}, no body", () => {
+    const req = buildIntegrationRequest("netlify", "get_site", {
+      siteId: "my-site-id",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/sites/my-site-id");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Netlify get_deploy → GET /sites/{siteId}/deploys/{deployId}, no body", () => {
+    const req = buildIntegrationRequest("netlify", "get_deploy", {
+      siteId: "my-site-id",
+      deployId: "deploy-123",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/sites/my-site-id/deploys/deploy-123");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("DigitalOcean create_droplet → POST /droplets with name/region/size/image in body", () => {
+    const req = buildIntegrationRequest("digitalocean", "create_droplet", {
+      name: "web-1",
+      region: "nyc3",
+      size: "s-1vcpu-1gb",
+      image: "ubuntu-22-04-x64",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/droplets");
+    expect(req.body).toEqual({
+      name: "web-1",
+      region: "nyc3",
+      size: "s-1vcpu-1gb",
+      image: "ubuntu-22-04-x64",
+    });
+  });
+
+  it("DigitalOcean delete_droplet → DELETE /droplets/{dropletId}, no body", () => {
+    const req = buildIntegrationRequest("digitalocean", "delete_droplet", {
+      dropletId: "3164444",
+    });
+    expect(req.method).toBe("DELETE");
+    expect(req.path).toBe("/droplets/3164444");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Cloudflare create_dns_record → POST /zones/{zoneId}/dns_records with type/name/content in body", () => {
+    const req = buildIntegrationRequest("cloudflare", "create_dns_record", {
+      zoneId: "zone123",
+      type: "A",
+      name: "www.example.com",
+      content: "192.0.2.1",
+      ttl: 3600,
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/zones/zone123/dns_records");
+    expect(req.body).toEqual({
+      type: "A",
+      name: "www.example.com",
+      content: "192.0.2.1",
+      ttl: 3600,
+    });
+  });
+
+  it("Cloudflare delete_dns_record → DELETE with both zoneId and recordId in path, no body", () => {
+    const req = buildIntegrationRequest("cloudflare", "delete_dns_record", {
+      zoneId: "zone123",
+      recordId: "rec456",
+    });
+    expect(req.method).toBe("DELETE");
+    expect(req.path).toBe("/zones/zone123/dns_records/rec456");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("PostHog create_annotation → POST, projectId in path, content in body", () => {
+    const req = buildIntegrationRequest("posthog", "create_annotation", {
+      projectId: "123",
+      content: "Deployed v2",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/api/projects/123/annotations/");
+    expect(req.body).toEqual({ content: "Deployed v2" });
+  });
+
+  it("PostHog list_persons → GET, projectId in path, search in query", () => {
+    const req = buildIntegrationRequest("posthog", "list_persons", {
+      projectId: "123",
+      search: "jane@acme.com",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/api/projects/123/persons/?search=jane%40acme.com");
+    expect(req.body).toBeUndefined();
+  });
+
+  it('Dropbox list_folder → POST /files/list_folder with { path: "" } in the body', () => {
+    const req = buildIntegrationRequest("dropbox", "list_folder", {
+      path: "",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/files/list_folder");
+    expect(req.body).toEqual({ path: "" });
+  });
+
+  it("Dropbox create_folder → POST /files/create_folder_v2 with the path in the body", () => {
+    const req = buildIntegrationRequest("dropbox", "create_folder", {
+      path: "/Docs/2026",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/files/create_folder_v2");
+    expect(req.body).toEqual({ path: "/Docs/2026" });
+  });
+
+  it("Microsoft Graph send_mail → POST /users/me/sendMail with the message in the body", () => {
+    const req = buildIntegrationRequest("msgraph", "send_mail", {
+      userId: "me",
+      message: {
+        subject: "Hello",
+        body: { contentType: "Text", content: "Hi there" },
+        toRecipients: [{ emailAddress: { address: "a@b.com" } }],
+      },
+      saveToSentItems: true,
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/users/me/sendMail");
+    expect(req.body).toEqual({
+      message: {
+        subject: "Hello",
+        body: { contentType: "Text", content: "Hi there" },
+        toRecipients: [{ emailAddress: { address: "a@b.com" } }],
+      },
+      saveToSentItems: true,
+    });
+  });
+
+  it("Microsoft Graph list_messages → GET /users/me/messages, no body", () => {
+    const req = buildIntegrationRequest("msgraph", "list_messages", {
+      userId: "me",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/users/me/messages");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Box create_folder → POST /folders with name + parent in the JSON body", () => {
+    const req = buildIntegrationRequest("box", "create_folder", {
+      name: "Reports",
+      parent: { id: "0" },
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/folders");
+    expect(req.body).toEqual({ name: "Reports", parent: { id: "0" } });
+  });
+
+  it("Box list_folder_items → GET /folders/0/items with the optional limit query param", () => {
+    const req = buildIntegrationRequest("box", "list_folder_items", {
+      folderId: "0",
+      limit: 100,
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/folders/0/items?limit=100");
+    expect(req.body).toBeUndefined();
+  });
 });
 
 describe("integration field resolution (static + bindings)", () => {
