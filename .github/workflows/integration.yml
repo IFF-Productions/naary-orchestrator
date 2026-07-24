@@ -5,9 +5,9 @@ name: Integration
 # up per-run by testcontainers, and in-process HTTP/GraphQL servers. See apps/worker/test/*.integration.spec.ts.
 #
 # testcontainers needs a reachable Docker daemon (it manages its own containers — NO docker-compose),
-# so this runs on the SELF-HOSTED runner (same one e2e.yml uses). It is SEPARATE from ci.yml's fast
-# verify gate and from e2e.yml's browser stack: a flake here never blocks the proven typecheck/test/
-# build gate. Kept out of the default `pnpm test` (vitest.config excludes *.integration.spec.ts).
+# which the GitHub-hosted ubuntu-latest runner provides. It is SEPARATE from ci.yml's fast verify gate
+# and from e2e.yml's browser stack: a flake here never blocks the proven typecheck/test/build gate.
+# Kept out of the default `pnpm test` (vitest.config excludes *.integration.spec.ts).
 on:
   pull_request:
   push:
@@ -21,7 +21,8 @@ concurrency:
 
 jobs:
   integration:
-    # SECURITY: never run untrusted fork code on the self-hosted runner (same rule as e2e.yml).
+    # Skip fork PRs (same rule as e2e.yml): a policy choice on a hosted runner, not a
+    # self-hosted requirement.
     if: >-
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -33,22 +34,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Make `shell: bash` resolve to Git Bash on a self-hosted Windows runner (shared action).
-      - uses: ./.github/actions/ensure-git-bash-on-path
-
-      # testcontainers talks to the Docker daemon directly — fail here with the fix if it's
-      # unreachable (the usual self-hosted "socket owned by another user" case), not deep in a test.
+      # testcontainers talks to the Docker daemon directly — fail here with a clear message if
+      # it's unreachable, not deep in a test. ubuntu-latest ships a running daemon, so this
+      # normally passes immediately.
       - name: Verify Docker daemon is reachable
         run: |
           if docker info >/dev/null 2>&1; then
             echo "Docker daemon reachable as user '$(whoami)'."
             exit 0
           fi
-          echo "::error::Cannot reach the Docker daemon as the runner account '$(whoami)'. Docker Desktop is per-user; run the runner as the Docker owner (or 'colima start' on macOS / add the account to docker-users on Windows), then restart the runner."
+          echo "::error::Cannot reach the Docker daemon as the runner account '$(whoami)'."
           exit 1
 
-      # Per-runner dest: all runner services on the CI VM share an account, so the default
-      # ~/setup-pnpm is one shared folder two jobs race on. runner.temp is per-runner.
       - uses: pnpm/action-setup@v4
         with:
           version: 11.9.0

@@ -2246,7 +2246,6 @@ const BOX: IntegrationProvider = {
   ],
 };
 
-
 const STRIPE: IntegrationProvider = {
   key: "stripe",
   label: "Stripe",
@@ -2389,7 +2388,7 @@ const SHOPIFY: IntegrationProvider = {
   authScheme: "bearer",
   description:
     "Manage a Shopify store's Admin API — read/create/update products and create orders.",
-  auth: "A custom connection whose Server URL is your store's Admin API base (https://{shop}.myshopify.com/admin/api/2024-01) and whose token is a Shopify Admin API access token (sent as X-Shopify-Access-Token).",
+  auth: "A custom connection whose Server URL is your store's Admin API base (https://{shop}.myshopify.com/admin/api/2024-01) and whose token is a Shopify Admin API access token. NOTE: Shopify authenticates via an `X-Shopify-Access-Token` header, which the shared auth resolver does not emit yet (it sends `Authorization: Bearer` today) — live calls won't authenticate until custom-header auth ships (#655).",
   actions: [
     {
       key: "get_product",
@@ -2542,7 +2541,7 @@ const TWILIO: IntegrationProvider = {
   authScheme: "basic",
   description:
     "Send SMS and place calls with Twilio — send/read messages, list messages, make a call.",
-  auth: "A custom connection whose token is `AccountSid:AuthToken` (sent as HTTP Basic). Your Account SID also fills the {accountSid} path segment.",
+  auth: "A custom connection whose token is `AccountSid:AuthToken` (sent as HTTP Basic). Set the same Account SID as the node's `accountSid` field — the request builder needs it explicitly for the {accountSid} path segment (it is not derived from the connection token).",
   actions: [
     {
       key: "send_sms",
@@ -2828,7 +2827,7 @@ const DISCORD: IntegrationProvider = {
   authScheme: "bearer",
   description:
     "Act on Discord — send channel messages, read channels/messages, open DMs, and react.",
-  auth: "A custom connection whose token is a Discord bot token. It is sent as `Authorization: Bot <token>` (the 'Bot ' prefix is applied at the activity layer).",
+  auth: "A custom connection whose token is a Discord bot token. NOTE: Discord expects `Authorization: Bot <token>`, but the shared auth resolver sends `Authorization: Bearer <token>` today (no per-provider prefix) — live calls won't authenticate until custom-header auth ships (#655).",
   actions: [
     {
       key: "send_message",
@@ -3191,6 +3190,7 @@ const CLICKUP: IntegrationProvider = {
           label: "Page",
           in: "query",
           required: false,
+          type: "number",
           hint: "0-based page number",
         },
       ],
@@ -3222,7 +3222,7 @@ const MONDAY: IntegrationProvider = {
   authScheme: "bearer",
   description:
     "Act on Monday.com boards via GraphQL — create/read items, post updates, change columns.",
-  auth: "A custom connection whose token is a Monday.com API token (Developers → My access tokens), sent as a Bearer token.",
+  auth: "A custom connection whose token is a Monday.com API token (Developers → My access tokens). NOTE: Monday expects the token in a bare `Authorization` header (no `Bearer ` prefix), but the shared auth resolver sends `Authorization: Bearer <token>` today — live calls may not authenticate until custom-header auth ships (#655).",
   actions: [
     {
       key: "create_item",
