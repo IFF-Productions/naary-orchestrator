@@ -1,7 +1,8 @@
 import type { Decorator, Preview } from "@storybook/react-vite";
 import { type ReactNode, useEffect } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { initialize, mswLoader } from "msw-storybook-addon";
+import { setupWorker } from "msw/browser";
+import { mswLoader } from "msw-storybook-addon/csf3";
 // The real design tokens (--ink / --brand / --surface …) + resets the app renders with. Without
 // this the components paint against undefined CSS variables, which defeats the visualization.
 import "../src/styles/global.css";
@@ -9,7 +10,14 @@ import "../src/components/components.css";
 
 // Start MSW so stories can mock `/api` (see parameters.msw.handlers). onUnhandledRequest: bypass
 // so static assets / unmocked calls don't spam warnings; a story without handlers just no-ops.
-initialize({ onUnhandledRequest: "bypass" });
+// msw-storybook-addon v3 removed the top-level `initialize()`; the worker options fold into
+// `mswLoader`'s setup fn (a factory now). mswLoader memoizes this so the worker starts once.
+// See MIGRATION.md (2.x → 3.x) — this is the codemod's canonical CSF-3 output.
+const mswSetup = async () => {
+  const worker = setupWorker();
+  await worker.start({ onUnhandledRequest: "bypass" });
+  return worker;
+};
 
 // Router context for components that use react-router (useNavigate/useLocation/useParams).
 // One MemoryRouter for the whole app — nesting a second one errors in RR v7, so stories that need
@@ -77,7 +85,7 @@ const preview: Preview = {
     },
   },
   decorators: [withTheme, withRouter],
-  loaders: [mswLoader],
+  loaders: [mswLoader(mswSetup)],
 };
 
 export default preview;
