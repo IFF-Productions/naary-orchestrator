@@ -498,11 +498,91 @@ const NOTION: IntegrationProvider = {
   ],
 };
 
+// ── HubSpot (cloud, api.hubapi.com; auth = a private-app access token as a Bearer) ──────
+const HUBSPOT: IntegrationProvider = {
+  key: "hubspot",
+  label: "HubSpot",
+  baseUrl: "https://api.hubapi.com",
+  description:
+    "Act on HubSpot CRM — get, create, and update contacts; create deals.",
+  auth: "A custom connection whose token is a HubSpot private-app access token.",
+  actions: [
+    {
+      key: "get_contact",
+      label: "Get contact",
+      description: "Fetch a single contact by id.",
+      method: "GET",
+      pathTemplate: "/crm/v3/objects/contacts/{contactId}",
+      write: false,
+      fields: [
+        { key: "contactId", label: "Contact id", in: "path", required: true },
+      ],
+    },
+    {
+      key: "create_contact",
+      label: "Create contact",
+      description: "Create a new contact.",
+      method: "POST",
+      pathTemplate: "/crm/v3/objects/contacts",
+      write: true,
+      fields: [
+        {
+          key: "properties",
+          label: "Properties (JSON)",
+          in: "body",
+          required: true,
+          type: "json",
+          bodyPath: "properties",
+          hint: "contact properties object, e.g. { email, firstname }",
+        },
+      ],
+    },
+    {
+      key: "update_contact",
+      label: "Update contact",
+      description: "Update an existing contact by id.",
+      method: "PATCH",
+      pathTemplate: "/crm/v3/objects/contacts/{contactId}",
+      write: true,
+      fields: [
+        { key: "contactId", label: "Contact id", in: "path", required: true },
+        {
+          key: "properties",
+          label: "Properties (JSON)",
+          in: "body",
+          required: true,
+          type: "json",
+          bodyPath: "properties",
+        },
+      ],
+    },
+    {
+      key: "create_deal",
+      label: "Create deal",
+      description: "Create a new deal.",
+      method: "POST",
+      pathTemplate: "/crm/v3/objects/deals",
+      write: true,
+      fields: [
+        {
+          key: "properties",
+          label: "Properties (JSON)",
+          in: "body",
+          required: true,
+          type: "json",
+          bodyPath: "properties",
+        },
+      ],
+    },
+  ],
+};
+
 export const INTEGRATION_CATALOG: Record<string, IntegrationProvider> = {
   github: GITHUB,
   jira: JIRA,
   slack: SLACK,
   notion: NOTION,
+  hubspot: HUBSPOT,
 };
 
 /** The node type added to the palette per provider (the tile presets `provider`). */
