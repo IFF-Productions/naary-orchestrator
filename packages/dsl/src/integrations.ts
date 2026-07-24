@@ -498,11 +498,103 @@ const NOTION: IntegrationProvider = {
   ],
 };
 
+// ── SendGrid (REST v3; static base api.sendgrid.com/v3; auth = a SendGrid API key as
+//    Bearer, stored on a "custom" connection). Send transactional mail, upsert marketing
+//    contacts, list templates. Schema-driven payloads use `json` fields. ────────────────
+const SENDGRID: IntegrationProvider = {
+  key: "sendgrid",
+  label: "SendGrid",
+  baseUrl: "https://api.sendgrid.com/v3",
+  description:
+    "Send email and manage marketing contacts via SendGrid — send mail, upsert contacts, list templates.",
+  auth: "A custom connection whose token is a SendGrid API key.",
+  actions: [
+    {
+      key: "send_mail",
+      label: "Send mail",
+      description: "Send a transactional email via the v3 Mail Send API.",
+      method: "POST",
+      pathTemplate: "/mail/send",
+      write: true,
+      fields: [
+        {
+          key: "personalizations",
+          label: "Personalizations (JSON)",
+          in: "body",
+          required: true,
+          type: "json",
+          hint: "array of personalization objects",
+        },
+        {
+          key: "from",
+          label: "From (JSON)",
+          in: "body",
+          required: true,
+          type: "json",
+          hint: "{ email, name? }",
+        },
+        {
+          key: "subject",
+          label: "Subject",
+          in: "body",
+          required: true,
+          type: "string",
+        },
+        {
+          key: "content",
+          label: "Content (JSON)",
+          in: "body",
+          required: true,
+          type: "json",
+          hint: "array of { type, value }",
+        },
+      ],
+    },
+    {
+      key: "upsert_contacts",
+      label: "Upsert contacts",
+      description: "Add or update marketing contacts (async upsert).",
+      method: "PUT",
+      pathTemplate: "/marketing/contacts",
+      write: true,
+      fields: [
+        {
+          key: "contacts",
+          label: "Contacts (JSON)",
+          in: "body",
+          required: true,
+          type: "json",
+          bodyPath: "contacts",
+          hint: "array of contact objects",
+        },
+      ],
+    },
+    {
+      key: "list_templates",
+      label: "List templates",
+      description: "List transactional templates.",
+      method: "GET",
+      pathTemplate: "/templates",
+      write: false,
+      fields: [
+        {
+          key: "generations",
+          label: "Generations",
+          in: "query",
+          required: false,
+          hint: "legacy|dynamic",
+        },
+      ],
+    },
+  ],
+};
+
 export const INTEGRATION_CATALOG: Record<string, IntegrationProvider> = {
   github: GITHUB,
   jira: JIRA,
   slack: SLACK,
   notion: NOTION,
+  sendgrid: SENDGRID,
 };
 
 /** The node type added to the palette per provider (the tile presets `provider`). */

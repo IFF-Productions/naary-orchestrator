@@ -132,6 +132,34 @@ describe("integration catalog — request construction", () => {
     expect(req.body).toEqual({ children: [{ type: "paragraph" }] });
   });
 
+  it("SendGrid send_mail → POST /mail/send with personalizations/from/subject/content in body", () => {
+    const req = buildIntegrationRequest("sendgrid", "send_mail", {
+      personalizations: [{ to: [{ email: "to@example.com" }] }],
+      from: { email: "from@example.com", name: "Naary" },
+      subject: "Hello",
+      content: [{ type: "text/plain", value: "Hi there" }],
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/mail/send");
+    expect(req.body).toEqual({
+      personalizations: [{ to: [{ email: "to@example.com" }] }],
+      from: { email: "from@example.com", name: "Naary" },
+      subject: "Hello",
+      content: [{ type: "text/plain", value: "Hi there" }],
+    });
+  });
+
+  it("SendGrid upsert_contacts → PUT /marketing/contacts with { contacts: [...] } body", () => {
+    const req = buildIntegrationRequest("sendgrid", "upsert_contacts", {
+      contacts: [{ email: "a@example.com", first_name: "Ada" }],
+    });
+    expect(req.method).toBe("PUT");
+    expect(req.path).toBe("/marketing/contacts");
+    expect(req.body).toEqual({
+      contacts: [{ email: "a@example.com", first_name: "Ada" }],
+    });
+  });
+
   it("omits missing optional body fields (a blank optional stays out of the payload)", () => {
     const req = buildIntegrationRequest("github", "create_issue", {
       owner: "o",
