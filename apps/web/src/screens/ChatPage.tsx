@@ -10,6 +10,7 @@ import {
   PublicFrame,
   PublicNotice,
 } from "./public/PublicShell";
+import { useEmbedResize } from "../lib/embed-resize";
 import { TurnstileWidget } from "./public/TurnstileWidget";
 
 /**
@@ -112,6 +113,7 @@ export function ChatPage() {
   const { chatId } = useParams<{ chatId: string }>();
   const [searchParams] = useSearchParams();
   const embed = searchParams.get("embed") === "1";
+  useEmbedResize(embed, chatId); // report height to the parent iframe when embedded
   const [def, setDef] = useState<ChatDefinition | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "notfound">(
     "loading",
