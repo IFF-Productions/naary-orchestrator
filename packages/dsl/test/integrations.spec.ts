@@ -141,6 +141,25 @@ describe("integration catalog — request construction", () => {
     });
     expect(req.body).toEqual({ title: "t" });
   });
+
+  it("Calendly get_event → GET, uuid in path, no body", () => {
+    const req = buildIntegrationRequest("calendly", "get_event", {
+      eventUuid: "evt-123",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/scheduled_events/evt-123");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Calendly cancel_event → POST, uuid in path, reason in body", () => {
+    const req = buildIntegrationRequest("calendly", "cancel_event", {
+      eventUuid: "evt-123",
+      reason: "no longer needed",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/scheduled_events/evt-123/cancellation");
+    expect(req.body).toEqual({ reason: "no longer needed" });
+  });
 });
 
 describe("integration field resolution (static + bindings)", () => {
