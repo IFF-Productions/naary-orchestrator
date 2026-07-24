@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted]
     timeout-minutes: 10
     permissions:
       contents: write # push the bump commit + tag, create the release
