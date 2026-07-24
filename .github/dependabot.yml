@@ -9,3 +9,10 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "weekly"
+  # Keep the GitHub Actions used by our workflows (.github/workflows/*) up to date —
+  # "/" is where Dependabot looks for workflow files. Bumps action refs (e.g.
+  # actions/checkout@v4) via weekly PRs, same cadence as npm.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
