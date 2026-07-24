@@ -49,6 +49,10 @@ services:
     environment:
       # The browser origin the SPA is served from — used for CORS on the control plane.
       CORS_ORIGINS: "https://${PUBLIC_HOSTNAME:-naar-y.com}"
+      # Absolute SPA base for the api's own deep links (transactional emails, connect callbacks).
+      # The api would otherwise fall back to CORS_ORIGINS; set it explicitly so every service
+      # derives links from one var and the fallback isn't load-bearing. Override via APP_BASE_URL.
+      APP_BASE_URL: "${APP_BASE_URL:-https://${PUBLIC_HOSTNAME:-naar-y.com}}"
       # Label Sentry events as production (the code otherwise falls back to NODE_ENV → "development").
       SENTRY_ENVIRONMENT: production
     # Drop the local-temporal dependency (Temporal is Cloud); keep DB + migrations.
@@ -63,6 +67,12 @@ services:
     environment:
       # Label Sentry events as production (see api above).
       SENTRY_ENVIRONMENT: production
+      # Absolute SPA base for notification deep links (run links + Slack/Teams Approve/Reject
+      # buttons). The worker builds these and — unlike the api — is NOT passed CORS_ORIGINS, so
+      # its documented CORS_ORIGINS fallback never fires here: without this, resolveAppBaseUrl()
+      # returns undefined and the buttons/links are silently omitted. Derive it from the same
+      # PUBLIC_HOSTNAME the api's CORS uses so there's one var to set. Override via APP_BASE_URL.
+      APP_BASE_URL: "${APP_BASE_URL:-https://${PUBLIC_HOSTNAME:-naar-y.com}}"
     # Close the base file's published 9091 (metrics). Nothing scrapes it over the network
     # in prod (Sentry gets the metrics), and "every published port is closed" (header
     # point 1) should actually include this one — it was the lone hole.
@@ -80,6 +90,8 @@ services:
     container_name: !reset null
     environment:
       SENTRY_ENVIRONMENT: production
+      # Same as `worker` — deep-link base for notifications this queue may emit.
+      APP_BASE_URL: "${APP_BASE_URL:-https://${PUBLIC_HOSTNAME:-naar-y.com}}"
     ports: !override []
     depends_on: !override
       migrate:
