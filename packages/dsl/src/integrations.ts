@@ -32,6 +32,10 @@ export interface IntegrationField {
   bodyPath?: string;
   /** Short help shown under the field in the config panel + docs. */
   hint?: string;
+  /** Body fields only: keep the value in the payload even when it's an empty string — for APIs where
+   *  `""` is meaningful (e.g. Dropbox's root folder `path: ""`). Off by default, so an empty optional
+   *  field is dropped as usual. */
+  keepEmpty?: boolean;
 }
 
 export interface IntegrationAction {
@@ -621,7 +625,6 @@ const GITLAB: IntegrationProvider = {
     },
   ],
 };
-
 
 const HUBSPOT: IntegrationProvider = {
   key: "hubspot",
@@ -1466,6 +1469,783 @@ const ZOOM: IntegrationProvider = {
   ],
 };
 
+const FRONT: IntegrationProvider = {
+  key: "front",
+  label: "Front",
+  baseUrl: "https://api2.frontapp.com",
+  authScheme: "bearer",
+  description:
+    "Work with Front conversations — list/get conversations, comment, list inboxes.",
+  auth: "A custom connection whose token is a Front API token — sent as a Bearer token.",
+  actions: [
+    {
+      key: "list_conversations",
+      label: "List conversations",
+      description: "List conversations, optionally filtered by a search query.",
+      method: "GET",
+      pathTemplate: "/conversations",
+      write: false,
+      fields: [
+        {
+          key: "q",
+          label: "Query",
+          in: "query",
+          required: false,
+          hint: "search query",
+        },
+      ],
+    },
+    {
+      key: "get_conversation",
+      label: "Get conversation",
+      description: "Fetch a single conversation by id.",
+      method: "GET",
+      pathTemplate: "/conversations/{conversationId}",
+      write: false,
+      fields: [
+        {
+          key: "conversationId",
+          label: "Conversation id",
+          in: "path",
+          required: true,
+        },
+      ],
+    },
+    {
+      key: "add_comment",
+      label: "Add comment",
+      description: "Add an internal comment to a conversation.",
+      method: "POST",
+      pathTemplate: "/conversations/{conversationId}/comments",
+      write: true,
+      fields: [
+        {
+          key: "conversationId",
+          label: "Conversation id",
+          in: "path",
+          required: true,
+        },
+        { key: "body", label: "Comment", in: "body", required: true },
+        {
+          key: "author_id",
+          label: "Author id",
+          in: "body",
+          required: false,
+          hint: "teammate id authoring the comment",
+        },
+      ],
+    },
+    {
+      key: "list_inboxes",
+      label: "List inboxes",
+      description: "List the inboxes in the account.",
+      method: "GET",
+      pathTemplate: "/inboxes",
+      write: false,
+      fields: [],
+    },
+  ],
+};
+
+const SENTRY: IntegrationProvider = {
+  key: "sentry",
+  label: "Sentry",
+  baseUrl: "https://sentry.io/api/0",
+  authScheme: "bearer",
+  description:
+    "Triage Sentry — list/get issues, resolve or ignore them, list projects.",
+  auth: "A custom connection whose token is a Sentry auth token — sent as a Bearer token.",
+  actions: [
+    {
+      key: "list_issues",
+      label: "List issues",
+      description:
+        "List a project's issues, optionally filtered by a search query or time window.",
+      method: "GET",
+      pathTemplate: "/projects/{organizationSlug}/{projectSlug}/issues/",
+      write: false,
+      fields: [
+        {
+          key: "organizationSlug",
+          label: "Organization slug",
+          in: "path",
+          required: true,
+        },
+        {
+          key: "projectSlug",
+          label: "Project slug",
+          in: "path",
+          required: true,
+        },
+        {
+          key: "query",
+          label: "Query",
+          in: "query",
+          required: false,
+          hint: "Sentry search, e.g. is:unresolved",
+        },
+        {
+          key: "statsPeriod",
+          label: "Stats period",
+          in: "query",
+          required: false,
+          hint: "e.g. 24h, 14d",
+        },
+      ],
+    },
+    {
+      key: "get_issue",
+      label: "Get issue",
+      description: "Fetch a single issue by id.",
+      method: "GET",
+      pathTemplate: "/issues/{issueId}/",
+      write: false,
+      fields: [
+        { key: "issueId", label: "Issue id", in: "path", required: true },
+      ],
+    },
+    {
+      key: "update_issue",
+      label: "Update issue",
+      description: "Update an issue's status (resolve, ignore, or reopen).",
+      method: "PUT",
+      pathTemplate: "/issues/{issueId}/",
+      write: true,
+      fields: [
+        { key: "issueId", label: "Issue id", in: "path", required: true },
+        {
+          key: "status",
+          label: "Status",
+          in: "body",
+          required: true,
+          hint: "resolved|ignored|unresolved",
+        },
+      ],
+    },
+    {
+      key: "list_projects",
+      label: "List projects",
+      description: "List the projects in an organization.",
+      method: "GET",
+      pathTemplate: "/organizations/{organizationSlug}/projects/",
+      write: false,
+      fields: [
+        {
+          key: "organizationSlug",
+          label: "Organization slug",
+          in: "path",
+          required: true,
+        },
+      ],
+    },
+  ],
+};
+
+const VERCEL: IntegrationProvider = {
+  key: "vercel",
+  label: "Vercel",
+  baseUrl: "https://api.vercel.com",
+  authScheme: "bearer",
+  description:
+    "Act on Vercel deployments and projects — list deployments, get a deployment, list projects, delete a deployment.",
+  auth: "A custom connection whose token is a Vercel access token — sent as a Bearer token.",
+  actions: [
+    {
+      key: "list_deployments",
+      label: "List deployments",
+      description: "List deployments, optionally scoped to a project.",
+      method: "GET",
+      pathTemplate: "/v6/deployments",
+      write: false,
+      fields: [
+        {
+          key: "projectId",
+          label: "Project id",
+          in: "query",
+          required: false,
+          hint: "filter to a single project",
+        },
+        {
+          key: "limit",
+          label: "Limit",
+          in: "query",
+          required: false,
+          type: "number",
+        },
+      ],
+    },
+    {
+      key: "get_deployment",
+      label: "Get deployment",
+      description: "Fetch a single deployment by id.",
+      method: "GET",
+      pathTemplate: "/v13/deployments/{deploymentId}",
+      write: false,
+      fields: [
+        {
+          key: "deploymentId",
+          label: "Deployment id",
+          in: "path",
+          required: true,
+        },
+      ],
+    },
+    {
+      key: "list_projects",
+      label: "List projects",
+      description: "List the projects for the account.",
+      method: "GET",
+      pathTemplate: "/v9/projects",
+      write: false,
+      fields: [],
+    },
+    {
+      key: "delete_deployment",
+      label: "Delete deployment",
+      description: "Delete a deployment by id.",
+      method: "DELETE",
+      pathTemplate: "/v13/deployments/{deploymentId}",
+      write: true,
+      fields: [
+        {
+          key: "deploymentId",
+          label: "Deployment id",
+          in: "path",
+          required: true,
+        },
+      ],
+    },
+  ],
+};
+
+const NETLIFY: IntegrationProvider = {
+  key: "netlify",
+  label: "Netlify",
+  baseUrl: "https://api.netlify.com/api/v1",
+  authScheme: "bearer",
+  description:
+    "Read Netlify sites and deploys — list sites, get a site, list/get deploys.",
+  auth: "A custom connection whose token is a Netlify personal access token — sent as a Bearer token.",
+  actions: [
+    {
+      key: "list_sites",
+      label: "List sites",
+      description: "List the sites in your Netlify account.",
+      method: "GET",
+      pathTemplate: "/sites",
+      write: false,
+      fields: [],
+    },
+    {
+      key: "get_site",
+      label: "Get site",
+      description: "Fetch a single site by id.",
+      method: "GET",
+      pathTemplate: "/sites/{siteId}",
+      write: false,
+      fields: [{ key: "siteId", label: "Site id", in: "path", required: true }],
+    },
+    {
+      key: "list_deploys",
+      label: "List deploys",
+      description: "List the deploys for a site.",
+      method: "GET",
+      pathTemplate: "/sites/{siteId}/deploys",
+      write: false,
+      fields: [{ key: "siteId", label: "Site id", in: "path", required: true }],
+    },
+    {
+      key: "get_deploy",
+      label: "Get deploy",
+      description: "Fetch a single deploy for a site by id.",
+      method: "GET",
+      pathTemplate: "/sites/{siteId}/deploys/{deployId}",
+      write: false,
+      fields: [
+        { key: "siteId", label: "Site id", in: "path", required: true },
+        { key: "deployId", label: "Deploy id", in: "path", required: true },
+      ],
+    },
+  ],
+};
+
+const DIGITALOCEAN: IntegrationProvider = {
+  key: "digitalocean",
+  label: "DigitalOcean",
+  baseUrl: "https://api.digitalocean.com/v2",
+  authScheme: "bearer",
+  description: "Manage DigitalOcean Droplets — list, get, create, and delete.",
+  auth: "A custom connection whose token is a DigitalOcean personal access token — sent as a Bearer token.",
+  actions: [
+    {
+      key: "list_droplets",
+      label: "List droplets",
+      description: "List Droplets, optionally filtered by tag.",
+      method: "GET",
+      pathTemplate: "/droplets",
+      write: false,
+      fields: [
+        {
+          key: "tag_name",
+          label: "Tag name",
+          in: "query",
+          required: false,
+          hint: "filter by tag",
+        },
+      ],
+    },
+    {
+      key: "get_droplet",
+      label: "Get droplet",
+      description: "Fetch a single Droplet by id.",
+      method: "GET",
+      pathTemplate: "/droplets/{dropletId}",
+      write: false,
+      fields: [
+        { key: "dropletId", label: "Droplet id", in: "path", required: true },
+      ],
+    },
+    {
+      key: "create_droplet",
+      label: "Create droplet",
+      description: "Create a new Droplet.",
+      method: "POST",
+      pathTemplate: "/droplets",
+      write: true,
+      fields: [
+        { key: "name", label: "Name", in: "body", required: true },
+        {
+          key: "region",
+          label: "Region",
+          in: "body",
+          required: true,
+          hint: "e.g. nyc3",
+        },
+        {
+          key: "size",
+          label: "Size",
+          in: "body",
+          required: true,
+          hint: "e.g. s-1vcpu-1gb",
+        },
+        {
+          key: "image",
+          label: "Image",
+          in: "body",
+          required: true,
+          hint: "slug or id, e.g. ubuntu-22-04-x64",
+        },
+      ],
+    },
+    {
+      key: "delete_droplet",
+      label: "Delete droplet",
+      description: "Delete a Droplet by id.",
+      method: "DELETE",
+      pathTemplate: "/droplets/{dropletId}",
+      write: true,
+      fields: [
+        { key: "dropletId", label: "Droplet id", in: "path", required: true },
+      ],
+    },
+  ],
+};
+
+const CLOUDFLARE: IntegrationProvider = {
+  key: "cloudflare",
+  label: "Cloudflare",
+  baseUrl: "https://api.cloudflare.com/client/v4",
+  authScheme: "bearer",
+  description:
+    "Manage Cloudflare DNS — list zones, list/create/delete DNS records.",
+  auth: "A custom connection whose token is a Cloudflare API token — sent as a Bearer token.",
+  actions: [
+    {
+      key: "list_zones",
+      label: "List zones",
+      description: "List zones, optionally filtered by name.",
+      method: "GET",
+      pathTemplate: "/zones",
+      write: false,
+      fields: [
+        {
+          key: "name",
+          label: "Name",
+          in: "query",
+          required: false,
+          hint: "filter by zone name, e.g. example.com",
+        },
+      ],
+    },
+    {
+      key: "list_dns_records",
+      label: "List DNS records",
+      description: "List a zone's DNS records, optionally filtered by type.",
+      method: "GET",
+      pathTemplate: "/zones/{zoneId}/dns_records",
+      write: false,
+      fields: [
+        { key: "zoneId", label: "Zone id", in: "path", required: true },
+        {
+          key: "type",
+          label: "Type",
+          in: "query",
+          required: false,
+          hint: "A|CNAME|TXT|…",
+        },
+      ],
+    },
+    {
+      key: "create_dns_record",
+      label: "Create DNS record",
+      description: "Create a DNS record in a zone.",
+      method: "POST",
+      pathTemplate: "/zones/{zoneId}/dns_records",
+      write: true,
+      fields: [
+        { key: "zoneId", label: "Zone id", in: "path", required: true },
+        {
+          key: "type",
+          label: "Type",
+          in: "body",
+          required: true,
+          hint: "A|CNAME|TXT|…",
+        },
+        { key: "name", label: "Name", in: "body", required: true },
+        { key: "content", label: "Content", in: "body", required: true },
+        {
+          key: "ttl",
+          label: "TTL",
+          in: "body",
+          required: false,
+          type: "number",
+        },
+      ],
+    },
+    {
+      key: "delete_dns_record",
+      label: "Delete DNS record",
+      description: "Delete a DNS record from a zone.",
+      method: "DELETE",
+      pathTemplate: "/zones/{zoneId}/dns_records/{recordId}",
+      write: true,
+      fields: [
+        { key: "zoneId", label: "Zone id", in: "path", required: true },
+        { key: "recordId", label: "Record id", in: "path", required: true },
+      ],
+    },
+  ],
+};
+
+const POSTHOG: IntegrationProvider = {
+  key: "posthog",
+  label: "PostHog",
+  baseUrl: "https://app.posthog.com",
+  authScheme: "bearer",
+  description:
+    "Read PostHog analytics — list events and persons, get a person, add an annotation.",
+  auth: "A custom connection whose token is a PostHog personal API key — sent as a Bearer token.",
+  actions: [
+    {
+      key: "list_events",
+      label: "List events",
+      description: "List recent events for a project.",
+      method: "GET",
+      pathTemplate: "/api/projects/{projectId}/events/",
+      write: false,
+      fields: [
+        { key: "projectId", label: "Project id", in: "path", required: true },
+      ],
+    },
+    {
+      key: "list_persons",
+      label: "List persons",
+      description: "List persons for a project, optionally filtered by search.",
+      method: "GET",
+      pathTemplate: "/api/projects/{projectId}/persons/",
+      write: false,
+      fields: [
+        { key: "projectId", label: "Project id", in: "path", required: true },
+        { key: "search", label: "Search", in: "query", required: false },
+      ],
+    },
+    {
+      key: "get_person",
+      label: "Get person",
+      description: "Fetch a single person by id.",
+      method: "GET",
+      pathTemplate: "/api/projects/{projectId}/persons/{personId}/",
+      write: false,
+      fields: [
+        { key: "projectId", label: "Project id", in: "path", required: true },
+        { key: "personId", label: "Person id", in: "path", required: true },
+      ],
+    },
+    {
+      key: "create_annotation",
+      label: "Create annotation",
+      description: "Add an annotation to a project.",
+      method: "POST",
+      pathTemplate: "/api/projects/{projectId}/annotations/",
+      write: true,
+      fields: [
+        { key: "projectId", label: "Project id", in: "path", required: true },
+        { key: "content", label: "Content", in: "body", required: true },
+        {
+          key: "date_marker",
+          label: "Date marker",
+          in: "body",
+          required: false,
+          hint: "ISO timestamp the annotation marks",
+        },
+      ],
+    },
+  ],
+};
+
+const DROPBOX: IntegrationProvider = {
+  key: "dropbox",
+  label: "Dropbox",
+  baseUrl: "https://api.dropboxapi.com/2",
+  authScheme: "bearer",
+  description:
+    "Work with Dropbox files and folders — list, get metadata, create folders, delete.",
+  auth: "A custom connection whose token is a Dropbox access token — sent as a Bearer token.",
+  actions: [
+    {
+      key: "list_folder",
+      label: "List folder",
+      description: "List the contents of a folder.",
+      method: "POST",
+      pathTemplate: "/files/list_folder",
+      write: false,
+      fields: [
+        {
+          key: "path",
+          label: "Path",
+          in: "body",
+          required: true,
+          keepEmpty: true,
+          hint: 'folder path, e.g. "" for root or "/Docs"',
+        },
+      ],
+    },
+    {
+      key: "get_metadata",
+      label: "Get metadata",
+      description: "Fetch metadata for a file or folder by path.",
+      method: "POST",
+      pathTemplate: "/files/get_metadata",
+      write: false,
+      fields: [{ key: "path", label: "Path", in: "body", required: true }],
+    },
+    {
+      key: "create_folder",
+      label: "Create folder",
+      description: "Create a folder at a path.",
+      method: "POST",
+      pathTemplate: "/files/create_folder_v2",
+      write: true,
+      fields: [{ key: "path", label: "Path", in: "body", required: true }],
+    },
+    {
+      key: "delete",
+      label: "Delete",
+      description: "Delete a file or folder at a path.",
+      method: "POST",
+      pathTemplate: "/files/delete_v2",
+      write: true,
+      fields: [{ key: "path", label: "Path", in: "body", required: true }],
+    },
+  ],
+};
+
+const MSGRAPH: IntegrationProvider = {
+  key: "msgraph",
+  label: "Microsoft Graph",
+  baseUrl: "https://graph.microsoft.com/v1.0",
+  authScheme: "bearer",
+  description:
+    "Work with Microsoft 365 via Graph — read mail, send mail, read and create calendar events.",
+  auth: "A custom connection whose token is a Microsoft Graph OAuth access token — sent as a Bearer token.",
+  actions: [
+    {
+      key: "list_messages",
+      label: "List messages",
+      description: "List a user's mail messages.",
+      method: "GET",
+      pathTemplate: "/users/{userId}/messages",
+      write: false,
+      fields: [
+        {
+          key: "userId",
+          label: "User id",
+          in: "path",
+          required: true,
+          hint: "'me' for the delegated user, or a user id / UPN",
+        },
+      ],
+    },
+    {
+      key: "send_mail",
+      label: "Send mail",
+      description: "Send an email as a user.",
+      method: "POST",
+      pathTemplate: "/users/{userId}/sendMail",
+      write: true,
+      fields: [
+        {
+          key: "userId",
+          label: "User id",
+          in: "path",
+          required: true,
+          hint: "'me' for the delegated user, or a user id / UPN",
+        },
+        {
+          key: "message",
+          label: "Message (JSON)",
+          in: "body",
+          required: true,
+          type: "json",
+          bodyPath: "message",
+          hint: "Graph message object: { subject, body, toRecipients }",
+        },
+        {
+          key: "saveToSentItems",
+          label: "Save to sent items",
+          in: "body",
+          required: false,
+          type: "boolean",
+          bodyPath: "saveToSentItems",
+        },
+      ],
+    },
+    {
+      key: "list_events",
+      label: "List events",
+      description: "List a user's calendar events.",
+      method: "GET",
+      pathTemplate: "/users/{userId}/events",
+      write: false,
+      fields: [
+        {
+          key: "userId",
+          label: "User id",
+          in: "path",
+          required: true,
+          hint: "'me' for the delegated user, or a user id / UPN",
+        },
+      ],
+    },
+    {
+      key: "create_event",
+      label: "Create event",
+      description: "Create a calendar event for a user.",
+      method: "POST",
+      pathTemplate: "/users/{userId}/events",
+      write: true,
+      fields: [
+        {
+          key: "userId",
+          label: "User id",
+          in: "path",
+          required: true,
+          hint: "'me' for the delegated user, or a user id / UPN",
+        },
+        { key: "subject", label: "Subject", in: "body", required: true },
+        {
+          key: "start",
+          label: "Start (JSON)",
+          in: "body",
+          required: true,
+          type: "json",
+          hint: "{ dateTime, timeZone }",
+        },
+        {
+          key: "end",
+          label: "End (JSON)",
+          in: "body",
+          required: true,
+          type: "json",
+          hint: "{ dateTime, timeZone }",
+        },
+      ],
+    },
+  ],
+};
+
+const BOX: IntegrationProvider = {
+  key: "box",
+  label: "Box",
+  baseUrl: "https://api.box.com/2.0",
+  authScheme: "bearer",
+  description: "Work with Box files and folders — list, get, create, delete.",
+  auth: "A custom connection whose token is a Box access token — sent as a Bearer token.",
+  actions: [
+    {
+      key: "list_folder_items",
+      label: "List folder items",
+      description: "List the items (files and folders) in a folder.",
+      method: "GET",
+      pathTemplate: "/folders/{folderId}/items",
+      write: false,
+      fields: [
+        {
+          key: "folderId",
+          label: "Folder id",
+          in: "path",
+          required: true,
+          hint: "the root folder id is '0'",
+        },
+        {
+          key: "limit",
+          label: "Limit",
+          in: "query",
+          required: false,
+          type: "number",
+        },
+      ],
+    },
+    {
+      key: "get_file",
+      label: "Get file",
+      description: "Fetch a file's information by id.",
+      method: "GET",
+      pathTemplate: "/files/{fileId}",
+      write: false,
+      fields: [{ key: "fileId", label: "File id", in: "path", required: true }],
+    },
+    {
+      key: "create_folder",
+      label: "Create folder",
+      description: "Create a new folder under a parent folder.",
+      method: "POST",
+      pathTemplate: "/folders",
+      write: true,
+      fields: [
+        { key: "name", label: "Name", in: "body", required: true },
+        {
+          key: "parent",
+          label: "Parent (JSON)",
+          in: "body",
+          required: true,
+          type: "json",
+          hint: '{ "id": "0" } for root',
+        },
+      ],
+    },
+    {
+      key: "delete_file",
+      label: "Delete file",
+      description: "Delete a file by id.",
+      method: "DELETE",
+      pathTemplate: "/files/{fileId}",
+      write: true,
+      fields: [{ key: "fileId", label: "File id", in: "path", required: true }],
+    },
+  ],
+};
+
 export const INTEGRATION_CATALOG: Record<string, IntegrationProvider> = {
   github: GITHUB,
   jira: JIRA,
@@ -1481,6 +2261,16 @@ export const INTEGRATION_CATALOG: Record<string, IntegrationProvider> = {
   intercom: INTERCOM,
   webflow: WEBFLOW,
   zoom: ZOOM,
+  front: FRONT,
+  sentry: SENTRY,
+  vercel: VERCEL,
+  netlify: NETLIFY,
+  digitalocean: DIGITALOCEAN,
+  cloudflare: CLOUDFLARE,
+  posthog: POSTHOG,
+  dropbox: DROPBOX,
+  msgraph: MSGRAPH,
+  box: BOX,
 };
 
 /** The node type added to the palette per provider (the tile presets `provider`). */
@@ -1582,9 +2372,11 @@ export function buildIntegrationRequest(
         );
       }
     } else {
-      if (missing) continue;
+      // Empty optional body fields are dropped — UNLESS keepEmpty (an empty string is meaningful,
+      // e.g. Dropbox root path ""). A truly-absent value still coalesces to "" via the field default.
+      if (missing && !field.keepEmpty) continue;
       body ??= {};
-      setPath(body, field.bodyPath ?? field.key, value);
+      setPath(body, field.bodyPath ?? field.key, value ?? "");
     }
   }
 
