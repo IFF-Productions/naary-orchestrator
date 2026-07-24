@@ -5,9 +5,10 @@ name: CI
 # @temporalio/testing's in-process server. No secrets required — a dummy .env only
 # satisfies the prisma-generate dotenv wrapper (generate never connects).
 #
-# Runs on a SELF-HOSTED runner (like e2e.yml). Fork PRs are skipped (see the `if:` guard)
-# so untrusted code never executes on the runner. Runner needs Node 22 + pnpm reachable
-# (setup-node/pnpm-action-setup install them) and outbound network for the tool downloads.
+# Runs on a GitHub-hosted ubuntu-latest runner. Fork PRs are skipped (see the `if:` guard),
+# retained as a policy choice (conserve CI minutes / keep repo-scoped tokens away from fork
+# code) — no longer a self-hosted necessity, so fork CI can be enabled here if wanted.
+# setup-node / pnpm-action-setup install Node 22 + pnpm.
 on:
   pull_request:
   push:
@@ -20,38 +21,29 @@ concurrency:
 
 jobs:
   verify:
-    # SECURITY: on a self-hosted runner, never execute untrusted fork code. Only same-repo
-    # branches (and pushes to main) run — a fork PR's `verify` is skipped. (Mirrors e2e.yml.)
+    # Skip fork PRs: only same-repo branches (and pushes to main) run — a fork PR's `verify`
+    # is skipped. On a hosted runner this is a policy choice (CI minutes / token exposure),
+    # not a self-hosted requirement. (Mirrors e2e.yml.)
     if: >-
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Windows runner: the platform default step shell is PowerShell, which can't run the
-    # bash `run:` scripts (heredocs, `set -e`). Force bash for every step; the
-    # ensure-git-bash-on-path composite action (below) makes that bash Git Bash, not WSL.
+    # ubuntu-latest's default shell is already bash; kept explicit so the `run:` scripts'
+    # bash features (heredocs, `set -e`) are guaranteed.
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
 
-      # On a self-hosted Windows runner, make `shell: bash` resolve to Git Bash (not the
-      # System32 WSL launcher). Shared composite action — keep the logic in ONE place.
-      - uses: ./.github/actions/ensure-git-bash-on-path
-
-      # dest MUST be per-runner: all runner services on the Windows CI VM run as the SAME
-      # account (NetworkService), so the default ~/setup-pnpm is ONE shared folder — two
-      # concurrent jobs race on it and the loser dies with "EPERM: operation not permitted,
-      # rmdir ...\setup-pnpm\...". runner.temp is per-runner (and wiped between jobs).
       - uses: pnpm/action-setup@v4
         with:
           version: 11.9.0
           dest: ${{ runner.temp }}/setup-pnpm
 
-      # No `cache: pnpm` — on the self-hosted runner the pnpm store persists on the
-      # VM's disk, so the Actions cache upload (~287MB per branch) is redundant and
-      # was the main consumer of the repo's 10GB Actions cache quota.
+      # A follow-up could add `cache: pnpm` now we're on a hosted runner, where the pnpm
+      # store no longer persists between runs.
       - uses: actions/setup-node@v4
         with:
           node-version: 22

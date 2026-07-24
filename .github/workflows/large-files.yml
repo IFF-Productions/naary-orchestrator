@@ -9,8 +9,8 @@ name: Large files
 # only what the PR touches keeps it actionable and avoids a permanent nag on every PR).
 # Generated/vendored content (lockfiles, dist, prisma migrations) is excluded.
 #
-# Runs on a GitHub-hosted runner (like deploy.yml): it only needs git + the API, and
-# keeps the shared self-hosted CI VM free for real builds.
+# Runs on a GitHub-hosted ubuntu-latest runner (like deploy.yml): it only needs git + the
+# API, so there's no reason to spend a heavier runner on it.
 
 on:
   pull_request:

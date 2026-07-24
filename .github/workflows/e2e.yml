@@ -2,21 +2,16 @@ name: E2E
 
 # Browser end-to-end tests against the FULL docker-compose stack (postgres +
 # temporal + api + worker + web) driven by Playwright. This is heavy (builds the
-# backend + web images and boots the stack), so it runs on a SELF-HOSTED runner:
-# Docker layer caching between runs makes it fast, and it keeps the load off
-# GitHub-hosted minutes. Separate from the `verify` job in ci.yml — a flake here
-# never blocks the proven typecheck/test/build gate.
+# backend + web images and boots the stack). It runs on a GitHub-hosted ubuntu-latest
+# runner, which ships Docker + the `docker compose` v2 plugin. Separate from the `verify`
+# job in ci.yml — a flake here never blocks the proven typecheck/test/build gate.
 #
-# Runner prerequisites (register a self-hosted runner with these):
-#   - Docker with a working `docker compose` (v2 plugin) OR `docker-compose` (v1). The
-#     "Resolve Docker Compose command" step below picks whichever exists and, on a macOS
-#     runner whose user lacks the plugin (e.g. Docker Desktop installed under a DIFFERENT
-#     user), auto-links Docker Desktop's bundled plugin into this user's ~/.docker/cli-plugins.
-#   - Node 22 + pnpm (the setup steps install pnpm; Node via setup-node)
-#   - ~4 GB RAM per concurrent run (host ports are ephemeral — no fixed ports needed)
-#   - Playwright's bundled Chromium is fetched per-user by `playwright install chromium`
-#     (no sudo, no system browser needed). We deliberately do NOT use the branded
-#     `channel: chrome`, whose install needs root and dies on a non-interactive runner.
+# Notes:
+#   - The "Resolve Docker Compose command" step picks `docker compose` (v2) or `docker-compose`
+#     (v1); on ubuntu-latest the v2 plugin is present, so the self-heal fallback never runs.
+#   - Playwright's bundled Chromium is fetched by `playwright install chromium` (no system
+#     browser). We deliberately do NOT use the branded `channel: chrome`, which needs root.
+#   - The stack is namespaced per run (unique compose project + ephemeral host ports).
 on:
   pull_request:
   push:
@@ -33,16 +28,15 @@ concurrency:
 
 jobs:
   e2e:
-    # SECURITY: never run untrusted fork code on the self-hosted runner. Only
-    # same-repo branches (and pushes to main) execute the stack.
+    # Skip fork PRs: only same-repo branches (and pushes to main) execute the stack.
+    # A policy choice on a hosted runner, not a self-hosted requirement.
     if: >-
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Windows runner: the platform default step shell is PowerShell, which can't run the bash
-    # `run:` scripts (heredocs, `set -e`). Force bash for every step; the
-    # ensure-git-bash-on-path composite action (below) makes that bash Git Bash, not WSL.
+    # ubuntu-latest's default shell is already bash; kept explicit so the `run:` scripts'
+    # bash features (heredocs, `set -e`) are guaranteed.
     defaults:
       run:
         shell: bash
@@ -57,11 +51,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # On a self-hosted Windows runner, make `shell: bash` resolve to Git Bash (not the
-      # System32 WSL launcher). Shared composite action — keep the logic in ONE place.
-      - uses: ./.github/actions/ensure-git-bash-on-path
-
-      # Resolve the Compose command once, and self-heal the common self-hosted-Mac case.
+      # Resolve the Compose command once. The self-heal fallback below is a no-op on
+      # ubuntu-latest (the `docker compose` v2 plugin is already present) but is kept so the
+      # workflow still runs on a machine that only has the v1 `docker-compose` binary.
       #
       # Symptom: `docker compose up -d --build` fails with "unknown shorthand flag: 'd' in -d"
       # — i.e. `docker compose` is NOT a plugin here, so `-d` falls through to the top-level
@@ -138,9 +130,8 @@ jobs:
           version: 11.9.0
           dest: ${{ runner.temp }}/setup-pnpm
 
-      # No `cache: pnpm` — on the self-hosted runner the pnpm store persists on the
-      # VM's disk, so the Actions cache upload (~287MB per branch) is redundant and
-      # was the main consumer of the repo's 10GB Actions cache quota.
+      # A follow-up could add `cache: pnpm` now we're on a hosted runner, where the pnpm
+      # store no longer persists between runs.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
