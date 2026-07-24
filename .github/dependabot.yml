@@ -9,6 +9,18 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "weekly"
+    # Collapse the weekly npm bumps into ONE PR instead of one-per-dependency.
+    # Split by dependency-type so a risky prod bump and a routine dev bump stay in
+    # separate PRs (a broken devDependency can't block a production security patch).
+    groups:
+      npm-production:
+        dependency-type: "production"
+        patterns:
+          - "*"
+      npm-development:
+        dependency-type: "development"
+        patterns:
+          - "*"
   # Keep the GitHub Actions used by our workflows (.github/workflows/*) up to date —
   # "/" is where Dependabot looks for workflow files. Bumps action refs (e.g.
   # actions/checkout@v4) via weekly PRs, same cadence as npm.
@@ -16,3 +28,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # All action bumps in a single weekly PR.
+    groups:
+      github-actions:
+        patterns:
+          - "*"
