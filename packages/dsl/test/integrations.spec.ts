@@ -132,6 +132,26 @@ describe("integration catalog — request construction", () => {
     expect(req.body).toEqual({ children: [{ type: "paragraph" }] });
   });
 
+  it("Intercom create_contact → POST /contacts with role + email in body", () => {
+    const req = buildIntegrationRequest("intercom", "create_contact", {
+      role: "user",
+      email: "jane@example.com",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/contacts");
+    expect(req.body).toEqual({ role: "user", email: "jane@example.com" });
+  });
+
+  it("Intercom create_note → path contactId + { body } in the JSON body", () => {
+    const req = buildIntegrationRequest("intercom", "create_note", {
+      contactId: "c-1",
+      body: "left a voicemail",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/contacts/c-1/notes");
+    expect(req.body).toEqual({ body: "left a voicemail" });
+  });
+
   it("omits missing optional body fields (a blank optional stays out of the payload)", () => {
     const req = buildIntegrationRequest("github", "create_issue", {
       owner: "o",
