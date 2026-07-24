@@ -11,9 +11,9 @@
     "start": "node src/worker.cjs"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.15",
-    "@ai-sdk/google": "^4.0.17",
-    "@ai-sdk/openai": "^4.0.15",
+    "@ai-sdk/anthropic": "^4.0.19",
+    "@ai-sdk/google": "^4.0.23",
+    "@ai-sdk/openai": "^4.0.20",
     "@naary/connections": "workspace:*",
     "@naary/contracts": "workspace:*",
     "@naary/db": "workspace:*",
@@ -27,13 +27,13 @@
     "@naary/storage": "workspace:*",
     "@naary/temporal-config": "workspace:*",
     "@naary/usage": "workspace:*",
-    "@temporalio/activity": "^1.20.3",
-    "@temporalio/worker": "^1.20.3",
-    "@temporalio/workflow": "^1.20.3",
-    "ai": "7.0.29",
+    "@temporalio/activity": "^1.21.1",
+    "@temporalio/worker": "^1.21.1",
+    "@temporalio/workflow": "^1.21.1",
+    "ai": "7.0.37",
     "dotenv": "^17.4.2",
     "fast-xml-parser": "^5.10.1",
-    "jose": "^6.2.3",
+    "jose": "^6.2.4",
     "node-html-parser": "^9.0.0",
     "nodemailer": "^9.0.3",
     "papaparse": "^5.5.4",
@@ -42,10 +42,10 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@temporalio/testing": "^1.20.3",
+    "@temporalio/testing": "^1.21.1",
     "@testcontainers/postgresql": "12.0.4",
     "@types/nodemailer": "^8.0.1",
     "@types/papaparse": "^5.5.2",
-    "@types/sanitize-html": "^2.16.0"
+    "@types/sanitize-html": "^2.16.1"
   }
 }

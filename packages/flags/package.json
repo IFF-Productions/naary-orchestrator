@@ -12,9 +12,9 @@
   "dependencies": {
     "@openfeature/server-sdk": "1.22.0",
     "@openfeature/flagsmith-provider": "0.1.2",
-    "flagsmith-nodejs": "6.2.0"
+    "flagsmith-nodejs": "8.1.2"
   },
   "devDependencies": {
-    "@types/node": "^26.1.0"
+    "@types/node": "^26.1.1"
   }
 }
