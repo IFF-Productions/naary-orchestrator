@@ -35,16 +35,16 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.9.0
           dest: ${{ runner.temp }}/setup-pnpm
 
       # A follow-up could add `cache: pnpm` now we're on a hosted runner, where the pnpm
       # store no longer persists between runs.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
