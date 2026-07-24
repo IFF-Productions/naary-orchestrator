@@ -108,7 +108,9 @@ describe("FirebaseVerifier", () => {
       emailVerified: false,
       claimTenant: "t-1",
     });
-    expect(verify).toHaveBeenCalledWith("good.jwt");
+    // #598: the first verification of a token also passes checkRevoked=true so a
+    // revoked/disabled user is caught before the ID token's ~1h expiry.
+    expect(verify).toHaveBeenCalledWith("good.jwt", true);
   });
 
   it("returns null when the verify fn throws (bad signature / expiry)", async () => {

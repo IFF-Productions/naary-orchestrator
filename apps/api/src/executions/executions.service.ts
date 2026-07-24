@@ -784,9 +784,14 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     return opDecideByToken(this.deps(), workflowId, approved, comment);
   }
 
-  /** The relative resume-URL path for a run, for the owner's UI to display/copy. Tenant-scoped. */
-  async getResumePath(workflowId: string, tenantId: string): Promise<string> {
-    return opGetResumePath(this.deps(), workflowId, tenantId);
+  /** The relative resume-URL path for a run, for the owner's UI to display/copy. Tenant-scoped
+   *  and run-gated (G3, #593) — the path is a resume capability. */
+  async getResumePath(
+    workflowId: string,
+    tenantId: string,
+    actor?: Principal,
+  ): Promise<string> {
+    return opGetResumePath(this.deps(), workflowId, tenantId, actor);
   }
 
   /**
@@ -820,8 +825,12 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     id: string,
     tenantId: string,
     archived: boolean,
+    actor?: Principal,
   ): Promise<void> {
-    await this.assertOwner(id, tenantId);
+    const row = await this.assertOwner(id, tenantId);
+    // G3 (#598): archiving is a run-control action — mirror `cancel`, don't stop at
+    // the tenant check.
+    await this.assertRunAccess(actor, "run", row);
     await getPrisma().execution.update({
       where: { workflowId: id },
       data: { archivedAt: archived ? new Date() : null },
@@ -837,10 +846,11 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     ids: string[],
     tenantId: string,
     archived: boolean,
+    actor?: Principal,
   ): Promise<BatchDecisionResult[]> {
     const unique = [...new Set(ids)];
     const settled = await Promise.allSettled(
-      unique.map((id) => this.setArchived(id, tenantId, archived)),
+      unique.map((id) => this.setArchived(id, tenantId, archived, actor)),
     );
     return settled.map((r, i) =>
       r.status === "fulfilled"

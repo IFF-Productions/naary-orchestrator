@@ -154,6 +154,71 @@ describe("evaluateCondition", () => {
     ).toBe(false);
   });
 
+  it("regex ReDoS guard: rejects catastrophic-backtracking patterns fast (#598)", () => {
+    // The classic exponential pattern against a long non-matching input. Pre-guard
+    // this would hang the (deterministic, uninterruptible) workflow thread; the guard
+    // must return false essentially instantly.
+    const evil = { n: { s: `${"a".repeat(40)}!` } };
+    const start = Date.now();
+    expect(
+      evaluateCondition({ path: "n.s", op: "regex", value: "(a+)+$" }, evil),
+    ).toBe(false);
+    expect(
+      evaluateCondition({ path: "n.s", op: "regex", value: "(a*)*$" }, evil),
+    ).toBe(false);
+    expect(
+      evaluateCondition(
+        { path: "n.s", op: "regex", value: "([a-z]+)*$" },
+        evil,
+      ),
+    ).toBe(false);
+    // `?` inside a quantified group is also exponential — `(a?)+` over "aaaa…!".
+    expect(
+      evaluateCondition({ path: "n.s", op: "regex", value: "(a?)+$" }, evil),
+    ).toBe(false);
+    expect(Date.now() - start).toBeLessThan(100);
+  });
+
+  it("regex guard: an OUTER `?` on a quantified group stays allowed (linear, safe)", () => {
+    // `(a+)?` backtracks linearly, so the guard must NOT over-reject it.
+    const s = { n: { v: "aaa" } };
+    expect(
+      evaluateCondition({ path: "n.v", op: "regex", value: "^(a+)?$" }, s),
+    ).toBe(true);
+  });
+
+  it("regex guard: over-long pattern or input fails closed (#598)", () => {
+    const s = { n: { v: "x".repeat(20_000) } };
+    // Simple safe pattern, but the INPUT exceeds the cap → false.
+    expect(
+      evaluateCondition({ path: "n.v", op: "regex", value: "^x+$" }, s),
+    ).toBe(false);
+    // Over-long PATTERN → false.
+    expect(
+      evaluateCondition(
+        { path: "n.v", op: "regex", value: `^${"a".repeat(300)}$` },
+        { n: { v: "a" } },
+      ),
+    ).toBe(false);
+  });
+
+  it("regex guard: ordinary safe patterns still work, incl. a single quantified group", () => {
+    const s = { n: { email: "a@b.co", code: "AB-123" } };
+    expect(
+      evaluateCondition(
+        { path: "n.email", op: "regex", value: "^[^@]+@[^@]+$" },
+        s,
+      ),
+    ).toBe(true);
+    // One quantifier inside one group is NOT nested — must still be allowed.
+    expect(
+      evaluateCondition(
+        { path: "n.code", op: "regex", value: "^([A-Z]+)-[0-9]+$" },
+        s,
+      ),
+    ).toBe(true);
+  });
+
   it("isEmpty / notEmpty (null, '', [], {})", () => {
     const s = { n: { a: "", b: [], c: {}, d: null, e: "x", f: [1], g: 0 } };
     for (const k of ["a", "b", "c", "d", "missing"]) {

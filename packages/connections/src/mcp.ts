@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { type AuthDeps, resolveAuthHeader } from "./auth";
 import { ConnectionService } from "./connection.service";
 import { assertEgressAllowed } from "./egress";
+import { safeFetch } from "./safe-fetch";
 
 export interface McpCallInput {
   serverUrl: string;
@@ -31,6 +32,12 @@ export async function callMcpTool(input: McpCallInput): Promise<McpCallResult> {
   );
   const transport = new StreamableHTTPClientTransport(url, {
     requestInit: { headers: input.headers },
+    // #592: the pre-check above validates only the FIRST hop; the SDK otherwise uses
+    // global fetch, which re-resolves DNS (rebinding TOCTOU) and follows redirects
+    // unchecked. Route every transport request through the pinning safeFetch dispatcher
+    // so a mid-session rebind/redirect to a private IP is blocked with the token unsent.
+    fetch: ((fetchUrl: unknown, init?: unknown) =>
+      safeFetch(String(fetchUrl), init as never)) as unknown as typeof fetch,
   });
   try {
     await client.connect(transport);

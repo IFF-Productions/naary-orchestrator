@@ -256,3 +256,38 @@ describe("validateGraphConfigs (save gate — lenient on missing, strict on pres
     expect(errs[0]).toMatchObject({ nodeId: "w", nodeType: "wait" });
   });
 });
+
+describe("validateGraphConfigs — prototype-pollution binding keys (#591 save gate)", () => {
+  const graph = (
+    nodes: { id: string; type: NodeType; config?: Record<string, unknown> }[],
+  ) => ({ nodes });
+
+  it("rejects a fieldBindings key with a __proto__ / constructor / prototype segment", () => {
+    for (const key of ["__proto__.polluted", "constructor.prototype.x", "a.__proto__.b"]) {
+      const errs = validateGraphConfigs(
+        graph([
+          {
+            id: "s",
+            type: "set",
+            config: { fieldBindings: { [key]: { from: "n", path: "x" } } },
+          },
+        ]),
+      );
+      expect(errs, key).toHaveLength(1);
+      expect(errs[0].nodeId).toBe("s");
+    }
+  });
+
+  it("still accepts an ordinary dotted binding key", () => {
+    const errs = validateGraphConfigs(
+      graph([
+        {
+          id: "s",
+          type: "set",
+          config: { fieldBindings: { "user.profile.name": { from: "n", path: "x" } } },
+        },
+      ]),
+    );
+    expect(errs).toEqual([]);
+  });
+});

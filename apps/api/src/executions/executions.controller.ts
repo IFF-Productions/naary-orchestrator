@@ -186,8 +186,14 @@ export class ExecutionsController {
   archiveBatch(
     @TenantId() tenantId: string,
     @Body() body: ArchiveBatchDto,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<BatchDecisionResult[]> {
-    return this.executions.archiveBatch(body.ids, tenantId, body.archived);
+    return this.executions.archiveBatch(
+      body.ids,
+      tenantId,
+      body.archived,
+      principal,
+    );
   }
 
   /** Cancel many runs at once. Literal route before `:id`, like approve/archive-batch. */
@@ -288,8 +294,9 @@ export class ExecutionsController {
   async archive(
     @TenantId() tenantId: string,
     @Param("id") id: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<{ accepted: true }> {
-    await this.executions.setArchived(id, tenantId, true);
+    await this.executions.setArchived(id, tenantId, true, principal);
     return { accepted: true };
   }
 
@@ -305,8 +312,9 @@ export class ExecutionsController {
   async unarchive(
     @TenantId() tenantId: string,
     @Param("id") id: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<{ accepted: true }> {
-    await this.executions.setArchived(id, tenantId, false);
+    await this.executions.setArchived(id, tenantId, false, principal);
     return { accepted: true };
   }
 
@@ -341,8 +349,11 @@ export class ExecutionsController {
   async resumeUrl(
     @TenantId() tenantId: string,
     @Param("id") id: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<ResumeUrlResponse> {
-    return { path: await this.executions.getResumePath(id, tenantId) };
+    return {
+      path: await this.executions.getResumePath(id, tenantId, principal),
+    };
   }
 
   /** The graph SNAPSHOT this run executed (from Temporal history), for the run-detail canvas.

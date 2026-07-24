@@ -24,6 +24,10 @@ const PATTERNS: RegExp[] = [
   /\bey[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, // JWT
   /\b[0-9a-fA-F]{64}\b/g, // 64-hex (ENCRYPTION_KEY shape; also content hashes — redact to be safe)
   /((?:api[_-]?key|token|secret|password|authorization)["':=\s]+)([^\s,'"}]{6,})/gi, // key=value
+  // credentials-in-URL (#598): `scheme://user:password@host` under a benign key
+  // (dsn/url/uri) matches neither the key-name list nor the shapes above. Keep
+  // scheme://user:, redact the password; the lookahead leaves the @host readable.
+  /((?:[a-z][a-z0-9+.-]*):\/\/[^\s/:@]+:)[^\s@/]+(?=@)/gi,
 ];
 
 export function redactString(s: string): string {

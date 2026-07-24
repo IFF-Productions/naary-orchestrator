@@ -12,7 +12,7 @@
  * both the interpreter and the web app can import it.
  */
 import type { ArgBinding, IntegrationNodeConfig } from "./types";
-import { getByPath } from "./mcp-args";
+import { getByPath, hasForbiddenPathSegment } from "./mcp-args";
 
 export type FieldLocation = "path" | "query" | "body";
 /** `json` = a raw JSON value (object/array) for schema-driven payloads that a flat field can't
@@ -64,12 +64,18 @@ export interface IntegrationProvider {
   /** When true, the base URL is the CONNECTION's serverUrl (e.g. an Atlassian site). */
   baseUrlFromConnection?: boolean;
   /**
-   * How the connection token becomes the Authorization header (default "bearer").
-   * "basic" = HTTP Basic — the stored token is `email:api_token` and is sent as
-   * `Basic base64(email:api_token)`. Jira Cloud + an Atlassian API token needs this
-   * (Bearer is only for its OAuth access tokens); GitHub is genuinely "bearer".
+   * How the connection token becomes the auth header (default "bearer").
+   * - "bearer" — `Authorization: Bearer <token>` (GitHub etc.).
+   * - "basic"  — HTTP Basic; the stored token is `email:api_token`, sent as
+   *   `Basic base64(email:api_token)` (Jira Cloud + an Atlassian API token; Bearer is
+   *   only for its OAuth access tokens).
+   * - `{ header, prefix? }` — a CUSTOM header form (#655). The raw token is placed in
+   *   `header` with an optional literal `prefix`, e.g. Shopify
+   *   `{ header: "X-Shopify-Access-Token" }`, Discord `{ header: "Authorization", prefix: "Bot " }`,
+   *   Monday/ClickUp `{ header: "Authorization" }` (no `Bearer ` prefix). Only applies to
+   *   api_token/pat connections; an OAuth access token stays a normal Bearer.
    */
-  authScheme?: "bearer" | "basic";
+  authScheme?: "bearer" | "basic" | { header: string; prefix?: string };
   /** Provider-required static headers (non-secret), e.g. GitHub's Accept/version. */
   headers?: Record<string, string>;
   /** One-line description + setup note surfaced in the palette + docs. */
@@ -2385,10 +2391,10 @@ const SHOPIFY: IntegrationProvider = {
   key: "shopify",
   label: "Shopify",
   baseUrlFromConnection: true,
-  authScheme: "bearer",
+  authScheme: { header: "X-Shopify-Access-Token" },
   description:
     "Manage a Shopify store's Admin API — read/create/update products and create orders.",
-  auth: "A custom connection whose Server URL is your store's Admin API base (https://{shop}.myshopify.com/admin/api/2024-01) and whose token is a Shopify Admin API access token. NOTE: Shopify authenticates via an `X-Shopify-Access-Token` header, which the shared auth resolver does not emit yet (it sends `Authorization: Bearer` today) — live calls won't authenticate until custom-header auth ships (#655).",
+  auth: "A custom connection whose Server URL is your store's Admin API base (https://{shop}.myshopify.com/admin/api/2024-01) and whose token is a Shopify Admin API access token — sent as the `X-Shopify-Access-Token` header (#655).",
   actions: [
     {
       key: "get_product",
@@ -2824,10 +2830,10 @@ const DISCORD: IntegrationProvider = {
   key: "discord",
   label: "Discord",
   baseUrl: "https://discord.com/api/v10",
-  authScheme: "bearer",
+  authScheme: { header: "Authorization", prefix: "Bot " },
   description:
     "Act on Discord — send channel messages, read channels/messages, open DMs, and react.",
-  auth: "A custom connection whose token is a Discord bot token. NOTE: Discord expects `Authorization: Bot <token>`, but the shared auth resolver sends `Authorization: Bearer <token>` today (no per-provider prefix) — live calls won't authenticate until custom-header auth ships (#655).",
+  auth: "A custom connection whose token is a Discord bot token — sent as `Authorization: Bot <token>` (#655).",
   actions: [
     {
       key: "send_message",
@@ -3091,10 +3097,10 @@ const CLICKUP: IntegrationProvider = {
   key: "clickup",
   label: "ClickUp",
   baseUrl: "https://api.clickup.com/api/v2",
-  authScheme: "bearer",
+  authScheme: { header: "Authorization" },
   description:
     "Manage ClickUp tasks — create, read, update, list, and comment.",
-  auth: "A custom connection whose token is a ClickUp personal API token (`pk_…`), sent as the Authorization header.",
+  auth: "A custom connection whose token is a ClickUp personal API token (`pk_…`), sent as a bare `Authorization` header — no `Bearer ` prefix (#655).",
   actions: [
     {
       key: "create_task",
@@ -3219,10 +3225,10 @@ const MONDAY: IntegrationProvider = {
   key: "monday",
   label: "Monday.com",
   baseUrl: "https://api.monday.com",
-  authScheme: "bearer",
+  authScheme: { header: "Authorization" },
   description:
     "Act on Monday.com boards via GraphQL — create/read items, post updates, change columns.",
-  auth: "A custom connection whose token is a Monday.com API token (Developers → My access tokens). NOTE: Monday expects the token in a bare `Authorization` header (no `Bearer ` prefix), but the shared auth resolver sends `Authorization: Bearer <token>` today — live calls may not authenticate until custom-header auth ships (#655).",
+  auth: "A custom connection whose token is a Monday.com API token (Developers → My access tokens), sent in a bare `Authorization` header — no `Bearer ` prefix (#655).",
   actions: [
     {
       key: "create_item",
@@ -3716,6 +3722,7 @@ export function resolveIntegrationFields(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...(config.fields ?? {}) };
   for (const [name, binding] of Object.entries(config.fieldBindings ?? {})) {
+    if (hasForbiddenPathSegment(name)) continue; // #591: never assign prototype-chain keys
     const b = binding as ArgBinding;
     out[name] = getByPath(ctx[b.from], b.path);
   }
@@ -3728,6 +3735,7 @@ function setPath(
   path: string,
   value: unknown,
 ): void {
+  if (hasForbiddenPathSegment(path)) return; // #591: prototype-chain keys must never be walked/assigned
   const keys = path.split(".");
   let obj = target;
   for (let i = 0; i < keys.length - 1; i++) {

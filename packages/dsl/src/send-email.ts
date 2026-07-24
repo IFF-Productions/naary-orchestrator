@@ -1,4 +1,4 @@
-import { getByPath } from "./mcp-args";
+import { getByPath, hasForbiddenPathSegment } from "./mcp-args";
 import type { SendEmailNodeConfig } from "./types";
 
 /** The concrete email after binding resolution — no secret (the SMTP URI is
@@ -77,6 +77,7 @@ export function resolveSendEmail(
     html: config.html,
   };
   for (const [name, binding] of Object.entries(config.fieldBindings ?? {})) {
+    if (hasForbiddenPathSegment(name)) continue; // #591: never assign prototype-chain keys
     fields[name] = toField(getByPath(ctx[binding.from], binding.path));
   }
   return {

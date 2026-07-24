@@ -176,7 +176,11 @@ export async function opGetResumePath(
   deps: ExecutionsDeps,
   workflowId: string,
   tenantId: string,
+  actor?: Principal,
 ): Promise<string> {
-  await deps.assertOwner(workflowId, tenantId);
+  const row = await deps.assertOwner(workflowId, tenantId);
+  // G3 (#593): the minted path is a durable resume CAPABILITY — gate it like every
+  // other run-control surface (approve/cancel), not just tenant-scoped.
+  await deps.assertRunAccess(actor, "run", row);
   return resumePath(workflowId);
 }

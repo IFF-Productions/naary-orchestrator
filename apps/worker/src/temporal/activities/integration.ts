@@ -62,9 +62,12 @@ export async function callIntegration(
   const provider = getIntegrationProvider(cfg.provider)!;
 
   // Fetch the connection once if we need its site URL (Jira base) or its authMode (to decide
-  // Basic-vs-Bearer for a "basic"-scheme provider). GitHub needs neither.
+  // Basic-vs-Bearer for a "basic"-scheme provider, or whether a custom-header provider's token
+  // is an api_token vs an OAuth Bearer — #655). GitHub needs neither.
   const needsConnection =
-    provider.baseUrlFromConnection || provider.authScheme === "basic";
+    provider.baseUrlFromConnection ||
+    provider.authScheme === "basic" ||
+    typeof provider.authScheme === "object";
   const conn = needsConnection
     ? await __httpDeps.getConnection(meta.tenantId, cfg.connectionId)
     : null;
@@ -105,6 +108,21 @@ export async function callIntegration(
     ) {
       const raw = authHeaders.Authorization.replace(/^Bearer\s+/i, "");
       authHeaders.Authorization = `Basic ${Buffer.from(raw).toString("base64")}`;
+    }
+    // A CUSTOM-HEADER-scheme provider (#655): Shopify (`X-Shopify-Access-Token`), Discord
+    // (`Authorization: Bot <token>`), Monday/ClickUp (bare `Authorization`, no prefix). The
+    // resolver returns the raw token as `Bearer <token>`; strip that and place it in the
+    // declared header with the optional literal prefix. Only for api_token/pat connections —
+    // an OAuth access token stays a genuine Bearer (mirrors the "basic" guard above).
+    if (
+      typeof provider.authScheme === "object" &&
+      conn?.authMode !== "oauth" &&
+      authHeaders.Authorization
+    ) {
+      const raw = authHeaders.Authorization.replace(/^Bearer\s+/i, "");
+      delete authHeaders.Authorization;
+      authHeaders[provider.authScheme.header] =
+        `${provider.authScheme.prefix ?? ""}${raw}`;
     }
     const headers: Record<string, string> = {
       Accept: "application/json",

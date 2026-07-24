@@ -25,7 +25,7 @@ export function createGuardedDispatcher(
     opts,
     callback,
   ) => {
-    const host = opts.hostname;
+    const host = opts.hostname.replace(/^\[|\]$/g, ""); // IPv6 literals arrive bracketed
     // IP literal → validate directly (dns.lookup never runs for a literal).
     if (isIP(host)) {
       if (isBlocked(host)) {

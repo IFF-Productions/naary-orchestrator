@@ -72,3 +72,31 @@ describe("resolveSet", () => {
     expect(fields).toEqual({ nested: { keep: 1 } }); // original untouched
   });
 });
+
+describe("resolveSet — prototype pollution guard (#591)", () => {
+  it("never walks a __proto__ / constructor / prototype path segment", () => {
+    const before = ({} as Record<string, unknown>).polluted;
+    const out = resolveSet(
+      {
+        fieldBindings: {
+          "__proto__.polluted": { from: "up", path: "v" },
+          "constructor.prototype.x": { from: "up", path: "v" },
+        },
+      } as unknown as SetNodeConfig,
+      { up: { v: "PWNED" } },
+    );
+    // Object.prototype is untouched — the classic assertion.
+    expect(({} as Record<string, unknown>).polluted).toBe(before);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    // And the malicious keys produced no own-property output either.
+    expect(Object.keys(out)).not.toContain("__proto__");
+  });
+
+  it("still resolves a legitimate nested path", () => {
+    const out = resolveSet(
+      { fieldBindings: { "a.b": { from: "up", path: "v" } } } as unknown as SetNodeConfig,
+      { up: { v: 7 } },
+    );
+    expect(out).toEqual({ a: { b: 7 } });
+  });
+});

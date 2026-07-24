@@ -53,6 +53,10 @@ services:
       # The api would otherwise fall back to CORS_ORIGINS; set it explicitly so every service
       # derives links from one var and the fallback isn't load-bearing. Override via APP_BASE_URL.
       APP_BASE_URL: "${APP_BASE_URL:-https://${PUBLIC_HOSTNAME:-naar-y.com}}"
+      # Swagger off in prod (audit #595): nginx also 404s /api/docs*, this is belt-and-
+      # braces so the schema isn't served even if the proxy layer changes. Override
+      # with SWAGGER_DISABLED=0 for a debugging session.
+      SWAGGER_DISABLED: "${SWAGGER_DISABLED:-1}"
       # Label Sentry events as production (the code otherwise falls back to NODE_ENV → "development").
       SENTRY_ENVIRONMENT: production
     # Drop the local-temporal dependency (Temporal is Cloud); keep DB + migrations.

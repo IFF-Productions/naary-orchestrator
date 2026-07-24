@@ -1,4 +1,4 @@
-import { getByPath } from "./mcp-args";
+import { getByPath, hasForbiddenPathSegment } from "./mcp-args";
 import type { SetNodeConfig } from "./types";
 
 /**
@@ -12,6 +12,7 @@ function setByPath(
   path: string,
   value: unknown,
 ): void {
+  if (hasForbiddenPathSegment(path)) return; // #591: a `__proto__`/`constructor`/`prototype` segment would pollute the shared isolate's prototypes
   const keys = path.split(".");
   let cur = root;
   for (let i = 0; i < keys.length - 1; i++) {
