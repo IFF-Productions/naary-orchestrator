@@ -498,11 +498,111 @@ const NOTION: IntegrationProvider = {
   ],
 };
 
+// ── Zoom (REST API v2; static base api.zoom.us/v2; auth = a server-to-server OAuth access
+//    token as Bearer, stored on a "custom" connection. userId is usually 'me') ──────────
+const ZOOM: IntegrationProvider = {
+  key: "zoom",
+  label: "Zoom",
+  baseUrl: "https://api.zoom.us/v2",
+  authScheme: "bearer",
+  description: "Manage Zoom meetings — list, create, get, and delete.",
+  auth: "A custom connection whose token is a Zoom server-to-server OAuth access token.",
+  actions: [
+    {
+      key: "list_meetings",
+      label: "List meetings",
+      description: "List a user's meetings.",
+      method: "GET",
+      pathTemplate: "/users/{userId}/meetings",
+      write: false,
+      fields: [
+        {
+          key: "userId",
+          label: "User id",
+          in: "path",
+          required: true,
+          hint: "usually 'me'",
+        },
+        {
+          key: "type",
+          label: "Type",
+          in: "query",
+          required: false,
+          hint: "scheduled|live|upcoming",
+        },
+      ],
+    },
+    {
+      key: "create_meeting",
+      label: "Create meeting",
+      description: "Schedule a new meeting for a user.",
+      method: "POST",
+      pathTemplate: "/users/{userId}/meetings",
+      write: true,
+      fields: [
+        {
+          key: "userId",
+          label: "User id",
+          in: "path",
+          required: true,
+          hint: "usually 'me'",
+        },
+        { key: "topic", label: "Topic", in: "body", required: true },
+        {
+          key: "type",
+          label: "Type",
+          in: "body",
+          required: false,
+          type: "number",
+          hint: "1 instant, 2 scheduled",
+        },
+        {
+          key: "startTime",
+          label: "Start time",
+          in: "body",
+          required: false,
+          bodyPath: "start_time",
+        },
+        {
+          key: "duration",
+          label: "Duration",
+          in: "body",
+          required: false,
+          type: "number",
+        },
+      ],
+    },
+    {
+      key: "get_meeting",
+      label: "Get meeting",
+      description: "Fetch a meeting by id.",
+      method: "GET",
+      pathTemplate: "/meetings/{meetingId}",
+      write: false,
+      fields: [
+        { key: "meetingId", label: "Meeting id", in: "path", required: true },
+      ],
+    },
+    {
+      key: "delete_meeting",
+      label: "Delete meeting",
+      description: "Delete a meeting by id.",
+      method: "DELETE",
+      pathTemplate: "/meetings/{meetingId}",
+      write: true,
+      fields: [
+        { key: "meetingId", label: "Meeting id", in: "path", required: true },
+      ],
+    },
+  ],
+};
+
 export const INTEGRATION_CATALOG: Record<string, IntegrationProvider> = {
   github: GITHUB,
   jira: JIRA,
   slack: SLACK,
   notion: NOTION,
+  zoom: ZOOM,
 };
 
 /** The node type added to the palette per provider (the tile presets `provider`). */

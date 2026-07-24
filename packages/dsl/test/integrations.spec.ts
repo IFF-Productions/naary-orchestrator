@@ -55,6 +55,33 @@ describe("integration catalog — request construction", () => {
     expect(req.body).toBeUndefined();
   });
 
+  it("Zoom create_meeting → POST /users/me/meetings with topic + start_time via bodyPath", () => {
+    const req = buildIntegrationRequest("zoom", "create_meeting", {
+      userId: "me",
+      topic: "Sprint review",
+      type: 2,
+      startTime: "2026-08-01T15:00:00Z",
+      duration: 45,
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/users/me/meetings");
+    expect(req.body).toEqual({
+      topic: "Sprint review",
+      type: 2,
+      start_time: "2026-08-01T15:00:00Z",
+      duration: 45,
+    });
+  });
+
+  it("Zoom get_meeting → GET /meetings/{meetingId}, no body", () => {
+    const req = buildIntegrationRequest("zoom", "get_meeting", {
+      meetingId: "8391234567",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/meetings/8391234567");
+    expect(req.body).toBeUndefined();
+  });
+
   it("Jira create_issue → nested fields.* body via bodyPath", () => {
     const req = buildIntegrationRequest("jira", "create_issue", {
       projectKey: "PROJ",
