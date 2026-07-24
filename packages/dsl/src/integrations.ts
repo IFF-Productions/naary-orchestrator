@@ -564,7 +564,6 @@ const SENDGRID: IntegrationProvider = {
           in: "body",
           required: true,
           type: "json",
-          bodyPath: "contacts",
           hint: "array of contact objects",
         },
       ],

@@ -160,6 +160,18 @@ describe("integration catalog — request construction", () => {
     });
   });
 
+  it("SendGrid list_templates → GET with the optional generations query param", () => {
+    const req = buildIntegrationRequest("sendgrid", "list_templates", {
+      generations: "dynamic",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/templates?generations=dynamic");
+    // …and when omitted, no query string is appended.
+    expect(buildIntegrationRequest("sendgrid", "list_templates", {}).path).toBe(
+      "/templates",
+    );
+  });
+
   it("omits missing optional body fields (a blank optional stays out of the payload)", () => {
     const req = buildIntegrationRequest("github", "create_issue", {
       owner: "o",
