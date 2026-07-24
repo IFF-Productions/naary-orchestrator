@@ -82,6 +82,25 @@ describe("integration catalog — request construction", () => {
     expect(req.body).toBeUndefined();
   });
 
+  it("Zoom list_meetings → GET /users/{userId}/meetings with the type query param", () => {
+    const req = buildIntegrationRequest("zoom", "list_meetings", {
+      userId: "me",
+      type: "upcoming",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/users/me/meetings?type=upcoming");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Zoom delete_meeting → DELETE /meetings/{meetingId}, no body", () => {
+    const req = buildIntegrationRequest("zoom", "delete_meeting", {
+      meetingId: "8391234567",
+    });
+    expect(req.method).toBe("DELETE");
+    expect(req.path).toBe("/meetings/8391234567");
+    expect(req.body).toBeUndefined();
+  });
+
   it("Jira create_issue → nested fields.* body via bodyPath", () => {
     const req = buildIntegrationRequest("jira", "create_issue", {
       projectKey: "PROJ",

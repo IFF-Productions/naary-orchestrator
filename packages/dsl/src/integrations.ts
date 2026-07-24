@@ -506,7 +506,7 @@ const ZOOM: IntegrationProvider = {
   baseUrl: "https://api.zoom.us/v2",
   authScheme: "bearer",
   description: "Manage Zoom meetings — list, create, get, and delete.",
-  auth: "A custom connection whose token is a Zoom server-to-server OAuth access token.",
+  auth: "A custom connection whose token is a Zoom server-to-server OAuth access token. NOTE: these tokens are short-lived (~1h) — refresh/rotate the stored token periodically or calls will start failing with 401.",
   actions: [
     {
       key: "list_meetings",
