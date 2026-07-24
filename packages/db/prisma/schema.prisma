@@ -718,7 +718,11 @@ model TurnstileConfig {
   environmentId String
   siteKey       String
   enabled       Boolean  @default(true)
-  updatedAt     DateTime @default(now()) @updatedAt
+  // Optional server-side "allowed domains" (#615): when non-empty, a submission's solved Turnstile
+  // hostname (from siteverify, cryptographically tied to the token — NOT a spoofable header) must be
+  // in this list, else it's denied. Empty ⇒ no host restriction. Also defeats site-key-lift replay.
+  allowedHostnames String[] @default([])
+  updatedAt        DateTime @default(now()) @updatedAt
 
   // Restrict (like Variable): an env can't be deleted out from under its config.
   environment Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)

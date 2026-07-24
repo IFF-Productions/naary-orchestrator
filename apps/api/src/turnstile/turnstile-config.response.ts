@@ -16,4 +16,11 @@ export class TurnstileConfigResponse {
       "Whether a secret key is stored (write-only — the value is never returned).",
   })
   hasSecret!: boolean;
+
+  @ApiProperty({
+    type: [String],
+    description:
+      "Allowed solved-Turnstile hostnames (empty ⇒ any). A submission's hostname must match.",
+  })
+  allowedHostnames!: string[];
 }

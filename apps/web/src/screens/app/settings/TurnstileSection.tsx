@@ -20,6 +20,8 @@ interface EnvForm {
   secretKey: string; // draft only — never populated from the server (write-only)
   enabled: boolean;
   hasSecret: boolean;
+  /** Raw comma/newline-separated text of allowed domains (parsed to an array on save). */
+  allowedHostnames: string;
   exists: boolean;
 }
 
@@ -28,6 +30,7 @@ const EMPTY: EnvForm = {
   secretKey: "",
   enabled: true,
   hasSecret: false,
+  allowedHostnames: "",
   exists: false,
 };
 
@@ -38,8 +41,17 @@ function toForm(cfg: TurnstileConfig | null): EnvForm {
     secretKey: "",
     enabled: cfg.enabled,
     hasSecret: cfg.hasSecret,
+    allowedHostnames: (cfg.allowedHostnames ?? []).join(", "),
     exists: true,
   };
+}
+
+/** Parse the raw "domains" text (comma/newline separated) into a clean host list. */
+function parseHostnames(raw: string): string[] {
+  return raw
+    .split(/[\n,]/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 export function TurnstileSection({ envs }: { envs: Environment[] }) {
@@ -92,6 +104,7 @@ export function TurnstileSection({ envs }: { envs: Environment[] }) {
       const saved = await envScoped.setTurnstile(env.id, {
         siteKey: form.siteKey.trim(),
         enabled: form.enabled,
+        allowedHostnames: parseHostnames(form.allowedHostnames),
         // Only send the secret when the user typed a new one (write-only).
         ...(form.secretKey.trim() ? { secretKey: form.secretKey.trim() } : {}),
       });
@@ -189,7 +202,30 @@ export function TurnstileSection({ envs }: { envs: Environment[] }) {
                 }
                 autoComplete="new-password"
                 disabled={saving}
+                style={{ marginBottom: 10 }}
               />
+
+              <label style={labelStyle}>Allowed domains (optional)</label>
+              <TextInput
+                value={form.allowedHostnames}
+                onChange={(e) =>
+                  patch(env.id, { allowedHostnames: e.target.value })
+                }
+                placeholder="example.com, forms.example.com"
+                disabled={saving}
+              />
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--ink-3)",
+                  marginTop: 4,
+                }}
+              >
+                Comma-separated. When set, a challenge solved on any other
+                domain is rejected server-side — a non-spoofable “allowed
+                domains”. Leave blank to allow any (your Cloudflare widget
+                hostnames still apply).
+              </div>
 
               <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
                 <Button

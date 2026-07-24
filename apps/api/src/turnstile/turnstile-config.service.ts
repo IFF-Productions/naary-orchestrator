@@ -24,6 +24,8 @@ export interface TurnstileConfigView {
   siteKey: string;
   enabled: boolean;
   hasSecret: boolean;
+  /** Optional "allowed domains" — solved Turnstile hostnames permitted (empty ⇒ any). */
+  allowedHostnames: string[];
 }
 
 export interface TurnstileConfigInput {
@@ -31,6 +33,21 @@ export interface TurnstileConfigInput {
   /** Write-only: set/replaced, never read back. Omitted/empty on update ⇒ keep the existing secret. */
   secretKey?: unknown;
   enabled?: unknown;
+  /** Allowed solved-hostnames (#615). Non-array ⇒ unchanged; entries are trimmed + de-duped. */
+  allowedHostnames?: unknown;
+}
+
+/** Normalize an allowed-hostnames input to a clean string[] (trim, drop empties, de-dupe), or null
+ *  when the caller didn't supply an array (⇒ leave the stored value unchanged). */
+function normalizeHostnames(v: unknown): string[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: string[] = [];
+  for (const h of v) {
+    if (typeof h !== "string") continue;
+    const t = h.trim().toLowerCase();
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out;
 }
 
 /**
@@ -61,6 +78,7 @@ export class TurnstileConfigService {
       siteKey: row.siteKey,
       enabled: row.enabled,
       hasSecret: secret != null,
+      allowedHostnames: row.allowedHostnames,
     };
   }
 
@@ -76,11 +94,23 @@ export class TurnstileConfigService {
     if (!siteKey)
       throw new BadRequestException("A Turnstile site key is required.");
     const enabled = input.enabled === undefined ? true : Boolean(input.enabled);
+    const hostnames = normalizeHostnames(input.allowedHostnames);
 
     await getPrisma().turnstileConfig.upsert({
       where: { tenantId_environmentId: { tenantId, environmentId } },
-      create: { tenantId, environmentId, siteKey, enabled },
-      update: { siteKey, enabled },
+      create: {
+        tenantId,
+        environmentId,
+        siteKey,
+        enabled,
+        ...(hostnames ? { allowedHostnames: hostnames } : {}),
+      },
+      // Only overwrite the hostname list when the caller sent an array (else keep the stored one).
+      update: {
+        siteKey,
+        enabled,
+        ...(hostnames ? { allowedHostnames: hostnames } : {}),
+      },
     });
 
     const secretKey =
@@ -124,9 +154,11 @@ export class TurnstileConfigService {
    * 403s). Not enforced (disabled / no config / no secret) ⇒ allow. Enforced + missing token ⇒ deny.
    * Otherwise verify with Cloudflare: a `success:false` (invalid/expired/reused) ⇒ deny; a
    * timeout/network/5xx ⇒ **fail-open** (allow) — this gate is defense-in-depth and the tenant budget
-   * cap is the real cost backstop, so a Cloudflare blip must not brick every public form. No
-   * `remoteip` is sent (behind a proxy it's the proxy's address, which can turn valid solves into
-   * failures). The secret is decrypted in-request, used, never logged.
+   * cap is the real cost backstop, so a Cloudflare blip must not brick every public form. When a
+   * non-empty `allowedHostnames` list is set (#615), the solved `hostname` from siteverify (tied to
+   * the token, not a spoofable header) must be in it — a server-side "allowed domains" that also kills
+   * site-key-lift replay. No `remoteip` is sent (behind a proxy it's the proxy's address, which can
+   * turn valid solves into failures). The secret is decrypted in-request, used, never logged.
    */
   async verify(
     tenantId: string,
@@ -140,11 +172,27 @@ export class TurnstileConfigService {
     const secret = await this.secrets.get(tenantId, environmentId, SECRET_KEY);
     if (!secret) return true; // enabled but unconfigured — can't enforce (UI prevents this)
     if (!token) return false; // enforced, but the client sent no challenge
-    return this.siteverify(secret, token);
+
+    const result = await this.siteverify(secret, token);
+    if (result === "unavailable") return true; // Cloudflare blip → fail-open
+    if (!result.success) return false; // invalid / expired / reused
+    // Optional "allowed domains": the solved hostname must be on the list (empty ⇒ any host).
+    const allow = row.allowedHostnames ?? [];
+    if (allow.length > 0) {
+      const host = result.hostname?.toLowerCase();
+      if (!host || !allow.includes(host)) return false;
+    }
+    return true;
   }
 
-  /** POST the token to Cloudflare; true = solved. Fail-open on any transport failure (see `verify`). */
-  private async siteverify(secret: string, token: string): Promise<boolean> {
+  /**
+   * POST the token to Cloudflare. Returns the solved result `{ success, hostname }`, or the marker
+   * `"unavailable"` on any transport failure (timeout/network/5xx) so `verify` can fail-open.
+   */
+  private async siteverify(
+    secret: string,
+    token: string,
+  ): Promise<{ success: boolean; hostname?: string } | "unavailable"> {
     const body = new URLSearchParams();
     body.set("secret", secret);
     body.set("response", token);
@@ -155,11 +203,19 @@ export class TurnstileConfigService {
         body: body.toString(),
         signal: AbortSignal.timeout(SITEVERIFY_TIMEOUT_MS),
       });
-      if (!res.ok) return true; // 5xx/4xx from Cloudflare → fail-open
-      const json = (await res.json()) as { success?: boolean };
-      return json?.success === true;
+      if (!res.ok) return "unavailable"; // 5xx/4xx from Cloudflare → fail-open
+      const json = (await res.json()) as {
+        success?: boolean;
+        hostname?: string;
+      };
+      return {
+        success: json?.success === true,
+        ...(typeof json?.hostname === "string"
+          ? { hostname: json.hostname }
+          : {}),
+      };
     } catch {
-      return true; // timeout / network → fail-open
+      return "unavailable"; // timeout / network → fail-open
     }
   }
 }
