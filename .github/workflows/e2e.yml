@@ -38,7 +38,7 @@ jobs:
     if: >-
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     # Windows runner: the platform default step shell is PowerShell, which can't run the bash
     # `run:` scripts (heredocs, `set -e`). Force bash for every step; the
