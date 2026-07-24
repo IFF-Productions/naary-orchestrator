@@ -463,8 +463,6 @@ async function execNodeInner(
       return null;
     }
     case "humanApproval": {
-      state.status = "awaiting_approval";
-      await syncStatus(); // surface the pause in the Runs list / approval queue
       const gateCfg = (cfg ?? {}) as ApprovalNodeConfig;
       // ---- Approval routing + SLA/escalation (REDESIGN-FUNCTIONALITY-GAPS.md Slice 1) ----
       // REPLAY INVARIANT (two layers): every NEW command below (prepareApproval, the
@@ -482,15 +480,13 @@ async function execNodeInner(
         gateCfg.contextFields !== undefined ||
         (gateCfg.remindAfterHours?.length ?? 0) > 0 ||
         gateCfg.escalateAfterHours !== undefined;
-      const slice1Active =
-        hasSlice1Meta && wf.patched("approval-routing-sla-v1");
-      if (slice1Active) {
-        // Pause-side awaiting snapshot via an ACTIVITY: contextFields expression eval,
-        // approver group-name read, and the pausedAt clock stamp are side effects
-        // (Tier-1 rules 2/3); `$secrets` refs stay literal inside prepareApproval, so
-        // secrets can never enter this record / history (rule 4). The returned DATA is
-        // stored under the reserved __approval ctx key, where the API's stateQuery
-        // reads it (inbox rows, decide-time enforcement, public prompt).
+      // Pause-side awaiting snapshot via an ACTIVITY: contextFields expression eval,
+      // approver group-name read, and the pausedAt clock stamp are side effects
+      // (Tier-1 rules 2/3); `$secrets` refs stay literal inside prepareApproval, so
+      // secrets can never enter this record / history (rule 4). The returned DATA is
+      // stored under the reserved __approval ctx key, where the API's stateQuery
+      // reads it (inbox rows, decide-time enforcement, public prompt).
+      const writeApprovalRecord = async () => {
         const snapshot: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(ctx)) {
           if (!k.startsWith("__")) snapshot[k] = v;
@@ -508,6 +504,38 @@ async function execNodeInner(
           },
           ctx: snapshot,
         });
+      };
+      // ATOMIC-AWAIT invariant (record-before-status): the API's stateQuery reads the
+      // __approval record WHENEVER status is awaiting_approval (inbox rows, decide-time
+      // enforcement, public prompt). Writing status FIRST (the legacy order below) left a
+      // window where a query could observe awaiting_approval WITHOUT the record — normally
+      // sub-millisecond, but a loaded worker widens it until it's observable. For NEW runs
+      // we build the record FIRST, so the pause is never observable without it.
+      // Gated on a fresh patched() marker so in-flight runs recorded on the status-first
+      // order (their histories lack this marker → patched() returns false, emitting no
+      // command) replay the legacy path UNCHANGED. The marker implies routing-sla is active
+      // for this run (a strictly later interpreter version), so this branch doesn't re-check
+      // the approval-routing-sla-v1 marker.
+      const recordBeforeStatus =
+        hasSlice1Meta && wf.patched("approval-record-before-status-v1");
+      // Whether this run wrote an __approval record (either order) — used to drop it once
+      // the gate resolves (line below). A plain ctx delete, no command, so deriving this
+      // from either patch path is replay-safe.
+      let approvalRecorded = false;
+      if (recordBeforeStatus) {
+        await writeApprovalRecord();
+        approvalRecorded = true;
+        state.status = "awaiting_approval";
+        await syncStatus(); // surface the pause in the Runs list / approval queue
+      } else {
+        state.status = "awaiting_approval";
+        await syncStatus(); // surface the pause in the Runs list / approval queue
+        const slice1Active =
+          hasSlice1Meta && wf.patched("approval-routing-sla-v1");
+        if (slice1Active) {
+          await writeApprovalRecord();
+          approvalRecorded = true;
+        }
       }
       // Notify the tenant (best-effort) that a decision is needed — a HITL pause can
       // last days, so don't rely on someone watching the inbox. Gated + swallowed so
@@ -626,7 +654,7 @@ async function execNodeInner(
       state.status = "running";
       // The gate is no longer pending — drop the awaiting record so a later loop
       // iteration pauses fresh (plain ctx write: no command, replay-safe).
-      if (slice1Active) delete ctx[APPROVAL_CTX_KEY];
+      if (approvalRecorded) delete ctx[APPROVAL_CTX_KEY];
       // Record the decision + reason on the node's output so it's durable, visible
       // in the run, and branchable downstream (<nodeId>.approved / .comment). A ctx
       // write is in-workflow state — no new command, so it stays replay-safe.
