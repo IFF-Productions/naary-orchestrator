@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history so the merge-base diff against the PR base is available.
           fetch-depth: 0
@@ -64,7 +64,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Post or update the sticky PR comment
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           ROWS: ${{ steps.scan.outputs.rows }}
         with:

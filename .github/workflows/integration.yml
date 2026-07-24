@@ -32,7 +32,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # testcontainers talks to the Docker daemon directly — fail here with a clear message if
       # it's unreachable, not deep in a test. ubuntu-latest ships a running daemon, so this
@@ -46,12 +46,12 @@ jobs:
           echo "::error::Cannot reach the Docker daemon as the runner account '$(whoami)'."
           exit 1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.9.0
           dest: ${{ runner.temp }}/setup-pnpm
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm

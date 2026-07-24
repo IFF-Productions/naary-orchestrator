@@ -49,7 +49,7 @@ jobs:
       ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
       E2E_TENANT: t-demo
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Resolve the Compose command once. The self-heal fallback below is a no-op on
       # ubuntu-latest (the `docker compose` v2 plugin is already present) but is kept so the
@@ -125,14 +125,14 @@ jobs:
       # account (NetworkService), so the default ~/setup-pnpm is ONE shared folder — two
       # concurrent jobs race on it and the loser dies with "EPERM: operation not permitted,
       # rmdir ...\setup-pnpm\...". runner.temp is per-runner (and wiped between jobs).
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.9.0
           dest: ${{ runner.temp }}/setup-pnpm
 
       # A follow-up could add `cache: pnpm` now we're on a hosted runner, where the pnpm
       # store no longer persists between runs.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 

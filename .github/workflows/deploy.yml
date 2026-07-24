@@ -79,11 +79,11 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.DEPLOY_REF }}
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -104,12 +104,12 @@ jobs:
             fi
           done
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
         if: steps.exists.outputs.backend != 'true' || steps.exists.outputs.web != 'true'
 
       - name: Build + push backend image (api / worker / migrate)
         if: steps.exists.outputs.backend != 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -123,7 +123,7 @@ jobs:
       # server .env. VITE_APP_VERSION is stamped with the release tag.
       - name: Build + push web image (SPA + nginx)
         if: steps.exists.outputs.web != 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/web/Dockerfile
@@ -156,7 +156,7 @@ jobs:
     # environment in repo settings to make every deploy click-to-approve.
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.DEPLOY_REF }}
 
