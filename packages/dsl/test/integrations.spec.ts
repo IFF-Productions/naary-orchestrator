@@ -113,6 +113,30 @@ describe("integration catalog — request construction", () => {
     });
   });
 
+  it("Webflow create_item → POST with collectionId in path, fieldData json body", () => {
+    const req = buildIntegrationRequest("webflow", "create_item", {
+      collectionId: "col-1",
+      fieldData: { name: "Post", slug: "post" },
+      isDraft: true,
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/collections/col-1/items");
+    expect(req.body).toEqual({
+      fieldData: { name: "Post", slug: "post" },
+      isDraft: true,
+    });
+  });
+
+  it("Webflow get_item → GET with collectionId + itemId in path, no body", () => {
+    const req = buildIntegrationRequest("webflow", "get_item", {
+      collectionId: "col-1",
+      itemId: "item-9",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/collections/col-1/items/item-9");
+    expect(req.body).toBeUndefined();
+  });
+
   it("omits an OPTIONAL json field explicitly set to {} (empty = not sent)", () => {
     const req = buildIntegrationRequest("notion", "query_database", {
       databaseId: "db-1",
