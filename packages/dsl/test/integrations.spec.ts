@@ -132,6 +132,33 @@ describe("integration catalog — request construction", () => {
     expect(req.body).toEqual({ children: [{ type: "paragraph" }] });
   });
 
+  it("GitLab create_issue → POST /projects/{projectId}/issues with a JSON body", () => {
+    const req = buildIntegrationRequest("gitlab", "create_issue", {
+      projectId: "mygroup/myrepo",
+      title: "It broke",
+      description: "steps…",
+      labels: "bug,triage",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/projects/mygroup%2Fmyrepo/issues");
+    expect(req.body).toEqual({
+      title: "It broke",
+      description: "steps…",
+      labels: "bug,triage",
+    });
+  });
+
+  it("GitLab comment_issue → path iid substituted, comment in body", () => {
+    const req = buildIntegrationRequest("gitlab", "comment_issue", {
+      projectId: 42,
+      issueIid: 7,
+      body: "triaged",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/projects/42/issues/7/notes");
+    expect(req.body).toEqual({ body: "triaged" });
+  });
+
   it("omits missing optional body fields (a blank optional stays out of the payload)", () => {
     const req = buildIntegrationRequest("github", "create_issue", {
       owner: "o",
