@@ -132,6 +132,28 @@ describe("integration catalog — request construction", () => {
     expect(req.body).toEqual({ children: [{ type: "paragraph" }] });
   });
 
+  it("Airtable create_record → POST /{baseId}/{tableId} with a fields body", () => {
+    const req = buildIntegrationRequest("airtable", "create_record", {
+      baseId: "appX",
+      tableId: "tblY",
+      fields: { Name: "Ada", Status: "Active" },
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/appX/tblY");
+    expect(req.body).toEqual({ fields: { Name: "Ada", Status: "Active" } });
+  });
+
+  it("Airtable get_record → GET path with recordId, no body", () => {
+    const req = buildIntegrationRequest("airtable", "get_record", {
+      baseId: "appX",
+      tableId: "tblY",
+      recordId: "recZ",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/appX/tblY/recZ");
+    expect(req.body).toBeUndefined();
+  });
+
   it("omits missing optional body fields (a blank optional stays out of the payload)", () => {
     const req = buildIntegrationRequest("github", "create_issue", {
       owner: "o",
