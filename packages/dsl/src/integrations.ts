@@ -517,7 +517,9 @@ const TODOIST: IntegrationProvider = {
       write: false,
       fields: [
         {
-          key: "projectId",
+          // Query field KEY is the literal param name (query has no bodyPath remap), so it must be
+          // Todoist's snake_case `project_id`, not `projectId` (#647 review).
+          key: "project_id",
           label: "Project id",
           in: "query",
           required: false,

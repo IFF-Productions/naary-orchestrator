@@ -163,6 +163,14 @@ describe("integration catalog — request construction", () => {
     expect(req.path).toBe("/tasks/2995104339/close");
     expect(req.body).toBeUndefined();
   });
+
+  it("Todoist list_tasks → GET with the query param named project_id (not projectId)", () => {
+    const req = buildIntegrationRequest("todoist", "list_tasks", {
+      project_id: "2203306141",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/tasks?project_id=2203306141");
+  });
 });
 
 describe("integration field resolution (static + bindings)", () => {
