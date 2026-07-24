@@ -513,9 +513,7 @@ async function execNodeInner(
       // we build the record FIRST, so the pause is never observable without it.
       // Gated on a fresh patched() marker so in-flight runs recorded on the status-first
       // order (their histories lack this marker → patched() returns false, emitting no
-      // command) replay the legacy path UNCHANGED. The marker implies routing-sla is active
-      // for this run (a strictly later interpreter version), so this branch doesn't re-check
-      // the approval-routing-sla-v1 marker.
+      // command) replay the legacy path UNCHANGED.
       const recordBeforeStatus =
         hasSlice1Meta && wf.patched("approval-record-before-status-v1");
       // Whether this run wrote an __approval record (either order) — used to drop it once
@@ -523,6 +521,12 @@ async function execNodeInner(
       // from either patch path is replay-safe.
       let approvalRecorded = false;
       if (recordBeforeStatus) {
+        // Also record the routing-sla marker so EVERY slice-1 run's history carries both
+        // markers (record-first runs took slice-1 behavior too). Only NEW runs enter this
+        // branch — old runs replay the legacy path — so recording it here can't perturb an
+        // existing history's command sequence. Return value is unused: this is a slice-1
+        // run by construction (hasSlice1Meta above).
+        void wf.patched("approval-routing-sla-v1");
         await writeApprovalRecord();
         approvalRecorded = true;
         state.status = "awaiting_approval";
