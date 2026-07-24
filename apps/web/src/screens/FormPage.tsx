@@ -1,6 +1,6 @@
 import type { TemplateBlock } from "@naary/dsl";
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { TemplateContentBlock } from "../components";
 import { api, type FormDefinition, type FormFieldView } from "../lib/api";
 import { TurnstileWidget } from "./public/TurnstileWidget";
@@ -31,6 +31,8 @@ import {
  */
 export function FormPage() {
   const { formId } = useParams<{ formId: string }>();
+  const [searchParams] = useSearchParams();
+  const embed = searchParams.get("embed") === "1";
   const [def, setDef] = useState<FormDefinition | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "notfound">(
     "loading",
@@ -109,7 +111,7 @@ export function FormPage() {
   }
 
   return (
-    <PublicFrame>
+    <PublicFrame embed={embed}>
       <div style={{ width: "100%", maxWidth: 460 }}>
         {state === "loading" && (
           <div style={{ ...PUBLIC_CARD, overflow: "hidden" }}>

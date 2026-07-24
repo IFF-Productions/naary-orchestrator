@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { Icon, Logo } from "../components";
 import { api, type ChatDefinition, type Citation } from "../lib/api";
 import {
@@ -110,6 +110,8 @@ function Sources({ citations }: { citations: Citation[] }) {
 
 export function ChatPage() {
   const { chatId } = useParams<{ chatId: string }>();
+  const [searchParams] = useSearchParams();
+  const embed = searchParams.get("embed") === "1";
   const [def, setDef] = useState<ChatDefinition | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "notfound">(
     "loading",
@@ -199,7 +201,7 @@ export function ChatPage() {
     (!def?.turnstileSiteKey || !!turnstileToken);
 
   return (
-    <PublicFrame>
+    <PublicFrame embed={embed}>
       {state === "loading" && (
         <div style={{ ...PUBLIC_CARD, width: "100%", maxWidth: 440 }}>
           <div
