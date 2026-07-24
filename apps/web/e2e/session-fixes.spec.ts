@@ -92,6 +92,18 @@ test("run detail: the 'Run input' panel shows the payload that started the run",
   await page.getByRole("button", { name: "Run now" }).click();
   await expect(page).toHaveURL(/\/app\/runs\/.+/);
 
+  // Let the run settle so the timeline is stable. The default step selection FOLLOWS
+  // the run (state.currentNodeId), which on a completed run is the end node — so we
+  // can't rely on catching the sub-second window where the Start node is current.
+  await expect(page.getByText("Completed").first()).toBeVisible({
+    timeout: 15_000,
+  });
+
+  // Explicitly select the Start (trigger) step. Its panel shows the entry payload as
+  // "Trigger input" — the start node writes no ctx output of its own, so the run's
+  // ctx.__input surfaces here. (Deterministic: not a race on which node is current.)
+  await page.getByRole("button", { name: /Start/ }).click();
+
   // The redesigned run detail shows the entry payload as the trigger step's "Trigger input".
   await expect(page.getByText("Trigger input")).toBeVisible();
   // The seeded payload is rendered there (proves it's the real trigger input).
