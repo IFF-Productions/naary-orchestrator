@@ -213,21 +213,25 @@ jobs:
           # 8GB box with no swap the kernel OOM-kills the NEW worker before its /metrics health
           # endpoint binds, so the health gate never passes and docker-rollout reverts
           # ("New containers are not healthy. Rolling back."). A swapfile absorbs the transient
-          # spike. Idempotent: only creates it when no swap is active; persists via fstab.
-          # Uses dd (not fallocate) so the file has no holes — swapon rejects sparse files.
-          # /proc/swaps has a header line + one line per active swap → <=1 line means none
-          # (portable, no dependence on swapon flag versions).
-          if [ "$(wc -l < /proc/swaps)" -le 1 ]; then
-            echo "no swap active — creating /swapfile (4G)"
+          # spike. Idempotent + SIZE-aware: checks SwapTotal, not mere presence — a box with
+          # only a tiny existing swap (e.g. a 512MB zram device) would otherwise skip and still
+          # OOM. Uses dd (not fallocate) so the file has no holes — swapon rejects sparse files.
+          # Persists via fstab; logs the total in both branches for verification.
+          SWAP_TARGET_KB=4194304 # 4 GiB
+          cur_kb=$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)
+          echo "current swap total: $((cur_kb / 1024))MB"
+          if [ "$cur_kb" -lt "$SWAP_TARGET_KB" ]; then
+            echo "below 4GiB target — ensuring /swapfile (4G)"
+            swapoff /swapfile 2>/dev/null || true # replace a partial/smaller prior file cleanly
             rm -f /swapfile
             dd if=/dev/zero of=/swapfile bs=1M count=4096 status=none
             chmod 600 /swapfile
             mkswap /swapfile >/dev/null
             swapon /swapfile
             grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
-            free -m | awk '/Swap/ {print "swap enabled: total="$2"MB"}'
+            echo "swap after: $(($(awk '/^SwapTotal:/ {print $2}' /proc/meminfo) / 1024))MB"
           else
-            echo "swap already active — skipping"
+            echo "swap already >= 4GiB ($((cur_kb / 1024))MB) — skipping"
           fi
           # Boxes cloud-init'd by the pre-GHCR template staged the .env one level up.
           if [ -f /opt/naary.env ] && [ ! -f /opt/naary/.env ]; then
