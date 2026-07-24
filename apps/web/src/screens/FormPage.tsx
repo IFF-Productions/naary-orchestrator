@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { TemplateContentBlock } from "../components";
 import { api, type FormDefinition, type FormFieldView } from "../lib/api";
+import { useEmbedResize } from "../lib/embed-resize";
 import { TurnstileWidget } from "./public/TurnstileWidget";
 import {
   ButtonSpinner,
@@ -33,6 +34,7 @@ export function FormPage() {
   const { formId } = useParams<{ formId: string }>();
   const [searchParams] = useSearchParams();
   const embed = searchParams.get("embed") === "1";
+  useEmbedResize(embed, formId); // report height to the parent iframe when embedded
   const [def, setDef] = useState<FormDefinition | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "notfound">(
     "loading",

@@ -27,16 +27,13 @@ export const formUrl = (id: string): string =>
 export const chatUrl = (id: string): string =>
   `${window.location.origin}/c/${id}`;
 
-/** A copy-paste `<iframe>` snippet to embed a hosted form/chat on the tenant's own site
- *  (docs/design/EMBEDDED-PUBLIC-PAGES.md, Slice 1). `?embed=1` renders the page chrome-less so it
- *  sits flush in the frame. Same-origin INSIDE the frame → no CORS; protection stays with Turnstile
- *  + rate limits + budget cap. */
-export const embedSnippet = (
-  pageUrl: string,
-  kind: "form" | "chat",
-): string => {
-  const h = kind === "chat" ? 600 : 640;
-  return `<iframe src="${pageUrl}?embed=1" width="100%" height="${h}" style="border:0;max-width:480px" title="${kind === "chat" ? "Chat" : "Form"}" loading="lazy"></iframe>`;
+/** A copy-paste snippet to embed a hosted form/chat on the tenant's own site
+ *  (docs/design/EMBEDDED-PUBLIC-PAGES.md, Slice 2). Uses the `embed.js` loader, which injects the
+ *  chrome-less `?embed=1` iframe AND auto-resizes it to the content (via postMessage). Same-origin
+ *  INSIDE the frame → no CORS; protection stays with Turnstile + rate limits + budget cap. */
+export const embedSnippet = (id: string, kind: "form" | "chat"): string => {
+  const origin = window.location.origin;
+  return `<script src="${origin}/embed.js" async></script>\n<div data-naary-${kind}="${id}"></div>`;
 };
 
 /** Small copy-to-clipboard button with brief "Copied ✓" feedback. */
@@ -66,15 +63,15 @@ export function UrlCopy({ url }: { url: string }) {
 /** A collapsible "Embed" affordance: reveals the copy-paste `<iframe>` snippet for a hosted
  *  form/chat (docs/design/EMBEDDED-PUBLIC-PAGES.md, Slice 1). */
 export function EmbedSnippet({
-  pageUrl,
+  id,
   kind,
 }: {
-  pageUrl: string;
+  id: string;
   kind: "form" | "chat";
 }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const snippet = embedSnippet(pageUrl, kind);
+  const snippet = embedSnippet(id, kind);
   return (
     <div style={{ marginTop: 8 }}>
       <button
@@ -93,14 +90,15 @@ export function EmbedSnippet({
               marginBottom: 6,
             }}
           >
-            Paste this on your site to embed the {kind}. It stays protected by
-            your bot &amp; rate limits.
+            Paste this on your site to embed the {kind} — it loads our{" "}
+            <code>embed.js</code>, which injects the widget and auto-sizes it.
+            Stays protected by your bot &amp; rate limits.
           </div>
           <textarea
             readOnly
             value={snippet}
             onFocus={(e) => e.currentTarget.select()}
-            rows={2}
+            rows={3}
             style={{
               width: "100%",
               fontFamily: "var(--font-mono)",

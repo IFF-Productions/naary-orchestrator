@@ -122,7 +122,7 @@ export function ChatForm({
             </span>
             <UrlCopy url={chatUrl(registered.chatId)} />
           </div>
-          <EmbedSnippet pageUrl={chatUrl(registered.chatId)} kind="chat" />
+          <EmbedSnippet id={registered.chatId} kind="chat" />
         </div>
       )}
     </>
@@ -235,7 +235,7 @@ export function FormForm({
             </span>
             <UrlCopy url={formUrl(registered.formId)} />
           </div>
-          <EmbedSnippet pageUrl={formUrl(registered.formId)} kind="form" />
+          <EmbedSnippet id={registered.formId} kind="form" />
         </div>
       )}
     </>
