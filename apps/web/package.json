@@ -44,7 +44,7 @@
     "@vitejs/plugin-react": "^6.0.4",
     "msw": "^2.15.0",
     "msw-storybook-addon": "^3.0.0",
-    "openapi-typescript": "7.13.0",
+    "openapi-typescript": "6.7.6",
     "storybook": "^10.5.4",
     "typescript": "^7.0.2",
     "vite": "^8.1.5"
