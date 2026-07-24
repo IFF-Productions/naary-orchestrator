@@ -28,6 +28,12 @@ import { VariablesModule } from "./variables/variables.module";
 import { ContentTemplatesModule } from "./content-templates/content-templates.module";
 import { EnvSecretsModule } from "./env-secrets/env-secrets.module";
 import { ClientIpThrottlerGuard } from "./throttle/client-ip-throttler.guard";
+import {
+  PUBLIC_ENDPOINT_LIMIT,
+  PUBLIC_ENDPOINT_TTL_MS,
+  publicEndpointTracker,
+  skipUnlessPublicSubmit,
+} from "./throttle/public-endpoint-throttler";
 import { TurnstileConfigModule } from "./turnstile/turnstile-config.module";
 import { IntrospectModule } from "./introspect/introspect.module";
 import { EnvironmentsModule } from "./environments/environments.module";
@@ -45,9 +51,22 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
 
 @Module({
   imports: [
-    // Baseline rate limit (Sec#5): 120 requests / minute / IP across the API,
-    // protecting credential-save / execution-start / oauth / hooks from abuse.
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
+    // Two rate-limit dimensions (see the two throttle/ guards + helpers):
+    //  - `default`: 120 req/min per CLIENT IP across the API (keyed by ClientIpThrottlerGuard behind
+    //    nginx/cloudflared, #618) — protects credential-save / execution-start / oauth / hooks.
+    //  - `public-endpoint`: caps a single public form/chat's total submit rate PER ENDPOINT, across
+    //    all IPs (#616) — bounds a distributed flood the per-IP limit can't. Its own getTracker/skipIf
+    //    apply it ONLY to `POST /forms/:formId` + `POST /chat/:chatId`.
+    ThrottlerModule.forRoot([
+      { name: "default", ttl: 60_000, limit: 120 },
+      {
+        name: "public-endpoint",
+        ttl: PUBLIC_ENDPOINT_TTL_MS,
+        limit: PUBLIC_ENDPOINT_LIMIT,
+        getTracker: publicEndpointTracker,
+        skipIf: skipUnlessPublicSubmit,
+      },
+    ]),
     AuthModule,
     PermissionsModule,
     AuditModule,
