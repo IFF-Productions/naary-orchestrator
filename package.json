@@ -1,6 +1,6 @@
 {
   "name": "naary-orchestrator",
-  "version": "0.0.27",
+  "version": "0.0.28",
   "private": true,
   "description": "Durable, platform-agnostic orchestrator for AI-agent + webhook workflows (Temporal interpreter spine).",
   "packageManager": "pnpm@11.9.0",

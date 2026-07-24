@@ -1,6 +1,6 @@
 {
   "name": "@naary/web",
-  "version": "0.0.27",
+  "version": "0.0.28",
   "private": true,
   "description": "Naary web app — durable AI-agent workflow orchestrator UI (Vite + React + TS).",
   "type": "module",
