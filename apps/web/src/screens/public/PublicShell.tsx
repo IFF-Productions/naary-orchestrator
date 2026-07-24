@@ -22,18 +22,27 @@ const PUBLIC_CSS = `
 `;
 
 /** Full-viewport public frame: warm diagonal-striped wash with the card floating centered. */
-export function PublicFrame({ children }: { children: ReactNode }) {
+export function PublicFrame({
+  children,
+  embed,
+}: {
+  children: ReactNode;
+  /** Embedded-in-an-iframe mode (`?embed=1`): drop the full-page striped chrome so the card sits
+   *  flush + transparent inside the host page's frame (docs/design/EMBEDDED-PUBLIC-PAGES.md). */
+  embed?: boolean;
+}) {
   return (
     <div
       className="naary-public"
       style={{
-        minHeight: "100vh",
-        background:
-          "repeating-linear-gradient(135deg, var(--grad-a), var(--grad-a) 2px, var(--bg) 2px, var(--bg) 13px)",
+        minHeight: embed ? undefined : "100vh",
+        background: embed
+          ? "transparent"
+          : "repeating-linear-gradient(135deg, var(--grad-a), var(--grad-a) 2px, var(--bg) 2px, var(--bg) 13px)",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        padding: "44px 20px 48px",
+        padding: embed ? "0" : "44px 20px 48px",
         fontFamily: "var(--font-sans)",
         color: "var(--ink)",
       }}

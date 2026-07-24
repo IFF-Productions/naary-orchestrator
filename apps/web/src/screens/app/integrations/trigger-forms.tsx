@@ -8,7 +8,14 @@ import {
   type RegisteredForm,
   type RegisteredWebhook,
 } from "../../../lib/api";
-import { chatUrl, fieldLabel, fieldStyle, formUrl, UrlCopy } from "./shared";
+import {
+  chatUrl,
+  EmbedSnippet,
+  fieldLabel,
+  fieldStyle,
+  formUrl,
+  UrlCopy,
+} from "./shared";
 
 /** Register a hosted chat for a workflow whose entry node is a chatTrigger. Mirrors FormForm; on
  *  success it surfaces the shareable /c/ URL. 400s (with a hint) if the tenant has no budget cap. */
@@ -115,6 +122,7 @@ export function ChatForm({
             </span>
             <UrlCopy url={chatUrl(registered.chatId)} />
           </div>
+          <EmbedSnippet pageUrl={chatUrl(registered.chatId)} kind="chat" />
         </div>
       )}
     </>
@@ -227,6 +235,7 @@ export function FormForm({
             </span>
             <UrlCopy url={formUrl(registered.formId)} />
           </div>
+          <EmbedSnippet pageUrl={formUrl(registered.formId)} kind="form" />
         </div>
       )}
     </>

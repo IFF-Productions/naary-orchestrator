@@ -59,3 +59,36 @@ export const Gated: Story = {
   },
   decorators: [withTurnstileStub],
 };
+
+// A plain form (no bot gate) for the embed comparison.
+const plainHandlers = [
+  http.get("*/api/forms/demo", () =>
+    HttpResponse.json({
+      formId: "demo",
+      title: "Contact us",
+      description: "We'll get back to you shortly.",
+      submitLabel: "Send request",
+      fields: [
+        { key: "email", label: "Email", type: "email", required: true },
+        { key: "message", label: "Message", type: "textarea" },
+      ],
+    }),
+  ),
+];
+
+/** `?embed=1` — chrome-less render for embedding in an iframe (Slice 1): the full-page striped
+ *  background + centering are dropped so the card sits flush + transparent inside the host frame. */
+export const Embedded: Story = {
+  parameters: {
+    msw: { handlers: plainHandlers },
+    router: { path: "/f/:formId", initialEntries: ["/f/demo?embed=1"] },
+  },
+};
+
+/** The same form NOT embedded — full public-page chrome, for comparison. */
+export const Standalone: Story = {
+  parameters: {
+    msw: { handlers: plainHandlers },
+    router: { path: "/f/:formId", initialEntries: ["/f/demo"] },
+  },
+};

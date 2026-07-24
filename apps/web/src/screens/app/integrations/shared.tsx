@@ -27,6 +27,18 @@ export const formUrl = (id: string): string =>
 export const chatUrl = (id: string): string =>
   `${window.location.origin}/c/${id}`;
 
+/** A copy-paste `<iframe>` snippet to embed a hosted form/chat on the tenant's own site
+ *  (docs/design/EMBEDDED-PUBLIC-PAGES.md, Slice 1). `?embed=1` renders the page chrome-less so it
+ *  sits flush in the frame. Same-origin INSIDE the frame → no CORS; protection stays with Turnstile
+ *  + rate limits + budget cap. */
+export const embedSnippet = (
+  pageUrl: string,
+  kind: "form" | "chat",
+): string => {
+  const h = kind === "chat" ? 600 : 640;
+  return `<iframe src="${pageUrl}?embed=1" width="100%" height="${h}" style="border:0;max-width:480px" title="${kind === "chat" ? "Chat" : "Form"}" loading="lazy"></iframe>`;
+};
+
 /** Small copy-to-clipboard button with brief "Copied ✓" feedback. */
 export function UrlCopy({ url }: { url: string }) {
   const [copied, setCopied] = useState(false);
@@ -48,6 +60,78 @@ export function UrlCopy({ url }: { url: string }) {
     >
       {copied ? "Copied ✓" : "Copy"}
     </button>
+  );
+}
+
+/** A collapsible "Embed" affordance: reveals the copy-paste `<iframe>` snippet for a hosted
+ *  form/chat (docs/design/EMBEDDED-PUBLIC-PAGES.md, Slice 1). */
+export function EmbedSnippet({
+  pageUrl,
+  kind,
+}: {
+  pageUrl: string;
+  kind: "form" | "chat";
+}) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const snippet = embedSnippet(pageUrl, kind);
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button
+        type="button"
+        className="btn btn-sm btn-secondary"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Icon name="template" size={12} /> {open ? "Hide embed" : "Embed"}
+      </button>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginBottom: 6,
+            }}
+          >
+            Paste this on your site to embed the {kind}. It stays protected by
+            your bot &amp; rate limits.
+          </div>
+          <textarea
+            readOnly
+            value={snippet}
+            onFocus={(e) => e.currentTarget.select()}
+            rows={2}
+            style={{
+              width: "100%",
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--text-2xs)",
+              padding: "8px 10px",
+              borderRadius: "var(--radius-sm)",
+              border: "1px solid var(--line-2)",
+              background: "var(--surface)",
+              color: "var(--ink)",
+              resize: "vertical",
+            }}
+          />
+          <button
+            type="button"
+            className="btn btn-sm btn-secondary"
+            style={{ marginTop: 6 }}
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(snippet);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              } catch {
+                /* clipboard unavailable — the snippet is selectable above */
+              }
+            }}
+          >
+            {copied ? "Copied ✓" : "Copy embed code"}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
