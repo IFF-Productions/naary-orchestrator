@@ -856,17 +856,20 @@ function Field({
   );
 }
 
-/* ---------------- Budget-cap pill (run-time truth, always shown) ---------------- */
+/* ---------------- Budget-cap pill ---------------- */
+// Shows the tenant's PER-RUN budget CAP (a ceiling), NOT an estimate of what this automation costs.
+// Worded "Up to $X / run" so it doesn't read as a computed charge — a flow with no AI step spends
+// ~$0 but still can't exceed the cap. `title` spells it out; "No per-run cap" when none is set.
 function BudgetCapPill({ cap }: { cap: number | null | "loading" }) {
   const text =
     cap === "loading"
       ? "…"
       : cap === null
         ? "No per-run cap"
-        : `$${cap.toFixed(2)} / run`;
+        : `Up to $${cap.toFixed(2)} / run`;
   return (
     <span
-      title="The most this automation can spend in a single run"
+      title="A spending ceiling, not an estimate: the most this automation may cost in a single run (most steps are free; only AI steps spend)."
       style={{
         display: "inline-flex",
         alignItems: "center",
