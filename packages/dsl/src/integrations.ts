@@ -498,11 +498,99 @@ const NOTION: IntegrationProvider = {
   ],
 };
 
+// ── Todoist (REST v2; static base api.todoist.com/rest/v2; auth = a Todoist API token as
+//    Bearer, stored on a "custom" connection) ─────────────────────────────────────────
+const TODOIST: IntegrationProvider = {
+  key: "todoist",
+  label: "Todoist",
+  baseUrl: "https://api.todoist.com/rest/v2",
+  description: "Manage Todoist tasks — list, get, create, and close.",
+  auth: "A custom connection whose token is a Todoist API token.",
+  actions: [
+    {
+      key: "list_tasks",
+      label: "List tasks",
+      description:
+        "List active tasks, optionally filtered by project or query.",
+      method: "GET",
+      pathTemplate: "/tasks",
+      write: false,
+      fields: [
+        {
+          key: "projectId",
+          label: "Project id",
+          in: "query",
+          required: false,
+          hint: "filter by project",
+        },
+        { key: "filter", label: "Filter", in: "query", required: false },
+      ],
+    },
+    {
+      key: "get_task",
+      label: "Get task",
+      description: "Fetch a single task by id.",
+      method: "GET",
+      pathTemplate: "/tasks/{taskId}",
+      write: false,
+      fields: [{ key: "taskId", label: "Task id", in: "path", required: true }],
+    },
+    {
+      key: "create_task",
+      label: "Create task",
+      description: "Create a new task.",
+      method: "POST",
+      pathTemplate: "/tasks",
+      write: true,
+      fields: [
+        { key: "content", label: "Content", in: "body", required: true },
+        {
+          key: "description",
+          label: "Description",
+          in: "body",
+          required: false,
+        },
+        {
+          key: "projectId",
+          label: "Project id",
+          in: "body",
+          required: false,
+          bodyPath: "project_id",
+        },
+        {
+          key: "dueString",
+          label: "Due (natural language)",
+          in: "body",
+          required: false,
+          bodyPath: "due_string",
+        },
+        {
+          key: "priority",
+          label: "Priority",
+          in: "body",
+          required: false,
+          type: "number",
+        },
+      ],
+    },
+    {
+      key: "close_task",
+      label: "Close task",
+      description: "Close (complete) a task by id.",
+      method: "POST",
+      pathTemplate: "/tasks/{taskId}/close",
+      write: true,
+      fields: [{ key: "taskId", label: "Task id", in: "path", required: true }],
+    },
+  ],
+};
+
 export const INTEGRATION_CATALOG: Record<string, IntegrationProvider> = {
   github: GITHUB,
   jira: JIRA,
   slack: SLACK,
   notion: NOTION,
+  todoist: TODOIST,
 };
 
 /** The node type added to the palette per provider (the tile presets `provider`). */

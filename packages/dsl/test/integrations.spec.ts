@@ -141,6 +141,28 @@ describe("integration catalog — request construction", () => {
     });
     expect(req.body).toEqual({ title: "t" });
   });
+
+  it("Todoist create_task → POST /tasks, projectId maps to project_id via bodyPath", () => {
+    const req = buildIntegrationRequest("todoist", "create_task", {
+      content: "Buy milk",
+      projectId: "2203306141",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/tasks");
+    expect(req.body).toEqual({
+      content: "Buy milk",
+      project_id: "2203306141",
+    });
+  });
+
+  it("Todoist close_task → POST path id, no body", () => {
+    const req = buildIntegrationRequest("todoist", "close_task", {
+      taskId: "2995104339",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/tasks/2995104339/close");
+    expect(req.body).toBeUndefined();
+  });
 });
 
 describe("integration field resolution (static + bindings)", () => {
