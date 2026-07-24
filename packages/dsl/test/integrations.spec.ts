@@ -665,6 +665,731 @@ describe("integration catalog — request construction", () => {
     expect(req.path).toBe("/folders/0/items?limit=100");
     expect(req.body).toBeUndefined();
   });
+
+  it("Stripe create_customer → POST /customers with a flat body", () => {
+    const req = buildIntegrationRequest("stripe", "create_customer", {
+      email: "jane@example.com",
+      name: "Jane Doe",
+      description: "VIP",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/customers");
+    expect(req.body).toEqual({
+      email: "jane@example.com",
+      name: "Jane Doe",
+      description: "VIP",
+    });
+  });
+
+  it("Stripe get_customer → GET /customers/{customerId}, no body", () => {
+    const req = buildIntegrationRequest("stripe", "get_customer", {
+      customerId: "cus_ABC123",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/customers/cus_ABC123");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Stripe create_payment_intent → POST /payment_intents, amount/currency in body", () => {
+    const req = buildIntegrationRequest("stripe", "create_payment_intent", {
+      amount: 1999,
+      currency: "usd",
+      customer: "cus_ABC123",
+      description: "Order #42",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/payment_intents");
+    expect(req.body).toEqual({
+      amount: 1999,
+      currency: "usd",
+      customer: "cus_ABC123",
+      description: "Order #42",
+    });
+  });
+
+  it("Stripe list_charges → GET /charges with customer + limit query params", () => {
+    const req = buildIntegrationRequest("stripe", "list_charges", {
+      customer: "cus_ABC123",
+      limit: 5,
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/charges?customer=cus_ABC123&limit=5");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Stripe create_refund → POST /refunds, omits the optional amount for a full refund", () => {
+    const req = buildIntegrationRequest("stripe", "create_refund", {
+      charge: "ch_ABC123",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/refunds");
+    expect(req.body).toEqual({ charge: "ch_ABC123" });
+  });
+
+  it("Shopify create_product → POST /products.json, fields wrapped in the product envelope", () => {
+    const req = buildIntegrationRequest("shopify", "create_product", {
+      title: "Snowboard",
+      bodyHtml: "<p>Fast</p>",
+      vendor: "Acme",
+      productType: "Boards",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/products.json");
+    expect(req.body).toEqual({
+      product: {
+        title: "Snowboard",
+        body_html: "<p>Fast</p>",
+        vendor: "Acme",
+        product_type: "Boards",
+      },
+    });
+  });
+
+  it("Shopify get_product → GET /products/{productId}.json, no body", () => {
+    const req = buildIntegrationRequest("shopify", "get_product", {
+      productId: "788032119674292922",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/products/788032119674292922.json");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Shopify list_products → GET /products.json with limit + vendor query params", () => {
+    const req = buildIntegrationRequest("shopify", "list_products", {
+      limit: 10,
+      vendor: "Acme",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/products.json?limit=10&vendor=Acme");
+    expect(req.body).toBeUndefined();
+    // …and with no filters, no query string is appended.
+    expect(buildIntegrationRequest("shopify", "list_products", {}).path).toBe(
+      "/products.json",
+    );
+  });
+
+  it("Shopify update_product → PUT, id in path, fields nested under product", () => {
+    const req = buildIntegrationRequest("shopify", "update_product", {
+      productId: "632910392",
+      title: "Renamed",
+      vendor: "NewCo",
+    });
+    expect(req.method).toBe("PUT");
+    expect(req.path).toBe("/products/632910392.json");
+    expect(req.body).toEqual({
+      product: { title: "Renamed", vendor: "NewCo" },
+    });
+  });
+
+  it("Shopify create_order → POST /orders.json, line_items/email nested under order", () => {
+    const req = buildIntegrationRequest("shopify", "create_order", {
+      lineItems: [{ variant_id: 447654529, quantity: 1 }],
+      email: "buyer@example.com",
+      financialStatus: "paid",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/orders.json");
+    expect(req.body).toEqual({
+      order: {
+        line_items: [{ variant_id: 447654529, quantity: 1 }],
+        email: "buyer@example.com",
+        financial_status: "paid",
+      },
+    });
+  });
+
+  it("Twilio send_sms → POST /Accounts/{accountSid}/Messages.json with To/From/Body body", () => {
+    const req = buildIntegrationRequest("twilio", "send_sms", {
+      accountSid: "AC123",
+      To: "+15558675310",
+      From: "+15017122661",
+      Body: "Hello from Naary",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/Accounts/AC123/Messages.json");
+    expect(req.body).toEqual({
+      To: "+15558675310",
+      From: "+15017122661",
+      Body: "Hello from Naary",
+    });
+  });
+
+  it("Twilio get_message → GET, accountSid + messageSid in path, no body", () => {
+    const req = buildIntegrationRequest("twilio", "get_message", {
+      accountSid: "AC123",
+      messageSid: "SM456",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/Accounts/AC123/Messages/SM456.json");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Twilio list_messages → GET with To/From/PageSize query params (order preserved)", () => {
+    const req = buildIntegrationRequest("twilio", "list_messages", {
+      accountSid: "AC123",
+      To: "+15558675310",
+      From: "+15017122661",
+      PageSize: 20,
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe(
+      "/Accounts/AC123/Messages.json?To=%2B15558675310&From=%2B15017122661&PageSize=20",
+    );
+    expect(req.body).toBeUndefined();
+    // …and with only the required path field, no query string is appended.
+    expect(
+      buildIntegrationRequest("twilio", "list_messages", {
+        accountSid: "AC123",
+      }).path,
+    ).toBe("/Accounts/AC123/Messages.json");
+  });
+
+  it("Twilio make_call → POST /Accounts/{accountSid}/Calls.json with To/From/Url body", () => {
+    const req = buildIntegrationRequest("twilio", "make_call", {
+      accountSid: "AC123",
+      To: "+15558675310",
+      From: "+15017122661",
+      Url: "https://example.com/twiml.xml",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/Accounts/AC123/Calls.json");
+    expect(req.body).toEqual({
+      To: "+15558675310",
+      From: "+15017122661",
+      Url: "https://example.com/twiml.xml",
+    });
+  });
+
+  it("Mailchimp add_member → POST /lists/{listId}/members with email/status/merge_fields body", () => {
+    const req = buildIntegrationRequest("mailchimp", "add_member", {
+      listId: "abc123",
+      email_address: "ada@example.com",
+      status: "subscribed",
+      merge_fields: { FNAME: "Ada", LNAME: "Lovelace" },
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/lists/abc123/members");
+    expect(req.body).toEqual({
+      email_address: "ada@example.com",
+      status: "subscribed",
+      merge_fields: { FNAME: "Ada", LNAME: "Lovelace" },
+    });
+  });
+
+  it("Mailchimp add_member → drops an empty ({}) merge_fields", () => {
+    const req = buildIntegrationRequest("mailchimp", "add_member", {
+      listId: "abc123",
+      email_address: "ada@example.com",
+      status: "subscribed",
+      merge_fields: {},
+    });
+    expect(req.body).toEqual({
+      email_address: "ada@example.com",
+      status: "subscribed",
+    });
+  });
+
+  it("Mailchimp get_member → GET, listId + subscriberHash in path, no body", () => {
+    const req = buildIntegrationRequest("mailchimp", "get_member", {
+      listId: "abc123",
+      subscriberHash: "62eeb292278cc15f5817cb78f7790b08",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe(
+      "/lists/abc123/members/62eeb292278cc15f5817cb78f7790b08",
+    );
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Mailchimp update_member → PATCH path + status/merge_fields in body", () => {
+    const req = buildIntegrationRequest("mailchimp", "update_member", {
+      listId: "abc123",
+      subscriberHash: "62eeb292278cc15f5817cb78f7790b08",
+      status: "unsubscribed",
+      merge_fields: { FNAME: "Ada" },
+    });
+    expect(req.method).toBe("PATCH");
+    expect(req.path).toBe(
+      "/lists/abc123/members/62eeb292278cc15f5817cb78f7790b08",
+    );
+    expect(req.body).toEqual({
+      status: "unsubscribed",
+      merge_fields: { FNAME: "Ada" },
+    });
+  });
+
+  it("Mailchimp list_members → GET /lists/{listId}/members with status/count query params", () => {
+    const req = buildIntegrationRequest("mailchimp", "list_members", {
+      listId: "abc123",
+      status: "subscribed",
+      count: 50,
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/lists/abc123/members?status=subscribed&count=50");
+    expect(req.body).toBeUndefined();
+    // …and with no filters, no query string is appended.
+    expect(
+      buildIntegrationRequest("mailchimp", "list_members", {
+        listId: "abc123",
+      }).path,
+    ).toBe("/lists/abc123/members");
+  });
+
+  it("Mailchimp create_campaign → POST /campaigns with type/recipients/settings body", () => {
+    const req = buildIntegrationRequest("mailchimp", "create_campaign", {
+      type: "regular",
+      recipients: { list_id: "abc123" },
+      settings: { subject_line: "Hello", from_name: "Naary" },
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/campaigns");
+    expect(req.body).toEqual({
+      type: "regular",
+      recipients: { list_id: "abc123" },
+      settings: { subject_line: "Hello", from_name: "Naary" },
+    });
+  });
+
+  it("Discord send_message → POST /channels/{channelId}/messages with content/tts/embeds body", () => {
+    const req = buildIntegrationRequest("discord", "send_message", {
+      channelId: "123456789",
+      content: "Deploy finished ✅",
+      tts: false,
+      embeds: [{ title: "Build", description: "green" }],
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/channels/123456789/messages");
+    expect(req.body).toEqual({
+      content: "Deploy finished ✅",
+      tts: false,
+      embeds: [{ title: "Build", description: "green" }],
+    });
+  });
+
+  it("Discord send_message → omits optional tts/embeds when not supplied", () => {
+    const req = buildIntegrationRequest("discord", "send_message", {
+      channelId: "123456789",
+      content: "hi",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/channels/123456789/messages");
+    expect(req.body).toEqual({ content: "hi" });
+  });
+
+  it("Discord get_channel → GET /channels/{channelId}, no body", () => {
+    const req = buildIntegrationRequest("discord", "get_channel", {
+      channelId: "123456789",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/channels/123456789");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Discord list_messages → GET with limit/before/after query params (order preserved)", () => {
+    const req = buildIntegrationRequest("discord", "list_messages", {
+      channelId: "123456789",
+      limit: 50,
+      before: "999",
+      after: "100",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe(
+      "/channels/123456789/messages?limit=50&before=999&after=100",
+    );
+    expect(req.body).toBeUndefined();
+    // …and with no query params, no query string is appended.
+    expect(
+      buildIntegrationRequest("discord", "list_messages", {
+        channelId: "123456789",
+      }).path,
+    ).toBe("/channels/123456789/messages");
+  });
+
+  it("Discord create_dm → POST /users/@me/channels with { recipient_id } body", () => {
+    const req = buildIntegrationRequest("discord", "create_dm", {
+      recipient_id: "987654321",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/users/@me/channels");
+    expect(req.body).toEqual({ recipient_id: "987654321" });
+  });
+
+  it("Discord add_reaction → PUT with channel/message/emoji in path (emoji URL-encoded)", () => {
+    const req = buildIntegrationRequest("discord", "add_reaction", {
+      channelId: "123456789",
+      messageId: "555",
+      emoji: "👍",
+    });
+    expect(req.method).toBe("PUT");
+    expect(req.path).toBe(
+      "/channels/123456789/messages/555/reactions/%F0%9F%91%8D/@me",
+    );
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Linear create_issue → POST /graphql with { query, variables } body", () => {
+    const query =
+      "mutation ($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id } } }";
+    const req = buildIntegrationRequest("linear", "create_issue", {
+      query,
+      variables: { input: { title: "It broke", teamId: "team-1" } },
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/graphql");
+    expect(req.body).toEqual({
+      query,
+      variables: { input: { title: "It broke", teamId: "team-1" } },
+    });
+    expect(typeof (req.body as { query: unknown }).query).toBe("string");
+  });
+
+  it("Linear get_issue → POST /graphql, id passed through variables", () => {
+    const query = "query ($id: String!) { issue(id: $id) { id title } }";
+    const req = buildIntegrationRequest("linear", "get_issue", {
+      query,
+      variables: { id: "issue-123" },
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/graphql");
+    expect(req.body).toEqual({ query, variables: { id: "issue-123" } });
+  });
+
+  it("Linear list_issues → POST /graphql; optional variables omitted leaves only { query }", () => {
+    const query = "query { issues { nodes { id title } } }";
+    const req = buildIntegrationRequest("linear", "list_issues", { query });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/graphql");
+    // variables is optional here; an unset/empty one stays out of the body.
+    expect(req.body).toEqual({ query });
+  });
+
+  it("Linear create_comment → POST /graphql, write mutation with variables", () => {
+    const query =
+      "mutation ($input: CommentCreateInput!) { commentCreate(input: $input) { success } }";
+    const req = buildIntegrationRequest("linear", "create_comment", {
+      query,
+      variables: { input: { issueId: "issue-123", body: "triaged" } },
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/graphql");
+    expect(req.body).toEqual({
+      query,
+      variables: { input: { issueId: "issue-123", body: "triaged" } },
+    });
+  });
+
+  it("Linear update_issue → POST /graphql, id + input in variables", () => {
+    const query =
+      "mutation ($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }";
+    const req = buildIntegrationRequest("linear", "update_issue", {
+      query,
+      variables: { id: "issue-123", input: { title: "Renamed" } },
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/graphql");
+    expect(req.body).toEqual({
+      query,
+      variables: { id: "issue-123", input: { title: "Renamed" } },
+    });
+  });
+
+  it("ClickUp create_task → POST /list/{listId}/task with a JSON body", () => {
+    const req = buildIntegrationRequest("clickup", "create_task", {
+      listId: "901",
+      name: "Ship it",
+      description: "the details",
+      assignees: ["u1", "u2"],
+      priority: 2,
+      due_date: 1700000000000,
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/list/901/task");
+    expect(req.body).toEqual({
+      name: "Ship it",
+      description: "the details",
+      assignees: ["u1", "u2"],
+      priority: 2,
+      due_date: 1700000000000,
+    });
+  });
+
+  it("ClickUp create_task → omits blank optionals, keeps the required name", () => {
+    const req = buildIntegrationRequest("clickup", "create_task", {
+      listId: "901",
+      name: "Just a name",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/list/901/task");
+    expect(req.body).toEqual({ name: "Just a name" });
+  });
+
+  it("ClickUp get_task → GET /task/{taskId}, no body", () => {
+    const req = buildIntegrationRequest("clickup", "get_task", {
+      taskId: "abc123",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/task/abc123");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("ClickUp update_task → PUT /task/{taskId} with name/status/priority in body", () => {
+    const req = buildIntegrationRequest("clickup", "update_task", {
+      taskId: "abc123",
+      name: "Renamed",
+      status: "in progress",
+      priority: 1,
+    });
+    expect(req.method).toBe("PUT");
+    expect(req.path).toBe("/task/abc123");
+    expect(req.body).toEqual({
+      name: "Renamed",
+      status: "in progress",
+      priority: 1,
+    });
+  });
+
+  it("ClickUp list_tasks → GET with archived/page query params (verbatim names)", () => {
+    const req = buildIntegrationRequest("clickup", "list_tasks", {
+      listId: "901",
+      archived: "false",
+      page: 0,
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/list/901/task?archived=false&page=0");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("ClickUp create_comment → POST /task/{taskId}/comment with comment_text in body", () => {
+    const req = buildIntegrationRequest("clickup", "create_comment", {
+      taskId: "abc123",
+      comment_text: "looks good",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/task/abc123/comment");
+    expect(req.body).toEqual({ comment_text: "looks good" });
+  });
+
+  it("Monday create_item → POST /v2 with a GraphQL query + variables in the body", () => {
+    const req = buildIntegrationRequest("monday", "create_item", {
+      query:
+        "mutation ($boardId: ID!, $itemName: String!, $columnValues: JSON) { create_item(board_id: $boardId, item_name: $itemName, column_values: $columnValues) { id } }",
+      variables: {
+        boardId: "123",
+        itemName: "New task",
+        columnValues: { status: { label: "Working on it" } },
+      },
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/v2");
+    expect(typeof req.body?.query).toBe("string");
+    expect(req.body).toEqual({
+      query:
+        "mutation ($boardId: ID!, $itemName: String!, $columnValues: JSON) { create_item(board_id: $boardId, item_name: $itemName, column_values: $columnValues) { id } }",
+      variables: {
+        boardId: "123",
+        itemName: "New task",
+        columnValues: { status: { label: "Working on it" } },
+      },
+    });
+  });
+
+  it("Monday get_item → POST /v2, GraphQL query + { itemId } variables", () => {
+    const req = buildIntegrationRequest("monday", "get_item", {
+      query:
+        "query ($itemId: [ID!]) { items(ids: $itemId) { id name column_values { id text } } }",
+      variables: { itemId: ["456"] },
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/v2");
+    expect(typeof req.body?.query).toBe("string");
+    expect(req.body?.variables).toEqual({ itemId: ["456"] });
+  });
+
+  it("Monday list_items → POST /v2, optional variables omitted when empty", () => {
+    const req = buildIntegrationRequest("monday", "list_items", {
+      query:
+        "query ($boardId: [ID!]) { boards(ids: $boardId) { items_page { items { id name } } } }",
+      // variables omitted — an optional empty json must stay out of the body
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/v2");
+    expect(typeof req.body?.query).toBe("string");
+    expect(req.body?.variables).toBeUndefined();
+  });
+
+  it("Monday create_update → POST /v2 mutation posting an update on an item", () => {
+    const req = buildIntegrationRequest("monday", "create_update", {
+      query:
+        "mutation ($itemId: ID!, $body: String!) { create_update(item_id: $itemId, body: $body) { id } }",
+      variables: { itemId: "789", body: "Looks good to me" },
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/v2");
+    expect(typeof req.body?.query).toBe("string");
+    expect(req.body).toEqual({
+      query:
+        "mutation ($itemId: ID!, $body: String!) { create_update(item_id: $itemId, body: $body) { id } }",
+      variables: { itemId: "789", body: "Looks good to me" },
+    });
+  });
+
+  it("Monday change_column_value → POST /v2 mutation with column variables", () => {
+    const req = buildIntegrationRequest("monday", "change_column_value", {
+      query:
+        "mutation ($boardId: ID!, $itemId: ID!, $columnId: String!, $value: JSON!) { change_column_value(board_id: $boardId, item_id: $itemId, column_id: $columnId, value: $value) { id } }",
+      variables: {
+        boardId: "123",
+        itemId: "789",
+        columnId: "status",
+        value: JSON.stringify({ label: "Done" }),
+      },
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/v2");
+    expect(typeof req.body?.query).toBe("string");
+    expect(req.body?.variables).toMatchObject({ columnId: "status" });
+  });
+
+  it("Pipedrive create_deal → POST /deals with title/value/currency/person_id/org_id in body", () => {
+    const req = buildIntegrationRequest("pipedrive", "create_deal", {
+      title: "Acme renewal",
+      value: 5000,
+      currency: "USD",
+      person_id: 42,
+      org_id: 7,
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/deals");
+    expect(req.body).toEqual({
+      title: "Acme renewal",
+      value: 5000,
+      currency: "USD",
+      person_id: 42,
+      org_id: 7,
+    });
+  });
+
+  it("Pipedrive get_deal → GET /deals/{dealId}, no body", () => {
+    const req = buildIntegrationRequest("pipedrive", "get_deal", {
+      dealId: "123",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/deals/123");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Pipedrive update_deal → PUT path id substituted, title/value/status in body", () => {
+    const req = buildIntegrationRequest("pipedrive", "update_deal", {
+      dealId: "123",
+      title: "Acme renewal (updated)",
+      value: 6000,
+      status: "won",
+    });
+    expect(req.method).toBe("PUT");
+    expect(req.path).toBe("/deals/123");
+    expect(req.body).toEqual({
+      title: "Acme renewal (updated)",
+      value: 6000,
+      status: "won",
+    });
+  });
+
+  it("Pipedrive create_person → POST /persons with name + email array + phone in body", () => {
+    const req = buildIntegrationRequest("pipedrive", "create_person", {
+      name: "Ada Lovelace",
+      email: ["ada@example.com"],
+      phone: "+15551234567",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/persons");
+    expect(req.body).toEqual({
+      name: "Ada Lovelace",
+      email: ["ada@example.com"],
+      phone: "+15551234567",
+    });
+  });
+
+  it("Pipedrive list_deals → GET /deals with status/limit/start query params", () => {
+    const req = buildIntegrationRequest("pipedrive", "list_deals", {
+      status: "open",
+      limit: 50,
+      start: 0,
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/deals?status=open&limit=50&start=0");
+    expect(req.body).toBeUndefined();
+    // …and with no filters, no query string is appended.
+    expect(buildIntegrationRequest("pipedrive", "list_deals", {}).path).toBe(
+      "/deals",
+    );
+  });
+
+  it("Zendesk create_ticket → POST /tickets.json, body wrapped under the ticket key", () => {
+    const req = buildIntegrationRequest("zendesk", "create_ticket", {
+      subject: "Printer is on fire",
+      comment: { body: "smoke everywhere" },
+      priority: "urgent",
+      type: "incident",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/tickets.json");
+    expect(req.body).toEqual({
+      ticket: {
+        subject: "Printer is on fire",
+        comment: { body: "smoke everywhere" },
+        priority: "urgent",
+        type: "incident",
+      },
+    });
+  });
+
+  it("Zendesk get_ticket → GET /tickets/{ticketId}.json, no body", () => {
+    const req = buildIntegrationRequest("zendesk", "get_ticket", {
+      ticketId: 42,
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/tickets/42.json");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Zendesk update_ticket → PUT path id substituted, status/comment under ticket", () => {
+    const req = buildIntegrationRequest("zendesk", "update_ticket", {
+      ticketId: 42,
+      status: "solved",
+      comment: { body: "fixed", public: false },
+    });
+    expect(req.method).toBe("PUT");
+    expect(req.path).toBe("/tickets/42.json");
+    expect(req.body).toEqual({
+      ticket: { status: "solved", comment: { body: "fixed", public: false } },
+    });
+  });
+
+  it("Zendesk list_tickets → GET /tickets.json with page/per_page query params", () => {
+    const req = buildIntegrationRequest("zendesk", "list_tickets", {
+      page: 2,
+      per_page: 50,
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/tickets.json?page=2&per_page=50");
+    expect(req.body).toBeUndefined();
+    // …and when omitted, no query string is appended.
+    expect(buildIntegrationRequest("zendesk", "list_tickets", {}).path).toBe(
+      "/tickets.json",
+    );
+  });
+
+  it("Zendesk create_user → POST /users.json, name/email wrapped under the user key", () => {
+    const req = buildIntegrationRequest("zendesk", "create_user", {
+      name: "Ada Lovelace",
+      email: "ada@example.com",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/users.json");
+    expect(req.body).toEqual({
+      user: { name: "Ada Lovelace", email: "ada@example.com" },
+    });
+  });
 });
 
 describe("integration field resolution (static + bindings)", () => {
