@@ -168,6 +168,282 @@ describe("integration catalog — request construction", () => {
     });
     expect(req.body).toEqual({ title: "t" });
   });
+
+  it("HubSpot create_contact → POST /crm/v3/objects/contacts with { properties }", () => {
+    const req = buildIntegrationRequest("hubspot", "create_contact", {
+      properties: { email: "a@b.com", firstname: "Ada" },
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/crm/v3/objects/contacts");
+    expect(req.body).toEqual({
+      properties: { email: "a@b.com", firstname: "Ada" },
+    });
+  });
+
+  it("HubSpot update_contact → path id substituted, properties in body", () => {
+    const req = buildIntegrationRequest("hubspot", "update_contact", {
+      contactId: "12345",
+      properties: { lastname: "Lovelace" },
+    });
+    expect(req.method).toBe("PATCH");
+    expect(req.path).toBe("/crm/v3/objects/contacts/12345");
+    expect(req.body).toEqual({ properties: { lastname: "Lovelace" } });
+  });
+
+  it("HubSpot get_contact → GET path id, no body", () => {
+    const req = buildIntegrationRequest("hubspot", "get_contact", {
+      contactId: "12345",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/crm/v3/objects/contacts/12345");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("HubSpot create_deal → POST /crm/v3/objects/deals with { properties }", () => {
+    const req = buildIntegrationRequest("hubspot", "create_deal", {
+      properties: { dealname: "Acme", amount: "1000" },
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/crm/v3/objects/deals");
+    expect(req.body).toEqual({
+      properties: { dealname: "Acme", amount: "1000" },
+    });
+  });
+
+  it("SendGrid send_mail → POST /mail/send with personalizations/from/subject/content in body", () => {
+    const req = buildIntegrationRequest("sendgrid", "send_mail", {
+      personalizations: [{ to: [{ email: "to@example.com" }] }],
+      from: { email: "from@example.com", name: "Naary" },
+      subject: "Hello",
+      content: [{ type: "text/plain", value: "Hi there" }],
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/mail/send");
+    expect(req.body).toEqual({
+      personalizations: [{ to: [{ email: "to@example.com" }] }],
+      from: { email: "from@example.com", name: "Naary" },
+      subject: "Hello",
+      content: [{ type: "text/plain", value: "Hi there" }],
+    });
+  });
+
+  it("SendGrid upsert_contacts → PUT /marketing/contacts with { contacts: [...] } body", () => {
+    const req = buildIntegrationRequest("sendgrid", "upsert_contacts", {
+      contacts: [{ email: "a@example.com", first_name: "Ada" }],
+    });
+    expect(req.method).toBe("PUT");
+    expect(req.path).toBe("/marketing/contacts");
+    expect(req.body).toEqual({
+      contacts: [{ email: "a@example.com", first_name: "Ada" }],
+    });
+  });
+
+  it("SendGrid list_templates → GET with the optional generations query param", () => {
+    const req = buildIntegrationRequest("sendgrid", "list_templates", {
+      generations: "dynamic",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/templates?generations=dynamic");
+    // …and when omitted, no query string is appended.
+    expect(buildIntegrationRequest("sendgrid", "list_templates", {}).path).toBe(
+      "/templates",
+    );
+  });
+
+  it("Airtable create_record → POST /{baseId}/{tableId} with a fields body", () => {
+    const req = buildIntegrationRequest("airtable", "create_record", {
+      baseId: "appX",
+      tableId: "tblY",
+      fields: { Name: "Ada", Status: "Active" },
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/appX/tblY");
+    expect(req.body).toEqual({ fields: { Name: "Ada", Status: "Active" } });
+  });
+
+  it("Airtable get_record → GET path with recordId, no body", () => {
+    const req = buildIntegrationRequest("airtable", "get_record", {
+      baseId: "appX",
+      tableId: "tblY",
+      recordId: "recZ",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/appX/tblY/recZ");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Asana create_task → POST /tasks, body wrapped in the data envelope", () => {
+    const req = buildIntegrationRequest("asana", "create_task", {
+      name: "Ship it",
+      notes: "before Friday",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/tasks");
+    expect(req.body).toEqual({
+      data: { name: "Ship it", notes: "before Friday" },
+    });
+  });
+
+  it("Asana add_comment → path gid + text nested under data", () => {
+    const req = buildIntegrationRequest("asana", "add_comment", {
+      taskGid: "12345",
+      text: "looks good",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/tasks/12345/stories");
+    expect(req.body).toEqual({ data: { text: "looks good" } });
+  });
+
+  it("Todoist create_task → POST /tasks, projectId maps to project_id via bodyPath", () => {
+    const req = buildIntegrationRequest("todoist", "create_task", {
+      content: "Buy milk",
+      projectId: "2203306141",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/tasks");
+    expect(req.body).toEqual({
+      content: "Buy milk",
+      project_id: "2203306141",
+    });
+  });
+
+  it("Todoist close_task → POST path id, no body", () => {
+    const req = buildIntegrationRequest("todoist", "close_task", {
+      taskId: "2995104339",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/tasks/2995104339/close");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Todoist list_tasks → GET with the query param named project_id (not projectId)", () => {
+    const req = buildIntegrationRequest("todoist", "list_tasks", {
+      project_id: "2203306141",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/tasks?project_id=2203306141");
+  });
+
+  it("Calendly get_event → GET, uuid in path, no body", () => {
+    const req = buildIntegrationRequest("calendly", "get_event", {
+      eventUuid: "evt-123",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/scheduled_events/evt-123");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Calendly cancel_event → POST, uuid in path, reason in body", () => {
+    const req = buildIntegrationRequest("calendly", "cancel_event", {
+      eventUuid: "evt-123",
+      reason: "no longer needed",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/scheduled_events/evt-123/cancellation");
+    expect(req.body).toEqual({ reason: "no longer needed" });
+  });
+
+  it("Calendly list_events → GET with user/status/count query params (order preserved)", () => {
+    const req = buildIntegrationRequest("calendly", "list_events", {
+      user: "https://api.calendly.com/users/ABC",
+      status: "active",
+      count: 20,
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe(
+      "/scheduled_events?user=https%3A%2F%2Fapi.calendly.com%2Fusers%2FABC&status=active&count=20",
+    );
+  });
+
+  it("Intercom create_contact → POST /contacts with role + email in body", () => {
+    const req = buildIntegrationRequest("intercom", "create_contact", {
+      role: "user",
+      email: "jane@example.com",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/contacts");
+    expect(req.body).toEqual({ role: "user", email: "jane@example.com" });
+  });
+
+  it("Intercom create_note → path contactId + { body } in the JSON body", () => {
+    const req = buildIntegrationRequest("intercom", "create_note", {
+      contactId: "c-1",
+      body: "left a voicemail",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/contacts/c-1/notes");
+    expect(req.body).toEqual({ body: "left a voicemail" });
+  });
+
+  it("Webflow create_item → POST with collectionId in path, fieldData json body", () => {
+    const req = buildIntegrationRequest("webflow", "create_item", {
+      collectionId: "col-1",
+      fieldData: { name: "Post", slug: "post" },
+      isDraft: true,
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/collections/col-1/items");
+    expect(req.body).toEqual({
+      fieldData: { name: "Post", slug: "post" },
+      isDraft: true,
+    });
+  });
+
+  it("Webflow get_item → GET with collectionId + itemId in path, no body", () => {
+    const req = buildIntegrationRequest("webflow", "get_item", {
+      collectionId: "col-1",
+      itemId: "item-9",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/collections/col-1/items/item-9");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Zoom create_meeting → POST /users/me/meetings with topic + start_time via bodyPath", () => {
+    const req = buildIntegrationRequest("zoom", "create_meeting", {
+      userId: "me",
+      topic: "Sprint review",
+      type: 2,
+      startTime: "2026-08-01T15:00:00Z",
+      duration: 45,
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/users/me/meetings");
+    expect(req.body).toEqual({
+      topic: "Sprint review",
+      type: 2,
+      start_time: "2026-08-01T15:00:00Z",
+      duration: 45,
+    });
+  });
+
+  it("Zoom get_meeting → GET /meetings/{meetingId}, no body", () => {
+    const req = buildIntegrationRequest("zoom", "get_meeting", {
+      meetingId: "8391234567",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/meetings/8391234567");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Zoom list_meetings → GET /users/{userId}/meetings with the type query param", () => {
+    const req = buildIntegrationRequest("zoom", "list_meetings", {
+      userId: "me",
+      type: "upcoming",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/users/me/meetings?type=upcoming");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Zoom delete_meeting → DELETE /meetings/{meetingId}, no body", () => {
+    const req = buildIntegrationRequest("zoom", "delete_meeting", {
+      meetingId: "8391234567",
+    });
+    expect(req.method).toBe("DELETE");
+    expect(req.path).toBe("/meetings/8391234567");
+    expect(req.body).toBeUndefined();
+  });
 });
 
 describe("integration field resolution (static + bindings)", () => {
