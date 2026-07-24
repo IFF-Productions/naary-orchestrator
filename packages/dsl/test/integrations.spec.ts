@@ -153,6 +153,26 @@ describe("integration catalog — request construction", () => {
     expect(req.body).toEqual({ properties: { lastname: "Lovelace" } });
   });
 
+  it("HubSpot get_contact → GET path id, no body", () => {
+    const req = buildIntegrationRequest("hubspot", "get_contact", {
+      contactId: "12345",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/crm/v3/objects/contacts/12345");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("HubSpot create_deal → POST /crm/v3/objects/deals with { properties }", () => {
+    const req = buildIntegrationRequest("hubspot", "create_deal", {
+      properties: { dealname: "Acme", amount: "1000" },
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/crm/v3/objects/deals");
+    expect(req.body).toEqual({
+      properties: { dealname: "Acme", amount: "1000" },
+    });
+  });
+
   it("omits missing optional body fields (a blank optional stays out of the payload)", () => {
     const req = buildIntegrationRequest("github", "create_issue", {
       owner: "o",
