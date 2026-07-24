@@ -499,7 +499,7 @@ const NOTION: IntegrationProvider = {
 };
 
 // ── GitLab (cloud, gitlab.com/api/v4; auth = a personal access token with the `api`
-//    scope as a Bearer. `projectId` is a numeric id OR a URL-encoded 'group/project') ──
+//    scope as a Bearer. `projectId` is a numeric id OR a raw 'group/project' path — path fields are URL-encoded by buildIntegrationRequest, so pass it un-encoded) ──
 const GITLAB: IntegrationProvider = {
   key: "gitlab",
   label: "GitLab",
@@ -521,7 +521,7 @@ const GITLAB: IntegrationProvider = {
           label: "Project id",
           in: "path",
           required: true,
-          hint: "numeric id or URL-encoded 'group/project'",
+          hint: "numeric id or the raw 'group/project' path (it's URL-encoded automatically — don't pre-encode)",
         },
         {
           key: "issueIid",
@@ -546,7 +546,7 @@ const GITLAB: IntegrationProvider = {
           label: "Project id",
           in: "path",
           required: true,
-          hint: "numeric id or URL-encoded 'group/project'",
+          hint: "numeric id or the raw 'group/project' path (it's URL-encoded automatically — don't pre-encode)",
         },
         {
           key: "state",
@@ -576,7 +576,7 @@ const GITLAB: IntegrationProvider = {
           label: "Project id",
           in: "path",
           required: true,
-          hint: "numeric id or URL-encoded 'group/project'",
+          hint: "numeric id or the raw 'group/project' path (it's URL-encoded automatically — don't pre-encode)",
         },
         { key: "title", label: "Title", in: "body", required: true },
         {
@@ -607,7 +607,7 @@ const GITLAB: IntegrationProvider = {
           label: "Project id",
           in: "path",
           required: true,
-          hint: "numeric id or URL-encoded 'group/project'",
+          hint: "numeric id or the raw 'group/project' path (it's URL-encoded automatically — don't pre-encode)",
         },
         {
           key: "issueIid",
