@@ -69,6 +69,15 @@ jobs:
       contents: read
       packages: write
     steps:
+      # GHCR repository paths MUST be lowercase, but github.repository_owner preserves the
+      # org's canonical case (e.g. "IFF-Productions"), which buildx rejects with
+      # `repository name must be lowercase`. Lowercase it once here so both the image tags
+      # below and the deploy job's `docker pull` get a valid ghcr.io/<owner> path.
+      - name: Lowercase IMAGE_BASE for GHCR
+        run: echo "IMAGE_BASE=ghcr.io/$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+        env:
+          OWNER: ${{ github.repository_owner }}
+
       # DEPLOY_REF becomes a docker image tag and is embedded in the remote command
       # line — reject anything outside safe tag characters (no '/', so tags or `main`;
       # slash-branches can't be image tags anyway).
@@ -156,6 +165,13 @@ jobs:
     # environment in repo settings to make every deploy click-to-approve.
     environment: production
     steps:
+      # Same lowercasing as the build job: the box's `docker pull $IMAGE_BASE/...` also
+      # rejects an uppercase owner. (Set per job — $GITHUB_ENV doesn't cross jobs.)
+      - name: Lowercase IMAGE_BASE for GHCR
+        run: echo "IMAGE_BASE=ghcr.io/$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+        env:
+          OWNER: ${{ github.repository_owner }}
+
       - uses: actions/checkout@v7
         with:
           ref: ${{ env.DEPLOY_REF }}
