@@ -160,6 +160,18 @@ describe("integration catalog — request construction", () => {
     expect(req.path).toBe("/scheduled_events/evt-123/cancellation");
     expect(req.body).toEqual({ reason: "no longer needed" });
   });
+
+  it("Calendly list_events → GET with user/status/count query params (order preserved)", () => {
+    const req = buildIntegrationRequest("calendly", "list_events", {
+      user: "https://api.calendly.com/users/ABC",
+      status: "active",
+      count: 20,
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe(
+      "/scheduled_events?user=https%3A%2F%2Fapi.calendly.com%2Fusers%2FABC&status=active&count=20",
+    );
+  });
 });
 
 describe("integration field resolution (static + bindings)", () => {

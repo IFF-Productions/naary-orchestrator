@@ -506,7 +506,7 @@ const CALENDLY: IntegrationProvider = {
   baseUrl: "https://api.calendly.com",
   description:
     "Read your Calendly account — who am I, list/get scheduled events, cancel an event.",
-  auth: "A custom connection whose token is a Calendly personal access token.",
+  auth: "A custom connection whose token is a Calendly personal access token — sent as a Bearer token.",
   actions: [
     {
       key: "get_me",
