@@ -9,6 +9,9 @@ import {
 import { connectionSecretKey } from "../src/connection.service";
 
 const CONN = "conn-1";
+/** #592 seam: the token endpoint is a fake host — skip the real DNS egress guard. */
+const assertEgress = vi.fn(async (url: string) => new URL(url));
+
 const baseCfg: OAuthConfig = {
   clientId: "client-abc",
   tokenEndpoint: "https://auth.example.com/token",
@@ -67,6 +70,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     const token = await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
+      assertEgress,
       connections: {} as never,
     });
     expect(token).toBe("AT1");
@@ -85,6 +89,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
+      assertEgress,
       connections: {} as never,
     });
     expect(put).toHaveBeenCalledOnce();
@@ -107,6 +112,8 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
       getOAuthAccessToken("t1", "e1", CONN, {
         store,
         fetchFn,
+        assertEgress,
+      assertEgress,
         connections: { setStatus } as never,
       }),
     ).rejects.toBeInstanceOf(NeedsReauthError);
@@ -121,11 +128,13 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
+      assertEgress,
       connections: {} as never,
     });
     await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
+      assertEgress,
       connections: {} as never,
     });
     expect(fetchFn).toHaveBeenCalledOnce();
@@ -148,6 +157,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     const t1 = await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
+      assertEgress,
       connections: { getById } as never,
       now,
     });
@@ -158,6 +168,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
+      assertEgress,
       connections: { getById } as never,
       now,
     });
@@ -169,6 +180,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
+      assertEgress,
       connections: { getById } as never,
       now,
     });
@@ -185,6 +197,8 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
       getOAuthAccessToken("t1", "e1", CONN, {
         store: revokedStore,
         fetchFn,
+        assertEgress,
+      assertEgress,
         connections: { getById } as never,
         now,
       }),
@@ -210,6 +224,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
+      assertEgress,
       connections: { getById } as never,
       now,
     });
@@ -218,6 +233,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     const stillOk = await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
+      assertEgress,
       connections: { getById } as never,
       now,
     });
@@ -227,6 +243,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
+      assertEgress,
       connections: { getById } as never,
       now,
     });
@@ -251,6 +268,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
+      assertEgress,
       connections: { getById } as never,
       now,
     });
@@ -260,18 +278,24 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
       getOAuthAccessToken("t1", "e1", CONN, {
         store,
         fetchFn,
+        assertEgress,
+      assertEgress,
         connections: { getById } as never,
         now,
       }),
       getOAuthAccessToken("t1", "e1", CONN, {
         store,
         fetchFn,
+        assertEgress,
+      assertEgress,
         connections: { getById } as never,
         now,
       }),
       getOAuthAccessToken("t1", "e1", CONN, {
         store,
         fetchFn,
+        assertEgress,
+      assertEgress,
         connections: { getById } as never,
         now,
       }),
@@ -292,16 +316,22 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
       getOAuthAccessToken("t1", "e1", CONN, {
         store,
         fetchFn,
+        assertEgress,
+      assertEgress,
         connections: {} as never,
       }),
       getOAuthAccessToken("t1", "e1", CONN, {
         store,
         fetchFn,
+        assertEgress,
+      assertEgress,
         connections: {} as never,
       }),
       getOAuthAccessToken("t1", "e1", CONN, {
         store,
         fetchFn,
+        assertEgress,
+      assertEgress,
         connections: {} as never,
       }),
     ]);
@@ -361,6 +391,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     const a = await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
+      assertEgress,
       connections: {} as never,
       refreshLock,
     });
@@ -373,6 +404,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     const b = await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
+      assertEgress,
       connections: {} as never,
       refreshLock,
     });
@@ -404,6 +436,7 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     const token = await getOAuthAccessToken("t1", "e1", CONN, {
       store,
       fetchFn,
+      assertEgress,
       connections: {} as never,
       refreshLock,
       now: () => 1_000_000,

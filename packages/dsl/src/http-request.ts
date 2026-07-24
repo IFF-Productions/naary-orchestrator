@@ -1,4 +1,4 @@
-import { getByPath } from "./mcp-args";
+import { getByPath, hasForbiddenPathSegment } from "./mcp-args";
 import type {
   HttpMethod,
   HttpPaginationConfig,
@@ -33,6 +33,7 @@ function setByPath(
   path: string,
   value: unknown,
 ): void {
+  if (hasForbiddenPathSegment(path)) return; // #591: prototype-chain keys must never be walked/assigned
   const keys = path.split(".");
   let cur = root;
   for (let i = 0; i < keys.length - 1; i++) {

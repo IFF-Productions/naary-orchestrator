@@ -140,6 +140,82 @@ describe("callIntegration activity", () => {
     expect(init.headers.Authorization).toBe("Bearer oauth-access-token");
   });
 
+  it("Shopify custom-header (#655): token → X-Shopify-Access-Token, no Authorization", async () => {
+    connMock.mockResolvedValue({
+      serverUrl: "https://shop.myshopify.com/admin/api/2024-01",
+      authMode: "api_token",
+    });
+    authMock.mockResolvedValue({ Authorization: "Bearer shpat_xxx" });
+    fetchMock.mockResolvedValue(res(200, { product: {} }));
+    const cfg: IntegrationNodeConfig = {
+      provider: "shopify",
+      action: "get_product",
+      connectionId: "shop",
+      fields: { productId: "123" },
+    };
+    await callIntegration(cfg, cfg.fields!, META);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers["X-Shopify-Access-Token"]).toBe("shpat_xxx");
+    expect(init.headers.Authorization).toBeUndefined();
+  });
+
+  it("Discord custom-header (#655): token → Authorization: Bot <token> (prefix applied)", async () => {
+    connMock.mockResolvedValue({
+      serverUrl: "https://discord.com/api/v10",
+      authMode: "api_token",
+    });
+    authMock.mockResolvedValue({ Authorization: "Bearer bot-token" });
+    fetchMock.mockResolvedValue(res(200, {}));
+    const cfg: IntegrationNodeConfig = {
+      provider: "discord",
+      action: "get_channel",
+      connectionId: "disc",
+      fields: { channelId: "c1" },
+    };
+    await callIntegration(cfg, cfg.fields!, META);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers.Authorization).toBe("Bot bot-token");
+  });
+
+  it("Monday custom-header (#655): bare Authorization, no Bearer prefix", async () => {
+    connMock.mockResolvedValue({
+      serverUrl: "https://api.monday.com",
+      authMode: "api_token",
+    });
+    authMock.mockResolvedValue({ Authorization: "Bearer monday-tok" });
+    fetchMock.mockResolvedValue(res(200, { data: {} }));
+    const cfg: IntegrationNodeConfig = {
+      provider: "monday",
+      action: "create_item",
+      connectionId: "mon",
+      fields: {
+        query: "mutation { create_item { id } }",
+        variables: { boardId: "1", itemName: "x" },
+      },
+    };
+    await callIntegration(cfg, cfg.fields!, META);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers.Authorization).toBe("monday-tok");
+  });
+
+  it("Discord over OAuth keeps a genuine Bearer (custom-header only for api_token)", async () => {
+    connMock.mockResolvedValue({
+      serverUrl: "https://discord.com/api/v10",
+      authMode: "oauth",
+    });
+    authMock.mockResolvedValue({ Authorization: "Bearer oauth-access" });
+    fetchMock.mockResolvedValue(res(200, {}));
+    const cfg: IntegrationNodeConfig = {
+      provider: "discord",
+      action: "get_channel",
+      connectionId: "disc",
+      fields: { channelId: "c1" },
+    };
+    await callIntegration(cfg, cfg.fields!, META);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers.Authorization).toBe("Bearer oauth-access");
+  });
+
   it("GitHub keeps Bearer (authScheme default)", async () => {
     fetchMock.mockResolvedValue(res(200, {}));
     const cfg: IntegrationNodeConfig = {

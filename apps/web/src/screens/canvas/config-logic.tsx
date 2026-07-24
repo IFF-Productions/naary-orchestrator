@@ -254,7 +254,11 @@ export function renderLogicSections(c: ConfigSectionCtx) {
               style={inputStyle}
             >
               <option value="sha256">sha256</option>
-              <option value="sha1">sha1</option>
+              {/* Weak digests are legacy-interop only (#598): not offered for new
+                  configs, but a saved sha1 config keeps rendering its value. */}
+              {str("algorithm") === "sha1" && (
+                <option value="sha1">sha1 (legacy)</option>
+              )}
             </select>
           </Labeled>
           <Labeled label="Encoding">
@@ -413,8 +417,14 @@ export function renderLogicSections(c: ConfigSectionCtx) {
               >
                 <option value="sha256">SHA-256</option>
                 <option value="sha512">SHA-512</option>
-                <option value="sha1">SHA-1</option>
-                <option value="md5">MD5</option>
+                {/* md5/sha1 are legacy-interop only (#598): hidden for new configs,
+                    still rendered when a saved graph already uses one. */}
+                {str("algorithm") === "sha1" && (
+                  <option value="sha1">SHA-1 (legacy)</option>
+                )}
+                {str("algorithm") === "md5" && (
+                  <option value="md5">MD5 (legacy)</option>
+                )}
               </select>
             </Labeled>
             <Labeled label="Encoding">

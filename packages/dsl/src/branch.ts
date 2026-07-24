@@ -9,6 +9,43 @@ import type { EdgeCondition, GraphDef, IntegrationNodeConfig } from "./types";
  * replay-sensitive (CLAUDE.md Tier-1 rule 2). Predicates are structured DATA.
  */
 
+/**
+ * ReDoS guard for the `regex` operator (#598): the pattern is author-controlled and
+ * runs in DETERMINISTIC WORKFLOW CODE against upstream data — a catastrophic-
+ * backtracking pattern stalls the workflow thread (Temporal deadlock detector /
+ * worker-slot starvation), and no timeout can interrupt a sync RegExp. An re2-style
+ * engine can't be used here (native modules can't load in the workflow isolate), so
+ * we bound the blast radius instead: cap pattern + input size and reject patterns
+ * with a quantified group that itself contains a quantifier (star height > 1 — the
+ * `(a+)+` family, the classic exponential shape). Deterministic: pure string checks.
+ */
+const MAX_REGEX_PATTERN_LENGTH = 250;
+const MAX_REGEX_INPUT_LENGTH = 10_000;
+
+function hasNestedQuantifier(pattern: string): boolean {
+  // Neutralize escapes and character classes so their contents can't read as
+  // quantifiers/groups ("\(" or "[+*]" are literals).
+  const stripped = pattern.replace(/\\./g, "x").replace(/\[[^\]]*\]/g, "x");
+  const stack: boolean[] = [];
+  let cur: boolean = false; // does the CURRENT group level contain a quantifier?
+  for (let i = 0; i < stripped.length; i++) {
+    const c = stripped[i];
+    if (c === "(") {
+      stack.push(cur);
+      cur = false;
+    } else if (c === ")") {
+      const inner: boolean = cur;
+      cur = stack.pop() ?? false;
+      const next = stripped[i + 1];
+      if (inner && (next === "*" || next === "+" || next === "{")) return true;
+      cur = cur || inner;
+    } else if (c === "*" || c === "+" || c === "{") {
+      cur = true;
+    }
+  }
+  return false;
+}
+
 /** Empty = null/undefined, empty string, empty array, or object with no own keys. */
 function isEmptyValue(v: unknown): boolean {
   if (v === undefined || v === null || v === "") return true;
@@ -59,13 +96,25 @@ export function evaluateCondition(
       return actual != null && String(actual).startsWith(String(cond.value));
     case "endsWith":
       return actual != null && String(actual).endsWith(String(cond.value));
-    case "regex":
+    case "regex": {
       if (actual == null) return false;
+      const pattern = String(cond.value);
+      const input = String(actual);
+      // Fail closed (false) on anything the guard can't vouch for — same contract
+      // as an invalid pattern, and deterministic across replays.
+      if (
+        pattern.length > MAX_REGEX_PATTERN_LENGTH ||
+        input.length > MAX_REGEX_INPUT_LENGTH ||
+        hasNestedQuantifier(pattern)
+      ) {
+        return false;
+      }
       try {
-        return new RegExp(String(cond.value)).test(String(actual));
+        return new RegExp(pattern).test(input);
       } catch {
         return false; // invalid pattern never fails the run
       }
+    }
     case "isEmpty":
       return isEmptyValue(actual);
     case "notEmpty":

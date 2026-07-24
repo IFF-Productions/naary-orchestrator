@@ -116,3 +116,19 @@ describe("scrubEvent", () => {
     expect(s).toContain("SELECT");
   });
 });
+
+describe("redactString — credentials in a URL (#598)", () => {
+  it("redacts the password in a DSN / URI while keeping the host readable", () => {
+    expect(redactString("postgres://admin:hunter2@db.example.com/app")).toBe(
+      "postgres://admin:[REDACTED]@db.example.com/app",
+    );
+    expect(redactString("https://user:s3cr3t@api.example.com/v1")).toBe(
+      "https://user:[REDACTED]@api.example.com/v1",
+    );
+  });
+
+  it("leaves a credential-free URL untouched", () => {
+    const clean = "https://api.example.com/v1?ok=1";
+    expect(redactString(clean)).toBe(clean);
+  });
+});

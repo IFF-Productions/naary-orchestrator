@@ -3,6 +3,7 @@ import { getPrisma } from "@naary/db";
 import { SecretStore } from "@naary/secrets";
 import { ConnectionService, connectionSecretKey } from "./connection.service";
 import { assertEgressAllowed } from "./egress";
+import { safeFetch } from "./safe-fetch";
 import { ConnectCallbackError, NeedsReauthError } from "./errors";
 
 const b64url = (b: Buffer) => b.toString("base64url");
@@ -52,6 +53,18 @@ interface TokenResponse {
 
 export type FetchFn = typeof fetch;
 
+/**
+ * Default fetch for every OAuth wire call (#592): bound to the pinning safeFetch
+ * dispatcher so token/registration POSTs — which carry client_secret / refresh_token —
+ * can't be redirected or DNS-rebound onto a private address. Tests still inject a
+ * plain stub via the fetchFn params/deps.
+ */
+const guardedFetch: FetchFn = ((url: unknown, init?: unknown) =>
+  safeFetch(String(url), init as never)) as unknown as FetchFn;
+
+/** Injectable egress assertion (tests use non-resolving fake hosts). */
+export type AssertEgressFn = typeof assertEgressAllowed;
+
 /** Build the PKCE authorize URL (pure). Requests offline_access + the resource param. */
 export function buildAuthorizeUrl(p: {
   authorizationEndpoint: string;
@@ -95,8 +108,12 @@ export async function exchangeCode(
     redirectUri: string;
     resource: string;
   },
-  fetchFn: FetchFn = fetch,
+  fetchFn: FetchFn = guardedFetch,
+  assertEgress: AssertEgressFn = assertEgressAllowed,
 ): Promise<TokenResponse> {
+  // #592: the endpoint came from attacker-influenceable AS metadata — never POST the
+  // code/client_secret to a non-public address.
+  await assertEgress(p.tokenEndpoint);
   const res = await fetchFn(p.tokenEndpoint, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -121,7 +138,11 @@ async function refreshGrant(
   cfg: OAuthConfig,
   connectionId: string,
   fetchFn: FetchFn,
+  assertEgress: AssertEgressFn = assertEgressAllowed,
 ): Promise<TokenResponse> {
+  // #592: re-validate at every refresh — this runs ~hourly in the worker forever, so a
+  // host that later rebinds to an internal IP must fail here, not deliver the secret.
+  await assertEgress(cfg.tokenEndpoint);
   const res = await fetchFn(cfg.tokenEndpoint, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -245,6 +266,8 @@ export interface OAuthDeps {
   store?: SecretStore;
   connections?: ConnectionService;
   fetchFn?: FetchFn;
+  /** Override the egress guard (tests only — defaults to assertEgressAllowed, #592). */
+  assertEgress?: AssertEgressFn;
   now?: () => number;
   /** Override the cross-process refresh lock (tests inject a stub for the DB seam). */
   refreshLock?: RefreshLock;
@@ -303,7 +326,7 @@ export async function getOAuthAccessToken(
 
   const store = deps.store ?? new SecretStore();
   const connections = deps.connections ?? new ConnectionService();
-  const fetchFn = deps.fetchFn ?? fetch;
+  const fetchFn = deps.fetchFn ?? guardedFetch;
   const refreshLock = deps.refreshLock ?? refreshWithDistributedLock;
 
   const p = refreshLock(connectionId, async () => {
@@ -338,7 +361,12 @@ export async function getOAuthAccessToken(
 
     let tokens: TokenResponse;
     try {
-      tokens = await refreshGrant(cfg, connectionId, fetchFn);
+      tokens = await refreshGrant(
+        cfg,
+        connectionId,
+        fetchFn,
+        deps.assertEgress,
+      );
     } catch (e) {
       if (e instanceof NeedsReauthError) {
         await connections.setStatus(tenantId, connectionId, "needs_reauth");
@@ -395,23 +423,22 @@ export interface DiscoveredMetadata {
 /** Discover AS metadata: protected-resource-metadata (RFC 9728) → AS metadata (RFC 8414). */
 export async function discoverOAuthMetadata(
   serverUrl: string,
-  fetchFn: FetchFn = fetch,
+  fetchFn: FetchFn = guardedFetch,
+  assertEgress: AssertEgressFn = assertEgressAllowed,
 ): Promise<DiscoveredMetadata> {
   // SSRF guard: both the resource origin and the authorization-server origin it
   // returns are fetched server-side, so both must pass the egress allowlist.
-  const origin = (await assertEgressAllowed(new URL(serverUrl).origin)).origin;
+  const origin = (await assertEgress(new URL(serverUrl).origin)).origin;
   const prm = (await (
     await fetchFn(`${origin}/.well-known/oauth-protected-resource`)
   ).json()) as { authorization_servers?: string[] };
   const asOrigin = (
-    await assertEgressAllowed(
-      new URL(prm.authorization_servers?.[0] ?? origin).origin,
-    )
+    await assertEgress(new URL(prm.authorization_servers?.[0] ?? origin).origin)
   ).origin;
   const asm = (await (
     await fetchFn(`${asOrigin}/.well-known/oauth-authorization-server`)
   ).json()) as Record<string, unknown>;
-  return {
+  const discovered: DiscoveredMetadata = {
     authorizationEndpoint: String(asm.authorization_endpoint),
     tokenEndpoint: String(asm.token_endpoint),
     registrationEndpoint: asm.registration_endpoint
@@ -420,14 +447,25 @@ export async function discoverOAuthMetadata(
     issuer: String(asm.issuer),
     scopesSupported: asm.scopes_supported as string[] | undefined,
   };
+  // #592: the origins above are validated, but the metadata's endpoint URLs were used
+  // VERBATIM — an AS document can point token/registration at cloud metadata or an
+  // internal host. Validate each discovered URL before anything is sent to it.
+  await assertEgress(discovered.tokenEndpoint);
+  await assertEgress(discovered.authorizationEndpoint);
+  if (discovered.registrationEndpoint) {
+    await assertEgress(discovered.registrationEndpoint);
+  }
+  return discovered;
 }
 
 /** Dynamic Client Registration (RFC 7591) — public client (PKCE, no secret). */
 export async function registerClient(
   registrationEndpoint: string,
   redirectUri: string,
-  fetchFn: FetchFn = fetch,
+  fetchFn: FetchFn = guardedFetch,
+  assertEgress: AssertEgressFn = assertEgressAllowed,
 ): Promise<{ clientId: string; clientSecret?: string }> {
+  await assertEgress(registrationEndpoint); // #592
   const res = await fetchFn(registrationEndpoint, {
     method: "POST",
     headers: { "content-type": "application/json" },

@@ -54,6 +54,25 @@ function walkSegs(value: unknown, segs: PathSeg[], i: number): unknown {
 }
 
 /**
+ * Segments that would walk the PROTOTYPE CHAIN instead of own data. A binding key
+ * like `__proto__.polluted` makes a path-setter mutate `Object.prototype` in the
+ * shared workflow isolate — cross-execution integrity corruption plus replay
+ * divergence (issue #591). Every write-side path resolver (setByPath and the flat
+ * binding-name assignments) must skip such keys, and the graph save-gate rejects
+ * them (`registry.ts`).
+ */
+const FORBIDDEN_PATH_SEGMENTS = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
+
+/** True if any dotted segment of `path` is a prototype-chain key. Pure + total. */
+export function hasForbiddenPathSegment(path: string): boolean {
+  return path.split(".").some((k) => FORBIDDEN_PATH_SEGMENTS.has(k));
+}
+
+/**
  * Read a dotted/bracketed path out of a value. `getByPath(obj)` (no path) returns obj.
  * Supports object keys (`a.b`), array indices (`a[0]`), and the array-projection wildcard
  * `a[*].b` (#478) — which maps `.b` over each element of the array `a`. Pure + total — a
@@ -90,6 +109,7 @@ export function resolveMcpArguments(
 ): Record<string, unknown> {
   const args: Record<string, unknown> = { ...(config.arguments ?? {}) };
   for (const [name, binding] of Object.entries(config.argumentBindings ?? {})) {
+    if (hasForbiddenPathSegment(name)) continue; // #591: never assign prototype-chain keys
     args[name] = getByPath(ctx[binding.from], binding.path);
   }
   return args;

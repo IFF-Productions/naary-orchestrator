@@ -21,6 +21,7 @@
  * bottom — a drift makes the guard resolve to `never` and fails `tsc -b`, naming the culprit.
  */
 import { z } from "zod";
+import { hasForbiddenPathSegment } from "./mcp-args";
 import type {
   AggregateNodeConfig,
   ApprovalNodeConfig,
@@ -77,6 +78,20 @@ import type {
 
 /** {from, path?} upstream-output binding (mirrors ArgBinding in types.ts). */
 const argBinding = z.object({ from: z.string(), path: z.string().optional() });
+
+/**
+ * Save-gate for binding-record KEYS (#591): the key is a dotted output path that
+ * `setByPath` walks, so a `__proto__`/`constructor`/`prototype` segment would let a
+ * saved graph pollute `Object.prototype` in the shared workflow isolate. The
+ * interpreter-side resolvers also skip such keys (defense in depth) — this rejects
+ * them up front with a clear save error.
+ */
+const bindingKey = z
+  .string()
+  .refine((k) => !hasForbiddenPathSegment(k), {
+    message:
+      "binding key must not contain __proto__/constructor/prototype segments",
+  });
 
 /**
  * The operator set as a LITERAL tuple, so `z.enum` infers the exact `ConditionOp` union (a plain
@@ -254,7 +269,7 @@ const CONFIG_SCHEMAS = {
     connectionId: z.string(),
     tool: z.string(),
     arguments: z.record(z.string(), z.unknown()).optional(),
-    argumentBindings: z.record(z.string(), argBinding).optional(),
+    argumentBindings: z.record(bindingKey, argBinding).optional(),
     costUsd: z.number().optional(),
   }),
 
@@ -265,7 +280,7 @@ const CONFIG_SCHEMAS = {
     action: z.string(),
     connectionId: z.string(),
     fields: z.record(z.string(), z.unknown()).optional(),
-    fieldBindings: z.record(z.string(), argBinding).optional(),
+    fieldBindings: z.record(bindingKey, argBinding).optional(),
   }),
 
   // --- Data sources ---
@@ -275,7 +290,7 @@ const CONFIG_SCHEMAS = {
     headers: z.record(z.string(), z.string()).optional(),
     query: z.record(z.string(), z.string()).optional(),
     body: z.unknown().optional(),
-    argumentBindings: z.record(z.string(), argBinding).optional(),
+    argumentBindings: z.record(bindingKey, argBinding).optional(),
     connectionId: z.string().optional(),
     failOnErrorStatus: z.boolean().optional(),
     timeoutMs: z.number().optional(),
@@ -299,7 +314,7 @@ const CONFIG_SCHEMAS = {
     query: z.string(),
     variables: z.record(z.string(), z.unknown()).optional(),
     headers: z.record(z.string(), z.string()).optional(),
-    argumentBindings: z.record(z.string(), argBinding).optional(),
+    argumentBindings: z.record(bindingKey, argBinding).optional(),
     failOnErrors: z.boolean().optional(),
     timeoutMs: z.number().optional(),
     costUsd: z.number().optional(),
@@ -329,7 +344,7 @@ const CONFIG_SCHEMAS = {
   // --- Transform ---
   set: z.object({
     fields: z.record(z.string(), z.unknown()).optional(),
-    fieldBindings: z.record(z.string(), argBinding).optional(),
+    fieldBindings: z.record(bindingKey, argBinding).optional(),
   }),
   renameKeys: z.object({
     from: z.string(),
@@ -488,7 +503,7 @@ const CONFIG_SCHEMAS = {
   executeSubWorkflow: z.object({
     workflowKey: z.string(),
     input: z.record(z.string(), z.unknown()).optional(),
-    inputBindings: z.record(z.string(), argBinding).optional(),
+    inputBindings: z.record(bindingKey, argBinding).optional(),
   }),
   forEach: z.object({
     workflowKey: z.string(),
@@ -548,7 +563,7 @@ const CONFIG_SCHEMAS = {
     connectionId: z.string(),
     algorithm: z.enum(["HS256", "RS256"]).optional(),
     claims: z.record(z.string(), z.unknown()).optional(),
-    claimsBindings: z.record(z.string(), argBinding).optional(),
+    claimsBindings: z.record(bindingKey, argBinding).optional(),
     expiresInSeconds: z.number().optional(),
   }),
   totp: z.object({
@@ -583,7 +598,7 @@ const CONFIG_SCHEMAS = {
     // the html/subject — overriding the inline html/subject. The stored id (never the blocks) rides
     // the graph; the blocks are loaded in-activity by (tenant, env, id).
     templateId: z.string().optional(),
-    fieldBindings: z.record(z.string(), argBinding).optional(),
+    fieldBindings: z.record(bindingKey, argBinding).optional(),
     costUsd: z.number().optional(),
   }),
 

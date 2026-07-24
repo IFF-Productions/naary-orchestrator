@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import {
   type App,
@@ -34,8 +35,13 @@ export interface FirebaseUser {
 }
 
 /** A verify function over the raw token → decoded claims. Injectable so the
- *  verifier is unit-testable without firebase-admin / a live project. */
-export type VerifyIdToken = (token: string) => Promise<Record<string, unknown>>;
+ *  verifier is unit-testable without firebase-admin / a live project. When
+ *  `checkRevoked` is true the implementation must also confirm the token hasn't
+ *  been revoked (a Google round-trip in the real impl); stubs may ignore it. */
+export type VerifyIdToken = (
+  token: string,
+  checkRevoked?: boolean,
+) => Promise<Record<string, unknown>>;
 
 /**
  * Pure: decoded ID-token claims → the authenticated user, or null when there is no
@@ -84,6 +90,13 @@ export class FirebaseVerifier {
   private readonly config?: FirebaseConfig;
   private app?: App;
   private verifyFn?: VerifyIdToken;
+  /** sha256(token) → epoch-ms of the last successful REVOCATION check (#598): a plain
+   *  `verifyIdToken(token)` never notices a revoked/disabled user until the ID token
+   *  expires (~1h). Checking revocation costs a Google round-trip, and `verify` runs on
+   *  every request — so re-check each distinct token at most once per TTL. */
+  private readonly revocationCheckedAt = new Map<string, number>();
+  private static readonly REVOCATION_TTL_MS = 5 * 60_000;
+  private static readonly REVOCATION_CACHE_MAX = 10_000;
 
   constructor(config?: FirebaseConfig, verifyFn?: VerifyIdToken) {
     this.config = config ?? FirebaseVerifier.fromEnv();
@@ -113,7 +126,21 @@ export class FirebaseVerifier {
     if (!this.config) return null;
     try {
       const verify = this.resolveVerifyFn();
-      const claims = await verify(token);
+      const key = createHash("sha256").update(token).digest("hex");
+      const last = this.revocationCheckedAt.get(key);
+      const checkRevoked =
+        last === undefined ||
+        Date.now() - last > FirebaseVerifier.REVOCATION_TTL_MS;
+      const claims = await verify(token, checkRevoked);
+      if (checkRevoked) {
+        // Bounded: reset rather than grow past the cap (tokens rotate hourly anyway).
+        if (
+          this.revocationCheckedAt.size >= FirebaseVerifier.REVOCATION_CACHE_MAX
+        ) {
+          this.revocationCheckedAt.clear();
+        }
+        this.revocationCheckedAt.set(key, Date.now());
+      }
       return userFromClaims(claims, this.config.tenantClaim);
     } catch {
       return null; // bad signature / issuer / audience / expiry / revoked
@@ -123,8 +150,9 @@ export class FirebaseVerifier {
   private resolveVerifyFn(): VerifyIdToken {
     if (!this.verifyFn) {
       const auth = getAuth(this.initApp());
-      this.verifyFn = async (token) =>
-        (await auth.verifyIdToken(token)) as unknown as Record<string, unknown>;
+      this.verifyFn = async (token, checkRevoked) =>
+        (await auth.verifyIdToken(token, checkRevoked === true)) as unknown as
+          Record<string, unknown>;
     }
     return this.verifyFn;
   }

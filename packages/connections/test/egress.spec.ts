@@ -111,3 +111,57 @@ describe("assertHostPublic (SMTP / non-HTTP SSRF guard)", () => {
     );
   });
 });
+
+describe("isBlockedIp — IPv4-mapped/embedded IPv6 forms (#590)", () => {
+  it("blocks HEX-COMPRESSED IPv4-mapped literals (the URL-parser normalized form)", () => {
+    // `new URL("https://[::ffff:127.0.0.1]/")`.hostname → "[::ffff:7f00:1]" — the
+    // dotted-decimal regex never saw these before the fix.
+    for (const ip of [
+      "::ffff:7f00:1", // 127.0.0.1
+      "::ffff:a9fe:a9fe", // 169.254.169.254 (cloud metadata)
+      "::ffff:a00:5", // 10.0.0.5
+      "0:0:0:0:0:ffff:7f00:1", // uncompressed spelling
+    ]) {
+      expect(isBlockedIp(ip), ip).toBe(true);
+    }
+  });
+
+  it("blocks DOTTED IPv4-mapped literals (regression)", () => {
+    for (const ip of [
+      "::ffff:127.0.0.1",
+      "::ffff:169.254.169.254",
+      "::ffff:10.0.0.5",
+    ]) {
+      expect(isBlockedIp(ip), ip).toBe(true);
+    }
+  });
+
+  it("allows IPv4-mapped forms of PUBLIC addresses", () => {
+    for (const ip of ["::ffff:8.8.8.8", "::ffff:808:808"]) {
+      expect(isBlockedIp(ip), ip).toBe(false);
+    }
+  });
+
+  it("blocks NAT64/6to4/Teredo embeddings of private addresses", () => {
+    for (const ip of [
+      "64:ff9b::7f00:1", // NAT64 → 127.0.0.1
+      "64:ff9b::a9fe:a9fe", // NAT64 → cloud metadata
+      "2002:7f00:1::", // 6to4 → 127.0.0.1
+      "2002:a9fe:a9fe::", // 6to4 → 169.254.169.254
+      "2001:0:503:236e::", // Teredo (obfuscated v4 → reject outright)
+    ]) {
+      expect(isBlockedIp(ip), ip).toBe(true);
+    }
+  });
+
+  it("keeps blocking classic v6 special ranges and zone-indexed literals", () => {
+    for (const ip of ["::1", "::", "fe80::1", "fc00::1", "fd12::1", "ff02::1", "fe80::1%eth0"]) {
+      expect(isBlockedIp(ip), ip).toBe(true);
+    }
+  });
+
+  it("still allows normal public v6", () => {
+    expect(isBlockedIp("2606:4700:4700::1111")).toBe(false); // Cloudflare DNS
+    expect(isBlockedIp("2001:4860:4860::8888")).toBe(false); // Google DNS (2001:: but NOT 2001:0::/32)
+  });
+});

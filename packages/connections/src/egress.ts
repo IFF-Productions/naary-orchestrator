@@ -43,21 +43,81 @@ function isBlockedV4(ip: string): boolean {
   );
 }
 
-function isBlockedV6(ip: string): boolean {
-  const lower = ip.toLowerCase();
-  // IPv4-mapped (::ffff:a.b.c.d) — classify by the embedded v4.
-  const mapped = lower.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return isBlockedV4(mapped[1]);
-  return (
-    lower === "::1" || // loopback
-    lower === "::" || // unspecified
-    lower.startsWith("fe8") || // fe80::/10 link-local
-    lower.startsWith("fe9") ||
-    lower.startsWith("fea") ||
-    lower.startsWith("feb") ||
-    lower.startsWith("fc") || // fc00::/7 unique-local
-    lower.startsWith("fd")
+/**
+ * Expand an IPv6 literal to its 8 hextets, or null if unparseable. Handles `::`
+ * compression and an embedded dotted-v4 tail (`::ffff:1.2.3.4`). String prefix
+ * checks are NOT enough here: Node's URL parser normalizes IPv4-mapped addresses
+ * to the hex-compressed form (`[::ffff:127.0.0.1]` → `::ffff:7f00:1`), which a
+ * dotted-decimal regex never matches — the bypass behind issue #590.
+ */
+function expandV6(ip: string): number[] | null {
+  let s = ip;
+  const v4tail = s.match(/:(\d+\.\d+\.\d+\.\d+)$/);
+  if (v4tail) {
+    const p = v4tail[1].split(".").map(Number);
+    if (p.length !== 4 || p.some((n) => Number.isNaN(n) || n < 0 || n > 255)) {
+      return null;
+    }
+    s =
+      s.slice(0, s.length - v4tail[1].length) +
+      (((p[0] << 8) | p[1]).toString(16) +
+        ":" +
+        (((p[2] << 8) | p[3]) >>> 0).toString(16));
+  }
+  const halves = s.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const missing = 8 - head.length - tail.length;
+  if (halves.length === 2 ? missing < 1 : head.length !== 8) return null;
+  const groups = [
+    ...head,
+    ...(halves.length === 2 ? Array<string>(missing).fill("0") : []),
+    ...tail,
+  ];
+  if (groups.length !== 8) return null;
+  const out = groups.map((g) =>
+    /^[0-9a-f]{1,4}$/.test(g) ? parseInt(g, 16) : NaN,
   );
+  return out.some(Number.isNaN) ? null : out;
+}
+
+function isBlockedV6(ip: string): boolean {
+  // A zone index (fe80::1%eth0) is inherently link-local/interface-scoped.
+  const lower = ip.toLowerCase();
+  if (lower.includes("%")) return true;
+  const g = expandV6(lower);
+  if (!g) return true; // unparseable → unsafe
+  const embeddedV4 = (hi: number, lo: number) =>
+    `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
+  if (g[0] === 0 && g[1] === 0 && g[2] === 0 && g[3] === 0 && g[4] === 0) {
+    // IPv4-mapped ::ffff:0:0/96 (both dotted and hex-compressed spellings land here).
+    if (g[5] === 0xffff) return isBlockedV4(embeddedV4(g[6], g[7]));
+    if (g[5] === 0) {
+      // `::` (unspecified), `::1` (loopback), and deprecated IPv4-compatible ::a.b.c.d.
+      if (g[6] === 0 && g[7] <= 1) return true;
+      return isBlockedV4(embeddedV4(g[6], g[7]));
+    }
+  }
+  // NAT64 (64:ff9b::/96) — the suffix is a real IPv4 destination.
+  if (
+    g[0] === 0x64 &&
+    g[1] === 0xff9b &&
+    g[2] === 0 &&
+    g[3] === 0 &&
+    g[4] === 0 &&
+    g[5] === 0
+  ) {
+    return isBlockedV4(embeddedV4(g[6], g[7]));
+  }
+  // 6to4 (2002::/16) — hextets 1-2 embed the v4 address.
+  if (g[0] === 0x2002) return isBlockedV4(embeddedV4(g[1], g[2]));
+  // Teredo (2001:0::/32) — the client v4 is obfuscated; reject outright.
+  if (g[0] === 0x2001 && g[1] === 0) return true;
+  if ((g[0] & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
+  if ((g[0] & 0xfe00) === 0xfc00) return true; // fc00::/7 unique-local
+  if (g[0] >= 0xff00) return true; // ff00::/8 multicast
+  return false;
 }
 
 type Lookup = (host: string) => Promise<{ address: string }[]>;

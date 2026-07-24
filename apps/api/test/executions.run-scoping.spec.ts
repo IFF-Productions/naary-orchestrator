@@ -368,6 +368,58 @@ describe("approve/cancel run gating (G3)", () => {
     expect(terminate).toHaveBeenCalledTimes(1);
   });
 
+  it("resume-url 403s a restricted subject without `run`; no path is minted (#593)", async () => {
+    const perms = makePerms({
+      getEffective: vi.fn().mockResolvedValue(eff({ all: false, keys: [] })),
+      assertCan: vi.fn().mockRejectedValue(new ForbiddenException("no")),
+    });
+    const service = makeService({ perms });
+    await expect(
+      service.getResumePath("wf-1", "t-1", member),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(perms.assertCan).toHaveBeenCalledWith(
+      member,
+      "run",
+      "refunds",
+      "env-prod",
+    );
+  });
+
+  it("resume-url mints a path for a granted subject and for an actor-less caller (#593)", async () => {
+    process.env.ENCRYPTION_KEY ??= "a".repeat(64); // resumePath signs with it
+    const granted = makeService({
+      perms: makePerms({
+        getEffective: vi
+          .fn()
+          .mockResolvedValue(eff({ all: false, keys: ["refunds"] })),
+      }),
+    });
+    await expect(
+      granted.getResumePath("wf-1", "t-1", member),
+    ).resolves.toContain("wf-1");
+    // No actor (internal/legacy shape) stays ungated.
+    await expect(
+      makeService({ perms: makePerms() }).getResumePath("wf-1", "t-1"),
+    ).resolves.toContain("wf-1");
+  });
+
+  it("archive/unarchive 403 a restricted subject without `run`; no write (#598)", async () => {
+    const perms = makePerms({
+      getEffective: vi.fn().mockResolvedValue(eff({ all: false, keys: [] })),
+      assertCan: vi.fn().mockRejectedValue(new ForbiddenException("no")),
+    });
+    const service = makeService({ perms });
+    await expect(
+      service.setArchived("wf-1", "t-1", true, member),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(perms.assertCan).toHaveBeenCalledWith(
+      member,
+      "run",
+      "refunds",
+      "env-prod",
+    );
+  });
+
   it("approveBatch threads the actor into every per-run decision", async () => {
     const perms = makePerms({
       getEffective: vi.fn().mockResolvedValue(eff({ all: false, keys: [] })),
