@@ -17,11 +17,16 @@ updates:
     #  - openapi-typescript v7 generates via the TS compiler `ts.factory` AST API,
     #    which our typescript@7 (TS7-native) doesn't expose. Stay on v6 (string emitter)
     #    until openapi-typescript supports the native compiler.
+    #  - msw-storybook-addon v3 dropped the top-level `initialize`/`mswLoader` named
+    #    exports our .storybook/preview.tsx imports (restructured entry points). Stay on
+    #    v2 until preview.tsx is migrated to the v3 API.
     ignore:
       - dependency-name: "flagsmith-nodejs"
         versions: [">=8"]
       - dependency-name: "openapi-typescript"
         versions: [">=7"]
+      - dependency-name: "msw-storybook-addon"
+        versions: [">=3"]
     # Collapse the weekly npm bumps into ONE PR instead of one-per-dependency.
     # Split by dependency-type so a risky prod bump and a routine dev bump stay in
     # separate PRs (a broken devDependency can't block a production security patch).
