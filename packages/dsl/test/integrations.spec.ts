@@ -132,6 +132,28 @@ describe("integration catalog — request construction", () => {
     expect(req.body).toEqual({ children: [{ type: "paragraph" }] });
   });
 
+  it("Asana create_task → POST /tasks, body wrapped in the data envelope", () => {
+    const req = buildIntegrationRequest("asana", "create_task", {
+      name: "Ship it",
+      notes: "before Friday",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/tasks");
+    expect(req.body).toEqual({
+      data: { name: "Ship it", notes: "before Friday" },
+    });
+  });
+
+  it("Asana add_comment → path gid + text nested under data", () => {
+    const req = buildIntegrationRequest("asana", "add_comment", {
+      taskGid: "12345",
+      text: "looks good",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/tasks/12345/stories");
+    expect(req.body).toEqual({ data: { text: "looks good" } });
+  });
+
   it("omits missing optional body fields (a blank optional stays out of the payload)", () => {
     const req = buildIntegrationRequest("github", "create_issue", {
       owner: "o",
