@@ -206,6 +206,29 @@ jobs:
           $SSH "DEPLOY_REF='$DEPLOY_REF' IMAGE_BASE='$IMAGE_BASE' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' SENTRY_DSN='$SENTRY_DSN' SENTRY_TRACES_SAMPLE_RATE='$SENTRY_TRACES_SAMPLE_RATE' SENTRY_PROFILES_SAMPLE_RATE='$SENTRY_PROFILES_SAMPLE_RATE' OTEL_EXPORTER_OTLP_ENDPOINT='$OTEL_EXPORTER_OTLP_ENDPOINT' OTEL_EXPORTER_OTLP_HEADERS='$OTEL_EXPORTER_OTLP_HEADERS' OTEL_EXPORTER_OTLP_PROTOCOL='$OTEL_EXPORTER_OTLP_PROTOCOL' bash -s" <<'REMOTE'
           set -euo pipefail
           cd /opt/naary
+          # Ensure swap exists BEFORE the rolling replace. docker-rollout scales a service
+          # to 2x (start-first), so during the worker roll a second worker boots while the
+          # old one is still resident — and a worker's boot briefly spikes RSS (in-process
+          # webpack bundle of the workflow code + the quickjs-emscripten WASM runtime). On the
+          # 8GB box with no swap the kernel OOM-kills the NEW worker before its /metrics health
+          # endpoint binds, so the health gate never passes and docker-rollout reverts
+          # ("New containers are not healthy. Rolling back."). A swapfile absorbs the transient
+          # spike. Idempotent: only creates it when no swap is active; persists via fstab.
+          # Uses dd (not fallocate) so the file has no holes — swapon rejects sparse files.
+          # /proc/swaps has a header line + one line per active swap → <=1 line means none
+          # (portable, no dependence on swapon flag versions).
+          if [ "$(wc -l < /proc/swaps)" -le 1 ]; then
+            echo "no swap active — creating /swapfile (4G)"
+            rm -f /swapfile
+            dd if=/dev/zero of=/swapfile bs=1M count=4096 status=none
+            chmod 600 /swapfile
+            mkswap /swapfile >/dev/null
+            swapon /swapfile
+            grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+            free -m | awk '/Swap/ {print "swap enabled: total="$2"MB"}'
+          else
+            echo "swap already active — skipping"
+          fi
           # Boxes cloud-init'd by the pre-GHCR template staged the .env one level up.
           if [ -f /opt/naary.env ] && [ ! -f /opt/naary/.env ]; then
             mv /opt/naary.env /opt/naary/.env && chmod 600 /opt/naary/.env

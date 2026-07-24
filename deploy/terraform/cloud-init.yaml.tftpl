@@ -16,6 +16,17 @@ write_files:
     content: |
       ${indent(6, env_file)}
 
+# 4 GiB swap — absorbs the worker's boot-time RSS spike (in-process webpack bundle of the
+# workflow code + quickjs-emscripten WASM) so the kernel doesn't OOM-kill a NEW worker during
+# docker-rollout's 2x-scale rolling replace on this 8GB box. cloud-init writes /swapfile,
+# enables it, AND adds the fstab entry (survives reboot). Bytes as integers per the cc_mounts
+# schema. NB cloud-init runs on FIRST BOOT only — the Deploy workflow ensures swap on the
+# EXISTING box (idempotent step) so this covers freshly-provisioned boxes.
+swap:
+  filename: /swapfile
+  size: 4294967296
+  maxsize: 4294967296
+
 runcmd:
   - curl -fsSL https://get.docker.com | sh
   - systemctl enable --now docker
