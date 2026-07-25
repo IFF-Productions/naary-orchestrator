@@ -40,7 +40,10 @@ shows one tile per provider.
   Atlassian Cloud sites work.
 - **Verification.** Request construction (method / URL / body / auth) is unit-tested against the
   catalog. Whether the provider *accepts* a call (token scopes, API changes) is confirmed by a
-  live smoke test with a real connection — see each provider page.
+  live smoke test with a real connection — see each provider page. For the 14 providers with a
+  non-write, zero-argument read, **Test connection** on the Integrations screen answers "does this
+  token work?" in one click, through the same request builder the node uses
+  (`VERIFICATION.md` §1.5, coverage table §2.4).
 
 ## Providers
 

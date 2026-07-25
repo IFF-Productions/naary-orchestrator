@@ -224,10 +224,11 @@ that column allows an action that needs an id and this one does not.
 `zendesk`
 
 Worth noting how much of the risky surface that covers: of the **9 non-Bearer providers** (§2.2) — the
-ones where a wrong header scheme fails 100% of calls and no unit test would notice — **5 are
-one-click testable** (`deepl`, `pagerduty`, `shopify`, `zendesk`, plus `twilio`'s scheme shared with
-the other two Basic providers is *not*: twilio is untestable). And 3 of the 6 baseUrl-less providers
-(§2.3) are testable (`deepl`, `shopify`, `zendesk`).
+ones where a wrong header scheme fails 100% of that provider's calls and no unit test would notice —
+**4 are one-click testable**: `deepl` and `pagerduty` (custom-header form) and `zendesk` (HTTP Basic)
+and `shopify` (`X-Shopify-Access-Token`). So both non-Bearer code paths get real coverage, even
+though `jira`/`twilio`/`discord`/`clickup`/`monday` individually do not. And 3 of the 6
+baseUrl-less providers (§2.3) are testable: `deepl`, `shopify`, `zendesk`.
 
 **Reports `unknown` (24)** — use single-node Test (§1.1), where you can supply the id the read needs:
 
@@ -269,7 +270,7 @@ all would send them to fix the wrong thing.
 | GitHub App | connection (`github-app/install/start` → `/api/github-app/callback`) | App ID + private key + installation | complete the install flow, then a `github` integration read | install itself does | **yes** — `github-app.live.spec.ts` |
 | Atlassian 3LO | connection (`.../atlassian/oauth/start` → `/api/atlassian/oauth/callback`) | OAuth client | complete the flow; connection `status` must be `connected`; then a `jira` read | no | — |
 | Generic OAuth2 connection | `.../oauth/start` → `/api/oauth/callback` | OAuth client | same: `status` → `connected`, then a provider read | no | — |
-| PAT / custom connection | `POST /api/tenants/:id/connections` | token + server URL | there is **no** per-connection test route — use single-node Test (see §7) | no | — |
+| PAT / custom connection | `POST /api/tenants/:id/connections` | token + server URL | §1.5 Test connection (14 of 38 providers — §2.4); otherwise single-node Test | no | — |
 | Webhook ingress | `POST /api/hooks/:endpointId` | endpoint secret | `curl` a real payload; a run should appear | starts a run | covered by e2e |
 | Hosted forms | `GET/POST /api/forms/:formId`, page at `/f/:id` | none (optional Turnstile) | load `/f/:id` in a browser and submit | starts a run | **yes** — `form-email.live.spec.ts` |
 | Hosted chat | `GET/POST /api/chat/:chatId`, page at `/c/:id` | none (optional Turnstile) | load `/c/:id` and send a message | starts a run | covered by e2e |
