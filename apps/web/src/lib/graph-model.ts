@@ -136,6 +136,24 @@ export const NODE_KINDS: NodeKind[] = [
   { type: "integration", label: "Notion", group: "Integrations", accent: "var(--node-mcp)",
     description: "Read/write Notion — query a database, create a page, append blocks.",
     defaultConfig: { provider: "notion", action: "create_page", connectionId: "", fields: {} } },
+  // NOTE: the palette lists ONE tile per provider and the config panel's Provider input is
+  // read-only, so a catalog provider WITHOUT a tile here can't be added from the canvas at
+  // all (only via AI generation / raw graph JSON). The catalog holds 38 providers, but only
+  // the 8 tiled here — GitHub, Jira, Slack, Notion (above) plus the four below — are
+  // reachable. The other 30 are a known gap, not a design choice: the fix is to derive
+  // these tiles from INTEGRATION_CATALOG instead of hand-listing them.
+  { type: "integration", label: "Mattermost", group: "Integrations", accent: "var(--node-mcp)",
+    description: "Post to Mattermost — send a message, reply in a thread, react, or read history.",
+    defaultConfig: { provider: "mattermost", action: "send_message", connectionId: "", fields: {} } },
+  { type: "integration", label: "PagerDuty", group: "Integrations", accent: "var(--node-mcp)",
+    description: "Manage PagerDuty incidents — create, acknowledge, resolve, annotate, or read.",
+    defaultConfig: { provider: "pagerduty", action: "create_incident", connectionId: "", fields: {} } },
+  { type: "integration", label: "Google Sheets", group: "Integrations", accent: "var(--node-mcp)",
+    description: "Read and write a Google Sheet — append rows, read a range, update or clear values.",
+    defaultConfig: { provider: "googlesheets", action: "append_row", connectionId: "", fields: {} } },
+  { type: "integration", label: "DeepL", group: "Integrations", accent: "var(--node-mcp)",
+    description: "Translate text with DeepL — translate, check quota usage, list languages.",
+    defaultConfig: { provider: "deepl", action: "translate_text", connectionId: "", fields: {} } },
   { type: "httpRequest", label: "HTTP Request", group: "Data sources", accent: "var(--node-http, #2f9e8f)",
     description: "Call any REST API and use the response in later steps.",
     defaultConfig: { method: "GET", url: "https://api.example.com/resource" } },
