@@ -1,4 +1,5 @@
 import { Client } from "pg";
+import { pinnedPgStream } from "./pin";
 import type { SqlEngineAdapter } from "./types";
 
 /** The slice of `pg.Client` we use — narrowed so tests can supply a fake. */
@@ -13,10 +14,20 @@ export interface PgClientLike {
 
 /** Test seam: the client constructor, swappable so adapter tests need no live DB. */
 export const __pgDeps = {
-  createClient: (dsn: string, statementTimeoutMs: number): PgClientLike =>
+  createClient: (
+    dsn: string,
+    statementTimeoutMs: number,
+    pinnedHost?: string,
+  ): PgClientLike =>
     new Client({
       connectionString: dsn,
       statement_timeout: statementTimeoutMs,
+      // Connect-pin: aim pg's socket at the pre-validated address (#597). The connection
+      // string keeps its hostname, so pg still sets that as the TLS servername. NOTE the
+      // config order matters — an explicit `host` would be overwritten by the parsed
+      // connectionString (ConnectionParameters re-parses it last), which is why this pins
+      // the socket instead.
+      ...(pinnedHost ? { stream: pinnedPgStream(pinnedHost) } : {}),
     }),
 };
 
@@ -29,7 +40,7 @@ export const __pgDeps = {
 export const postgresAdapter: SqlEngineAdapter = {
   engine: "postgres",
   async runReadOnly(dsn, sql, params, opts) {
-    const client = __pgDeps.createClient(dsn, opts.timeoutMs);
+    const client = __pgDeps.createClient(dsn, opts.timeoutMs, opts.pinnedHost);
     await client.connect();
     try {
       await client.query("BEGIN TRANSACTION READ ONLY");
@@ -41,7 +52,7 @@ export const postgresAdapter: SqlEngineAdapter = {
     }
   },
   async runWrite(dsn, sql, params, opts) {
-    const client = __pgDeps.createClient(dsn, opts.timeoutMs);
+    const client = __pgDeps.createClient(dsn, opts.timeoutMs, opts.pinnedHost);
     await client.connect();
     try {
       await client.query("BEGIN");

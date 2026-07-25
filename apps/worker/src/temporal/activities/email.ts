@@ -7,7 +7,7 @@ import {
   BlockedEgressError,
   MissingConnectionTokenError,
   NeedsReauthError,
-  assertHostPublic,
+  pinnedSmtpUri,
   resolveSmtpUri,
 } from "@naary/connections";
 import {
@@ -43,10 +43,10 @@ class SmtpTimeoutError extends Error {}
 
 // Injectable I/O seam for the sendEmail activity (swapped in unit tests so no real
 // SMTP/DNS is touched): the SMTP-URI resolver, the transport factory, and the host
-// SSRF check.
+// SSRF check + connect-pin.
 export const __emailDeps = {
   resolveSmtpUri,
-  assertHostPublic,
+  pinnedSmtpUri,
   createTransport: (uri: string) => nodemailer.createTransport(uri),
 };
 
@@ -54,8 +54,9 @@ export const __emailDeps = {
  * sendEmail node — send a message via an `smtp` connection. The SMTP URI (with
  * credentials) is read + used here and never returned/logged/in history. SSRF: the
  * SMTP host is resolved and required to be public BEFORE connecting (a
- * tenant-supplied host could otherwise point at an internal service). `from`
- * defaults to the URI's user when unset.
+ * tenant-supplied host could otherwise point at an internal service), and the
+ * validated address is PINNED into the URI we dial so nodemailer can't re-resolve it
+ * to something internal (#597). `from` defaults to the URI's user when unset.
  */
 export async function callSendEmail(
   cfg: ResolvedSendEmail,
@@ -69,12 +70,13 @@ export async function callSendEmail(
       cfg.connectionId,
     );
     const parsed = new URL(uri);
-    // SSRF guard: reject a private/reserved SMTP host (checked at call time).
-    await __emailDeps.assertHostPublic(parsed.hostname);
+    // SSRF guard: reject a private/reserved SMTP host, and dial the ONE address that
+    // check validated (TLS servername stays the hostname — see pinnedSmtpUri).
+    const dialUri = await __emailDeps.pinnedSmtpUri(uri);
     const from =
       cfg.from ||
       (parsed.username ? decodeURIComponent(parsed.username) : undefined);
-    const transport = __emailDeps.createTransport(uri);
+    const transport = __emailDeps.createTransport(dialUri);
     // Bound the SMTP round-trip so an unresponsive host fails fast (see SMTP_TIMEOUT_MS) rather
     // than hanging to the 60s start-to-close. transport.close() tears down the dangling socket.
     let timer: ReturnType<typeof setTimeout> | undefined;

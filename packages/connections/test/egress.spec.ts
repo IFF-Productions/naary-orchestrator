@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   assertEgressAllowed,
   assertHostPublic,
   BlockedEgressError,
   isBlockedIp,
+  resolvePinnedHost,
 } from "../src/egress";
 
 // A fake DNS resolver so the URL guard is exercised without real network.
@@ -112,6 +113,62 @@ describe("assertHostPublic (SMTP / non-HTTP SSRF guard)", () => {
   });
 });
 
+describe("resolvePinnedHost (connect-pinning for SQL/SMTP, #597)", () => {
+  it("returns the validated address so the caller connects to THAT, not the hostname", async () => {
+    await expect(
+      resolvePinnedHost("db.example.com", resolvesTo("93.184.216.34")),
+    ).resolves.toBe("93.184.216.34");
+  });
+
+  it("resolves EXACTLY ONCE — the pin is why rebinding can't win", async () => {
+    // A resolver that answers public first and private after: the classic rebinding
+    // sequence. One lookup means the second answer never happens, so what the driver
+    // connects to is what we checked. (Two lookups = the bug this closes.)
+    const answers = ["93.184.216.34", "169.254.169.254"];
+    let calls = 0;
+    const flipFlop = async () => {
+      calls += 1;
+      return [{ address: answers[Math.min(calls - 1, answers.length - 1)] }];
+    };
+    expect(await resolvePinnedHost("rebind.example.com", flipFlop)).toBe(
+      "93.184.216.34",
+    );
+    expect(calls).toBe(1);
+  });
+
+  it("returns a public IP literal unchanged (no DNS at all)", async () => {
+    const resolve = vi.fn();
+    expect(await resolvePinnedHost("8.8.8.8", resolve)).toBe("8.8.8.8");
+    expect(await resolvePinnedHost("[2606:4700:4700::1111]", resolve)).toBe(
+      "2606:4700:4700::1111",
+    );
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("throws (never returns a pin) for private literals, private answers, and no answer", async () => {
+    await expect(resolvePinnedHost("10.0.0.5")).rejects.toBeInstanceOf(
+      BlockedEgressError,
+    );
+    await expect(
+      resolvePinnedHost("evil.example.com", resolvesTo("169.254.169.254")),
+    ).rejects.toBeInstanceOf(BlockedEgressError);
+    await expect(
+      resolvePinnedHost("nope.example.com", async () => []),
+    ).rejects.toBeInstanceOf(BlockedEgressError);
+  });
+
+  it("rejects a MIXED record set rather than cherry-picking the public address", async () => {
+    // A public+private answer pair is what a rebinding attack looks like; returning the
+    // public one would let the attacker keep retrying until the driver got the private one.
+    await expect(
+      resolvePinnedHost("mixed.example.com", async () => [
+        { address: "93.184.216.34" },
+        { address: "127.0.0.1" },
+      ]),
+    ).rejects.toBeInstanceOf(BlockedEgressError);
+  });
+});
+
 describe("isBlockedIp — IPv4-mapped/embedded IPv6 forms (#590)", () => {
   it("blocks HEX-COMPRESSED IPv4-mapped literals (the URL-parser normalized form)", () => {
     // `new URL("https://[::ffff:127.0.0.1]/")`.hostname → "[::ffff:7f00:1]" — the
@@ -155,7 +212,15 @@ describe("isBlockedIp — IPv4-mapped/embedded IPv6 forms (#590)", () => {
   });
 
   it("keeps blocking classic v6 special ranges and zone-indexed literals", () => {
-    for (const ip of ["::1", "::", "fe80::1", "fc00::1", "fd12::1", "ff02::1", "fe80::1%eth0"]) {
+    for (const ip of [
+      "::1",
+      "::",
+      "fe80::1",
+      "fc00::1",
+      "fd12::1",
+      "ff02::1",
+      "fe80::1%eth0",
+    ]) {
       expect(isBlockedIp(ip), ip).toBe(true);
     }
   });

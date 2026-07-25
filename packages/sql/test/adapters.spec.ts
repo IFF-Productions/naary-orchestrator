@@ -41,7 +41,7 @@ vi.mock("mssql", () => {
   };
 });
 
-import { augmentMssqlDsn, mssqlAdapter } from "../src/mssql";
+import { __mssqlDeps, augmentMssqlDsn, mssqlAdapter } from "../src/mssql";
 import { __mysqlDeps, mysqlAdapter } from "../src/mysql";
 import { __pgDeps, postgresAdapter } from "../src/postgres";
 
@@ -162,7 +162,9 @@ describe("postgresAdapter.runWrite", () => {
       end: async () => calls.push("END"),
     });
     await expect(
-      postgresAdapter.runWrite("dsn", "UPDATE t SET x=1", [], { timeoutMs: 1000 }),
+      postgresAdapter.runWrite("dsn", "UPDATE t SET x=1", [], {
+        timeoutMs: 1000,
+      }),
     ).rejects.toThrow("constraint");
     expect(calls).toContain("ROLLBACK");
     expect(calls).toContain("END"); // still closed
@@ -202,5 +204,45 @@ describe("mysqlAdapter", () => {
     expect(res).toEqual({ rowsAffected: 4 });
     expect(log).toContain("START TRANSACTION");
     expect(log).toContain("COMMIT");
+  });
+});
+
+describe("connect-pinning is forwarded to every driver seam (#597)", () => {
+  // The pin only helps if it actually reaches the driver factory — pin.spec proves each
+  // factory then dials it; this proves the adapters pass it down (all three engines).
+  it("pg / mysql / mssql each receive opts.pinnedHost", async () => {
+    const pinned: (string | undefined)[] = [];
+    __pgDeps.createClient = ((_dsn: string, _t: number, pin?: string) => {
+      pinned.push(pin);
+      return {
+        connect: async () => undefined,
+        query: async () => ({ rows: [], rowCount: 0 }),
+        end: async () => undefined,
+      };
+    }) as never;
+    __mysqlDeps.createConnection = (async (
+      _dsn: string,
+      _t: number,
+      pin?: string,
+    ) => {
+      pinned.push(pin);
+      return {
+        query: async () => [[], []] as [unknown, unknown],
+        end: async () => undefined,
+      };
+    }) as never;
+    __mssqlDeps.createPool = ((_dsn: string, _t: number, pin?: string) => {
+      pinned.push(pin);
+      return {
+        connect: async () => undefined,
+        close: async () => undefined,
+      };
+    }) as never;
+
+    const opts = { timeoutMs: 1000, pinnedHost: "93.184.216.34" };
+    await postgresAdapter.runReadOnly("dsn", "SELECT 1", [], opts);
+    await mysqlAdapter.runReadOnly("mysql://x", "SELECT 1", [], opts);
+    await mssqlAdapter.runReadOnly("Server=db;", "SELECT 1", [], opts);
+    expect(pinned).toEqual(["93.184.216.34", "93.184.216.34", "93.184.216.34"]);
   });
 });

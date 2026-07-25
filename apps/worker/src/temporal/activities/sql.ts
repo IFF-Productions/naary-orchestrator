@@ -5,8 +5,8 @@ import {
   BlockedEgressError,
   MissingConnectionTokenError,
   NeedsReauthError,
-  assertHostPublic,
   resolveDbConnection,
+  resolvePinnedHost,
 } from "@naary/connections";
 import { getAdapter } from "@naary/sql";
 import {
@@ -55,7 +55,7 @@ export interface SqlQueryResult {
 export const __sqlDeps = {
   resolveDbConnection,
   getAdapter,
-  assertHostPublic,
+  resolvePinnedHost,
 };
 
 /** Best-effort host extraction from a DSN — a URL (postgres:// / mssql://) or an
@@ -126,10 +126,17 @@ export async function callSqlQuery(
       cfg.connectionId,
     );
     // SSRF (audit S-3): the DSN host is tenant-supplied — reject an internal/reserved
-    // target before connecting (mirrors callSendEmail's assertHostPublic). Wire
-    // protocol, not HTTP, so this bounds internal reach/port-scanning.
+    // target before connecting (mirrors callSendEmail). Wire protocol, not HTTP, so this
+    // bounds internal reach/port-scanning.
+    //
+    // Resolve ONCE and PIN the validated address (#597): the driver would otherwise
+    // re-resolve the hostname itself, so a host that answers public here could answer
+    // private at connect time (rebinding TOCTOU). The DSN's hostname is left alone, so TLS
+    // still validates the certificate against it — see @naary/sql's pin.ts.
     const dbHost = dsnHost(dsn);
-    if (dbHost) await __sqlDeps.assertHostPublic(dbHost);
+    const pinnedHost = dbHost
+      ? await __sqlDeps.resolvePinnedHost(dbHost)
+      : undefined;
     // Resolve any claim-checked bound param back to its real value before the call.
     const params = (await resolveClaimChecks(
       cfg.params ?? [],
@@ -141,7 +148,7 @@ export async function callSqlQuery(
     );
     const result = await __sqlDeps
       .getAdapter(engine)
-      .runReadOnly(dsn, cfg.sql, params, { timeoutMs });
+      .runReadOnly(dsn, cfg.sql, params, { timeoutMs, pinnedHost });
 
     // Offload a large result set so it can't blow Temporal's ~2MB payload cap.
     const rows = await maybeOffload(result.rows, store, {
@@ -255,7 +262,9 @@ export async function callSqlExec(
       cfg.connectionId,
     );
     const dbHost = dsnHost(dsn);
-    if (dbHost) await __sqlDeps.assertHostPublic(dbHost);
+    const pinnedHost = dbHost
+      ? await __sqlDeps.resolvePinnedHost(dbHost)
+      : undefined;
     const params = (await resolveClaimChecks(
       cfg.params ?? [],
       store,
@@ -266,7 +275,7 @@ export async function callSqlExec(
     );
     const result = await __sqlDeps
       .getAdapter(engine)
-      .runWrite(dsn, cfg.sql, params, { timeoutMs });
+      .runWrite(dsn, cfg.sql, params, { timeoutMs, pinnedHost });
 
     log.info(
       {
