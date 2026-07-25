@@ -41,6 +41,7 @@ import { IntrospectModule } from "./introspect/introspect.module";
 import { EnvironmentsModule } from "./environments/environments.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { PermissionsModule } from "./permissions/permissions.module";
+import { EvalsModule } from "./evals/evals.module";
 import { PinsModule } from "./pins/pins.module";
 import { SchedulesModule } from "./schedules/schedules.module";
 import { TagsModule } from "./tags/tags.module";
@@ -75,6 +76,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     HealthModule,
     GraphsModule,
     PinsModule,
+    EvalsModule,
     ExecutionsModule,
     SecretsModule,
     UsageModule,

@@ -208,6 +208,23 @@ export {
 } from "./activities/items";
 export type { ExpandItemsConfig } from "./activities/items";
 
+// Workflow evals (#575): the batch workflow's three activities (dataset read, assertion scoring +
+// per-case persist, run aggregation).
+export {
+  __evalDeps,
+  EVAL_JUDGE_NODE_TYPE,
+  evaluateEvalCase,
+  finalizeEvalRun,
+  loadEvalPlan,
+} from "./activities/evals";
+export type {
+  EvalPlan,
+  EvalPlanCase,
+  EvalRunSummary,
+  EvaluateEvalCaseInput,
+  EvaluateEvalCaseResult,
+} from "./activities/evals";
+
 export { __ragDeps, callVectorUpsert, callVectorQuery } from "./activities/rag";
 export type {
   VectorUpsertResult,

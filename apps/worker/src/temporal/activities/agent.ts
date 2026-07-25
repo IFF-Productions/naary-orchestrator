@@ -763,7 +763,7 @@ export async function runAgent(
           environmentId: meta.environmentId,
           executionId: meta.executionId,
           nodeId: meta.nodeId,
-          nodeType: "agent",
+          nodeType: meta.ledgerNodeType ?? "agent",
           durationMs: Math.round(secondsSince(startedAt) * 1000),
           provider,
           model,
@@ -787,7 +787,9 @@ export async function runAgent(
       environmentId: meta.environmentId, // per-env cost tag (Slice 6)
       executionId: meta.executionId,
       nodeId: meta.nodeId,
-      nodeType: "agent", // Slice 2: by-node-type rollups without a graph join
+      // Slice 2: by-node-type rollups without a graph join. `ledgerNodeType` lets the eval
+      // activity tag its LLM-JUDGE spend distinctly (#575) while reusing this whole path.
+      nodeType: meta.ledgerNodeType ?? "agent",
       durationMs: Math.round(secondsSince(startedAt) * 1000), // measured in-activity
       provider,
       model, // the model that actually ran (post-downgrade)

@@ -24,6 +24,10 @@ export const RUN_GRAPH_WORKFLOW = "runGraph";
 /** Workflow type name for the durable per-session chat workflow (design §2.1b, option A). */
 export const CHAT_SESSION_WORKFLOW = "chatSession";
 
+/** Registered name of the eval-batch workflow (#575) — one execution per eval run, launching one
+ *  CHILD `runGraph` per golden case. Must match the export name in the worker's workflows.ts. */
+export const EVAL_RUN_WORKFLOW = "evalRun";
+
 export type ExecutionStatus =
   | "running"
   | "awaiting_approval"

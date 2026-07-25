@@ -16,3 +16,11 @@ export type {
 } from "./workflow/types";
 export { chatSession } from "./workflow/chat-session";
 export type { ChatSessionInput } from "./workflow/chat-session";
+// Eval batch (#575): a golden dataset run as an ordinary Temporal execution, launching one CHILD
+// runGraph per case. Registered by the name "evalRun".
+export {
+  evalRun,
+  EVAL_CONCURRENCY,
+  EVAL_CASE_TIMEOUT_MS,
+} from "./workflow/eval-run";
+export type { EvalRunInput, EvalRunResult } from "./workflow/eval-run";
