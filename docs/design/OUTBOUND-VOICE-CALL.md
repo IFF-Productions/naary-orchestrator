@@ -191,6 +191,10 @@ export interface VoiceCallNodeConfig {
   from: string;                  // E.164, must be a number on the tenant's account
   to?: string;
   toBinding?: ArgBinding;
+  /** IANA zone for the CALLEE, used by the quiet-hours gate (§6). Never inferred from
+   *  the number's area code. Absent => the call is refused, not silently allowed. */
+  timezone?: string;
+  timezoneBinding?: ArgBinding;
   /** The textToSpeech node whose `audio.__objectRef` is played. */
   audioBinding: ArgBinding;
   /** Prepended AI-voice disclosure. Default ON; see §6. */
@@ -331,7 +335,7 @@ set.
 |---|---|---|
 | **Consent to call** (TCPA-style prior express consent for automated/prerecorded calls to mobiles; per-country robocall regimes) | **Tenant responsibility, product-attested** | `consentAttested: true` is a *required* config field — the graph will not save without it. The node's UI copy states the attestation in the first person so it is a deliberate act, not a checkbox someone skims. We cannot verify consent; we can refuse to let it be implicit. |
 | **AI-voice / prerecorded disclosure** (tightening in several jurisdictions; a synthesized voice may be legally required to announce itself) | **Product-enforced by default** | `disclosure.enabled` defaults to **true** and prepends a spoken preamble before the tenant's audio. Turning it off is possible but is a visible, logged choice with a warning. Default-on is the whole point: the compliant path must be the lazy path. |
-| **Quiet hours** (local-time calling windows) | **Product-enforced** | The activity resolves the callee's local time from the E.164 country/area code and refuses to place a call outside a configurable window (default 09:00–20:00 local), throwing a non-retryable `QUIET_HOURS` failure so the graph can branch and retry later rather than the run dying. Deliberately enforced rather than delegated: a workflow that fires on an inbound event has no natural sense of the callee's clock. |
+| **Quiet hours** (local-time calling windows) | **Product-enforced, fail-closed on unknown** | The activity refuses to place a call outside a configurable window (default 09:00–20:00 **callee-local**), throwing a non-retryable `QUIET_HOURS` failure so the graph branches and reschedules rather than the run dying. Enforced rather than delegated because a workflow firing on an inbound event has no natural sense of the callee's clock. **The timezone must be supplied per recipient** (a `timezone` field / binding on the node): do **not** infer it from the E.164 country or area code — NANP area codes do not map cleanly to zones (several states are split, and a mobile number keeps its area code when its owner moves), so inference would both block legitimate calls and permit real violations. Country code alone is a usable default only for single-timezone countries; anywhere else, **unknown timezone = do not call**, surfaced as a distinct `QUIET_HOURS_UNKNOWN_TZ` outcome so the author sees the gap instead of silently getting a 24h window. |
 | **Retry / call-frequency limits** | **Product-enforced** | `maximumAttempts: 1` on the activity means the *platform* never re-dials. A tenant re-calling deliberately (the "on voicemail, retry later" pattern the issue wants) is an explicit graph edge, and a per-`(tenantId, to)` attempt counter with a daily cap backstops a runaway loop. |
 | **Do-not-call suppression** | **Product-enforced list, tenant-supplied contents** | A per-tenant DNC list, checked in-activity before dialling; a match is a non-retryable `DNC_SUPPRESSED` outcome. We host and enforce the list; we cannot populate it from national registries on the tenant's behalf. |
 | **Call recording consent** (one-party vs all-party jurisdictions) | **Out of scope — recording is NOT built** | The node must not gain a `record: true` flag in this design. All-party-consent jurisdictions make silent recording a criminal matter, and the feature is not needed for the stated use case. If recording is ever added it needs its own design and its own consent gate. |
@@ -353,7 +357,9 @@ set.
 > region you call.
 >
 > **Calling hours** 09:00–20:00 in the recipient's local time. Calls outside this window are not
-> placed — the run branches to your "skipped" path so you can schedule a retry.
+> placed — the run branches to your "skipped" path so you can schedule a retry. **Set the
+> recipient's timezone** on this node; we don't guess it from the phone number, because area codes
+> don't reliably indicate where someone is. Without it, the call is not placed.
 >
 > **Spend limit** Max {maxMinutes} min per call. Voice is billed per minute by Twilio and reserved
 > against your monthly cap before the call is placed.
