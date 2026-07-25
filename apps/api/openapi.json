@@ -3906,7 +3906,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get the workspace agent guardrail policy",
+        "summary": "Get the workspace agent guardrail policy (owner/admin only)",
         "tags": [
           "Settings"
         ]
@@ -3980,7 +3980,7 @@
             "bearer": []
           }
         ],
-        "summary": "Replace the workspace agent guardrail policy",
+        "summary": "Replace the workspace agent guardrail policy (owner/admin only)",
         "tags": [
           "Settings"
         ]

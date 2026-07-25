@@ -76,9 +76,17 @@ non-answers are all rejected:
 
 **What ships.** Forced approval is a real durable pause **where the interpreter owns the call**:
 
-1. `execNodeInner` resolves the run's tool-policy projection once per run segment
-   (`resolveToolPolicy` activity → `ctx.__toolPolicy`, a small `ref → verdict` map; refs the policy
-   plainly allows are omitted, so an unrestricted graph caches `{}`).
+1. `execNodeInner` evaluates the policy against the **resolved** ref of the node it is about to run
+   (`resolveToolPolicy` activity), memoized per distinct ref under `ctx.__toolPolicy`.
+
+   > **The memo is TOTAL, including `"allow"` — and this is load-bearing.** An earlier draft
+   > precomputed a projection from the *saved graph's* static refs and treated a key miss as
+   > "allowed". `mcpTool.tool` is a plain `z.string()`, so `tool: "{{ trigger.body.t }}"` saves
+   > fine: the save gate only ever saw the literal `{{…}}` (matching no glob), and the resolved
+   > `c1:wire_money` was not a projection key — so it bypassed the policy entirely, *including*
+   > `deny: ["*"]`. Absence now means "not yet evaluated", never "allowed". Cost: one activity call
+   > per distinct resolved ref per run segment. Regression-tested in
+   > `interpreter-tool-approval.e2e.spec.ts`.
 2. On a `mcpTool` / `integration` node whose ref is `approval`, the interpreter writes the
    `__approval` record (with `toolRef`, so the inbox/Slack/public prompt names the tool), sets
    `awaiting_approval`, pages the tenant best-effort, and awaits `approvalSignal` via
@@ -137,10 +145,33 @@ separate problem (ingress-side filtering) and is not claimed here.
 
 ---
 
+### Known limitation: the approval channel is shared and single-slot
+
+The tool gate reuses `approvalSignal` / `state.approval` verbatim — the pre-existing `humanApproval`
+shape, which carries no `nodeId` and has exactly one slot. Making it carry a *guardrail* decision
+inherits three properties worth stating explicitly:
+
+- **Parallel fan-out.** Two policy-gated tool nodes pausing concurrently both wake on one signal, and
+  the second `__approval` record overwrites the first — so an approver shown one `toolRef` can
+  release two tools. Sequential graphs (the normal shape) are unaffected.
+- **No approver routing.** The gate calls `prepareApproval({ config: {} })`, so the record names no
+  approvers and `assertApprover` is a no-op: anyone holding `run` on the workflow (or a valid public
+  signed link for that run) can decide it. Same as a `humanApproval` node with no `approvers` set.
+- **`opApprove` has no awaiting-status guard** (only the public signed-link path does, which
+  documents the buffered-signal hazard). A decision signalled before the gate is reached satisfies it
+  immediately.
+
+None of these is a privilege bypass — `run` on the workflow is still required, and a *denied* tool is
+never approvable. Binding a decision to its paused node would change shared `humanApproval`
+semantics and the API's decide paths, so it is deliberately out of this slice.
+
 ## 5. Not in this slice
 
-- **Web UI** for editing the policy. The API is `GET`/`PUT /tenants/:id/settings/guardrails`
-  (whole-object PUT: a merge could never remove a rule from a blocklist).
+- **Web UI** for editing the policy. The API is `GET`/`PUT /tenants/:id/settings/guardrails`,
+  **owner/admin only** (unlike its `displayName`/`defaultModel` siblings: a `PUT {}` would clear the
+  deny-list, the content rules and redaction in one request, zeroing all three enforcement points).
+  Whole-object PUT — a merge could never remove a rule from a blocklist.
+- Binding an approval decision to the node that is paused (see the limitation above).
 - Per-**environment** policy (workspace-wide today), and per-**node** overrides of the workspace
   policy (node-level `tools[]` is validated *against* it, which is what the issue asks for).
 - Redaction of tool ARGUMENTS and tool RESULTS inside the agent loop (prompt assembly only).

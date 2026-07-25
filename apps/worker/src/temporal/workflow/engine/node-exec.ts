@@ -27,13 +27,16 @@ import {
   resolveWebhookResponse,
   collectCitations,
   asNodeConfig,
-  distinctToolRefs,
-  graphToolRefs,
   integrationToolRef,
   mcpToolRef,
   type UnresolvedRef,
 } from "@naary/dsl";
-import type { ApprovalNodeConfig, NodeDef, NodeOutputMap } from "@naary/dsl";
+import type {
+  ApprovalNodeConfig,
+  NodeDef,
+  NodeOutputMap,
+  ToolPolicyVerdict,
+} from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
 import type * as activities from "../../activities";
 // Pure fan-out policy (no side effects) — safe to import into workflow code.
@@ -129,7 +132,9 @@ export async function execNode(
 
 /**
  * The tool ref a node will call, or undefined for a node that calls no tool. PURE (a config read).
- * `cfg` is the already-template-resolved config, so `{{…}}`-built connection ids/tools are covered.
+ * `cfg` is the already-template-resolved config, so a `{{…}}`-built connection id / tool name yields
+ * the ref that will ACTUALLY be called — which is the ref the policy must be evaluated against (see
+ * the memo note in {@link toolApprovalGate}).
  */
 function toolRefForNode(
   node: NodeDef,
@@ -162,36 +167,47 @@ function toolRefForNode(
  *
  * Returns a TERMINAL status (rejected) to stop the run, or null to let the node proceed.
  *
- * DETERMINISM (Tier-1 rule 2): the ref derivation and the projection lookup are pure; the policy
- * read is an activity; the pause is a Signal + condition(), never a sleep-loop; every new command
- * sits behind `wf.patched("tool-approval-gate-v1")` at the call site so histories recorded before
- * this code replay their original command sequence unchanged.
+ * DETERMINISM (Tier-1 rule 2): the ref derivation and the memo lookup are pure; the policy read is
+ * an activity; the pause is a Signal + condition(), never a sleep-loop; every new command sits
+ * behind `wf.patched("tool-approval-gate-v1")` at the call site so histories recorded before this
+ * code replay their original command sequence unchanged. The set of refs evaluated is a function of
+ * the (deterministic) ctx, so the activity call sequence replays identically.
  */
 async function toolApprovalGate(
   engine: Engine,
   node: NodeDef,
   cfg: Record<string, unknown>,
 ): Promise<ExecutionStatus | null> {
-  const { ctx, state, runCtx, graph, syncStatus } = engine;
+  const { ctx, state, runCtx, syncStatus } = engine;
   const ref = toolRefForNode(node, cfg);
   if (ref === undefined) return null;
 
-  // Resolve the run's policy projection ONCE per segment (see TOOL_POLICY_CTX_KEY). The refs are
-  // derived from the pinned graph snapshot in a deterministic order, so the activity argument
-  // replays identically.
-  let projection = ctx[TOOL_POLICY_CTX_KEY] as
-    Record<string, "deny" | "approval"> | undefined;
-  if (projection === undefined) {
-    projection = await resolveToolPolicy({
+  // Evaluate the policy against the RESOLVED ref, memoized per distinct ref for the run segment.
+  //
+  // WHY NOT a projection precomputed from the graph's static refs: `cfg` here is the
+  // template-RESOLVED config, so `tool: "{{ trigger.body.t }}"` yields a ref that a scan of the
+  // saved graph never produced. Keying a projection on the static refs and treating a MISS as
+  // "allowed" meant such a node bypassed the policy entirely — including `deny: ["*"]`. The memo is
+  // therefore TOTAL (an "allow" verdict is stored explicitly) and a miss means "not yet evaluated",
+  // which triggers a real policy evaluation for exactly this ref. Cost: one activity call per
+  // DISTINCT resolved ref per run segment.
+  const memo = (ctx[TOOL_POLICY_CTX_KEY] ??= {}) as Record<
+    string,
+    ToolPolicyVerdict
+  >;
+  if (!Object.prototype.hasOwnProperty.call(memo, ref)) {
+    const resolved = await resolveToolPolicy({
       tenantId: runCtx.tenantId,
-      refs: distinctToolRefs(graphToolRefs(graph)),
+      refs: [ref],
     });
-    ctx[TOOL_POLICY_CTX_KEY] = projection;
+    // The activity is TOTAL over `refs`, so `resolved[ref]` is always present; `?? "allow"` only
+    // pins the memo so a (contract-violating) omission cannot make this re-call the activity on
+    // every visit to the node.
+    memo[ref] = resolved[ref] ?? "allow";
   }
-  const verdict = projection[ref];
-  if (verdict === undefined) return null; // plainly allowed — the overwhelmingly common case
+  if (memo[ref] === "allow") return null; // the overwhelmingly common case
 
-  if (verdict === "deny") {
+  if (memo[ref] === "deny") {
     // Runtime enforcement of the deny-list for a graph the save gate never saw (saved before the
     // policy tightened, promoted in, seeded). Non-retryable: only an admin can change the policy.
     void recordAuditEvent({

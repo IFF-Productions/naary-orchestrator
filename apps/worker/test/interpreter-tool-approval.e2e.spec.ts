@@ -251,7 +251,7 @@ describe("interpreter — forced-approval tool gate (#576)", () => {
     });
   });
 
-  it("an UNRESTRICTED policy costs one policy read per RUN (not per node) and changes nothing else", async () => {
+  it("an UNRESTRICTED policy evaluates each DISTINCT ref once and changes nothing else", async () => {
     harnessState.toolPolicy = {};
     const worker = await makeWorker(env);
     await worker.runUntil(async () => {
@@ -264,11 +264,98 @@ describe("interpreter — forced-approval tool gate (#576)", () => {
       expect(result.status).toBe("completed");
       expect(mcpCalls.map((c) => c.tool)).toEqual(["read_a", "read_b"]);
     });
-    // Two tool nodes, ONE resolveToolPolicy call (cached under ctx.__toolPolicy), and the argument
-    // carries every ref the pinned graph can reach, in deterministic graph order.
+    // One evaluation per distinct RESOLVED ref, memoized under ctx.__toolPolicy.
     expect(resolveToolPolicyCalls).toEqual([
-      { tenantId: "t-open", refs: ["c1:read_a", "c1:read_b"] },
+      { tenantId: "t-open", refs: ["c1:read_a"] },
+      { tenantId: "t-open", refs: ["c1:read_b"] },
     ]);
     expect(auditEvents).toHaveLength(0);
+  });
+
+  it("the same ref reached TWICE is evaluated once (the memo is real)", async () => {
+    harnessState.toolPolicy = {};
+    const sameRefTwice: GraphDef = {
+      startNodeId: "trigger",
+      nodes: [
+        { id: "trigger", type: "webhookTrigger" },
+        {
+          id: "t1",
+          type: "mcpTool",
+          config: { connectionId: "c1", tool: "read_a" },
+        },
+        {
+          id: "t2",
+          type: "mcpTool",
+          config: { connectionId: "c1", tool: "read_a" },
+        },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "trigger", to: "t1" },
+        { from: "t1", to: "t2" },
+        { from: "t2", to: "end" },
+      ],
+    };
+    const worker = await makeWorker(env);
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [sameRefTwice, {}, { tenantId: "t-memo" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-tool-memo",
+      });
+      expect((await handle.result()).status).toBe("completed");
+    });
+    expect(resolveToolPolicyCalls).toEqual([
+      { tenantId: "t-memo", refs: ["c1:read_a"] },
+    ]);
+    expect(mcpCalls).toHaveLength(2);
+  });
+
+  /**
+   * REGRESSION (found in review): the gate must evaluate the ref it is ACTUALLY about to call.
+   *
+   * A `{{ }}`-templated tool name is a plain `z.string()` at save time, so the save gate only ever
+   * sees the literal `"{{ trigger.body.tool }}"` — which matches no glob and is permitted. If the
+   * interpreter had keyed a precomputed projection on the graph's STATIC refs and treated a key miss
+   * as "allowed", the resolved `c1:wire_money` would have sailed straight past the deny-list.
+   */
+  it("a TEMPLATED tool name is evaluated against its RESOLVED ref, not the literal `{{…}}`", async () => {
+    harnessState.toolPolicy = { "c1:wire_money": "deny" };
+    const templated: GraphDef = {
+      startNodeId: "trigger",
+      nodes: [
+        { id: "trigger", type: "webhookTrigger" },
+        {
+          id: "tool",
+          type: "mcpTool",
+          config: { connectionId: "c1", tool: "{{ trigger.tool }}" },
+        },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "trigger", to: "tool" },
+        { from: "tool", to: "end" },
+      ],
+    };
+    const worker = await makeWorker(env);
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [templated, { tool: "wire_money" }, { tenantId: "t-tmpl" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-tool-templated",
+      });
+      const err = await handle.result().then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      const cause = (err as { cause?: { type?: string } }).cause;
+      expect(cause?.type).toBe("GUARDRAIL_TOOL_DENIED");
+      // The tool never ran.
+      expect(mcpCalls).toHaveLength(0);
+    });
+    // The activity was asked about the RESOLVED ref — the whole point of the fix.
+    expect(resolveToolPolicyCalls).toEqual([
+      { tenantId: "t-tmpl", refs: ["c1:wire_money"] },
+    ]);
   });
 });

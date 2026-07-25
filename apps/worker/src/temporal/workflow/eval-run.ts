@@ -38,7 +38,13 @@ export interface EvalRunInput {
   /** The `EvalRun` row this execution reports into (also the ledger identity for judge spend). */
   evalRunId: string;
   /** The VERSION-PINNED graph snapshot every case runs — resolved by the API at start, exactly like
-   *  a normal run, so an edit mid-batch cannot change what was measured. */
+   *  a normal run, so an edit to the GRAPH mid-batch cannot change what was measured.
+   *
+   *  NOTE, precisely: the DATASET is not pinned. `evaluateEvalCase` re-reads the dataset body per
+   *  case, so editing assertions while a batch is in flight can score later cases against a
+   *  different rubric, and renaming a case makes it unscoreable (its scoring is skipped and the
+   *  batch continues). Pinning the body would mean threading it through every case's activity
+   *  arguments; the graph — the thing under test — is what must be immutable. */
   graph: GraphDef;
   graphContentHash: string;
   graphVersion: number;
@@ -49,11 +55,26 @@ export interface EvalRunInput {
 
 export type EvalRunResult = activities.EvalRunSummary;
 
-const { loadEvalPlan, evaluateEvalCase, finalizeEvalRun } = wf.proxyActivities<
-  typeof activities
->({
-  startToCloseTimeout: "5 minutes", // evaluateEvalCase may make an LLM-judge call per assertion
-  retry: { maximumAttempts: 3 },
+// Read-only DB work; idempotent, so the shared retry shape is right.
+const { loadEvalPlan, finalizeEvalRun } = wf.proxyActivities<typeof activities>(
+  {
+    startToCloseTimeout: "1 minute",
+    retry: { maximumAttempts: 3 },
+  },
+);
+
+/**
+ * Case scoring is AT-MOST-ONCE (maximumAttempts: 1) for exactly the reason `runAgentTooled` is
+ * (see proxies.ts): it can make up to MAX_ASSERTIONS_PER_CASE sequential LLM-JUDGE calls, and a
+ * retry re-runs the WHOLE activity — replaying every judge call already made. Those are real
+ * provider calls, and `recordUsage` is first-write-wins on (executionId, nodeId), so a second
+ * attempt would SPEND money and record nothing: a silently-free call, which Tier-1 rule 6 forbids.
+ * The long start-to-close covers a case with many judge assertions; the caller catches a failure
+ * per case so one unscored case cannot take the batch down.
+ */
+const { evaluateEvalCase } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "30 minutes",
+  retry: { maximumAttempts: 1 },
 });
 
 /**
@@ -63,6 +84,23 @@ const { loadEvalPlan, evaluateEvalCase, finalizeEvalRun } = wf.proxyActivities<
  * name "evalRun" is the registration name the API starts.
  */
 export async function evalRun(input: EvalRunInput): Promise<EvalRunResult> {
+  try {
+    return await runBatch(input);
+  } catch (e) {
+    // The row must never be left saying `running` forever with `finishedAt: null` — that is
+    // indistinguishable from a batch still in progress. Close it out as FAILED, then rethrow so the
+    // execution itself is still recorded as failed. Best-effort: if the close-out also fails, the
+    // original error is what matters.
+    await finalizeEvalRun({
+      tenantId: input.tenantId,
+      evalRunId: input.evalRunId,
+      status: "failed",
+    }).catch(() => undefined);
+    throw e;
+  }
+}
+
+async function runBatch(input: EvalRunInput): Promise<EvalRunResult> {
   const plan = await loadEvalPlan({
     tenantId: input.tenantId,
     evalRunId: input.evalRunId,
@@ -117,6 +155,12 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunResult> {
               : 0;
         }
 
+        // A SCORING failure is isolated per case too (at-most-once, so there is no retry to fall
+        // back on): a case whose assertions could not be evaluated — its judge exhausted the
+        // activity deadline, or the case was renamed out of the dataset mid-batch — must not take
+        // the other 199 cases with it. It simply has no result row, so `finalizeEvalRun`'s
+        // row-derived `total` comes out below `EvalRun.totalCases`, which is an honest signal that
+        // the batch is incomplete rather than a fabricated verdict.
         await evaluateEvalCase({
           tenantId: input.tenantId,
           environmentId: input.environmentId,
@@ -127,7 +171,7 @@ export async function evalRun(input: EvalRunInput): Promise<EvalRunResult> {
           ctx,
           costUsd,
           latencyMs,
-        });
+        }).catch(() => undefined);
       }),
     );
   }

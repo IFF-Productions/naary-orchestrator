@@ -109,14 +109,17 @@ export interface ApprovalAwaitingRecord {
 }
 
 /**
- * ctx key under which the interpreter caches the run's TOOL-POLICY PROJECTION (#576) — a small
- * `ref → "deny" | "approval"` map resolved once per run segment by the `resolveToolPolicy` activity
- * (refs the policy plainly allows are omitted, so an unrestricted graph caches `{}`).
+ * ctx key under which the interpreter MEMOIZES tool-policy verdicts (#576) — a
+ * `ref → "allow" | "deny" | "approval"` map filled lazily by the `resolveToolPolicy` activity, one
+ * entry per DISTINCT resolved tool ref the run actually reaches.
  *
- * Cached rather than re-read per node for the same reason `$vars` are loaded once: it keeps one
- * activity call per run instead of one per tool node. A run that pauses for days therefore enforces
- * the policy as it stood at that point in the segment — the same "snapshot at start" contract the
- * pinned graph version already has.
+ * TOTAL, including "allow": absence means "not yet evaluated", NEVER "allowed". Representing allow
+ * by absence would make an unregistered ref indistinguishable from a permitted one, which is exactly
+ * how a `{{ }}`-templated tool name could slip past a deny-list.
+ *
+ * Memoized rather than re-read per node for the same reason `$vars` are loaded once. A run that
+ * pauses for days therefore enforces the policy as it stood when that ref was first reached in the
+ * segment — the same "snapshot at start" contract the pinned graph version already has.
  */
 export const TOOL_POLICY_CTX_KEY = "__toolPolicy";
 

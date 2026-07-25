@@ -213,6 +213,14 @@ export class EvalsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  /**
+   * Delete a dataset — REFUSED while it has eval runs.
+   *
+   * `EvalRun.datasetId` cascades, so a routine delete-and-recreate would take every `EvalRun` and
+   * `EvalCaseResult` with it — i.e. exactly the `graphVersion`/`graphContentHash` history the
+   * promote comparison ("vN passed 18/20 vs vN-1 20/20") reads. Losing the regression record is
+   * worse than having to rename, so this is a 400 rather than a silent cascade.
+   */
   async deleteDataset(
     tenantId: string,
     environmentId: string,
@@ -221,9 +229,24 @@ export class EvalsService implements OnModuleInit, OnModuleDestroy {
     actor?: Principal,
   ): Promise<void> {
     await this.assertActor(actor, "edit", workflowKey, environmentId);
-    await getPrisma().evalDataset.deleteMany({
-      where: { tenantId, environmentId, workflowKey, name },
+    const row = await getPrisma().evalDataset.findUnique({
+      where: {
+        tenantId_environmentId_workflowKey_name: {
+          tenantId,
+          environmentId,
+          workflowKey,
+          name,
+        },
+      },
+      select: { id: true, _count: { select: { runs: true } } },
     });
+    if (!row) return; // idempotent delete
+    if (row._count.runs > 0) {
+      throw new BadRequestException(
+        `Dataset '${name}' has ${row._count.runs} eval run(s); deleting it would destroy their results. Edit it in place, or use a new name.`,
+      );
+    }
+    await getPrisma().evalDataset.delete({ where: { id: row.id } });
   }
 
   // --- runs ------------------------------------------------------------------------------------
@@ -242,6 +265,12 @@ export class EvalsService implements OnModuleInit, OnModuleDestroy {
   ): Promise<EvalRunView> {
     // An eval executes the real workflow with real spend → the `run` verb, not `view`.
     await this.assertActor(actor, "run", workflowKey, environmentId);
+
+    // Guard BEFORE the query: a missing `dataset` in the body would reach findUnique's compound key
+    // as `undefined` and surface as a Prisma validation 500 rather than a 400.
+    if (typeof datasetName !== "string" || !datasetName.trim()) {
+      throw new BadRequestException("`dataset` (the dataset name) is required");
+    }
 
     const dataset = await getPrisma().evalDataset.findUnique({
       where: {
@@ -344,7 +373,9 @@ export class EvalsService implements OnModuleInit, OnModuleDestroy {
     const rows = await getPrisma().evalRun.findMany({
       where: { tenantId, environmentId, workflowKey },
       orderBy: { startedAt: "desc" },
-      take: Math.min(Math.max(limit, 1), 200),
+      // `Number("abc")` is NaN, and Math.min/max propagate it → `take: NaN` is a Prisma 500. Fall
+      // back to the default for anything non-finite.
+      take: Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 200) : 50,
       include: { dataset: { select: { name: true } } },
     });
     return rows.map((r) => this.toRunView(r));

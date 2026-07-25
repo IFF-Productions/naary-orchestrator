@@ -76,6 +76,23 @@ verdict, and the batch continues (a child rejection is caught per case, exactly 
 **Concurrency is bounded** for the same reason `forEach`'s fan-out is: 200 simultaneous child runs
 would swamp the worker pool and the tenant's provider rate limits.
 
+**Scoring is AT-MOST-ONCE** (`maximumAttempts: 1`), for the reason `runAgentTooled` is: one
+`evaluateEvalCase` can make up to `MAX_ASSERTIONS_PER_CASE` sequential LLM-judge calls, and a retry
+re-runs the *whole* activity — replaying every judge call already made. `recordUsage` is
+first-write-wins on `(executionId, nodeId)`, so a second attempt would spend money and record
+nothing: a silently-free call, which rule 6 forbids. A scoring failure is therefore caught per case
+(one unscoreable case cannot take the other 199 down); that case has no result row, so the
+row-derived `total` comes out below `EvalRun.totalCases` — an honest "incomplete" signal rather than
+a fabricated verdict.
+
+**A failed batch closes its row out** as `status: "failed"` before rethrowing. Leaving it `running`
+with `finishedAt: null` would be indistinguishable from a batch still in progress.
+
+**The GRAPH is pinned; the DATASET is not.** `evaluateEvalCase` re-reads the dataset body per case,
+so editing assertions mid-batch can score later cases against a different rubric, and renaming a case
+makes it unscoreable (skipped, batch continues). Pinning the body would mean threading it through
+every case's activity arguments; the graph — the thing under test — is what must be immutable.
+
 ---
 
 ## 4. LLM judge — billed through the existing path
@@ -128,6 +145,11 @@ it.
 
 Dataset PUT is whole-body (a merge could never delete a case) and capped at `MAX_DATASET_BYTES`
 (512 KB) because the whole body becomes one activity result the batch holds in history.
+
+**DELETE is refused while the dataset has runs.** `EvalRun.datasetId` cascades, so a routine
+delete-and-recreate would take every `EvalRun` and `EvalCaseResult` with it — i.e. exactly the
+`graphVersion`/`graphContentHash` history the promote comparison reads. Losing the regression record
+is worse than having to rename, so it is a 400.
 
 The runs list is what satisfies AC2 — "vN passed 18/20 vs vN-1 20/20" needs only the version, hash
 and counts each row already carries; there is no separate comparison endpoint.

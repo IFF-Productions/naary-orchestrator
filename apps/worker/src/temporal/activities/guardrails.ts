@@ -62,23 +62,28 @@ export async function loadGuardrailPolicy(
   }
 }
 
-/** The projection the interpreter caches under `ctx.__toolPolicy`: only the refs that are NOT
- *  plainly allowed, so a graph with no restricted tools carries an empty object. */
-export type ToolPolicyProjection = Record<string, "deny" | "approval">;
+/**
+ * The verdict map the interpreter memoizes under `ctx.__toolPolicy`.
+ *
+ * TOTAL over the refs asked about — an "allow" verdict is recorded EXPLICITLY. That is
+ * security-critical: if "allow" were represented by absence, a key MISS would be
+ * indistinguishable from a permitted tool, and any ref the interpreter had not pre-registered
+ * would sail through even under `deny: ["*"]`. Absence means "not yet evaluated", never "allowed".
+ */
+export type ToolPolicyProjection = Record<string, ToolPolicyVerdict>;
 
 export interface ResolveToolPolicyInput {
   tenantId: string;
-  /** Distinct tool refs the graph can invoke, in the graph's deterministic order. */
+  /** The tool refs to evaluate — the RESOLVED refs the interpreter is about to call. */
   refs: string[];
 }
 
 /**
- * ACTIVITY. Evaluate the workspace policy for a run's tool refs once, and hand the interpreter the
- * minimal verdict map it needs to decide "pause / refuse / just run it".
+ * ACTIVITY. Evaluate the workspace policy for the given tool refs.
  *
- * Deliberately a projection rather than the policy object: the interpreter should not carry (or
- * write into Temporal history) the operator's full blocklist, and keeping the matcher here means
- * workflow code holds no policy-interpretation logic to keep in sync.
+ * Deliberately returns a verdict map rather than the policy object: the interpreter should not
+ * carry (or write into Temporal history) the operator's full blocklist, and keeping the matcher
+ * here means workflow code holds no policy-interpretation logic to keep in sync.
  */
 export async function resolveToolPolicy(
   input: ResolveToolPolicyInput,
@@ -86,8 +91,7 @@ export async function resolveToolPolicy(
   const policy = await loadGuardrailPolicy(input.tenantId);
   const out: ToolPolicyProjection = {};
   for (const ref of input.refs) {
-    const verdict: ToolPolicyVerdict = evaluateToolPolicy(ref, policy);
-    if (verdict !== "allow") out[ref] = verdict;
+    out[ref] = evaluateToolPolicy(ref, policy);
   }
   return out;
 }

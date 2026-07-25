@@ -377,7 +377,13 @@ const mockActivities = {
     input: activities.ResolveToolPolicyInput,
   ): Promise<activities.ToolPolicyProjection> => {
     resolveToolPolicyCalls.push(input);
-    return harnessState.toolPolicy;
+    // Mirror the real activity: TOTAL over the refs asked about, with an explicit "allow" for
+    // anything `harnessState.toolPolicy` does not restrict. (Absence must never read as allowed.)
+    const out: activities.ToolPolicyProjection = {};
+    for (const ref of input.refs) {
+      out[ref] = harnessState.toolPolicy[ref] ?? "allow";
+    }
+    return out;
   },
   recordAuditEvent: async (
     input: activities.AuditEventInput,

@@ -5,6 +5,7 @@
 // This is what proves the AC "a workflow with a golden dataset can run an eval batch; results show
 // pass/fail per case with cost" against the actual interpreter rather than a stub.
 import * as path from "node:path";
+import { ApplicationFailure } from "@temporalio/activity";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -45,7 +46,17 @@ const state: {
   verdicts: Record<string, "pass" | "fail" | "error">;
   /** Which case inputs should make the child run FAIL (a stopAndError-like blow-up). */
   failInputs: string[];
-} = { cases: [], verdicts: {}, failInputs: [] };
+  /** Make `loadEvalPlan` throw — exercises the batch's failure path. */
+  planThrows: boolean;
+  /** Case names whose SCORING activity throws (at-most-once, so there is no retry). */
+  scoringThrowsFor: string[];
+} = {
+  cases: [],
+  verdicts: {},
+  failInputs: [],
+  planThrows: false,
+  scoringThrowsFor: [],
+};
 
 const scored: activities.EvaluateEvalCaseInput[] = [];
 const finalized: { tenantId: string; evalRunId: string; status?: string }[] =
@@ -77,14 +88,25 @@ const mockActivities = {
   recordAuditEvent: async (): Promise<void> => undefined,
 
   // --- eval activities ---
-  loadEvalPlan: async (): Promise<activities.EvalPlan> => ({
-    workflowKey: "refunds",
-    environmentId: "e1",
-    cases: state.cases,
-  }),
+  loadEvalPlan: async (): Promise<activities.EvalPlan> => {
+    if (state.planThrows) {
+      throw ApplicationFailure.nonRetryable(
+        "dataset is malformed",
+        "EVAL_DATASET_INVALID",
+      );
+    }
+    return {
+      workflowKey: "refunds",
+      environmentId: "e1",
+      cases: state.cases,
+    };
+  },
   evaluateEvalCase: async (
     input: activities.EvaluateEvalCaseInput,
   ): Promise<activities.EvaluateEvalCaseResult> => {
+    if (state.scoringThrowsFor.includes(input.caseName)) {
+      throw ApplicationFailure.nonRetryable("judge deadline", "SCORING_FAILED");
+    }
     scored.push(input);
     const verdict =
       input.status === "completed"
@@ -133,6 +155,8 @@ beforeEach(() => {
   childInputs.length = 0;
   state.verdicts = {};
   state.failInputs = [];
+  state.planThrows = false;
+  state.scoringThrowsFor = [];
 });
 
 const makeWorker = () =>
@@ -250,6 +274,47 @@ describe("evalRun — batch eval over a golden dataset", () => {
     });
     expect(scored).toHaveLength(0);
     expect(finalized).toHaveLength(1);
+  });
+
+  it("a FAILED batch closes the run out as `failed` — never left saying `running` forever", async () => {
+    state.planThrows = true;
+    state.cases = [{ name: "a", input: { tag: "billing" } }];
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(evalRun, {
+        args: [input("run-e")],
+        taskQueue: TASK_QUEUE,
+        workflowId: "eval-run-e",
+      });
+      // The execution itself still fails (the error is not swallowed) …
+      await expect(handle.result()).rejects.toThrow();
+    });
+    // … but the row was closed out, so it is distinguishable from a batch still in progress.
+    expect(finalized).toEqual([
+      { tenantId: "t-eval", evalRunId: "run-e", status: "failed" },
+    ]);
+  });
+
+  it("a case whose SCORING fails is skipped, not fatal (at-most-once: there is no retry)", async () => {
+    // The scoring activity is maximumAttempts:1 because it can make many billed LLM-judge calls;
+    // so one unscoreable case must not take the batch down. It simply has no result row, and the
+    // row-derived total comes out below EvalRun.totalCases — an honest "incomplete" signal.
+    state.cases = [
+      { name: "good", input: { tag: "billing" } },
+      { name: "unscoreable", input: { tag: "billing" } },
+    ];
+    state.scoringThrowsFor = ["unscoreable"];
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const result = await env.client.workflow.execute(evalRun, {
+        args: [input("run-f")],
+        taskQueue: TASK_QUEUE,
+        workflowId: "eval-run-f",
+      });
+      expect(result).toMatchObject({ total: 1, passed: 1 });
+    });
+    expect(scored.map((s) => s.caseName)).toEqual(["good"]);
+    expect(finalized[0].status).toBe("completed");
   });
 
   it("runs cases in bounded CONCURRENCY chunks (a large dataset cannot fan out unbounded)", async () => {

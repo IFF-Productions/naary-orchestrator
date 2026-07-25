@@ -7,7 +7,7 @@ import type { GraphDef } from "@naary/dsl";
 const datasetFindUnique = vi.fn();
 const datasetUpsert = vi.fn();
 const datasetFindMany = vi.fn();
-const datasetDeleteMany = vi.fn();
+const datasetDelete = vi.fn();
 const runCreate = vi.fn();
 const runFindMany = vi.fn();
 const runFindFirst = vi.fn();
@@ -18,7 +18,7 @@ vi.mock("@naary/db", async (orig) => ({
       findUnique: datasetFindUnique,
       upsert: datasetUpsert,
       findMany: datasetFindMany,
-      deleteMany: datasetDeleteMany,
+      delete: datasetDelete,
     },
     evalRun: {
       create: runCreate,
@@ -82,7 +82,7 @@ beforeEach(() => {
     datasetFindUnique,
     datasetUpsert,
     datasetFindMany,
-    datasetDeleteMany,
+    datasetDelete,
     runCreate,
     runFindMany,
     runFindFirst,
@@ -143,6 +143,30 @@ describe("saveDataset", () => {
       service().saveDataset("t1", "e1", "refunds", "golden", big),
     ).rejects.toThrow(/too large/);
     expect(datasetUpsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("deleteDataset — must not cascade away the eval history", () => {
+  it("REFUSES while the dataset has runs (EvalRun cascades; that history IS the AC2 record)", async () => {
+    datasetFindUnique.mockResolvedValue({ id: "ds-1", _count: { runs: 3 } });
+    await expect(
+      service().deleteDataset("t1", "e1", "refunds", "golden"),
+    ).rejects.toThrow(/3 eval run\(s\)/);
+    expect(datasetDelete).not.toHaveBeenCalled();
+  });
+
+  it("deletes a dataset with no runs", async () => {
+    datasetFindUnique.mockResolvedValue({ id: "ds-1", _count: { runs: 0 } });
+    await service().deleteDataset("t1", "e1", "refunds", "golden");
+    expect(datasetDelete).toHaveBeenCalledWith({ where: { id: "ds-1" } });
+  });
+
+  it("is idempotent for an unknown name", async () => {
+    datasetFindUnique.mockResolvedValue(null);
+    await expect(
+      service().deleteDataset("t1", "e1", "refunds", "nope"),
+    ).resolves.toBeUndefined();
+    expect(datasetDelete).not.toHaveBeenCalled();
   });
 });
 
@@ -222,6 +246,14 @@ describe("startRun", () => {
     expect(start).not.toHaveBeenCalled();
   });
 
+  it("400s (not 500) on a missing `dataset` in the body — it would reach a compound key as undefined", async () => {
+    await expect(
+      service().startRun("t1", "e1", "refunds", undefined as never),
+    ).rejects.toThrow(BadRequestException);
+    expect(datasetFindUnique).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+  });
+
   it("400s when the workflow has no saved graph in this environment", async () => {
     const s = new EvalsService({
       getLatest: () => Promise.resolve(null),
@@ -274,10 +306,12 @@ describe("listRuns / getRun", () => {
     expect(runFindMany.mock.calls[0][0].orderBy).toEqual({ startedAt: "desc" });
   });
 
-  it("clamps the limit", async () => {
+  it("clamps the limit, and falls back on a NON-NUMERIC one (NaN take is a Prisma 500)", async () => {
     runFindMany.mockResolvedValue([]);
     await service().listRuns("t1", "e1", "refunds", 9999);
     expect(runFindMany.mock.calls[0][0].take).toBe(200);
+    await service().listRuns("t1", "e1", "refunds", Number("abc"));
+    expect(runFindMany.mock.calls[1][0].take).toBe(50);
   });
 
   it("getRun returns per-case verdicts with cost, and NO run output", async () => {
