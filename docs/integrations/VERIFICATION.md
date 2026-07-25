@@ -140,7 +140,7 @@ catalog's own `write` flag and `fields[].required`). `Needs` = the fields you mu
 | cloudflare | `list_zones` | — | 2/4 | — |
 | deepl | `get_usage` | — | 3/3 | — |
 | digitalocean | `list_droplets` | — | 2/4 | — |
-| discord | `get_channel` | channelId | 3/5 | — |
+| discord | `get_channel` | channelId | 2/5 | — |
 | dropbox | `list_folder` | path (`""` = root) | 2/4 | — |
 | front | `list_conversations` | — | 3/4 | — |
 | github | `get_issue` | owner, repo, issueNumber | 2/5 | **yes** — `github-agent.live.spec.ts` |
