@@ -36,8 +36,9 @@ const GRID = "2fr 1fr 1.6fr 0.8fr 44px";
  * pattern #3 — but measured at 390px it hid 324 of these 680px (48% of the row, the
  * role/approve/last-active columns AND the kebab) behind a scroller with no visual
  * affordance (#511). So on phone the rows render as stacked, self-labelling cards
- * instead — the Runs/Workflows reference treatment — and this floor applies only
- * from tablet up, where 680 - 356 = a scroll a mouse can discover.
+ * instead — the Runs/Workflows reference treatment — and this floor applies only from
+ * tablet up, where it costs nothing: at 820px the content box is ~762px, so 680 fits
+ * outright and the measured hidden width is 0.
  */
 const TABLE_MIN_WIDTH = 680;
 
