@@ -30,7 +30,11 @@ import {
   UnauthorizedError,
 } from "../../lib/api";
 import { useActiveEnvironment } from "../../lib/useActiveEnvironment";
-import { BELOW_DRAWER_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
+import {
+  BELOW_DRAWER_QUERY,
+  PHONE_QUERY,
+  useMediaQuery,
+} from "../../lib/useMediaQuery";
 import {
   type GrantDraft,
   draftFromGrant,
@@ -99,6 +103,9 @@ export function Groups() {
   const [ackRestrict, setAckRestrict] = useState(false);
 
   const belowDrawer = useMediaQuery(BELOW_DRAWER_QUERY);
+  // Phone gutters (#511): this screen collapsed its two panes at <= 1024 but never
+  // reduced the desktop 28px page padding (+18px pane padding) for a 390px phone.
+  const phone = useMediaQuery(PHONE_QUERY);
   const activeEnv = useActiveEnvironment();
 
   const canManage = myRole === "owner" || myRole === "admin";
@@ -450,7 +457,12 @@ export function Groups() {
 
   if (notAllowed) {
     return (
-      <div style={{ padding: "22px 28px 40px", maxWidth: 1080 }}>
+      <div
+        style={{
+          padding: phone ? "16px 14px 32px" : "22px 28px 40px",
+          maxWidth: 1080,
+        }}
+      >
         <EmptyState
           icon="key"
           title="Owner or admin only"
@@ -465,7 +477,7 @@ export function Groups() {
   return (
     <div
       style={{
-        padding: "22px 28px 40px",
+        padding: phone ? "16px 14px 32px" : "22px 28px 40px",
         maxWidth: 1080,
         animation: "naaryFadeUp .25s ease",
       }}
@@ -569,7 +581,9 @@ export function Groups() {
             />
 
             {/* ---------------- RIGHT MATRIX PANE ---------------- */}
-            <div style={{ flex: 1, minWidth: 0, padding: 18 }}>
+            <div
+              style={{ flex: 1, minWidth: 0, padding: phone ? 12 : 18 }}
+            >
               {current ? (
                 <>
                   {/* header: role-tinted icon + name + union meta + active-env pill */}

@@ -26,6 +26,7 @@ import {
   type CompanyBudgetView,
   type CompanyUsage,
 } from "../../lib/api";
+import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import { useWorkspace } from "../../workspace/WorkspaceProvider";
 import { CompanyGroupsCard } from "./CompanyGroups";
 import { billingPeriod, initialsOf } from "./company/helpers";
@@ -42,6 +43,9 @@ type ConsoleTab = "workspaces" | "usage" | "groups";
 
 export function Company() {
   const navigate = useNavigate();
+  // Phone gutters (#511): this screen was deferred from the responsive wave, so it kept
+  // the desktop 28px side padding — 56 of 390px on a phone. Match the wave's 14px.
+  const phone = useMediaQuery(PHONE_QUERY);
   const { workspaces, setActive, refresh } = useWorkspace();
   const [companies, setCompanies] = useState<Company[] | null>(null);
   const [companyId, setCompanyId] = useState<string | null>(null);
@@ -129,7 +133,12 @@ export function Company() {
 
   if (companies.length === 0) {
     return (
-      <div style={{ padding: "22px 28px 40px", maxWidth: 720 }}>
+      <div
+        style={{
+          padding: phone ? "16px 14px 32px" : "22px 28px 40px",
+          maxWidth: 720,
+        }}
+      >
         <EmptyState
           icon="users"
           title="No company yet"
@@ -210,7 +219,7 @@ export function Company() {
   return (
     <div
       style={{
-        padding: "22px 28px 40px",
+        padding: phone ? "16px 14px 32px" : "22px 28px 40px",
         maxWidth: 1080,
         animation: "naaryFadeUp .25s ease",
       }}

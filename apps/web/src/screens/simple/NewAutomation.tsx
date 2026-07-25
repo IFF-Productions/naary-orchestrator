@@ -4,6 +4,7 @@ import type { GraphDef, NodeType } from "@naary/dsl";
 import { Button } from "../../components";
 import { api } from "../../lib/api";
 import { nodeDisplayLabel } from "../../lib/graph-model";
+import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import {
   nextProgressMessage,
   PROGRESS_MESSAGES,
@@ -28,6 +29,7 @@ interface LiveStep {
  *  live with a playful rotating status. */
 export function NewAutomation() {
   const navigate = useNavigate();
+  const phone = useMediaQuery(PHONE_QUERY);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -96,7 +98,8 @@ export function NewAutomation() {
   return (
     <div
       style={{
-        padding: "22px 28px 40px",
+        // Phone gutters (#511) — Simple-mode screens were deferred from the wave.
+        padding: phone ? "16px 14px 32px" : "22px 28px 40px",
         maxWidth: 720,
         animation: "naaryFadeUp .25s ease",
       }}
