@@ -196,8 +196,12 @@ function EventTile({
   );
 }
 
-/** Matrix grid: channel identity | 4 event columns | expand chevron. */
-const GRID_COLUMNS = "minmax(180px,1.6fr) repeat(4, minmax(70px,1fr)) 28px";
+/** Matrix grid: channel identity | 4 event columns | expand chevron.
+ *  The identity floor (220px) is what keeps the channel NAME readable at the matrix's narrowest —
+ *  at 180px the name was left ~58px after the type glyph and ellipsised to nothing (#665). It stays
+ *  under the 620px scroll floor of the panel below (220 + 4×70 + 28 + 5×8 gaps + 36 padding = 604),
+ *  so raising it does NOT widen the horizontal scroll at any viewport. */
+const GRID_COLUMNS = "minmax(220px,1.6fr) repeat(4, minmax(70px,1fr)) 28px";
 
 export function NotificationsSection({
   tenantId,
@@ -516,6 +520,11 @@ export function NotificationsSection({
               const status = rowStatus[key];
               const test = testResult[key];
               const tHint = testHint(ch);
+              // The row's identity. It can still ellipsise on a phone, so it also becomes the
+              // title (hover/long-press reveals the full name).
+              const name =
+                ch.label ||
+                (ch.type === "email" ? "Email list" : `${meta.title} webhook`);
               return (
                 <div
                   key={key}
@@ -579,16 +588,14 @@ export function NotificationsSection({
                           }}
                         >
                           <span
+                            title={name}
                             style={{
                               overflow: "hidden",
                               textOverflow: "ellipsis",
                               whiteSpace: "nowrap",
                             }}
                           >
-                            {ch.label ||
-                              (ch.type === "email"
-                                ? "Email list"
-                                : `${meta.title} webhook`)}
+                            {name}
                           </span>
                           {!ch.id && (
                             <span
@@ -602,7 +609,12 @@ export function NotificationsSection({
                               (not saved yet)
                             </span>
                           )}
-                          {activeEnv && <EnvChip env={activeEnv} />}
+                          {/* No env chip here: the list is env-FILTERED server-side (every row
+                              belongs to the active environment), so a per-row chip repeats the one
+                              in the intro above while stealing the name's width — at the identity
+                              column's floor the "production" pill + status dot left the name a few
+                              ellipsised characters (#665). The env belongs to the section, not the
+                              row; `label` is what tells same-type channels apart. */}
                           <span
                             title={ch.enabled ? "Enabled" : "Disabled"}
                             style={{
