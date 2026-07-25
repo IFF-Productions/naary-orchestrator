@@ -77,6 +77,14 @@ Stated here because a proof page that only lists wins is not a proof page.
   it would exceed the payload cap as the offload activity's own argument. Only a pure workflow-side
   node (`merge`/`aggregate`/`listOps` over several already-large parents) can produce one, since every
   activity output is already claim-checked at 1 MB.
+- **A carried Signal keeps the same semantics it has WITHIN a segment — including the sharp edge.** An
+  un-consumed decision is consumed by the next gate the walk reaches, so a duplicate approval click can
+  satisfy a later gate. That is pre-existing behavior inside a single segment (the value simply lives in
+  engine state until something reads it); carrying it makes a run that continues as new behave the same
+  as one that does not, rather than introducing a new rule.
+- **If the object store is unavailable when an oversized snapshot needs offloading**, the offload
+  activity fails, the `continueAsNew` does not happen, and the workflow task retries — the run stalls
+  visibly instead of losing state. Continuing without the offload would fail on the payload cap anyway.
 - **`continueAsNew` happens between node executions, never mid-node.** A run parked on a
   `humanApproval` gate does not continue as new while it waits. That is safe because a gate's history
   growth is bounded by its configuration (a finite `remindAfterHours` list plus at most one

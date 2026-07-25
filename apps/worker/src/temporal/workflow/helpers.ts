@@ -56,11 +56,12 @@ export function containsClaimCheckRef(
 }
 
 /**
- * continueAsNew snapshot budget (#681). Above this many serialized `ctx` bytes the interpreter
- * claim-checks the LARGEST node outputs before continuing, so the carried snapshot stays under
- * Temporal's ~2MB payload cap instead of hard-failing an otherwise-healthy long run. Deliberately
- * well below 2MB: the continueAsNew payload also carries the graph snapshot, the trigger input and
- * runCtx, and Temporal's cap applies to the whole thing.
+ * continueAsNew snapshot budget (#681). Above this serialized `ctx` size the interpreter claim-checks
+ * the LARGEST node outputs before continuing, so the carried snapshot stays under Temporal's ~2MB
+ * payload cap instead of hard-failing an otherwise-healthy long run. Deliberately well below 2MB on
+ * two counts: the continueAsNew payload also carries the graph snapshot, the trigger input and runCtx
+ * (the cap applies to the whole thing), and the measurement is `JSON.stringify(…).length` — UTF-16
+ * units, which UNDER-counts multibyte content in bytes. The headroom absorbs both.
  */
 export const CAN_CTX_BUDGET_BYTES = 1_200_000;
 
