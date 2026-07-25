@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { delay, http, HttpResponse } from "msw";
 import { expect, userEvent, waitFor, within } from "storybook/test";
-import { supervisorHandoffGraph } from "@naary/dsl";
+import { codeAgentPrGraph, supervisorHandoffGraph } from "@naary/dsl";
 import type { GraphDef } from "@naary/dsl";
 import { ModeProvider } from "../../mode";
 import { Templates } from "./Templates";
@@ -167,6 +167,15 @@ const TEMPLATES: {
       "A supervisor agent reads an inbound request and hands it to exactly one specialist with a typed brief; that specialist answers and the reply is returned synchronously.",
     graph: supervisorHandoffGraph,
   },
+  {
+    // Also the REAL graph: it is the one template with a WRITE-mode codeAgent (whose
+    // subtitle used to claim "read-only") and the one with an explicit decline branch.
+    key: "code-agent-pr",
+    name: "Issue to approved plan to pull request",
+    description:
+      "An agent judges whether an issue is safe to attempt and writes the plan; a human approves it; only then does the code agent open a PR. Capped in dollars and turns.",
+    graph: codeAgentPrGraph,
+  },
 ];
 
 const summaries = TEMPLATES.map(({ key, name, description, graph }) => ({
@@ -319,5 +328,39 @@ export const InstalledNoApproval: Story = {
     );
     await canvas.findByText(/Scheduled database report installed/);
     await waitFor(() => expect(canvas.queryByText("APPROVAL")).toBeNull());
+  },
+};
+
+/**
+ * The code-agent template's preview. Two things this pins that no other story does: a
+ * WRITE-mode codeAgent must not be subtitled "read-only" (it clones a repo and can open a
+ * pull request), and the decline branch (`attempt` false) must be drawn and labelled rather
+ * than dead-ending.
+ */
+export const PreviewCodeAgent: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      await canvas.findByRole("button", {
+        name: /Preview Issue to approved plan/,
+      }),
+    );
+    const dialog = await canvas.findByRole("dialog");
+    await waitFor(
+      () =>
+        expect(
+          dialog.querySelectorAll(".react-flow__node").length,
+        ).toBeGreaterThan(4),
+      { timeout: 5000 },
+    );
+    const shown = dialog.textContent ?? "";
+    await expect(shown).toContain("write");
+    await expect(shown).not.toContain("read-only");
+    // Both branches off the plan node are conditional, and both are labelled.
+    const labels = [...dialog.querySelectorAll(".react-flow__edge-text")].map(
+      (e) => e.textContent,
+    );
+    await expect(labels).toContain("attempt = true");
+    await expect(labels).toContain("attempt ≠ true");
   },
 };

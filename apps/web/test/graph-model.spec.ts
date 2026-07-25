@@ -6,6 +6,7 @@ import {
   NODE_KINDS,
   nodeDisplayDescription,
   nodeDisplayLabel,
+  nodeSubtitle,
 } from "../src/lib/graph-model";
 
 describe("nodeDisplayLabel (custom name overrides the derived label)", () => {
@@ -216,5 +217,43 @@ describe("provider coercion (malformed/legacy graphs must not crash rendering)",
     expect(
       nodeDisplayDescription("integration", { provider: " github " }),
     ).toContain("GitHub issues");
+  });
+});
+
+describe("nodeSubtitle reports what the node actually does", () => {
+  it("does NOT call a write-mode codeAgent read-only", () => {
+    // Honest-data regression: this hardcoded "read-only" from before write mode existed, so
+    // a node that clones a repo and opens a pull request was labelled as if it touched
+    // nothing. The subtitle is shown on the canvas AND in the template preview.
+    expect(nodeSubtitle("codeAgent", { tool: "claude" })).toBe(
+      "claude · read-only",
+    );
+    expect(nodeSubtitle("codeAgent", { tool: "claude", mode: "read" })).toBe(
+      "claude · read-only",
+    );
+    const write = nodeSubtitle("codeAgent", {
+      tool: "claude",
+      mode: "write",
+      repo: "acme/app",
+    });
+    expect(write).toContain("write");
+    expect(write).not.toContain("read-only");
+    expect(write).toContain("acme/app");
+  });
+
+  it("names the RAG collection and the published MCP tool", () => {
+    expect(nodeSubtitle("vectorQuery", { collection: "docs", topK: 5 })).toBe(
+      "docs · top 5",
+    );
+    expect(nodeSubtitle("vectorUpsert", { collection: "docs" })).toBe("docs");
+    expect(nodeSubtitle("mcpServerTrigger", { toolName: "summarize_ticket" })).toBe(
+      "tool: summarize_ticket",
+    );
+  });
+
+  it("returns undefined rather than inventing a subtitle", () => {
+    expect(nodeSubtitle("vectorQuery", {})).toBeUndefined();
+    expect(nodeSubtitle("mcpServerTrigger", {})).toBeUndefined();
+    expect(nodeSubtitle("agent", {})).toBeUndefined();
   });
 });
