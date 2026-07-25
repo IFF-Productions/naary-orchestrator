@@ -182,6 +182,12 @@ function recordTokenUsageMetric(req: GenAiRequest, res: GenAiResponse): void {
     "gen_ai.operation.name": req.operation,
     "gen_ai.provider.name": genAiProviderName(req.provider),
     "gen_ai.request.model": req.model,
+    // Carry the fail-safe flag as a DIMENSION, not just a span attribute: the OTLP sink is
+    // metrics-only (#462), so a Datadog/OTLP dashboard sees these series and nothing else.
+    // Without it, a rule-6 ESTIMATE is indistinguishable from provider-reported usage and
+    // would silently skew token/cost reporting (Copilot review, #581). Always present (never
+    // conditional) so the series has a stable dimension set — absent flag ⇒ reported.
+    "naary.gen_ai.usage.estimated": res.estimated === true,
   };
   if (res.inputTokens !== undefined) {
     metricDistribution(

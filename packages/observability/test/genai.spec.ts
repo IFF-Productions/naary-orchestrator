@@ -221,6 +221,32 @@ describe("gen_ai.client.token.usage metric (the OTLP/Datadog path)", () => {
       expect(Object.keys(call[2] as object)).not.toContain("tenantId");
       expect(Object.keys(call[2] as object)).not.toContain("executionId");
       expect(call[3]).toBe("{token}"); // unit per the conventions
+      // Provider-reported ⇒ estimated:false, so a dashboard can trust these counts.
+      expect(call[2]).toMatchObject({
+        "naary.gen_ai.usage.estimated": false,
+      });
+    }
+  });
+
+  it("marks a rule-6 fail-safe ESTIMATE in the metric dimensions, not only on the span", async () => {
+    // The OTLP sink is metrics-only, so without this dimension an estimate is
+    // indistinguishable from provider-reported usage and would skew cost dashboards
+    // (Copilot review, #581).
+    hoisted.metricCalls.length = 0;
+    await withGenAiSpan(
+      { operation: "chat", provider: "google", model: "gemini-3-pro" },
+      async (record) => {
+        record({ inputTokens: 120, outputTokens: 30, estimated: true });
+      },
+    );
+    const calls = hoisted.metricCalls.filter(
+      (c) => c[0] === "gen_ai.client.token.usage",
+    );
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      expect(call[2]).toMatchObject({
+        "naary.gen_ai.usage.estimated": true,
+      });
     }
   });
 });
