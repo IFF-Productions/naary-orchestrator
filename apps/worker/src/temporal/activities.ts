@@ -170,6 +170,13 @@ export type {
 export { __mapDeps, mapNode } from "./activities/map-node";
 export type { MapNodeItem, MapNodeResult } from "./activities/map-node";
 
+export {
+  expandItems,
+  ITEM_CLAIM_CHECK_THRESHOLD,
+  MAX_EXPANDED_ITEMS_BYTES,
+} from "./activities/items";
+export type { ExpandItemsConfig } from "./activities/items";
+
 export { __ragDeps, callVectorUpsert, callVectorQuery } from "./activities/rag";
 export type {
   VectorUpsertResult,

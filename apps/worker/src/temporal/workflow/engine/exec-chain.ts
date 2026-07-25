@@ -25,11 +25,12 @@ import {
 } from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
 import type * as activities from "../../activities";
-import { mapNode } from "../proxies";
+import { expandItems, mapNode } from "../proxies";
 import {
   MAX_MAP_BATCH_ITEMS,
   MAX_A4_REGION_ACTIVITY_EXECUTIONS,
   MAX_TRACE_ITEMS,
+  containsClaimCheckRef,
   MAX_TRACE_TOTAL_BYTES,
   isBudgetPauseFailure,
   traceCell,
@@ -113,7 +114,25 @@ export async function execChain(
           resolveTemplates((node.config ?? {}) as Record<string, unknown>, ctx),
           "splitOut",
         );
-        const arr = getByPath(ctx[splitCfg.from], splitCfg.path);
+        // Items claim-check offload (#479). The upstream array may not be READABLE here: a large
+        // http/sql/mcp/code output was offloaded to object storage, so ctx holds a `{__claimCheck}`
+        // reference. Before this, that either hard-failed as ITEMS_NOT_ARRAY (reference AT the path)
+        // or SILENTLY mapped zero items (reference above the path → getByPath undefined). Rehydrating
+        // is I/O, forbidden in workflow code (Tier-1 rules 2/3), so route it through the expandItems
+        // ACTIVITY, which resolves + re-offloads PER ELEMENT and returns references, not blobs.
+        //
+        // wf.patched() is SECOND in the `&&` on purpose: a pre-patch history never got past a
+        // reference-carrying source (it threw, or collected [] and moved on), so a replaying run never
+        // reaches — and never evaluates — this new marker. Same argument as the items-model-a4 and
+        // loop-fanout gates below; do not reorder.
+        const rawSource = ctx[splitCfg.from];
+        const arr =
+          containsClaimCheckRef(rawSource) && wf.patched("items-claim-check-v1")
+            ? await expandItems(
+                { source: rawSource, path: splitCfg.path },
+                metaFor(splitOutId),
+              )
+            : getByPath(rawSource, splitCfg.path);
         // Fail closed on a DEFINED non-array source (a mis-binding) rather than silently mapping
         // 0 times; a missing/null source is a legitimate "no items" → empty region.
         if (arr !== undefined && arr !== null && !Array.isArray(arr)) {
