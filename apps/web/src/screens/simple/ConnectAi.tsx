@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "../../components";
 import { api, type ProviderCredential } from "../../lib/api";
+import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 
 const PROVIDERS = [
   { key: "anthropic", label: "Anthropic (Claude)", hint: "sk-ant-…" },
@@ -14,6 +15,7 @@ const PROVIDERS = [
  * step; this asks for it without the full Integrations screen.
  */
 export function ConnectAi() {
+  const phone = useMediaQuery(PHONE_QUERY);
   const [tenant, setTenant] = useState<string | null>(null);
   const [creds, setCreds] = useState<ProviderCredential[]>([]);
   const [provider, setProvider] = useState("anthropic");
@@ -49,7 +51,8 @@ export function ConnectAi() {
   return (
     <div
       style={{
-        padding: "22px 28px 40px",
+        // Phone gutters (#511) — Simple-mode screens were deferred from the wave.
+        padding: phone ? "16px 14px 32px" : "22px 28px 40px",
         maxWidth: 560,
         animation: "naaryFadeUp .25s ease",
       }}

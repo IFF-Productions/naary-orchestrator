@@ -280,10 +280,21 @@ export function AppShell() {
             />
             {/* Key the routed screen by path + environment: navigation fades the new screen
                 in (in-place swap), and an env switch remounts the current screen so it
-                re-fetches under the new X-Environment-Id — no full page reload. */}
+                re-fetches under the new X-Environment-Id — no full page reload.
+
+                NO animation-fill-mode here (issue #694). naaryFadeUp animates `transform`,
+                and `both`/`forwards` RETAINS the final `translateY(0)` forever. A retained
+                transform is not `none`, so this wrapper became a containing block for every
+                `position: fixed` descendant — which re-parented the shared `.overlay` scrim
+                (`position: fixed; inset: 0; backdrop-filter: blur(2px)`) from the viewport to
+                this content column, and let `main`'s `overflow-y: auto` clip it. Result: the
+                modal blur covered only a partial box, leaving the rail/context bar sharp.
+                Dropping the fill-mode is visually identical — naaryFadeUp's `to` keyframe
+                (opacity 1, translateY(0)) is already this element's resting state — so nothing
+                needs to be retained. */}
             <div
               key={`${pathname}|${activeEnv ?? "default"}`}
-              style={{ animation: "naaryFadeUp .28s ease both" }}
+              style={{ animation: "naaryFadeUp .28s ease" }}
             >
               <Outlet />
             </div>

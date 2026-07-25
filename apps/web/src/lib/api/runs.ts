@@ -15,6 +15,7 @@
  * state (see ./http + ./client), so this coexistence is transparent.
  */
 import type { GraphDef } from "@naary/dsl";
+import { markApprovalsDecided } from "./approvals-count";
 import { client, unwrap } from "./client";
 import type { components } from "./schema";
 
@@ -51,17 +52,31 @@ export const runsApi = {
   async testCodeAgent(): Promise<StartExecutionResponse> {
     return unwrap(await client.POST("/executions/code-agent-test", {}));
   },
+  // Every decision path (Approvals inbox, run detail, Overview queue preview, Runs
+  // bulk bar, Simple-mode automation detail) goes through approve/approveBatch, so
+  // this is the ONE place that tells the shell's approvals count to update — see
+  // ./approvals-count for why the id is masked optimistically and then reconciled.
   async approve(
     id: string,
     approved: boolean,
     comment?: string,
   ): Promise<AcceptedResponse> {
-    return unwrap(
-      await client.POST("/executions/{id}/approve", {
-        params: { path: { id } },
-        body: { approved, ...(comment ? { comment } : {}) },
-      }),
-    );
+    let res: AcceptedResponse;
+    try {
+      res = unwrap(
+        await client.POST("/executions/{id}/approve", {
+          params: { path: { id } },
+          body: { approved, ...(comment ? { comment } : {}) },
+        }),
+      );
+    } catch (e) {
+      // The decision did NOT happen — mask nothing, but a 409 ("no longer
+      // awaiting") means our count is probably stale, so still revalidate.
+      markApprovalsDecided([]);
+      throw e;
+    }
+    markApprovalsDecided([id]);
+    return res;
   },
   // Decide many paused runs at once (same decision). Returns a per-run outcome so the
   // UI can show which ids slipped (already closed / no longer awaiting) without failing all.
@@ -70,11 +85,20 @@ export const runsApi = {
     approved: boolean,
     comment?: string,
   ): Promise<BatchDecisionItem[]> {
-    return unwrap(
-      await client.POST("/executions/approve-batch", {
-        body: { ids, approved, ...(comment ? { comment } : {}) },
-      }),
-    );
+    let results: BatchDecisionItem[];
+    try {
+      results = unwrap(
+        await client.POST("/executions/approve-batch", {
+          body: { ids, approved, ...(comment ? { comment } : {}) },
+        }),
+      );
+    } catch (e) {
+      markApprovalsDecided([]);
+      throw e;
+    }
+    // Only the runs the server actually decided — ids that slipped stay counted.
+    markApprovalsDecided(results.filter((r) => r.ok).map((r) => r.workflowId));
+    return results;
   },
   // Archive/restore many runs at once. Per-run outcome, like approveBatch.
   async archiveBatch(
