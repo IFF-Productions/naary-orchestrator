@@ -11,6 +11,7 @@ import { AuthGuard, parseRequireMfa } from "../src/auth/auth.guard";
 import type { FirebaseVerifier } from "../src/auth/firebase-verifier";
 import type { MembershipService } from "../src/membership/membership.service";
 import type { PermissionsService } from "../src/permissions/permissions.service";
+import type { SsoSessionService } from "../src/sso/sso-session.service";
 import { IS_USER_SCOPED_KEY } from "../src/auth/user-scoped.decorator";
 
 const verify = vi.fn();
@@ -20,6 +21,9 @@ const ensureMembership = vi.fn();
 const acceptPendingInvitations = vi.fn();
 const touchLastActive = vi.fn();
 const isTenantEnforced = vi.fn();
+/** #455: the SAML session verifier the guard consults for `nrys_` bearers. Default = a
+ *  configured-but-nothing-valid stub, so every pre-#455 test keeps taking the Firebase path. */
+const ssoVerify = vi.fn();
 const getAllAndOverride = vi.fn();
 let firebaseEnabled = false;
 /** Routes flagged user-scoped for a given test (keyed by metadata key). */
@@ -41,12 +45,17 @@ function makeGuard(): AuthGuard {
   const permissions = {
     isTenantEnforced,
   } as unknown as PermissionsService;
+  const sso = {
+    isSessionToken: (token: string) => token.startsWith("nrys_"),
+    verify: ssoVerify,
+  } as unknown as SsoSessionService;
   return new AuthGuard(
     { verify } as unknown as ApiTokenService,
     firebase,
     { getAllAndOverride } as unknown as Reflector,
     memberships,
     permissions,
+    sso,
   );
 }
 
@@ -73,6 +82,7 @@ beforeEach(() => {
   acceptPendingInvitations.mockReset().mockResolvedValue(undefined);
   touchLastActive.mockReset().mockResolvedValue(undefined);
   isTenantEnforced.mockReset().mockResolvedValue(false);
+  ssoVerify.mockReset().mockResolvedValue(null);
   firebaseEnabled = false;
   userScoped = false;
   // Reflector: IS_PUBLIC_KEY → false, IS_USER_SCOPED_KEY → the per-test `userScoped`.
@@ -788,5 +798,159 @@ describe("AuthGuard — MFA enforcement (REQUIRE_MFA, #457)", () => {
     await expect(makeGuard().canActivate(ctx(req))).rejects.toMatchObject({
       response: { code: "mfa_required" },
     });
+  });
+});
+
+// ── #455: SAML SSO as a SECOND identity source ──────────────────────────────────────────────
+// The guard must accept an `nrys_` session exactly like a Firebase user — same downstream path
+// (allowlist, MFA gate, invitation accept-on-login, membership resolution) — WITHOUT reordering
+// the two branches that come first (`@Public()`, then `nry_`). The session verifier is the mock
+// seam here; sso-session.service.spec.ts covers the real JWS.
+describe("AuthGuard — SAML SSO session (#455)", () => {
+  const KEYS = ["REQUIRE_MFA", "ACCESS_ALLOWED_EMAILS"] as const;
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const k of KEYS) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
+  afterEach(() => {
+    for (const k of KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  /** An `nrys_` bearer whose session resolves to `user`. */
+  function bearerSso(user: unknown): FakeReq {
+    ssoVerify.mockResolvedValue(user);
+    return { headers: { authorization: "Bearer nrys_session.jwt" } };
+  }
+
+  const ssoUser = {
+    userId: "sso:conn-a:deadbeef",
+    email: "alice@tenant-a.com",
+    emailVerified: true,
+    name: "Alice",
+  };
+
+  it("authenticates the user and resolves the ACS-provisioned workspace", async () => {
+    listForUser.mockResolvedValue([{ tenantId: "ws-a", role: "member" }]);
+    const req = bearerSso(ssoUser);
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(req.principal).toMatchObject({
+      tenantId: "ws-a",
+      userId: "sso:conn-a:deadbeef",
+      email: "alice@tenant-a.com",
+      role: "member",
+    });
+    // The Firebase path was NOT taken (and Firebase may be entirely unconfigured).
+    expect(firebaseVerify).not.toHaveBeenCalled();
+  });
+
+  it("works with Firebase DISABLED (SSO is genuinely 'beyond Firebase')", async () => {
+    firebaseEnabled = false;
+    listForUser.mockResolvedValue([{ tenantId: "ws-a", role: "member" }]);
+    await expect(
+      makeGuard().canActivate(ctx(bearerSso(ssoUser))),
+    ).resolves.toBe(true);
+  });
+
+  it("401s an invalid/expired/tampered session (verifier returns null)", async () => {
+    ssoVerify.mockResolvedValue(null);
+    await expect(
+      makeGuard().canActivate(
+        ctx({ headers: { authorization: "Bearer nrys_tampered" } }),
+      ),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it("NEVER grants owner implicitly: no membership ⇒ 403, no claim backfill", async () => {
+    listForUser.mockResolvedValue([]);
+    const req = bearerSso(ssoUser);
+    req.path = "/tenants/ws-a/credentials";
+    await expect(makeGuard().canActivate(ctx(req))).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(ensureMembership).not.toHaveBeenCalled();
+  });
+
+  it("cannot reach another workspace (the cross-tenant check applies unchanged)", async () => {
+    listForUser.mockResolvedValue([{ tenantId: "ws-a", role: "member" }]);
+    const req = bearerSso(ssoUser);
+    req.path = "/tenants/ws-b/workflows";
+    await expect(makeGuard().canActivate(ctx(req))).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it("runs invitation accept-on-login (an SSO session is email_verified)", async () => {
+    listForUser.mockResolvedValue([{ tenantId: "ws-a", role: "member" }]);
+    await makeGuard().canActivate(ctx(bearerSso(ssoUser)));
+    expect(acceptPendingInvitations).toHaveBeenCalledWith(
+      "sso:conn-a:deadbeef",
+      "alice@tenant-a.com",
+      true,
+    );
+  });
+
+  it("is subject to REQUIRE_MFA: a single-factor SSO session is gated", async () => {
+    process.env.REQUIRE_MFA = "true";
+    userScoped = true;
+    await expect(
+      makeGuard().canActivate(ctx(bearerSso(ssoUser))),
+    ).rejects.toMatchObject({ response: { code: "mfa_required" } });
+    expect(acceptPendingInvitations).not.toHaveBeenCalled();
+  });
+
+  it("is satisfied by an IdP-asserted second factor", async () => {
+    process.env.REQUIRE_MFA = "true";
+    userScoped = true;
+    await expect(
+      makeGuard().canActivate(
+        ctx(bearerSso({ ...ssoUser, secondFactor: "mfa" })),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it("is subject to the early-access allowlist", async () => {
+    process.env.ACCESS_ALLOWED_EMAILS = "someone-else@tenant-a.com";
+    userScoped = true;
+    await expect(
+      makeGuard().canActivate(ctx(bearerSso(ssoUser))),
+    ).rejects.toMatchObject({ response: { code: "access_not_allowed" } });
+  });
+
+  it("ORDERING is unchanged: @Public() still short-circuits before any SSO work", async () => {
+    getAllAndOverride.mockReturnValue(true); // isPublic
+    const req: FakeReq = { headers: { authorization: "Bearer nrys_whatever" } };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(ssoVerify).not.toHaveBeenCalled();
+  });
+
+  it("ORDERING is unchanged: an `nry_` API token still takes the token branch", async () => {
+    verify.mockResolvedValue({ tenantId: "t-1", environmentId: null });
+    const req: FakeReq = { headers: { authorization: "Bearer nry_abc" } };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(req.principal).toMatchObject({ tenantId: "t-1", role: "owner" });
+    expect(ssoVerify).not.toHaveBeenCalled();
+  });
+
+  it("a non-prefixed bearer still goes to Firebase (default path untouched)", async () => {
+    firebaseEnabled = true;
+    firebaseVerify.mockResolvedValue({
+      userId: "u-1",
+      email: "me@acme.com",
+      emailVerified: true,
+    });
+    listForUser.mockResolvedValue([{ tenantId: "t-1", role: "owner" }]);
+    await expect(
+      makeGuard().canActivate(
+        ctx({ headers: { authorization: "Bearer good.jwt" } }),
+      ),
+    ).resolves.toBe(true);
+    expect(ssoVerify).not.toHaveBeenCalled();
+    expect(firebaseVerify).toHaveBeenCalled();
   });
 });

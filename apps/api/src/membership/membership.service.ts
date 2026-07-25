@@ -37,6 +37,31 @@ export class MembershipService {
   }
 
   /**
+   * The membership for an email address IN ONE WORKSPACE (SAML SSO linking, #455).
+   *
+   * Scoped to `tenantId` BY DESIGN, and there is deliberately no email-only variant: a
+   * federated login must only ever link inside the tenant that owns the IdP that asserted it
+   * (SAML-SSO.md "THE SECURITY INVARIANT"). Case-insensitive because `Membership.email` records
+   * whatever case the user joined with, while an IdP may assert another.
+   *
+   * NOT cached: this is a login-time lookup, not a hot path, and a stale negative would make a
+   * returning federated user look like a new one (a duplicate identity).
+   */
+  async findByEmail(
+    tenantId: string,
+    email: string,
+  ): Promise<{ userId: string; role: string } | null> {
+    const trimmed = email.trim();
+    if (trimmed.length === 0) return null;
+    const row = await getPrisma().membership.findFirst({
+      where: { tenantId, email: { equals: trimmed, mode: "insensitive" } },
+      orderBy: { createdAt: "asc" },
+      select: { userId: true, role: true },
+    });
+    return row ?? null;
+  }
+
+  /**
    * Record that this user just made an authenticated request in this workspace (#489, the
    * Team screen's "Last active"). Fire-and-forget from the guard — NEVER await it on the hot
    * path, and it must never affect authz.

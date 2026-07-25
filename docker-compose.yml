@@ -187,6 +187,15 @@ services:
       # screen). nry_ tokens + all @Public() ingress are exempt. Enrol before enabling — see
       # deploy/.env.prod.example.
       REQUIRE_MFA: ${REQUIRE_MFA:-}
+      # SAML SSO (#455, docs/design/SAML-SSO.md) — api-only (the worker has no auth surface).
+      # OFF unless all three are set: no SSO_SESSION_SECRET / SSO_SP_ENTITY_ID / SSO_ACS_URL
+      # ⇒ /sso/metadata answers 503, the ACS refuses, and the guard's `nrys_` branch verifies
+      # nothing. Firebase login is unaffected either way. The SP entity id + ACS URL must match
+      # what the IdP admin entered, so they are explicit (never derived from a request Host).
+      SSO_SESSION_SECRET: ${SSO_SESSION_SECRET:-}
+      SSO_SP_ENTITY_ID: ${SSO_SP_ENTITY_ID:-}
+      SSO_ACS_URL: ${SSO_ACS_URL:-}
+      SSO_SESSION_TTL_SECONDS: ${SSO_SESSION_TTL_SECONDS:-}
       # Feature flags (OpenFeature + Flagsmith) — api-only (only @naary/api imports
       # @naary/flags). OFF unless FLAGSMITH_ENVIRONMENT_KEY (server-side `ser.` key) is
       # set: no key ⇒ every flag resolves to its safe code default (fail-safe). For a
