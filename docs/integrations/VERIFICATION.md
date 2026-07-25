@@ -48,7 +48,14 @@ curl -sS -X POST "$BASE/api/graphs/$WORKFLOW_KEY/nodes/$NODE_ID/test" \
   if you send one) — the binding wins.
 - Response: `{pure, output, durationMs, costUsd}` for runnable nodes, or
   `{pure: false, message}` for control/wait nodes that can't run in isolation.
-- Requires the `run` permission on that workflow (RBAC matrix).
+- Requires the **`run`** permission on that workflow (RBAC matrix).
+
+  **The API-token caveat that will bite a script.** In a workspace with **zero**
+  `WorkflowGrant` rows, an `nry_` token has full access and this call just works. The moment
+  the workspace has **any** grant, group enforcement switches on and `nry_` tokens become
+  deny-by-default — the token must then be a member of a permission group holding a `run`
+  grant on that workflow, or this returns 403. Adding your first permission group to a
+  workspace silently breaks previously-working verification scripts.
 
 **Point it at a sandbox environment with sandbox connections** when the action writes.
 
@@ -137,26 +144,39 @@ Every Slack catalog action (`post_message`, `update_message`, `add_reaction`) mu
 smoke test **must post** — use a scratch channel, never a real one. (Slack's `humanApproval`
 *notification* path is separately live-covered via webhook.)
 
-### 2.2 Providers whose auth is **not** a plain Bearer — verify these first
+### 2.2 The 9 providers whose auth is **not** a plain Bearer — verify these first
 
-A wrong header scheme fails 100% of calls, and these are the ones where it's easy to get
-wrong. From the catalog's own `auth` descriptions:
+A wrong header scheme fails 100% of that provider's calls and is invisible to every unit
+test. Machine-derived from each provider's `authScheme` field, which is what
+`integration.ts` actually branches on (`"basic"` → re-wrap as Basic; an object → move the
+token into a custom header with an optional prefix; absent/`"bearer"` → plain Bearer):
 
-| Provider | Header scheme | Also needs |
-| --- | --- | --- |
-| shopify | `X-Shopify-Access-Token: <token>` | Server URL = `https://{shop}.myshopify.com/admin/api/2024-01` |
-| discord | `Authorization: Bot <token>` | — |
-| clickup | `Authorization: <token>` (**bare**, no `Bearer`) | — |
-| monday | `Authorization: <token>` (**bare**) | — |
-| deepl | `Authorization: DeepL-Auth-Key <key>` | Server URL = free vs pro host |
-| pagerduty | `Authorization: Token token=<key>` | `From:` = a user email for writes |
-| twilio | HTTP Basic `AccountSid:AuthToken` | node's `accountSid` field set explicitly |
-| zendesk | HTTP Basic `email/token:api-token` | Server URL = `https://{sub}.zendesk.com/api/v2` |
-| jira | HTTP Basic `email:api-token` | Server URL = your Atlassian site |
-| mattermost | Bearer, but **self-hosted** | Server URL = your Mattermost host |
-| mailchimp | Bearer | Server URL = `https://{dc}.api.mailchimp.com/3.0` |
-| googlesheets | Google **OAuth access token** (an API key will not work) | `spreadsheets` scope |
-| zoom | Server-to-server OAuth token, **~1h TTL** | rotate or calls start 401ing |
+| Provider | `authScheme` | Effective header | Also needs |
+| --- | --- | --- | --- |
+| jira | `basic` | `Authorization: Basic base64(email:api-token)` | Server URL = your Atlassian site |
+| twilio | `basic` | `Authorization: Basic base64(AccountSid:AuthToken)` | node's `accountSid` field set explicitly — it is **not** derived from the token |
+| zendesk | `basic` | `Authorization: Basic base64(email/token:api-token)` | Server URL = `https://{sub}.zendesk.com/api/v2` |
+| shopify | `{header: X-Shopify-Access-Token}` | `X-Shopify-Access-Token: <token>` | Server URL = `https://{shop}.myshopify.com/admin/api/2024-01` |
+| discord | `{header: Authorization, prefix: "Bot "}` | `Authorization: Bot <token>` | — |
+| clickup | `{header: Authorization}` (no prefix) | `Authorization: <token>` — **bare**, no `Bearer` | — |
+| monday | `{header: Authorization}` (no prefix) | `Authorization: <token>` — **bare** | — |
+| deepl | `{header: Authorization, prefix: "DeepL-Auth-Key "}` | `Authorization: DeepL-Auth-Key <key>` | Server URL = free vs pro host |
+| pagerduty | `{header: Authorization, prefix: "Token token="}` | `Authorization: Token token=<key>` | `From:` = a PagerDuty user email, for writes |
+
+The other 29 send a plain Bearer.
+
+**An OAuth connection escapes both rewrites.** Both the Basic and the custom-header branches
+are guarded on the connection's auth mode: an OAuth access token stays a genuine Bearer.
+So a provider reached over OAuth exercises a *different* header path than the same provider
+reached with a PAT — verify the mode you actually use.
+
+### 2.3 Bearer, but still needs setup
+
+| Providers | What's missing by default |
+| --- | --- |
+| `mattermost`, `deepl`, `shopify`, `mailchimp`, `zendesk`, `jira` | **No `baseUrl` in the catalog** — the connection's Server URL is mandatory. These are the only 6; the other 32 have a fixed base |
+| `googlesheets` | A Google **OAuth access token** with the `spreadsheets` scope. A Google API key will never work — API keys go in a `?key=` query param, which this node does not send |
+| `zoom` | A server-to-server OAuth token with a **~1h TTL** — rotate it, or calls start 401ing after an hour of working fine |
 
 ---
 
@@ -244,16 +264,19 @@ Nothing in steps 1–4 writes to an external system, except step 4 for Slack (§
 `naary-e2e-*` resources and clean up in `finally`. Files are serialized
 (`fileParallelism: false`) because they share remote state.
 
-| Spec | Env vars that unskip it |
-| --- | --- |
-| `github-agent.live.spec.ts` | `GITHUB_TEST_TOKEN`, `GITHUB_TEST_REPO`, `ANTHROPIC_TEST_KEY` |
-| `github-app.live.spec.ts` | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_TEST_REPO` |
-| `approval-notify.live.spec.ts` | `SLACK_TEST_WEBHOOK_URL`, `TEAMS_TEST_WEBHOOK_URL`, `APP_BASE_URL`, `ENCRYPTION_KEY` |
-| `form-email.live.spec.ts` | `ANTHROPIC_TEST_KEY` (SMTP is a real Ethereal account, created on the fly) |
-| `mcp-tool.live.spec.ts` | `MCP_TEST_URL`, `MCP_TEST_TOKEN`, `MCP_TEST_TOOL`, `MCP_TEST_ARGS` |
-| `agent-tools.live.spec.ts` | `ANTHROPIC_TEST_KEY`, `MCP_TEST_URL`, `MCP_TEST_TOKEN`, `MCP_TEST_TOOL`, `MCP_TEST_TOOL_DESC` |
-| `code-agent.live.spec.ts` | `CLAUDE_CODE_TEST_TOKEN` |
-| `sql-sync.live.spec.ts` | `POSTGRES_TEST_DSN` |
+The two columns are **not** interchangeable: only the first unskips the suite. Exporting an
+optional var and still seeing a skip means a *required* one is missing.
+
+| Spec | Required to unskip (the `skipIf` gate) | Optional config it also reads |
+| --- | --- | --- |
+| `github-agent.live.spec.ts` | `GITHUB_TEST_TOKEN` **and** `GITHUB_TEST_REPO` **and** `ANTHROPIC_TEST_KEY` | — |
+| `github-app.live.spec.ts` | `GITHUB_APP_ID` **and** `GITHUB_APP_PRIVATE_KEY` **and** `GITHUB_APP_INSTALLATION_ID` **and** `GITHUB_TEST_REPO` | — |
+| `approval-notify.live.spec.ts` | `SLACK_TEST_WEBHOOK_URL` **OR** `TEAMS_TEST_WEBHOOK_URL` — either alone is enough | `APP_BASE_URL`, `ENCRYPTION_KEY` |
+| `form-email.live.spec.ts` | `ANTHROPIC_TEST_KEY` | — (SMTP is a real Ethereal account created on the fly) |
+| `mcp-tool.live.spec.ts` | `MCP_TEST_URL` **and** `MCP_TEST_TOOL` | `MCP_TEST_TOKEN`, `MCP_TEST_ARGS` |
+| `agent-tools.live.spec.ts` | `ANTHROPIC_TEST_KEY` **and** `MCP_TEST_URL` **and** `MCP_TEST_TOOL` | `MCP_TEST_TOKEN`, `MCP_TEST_TOOL_DESC` |
+| `code-agent.live.spec.ts` | `CLAUDE_CODE_TEST_TOKEN` | — |
+| `sql-sync.live.spec.ts` | `POSTGRES_TEST_DSN` | — |
 
 `APP_BASE_URL` matters beyond tests: without it the worker renders Slack/Teams messages with
 no approve buttons and no run links.
