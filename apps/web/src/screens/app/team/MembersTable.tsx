@@ -13,7 +13,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../../../components";
 import type { Member, PermissionGroup } from "../../../lib/api";
-import { PHONE_QUERY, useMediaQuery } from "../../../lib/useMediaQuery";
+import {
+  BELOW_RAIL_QUERY,
+  PHONE_QUERY,
+  useMediaQuery,
+} from "../../../lib/useMediaQuery";
 import {
   deriveCanApprove,
   displayName,
@@ -75,6 +79,12 @@ interface MenuItem {
 function KebabMenu({ items, label }: { items: MenuItem[]; label: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // On the touch range this kebab is the ONLY way to reach a member's actions (the card
+  // layout has no inline buttons), so it must meet the 44px minimum. It can't inherit the
+  // app-wide `.btn-icon` rule in components.css: this is a raw button whose size is set
+  // INLINE, and an inline style beats a stylesheet — so the breakpoint is applied here.
+  const touch = useMediaQuery(BELOW_RAIL_QUERY);
+  const size = touch ? 44 : 30;
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => {
@@ -98,8 +108,8 @@ function KebabMenu({ items, label }: { items: MenuItem[]; label: string }) {
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         style={{
-          width: 30,
-          height: 30,
+          width: size,
+          height: size,
           borderRadius: "var(--radius-sm)",
           border: "1px solid var(--line-2)",
           background: "var(--card)",
@@ -118,7 +128,8 @@ function KebabMenu({ items, label }: { items: MenuItem[]; label: string }) {
           className="menu-pop"
           style={{
             position: "absolute",
-            top: 34,
+            // Sits just under the trigger, which is taller on the touch range.
+            top: size + 4,
             right: 0,
             zIndex: 30,
             minWidth: 168,

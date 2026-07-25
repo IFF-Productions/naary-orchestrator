@@ -66,7 +66,7 @@ sitting in that trap today.
 > to `IntegrationAction` (a data-shaped change that fixes both), or remove the two write actions
 > so authors can't place a node that cannot succeed. This is a bug fix, not part of this design.
 
-### What #699 shipped, and what it means here
+### What the `textToSpeech` node established, and what it means here
 
 `textToSpeech` writes audio to object storage and returns **only a reference**
 (`packages/dsl/src/node-output.ts:92-108`):
@@ -216,7 +216,7 @@ Output, per the issue:
   durationSeconds: number, callSid: string, answeredBy?: string }
 ```
 
-Registration touch points are the #699 checklist verbatim (DSL union + interface + zod schema +
+Registration touch points are the `textToSpeech` node's checklist verbatim (DSL union + interface + zod schema +
 `Exact<>` proof + coverage map + catalog entry; worker activity + `proxies.ts` policy +
 `node-handlers/index.ts`; web palette tile + config panel + `ERRORABLE_KINDS`). Two deltas:
 
@@ -225,7 +225,7 @@ Registration touch points are the #699 checklist verbatim (DSL union + interface
   human twice.
 - **Not** in `RETRYABLE_KINDS` (`screens/canvas/fields.tsx:145-153` already excludes the
   at-most-once nodes for this reason). In `ERRORABLE_KINDS`, yes.
-- Simple mode: **skip**, following #699's precedent (`textToSpeech` is builder-only,
+- Simple mode: **skip**, following the `textToSpeech` precedent (it is builder-only,
   `friendly-catalog.ts` has no entry). A non-developer surface is the wrong place to hand someone a
   robocall button.
 
