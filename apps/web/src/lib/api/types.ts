@@ -57,6 +57,9 @@ export interface GraphSummary {
   updatedAt: string;
   /** Whether the workflow's automatic triggers fire (n8n parity). Default true. */
   active: boolean;
+  /** Node type of the graph's entry node (e.g. "formTrigger"); null when unresolvable.
+   *  Lets a picker offer only the workflows a hosted endpoint can actually be registered for. */
+  entryType: string | null;
   /** Organizational tags (tenant-wide per workflowKey — same chips in every environment). */
   tags: TagRef[];
 }

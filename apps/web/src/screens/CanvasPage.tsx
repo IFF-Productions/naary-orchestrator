@@ -43,6 +43,12 @@ import {
   type WebhookRow,
 } from "../lib/api";
 import { isTerminal } from "../lib/run-status";
+import {
+  RETURN_PARAM,
+  returnLabel,
+  safeReturnTo,
+  withReturn,
+} from "../lib/canvas-return";
 import { decompileGraph } from "../lib/decompile-graph";
 import { canSaveWorkflow } from "../lib/permissions-logic";
 import {
@@ -90,6 +96,13 @@ import { useWorkflowActions } from "./canvas/useWorkflowActions";
 export function CanvasPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  // Where the back control returns to. UNTRUSTED (it comes off the URL) — safeReturnTo
+  // reduces it to an in-app /app path or null, and null means today's behaviour (/app).
+  const returnTo = safeReturnTo(searchParams.get(RETURN_PARAM));
+  const backLabel = returnLabel(returnTo);
+  /** Params for a canvas URL rewrite, with the return target preserved. */
+  const keepReturn = (params: Record<string, string> = {}) =>
+    withReturn(params, returnTo);
   const [nodes, setNodes] = useState<Node<NaaryData>[]>(SEED_NODES);
   const [edges, setEdges] = useState<FlowEdge[]>(SEED_EDGES);
   // Stable node-id → kind map for the ExpressionField autocomplete fallback. Memoized so it
@@ -721,11 +734,11 @@ export function CanvasPage() {
     setWorkflowKey("");
     setVersion(null);
     setStatus(null);
-    if (keyParam) setSearchParams({}, { replace: true });
+    if (keyParam) setSearchParams(keepReturn(), { replace: true });
   }
 
   function openWorkflow(key: string) {
-    if (key) setSearchParams({ key }, { replace: true });
+    if (key) setSearchParams(keepReturn({ key }), { replace: true });
     else newWorkflow();
   }
 
@@ -740,6 +753,7 @@ export function CanvasPage() {
     runInput,
     keyParam,
     templateParam,
+    returnTo,
     setNodes,
     setEdges,
     setName,
@@ -839,6 +853,8 @@ export function CanvasPage() {
       <CanvasTopBar
         name={name}
         onNameChange={setName}
+        backTo={returnTo ?? undefined}
+        backLabel={backLabel}
         activeKey={activeKey}
         version={version}
         generating={generating}

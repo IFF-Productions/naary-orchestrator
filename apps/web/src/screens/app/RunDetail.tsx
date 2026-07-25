@@ -10,6 +10,7 @@
 import "./run-detail/run-detail.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useCanvasLink } from "../../lib/useCanvasLink";
 import type { GraphDef } from "@naary/dsl";
 import { Button, Card, Icon, LoadingBlock, StatusPill } from "../../components";
 import { api, type ExecutionState, UnauthorizedError } from "../../lib/api";
@@ -207,6 +208,8 @@ function TopStat({ label, value }: { label: string; value: string }) {
 /* ------------- Real run: polls the control plane for live + closed runs ------------- */
 function RunView({ id }: { id: string }) {
   const navigate = useNavigate();
+  // Canvas links carry ?from= so the canvas's back control returns HERE.
+  const canvasLink = useCanvasLink();
   const phone = useMediaQuery(PHONE_QUERY);
   // Three-pane instrument: at <= 1024 the executed-path graph and the hero/
   // timeline/detail stack vertically (graph capped on top, inspector below)
@@ -693,11 +696,13 @@ function RunView({ id }: { id: string }) {
                 icon="workflow"
                 onClick={() =>
                   navigate(
-                    // #490 — carry the runId so the canvas live-watches this run,
-                    // overlaying each node's real state (live, or final if terminal).
-                    `/app/canvas?key=${encodeURIComponent(
-                      runWorkflowKey,
-                    )}&runId=${encodeURIComponent(id)}`,
+                    canvasLink(
+                      // #490 — carry the runId so the canvas live-watches this run,
+                      // overlaying each node's real state (live, or final if terminal).
+                      `/app/canvas?key=${encodeURIComponent(
+                        runWorkflowKey,
+                      )}&runId=${encodeURIComponent(id)}`,
+                    ),
                   )
                 }
                 style={stacked ? { minHeight: 44 } : undefined}

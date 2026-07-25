@@ -46,8 +46,21 @@ const TERMINAL = new Set([
 
 export const isTerminal = (s: string): boolean => TERMINAL.has(s);
 export const isSuccess = (s: string): boolean => s === "completed";
+/** Terminal and not successful. The AGGREGATE "didn't succeed" bucket — it deliberately
+ *  includes `rejected`, because a rejected run is still a run that produced no result
+ *  (success-rate denominators, failure charts, the notifications bell all rely on that). */
 export const isFailure = (s: string): boolean =>
   isTerminal(s) && s !== "completed";
+
+/** A human declined the run at an approval gate (or it auto-rejected on timeout). Not a
+ *  defect: the system did exactly what it was asked. Kept separate from isSystemFailure so
+ *  "what broke?" isn't polluted by "what someone said no to". */
+export const isRejected = (s: string): boolean => s === "rejected";
+
+/** Terminal, unsuccessful, and NOT a human rejection — a genuine failure worth
+ *  investigating (error, timeout, budget, circuit-breaker, cancellation). */
+export const isSystemFailure = (s: string): boolean =>
+  isFailure(s) && !isRejected(s);
 
 /** Success rate over TERMINAL runs only (null when none have finished yet). */
 export function successRate(statuses: string[]): number | null {

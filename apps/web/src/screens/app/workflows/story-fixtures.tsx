@@ -29,6 +29,7 @@ export const GRAPHS_BY_ENV: Record<
     version: number;
     updatedAt: string;
     active: boolean;
+    entryType: string | null;
     tags: { id: string; name: string; color: string | null }[];
   }[]
 > = {
@@ -39,6 +40,7 @@ export const GRAPHS_BY_ENV: Record<
       version: 9,
       updatedAt: at("2026-07-19T08:00:00Z"),
       active: true,
+      entryType: "scheduleTrigger",
       tags: [{ id: "tag-bill", name: "billing", color: "#0ea5e9" }],
     },
     {
@@ -47,6 +49,7 @@ export const GRAPHS_BY_ENV: Record<
       version: 7,
       updatedAt: at("2026-07-18T18:00:00Z"),
       active: true,
+      entryType: "scheduleTrigger",
       tags: [{ id: "tag-ai", name: "ai", color: "#8b5cf6" }],
     },
     {
@@ -55,6 +58,7 @@ export const GRAPHS_BY_ENV: Record<
       version: 1,
       updatedAt: at("2026-07-12T12:00:00Z"),
       active: false,
+      entryType: "scheduleTrigger",
       tags: [],
     },
   ],
@@ -65,6 +69,7 @@ export const GRAPHS_BY_ENV: Record<
       version: 4,
       updatedAt: at("2026-07-18T09:00:00Z"),
       active: true,
+      entryType: "scheduleTrigger",
       tags: [{ id: "tag-bill", name: "billing", color: "#0ea5e9" }],
     },
   ],
@@ -75,6 +80,7 @@ export const GRAPHS_BY_ENV: Record<
       version: 3,
       updatedAt: at("2026-07-13T10:00:00Z"),
       active: true,
+      entryType: "scheduleTrigger",
       tags: [{ id: "tag-bill", name: "billing", color: "#0ea5e9" }],
     },
     {
@@ -83,6 +89,7 @@ export const GRAPHS_BY_ENV: Record<
       version: 2,
       updatedAt: at("2026-07-10T10:00:00Z"),
       active: false,
+      entryType: "scheduleTrigger",
       tags: [{ id: "tag-ai", name: "ai", color: "#8b5cf6" }],
     },
   ],

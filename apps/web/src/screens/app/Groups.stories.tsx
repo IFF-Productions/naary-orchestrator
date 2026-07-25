@@ -135,6 +135,7 @@ const GRAPHS = [
     version: 3,
     updatedAt: "2026-07-15T09:00:00.000Z",
     active: true,
+    entryType: "scheduleTrigger",
     tags: [{ id: "tag-billing", name: "billing", color: "#4a9dff" }],
   },
   {
@@ -143,6 +144,7 @@ const GRAPHS = [
     version: 7,
     updatedAt: "2026-07-14T09:00:00.000Z",
     active: false,
+    entryType: "scheduleTrigger",
     tags: [],
   },
 ] satisfies GraphSummary[];

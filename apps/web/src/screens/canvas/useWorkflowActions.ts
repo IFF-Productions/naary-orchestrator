@@ -6,6 +6,7 @@ import { type Node } from "@xyflow/react";
 import type { NavigateFunction, SetURLSearchParams } from "react-router-dom";
 import { type GraphDef } from "@naary/dsl";
 import { api, type GraphSummary, UnauthorizedError } from "../../lib/api";
+import { withReturn } from "../../lib/canvas-return";
 import { decompileGraph } from "../../lib/decompile-graph";
 import {
   type FlowEdge,
@@ -24,6 +25,7 @@ export function useWorkflowActions({
   runInput,
   keyParam,
   templateParam,
+  returnTo,
   setNodes,
   setEdges,
   setName,
@@ -43,6 +45,8 @@ export function useWorkflowActions({
   runInput: string;
   keyParam: string | null;
   templateParam: string | null;
+  /** The canvas's validated return target, preserved across param rewrites. */
+  returnTo: string | null;
   setNodes: Dispatch<SetStateAction<Node<NaaryData>[]>>;
   setEdges: Dispatch<SetStateAction<FlowEdge[]>>;
   setName: Dispatch<SetStateAction<string>>;
@@ -143,7 +147,10 @@ export function useWorkflowActions({
       setName(appliedName);
       setWorkflowKey("");
       setVersion(null);
-      if (keyParam || templateParam) setSearchParams({}, { replace: true });
+      // Clearing ?key=/?template= must NOT clear the canvas's return target — a fresh params
+      // object would drop it and strand the user's "back" on /app (see lib/canvas-return).
+      if (keyParam || templateParam)
+        setSearchParams(withReturn({}, returnTo), { replace: true });
       setStatus(`Imported "${appliedName}" — review, then Save to keep it.`);
     };
     reader.readAsText(file);

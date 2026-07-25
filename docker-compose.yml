@@ -44,7 +44,11 @@ x-backend-env: &backend-env
   STORAGE_PROVIDER: ${STORAGE_PROVIDER:-}
   S3_BUCKET: ${S3_BUCKET:-}
   AWS_REGION: ${AWS_REGION:-}
-  # Observability (Sentry) — OFF unless SENTRY_DSN is set. Events are scrubbed.
+  # Observability (Sentry) — OFF unless a DSN is set. Events are scrubbed.
+  # SENTRY_DSN is the SHARED fallback. Each app can instead report to its OWN Sentry project
+  # via SENTRY_DSN_API / SENTRY_DSN_WORKER (set per-service below) — separate issue streams,
+  # alert rules and quotas per app. Unset ⇒ that app falls back to SENTRY_DSN, and the
+  # `component` tag still distinguishes them inside one shared project.
   SENTRY_DSN: ${SENTRY_DSN:-}
   SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0}
   # CPU profiling (api/worker). Trace-based: profiles only inside sampled transactions,
@@ -156,6 +160,8 @@ services:
     environment:
       <<: *backend-env
       PORT: '3000'
+      # This app's OWN Sentry project (falls back to SENTRY_DSN when unset).
+      SENTRY_DSN_API: ${SENTRY_DSN_API:-}
       # Allow the containerized web app (and the Vite dev server) as CORS origins.
       CORS_ORIGINS: http://localhost:8081,http://localhost:5173
       # Firebase Auth (human login). The API verifies ID tokens with the Admin SDK,
@@ -214,6 +220,9 @@ services:
     command: ['pnpm', '--filter', '@naary/worker', 'start']
     environment:
       <<: *backend-env
+      # This app's OWN Sentry project (falls back to SENTRY_DSN when unset). Both worker
+      # services share it — they run the same code, so one worker project is the useful split.
+      SENTRY_DSN_WORKER: ${SENTRY_DSN_WORKER:-}
       # Queue-mode per-replica capacity knobs (unset ⇒ Temporal SDK defaults; see worker-tuning.ts).
       # Raise `replicas` to scale horizontally; tune these to size each replica.
       WORKER_MAX_ACTIVITIES: ${WORKER_MAX_ACTIVITIES:-}
@@ -257,6 +266,8 @@ services:
     command: ['pnpm', '--filter', '@naary/worker', 'start']
     environment:
       <<: *backend-env
+      # Same worker code ⇒ same Sentry project as the default worker.
+      SENTRY_DSN_WORKER: ${SENTRY_DSN_WORKER:-}
       WORKER_TASK_QUEUE: orchestrator-heavy
       # Heavy activities are few + long — a small slot cap keeps a burst from over-committing a box.
       WORKER_MAX_ACTIVITIES: ${WORKER_HEAVY_MAX_ACTIVITIES:-4}
