@@ -416,6 +416,10 @@ describe("callIntegration activity", () => {
     );
     const [, init] = fetchMock.mock.calls[0];
     expect(init.headers.Authorization).toBe("Token token=pd-key");
+    // …and the provider's own catalog header still wins over a field-built one.
+    expect(init.headers.Accept).toBe(
+      "application/vnd.pagerduty+json;version=2",
+    );
   });
 
   it("a CR/LF in a header field fails NON-retryably and never reaches fetch", async () => {
@@ -440,7 +444,7 @@ describe("callIntegration activity", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("Google Sheets append_row → PUT/POST with an OAuth Bearer, range percent-encoded, :append kept", async () => {
+  it("Google Sheets append_row → POST with an OAuth Bearer, range in A1 notation, :append kept", async () => {
     fetchMock.mockResolvedValue(res(200, { updates: { updatedRows: 1 } }));
     const cfg: IntegrationNodeConfig = {
       provider: "googlesheets",

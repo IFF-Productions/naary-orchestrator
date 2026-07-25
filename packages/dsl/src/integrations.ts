@@ -3877,9 +3877,9 @@ const PAGERDUTY: IntegrationProvider = {
           bodyPath: "incident.incident_key",
           hint: "dedupe key — a second create with the same key + service is rejected while the incident is open",
         },
-        // `incident.body` is an IncidentBody, whose own `type` is constant. It is always sent
-        // (as `{ type: "incident_body" }` when no details are given) — `details` is optional in
-        // PD's schema, so a type-only body is valid.
+        // `incident.body` is an IncidentBody, whose own `type` is constant. Being a const
+        // nested BELOW the envelope, it is injected only when `details` is actually given —
+        // never as a lone `body: { type: "incident_body" }` (see buildIntegrationRequest).
         {
           key: "bodyType",
           label: "Body type",
