@@ -1,6 +1,12 @@
 // Public interpreter types (split out of workflows.ts — moved verbatim, zero
 // behavior change). Type-only module: erased at runtime, nothing to replay.
-import type { Citation, ExecutionStatus } from "@naary/contracts";
+import type {
+  ApprovalInput,
+  Citation,
+  ExecutionStatus,
+  ResumeInput,
+  WebhookResponse,
+} from "@naary/contracts";
 
 export interface RunGraphResult {
   status: ExecutionStatus;
@@ -88,4 +94,19 @@ export interface ResumeState {
   /** Fan-in arrival counts per merge node id (Slice N5). Carried so a run that
    *  continueAsNews mid-join resumes its counts. Plain object (CAN-safe). */
   mergeArrivals?: Record<string, number>;
+  /**
+   * SIGNAL DURABILITY ACROSS THE BOUNDARY (#681). A decision/resume Signal can land at ANY moment —
+   * including while the walk sits between two nodes, before the gate that consumes it has been
+   * reached. Such a signal lives only in `EngineState`, so a continueAsNew that did not carry it
+   * would DROP it and the run would then wait forever for a decision the user already made.
+   * All three are optional: a run continued by a pre-#681 worker carries none of them and seeds
+   * `undefined`, i.e. byte-identical behavior.
+   */
+  approval?: ApprovalInput;
+  /** Pending wait-webhook resume (same rationale as `approval`). */
+  webhookResume?: ResumeInput;
+  /** The synchronous reply a respondToWebhook node already produced. Carried so the
+   *  webhookResponseQuery the ingress polls — and a child run's RunGraphResult.reply — survive a
+   *  continueAsNew that happens AFTER the response node ran. */
+  webhookResponse?: WebhookResponse;
 }

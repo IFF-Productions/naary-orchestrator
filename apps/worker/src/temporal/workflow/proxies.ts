@@ -38,6 +38,11 @@ export const {
   // shared retry policy is safe; the payloads it moves are bounded by MAX_EXPANDED_ITEMS_BYTES, which
   // keeps it comfortably inside the 1-minute default.
   expandItems,
+  // continueAsNew ctx offload (#681): ONE object-store PUT per oversized ctx entry, called only at a
+  // continueAsNew boundary. Idempotent in effect (a retry writes a fresh copy under a new key and the
+  // reference the workflow keeps is the LAST returned one), and each argument is bounded by
+  // CAN_CTX_MAX_OFFLOADABLE_ENTRY_BYTES — comfortably inside the shared 1-minute timeout.
+  offloadCtxEntry,
 } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },

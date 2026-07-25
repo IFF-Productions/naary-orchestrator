@@ -172,6 +172,7 @@ export type { MapNodeItem, MapNodeResult } from "./activities/map-node";
 
 export {
   expandItems,
+  offloadCtxEntry,
   ITEM_CLAIM_CHECK_THRESHOLD,
   MAX_EXPANDED_ITEMS_BYTES,
 } from "./activities/items";

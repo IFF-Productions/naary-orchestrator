@@ -1,4 +1,5 @@
-// items — claim-check expansion of an offloaded items source (#479).
+// items — claim-check expansion of an offloaded items source (#479), plus the
+// continueAsNew ctx-snapshot offload (#681) that shares the same claim-check machinery.
 import { createLogger } from "@naary/logging";
 import { ApplicationFailure } from "@temporalio/activity";
 import { getByPath } from "@naary/dsl";
@@ -113,4 +114,44 @@ export async function expandItems(
     "expanded a claim-checked items source",
   );
   return items;
+}
+
+/**
+ * Offload ONE `ctx` entry to the claim-check store so the `continueAsNew` snapshot fits Temporal's
+ * ~2MB payload cap (#681).
+ *
+ * WHY AN ACTIVITY (CLAUDE.md Tier-1 rules 2 + 3): the PUT is object-storage I/O and the returned
+ * reference key is a `randomUUID()` — both illegal in workflow/graph-traversal code. The interpreter
+ * decides WHICH entries to offload with a pure size calculation (see `planCtxOffload`) and calls this
+ * once per chosen entry; the result is recorded in history, so the reference replays deterministically.
+ *
+ * ONE ENTRY PER CALL, not the whole ctx: an activity ARGUMENT rides the same ~2MB payload cap as the
+ * continueAsNew it is trying to shrink, so handing over the oversized ctx wholesale would fail for
+ * exactly the reason we are here (the same constraint documented on MAX_MAP_BATCH_ITEMS).
+ *
+ * `thresholdBytes: 0` forces the offload — the caller already measured the entry and decided. The
+ * reference is resolved again at the next activity boundary (runAgent / callHttpRequest / callSqlQuery
+ * / … all rehydrate their inputs), exactly like an `expandItems` element.
+ */
+export async function offloadCtxEntry(
+  input: { value: unknown },
+  meta: AgentMeta,
+): Promise<unknown> {
+  const store = getObjectStore();
+  const ref = await maybeOffload(input.value, store, {
+    keyPrefix: `ctx/${meta.tenantId}`,
+    thresholdBytes: 0,
+  });
+  // Node id + size only — never the value (privacy checklist: no run content in logs).
+  log.info(
+    {
+      activity: "offloadCtxEntry",
+      executionId: meta.executionId,
+      nodeId: meta.nodeId,
+      tenantId: meta.tenantId,
+      bytes: Buffer.byteLength(JSON.stringify(input.value ?? null), "utf8"),
+    },
+    "offloaded a ctx entry for the continueAsNew snapshot",
+  );
+  return ref;
 }

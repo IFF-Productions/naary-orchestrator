@@ -133,6 +133,16 @@ export async function runGraph(
     status: "running",
     currentNodeId: resume?.startNodeId ?? graph.startNodeId,
     mergeArrivals: resume?.mergeArrivals ? { ...resume.mergeArrivals } : {},
+    // Signals that had ARRIVED but were not yet consumed when the previous segment continued as new
+    // (#681): re-seed them so a decision the user already made is honored by this segment instead of
+    // being silently dropped (the run would otherwise wait forever for a second click). Pure data
+    // seeding from workflow ARGS — no Temporal command, so a segment continued by a pre-#681 worker
+    // (fields absent → undefined) behaves byte-identically.
+    approval: resume?.approval,
+    webhookResume: resume?.webhookResume,
+    // The already-produced synchronous reply, so webhookResponseQuery (which the ingress polls by
+    // workflowId — always the LATEST run) and RunGraphResult.reply survive the boundary.
+    webhookResponse: resume?.webhookResponse,
   };
 
   wf.setHandler(approvalSignal, (s) => {

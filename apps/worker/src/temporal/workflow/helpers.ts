@@ -55,6 +55,86 @@ export function containsClaimCheckRef(
   return Object.values(value).some((v) => containsClaimCheckRef(v, seen));
 }
 
+/**
+ * continueAsNew snapshot budget (#681). Above this many serialized `ctx` bytes the interpreter
+ * claim-checks the LARGEST node outputs before continuing, so the carried snapshot stays under
+ * Temporal's ~2MB payload cap instead of hard-failing an otherwise-healthy long run. Deliberately
+ * well below 2MB: the continueAsNew payload also carries the graph snapshot, the trigger input and
+ * runCtx, and Temporal's cap applies to the whole thing.
+ */
+export const CAN_CTX_BUDGET_BYTES = 1_200_000;
+
+/**
+ * Per-entry floor for that offload. Only sizeable entries are worth a reference, and every
+ * reference costs workflow-side readability: an edge condition or `{{ }}` expression reading INTO an
+ * offloaded output resolves to `undefined` in workflow code (only activities rehydrate). Keeping the
+ * floor high means the trade is made for a handful of blobs, never for the small outputs conditions
+ * actually branch on. (This residual is documented in docs/DURABILITY-PROOF.md.)
+ */
+export const CAN_CTX_ENTRY_FLOOR_BYTES = 64_000;
+
+/**
+ * A single entry above this size cannot be offloaded at all — it would blow the ~2MB payload cap as
+ * the offload ACTIVITY's own argument. Such an entry can only come from a PURE workflow-side node
+ * (merge/aggregate/listOps of several already-large parents), since every activity output is already
+ * claim-checked at 1MB. It is skipped and the continueAsNew fails loudly on the payload cap — the
+ * same fail-closed posture as MAX_EXPANDED_ITEMS_BYTES' "many small items".
+ */
+export const CAN_CTX_MAX_OFFLOADABLE_ENTRY_BYTES = 1_000_000;
+
+/** Approximate serialized size of a claim-check reference (`{"__claimCheck":"…","bytes":N}`). Used
+ *  only to estimate how much a planned offload saves, so a rough over-estimate is the safe side. */
+const CLAIM_CHECK_REF_BYTES = 160;
+
+/**
+ * Decide WHICH `ctx` entries to claim-check before a continueAsNew (#681) — PURE: JSON sizing only,
+ * no I/O, no clock, no randomness, no Temporal command. The caller performs the actual offload via
+ * the `offloadCtxEntry` activity, once per returned key, in the returned order.
+ *
+ * DETERMINISM: the plan is a function of the ctx contents alone. Candidates are sorted by size
+ * DESCENDING with the node id as tie-break (never insertion order, which is only incidentally
+ * stable), so a replay of the same ctx produces the same plan and therefore the same activity
+ * sequence.
+ *
+ * Strategy: largest-first until the snapshot fits the budget — the minimum number of entries loses
+ * workflow-side readability. Reserved `__*`/`$*` keys are never offloaded: they are the interpreter's
+ * own bookkeeping (`__input`, `__costUsd`, `__approval`, `__regionTrace`, `$vars`), are individually
+ * capped already, and expressions read them constantly.
+ */
+export function planCtxOffload(
+  ctx: Record<string, unknown>,
+  budgetBytes: number = CAN_CTX_BUDGET_BYTES,
+): string[] {
+  let total = 2; // the enclosing "{}"
+  const candidates: { key: string; bytes: number }[] = [];
+  for (const key of Object.keys(ctx)) {
+    let bytes: number;
+    try {
+      bytes = JSON.stringify(ctx[key] ?? null).length + key.length + 4;
+    } catch {
+      continue; // unserializable: continueAsNew would fail on it regardless
+    }
+    total += bytes;
+    if (
+      !key.startsWith("__") &&
+      !key.startsWith("$") &&
+      bytes >= CAN_CTX_ENTRY_FLOOR_BYTES &&
+      bytes <= CAN_CTX_MAX_OFFLOADABLE_ENTRY_BYTES
+    ) {
+      candidates.push({ key, bytes });
+    }
+  }
+  if (total <= budgetBytes) return [];
+  candidates.sort((a, b) => b.bytes - a.bytes || (a.key < b.key ? -1 : 1));
+  const plan: string[] = [];
+  for (const c of candidates) {
+    if (total <= budgetBytes) break;
+    total -= c.bytes - CLAIM_CHECK_REF_BYTES;
+    plan.push(c.key);
+  }
+  return plan;
+}
+
 /** Items model A3: max items a single splitOut region batches through ONE mapNode activity. The N
  *  resolved configs (in) + N outputs (out) ride in Temporal history verbatim (no global codec), so
  *  a very large N would cross the ~2MB payload cap and hard-fail the history write. Fail closed
