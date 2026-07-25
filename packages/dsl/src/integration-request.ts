@@ -32,17 +32,30 @@ import {
  * Reached through `globalThis` on purpose: `@naary/dsl` deliberately ships WITHOUT
  * `@types/node` (it's the one package apps/web imports, so it must stay browser-safe and
  * must not be able to reach for `fs`). A bare `Buffer` reference wouldn't typecheck here, and
- * hard-coding one would either break the web bundle or force a Buffer polyfill into it. HTTP
- * Basic credentials are ASCII (`email:token`), so `btoa`'s latin1-only limitation never bites.
+ * hard-coding one would either break the web bundle or force a Buffer polyfill into it.
+ *
+ * Both paths must produce the SAME bytes. `btoa` is latin1-only, so a UTF-8 credential (a non-ASCII
+ * character in a Jira email, say) would throw there while `Buffer.from(…, "utf8")` succeeded — an
+ * auth header that differs by host is exactly the kind of divergence this module exists to prevent.
+ * So the `btoa` path UTF-8-encodes first, byte-for-byte matching Node.
  */
 const host = globalThis as unknown as {
   Buffer?: { from(s: string, enc: string): { toString(enc: string): string } };
   btoa?: (s: string) => string;
+  TextEncoder?: new () => { encode(s: string): Uint8Array };
 };
 
 function toBase64(s: string): string {
   if (host.Buffer) return host.Buffer.from(s, "utf8").toString("base64");
-  if (host.btoa) return host.btoa(s);
+  if (host.btoa) {
+    if (!host.TextEncoder) return host.btoa(s); // ASCII-only host; nothing better available
+    // One latin1 char per UTF-8 BYTE — what btoa expects, and what makes this match Buffer.
+    let binary = "";
+    for (const byte of new host.TextEncoder().encode(s)) {
+      binary += String.fromCharCode(byte);
+    }
+    return host.btoa(binary);
+  }
   throw new Error("no base64 encoder available (neither Buffer nor btoa)");
 }
 

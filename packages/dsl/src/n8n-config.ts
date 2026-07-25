@@ -38,6 +38,10 @@ const asNumber = (v: unknown): number | undefined =>
 export const asPicked = (v: unknown): string | undefined =>
   asString(v) ?? asString(asRecord(v).value);
 
+/** Name given to a Switch's synthesized fallback branch (n8n's `fallbackOutput: "extra"`). Shared
+ *  with the importer, which gates that output's edge on `matched === this`. */
+export const FALLBACK_RULE_NAME = "fallback";
+
 /** n8n's comparison operators → ours. Unmapped ones fall back to `exists` + a note. */
 const OP_MAP: Record<string, ConditionOp> = {
   equals: "eq",
@@ -440,6 +444,26 @@ export function translateConfig(
       }
       if (rules.length === 0) {
         ctx.notes.push("no switch rules found — add them by hand.");
+      }
+      // n8n's `options.fallbackOutput` adds an EXTRA output taken when no rule matched. Our switch
+      // expresses the same thing as a `fallback` name that lands in `matched` — which matters a lot:
+      // without it, the edge off that extra output would be UNCONDITIONAL and the fallback branch
+      // would fire on every run, no matter which rule actually matched.
+      const fallbackOutput = asRecord(params.options).fallbackOutput;
+      if (fallbackOutput === "extra") {
+        const taken = new Set(rules.map((r) => r.name));
+        let name = FALLBACK_RULE_NAME;
+        let n = 2;
+        while (taken.has(name)) {
+          name = `${FALLBACK_RULE_NAME}-${n}`;
+          n += 1;
+        }
+        return { rules, fallback: name };
+      }
+      if (typeof fallbackOutput === "number" && rules[fallbackOutput]) {
+        // n8n can also route the fallback into an EXISTING output. Our switch has one fallback name,
+        // so point it at that rule's name: an unmatched item then takes the same branch.
+        return { rules, fallback: rules[fallbackOutput].name };
       }
       return { rules };
     }

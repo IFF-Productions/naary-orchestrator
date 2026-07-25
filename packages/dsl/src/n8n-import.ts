@@ -308,7 +308,18 @@ export function parseN8nWorkflow(input: unknown): N8nImportResult {
   const byName = new Map<string, Planned>();
   for (const p of planned) byName.set(p.n8nName, p);
 
-  /** Follow bridges: a disabled/sticky node forwards to whatever ITS main output pointed at. */
+  /**
+   * Follow bridges: a disabled/sticky node forwards to whatever ITS main output pointed at.
+   *
+   * `seen` is shared across the whole traversal, not cloned per path — which LOOKS like it could
+   * drop an edge when a fan-out's branches reconverge, and doesn't. A node is added to `seen` by the
+   * branch that visits it first, and that same branch has already pushed its resolution into the
+   * shared `out`; a later branch short-circuiting to `[]` therefore removes nothing from the result.
+   * Resolution is purely structural (it depends on the node, never on the path taken to reach it),
+   * so "already resolved once" and "resolve again" are the same answer. Sharing additionally
+   * de-duplicates a diamond, so a bridge reached twice yields one edge, not two.
+   * Covered both ways by the fan-out and diamond cases in `n8n-import.spec.ts`.
+   */
   function resolveTargets(name: string, seen = new Set<string>()): string[] {
     if (seen.has(name)) return []; // a bridge cycle can't be walked
     seen.add(name);
@@ -515,17 +526,24 @@ export function parseN8nWorkflow(input: unknown): N8nImportResult {
         };
       }
       if (source.nodeType === "switch") {
-        const rules = (nodeById.get(from)?.config?.rules ?? []) as Array<{
-          name: string;
-        }>;
-        const name = rules[outputIndex]?.name;
+        const cfg = nodeById.get(from)?.config ?? {};
+        const rules = (cfg.rules ?? []) as Array<{ name: string }>;
+        // n8n's EXTRA fallback output sits just past the rules. Our switch names it via
+        // `config.fallback` and emits that name in `matched`, so the edge is gated like any other.
+        // Leaving it unconditional would fire the fallback branch on EVERY run, whichever rule
+        // actually matched — the whole reason `fallback` is translated at all.
+        const name =
+          rules[outputIndex]?.name ??
+          (outputIndex === rules.length
+            ? (asString(cfg.fallback) ?? undefined)
+            : undefined);
         if (name === undefined) {
           source.notes.push(
-            `n8n output #${outputIndex} has no matching switch rule (n8n's fallback output) — that edge is UNCONDITIONAL, so it always fires; gate it by hand or set the switch's \`fallback\`.`,
+            `n8n output #${outputIndex} has no matching switch rule and the node declares no fallback output — that edge is UNCONDITIONAL, so it always fires; gate it by hand or set the switch's \`fallback\`.`,
           );
           return { from, to };
         }
-        // Our `switch` outputs `{ matched: <rule name> }`.
+        // Our `switch` outputs `{ matched: <rule name | fallback name> }`.
         return {
           from,
           to,

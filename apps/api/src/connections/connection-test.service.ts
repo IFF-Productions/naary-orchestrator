@@ -24,7 +24,7 @@
  * or echoed in the response (CLAUDE.md Tier-1 rule 4). Egress goes through the SSRF-hardened
  * `safeFetch` + `assertEgressAllowed`, exactly as the activity does.
  */
-import { Injectable } from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import {
   BlockedEgressError,
   ConnectionService,
@@ -108,7 +108,10 @@ export class ConnectionTestService {
     }
     const conn = await this.connections.getById(tenantId, connectionId);
     if (!conn) {
-      return unknownResult(null, `Unknown connection '${connectionId}'.`);
+      // A 404, not an `unknown` result: `unknown` means "we declined to probe a real connection",
+      // which is a verdict about the PROVIDER. A bad id is a bad request path, and the route
+      // advertises 404 — matching the sibling connection routes (e.g. OAuth start).
+      throw new NotFoundException(`Unknown connection '${connectionId}'`);
     }
 
     // What is safe to call? Decided from the catalog BEFORE anything else, so a provider we can't

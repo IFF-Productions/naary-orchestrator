@@ -360,10 +360,53 @@ describe("04 — switch → branches → merge, plus a sticky note and a disable
     });
   });
 
-  it("flags n8n's third (fallback) output as an ungated edge", () => {
-    expect(byName("Route by priority").notes.join(" ")).toMatch(
-      /fallback output/,
+  it("GATES the fallback output instead of leaving it unconditional", () => {
+    // The fixture sets `options.fallbackOutput: "extra"`, so n8n's third output is the fallback.
+    // Leaving that edge unconditional would fire the "Ignore" branch on EVERY run, whichever rule
+    // matched — the bug this translation exists to prevent.
+    const sw = node(byName("Route by priority").nodeId!);
+    expect(sw.config?.fallback).toBe("fallback");
+    const toIgnore = out.graph.edges.find(
+      (e) => e.from === sw.id && e.to === byName("Ignore").nodeId,
     );
+    expect(toIgnore?.condition).toEqual({
+      path: `${sw.id}.matched`,
+      op: "eq",
+      value: "fallback",
+    });
+    // No note complaining about an ungated edge, because there isn't one.
+    expect(byName("Route by priority").notes.join(" ")).not.toMatch(
+      /UNCONDITIONAL/,
+    );
+  });
+
+  it("still flags an output past the rules when the node declares NO fallback", () => {
+    const noFallback = parseN8nWorkflow({
+      nodes: [
+        { name: "Hook", type: "n8n-nodes-base.webhook", parameters: {} },
+        {
+          name: "Route",
+          type: "n8n-nodes-base.switch",
+          parameters: {
+            rules: { values: [{ outputKey: "a", conditions: {} }] },
+          },
+        },
+        { name: "A", type: "n8n-nodes-base.noOp", parameters: {} },
+        { name: "Extra", type: "n8n-nodes-base.noOp", parameters: {} },
+      ],
+      connections: {
+        Hook: { main: [[{ node: "Route", type: "main", index: 0 }]] },
+        Route: {
+          main: [
+            [{ node: "A", type: "main", index: 0 }],
+            [{ node: "Extra", type: "main", index: 0 }],
+          ],
+        },
+      },
+    });
+    const route = noFallback.nodes.find((r) => r.n8nName === "Route")!;
+    expect(route.notes.join(" ")).toMatch(/UNCONDITIONAL/);
+    expect(validateGraph(noFallback.graph).valid).toBe(true);
   });
 
   it("strips the branch conditions on edges INTO the merge, and says what was lost", () => {
@@ -703,6 +746,117 @@ describe("degrading rather than failing", () => {
     expect(new Set(ids).size).toBe(3);
     expect(ids).toEqual(["do-it", "do-it-2", "do-it-3"]);
     expect(validateGraph(out.graph).valid).toBe(true);
+  });
+
+  it("bridges a disabled node that FANS OUT without dropping a sibling edge", () => {
+    const out = parseN8nWorkflow({
+      nodes: [
+        { name: "Hook", type: "n8n-nodes-base.webhook", parameters: {} },
+        {
+          name: "Off",
+          type: "n8n-nodes-base.noOp",
+          parameters: {},
+          disabled: true,
+        },
+        { name: "Left", type: "n8n-nodes-base.noOp", parameters: {} },
+        { name: "Right", type: "n8n-nodes-base.noOp", parameters: {} },
+      ],
+      connections: {
+        Hook: { main: [[{ node: "Off", type: "main", index: 0 }]] },
+        Off: {
+          main: [
+            [
+              { node: "Left", type: "main", index: 0 },
+              { node: "Right", type: "main", index: 0 },
+            ],
+          ],
+        },
+      },
+    });
+    const hook = out.nodes.find((r) => r.n8nName === "Hook")!.nodeId;
+    const targets = out.graph.edges
+      .filter((e) => e.from === hook)
+      .map((e) => e.to)
+      .sort();
+    expect(targets).toEqual(["left", "right"]);
+    expect(validateGraph(out.graph).valid).toBe(true);
+  });
+
+  it("bridges a CHAIN of disabled nodes whose branches reconverge — no edge lost", () => {
+    // The case that actually stresses resolveTargets's shared visited-set: Off fans out to two
+    // further BRIDGES, one of which reaches a target the other also reaches, plus one it doesn't.
+    // The union must be complete — a per-branch short-circuit must not cost the `Only` edge.
+    const dis = (name: string) => ({
+      name,
+      type: "n8n-nodes-base.noOp",
+      parameters: {},
+      disabled: true,
+    });
+    const out = parseN8nWorkflow({
+      nodes: [
+        { name: "Hook", type: "n8n-nodes-base.webhook", parameters: {} },
+        dis("Off"),
+        dis("Mid1"),
+        dis("Mid2"),
+        { name: "Shared", type: "n8n-nodes-base.noOp", parameters: {} },
+        { name: "Only", type: "n8n-nodes-base.noOp", parameters: {} },
+      ],
+      connections: {
+        Hook: { main: [[{ node: "Off", type: "main", index: 0 }]] },
+        Off: {
+          main: [
+            [
+              { node: "Mid1", type: "main", index: 0 },
+              { node: "Mid2", type: "main", index: 0 },
+            ],
+          ],
+        },
+        Mid1: { main: [[{ node: "Shared", type: "main", index: 0 }]] },
+        Mid2: {
+          main: [
+            [
+              { node: "Shared", type: "main", index: 0 },
+              { node: "Only", type: "main", index: 0 },
+            ],
+          ],
+        },
+      },
+    });
+    const hook = out.nodes.find((r) => r.n8nName === "Hook")!.nodeId;
+    const targets = out.graph.edges
+      .filter((e) => e.from === hook)
+      .map((e) => e.to)
+      .sort();
+    expect(targets).toEqual(["only", "shared"]);
+    expect(validateGraph(out.graph).valid).toBe(true);
+  });
+
+  it("emits ONE edge when a bridge diamond reconverges on the same target", () => {
+    const out = parseN8nWorkflow({
+      nodes: [
+        { name: "Hook", type: "n8n-nodes-base.webhook", parameters: {} },
+        {
+          name: "Off",
+          type: "n8n-nodes-base.noOp",
+          parameters: {},
+          disabled: true,
+        },
+        { name: "End", type: "n8n-nodes-base.noOp", parameters: {} },
+      ],
+      connections: {
+        Hook: { main: [[{ node: "Off", type: "main", index: 0 }]] },
+        Off: {
+          main: [
+            [
+              { node: "End", type: "main", index: 0 },
+              { node: "End", type: "main", index: 0 },
+            ],
+          ],
+        },
+      },
+    });
+    const hook = out.nodes.find((r) => r.n8nName === "Hook")!.nodeId;
+    expect(out.graph.edges.filter((e) => e.from === hook)).toHaveLength(1);
   });
 
   it("warns when the export has more than one trigger", () => {

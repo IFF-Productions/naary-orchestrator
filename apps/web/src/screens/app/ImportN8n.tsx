@@ -16,9 +16,14 @@ import { Button } from "../../components";
 import { api } from "../../lib/api";
 import type { N8nImportResult, N8nNodeReport } from "../../lib/api";
 
-/** Same slug rule BuildWithAi uses for a generated draft's workflowKey. */
+/**
+ * workflowKey for the imported draft. Same shape as the slug BuildWithAi derives for a generated
+ * draft, but NOT the same function — the fallback differs (a timestamped `imported-…` key, so an
+ * unnamed export still gets a stable, non-colliding key). Don't assume they stay in step.
+ */
 function slugifyName(name: string): string {
   const s = name
+    .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");

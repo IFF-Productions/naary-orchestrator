@@ -12,6 +12,7 @@
  * (a) calls the right action, (b) sends the right headers, (c) never writes, and (d) sets
  * `Connection.status` correctly.
  */
+import { NotFoundException } from "@nestjs/common";
 import { type Server, createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
@@ -276,6 +277,19 @@ describe("ConnectionTestService — declines to probe (`unknown`)", () => {
     expect(out.message).toContain("owner");
     expect(out.message).toContain("single-node Test");
     expect(captured).toHaveLength(0);
+  });
+
+  it("an unknown CONNECTION id is a 404, not an `unknown` result", async () => {
+    // `unknown` is a verdict about the provider ("nothing safe to call"). A bad id is a bad path —
+    // and the route advertises 404, like the sibling connection routes.
+    useLocalProvider();
+    getById.mockResolvedValue(null);
+
+    await expect(svc.test("t1", "nope", "calendly")).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(captured).toHaveLength(0);
+    expect(setStatus).not.toHaveBeenCalled();
   });
 
   it("an unknown provider key is rejected without resolving a secret", async () => {
