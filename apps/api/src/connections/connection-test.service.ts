@@ -180,7 +180,28 @@ export class ConnectionTestService {
       // Drain the body so the connection is released, and keep a short excerpt for the message —
       // the provider's own error text ("Invalid API key") is the most useful thing we can show.
       // Capped hard: a response body is untrusted and can be huge.
-      const excerpt = (await res.text().catch(() => "")).slice(0, 200);
+      //
+      // Then SCRUB the credential out of it. Some providers echo the offending token back in an
+      // auth error ("Invalid token: sk-abc123…"), and this excerpt goes into an API response body —
+      // which is exactly how a secret ends up in a browser console, a Sentry breadcrumb, or a
+      // support screenshot. Tier-1 rule 4 says a credential never crosses this boundary, and
+      // "the provider put it there, not us" is not an exemption.
+      // Both forms of the credential: the RESOLVER's (`Bearer <raw>`) and the PLAN's, which may have
+      // rewritten it to `Basic <base64>` or moved it into a custom header — a provider could echo
+      // either. Only the auth header names are read from the plan, so a non-secret header's value
+      // (e.g. an Accept type) is never scrubbed out of the excerpt.
+      const authNames =
+        typeof provider.authScheme === "object"
+          ? ["Authorization", provider.authScheme.header]
+          : ["Authorization"];
+      const secretValues = [
+        ...Object.values(authHeaders),
+        ...authNames.map((k) => plan.headers[k]).filter(Boolean),
+      ];
+      const excerpt = redactToken(
+        (await res.text().catch(() => "")).slice(0, 200),
+        secretValues,
+      );
 
       if (res.ok) {
         await this.connections.setStatus(tenantId, connectionId, "connected");
@@ -228,6 +249,28 @@ export class ConnectionTestService {
       };
     }
   }
+}
+
+/**
+ * Remove the resolved credential from a provider's response text before it can reach the API
+ * response body.
+ *
+ * Scrubs every auth header VALUE the resolver produced plus the bare token inside it (the value is
+ * `Bearer <token>` / `Basic <b64>` / a custom-header form, and a provider would echo the token, not
+ * the whole header). Short values are skipped: a 1–7 character "token" is almost certainly a
+ * placeholder in a test, and scrubbing it would mangle unrelated text.
+ */
+function redactToken(text: string, secretValues: string[]): string {
+  let out = text;
+  for (const value of secretValues) {
+    // Both the whole header value and the bare token inside it: a provider echoes the token, not
+    // the header. Values under 8 chars are test placeholders — scrubbing them would mangle text.
+    for (const c of [value, value.replace(/^\S+\s+/, "")]) {
+      if (c.length < 8) continue;
+      out = out.split(c).join("[redacted]");
+    }
+  }
+  return out;
 }
 
 /** `unknown` — we declined to probe. The connection's status is deliberately left ALONE: we

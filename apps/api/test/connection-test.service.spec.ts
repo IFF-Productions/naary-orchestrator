@@ -137,6 +137,39 @@ describe("ConnectionTestService — a passing probe", () => {
     expect(JSON.stringify(out)).not.toContain("super-secret-token");
   });
 
+  it("scrubs the token even when the PROVIDER echoes it back in its error body", async () => {
+    // Real providers do this ("Invalid token: sk-abc…"). The excerpt lands in an API response body,
+    // so an echoed credential would reach a browser console / Sentry breadcrumb / screenshot.
+    useLocalProvider("super-secret-token");
+    getById.mockResolvedValue(CONN);
+    reply = {
+      status: 401,
+      body: JSON.stringify({
+        error: "Invalid token: super-secret-token — check your key",
+      }),
+    };
+
+    const out = await svc.test("t1", "c1", "calendly");
+
+    expect(out.connectionStatus).toBe("needs_reauth");
+    expect(JSON.stringify(out)).not.toContain("super-secret-token");
+    // The useful part of the provider's message survives.
+    expect(out.message).toContain("[redacted]");
+    expect(out.message).toContain("check your key");
+  });
+
+  it("scrubs the base64 form too (a Basic-scheme provider echoing the header value)", async () => {
+    useLocalProvider("alice@acme.com:api-tok");
+    getById.mockResolvedValue(CONN);
+    const b64 = "YWxpY2VAYWNtZS5jb206YXBpLXRvaw==";
+    reply = { status: 401, body: `rejected credential ${b64}` };
+
+    const out = await svc.test("t1", "c1", "zendesk");
+
+    expect(JSON.stringify(out)).not.toContain(b64);
+    expect(JSON.stringify(out)).not.toContain("alice@acme.com:api-tok");
+  });
+
   it("sends the provider's custom auth header, not a Bearer (pagerduty)", async () => {
     useLocalProvider();
     getById.mockResolvedValue(CONN);
