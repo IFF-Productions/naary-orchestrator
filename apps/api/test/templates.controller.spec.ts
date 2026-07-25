@@ -100,6 +100,33 @@ describe("TemplatesController", () => {
     expect(() => c.get("does-not-exist")).toThrow(NotFoundException);
   });
 
+  // --- ?include=graph: one request instead of a per-key fan-out ---
+
+  it("serves every graph in ONE response for ?include=graph", () => {
+    // The gallery needs all the graphs. Fetching them per key was a 19-request fan-out
+    // against the API's 120-req/min per-IP throttle, and a throttled request made that
+    // template silently vanish from the gallery (Promise.allSettled dropped it). One
+    // response cannot partially fail.
+    const all = c.list("graph") as ReturnType<typeof c.get>[];
+    expect(all).toHaveLength(c.list().length);
+    for (const t of all) {
+      expect(t.graph?.nodes.length).toBe(t.nodeCount);
+      // Identical to what GET /templates/:key would have returned for that key.
+      expect(t).toEqual(c.get(t.key));
+    }
+  });
+
+  it("returns the UNCHANGED summary shape without the param", () => {
+    // The param is opt-in precisely so an existing GET /templates consumer is untouched.
+    for (const anything of [undefined, "", "graphs", "GRAPH", "1"]) {
+      const rows = c.list(anything);
+      expect(rows).toEqual(c.list());
+      for (const r of rows) {
+        expect(Object.prototype.hasOwnProperty.call(r, "graph")).toBe(false);
+      }
+    }
+  });
+
   // --- #574: server-owned taxonomy (the SPA used to INFER a category from node types) ---
 
   // The SPA maps each id to a label/icon/accent; a typo'd or invented id would silently

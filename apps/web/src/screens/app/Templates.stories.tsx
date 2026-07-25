@@ -186,7 +186,15 @@ const summaries = TEMPLATES.map(({ key, name, description, graph }) => ({
 }));
 
 const handlers = [
-  http.get("*/api/templates", () => HttpResponse.json(summaries)),
+  // The gallery now asks for `?include=graph` (one request instead of a per-key fan-out);
+  // serve the graphs when it does, and the bare summaries otherwise.
+  http.get("*/api/templates", ({ request }) =>
+    HttpResponse.json(
+      new URL(request.url).searchParams.get("include") === "graph"
+        ? TEMPLATES.map((t) => ({ ...t, nodeCount: t.graph.nodes.length }))
+        : summaries,
+    ),
+  ),
   http.get("*/api/templates/:key", ({ params }) => {
     const t = TEMPLATES.find((x) => x.key === params.key);
     if (!t) return new HttpResponse(null, { status: 404 });

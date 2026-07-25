@@ -1,4 +1,11 @@
-import { Controller, Get, NotFoundException, Param } from "@nestjs/common";
+import {
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  Query,
+} from "@nestjs/common";
+import { ApiQuery } from "@nestjs/swagger";
 import type { GraphDef } from "@naary/dsl";
 import {
   apiEnrichGraph,
@@ -267,8 +274,25 @@ const TEMPLATES: {
  */
 @Controller("templates")
 export class TemplatesController {
+  // OPTIONAL in the spec: without this the Nest plugin marks it required, which would force
+  // every generated client (including apps/web's schema.d.ts) to send `?include=` — and the
+  // whole point of the param is that omitting it returns the untouched legacy response.
+  // Same reason mcp-registry.controller.ts declares its query params.
+  @ApiQuery({
+    name: "include",
+    required: false,
+    enum: ["graph"],
+    description:
+      "Pass `graph` to get every template's graph in this one response instead of fetching /templates/:key per template.",
+  })
   @Get()
-  list(): TemplateSummary[] {
+  list(
+    @Query("include") include?: string,
+  ): TemplateSummary[] | TemplateDetail[] {
+    // Opt-in ONLY: without `?include=graph` the response is byte-identical to before, so an
+    // existing GET /templates consumer is unaffected (#574 AC). See detailOf's docblock for
+    // why the graphs-in-one-response variant exists.
+    if (include === "graph") return TEMPLATES.map((t) => this.detailOf(t));
     // ADDITIVE projection: key/name/description/nodeCount keep their exact meaning and
     // type, so an existing GET /templates consumer is unaffected (#574 AC).
     return TEMPLATES.map(
@@ -283,11 +307,22 @@ export class TemplatesController {
     );
   }
 
-  /** The template + its graph — the canvas loads this as a NEW draft to fork. */
-  @Get(":key")
-  get(@Param("key") key: string): TemplateDetail {
-    const t = TEMPLATES.find((x) => x.key === key);
-    if (!t) throw new NotFoundException(`Unknown template '${key}'`);
+  /**
+   * `?include=graph` returns each template WITH its graph, in ONE response.
+   *
+   * Why this exists: the gallery derives every chip, chain, badge and connection
+   * requirement from the real graphs, so it used to fetch `/templates` and then
+   * `/templates/:key` once PER template. At 18 templates that is a 19-request fan-out per
+   * page load, against a 120-req/min per-IP throttle — and because the screen collects the
+   * results with `Promise.allSettled`, every throttled (429) detail request silently
+   * DROPPED that template from the gallery. No error, no retry: cards just went missing.
+   * Reproduced at ~133 requests from one IP; it was already possible at 10 templates and
+   * became easy at 18.
+   *
+   * One request instead of nineteen removes the fan-out, the 429s, and the silent drop —
+   * and costs a user 1/19th of their rate-limit budget to open the screen.
+   */
+  private detailOf(t: (typeof TEMPLATES)[number]): TemplateDetail {
     return {
       key: t.key,
       name: t.name,
@@ -297,5 +332,13 @@ export class TemplatesController {
       tags: [...t.tags],
       graph: t.graph,
     };
+  }
+
+  /** The template + its graph — the canvas loads this as a NEW draft to fork. */
+  @Get(":key")
+  get(@Param("key") key: string): TemplateDetail {
+    const t = TEMPLATES.find((x) => x.key === key);
+    if (!t) throw new NotFoundException(`Unknown template '${key}'`);
+    return this.detailOf(t);
   }
 }

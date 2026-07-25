@@ -12326,7 +12326,20 @@
     "/templates": {
       "get": {
         "operationId": "TemplatesController_list",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "include",
+            "required": false,
+            "in": "query",
+            "description": "Pass `graph` to get every template's graph in this one response instead of fetching /templates/:key per template.",
+            "schema": {
+              "enum": [
+                "graph"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": ""
