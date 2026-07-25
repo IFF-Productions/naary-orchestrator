@@ -130,6 +130,16 @@ email — which the company-member email lookup would later honour). So:
 A future domain-ownership proof (a DNS TXT challenge) is what would make self-service safe by
 default; that is deferred, and the flag exists so an operator can opt in knowingly.
 
+**Known residual, and the second reason registration is operator-gated.** A Membership row written
+by an SSO login carries an **IdP-asserted** email. `CompanyService`'s member resolution looks an
+email up across the whole instance (`membership.findFirst({ email }, orderBy: { createdAt: desc })`),
+so such a row — being the newest — would be picked ahead of the real person's when a company owner
+later adds that address. Session confinement does not fix this, because it constrains what a
+session can *reach*, not what the ACS *writes*. With registration gated (`SSO_SELF_SERVICE` off,
+CLI otherwise), asserting a foreign domain requires an operator to have configured it, which is the
+containment. Making that email→userId lookup company-scoped is the real fix and belongs with the
+Companies work, not here.
+
 ## Assertion validation
 
 In `apps/api/src/sso/saml.ts` (pure functions — no DB, no Nest), using `xml-crypto`

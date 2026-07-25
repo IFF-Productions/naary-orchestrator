@@ -49,9 +49,12 @@ export class SsoController {
   @Get("metadata")
   metadata(@Res() res: Response): void {
     const config = ssoConfig();
-    if (!config) {
-      // Not configured: say so plainly here (this route is for a human admin, not a browser
-      // redirect), without leaking anything.
+    // `this.sso.enabled` as well as the config: a short/absent SSO_SESSION_SECRET leaves logins
+    // disabled while the SP config is fine, and serving valid metadata in that state invites an
+    // IdP admin to configure against an instance that will then refuse every login. Fail at
+    // configuration time instead. This route is read by a human admin, not a browser mid-redirect,
+    // so it says so plainly (still leaking nothing).
+    if (!config || !this.sso.enabled) {
       res.status(503).type("text/plain").send("SAML SSO is not configured");
       return;
     }

@@ -18,6 +18,8 @@ import { SsoLoginError, SsoService } from "../src/sso/sso.service";
 
 const consumeAssertion = vi.fn();
 const ssoUrlForSlug = vi.fn();
+/** Whether the (doubled) SsoService reports SAML as usable — see the metadata 503 cases. */
+let ssoEnabled = true;
 
 let app: INestApplication;
 let base: string;
@@ -31,7 +33,13 @@ beforeAll(async () => {
     providers: [
       {
         provide: SsoService,
-        useValue: { consumeAssertion, ssoUrlForSlug, enabled: true },
+        useValue: {
+          consumeAssertion,
+          ssoUrlForSlug,
+          get enabled() {
+            return ssoEnabled;
+          },
+        },
       },
     ],
   }).compile();
@@ -55,6 +63,18 @@ describe("SsoController — SP metadata", () => {
     const xml = await res.text();
     expect(xml).toContain('entityID="https://api.naary.test/sso/metadata"');
     expect(xml).toContain('Location="https://api.naary.test/sso/saml/acs"');
+  });
+
+  it("says 503 when logins are disabled even though the SP config is present", async () => {
+    // A short/absent SSO_SESSION_SECRET disables logins; serving metadata anyway would let an
+    // IdP admin configure against an instance that refuses every login.
+    ssoEnabled = false;
+    try {
+      const res = await fetch(`${base}/sso/metadata`);
+      expect(res.status).toBe(503);
+    } finally {
+      ssoEnabled = true;
+    }
   });
 
   it("says 503 (not a broken document) when SAML is unconfigured", async () => {
