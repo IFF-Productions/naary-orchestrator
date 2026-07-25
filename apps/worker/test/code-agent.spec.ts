@@ -495,6 +495,54 @@ describe("callCodeAgent activity", () => {
     });
   });
 
+  // --- READ mode isolation (#594/#680), gated by CODE_AGENT_SANDBOX_READ ---
+  it("READ mode: by DEFAULT runs in-worker (exec), NOT the sandbox (flag off)", async () => {
+    const runWrite = vi.fn();
+    __codeAgentDeps.runWrite = runWrite as never;
+    delete process.env.CODE_AGENT_SANDBOX_READ;
+    await callCodeAgent(CFG, {}, META); // CFG has no mode → read
+    expect(exec).toHaveBeenCalledOnce();
+    expect(runWrite).not.toHaveBeenCalled();
+  });
+
+  it("READ mode: with CODE_AGENT_SANDBOX_READ=true dispatches to the sandbox (runWrite, mode:read), NOT in-worker exec", async () => {
+    const runWrite = vi.fn().mockResolvedValue({
+      exitCode: 0,
+      stdout: envelope(),
+      diff: "",
+    });
+    __codeAgentDeps.runWrite = runWrite as never;
+    process.env.CODE_AGENT_SANDBOX_READ = "true";
+    try {
+      const out = await callCodeAgent(
+        { ...CFG, repo: "acme/widgets", connectionId: "conn-gh" },
+        {},
+        META,
+      );
+      expect(runWrite).toHaveBeenCalledOnce();
+      expect(exec).not.toHaveBeenCalled();
+      const wp = runWrite.mock.calls[0][0];
+      expect(wp.mode).toBe("read");
+      expect(wp.openPr).toBe(false); // read never opens a PR
+      expect(wp.agentArgs).toContain("plan"); // read-only argv
+      expect(out.output.diff).toBeUndefined(); // a read run makes no edits
+    } finally {
+      delete process.env.CODE_AGENT_SANDBOX_READ;
+    }
+  });
+
+  it("READ mode: sandboxed read without repo/connectionId is a non-retryable config failure", async () => {
+    process.env.CODE_AGENT_SANDBOX_READ = "true";
+    try {
+      await expect(callCodeAgent(CFG, {}, META)).rejects.toMatchObject({
+        type: "CODE_AGENT_READ_CONFIG",
+        nonRetryable: true,
+      });
+    } finally {
+      delete process.env.CODE_AGENT_SANDBOX_READ;
+    }
+  });
+
   it("surfaces a small trace INLINE on the node output", async () => {
     exec.mockResolvedValue({ stdout: streamLog(), exitCode: 0 });
     const out = await callCodeAgent(CFG, {}, META);

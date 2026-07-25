@@ -19,6 +19,7 @@ const ENV = {
   runnerToken: "runner-bearer",
   runsDir: "/srv/runs",
   writeEnabled: true,
+  sandboxReadEnabled: false,
 };
 
 const PARAMS = {
@@ -124,6 +125,50 @@ describe("runCodeAgentWrite", () => {
       type: "CODE_AGENT_RUNNER_ERROR",
     });
     expect(rm).toHaveBeenCalledOnce();
+  });
+
+  // --- READ mode through the same isolated dispatch (#594/#680) ---
+  const READ_PARAMS = {
+    ...PARAMS,
+    mode: "read" as const,
+    agentArgs: ["-p", "review the code", "--permission-mode", "plan"],
+  };
+  const READ_ENV = { ...ENV, writeEnabled: false, sandboxReadEnabled: true };
+
+  it("READ mode: clones + dispatches to the runner (isolated), gated by sandboxReadEnabled", async () => {
+    const out = await runCodeAgentWrite(READ_PARAMS, READ_ENV);
+    expect(out.exitCode).toBe(0);
+    // Same isolated path as write: git clone + runner POST /run.
+    expect(exec).toHaveBeenCalledOnce();
+    expect(exec.mock.calls[0][0]).toBe("git");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://naary-sandbox-runner:8080/run");
+    const body = JSON.parse(init.body);
+    // Read-only argv is forwarded; the ANTHROPIC key is, the git token is NOT.
+    expect(body.agentArgs).toContain("plan");
+    expect(body.authKey).toBe(ANTHROPIC);
+    expect(init.body).not.toContain(GIT_TOKEN);
+    expect(JSON.stringify(init.headers)).not.toContain(GIT_TOKEN);
+  });
+
+  it("READ mode: independent gate — disabled unless CODE_AGENT_SANDBOX_READ is on", async () => {
+    await expect(
+      runCodeAgentWrite(READ_PARAMS, {
+        ...READ_ENV,
+        sandboxReadEnabled: false,
+      }),
+    ).rejects.toMatchObject({
+      type: "CODE_AGENT_SANDBOX_READ_DISABLED",
+      nonRetryable: true,
+    });
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("READ mode: the write gate does NOT block it (read runs with writeEnabled=false)", async () => {
+    // READ_ENV has writeEnabled:false — a read run must still proceed.
+    await expect(
+      runCodeAgentWrite(READ_PARAMS, READ_ENV),
+    ).resolves.toBeTruthy();
   });
 
   it("is a non-retryable no-op when write mode is disabled (the gate)", async () => {
