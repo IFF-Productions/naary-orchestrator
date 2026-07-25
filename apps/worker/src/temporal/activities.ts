@@ -134,7 +134,29 @@ export { __codeDeps, callCode } from "./activities/code";
 export type { CodeInput, CodeResult } from "./activities/code";
 
 export { __agentDeps, runAgent } from "./activities/agent";
-export type { AgentConfig, AgentOutput, AgentResult } from "./activities/agent";
+export type {
+  AgentConfig,
+  AgentGuardrailReport,
+  AgentOutput,
+  AgentResult,
+} from "./activities/agent";
+
+// Agent guardrails (#576): the interpreter's tool-policy projection + the worker's audit writer.
+export {
+  __guardrailDeps,
+  loadGuardrailPolicy,
+  resolveToolPolicy,
+} from "./activities/guardrails";
+export type {
+  ResolveToolPolicyInput,
+  ToolPolicyProjection,
+} from "./activities/guardrails";
+export {
+  GUARDRAIL_ACTOR,
+  WORKER_AUDIT_METHOD,
+  recordAuditEvent,
+} from "./activities/audit";
+export type { AuditEventInput } from "./activities/audit";
 
 export { __codeAgentDeps, callCodeAgent } from "./activities/code-agent";
 export type {

@@ -4,6 +4,7 @@ import { CredentialsService } from "@naary/secrets";
 import { EnvironmentsModule } from "../environments/environments.module";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { SchedulesModule } from "../schedules/schedules.module";
+import { SettingsModule } from "../settings/settings.module";
 import { GraphGeneratorService } from "./graph-generator.service";
 import { GraphsController } from "./graphs.controller";
 import { GraphsService } from "./graphs.service";
@@ -14,7 +15,14 @@ import { WorkflowLifecycleService } from "./workflow-lifecycle.service";
 @Module({
   // EnvironmentsModule/SchedulesModule: sync a pollTrigger graph's interval schedule on save.
   // NotificationsModule: promote announces to the target env's channels (Slice 4).
-  imports: [EnvironmentsModule, SchedulesModule, NotificationsModule],
+  // SettingsModule: GuardrailsService reads the workspace agent-guardrail policy for the save
+  // gate (#576). Import (not a re-provide) so there is ONE reader of that policy row.
+  imports: [
+    EnvironmentsModule,
+    SchedulesModule,
+    NotificationsModule,
+    SettingsModule,
+  ],
   controllers: [GraphsController],
   providers: [
     GraphsService,

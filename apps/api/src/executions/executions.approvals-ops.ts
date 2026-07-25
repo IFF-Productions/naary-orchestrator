@@ -26,9 +26,16 @@ export async function opApprove(
   // (owner/admin user principals bypass). No-op when the gate has no routing.
   await deps.assertApprover(actor, id, row.tenantId);
   try {
-    await deps.client.workflow
-      .getHandle(id)
-      .signal(approvalSignal, { approved, ...(comment ? { comment } : {}) });
+    await deps.client.workflow.getHandle(id).signal(approvalSignal, {
+      approved,
+      ...(comment ? { comment } : {}),
+      // #576: carry the DISPLAY identity of the decider into the signal so the interpreter can
+      // write the AuditEvent for a forced-approval TOOL gate (actor + tool + decision). The API has
+      // already authenticated + authorized this principal above — this is a label, never an authz
+      // input. Same string shape GraphDefinition.savedBy uses. Absent for an actor-less internal
+      // caller, which is why the field is optional in ApprovalInput.
+      ...(actor ? { actor: actor.email ?? actor.subject ?? "api-token" } : {}),
+    });
   } catch (e) {
     // Signaling a CLOSED workflow (already completed / rejected / failed) returns
     // gRPC NOT_FOUND → WorkflowNotFoundError. The execution row exists (assertOwner
@@ -161,6 +168,10 @@ export async function opDecideByToken(
     await handle.signal(approvalSignal, {
       approved,
       ...(comment ? { comment } : {}),
+      // #576: the signed-link path has no principal (that IS the point of the link — the holder of
+      // a mailed/Slacked capability decides). Record it honestly as "public-link" rather than
+      // leaving the audit row actor-less; the link itself is the authorization.
+      actor: "public-link",
     });
   } catch (e) {
     if (e instanceof WorkflowNotFoundError) {

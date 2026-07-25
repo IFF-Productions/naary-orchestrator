@@ -754,6 +754,14 @@ model TenantSettings {
   // switcher; null → live. Runs/schedules/budgets are untouched — this is a UI-visibility
   // flag, not a lifecycle change.
   archivedAt   DateTime?
+  // Agent guardrail policy (#576) — the WORKSPACE-level governance object: tool allow/deny +
+  // forced-approval globs, input/output content rules, PII-redaction opt-in. Shape is
+  // `AgentGuardrailPolicy` (@naary/dsl/guardrails), write-gated by `agentGuardrailPolicySchema`
+  // (@naary/dsl/dist/registry). Lives HERE rather than in its own model because it is exactly one
+  // row per workspace with no independent lifecycle, and TenantSettings already IS that row.
+  // NULL / `{}` ⇒ no guardrails, byte-identical to the pre-#576 behaviour. Non-secret by
+  // construction: globs, labels, and patterns only — never a credential (Tier-1 rule 4).
+  agentGuardrails Json?
   updatedAt    DateTime @default(now()) @updatedAt
 
   @@index([companyId])

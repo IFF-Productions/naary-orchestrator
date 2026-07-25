@@ -3676,6 +3676,316 @@
         ]
       }
     },
+    "/tenants/{id}/settings": {
+      "get": {
+        "operationId": "SettingsController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get tenant settings",
+        "tags": [
+          "Settings"
+        ]
+      },
+      "put": {
+        "operationId": "SettingsController_save",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveSettingsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update tenant settings",
+        "tags": [
+          "Settings"
+        ]
+      }
+    },
+    "/tenants/{id}/settings/guardrails": {
+      "get": {
+        "operationId": "SettingsController_getGuardrails",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailPolicyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the workspace agent guardrail policy",
+        "tags": [
+          "Settings"
+        ]
+      },
+      "put": {
+        "operationId": "SettingsController_saveGuardrails",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailPolicyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Replace the workspace agent guardrail policy",
+        "tags": [
+          "Settings"
+        ]
+      }
+    },
     "/graphs/{workflowKey}/nodes/{nodeId}/test": {
       "post": {
         "operationId": "PinsController_test",
@@ -11593,166 +11903,6 @@
         ]
       }
     },
-    "/tenants/{id}/settings": {
-      "get": {
-        "operationId": "SettingsController_get",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SettingsResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get tenant settings",
-        "tags": [
-          "Settings"
-        ]
-      },
-      "put": {
-        "operationId": "SettingsController_save",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SaveSettingsDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SettingsResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Update tenant settings",
-        "tags": [
-          "Settings"
-        ]
-      }
-    },
     "/me/preferences": {
       "get": {
         "operationId": "PreferencesController_get",
@@ -15981,6 +16131,89 @@
           "status"
         ]
       },
+      "SettingsResponse": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "object",
+            "nullable": true,
+            "example": "Acme Inc.",
+            "description": "Tenant display name."
+          },
+          "defaultModel": {
+            "type": "object",
+            "nullable": true,
+            "example": "claude-sonnet-4",
+            "description": "Default model for new agent nodes."
+          }
+        },
+        "required": [
+          "displayName",
+          "defaultModel"
+        ]
+      },
+      "SaveSettingsDto": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "maxLength": 120,
+            "example": "Acme Inc.",
+            "description": "Tenant display name."
+          },
+          "defaultModel": {
+            "type": "string",
+            "maxLength": 120,
+            "example": "claude-sonnet-4",
+            "description": "Default model for new agent nodes."
+          }
+        }
+      },
+      "GuardrailPolicyResponse": {
+        "type": "object",
+        "properties": {
+          "policy": {
+            "type": "object",
+            "additionalProperties": true,
+            "example": {
+              "tools": {
+                "deny": [
+                  "delete_*"
+                ],
+                "requireApproval": [
+                  "github:create_issue"
+                ]
+              },
+              "input": [
+                {
+                  "label": "no-codenames",
+                  "kind": "keyword",
+                  "pattern": "Project Bluebird"
+                }
+              ],
+              "output": [
+                {
+                  "label": "no-swearing",
+                  "kind": "regex",
+                  "pattern": "damn",
+                  "action": "strip"
+                }
+              ],
+              "redact": {
+                "enabled": true,
+                "kinds": [
+                  "email",
+                  "phone"
+                ]
+              }
+            },
+            "description": "Tool allow/deny/forced-approval globs, input/output content rules, and PII redaction opt-in. `{}` = no guardrails."
+          }
+        },
+        "required": [
+          "policy"
+        ]
+      },
       "StartExecutionDto": {
         "type": "object",
         "properties": {
@@ -18472,44 +18705,6 @@
         "required": [
           "name"
         ]
-      },
-      "SettingsResponse": {
-        "type": "object",
-        "properties": {
-          "displayName": {
-            "type": "object",
-            "nullable": true,
-            "example": "Acme Inc.",
-            "description": "Tenant display name."
-          },
-          "defaultModel": {
-            "type": "object",
-            "nullable": true,
-            "example": "claude-sonnet-4",
-            "description": "Default model for new agent nodes."
-          }
-        },
-        "required": [
-          "displayName",
-          "defaultModel"
-        ]
-      },
-      "SaveSettingsDto": {
-        "type": "object",
-        "properties": {
-          "displayName": {
-            "type": "string",
-            "maxLength": 120,
-            "example": "Acme Inc.",
-            "description": "Tenant display name."
-          },
-          "defaultModel": {
-            "type": "string",
-            "maxLength": 120,
-            "example": "claude-sonnet-4",
-            "description": "Default model for new agent nodes."
-          }
-        }
       },
       "PreferencesResponse": {
         "type": "object",

@@ -53,6 +53,17 @@ export interface ApprovalInput {
   approved: boolean;
   /** Optional reviewer note recorded with the decision (approve or reject). */
   comment?: string;
+  /**
+   * DISPLAY identity of whoever decided (email, else OIDC subject, else "api-token"; the public
+   * signed-link path sends "public-link"). Added for #576: a forced-approval TOOL gate resolves
+   * inside the interpreter, which then writes the AuditEvent naming actor + tool + decision — the
+   * API's request-scoped AuditInterceptor cannot cover a decision the worker observes as a Signal
+   * (and never covered the public link at all, which has no `req.principal`).
+   *
+   * NOT a secret and NOT an authorization input: the API has already authenticated and authorized
+   * the decider before signalling. Optional, so an old API signalling a new worker is fine.
+   */
+  actor?: string;
 }
 
 /** ctx key under which the interpreter stores the {@link ApprovalAwaitingRecord} while a
@@ -84,7 +95,26 @@ export interface ApprovalAwaitingRecord {
   remindAfterHours?: number[];
   escalateAfterHours?: number;
   escalateTo?: string;
+  /**
+   * FORCED-APPROVAL TOOL GATE (#576). Present only when the pause is a guardrail tool gate rather
+   * than a `humanApproval` node: the `connectionId:tool` / `provider:action` ref the run is waiting
+   * to be allowed to call. Lets the approval inbox / Slack message say WHAT is being approved, and
+   * is what the interpreter names in the AuditEvent. A ref, never arguments.
+   */
+  toolRef?: string;
 }
+
+/**
+ * ctx key under which the interpreter caches the run's TOOL-POLICY PROJECTION (#576) — a small
+ * `ref → "deny" | "approval"` map resolved once per run segment by the `resolveToolPolicy` activity
+ * (refs the policy plainly allows are omitted, so an unrestricted graph caches `{}`).
+ *
+ * Cached rather than re-read per node for the same reason `$vars` are loaded once: it keeps one
+ * activity call per run instead of one per tool node. A run that pauses for days therefore enforces
+ * the policy as it stood at that point in the segment — the same "snapshot at start" contract the
+ * pinned graph version already has.
+ */
+export const TOOL_POLICY_CTX_KEY = "__toolPolicy";
 
 /** ctx key under which the interpreter records per-node execution times (Slice 2 —
  *  per-node timing + cost). `__`-prefixed = reserved/system, so it is stripped from
