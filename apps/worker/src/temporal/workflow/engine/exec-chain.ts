@@ -117,22 +117,39 @@ export async function execChain(
         // Items claim-check offload (#479). The upstream array may not be READABLE here: a large
         // http/sql/mcp/code output was offloaded to object storage, so ctx holds a `{__claimCheck}`
         // reference. Before this, that either hard-failed as ITEMS_NOT_ARRAY (reference AT the path)
-        // or SILENTLY mapped zero items (reference above the path → getByPath undefined). Rehydrating
+        // or SILENTLY mapped zero items (reference ABOVE the path → getByPath undefined). Rehydrating
         // is I/O, forbidden in workflow code (Tier-1 rules 2/3), so route it through the expandItems
         // ACTIVITY, which resolves + re-offloads PER ELEMENT and returns references, not blobs.
         //
-        // wf.patched() is SECOND in the `&&` on purpose: a pre-patch history never got past a
-        // reference-carrying source (it threw, or collected [] and moved on), so a replaying run never
-        // reaches — and never evaluates — this new marker. Same argument as the items-model-a4 and
-        // loop-fanout gates below; do not reorder.
+        // ORDER OF THE THREE CONDITIONS IS LOAD-BEARING:
+        //  1. `!Array.isArray(direct)` FIRST. If the path already yields a real array we take the old
+        //     path byte-for-byte, even when some OTHER field of the same node output is a reference
+        //     (e.g. codeAgent's `{diff: ref, trace: ref, …}`). Without this, a working splitOut over an
+        //     inline array would get re-represented as per-element references — silently breaking a
+        //     pure region node's `{{ sp.field }}` — or trip ITEMS_SOURCE_TOO_LARGE on a large-but-fine
+        //     A2 array. Both target cases still route: a reference AT the path is not an array, and a
+        //     reference above it leaves `direct` undefined.
+        //  2. The pure ref scan, so the common case never touches the activity.
+        //  3. wf.patched() LAST, so it is evaluated only for a source we would actually expand.
+        //
+        // REPLAY NOTE — deliberately NOT the same argument as the items-model-a4 / loop-fanout gates
+        // below (those rely on a pre-patch run never REACHING their marker). A pre-patch run whose
+        // source was a reference above the path collected [] and kept going, so a long-parked run CAN
+        // replay through here and DOES call this marker. That is safe by the standard mechanism:
+        // `patched()` returns false while replaying a history that lacks the marker, so such a run
+        // keeps its original zero-item behavior. Condition 1 means a run whose source resolved to a
+        // real array never evaluates the marker at all.
         const rawSource = ctx[splitCfg.from];
+        const direct = getByPath(rawSource, splitCfg.path); // pure + free; also the old behavior
         const arr =
-          containsClaimCheckRef(rawSource) && wf.patched("items-claim-check-v1")
+          !Array.isArray(direct) &&
+          containsClaimCheckRef(rawSource) &&
+          wf.patched("items-claim-check-v1")
             ? await expandItems(
                 { source: rawSource, path: splitCfg.path },
                 metaFor(splitOutId),
               )
-            : getByPath(rawSource, splitCfg.path);
+            : direct;
         // Fail closed on a DEFINED non-array source (a mis-binding) rather than silently mapping
         // 0 times; a missing/null source is a legitimate "no items" → empty region.
         if (arr !== undefined && arr !== null && !Array.isArray(arr)) {

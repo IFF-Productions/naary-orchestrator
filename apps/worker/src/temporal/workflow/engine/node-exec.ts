@@ -256,19 +256,22 @@ async function execNodeInner(
       const depth = runCtx.subWorkflowDepth ?? 0;
       if (depth >= MAX_SUBWORKFLOW_DEPTH) return "circuit_open";
 
-      // Items claim-check offload (#479) — identical rationale AND identical patched() ordering to
-      // the splitOut region in exec-chain.ts: an offloaded upstream array is unreadable in workflow
-      // code, so expand it in an activity. Before this a reference source silently fanned out ZERO
-      // children. `patched()` is second in the `&&` so a pre-patch history (which collected [] and
-      // moved on) never evaluates the new marker on replay.
+      // Items claim-check offload (#479) — same three-condition gate as the splitOut region in
+      // exec-chain.ts, where the full rationale (why `!Array.isArray` must come first, and why this
+      // patched() marker IS reached on replay yet still safe) is written out. Short version: an
+      // offloaded upstream array is unreadable in workflow code, so expand it in an activity; before
+      // this a reference source silently fanned out ZERO children.
       const rawSource = ctx[feCfg.from];
+      const direct = getByPath(rawSource, feCfg.path); // pure + free; also the old behavior
       const raw =
-        containsClaimCheckRef(rawSource) && wf.patched("items-claim-check-v1")
+        !Array.isArray(direct) &&
+        containsClaimCheckRef(rawSource) &&
+        wf.patched("items-claim-check-v1")
           ? await expandItems(
               { source: rawSource, path: feCfg.path },
               metaFor(node.id),
             )
-          : getByPath(rawSource, feCfg.path);
+          : direct;
       const items = Array.isArray(raw) ? raw : [];
       if (items.length === 0) {
         ctx[node.id] = [];

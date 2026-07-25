@@ -1,4 +1,19 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+// genai.ts binds `metricDistribution` at import time, so a vi.spyOn on the module namespace would
+// never be seen — record through a module mock that still calls the real implementation.
+const hoisted = vi.hoisted(() => ({ metricCalls: [] as unknown[][] }));
+vi.mock("../src/metrics", async (orig) => {
+  const actual = (await orig()) as Record<string, unknown>;
+  return {
+    ...actual,
+    metricDistribution: (...args: unknown[]) => {
+      hoisted.metricCalls.push(args);
+      return (actual.metricDistribution as (...a: unknown[]) => void)(...args);
+    },
+  };
+});
+
 import { __closeSentryForTest, __initSentryForTest } from "../src/index";
 import {
   GEN_AI_SEMCONV_VERSION,
@@ -168,6 +183,45 @@ describe("withGenAiSpan / withGenAiToolSpan (passthrough when Sentry is off)", (
     expect(await withGenAiToolSpan({ toolName: "t" }, async () => "ok")).toBe(
       "ok",
     );
+  });
+});
+
+describe("gen_ai.client.token.usage metric (the OTLP/Datadog path)", () => {
+  it("dual-emits both token types with low-cardinality convention dimensions", async () => {
+    // Our OTLP exporter (#462) is METRICS-only, so this is the path by which token counts reach a
+    // Datadog/OTLP backend natively. metrics.ts fans out to Sentry AND OTLP; the recording wrapper
+    // above still calls through to the real implementation.
+    hoisted.metricCalls.length = 0;
+    await withGenAiSpan(
+      { operation: "chat", provider: "google", model: "gemini-3-pro" },
+      async (record) => {
+        record({ inputTokens: 300, outputTokens: 40 });
+      },
+    );
+
+    const calls = hoisted.metricCalls.filter(
+      (c) => c[0] === "gen_ai.client.token.usage",
+    );
+    expect(calls).toHaveLength(2);
+    const byType = new Map(
+      calls.map((c) => [
+        (c[2] as Record<string, unknown>)["gen_ai.token.type"],
+        c,
+      ]),
+    );
+    expect(byType.get("input")?.[1]).toBe(300);
+    expect(byType.get("output")?.[1]).toBe(40);
+    for (const [, call] of byType) {
+      expect(call[2]).toMatchObject({
+        "gen_ai.operation.name": "chat",
+        "gen_ai.provider.name": "gcp.gemini",
+        "gen_ai.request.model": "gemini-3-pro",
+      });
+      // Metric labels stay low-cardinality — never tenant/execution/node ids (metrics.ts rule).
+      expect(Object.keys(call[2] as object)).not.toContain("tenantId");
+      expect(Object.keys(call[2] as object)).not.toContain("executionId");
+      expect(call[3]).toBe("{token}"); // unit per the conventions
+    }
   });
 });
 

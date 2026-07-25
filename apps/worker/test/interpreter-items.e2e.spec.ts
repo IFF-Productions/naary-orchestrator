@@ -705,6 +705,35 @@ describe("runGraph interpreter — items model (splitOut region)", () => {
     });
   });
 
+  it("#479: an INLINE array is left alone even when a SIBLING field is a reference", async () => {
+    // Guard against the obvious over-reach: `containsClaimCheckRef` scans the whole node output, and a
+    // node can offload one field while another holds a perfectly readable array (codeAgent's
+    // `{diff: ref, trace: ref, …}` is the shipped example). Routing that through expandItems would
+    // re-represent the array as per-element references and break a pure region node's `{{ sp.n }}`.
+    // The `!Array.isArray(direct)` condition keeps this byte-identical to pre-#479.
+    const store = getObjectStore();
+    const unrelatedRef = await maybeOffload({ big: "blob" }, store, {
+      keyPrefix: "e2e",
+      thresholdBytes: 0,
+    });
+    const worker = await makeWorker(env);
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          itemsGraph(), // splits `__input.items`
+          { items: [{ n: 4 }, { n: 5 }], trace: unrelatedRef },
+          { tenantId: "t-items-sibling" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-sibling-ref",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const final = await handle.query(stateQuery);
+      // The pure region node still read real item values (it would see undefined off a reference).
+      expect(final.ctx.le).toEqual([{ doubled: 4 }, { doubled: 5 }]);
+    });
+  });
+
   it("#479: an oversized ITEM rides as a reference, not a blob (A3 batch sees the ref)", async () => {
     const store = getObjectStore();
     // Two items well over the per-item offload threshold. Pre-#479 both would have had to ride in
