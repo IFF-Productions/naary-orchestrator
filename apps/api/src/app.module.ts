@@ -8,6 +8,7 @@ import { ThrottlerModule } from "@nestjs/throttler";
 import { AuditModule } from "./audit/audit.module";
 import { AuthModule } from "./auth/auth.module";
 import { DbLifecycleService } from "./common/db-lifecycle.service";
+import { EmbedOriginsModule } from "./common/embed-origins.module";
 import { MetricsController } from "./common/metrics.controller";
 import { RequestLoggerMiddleware } from "./common/request-logger.middleware";
 import { BudgetModule } from "./budget/budget.module";
@@ -88,6 +89,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     ContentTemplatesModule,
     EnvSecretsModule,
     TurnstileConfigModule,
+    EmbedOriginsModule, // @Global: the per-tenant embed-origin resolver behind public CORS (#617)
     IntrospectModule,
     SettingsModule,
     PreferencesModule,

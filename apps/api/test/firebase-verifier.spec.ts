@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   FirebaseVerifier,
+  secondFactorFromClaims,
   userFromClaims,
 } from "../src/auth/firebase-verifier";
 
@@ -121,5 +122,87 @@ describe("FirebaseVerifier", () => {
   it("returns null when the verified token has no user identity", async () => {
     const verify = vi.fn().mockResolvedValue({ tenant: "t-1" });
     expect(await new FirebaseVerifier(config, verify).verify("ok")).toBeNull();
+  });
+});
+
+// ── #457: instance-wide MFA enforcement reads the SESSION's second factor off the ID token.
+// No live Firebase MFA enrolment is possible in a unit test, so this is the mocked seam: the
+// claims object below is exactly what firebase-admin's verifyIdToken returns for an
+// MFA-completed sign-in. Everything downstream (the guard) consumes only `user.secondFactor`.
+describe("secondFactorFromClaims (#457)", () => {
+  it("returns the Firebase second factor used to sign in", () => {
+    expect(
+      secondFactorFromClaims({
+        uid: "u",
+        firebase: {
+          sign_in_provider: "password",
+          sign_in_second_factor: "totp",
+        },
+      }),
+    ).toBe("totp");
+    expect(
+      secondFactorFromClaims({
+        firebase: {
+          sign_in_provider: "google.com",
+          sign_in_second_factor: "phone",
+        },
+      }),
+    ).toBe("phone");
+  });
+
+  it("returns undefined for a SINGLE-factor session (fails closed under enforcement)", () => {
+    expect(
+      secondFactorFromClaims({
+        uid: "u",
+        firebase: { sign_in_provider: "password" },
+      }),
+    ).toBeUndefined();
+    // no `firebase` claim at all (e.g. a custom-token session)
+    expect(secondFactorFromClaims({ uid: "u" })).toBeUndefined();
+    // present but empty / wrong type / not an object ⇒ still no factor
+    expect(
+      secondFactorFromClaims({ firebase: { sign_in_second_factor: "  " } }),
+    ).toBeUndefined();
+    expect(
+      secondFactorFromClaims({ firebase: { sign_in_second_factor: 1 } }),
+    ).toBeUndefined();
+    expect(
+      secondFactorFromClaims({ firebase: "not-an-object" }),
+    ).toBeUndefined();
+    expect(secondFactorFromClaims({ firebase: ["array"] })).toBeUndefined();
+  });
+
+  it("accepts an OIDC `amr` MFA method as a secondary signal", () => {
+    expect(secondFactorFromClaims({ amr: ["pwd", "MFA"] })).toBe("mfa");
+    expect(secondFactorFromClaims({ amr: ["pwd", "otp"] })).toBe("otp");
+    // a non-MFA amr is not a second factor
+    expect(secondFactorFromClaims({ amr: ["pwd"] })).toBeUndefined();
+    expect(secondFactorFromClaims({ amr: "pwd" })).toBeUndefined();
+  });
+
+  it("prefers the Firebase claim over amr", () => {
+    expect(
+      secondFactorFromClaims({
+        firebase: { sign_in_second_factor: "phone" },
+        amr: ["otp"],
+      }),
+    ).toBe("phone");
+  });
+});
+
+describe("userFromClaims — second factor (#457)", () => {
+  it("carries the second factor onto the user", () => {
+    expect(
+      userFromClaims(
+        { uid: "u", firebase: { sign_in_second_factor: "totp" } },
+        "tenant",
+      ),
+    ).toMatchObject({ userId: "u", secondFactor: "totp" });
+  });
+
+  it("leaves secondFactor undefined for a single-factor session", () => {
+    expect(
+      userFromClaims({ uid: "u" }, "tenant")?.secondFactor,
+    ).toBeUndefined();
   });
 });

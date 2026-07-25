@@ -43,6 +43,20 @@ export class AccessNotAllowedError extends Error {
   }
 }
 
+/** Thrown when the instance requires two-factor auth (#457) and this session has none — the
+ *  SPA shows the "enrol to continue" screen. Distinct from a generic 403 (membership/tenant)
+ *  AND from a 401: the credentials are valid, so signing the user out would just loop them
+ *  back through the same single-factor login. */
+export class MfaRequiredError extends Error {
+  constructor(message?: string) {
+    super(
+      message ??
+        "This instance requires two-factor authentication. Enrol a second factor, then sign in again.",
+    );
+    this.name = "MfaRequiredError";
+  }
+}
+
 export const BASE = "/api";
 
 // The active workspace, sent as `X-Workspace-Id` so the server scopes every request to the
@@ -142,6 +156,13 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
     // Only this exact code, so an ordinary 403 (membership/tenant) still surfaces generically.
     if (res.status === 403 && body?.code === "access_not_allowed") {
       throw new AccessNotAllowedError(
+        typeof body.message === "string" ? body.message : undefined,
+      );
+    }
+    // A 403 carrying the MFA marker → the enrol-to-continue screen (#457). Same "exact code
+    // only" rule, so an ordinary 403 stays generic.
+    if (res.status === 403 && body?.code === "mfa_required") {
+      throw new MfaRequiredError(
         typeof body.message === "string" ? body.message : undefined,
       );
     }

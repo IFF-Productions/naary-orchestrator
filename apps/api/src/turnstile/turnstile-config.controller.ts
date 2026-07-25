@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, Put } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
 import { EnvironmentSel, TenantId } from "../auth/tenant.decorator";
+import { EmbedOriginsService } from "../common/embed-origins.service";
 import { EnvironmentsService } from "../environments/environments.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { TurnstileConfigResponse } from "./turnstile-config.response";
@@ -14,7 +15,9 @@ import {
  * ACTIVE environment (X-Environment-Id → EnvironmentsService). The secret key is WRITE-ONLY: GET
  * returns the public site key + `hasSecret`, never the secret. See
  * docs/design/TURNSTILE-BOT-PROTECTION.md. (The anonymous public verification of a submitted token
- * lives on the form/chat controllers — Slice 2.)
+ * lives on the form/chat controllers — Slice 2.) `allowedHostnames` is the SHARED domain allowlist:
+ * it gates Turnstile solved hostnames AND the public embed CORS layer (#617), so a write here
+ * invalidates the embed-origin resolver's cache.
  */
 @ApiBearerAuth("bearer")
 @Controller("turnstile-config")
@@ -22,6 +25,9 @@ export class TurnstileConfigController {
   constructor(
     private readonly service: TurnstileConfigService,
     private readonly environments: EnvironmentsService,
+    // The shared domain allowlist also drives public embed CORS (#617); drop its memoized copy on
+    // every write so an edit applies immediately rather than after the resolver's TTL.
+    private readonly embedOrigins: EmbedOriginsService,
   ) {}
 
   @ApiEndpoint({
@@ -52,7 +58,9 @@ export class TurnstileConfigController {
     @EnvironmentSel() envSel?: string,
   ): Promise<TurnstileConfigResponse> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    return this.service.save(tenantId, envId, body);
+    const saved = await this.service.save(tenantId, envId, body);
+    this.embedOrigins.invalidate();
+    return saved;
   }
 
   @ApiEndpoint({ summary: "Remove the Turnstile config (active environment)" })
@@ -64,5 +72,6 @@ export class TurnstileConfigController {
   ): Promise<void> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
     await this.service.remove(tenantId, envId);
+    this.embedOrigins.invalidate();
   }
 }

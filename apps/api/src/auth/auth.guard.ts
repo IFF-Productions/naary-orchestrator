@@ -55,6 +55,36 @@ const ACCESS_NOT_ALLOWED = {
 } as const;
 
 /**
+ * Instance-wide "require two-factor authentication" policy (#457). `REQUIRE_MFA` is an
+ * operator env toggle — the same shape as `ACCESS_ALLOWED_EMAILS` above, which is the
+ * existing precedent for an instance-wide auth policy (there is no instance-settings table;
+ * every DB settings row is tenant- or env-scoped, and this policy is explicitly NOT
+ * per-tenant). Accepts `1`/`true`/`yes`/`on` (case-insensitive); anything else — including
+ * unset — is OFF.
+ *
+ * DEFAULT OFF, on purpose: turning this on before anyone has enrolled would lock every
+ * human out of the instance, so it must be an explicit, deliberate operator action.
+ */
+export function parseRequireMfa(raw: string | undefined): boolean {
+  return ["1", "true", "yes", "on"].includes((raw ?? "").trim().toLowerCase());
+}
+
+/**
+ * Response body for an authenticated user whose SESSION has no second factor while the
+ * instance requires one (#457). A DISTINCT `code` (not a bare 403) is the contract with the
+ * SPA: it routes to the "enrol to continue" screen instead of showing a confusing
+ * "forbidden". 403 (not 401) deliberately — the credentials ARE valid, so a 401 would make
+ * the SPA sign the user out and loop them back through the same single-factor login.
+ */
+const MFA_REQUIRED = {
+  statusCode: 403,
+  error: "Forbidden",
+  code: "mfa_required",
+  message:
+    "This instance requires two-factor authentication. Enrol a second factor, then sign in again.",
+} as const;
+
+/**
  * Global dual-auth guard.
  *
  * Authenticates `Authorization: Bearer <token>` as EITHER a Firebase ID token (humans —
@@ -71,6 +101,10 @@ const ACCESS_NOT_ALLOWED = {
  * Fails CLOSED: a workspace-scoped route with no resolvable membership → 403. Only routes
  * marked `@UserScoped()` (identity/onboarding) run tenant-less. `@Public()` routes
  * (webhook HMAC ingress, connections OAuth redirect) skip auth entirely.
+ *
+ * Two instance-wide policies layer on top of the Firebase branch only (never on `nry_`
+ * tokens, never on `@Public()`): the `ACCESS_ALLOWED_EMAILS` early-access allowlist and the
+ * `REQUIRE_MFA` two-factor requirement (#457) — both default OFF.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -79,6 +113,8 @@ export class AuthGuard implements CanActivate {
   private readonly allowedEmails = parseAllowedEmails(
     process.env.ACCESS_ALLOWED_EMAILS,
   );
+  /** Instance-wide MFA enforcement (#457). false = off (default). Read once at boot. */
+  private readonly requireMfa = parseRequireMfa(process.env.REQUIRE_MFA);
 
   constructor(
     private readonly tokens: ApiTokenService,
@@ -93,6 +129,13 @@ export class AuthGuard implements CanActivate {
       this.allowedEmails
         ? `access allowlist: ${this.allowedEmails.size} email(s)`
         : "access allowlist: disabled (open)",
+    );
+    // Same reasoning as above: a misspelled REQUIRE_MFA silently means "not enforced", and
+    // a correct one can lock out humans — so make the state visible at boot.
+    this.logger.log(
+      this.requireMfa
+        ? "MFA enforcement: REQUIRED for all Firebase user sessions"
+        : "MFA enforcement: disabled (default)",
     );
   }
 
@@ -185,6 +228,24 @@ export class AuthGuard implements CanActivate {
       if (!email || !user.emailVerified || !this.allowedEmails.has(email)) {
         throw new ForbiddenException(ACCESS_NOT_ALLOWED);
       }
+    }
+
+    // Instance-wide MFA enforcement (#457). The ID token itself says whether the session
+    // completed a second factor (`firebase.sign_in_second_factor` — see
+    // secondFactorFromClaims), so this is a claim check, not a DB lookup.
+    //
+    // EXEMPT BY CONSTRUCTION (all of them return above, before this line):
+    //  - `@Public()` routes — webhook ingress, hosted forms/chat, OAuth callbacks, signed
+    //    approve/reject links, /healthz + /metrics. They have no user to enrol.
+    //  - `nry_` API tokens (CLI/MCP/CI) — owner-created capabilities with no interactive
+    //    login and therefore no possible second factor; gating them would break automation
+    //    without adding security (the token IS the secret). Same posture as the email
+    //    allowlist above.
+    //
+    // Runs BEFORE the invitation-acceptance and claim→Membership backfills below so a gated
+    // user causes no membership writes — same ordering rationale as the allowlist.
+    if (this.requireMfa && user.secondFactor === undefined) {
+      throw new ForbiddenException(MFA_REQUIRED);
     }
 
     // Accept-on-login (RBAC-GROUPS.md §5, slice U1): convert pending Invitations matching

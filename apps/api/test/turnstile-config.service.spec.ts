@@ -102,12 +102,74 @@ describe("TurnstileConfigService", () => {
     expect(secrets.put).not.toHaveBeenCalled();
   });
 
-  it("save rejects a missing site key", async () => {
+  it("save rejects a missing site key when ENABLING the gate", async () => {
     const { service } = makeService();
     await expect(
       service.save(T, E, { siteKey: "  ", enabled: true }),
     ).rejects.toThrow();
     expect(turnstileConfig.upsert).not.toHaveBeenCalled();
+  });
+
+  // ── #617: the row also carries the SHARED embed-domain allowlist ───────────────────────
+  it("save accepts a DOMAINS-ONLY config (gate off, no keys)", async () => {
+    const { service, secrets } = makeService();
+    turnstileConfig.findUnique.mockResolvedValue(null); // no row yet
+    secrets.get.mockResolvedValue(null);
+    await service.save(T, E, {
+      enabled: false,
+      allowedHostnames: ["example.com"],
+    });
+    expect(turnstileConfig.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          siteKey: "",
+          enabled: false,
+          allowedHostnames: ["example.com"],
+        }),
+      }),
+    );
+  });
+
+  it("save keeps a STORED site key when the caller sends none (no silent wipe)", async () => {
+    const { service, secrets } = makeService();
+    turnstileConfig.findUnique.mockResolvedValue({
+      siteKey: "stored-site",
+      enabled: true,
+    });
+    secrets.get.mockResolvedValue("x");
+    await service.save(T, E, { enabled: true, allowedHostnames: ["a.com"] });
+    expect(turnstileConfig.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ siteKey: "stored-site" }),
+      }),
+    );
+  });
+
+  it("normalizes allowed domains to bare hostnames (origins/ports/paths/case, de-duped)", async () => {
+    const { service, secrets } = makeService();
+    turnstileConfig.findUnique.mockResolvedValue({
+      siteKey: "site",
+      enabled: false,
+    });
+    secrets.get.mockResolvedValue(null);
+    await service.save(T, E, {
+      enabled: false,
+      allowedHostnames: [
+        "https://Example.com/forms/x",
+        "example.com", // dupe after normalization
+        "shop.example.com:3000",
+        "  ",
+        "not a hostname",
+        42 as unknown as string,
+      ],
+    });
+    expect(turnstileConfig.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          allowedHostnames: ["example.com", "shop.example.com"],
+        }),
+      }),
+    );
   });
 
   it("remove deletes the row AND the stored secret", async () => {

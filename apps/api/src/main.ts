@@ -20,7 +20,8 @@ import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { SwaggerModule } from "@nestjs/swagger";
 import helmet from "helmet";
-import { publicCors } from "./common/public-cors";
+import { EmbedOriginsService } from "./common/embed-origins.service";
+import { makePublicCors } from "./common/public-cors";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/all-exceptions.filter";
 import { AppLogger } from "./common/app-logger";
@@ -53,10 +54,13 @@ async function bootstrap(): Promise<void> {
   // must allow `https://challenges.cloudflare.com` in `script-src` + `frame-src`.
   app.use(helmet());
 
-  // Open CORS on the ANONYMOUS public embed ingress (/forms/:id, /chat/:id) BEFORE the app's
-  // allowlist below — lets tenants embed a form/chat natively (their own JS). Safe: no cookies, so
-  // ACAO:* leaks nothing; protection stays with Turnstile + rate limits + budget (see public-cors.ts).
-  app.use(publicCors);
+  // CORS on the ANONYMOUS public embed ingress (/forms/:id, /chat/:id) BEFORE the app's allowlist
+  // below — lets tenants embed a form/chat natively (their own JS). Safe: no cookies, so ACAO:*
+  // leaks nothing; protection stays with Turnstile + rate limits + budget (see public-cors.ts).
+  // #617: narrowed per tenant when they've configured embed domains (the shared Turnstile hostname
+  // allowlist); permissive (`*`, as before) when they haven't.
+  const embedOrigins = app.get(EmbedOriginsService);
+  app.use(makePublicCors((path) => embedOrigins.allowedHostnamesForPath(path)));
 
   // Explicit CORS allowlist (Sec#5): the web app calls the API cross-origin in a
   // deployed env; bearer auth means we allow the Authorization header.

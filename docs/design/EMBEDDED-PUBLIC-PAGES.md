@@ -75,10 +75,42 @@ So the security posture is already in place. This program is mostly **distributi
    injects the iframe + wires resize (mode 2a — no CORS). Nicer DX than hand-writing an iframe; still
    same-origin inside.
 
-3. **Per-tenant CORS + native embed (mode 2b).** Only if tenants need to call the API from their own
-   JS (custom UI). A per-tenant **allowed-origins** list (shared UX with #615's hostname allowlist)
-   → the public routes reflect `Access-Control-Allow-Origin` for listed origins. Security still =
-   Turnstile + limits + budget; CORS only permits the legit cross-origin fetch.
+3. **Per-tenant CORS + native embed (mode 2b).** ✅ **SHIPPED** (#617). A per-tenant
+   **allowed-domains** list → the public routes reflect `Access-Control-Allow-Origin` for listed
+   origins. Security still = Turnstile + limits + budget; CORS only permits the legit cross-origin
+   fetch.
+
+   Decisions taken while building it:
+   - **ONE shared field, not two lists with shared UX.** The list is
+     `TurnstileConfig.allowedHostnames` — already per (tenant, environment), already surfaced in
+     Settings, already normalized. Two fields would be two things to keep in sync for one
+     product question ("which hosts are these pages served from?"), with no user benefit.
+     Consequence: a `TurnstileConfig` row may now exist with `enabled: false` and an empty
+     `siteKey` (a domains-only config), so nothing may assume the row implies a bot gate.
+     No migration — the column already exists and nothing about it changed.
+   - **The one place the two consumers genuinely differ — documented in the UI, not split.** For a
+     **direct-fetch** embed the widget renders on the tenant's own page, so Turnstile's solved
+     hostname *and* the CORS origin are both `tenant.com` — one entry serves both. For an
+     **iframe** embed (slice 1) the widget renders inside *our* framed document, so the solved
+     hostname is **this instance's** host, while CORS isn't involved at all (same-origin inside
+     the frame). A tenant who lists only `tenant.com` and runs the iframe snippet with the gate on
+     would have every submission denied. That trap predates #617 (#615 behaved this way), so the
+     fix is help text that names both cases — not a second field, which wouldn't remove the need
+     to explain it.
+   - **`Remove` clears the shared list too** (it deletes the row), so embed access reverts from
+     narrowed to `*`. Called out in the UI copy; not a security regression under the framing
+     above, but it is a silent widening.
+   - **Hostname matching, not origin matching.** The shared list holds bare hostnames (Turnstile's
+     solved hostname never carries a scheme/port), so CORS compares the request origin's hostname
+     and ignores scheme/port. Tightening that would break http/localhost embeds and buy nothing —
+     `Origin` is client-supplied and forged trivially by any non-browser client.
+   - **Empty list ⇒ `*`, unchanged.** Every pre-#617 tenant has an empty list, so no live embed
+     changes behaviour. Configuring domains is opt-in narrowing.
+   - **`Vary: Origin` on every public-embed response** (allowed or not), so no shared cache can
+     serve one origin's `Access-Control-Allow-Origin` to another.
+   - **Fail-permissive.** The resolver (`EmbedOriginsService`, 30s memo) returns `[]` on any DB
+     error → `*`. It's an enablement layer; a DB blip must not break every tenant's live embed. It
+     returns hostnames only — never a tenant/env/workflow id.
 
 4. **Custom domains.** Cloudflare for SaaS (or ACME) for per-tenant TLS on `forms.tenant.com`, a TXT
    domain-verification flow, and routing the custom host → the tenant's form/chat. Largest slice;

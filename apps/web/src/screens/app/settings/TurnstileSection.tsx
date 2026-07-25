@@ -1,7 +1,15 @@
-// Bot protection (Cloudflare Turnstile) settings — docs/design/TURNSTILE-BOT-PROTECTION.md, Slice 1.
+// Bot protection (Cloudflare Turnstile) + the SHARED public-pages domain allowlist —
+// docs/design/TURNSTILE-BOT-PROTECTION.md and docs/design/EMBEDDED-PUBLIC-PAGES.md.
+//
 // Per-environment config: the tenant enters their OWN Turnstile site + secret key (BYO), so their
-// public form/chat pages get a bot gate (enforced at ingress in Slice 2). The secret is write-only:
-// it's sent on save but never returned — a stored secret shows as a filled placeholder.
+// public form/chat pages get a bot gate (enforced at ingress). The secret is write-only: it's sent
+// on save but never returned — a stored secret shows as a filled placeholder.
+//
+// #617: "Allowed domains" is ONE list serving two features — Turnstile's solved-hostname check and
+// the embed CORS allowlist on the anonymous /forms/:id + /chat/:id routes. Two lists would be two
+// things to keep in sync for one real-world question ("which of my sites host these pages?"), so the
+// list is shared and this is the single place to manage it. Consequence for the form: the Turnstile
+// keys are required only when the bot gate is ENABLED — a tenant can save domains alone.
 import { useCallback, useEffect, useState } from "react";
 import { Button, Switch, TextInput } from "../../../components";
 import type { Environment } from "../../../lib/api";
@@ -89,14 +97,21 @@ export function TurnstileSection({ envs }: { envs: Environment[] }) {
 
   async function save(env: Environment) {
     const form = forms[env.id] ?? EMPTY;
-    if (!form.siteKey.trim()) {
-      setError(`Enter a site key for ${env.name}.`);
-      return;
-    }
-    // A brand-new config with no secret can't gate anything — require it on first save.
-    if (!form.hasSecret && !form.secretKey.trim()) {
-      setError(`Enter a secret key for ${env.name}.`);
-      return;
+    // Keys are only needed to ENABLE the bot gate; a domains-only config (gate off) is valid (#617).
+    if (form.enabled) {
+      if (!form.siteKey.trim()) {
+        setError(
+          `Enter a site key for ${env.name}, or turn bot protection off.`,
+        );
+        return;
+      }
+      // A brand-new config with no secret can't gate anything — require it on first save.
+      if (!form.hasSecret && !form.secretKey.trim()) {
+        setError(
+          `Enter a secret key for ${env.name}, or turn bot protection off.`,
+        );
+        return;
+      }
     }
     setBusy(env.id);
     setError(null);
@@ -131,15 +146,17 @@ export function TurnstileSection({ envs }: { envs: Environment[] }) {
 
   return (
     <div>
-      <SectionHeader title="Bot protection" />
+      <SectionHeader title="Bot protection & embed domains" />
       <SectionIntro>
         Add a Cloudflare <strong>Turnstile</strong> CAPTCHA to your public form
-        and chat pages. Bring your own keys — create a Turnstile widget in your
-        Cloudflare dashboard for your form/chat hostname, then paste the{" "}
-        <strong>site key</strong> (public) and <strong>secret key</strong> here.
-        The secret is encrypted and write-only — it's never shown again. Scoped
-        per environment. Enforced at submit time once enabled (bad or missing
-        challenge → the submission is rejected before any workflow runs).
+        and chat pages, and list the domains you serve or embed them from. Bring
+        your own keys — create a Turnstile widget in your Cloudflare dashboard
+        for your form/chat hostname, then paste the <strong>site key</strong>{" "}
+        (public) and <strong>secret key</strong> here. The secret is encrypted
+        and write-only — it's never shown again. Scoped per environment.
+        Enforced at submit time once enabled (bad or missing challenge → the
+        submission is rejected before any workflow runs). Keys are only required
+        to turn the gate <em>on</em> — you can save domains with it off.
       </SectionIntro>
 
       {error && <ErrorLine>{error}</ErrorLine>}
@@ -205,7 +222,9 @@ export function TurnstileSection({ envs }: { envs: Environment[] }) {
                 style={{ marginBottom: 10 }}
               />
 
-              <label style={labelStyle}>Allowed domains (optional)</label>
+              <label style={labelStyle}>
+                Allowed domains (optional — shared)
+              </label>
               <TextInput
                 value={form.allowedHostnames}
                 onChange={(e) =>
@@ -221,10 +240,34 @@ export function TurnstileSection({ envs }: { envs: Environment[] }) {
                   marginTop: 4,
                 }}
               >
-                Comma-separated. When set, a challenge solved on any other
-                domain is rejected server-side — a non-spoofable “allowed
-                domains”. Leave blank to allow any (your Cloudflare widget
-                hostnames still apply).
+                Comma-separated hostnames (<code>example.com</code>) — pasted
+                URLs are normalised. One list, two jobs.{" "}
+                <strong>Bot protection:</strong> a challenge solved on any other
+                domain is rejected server-side — non-spoofable, and it kills
+                site-key-lift replay. <strong>Embedding:</strong> only these
+                domains may call your public form/chat endpoints from their own
+                JavaScript (cross-origin); other origins are refused by the
+                browser. Leave blank to allow any — that's today's behaviour, so
+                existing embeds keep working.
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--ink-3)",
+                  marginTop: 6,
+                }}
+              >
+                Two things worth knowing. <strong>Which host to list:</strong>{" "}
+                Turnstile matches the hostname of the page the widget actually
+                rendered on — for a JavaScript embed that's your own site, but
+                for the <em>iframe</em> snippet it's this Naary instance's
+                hostname (the framed page). If you use the iframe snippet with
+                bot protection on, list that host too, or those submissions will
+                be rejected. <strong>Removing</strong> this configuration clears
+                the domain list with it, so embed access reverts to allowing any
+                origin. And the embed side is a browser rule, not a security
+                boundary: bot protection, rate limits and your budget cap are
+                what actually protect these endpoints.
               </div>
 
               <div style={{ display: "flex", gap: 8, marginTop: 14 }}>

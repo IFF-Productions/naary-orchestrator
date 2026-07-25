@@ -718,9 +718,18 @@ model TurnstileConfig {
   environmentId String
   siteKey       String
   enabled       Boolean  @default(true)
-  // Optional server-side "allowed domains" (#615): when non-empty, a submission's solved Turnstile
-  // hostname (from siteverify, cryptographically tied to the token — NOT a spoofable header) must be
-  // in this list, else it's denied. Empty ⇒ no host restriction. Also defeats site-key-lift replay.
+  // The SHARED "allowed domains" list for this tenant/env's public pages — deliberately ONE list,
+  // not two (#617):
+  //  1. #615 Turnstile: when non-empty, a submission's solved Turnstile hostname (from siteverify,
+  //     cryptographically tied to the token — NOT a spoofable header) must be in it, else denied.
+  //     Also defeats site-key-lift replay.
+  //  2. #617 embed CORS: when non-empty, the anonymous /forms/:id + /chat/:id routes reflect only a
+  //     matching Origin instead of `*` (browser-only ENABLEMENT, not protection — see
+  //     apps/api/src/common/public-cors.ts).
+  // Bare hostnames, no wildcards (the service normalizes pasted origins/ports). Empty ⇒ no
+  // restriction in EITHER direction, which is the state of every pre-#617 row.
+  // NB: because the row now carries this shared list, `siteKey` may be "" on a row whose `enabled`
+  // is false (a domains-only config). Readers must not assume a non-empty site key.
   allowedHostnames String[] @default([])
   updatedAt        DateTime @default(now()) @updatedAt
 

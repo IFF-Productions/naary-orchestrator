@@ -24,7 +24,9 @@ export interface TurnstileConfigView {
   siteKey: string;
   enabled: boolean;
   hasSecret: boolean;
-  /** Optional "allowed domains" — solved Turnstile hostnames permitted (empty ⇒ any). */
+  /** The SHARED domain allowlist (#615 + #617): hostnames these public pages may be served/embedded
+   *  from. Empty ⇒ unrestricted. Used by BOTH the Turnstile solved-hostname check and the public
+   *  embed CORS layer. */
   allowedHostnames: string[];
 }
 
@@ -33,18 +35,44 @@ export interface TurnstileConfigInput {
   /** Write-only: set/replaced, never read back. Omitted/empty on update ⇒ keep the existing secret. */
   secretKey?: unknown;
   enabled?: unknown;
-  /** Allowed solved-hostnames (#615). Non-array ⇒ unchanged; entries are trimmed + de-duped. */
+  /** The shared domain allowlist (#615 Turnstile hostnames + #617 embed CORS origins). Non-array ⇒
+   *  unchanged; entries are normalized to bare hostnames + de-duped. */
   allowedHostnames?: unknown;
 }
 
-/** Normalize an allowed-hostnames input to a clean string[] (trim, drop empties, de-dupe), or null
- *  when the caller didn't supply an array (⇒ leave the stored value unchanged). */
+/**
+ * Normalize one entry of the shared domain allowlist to a bare HOSTNAME. Users paste origins
+ * (`https://example.com/`), hosts with ports (`example.com:3000`), or plain hosts — and the list is
+ * matched against BOTH Turnstile's solved hostname (never has a scheme/port) and a CORS request
+ * origin's hostname (#617), so every form must collapse to the same thing. Returns "" when the
+ * entry has no usable host.
+ */
+function toHostname(raw: string): string {
+  let s = raw.trim().toLowerCase();
+  if (!s) return "";
+  if (s.includes("://")) {
+    try {
+      s = new URL(s).hostname;
+    } catch {
+      return "";
+    }
+  } else {
+    s = s.split("/")[0]; // strip any path
+    // Strip a :port — but never break an IPv6 literal ("[::1]:3000" → "[::1]").
+    if (s.startsWith("[")) s = s.slice(0, s.indexOf("]") + 1) || s;
+    else s = s.split(":")[0];
+  }
+  return /^[a-z0-9._[\]:-]+$/.test(s) ? s : "";
+}
+
+/** Normalize an allowed-hostnames input to a clean string[] (to bare hostnames, drop empties,
+ *  de-dupe), or null when the caller didn't supply an array (⇒ leave the stored value unchanged). */
 function normalizeHostnames(v: unknown): string[] | null {
   if (!Array.isArray(v)) return null;
   const out: string[] = [];
   for (const h of v) {
     if (typeof h !== "string") continue;
-    const t = h.trim().toLowerCase();
+    const t = toHostname(h);
     if (t && !out.includes(t)) out.push(t);
   }
   return out;
@@ -52,10 +80,13 @@ function normalizeHostnames(v: unknown): string[] | null {
 
 /**
  * Cloudflare Turnstile bot-protection config, per (tenant, environment) — see
- * docs/design/TURNSTILE-BOT-PROTECTION.md. The public site key + enable toggle live in the
- * `TurnstileConfig` table; the SECRET key is stored encrypted in the SecretStore (per-tenant DEK,
- * write-only) under `turnstile:secret`, mirroring how connection tokens (`conn:`) and $secrets
- * (`secret:`) are namespaced there. The secret never leaves the server (Tier-1 §4).
+ * docs/design/TURNSTILE-BOT-PROTECTION.md. Also the home of the SHARED public-pages domain
+ * allowlist (`allowedHostnames`), which #617 unified: ONE list per (tenant, env) drives both the
+ * Turnstile solved-hostname check and the public embed CORS layer, rather than two competing lists.
+ * The public site key + enable toggle live in the `TurnstileConfig` table; the SECRET key is stored
+ * encrypted in the SecretStore (per-tenant DEK, write-only) under `turnstile:secret`, mirroring how
+ * connection tokens (`conn:`) and $secrets (`secret:`) are namespaced there. The secret never leaves
+ * the server (Tier-1 §4).
  */
 @Injectable()
 export class TurnstileConfigService {
@@ -82,18 +113,33 @@ export class TurnstileConfigService {
     };
   }
 
-  /** Create/update the config. The site key is required; the secret key is write-only (set only when
-   *  a non-empty value is supplied, so a site-key/enabled edit keeps the existing secret). */
+  /**
+   * Create/update the config. The secret key is write-only (set only when a non-empty value is
+   * supplied, so a site-key/enabled edit keeps the existing secret).
+   *
+   * The site key is required only when the bot gate is ENABLED (#617): the row now also carries the
+   * shared embed-domain allowlist, so a tenant who wants embed domains but no CAPTCHA must be able
+   * to save one with `enabled: false` and no keys. An `enabled: true` row with no site key anywhere
+   * would render no widget, so that combination still 400s. An omitted/empty site key KEEPS the
+   * stored one (like the secret) — so a domains-only save can never silently wipe working keys.
+   */
   async save(
     tenantId: string,
     environmentId: string,
     input: TurnstileConfigInput,
   ): Promise<TurnstileConfigView> {
-    const siteKey =
+    const existing = await getPrisma().turnstileConfig.findUnique({
+      where: { tenantId_environmentId: { tenantId, environmentId } },
+    });
+    const supplied =
       typeof input.siteKey === "string" ? input.siteKey.trim() : "";
-    if (!siteKey)
-      throw new BadRequestException("A Turnstile site key is required.");
+    const siteKey = supplied || existing?.siteKey || "";
     const enabled = input.enabled === undefined ? true : Boolean(input.enabled);
+    if (enabled && !siteKey) {
+      throw new BadRequestException(
+        "A Turnstile site key is required to enable bot protection.",
+      );
+    }
     const hostnames = normalizeHostnames(input.allowedHostnames);
 
     await getPrisma().turnstileConfig.upsert({
