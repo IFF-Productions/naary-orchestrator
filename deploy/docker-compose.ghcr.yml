@@ -1,5 +1,5 @@
 # GHCR overlay: run PREBUILT images from GitHub Container Registry instead of building
-# on the box. CI (.github/workflows/deploy.yml) builds + pushes both images per release
+# on the box. CI (.github/workflows/deploy.yml) builds + pushes these images per release
 # tag; the server only ever pulls. Layer it LAST:
 #
 #   APP_VERSION=v0.0.1 docker compose \
@@ -32,4 +32,12 @@ services:
 
   web:
     image: ${IMAGE_BASE:-ghcr.io/tarazena}/naary-web:${APP_VERSION:?set APP_VERSION to the release tag (e.g. v0.0.1)}
+    build: !reset null
+
+  # codeAgent sandbox runner (profile-gated `sandbox` in the prod overlay — pulled/started
+  # only when that profile is on). NOT the sandbox image itself: `naary-claude-sandbox` is
+  # launched by the runner through the host Docker, not by compose, and is built on the box
+  # (see the prod overlay's enablement steps).
+  sandbox-runner:
+    image: ${IMAGE_BASE:-ghcr.io/tarazena}/naary-sandbox-runner:${APP_VERSION:?set APP_VERSION to the release tag (e.g. v0.0.1)}
     build: !reset null

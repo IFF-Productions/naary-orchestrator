@@ -27,11 +27,16 @@ import type * as activities from "../../activities";
 // Pure fan-out policy (no side effects) — safe to import into workflow code.
 import { FOREACH_CONCURRENCY, perChildCap } from "../../foreach-cap";
 import {
+  expandItems,
   resolveSubWorkflowGraph,
   prepareApproval,
   sendNotification,
 } from "../proxies";
-import { MAX_SUBWORKFLOW_DEPTH, MAX_FOREACH_ITEMS } from "../helpers";
+import {
+  MAX_SUBWORKFLOW_DEPTH,
+  MAX_FOREACH_ITEMS,
+  containsClaimCheckRef,
+} from "../helpers";
 // Leaf node handlers, extracted VERBATIM behind a registry (Phase 1 run-graph split).
 import { NODE_HANDLERS } from "../node-handlers";
 // The recursive interpreter entry (executeSubWorkflow/forEach launch child runGraphs).
@@ -251,7 +256,22 @@ async function execNodeInner(
       const depth = runCtx.subWorkflowDepth ?? 0;
       if (depth >= MAX_SUBWORKFLOW_DEPTH) return "circuit_open";
 
-      const raw = getByPath(ctx[feCfg.from], feCfg.path);
+      // Items claim-check offload (#479) — same three-condition gate as the splitOut region in
+      // exec-chain.ts, where the full rationale (why `!Array.isArray` must come first, and why this
+      // patched() marker IS reached on replay yet still safe) is written out. Short version: an
+      // offloaded upstream array is unreadable in workflow code, so expand it in an activity; before
+      // this a reference source silently fanned out ZERO children.
+      const rawSource = ctx[feCfg.from];
+      const direct = getByPath(rawSource, feCfg.path); // pure + free; also the old behavior
+      const raw =
+        !Array.isArray(direct) &&
+        containsClaimCheckRef(rawSource) &&
+        wf.patched("items-claim-check-v1")
+          ? await expandItems(
+              { source: rawSource, path: feCfg.path },
+              metaFor(node.id),
+            )
+          : direct;
       const items = Array.isArray(raw) ? raw : [];
       if (items.length === 0) {
         ctx[node.id] = [];

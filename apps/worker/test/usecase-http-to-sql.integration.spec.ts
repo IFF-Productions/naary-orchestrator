@@ -56,7 +56,7 @@ beforeAll(async () => {
     engine: "postgres",
     dsn: container.getConnectionUri(),
   });
-  activities.__sqlDeps.assertHostPublic = async () => undefined;
+  activities.__sqlDeps.resolvePinnedHost = async (host: string) => host;
 
   // HTTP: reach the local server (bypass https/public pre-check + the private-IP transport guard).
   activities.__httpDeps.assertEgressAllowed = (async (u: string) =>

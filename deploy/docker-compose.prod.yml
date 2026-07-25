@@ -77,6 +77,20 @@ services:
       # returns undefined and the buttons/links are silently omitted. Derive it from the same
       # PUBLIC_HOSTNAME the api's CORS uses so there's one var to set. Override via APP_BASE_URL.
       APP_BASE_URL: "${APP_BASE_URL:-https://${PUBLIC_HOSTNAME:-naar-y.com}}"
+      # codeAgent sandbox wiring (see the sandbox-runner service below). Set on BOTH worker
+      # pools: codeAgent statically routes to `orchestrator-heavy`, but the default queue
+      # still serves runs whose history predates that route (workflow.patched) and
+      # single-node executions. The write path stays OFF regardless —
+      # CODE_AGENT_WRITE_ENABLED is deliberately not set here.
+      SANDBOX_RUNNER_URL: "${SANDBOX_RUNNER_URL:-http://sandbox-runner:8099}"
+      SANDBOX_RUNNER_TOKEN: "${SANDBOX_RUNNER_TOKEN:-}"
+      CODE_AGENT_RUNS_DIR: "${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}"
+    volumes:
+      # The shared working-tree dir: the worker clones into it, the runner mounts it into
+      # the sandbox. It MUST be the same path inside both containers as on the host — the
+      # runner shells `docker run -v <path>` through the HOST docker, so the path is
+      # resolved host-side (apps/sandbox-runner/src/config.ts). Hence one var on both sides.
+      - "${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}:${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}"
     # Close the base file's published 9091 (metrics). Nothing scrapes it over the network
     # in prod (Sentry gets the metrics), and "every published port is closed" (header
     # point 1) should actually include this one — it was the lone hole.
@@ -96,6 +110,12 @@ services:
       SENTRY_ENVIRONMENT: production
       # Same as `worker` — deep-link base for notifications this queue may emit.
       APP_BASE_URL: "${APP_BASE_URL:-https://${PUBLIC_HOSTNAME:-naar-y.com}}"
+      # This is the pool codeAgent actually routes to — same sandbox wiring as `worker`.
+      SANDBOX_RUNNER_URL: "${SANDBOX_RUNNER_URL:-http://sandbox-runner:8099}"
+      SANDBOX_RUNNER_TOKEN: "${SANDBOX_RUNNER_TOKEN:-}"
+      CODE_AGENT_RUNS_DIR: "${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}"
+    volumes:
+      - "${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}:${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}"
     ports: !override []
     depends_on: !override
       migrate:
@@ -165,6 +185,111 @@ services:
       - /sys:/host/sys:ro
       - /var/log:/host/var/log:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # container names (read-only)
+
+  # ── codeAgent sandbox (design CLAUDE-CODE-NODE.md §8b.1, was deploy/sandbox/) ──────────
+  # These two services are the prod home of what deploy/sandbox/docker-compose.sandbox.yml
+  # prototyped, so the code-agent sandbox is usable on the box instead of a side stack.
+  #
+  # PROFILE-GATED (`sandbox`), like `temporal`/`postgres` are here: the runner REQUIRES
+  # SANDBOX_RUNNER_TOKEN (it holds the Docker socket, so a tokenless runner is refused at
+  # boot, by design). A hard `${...:?}` would break `compose config` — and therefore every
+  # deploy — on boxes that haven't set one, and an empty token would just crash-loop a
+  # Docker-privileged container. So they start only when the operator opts in:
+  #
+  #   1. docker build -t naary-claude-sandbox:latest /opt/naary/deploy/sandbox   (the image
+  #      the runner launches; hard-pinned by name in the runner, never workflow-chosen)
+  #   2. /opt/naary/deploy/sandbox/egress-test.sh   (the acceptance gate — prove the sandbox
+  #      can reach Anthropic and NOTHING else, on this host)
+  #   3. add SANDBOX_RUNNER_TOKEN=<random> and COMPOSE_PROFILES=sandbox to /opt/naary/.env
+  #
+  # Enabling codeAgent write mode (CODE_AGENT_WRITE_ENABLED) is a SEPARATE, later step —
+  # this only makes the infrastructure available.
+  sandbox-proxy:
+    # Pinned by DIGEST for reproducibility — this proxy IS the security boundary, so it must
+    # not drift (ubuntu/squid only ships _beta/edge tags; the digest is the stable anchor).
+    image: ubuntu/squid:6.6-24.04_beta@sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029
+    # No fixed container_name (it's global → collides with the egress test / a side stack).
+    # The stable hostname the sandbox dials is a NETWORK ALIAS instead.
+    profiles: ["sandbox"]
+    restart: unless-stopped
+    networks:
+      sandbox-internal: # the sandbox reaches the proxy here…
+        aliases:
+          - naary-sandbox-proxy
+      sandbox-egress: {} # …and the proxy reaches Anthropic out here
+    volumes:
+      # Relative to the project directory (/opt/naary on the box), like PG_DATA_DIR above —
+      # deploy.yml ships deploy/sandbox/ alongside the compose files for exactly this.
+      - ./deploy/sandbox/squid-allowlist.conf:/etc/squid/squid.conf:ro
+    # Belt-and-braces hardening on the proxy container itself.
+    read_only: true
+    tmpfs:
+      - /var/spool/squid
+      - /var/run
+    security_opt:
+      - no-new-privileges:true
+
+  # The runner: the ONLY app container with Docker access (host-root-adjacent). It launches
+  # the ephemeral sandboxes. Kept OFF the worker on purpose — that split IS the containment,
+  # so never move this mount onto worker/worker-heavy. Prod-only sidecar with a fixed name,
+  # so (like cloudflared/netdata) it is not part of deploy.yml's rolling update.
+  #
+  # NOT publicly reachable: no published ports, and it sits on the app's `default` network
+  # only, where the worker dials it as SANDBOX_RUNNER_URL (bearer-token authed). It is
+  # deliberately NOT on sandbox-internal — the sandboxes it launches must not be able to
+  # reach the thing that holds the Docker socket.
+  sandbox-runner:
+    build:
+      context: .
+      dockerfile: deploy/sandbox/runner.Dockerfile
+    image: naary-sandbox-runner # replaced by the GHCR overlay (build reset there)
+    container_name: naary-sandbox-runner
+    profiles: ["sandbox"]
+    restart: unless-stopped
+    networks:
+      - default
+    environment:
+      SANDBOX_RUNNER_TOKEN: "${SANDBOX_RUNNER_TOKEN:-}"
+      SANDBOX_RUNS_DIR: "${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}"
+      SANDBOX_NETWORK: naary-sandbox-internal
+      SANDBOX_PROXY_URL: http://naary-sandbox-proxy:3128
+      SANDBOX_IMAGE: naary-claude-sandbox:latest
+    volumes:
+      # Docker socket — this container's (contained) privilege.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Working trees: the SAME host path as the worker mounts, at the same path inside, so
+      # the sibling `docker run -v <path>` (resolved on the host) points at the right dir.
+      - "${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}:${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}"
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # The runner image has no curl/wget — use node's fetch, like api/worker do.
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(\"http://127.0.0.1:8099/healthz\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# The two networks that realize sandbox containment (unchanged from deploy/sandbox/). Both
+# carry explicit `name:`s because the runner attaches sandboxes by name, independently of the
+# compose project. Compose MERGES this with the base file's implicit `default` network, which
+# is what api/worker/web keep using.
+#
+#   sandbox-internal — internal:true → NO default gateway. A container here cannot route to
+#                      the internet, the host, cloud metadata (169.254.169.254), or other
+#                      stacks. The ONLY thing it can reach is the proxy (same network).
+#   sandbox-egress   — an ordinary bridge; ONLY the proxy sits on it, giving the proxy (and
+#                      nothing else) a path to the internet.
+networks:
+  sandbox-internal:
+    name: naary-sandbox-internal
+    internal: true
+  sandbox-egress:
+    name: naary-sandbox-egress
 
 # Named volumes for the Netdata sidecar. Compose MERGES this top-level `volumes:` with the
 # base file's (naary-pgdata / naary-temporal), so declaring only the new ones here is safe.

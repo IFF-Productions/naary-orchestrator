@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { SearchInput, Skeleton, Toast } from "../../components";
-import { api, UnauthorizedError } from "../../lib/api";
+import { api, type ConnectionRow, UnauthorizedError } from "../../lib/api";
 import { useMode } from "../../mode";
 import { InstallSuccess } from "./templates/InstallSuccess";
 import {
+  checkConnectionRequirements,
   deriveCategoryChips,
   deriveTemplateView,
   uniqueWorkflowKey,
@@ -41,6 +42,10 @@ export function Templates() {
   const navigate = useNavigate();
   const { mode } = useMode();
   const [views, setViews] = useState<TemplateView[] | null>(null);
+  // The workspace's real connections, for the required-connection checklist. `null` means
+  // "not known" (still loading, or the call failed) — the checklist then renders WITHOUT a
+  // satisfied/missing verdict rather than claiming everything is missing.
+  const [connections, setConnections] = useState<ConnectionRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("all");
@@ -91,6 +96,28 @@ export function Templates() {
     };
   }, []);
 
+  // The workspace's connections — what the required-connection checklist is checked
+  // against. A failure leaves it null on purpose (see the state declaration).
+  //
+  // Connections are ENV-scoped (the client sends X-Environment-Id), and `[]` deps are
+  // still correct: AppShell keys the routed screen by `pathname|activeEnv`, so switching
+  // environments REMOUNTS this screen and re-runs this fetch under the new env — the same
+  // contract the Integrations screen's loader relies on. Without that a verdict could be
+  // computed against a different env's connections.
+  useEffect(() => {
+    let alive = true;
+    api
+      .getMe()
+      .then((me) => api.listConnections(me.tenantId))
+      .then((rows) => {
+        if (alive) setConnections(rows);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const chips = useMemo(
     () => (views ? deriveCategoryChips(views) : []),
     [views],
@@ -103,7 +130,9 @@ export function Templates() {
       (v) =>
         (cat === "all" || v.category.id === cat) &&
         (!needle ||
-          `${v.name} ${v.description} ${v.category.name}`
+          // The API's use-case tags are part of the haystack, so they're load-bearing
+          // rather than decoration ("rss", "human-approval", … find a template).
+          `${v.name} ${v.description} ${v.category.name} ${v.tags.join(" ")}`
             .toLowerCase()
             .includes(needle)),
     );
@@ -112,6 +141,23 @@ export function Templates() {
   const preview = previewKey
     ? (views?.find((v) => v.key === previewKey) ?? null)
     : null;
+
+  // Verdicts for the previewed / just-installed template's required connections. null
+  // whenever the workspace's connections aren't known — never a fabricated "missing".
+  const previewChecked = useMemo(
+    () =>
+      preview && connections
+        ? checkConnectionRequirements(preview.requirements, connections)
+        : null,
+    [preview, connections],
+  );
+  const installedChecked = useMemo(
+    () =>
+      installed && connections
+        ? checkConnectionRequirements(installed.view.requirements, connections)
+        : null,
+    [installed, connections],
+  );
 
   function pushToast(kind: ToastItem["kind"], text: string) {
     const id = ++toastIdRef.current;
@@ -174,6 +220,7 @@ export function Templates() {
         <InstallSuccess
           view={installed.view}
           workflowKey={installed.workflowKey}
+          checkedRequirements={installedChecked}
           openLabel={simple ? "Open automation" : "Open in canvas"}
           onOpen={() =>
             navigate(
@@ -182,6 +229,7 @@ export function Templates() {
                 : `/app/canvas?key=${encodeURIComponent(installed.workflowKey)}`,
             )
           }
+          onConnect={(tab) => navigate(`/app/integrations?tab=${tab}`)}
           onBack={() => setInstalled(null)}
         />
       ) : (
@@ -345,6 +393,7 @@ export function Templates() {
         <PreviewModal
           view={preview}
           installing={installing}
+          checkedRequirements={previewChecked}
           onInstall={() => void install(preview)}
           onClose={() => setPreviewKey(null)}
         />

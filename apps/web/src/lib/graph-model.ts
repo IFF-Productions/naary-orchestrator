@@ -146,6 +146,32 @@ const INTEGRATION_TILE_OVERRIDES: Record<
       "Read/write Notion — query a database, create a page, append blocks.",
     action: "create_page",
   },
+  // Batch 4 (#684) hand-authored these four tiles on main before this derivation landed.
+  // Their copy is better than the catalog's generic `description`, so it's preserved here.
+  // googlesheets ALSO needs its action pinned: the catalog's first action is `get_values`
+  // (a read), but the tile has always defaulted to the `append_row` write — same trap as
+  // github/jira/notion above. mattermost/pagerduty/deepl already lead with their write
+  // action, so only their copy is overridden.
+  mattermost: {
+    description:
+      "Post to Mattermost — send a message, reply in a thread, react, or read history.",
+    action: "send_message",
+  },
+  pagerduty: {
+    description:
+      "Manage PagerDuty incidents — create, acknowledge, resolve, annotate, or read.",
+    action: "create_incident",
+  },
+  googlesheets: {
+    description:
+      "Read and write a Google Sheet — append rows, read a range, update or clear values.",
+    action: "append_row",
+  },
+  deepl: {
+    description:
+      "Translate text with DeepL — translate, check quota usage, list languages.",
+    action: "translate_text",
+  },
 };
 
 /**

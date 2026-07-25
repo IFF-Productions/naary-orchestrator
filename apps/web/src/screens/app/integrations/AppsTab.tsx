@@ -6,18 +6,17 @@ import {
   type ConnectionRow,
   type ProviderCredential,
 } from "../../../lib/api";
+import { APP_CONNECTION_TYPES } from "../../../lib/connection-types";
 import { PHONE_QUERY, useMediaQuery } from "../../../lib/useMediaQuery";
 import { CodeAgentCard } from "./CodeAgentCard";
 import { CodeAgentCredentialCard } from "./CodeAgentCredentialCard";
 import { ConnectForm, GithubAppForm } from "./connection-forms";
 import { cardShell, EnvChip, IconTile, introStyle } from "./shared";
 
-/** Connection types that are apps/servers (the rest live on the Providers tab). */
-export const APP_CONNECTION_TYPES: ConnectionRow["type"][] = [
-  "github",
-  "atlassian",
-  "custom",
-];
+/** Connection types that are apps/servers (the rest live on the Providers tab). Defined in
+ *  lib/connection-types.ts so pure modules can route a "connect this" CTA at the right tab;
+ *  re-exported here because every existing import points at this screen. */
+export { APP_CONNECTION_TYPES };
 
 const TYPE_COLOR: Record<string, string> = {
   github: "var(--brand)",

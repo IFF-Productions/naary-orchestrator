@@ -786,82 +786,87 @@ export function renderAgentSections(c: ConfigSectionCtx) {
                   {action.write ? " · runs at-most-once (no retry)" : ""}
                 </div>
               )}
-              {(action?.fields ?? []).map((f) => {
-                const bound = boundFrom(f.key);
-                // Bound → the upstream value overrides any typed value at run time, and it
-                // satisfies "required", so show a hint + drop the `*` nag instead of the star.
-                const label = bound
-                  ? `${f.label} · bound`
-                  : `${f.label}${f.required ? " *" : ""}`;
-                const hint = bound ? (
-                  <div
-                    className="mono"
-                    style={{
-                      fontSize: "var(--text-2xs)",
-                      color: "var(--ink-3)",
-                      marginTop: 3,
-                    }}
-                  >
-                    ↳ from {bound} (upstream value overrides this)
-                  </div>
-                ) : null;
-                return f.type === "json" ? (
-                  // Schema-driven value (Notion properties, etc.) — a raw JSON editor.
-                  <div key={f.key}>
-                    <JsonField
-                      label={label}
-                      value={fields[f.key]}
-                      placeholder={f.hint ?? "{ }"}
-                      // A `json` field accepts an object OR an array (e.g. Notion `children`).
-                      allowArray
-                      onChange={(v) =>
-                        onChange({ fields: { ...fields, [f.key]: v } })
-                      }
-                    />
-                    {hint}
-                  </div>
-                ) : (
-                  <div key={f.key}>
-                    <Labeled label={label}>
-                      {f.type === "string" ? (
-                        // Free-text integration field (e.g. repo/owner/number) — supports
-                        // {{ upstream.path }} with highlighting + autocomplete.
-                        <ExpressionField
-                          value={display(fields[f.key])}
-                          onChange={(v) => setField(f.key, f.type, v)}
-                          nodeId={node.id}
-                          edges={edges}
-                          pins={pins}
-                          nodeKinds={nodeKinds}
-                          placeholder={
-                            bound
-                              ? "bound from an upstream step ↓"
-                              : (f.hint ?? "value or {{ upstream.path }}")
-                          }
-                        />
-                      ) : (
-                        <input
-                          type={f.type === "number" ? "number" : "text"}
-                          value={display(fields[f.key])}
-                          onChange={(e) =>
-                            setField(f.key, f.type, e.target.value)
-                          }
-                          style={inputStyle}
-                          placeholder={
-                            bound
-                              ? "bound from an upstream step ↓"
-                              : (f.hint ??
-                                (f.type === "string[]"
-                                  ? "comma-separated, or bind from an upstream step"
-                                  : ""))
-                          }
-                        />
-                      )}
-                    </Labeled>
-                    {hint}
-                  </div>
-                );
-              })}
+              {/* `const` fields are catalog-supplied API type discriminators (e.g. PagerDuty's
+                  `incident.type`) — the request builder injects them, so rendering an input the
+                  user can't change would only confuse. */}
+              {(action?.fields ?? [])
+                .filter((f) => f.const === undefined)
+                .map((f) => {
+                  const bound = boundFrom(f.key);
+                  // Bound → the upstream value overrides any typed value at run time, and it
+                  // satisfies "required", so show a hint + drop the `*` nag instead of the star.
+                  const label = bound
+                    ? `${f.label} · bound`
+                    : `${f.label}${f.required ? " *" : ""}`;
+                  const hint = bound ? (
+                    <div
+                      className="mono"
+                      style={{
+                        fontSize: "var(--text-2xs)",
+                        color: "var(--ink-3)",
+                        marginTop: 3,
+                      }}
+                    >
+                      ↳ from {bound} (upstream value overrides this)
+                    </div>
+                  ) : null;
+                  return f.type === "json" ? (
+                    // Schema-driven value (Notion properties, etc.) — a raw JSON editor.
+                    <div key={f.key}>
+                      <JsonField
+                        label={label}
+                        value={fields[f.key]}
+                        placeholder={f.hint ?? "{ }"}
+                        // A `json` field accepts an object OR an array (e.g. Notion `children`).
+                        allowArray
+                        onChange={(v) =>
+                          onChange({ fields: { ...fields, [f.key]: v } })
+                        }
+                      />
+                      {hint}
+                    </div>
+                  ) : (
+                    <div key={f.key}>
+                      <Labeled label={label}>
+                        {f.type === "string" ? (
+                          // Free-text integration field (e.g. repo/owner/number) — supports
+                          // {{ upstream.path }} with highlighting + autocomplete.
+                          <ExpressionField
+                            value={display(fields[f.key])}
+                            onChange={(v) => setField(f.key, f.type, v)}
+                            nodeId={node.id}
+                            edges={edges}
+                            pins={pins}
+                            nodeKinds={nodeKinds}
+                            placeholder={
+                              bound
+                                ? "bound from an upstream step ↓"
+                                : (f.hint ?? "value or {{ upstream.path }}")
+                            }
+                          />
+                        ) : (
+                          <input
+                            type={f.type === "number" ? "number" : "text"}
+                            value={display(fields[f.key])}
+                            onChange={(e) =>
+                              setField(f.key, f.type, e.target.value)
+                            }
+                            style={inputStyle}
+                            placeholder={
+                              bound
+                                ? "bound from an upstream step ↓"
+                                : (f.hint ??
+                                  (f.type === "string[]"
+                                    ? "comma-separated, or bind from an upstream step"
+                                    : ""))
+                            }
+                          />
+                        )}
+                      </Labeled>
+                      {hint}
+                    </div>
+                  );
+                })}
               <BindingsEditor
                 bindings={
                   obj("fieldBindings") as Record<string, BindingRow> | undefined

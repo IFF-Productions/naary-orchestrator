@@ -8,7 +8,7 @@ import {
 const fetch = vi.fn();
 const sendMail = vi.fn();
 const resolveSmtpUri = vi.fn();
-const assertHostPublic = vi.fn();
+const pinnedSmtpUri = vi.fn();
 // The tenant's ENABLED channels the worker fans out to (readChannels returns only enabled rows).
 let channels: NotificationChannelRow[];
 
@@ -46,14 +46,16 @@ beforeEach(() => {
   __notifyDeps.fetch = ((url: string, init?: RequestInit) =>
     fetch(url, init)) as never;
   __notifyDeps.readChannels = (async () => channels) as never;
-  // Email seam (Slice 4): resolver + SSRF check + transport, all test doubles — no SMTP/DB.
+  // Email seam (Slice 4): resolver + SSRF check/pin + transport, all test doubles — no SMTP/DB.
   sendMail.mockReset().mockResolvedValue({ messageId: "m1" });
   resolveSmtpUri
     .mockReset()
     .mockResolvedValue("smtps://ops%40acme.io:s3cret@smtp.acme.io:465");
-  assertHostPublic.mockReset().mockResolvedValue(undefined);
+  pinnedSmtpUri
+    .mockReset()
+    .mockImplementation(async (uri: string) => `${uri}?servername=smtp.acme.io`);
   __notifyDeps.resolveSmtpUri = resolveSmtpUri as never;
-  __notifyDeps.assertHostPublic = assertHostPublic as never;
+  __notifyDeps.pinnedSmtpUri = pinnedSmtpUri as never;
   __notifyDeps.createTransport = (() => ({ sendMail })) as never;
 });
 
@@ -861,8 +863,10 @@ describe("sendNotification — email channel (Slice 4)", () => {
     expect(fetch).not.toHaveBeenCalled();
     // The SMTP URI is resolved by tenant + the channel's connectionId, at send time.
     expect(resolveSmtpUri).toHaveBeenCalledWith("t1", "conn-smtp-1");
-    // SSRF: the SMTP host must be public.
-    expect(assertHostPublic).toHaveBeenCalledWith("smtp.acme.io");
+    // SSRF: the URI is validated + connect-pinned, and the pinned URI is what we dial.
+    expect(pinnedSmtpUri).toHaveBeenCalledWith(
+      "smtps://ops%40acme.io:s3cret@smtp.acme.io:465",
+    );
     expect(sendMail).toHaveBeenCalledOnce();
     const mail = sendMail.mock.calls[0][0];
     expect(mail.to).toEqual(["ops@acme.io", "sre@acme.io"]);
@@ -927,7 +931,7 @@ describe("sendNotification — email channel (Slice 4)", () => {
 
   it("a blocked (private) SMTP host is refused before any send", async () => {
     channels = [EMAIL_CHANNEL];
-    assertHostPublic.mockRejectedValue(new Error("private host"));
+    pinnedSmtpUri.mockRejectedValue(new Error("private host"));
     await sendNotification({ ...BASE, kind: "run_failed", detail: "boom" });
     expect(sendMail).not.toHaveBeenCalled();
   });

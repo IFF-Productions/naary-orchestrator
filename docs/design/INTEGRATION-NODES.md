@@ -62,9 +62,12 @@ no ctx, no secrets.
 ```ts
 interface IntegrationField {
   key: string; label: string;
-  in: "path" | "query" | "body";
+  in: "path" | "query" | "body" | "header"; // "header": wire name = the key (PagerDuty's `From`)
   required: boolean;
-  type?: "string" | "number" | "boolean" | "string[]";
+  type?: "string" | "number" | "boolean" | "string[]" | "json";
+  bodyPath?: string;   // dotted target in the JSON body (Jira's fields.project.key)
+  const?: string | number | boolean; // catalog-fixed value (PagerDuty's incident.type) — the
+                                     // user never sets it; always counts as "supplied"
 }
 interface IntegrationAction {
   key: string; label: string;
@@ -94,7 +97,12 @@ hygiene (auth resolved in-activity, never returned/logged), and testability:
 1. Look up `provider`+`action` in the catalog (unknown → non-retryable fail).
 2. `base` = `provider.baseUrl` **or** the connection's `serverUrl` (`baseUrlFromConnection`).
 3. Fill `{placeholders}` in `pathTemplate` from `in:"path"` fields; append `in:"query"` fields
-   as the query string; assemble `in:"body"` fields into a JSON body (write verbs only).
+   as the query string; assemble `in:"body"` fields into a JSON body (write verbs only); build
+   `in:"header"` fields into per-request headers, merged **under** the resolved auth headers so
+   a field (whose value may come from run data) can never clobber `Authorization` — a CR/LF in
+   such a value is rejected as a non-retryable config fault. `const` fields are injected last,
+   and a `const` nested deeper than the payload envelope is only sent when its sub-object
+   already carries data (so no `{ type: … }`-only wrapper is invented).
 4. `authHeaders = resolveAuthHeader(tenantId, connectionId)` (Bearer; PAT/api_token/OAuth).
 5. `assertEgressAllowed(url)` → `fetch` with the deadline → parse JSON.
 6. Return `{ status, ok, body }` — a non-2xx is **returned, not thrown** (branch on `.status`),
@@ -174,10 +182,15 @@ just a catalog entry once the pattern is in:
   (one endpoint, a query + variables), which the REST `pathTemplate`/method model can't express.
   A `graphql` action kind (query template + variable mapping) is the next design step for it.
 
-**Catalog capabilities so far:** flat/nested JSON bodies (`bodyPath`), path/query/body fields, typed
-fields incl. **`json`** (raw value, bindable) for schema-driven payloads, per-provider `authScheme`
-(bearer / basic). **Still needs extension for:** GraphQL providers (Linear), non-header auth
-(Telegram's token-in-path, Twilio's form-encoded Basic).
+**Catalog capabilities so far:** flat/nested JSON bodies (`bodyPath`), path/query/body/**header**
+fields, typed fields incl. **`json`** (raw value, bindable) for schema-driven payloads, catalog-fixed
+**`const`** fields (API type discriminators, e.g. PagerDuty's `incident.type`), per-provider
+`authScheme` (bearer / basic / a custom `{ header, prefix }` — Shopify, Discord, ClickUp, Monday,
+PagerDuty's `Token token=`, DeepL's `DeepL-Auth-Key`). **Still needs extension for:** GraphQL
+providers (Linear/Monday are modelled as a single POST + a `query` field), and non-header auth —
+a credential in the URL path (Telegram's `/bot<token>/…`), in a query param (OpenWeatherMap's
+`appid`), or a form-encoded body. A provider needing one of those must NOT be added with a
+"close enough" `authScheme`: it would silently fail to authenticate (see #655).
 
 **Tier 2 — broad demand:**
 - **Google Sheets** (append row / read range) · **Airtable** (create/update record) ·

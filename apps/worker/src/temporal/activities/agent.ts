@@ -11,6 +11,12 @@ import {
   resolveMcpTarget,
 } from "@naary/connections";
 import { MissingCredentialError } from "@naary/secrets";
+import { withGenAiSpan, withGenAiToolSpan } from "@naary/observability";
+import {
+  containsClaimCheck,
+  getObjectStore,
+  resolveClaimChecks,
+} from "@naary/storage";
 import {
   computeCost,
   estimateCallCost,
@@ -259,6 +265,15 @@ export async function runAgent(
     // anthropic is the only supported provider today; opus is a safe default model.
     const provider = cfg.provider?.trim() || "anthropic";
 
+    // Items claim-check (#479): a per-item input can arrive as a `{__claimCheck}` REFERENCE — the
+    // expandItems activity offloads large elements of a big items array so the workflow carries
+    // small refs, not blobs. Rehydrate HERE, at the activity boundary (the only place I/O is
+    // allowed), so the prompt + the budget estimate see the real value and not the reference. The
+    // pure containsClaimCheck pre-check keeps the ref-free case free of any object-store touch.
+    const modelInput = containsClaimCheck(input)
+      ? await resolveClaimChecks(input, getObjectStore())
+      : input;
+
     // In memory only — never returned from the activity, never logged. Env-scoped creds (Slice 5):
     // use the run's env (5b, threaded via meta) so a sandbox run reads the sandbox key; a pre-5b run
     // has no meta.environmentId → fall back to the tenant default (byte-identical to pre-Slice-5).
@@ -299,7 +314,7 @@ export async function runAgent(
             systemPrompt: cfg.systemPrompt,
             maxOutputTokens,
           },
-          input,
+          modelInput,
         );
       let res = await __agentDeps.reserveBudget(
         meta.tenantId,
@@ -407,40 +422,45 @@ export async function runAgent(
             additionalProperties: true,
           }) as unknown as Parameters<typeof jsonSchema>[0],
         ),
-        execute: async (args: unknown) => {
-          try {
-            const target = await __agentDeps.resolveMcpTarget(
-              meta.tenantId,
-              t.connectionId,
-            );
-            const r = await __agentDeps.callMcpTool({
-              serverUrl: target.serverUrl,
-              headers: target.headers,
-              tool: t.tool,
-              arguments: (args ?? {}) as Record<string, unknown>,
-            });
-            // A tool-level error is NOT success — surface it (non-retryable: same args fail the
-            // same way) so the model doesn't proceed on a phantom result.
-            if (r.isError) {
-              throw ApplicationFailure.nonRetryable(
-                `MCP tool '${t.tool}' returned an error`,
-                "MCP_TOOL_ERROR",
-                { connectionId: t.connectionId },
+        // GenAI-convention `execute_tool` span (#581) around each in-loop tool call, so a trace shows
+        // the model's tool round-trips as CHILDREN of the `chat` span above with their own latency.
+        // The exposed tool NAME only — never the arguments or the result (same privacy line as the
+        // prompt: the conventions' content capture stays off).
+        execute: (args: unknown) =>
+          withGenAiToolSpan({ toolName: exposedName }, async () => {
+            try {
+              const target = await __agentDeps.resolveMcpTarget(
+                meta.tenantId,
+                t.connectionId,
               );
+              const r = await __agentDeps.callMcpTool({
+                serverUrl: target.serverUrl,
+                headers: target.headers,
+                tool: t.tool,
+                arguments: (args ?? {}) as Record<string, unknown>,
+              });
+              // A tool-level error is NOT success — surface it (non-retryable: same args fail the
+              // same way) so the model doesn't proceed on a phantom result.
+              if (r.isError) {
+                throw ApplicationFailure.nonRetryable(
+                  `MCP tool '${t.tool}' returned an error`,
+                  "MCP_TOOL_ERROR",
+                  { connectionId: t.connectionId },
+                );
+              }
+              toolCostUsd += t.costUsd ?? 0;
+              return r.content;
+            } catch (err) {
+              // Map connection/transport errors to the SAME non-retryable failures the mcpTool node
+              // uses (with THIS tool's connectionId) before they escape into the model loop — so
+              // reauth/blocked/missing-token/misconfig don't get sanitized to a retryable transient
+              // by the outer catch. Our own ApplicationFailures pass through untouched.
+              if (err instanceof ApplicationFailure) throw err;
+              const mapped = mapMcpToolError(err, t.connectionId);
+              if (mapped) throw mapped;
+              throw err;
             }
-            toolCostUsd += t.costUsd ?? 0;
-            return r.content;
-          } catch (err) {
-            // Map connection/transport errors to the SAME non-retryable failures the mcpTool node
-            // uses (with THIS tool's connectionId) before they escape into the model loop — so
-            // reauth/blocked/missing-token/misconfig don't get sanitized to a retryable transient
-            // by the outer catch. Our own ApplicationFailures pass through untouched.
-            if (err instanceof ApplicationFailure) throw err;
-            const mapped = mapMcpToolError(err, t.connectionId);
-            if (mapped) throw mapped;
-            throw err;
-          }
-        },
+          }),
       });
     }
 
@@ -458,66 +478,118 @@ export async function runAgent(
         }
       : {};
 
-    const result = await generateText({
-      model: await buildModel(provider, model, apiKey),
-      ...(cachePrompt
-        ? {
-            messages: [
-              {
-                role: "system" as const,
-                content: cfg.systemPrompt as string,
-                providerOptions: {
-                  anthropic: { cacheControl: { type: "ephemeral" } },
-                },
-              },
-              { role: "user" as const, content: JSON.stringify(input) },
-            ],
-          }
-        : { system: cfg.systemPrompt, prompt: JSON.stringify(input) }),
-      ...(tooled
-        ? {
-            // Cast keeps generateText's tool generics shallow — combining ToolSet + Output
-            // inference otherwise risks a TS2589 deep-instantiation blow-up (see jsonSchema note).
-            tools: builtTools as Parameters<typeof generateText>[0]["tools"],
-            stopWhen: stepCountIs(cfg.maxToolSteps ?? DEFAULT_MAX_TOOL_STEPS),
-          }
-        : {}),
-      ...outputOpt,
-      maxOutputTokens,
-      ...(cfg.temperature !== undefined
-        ? { temperature: cfg.temperature }
-        : {}),
-    });
+    // GenAI-convention span (#581). It wraps ONLY the model call + the PURE usage/cost derivation
+    // whose numbers it reports — the credential fetch, budget reservation, and the recordUsage write
+    // stay outside, so the span's duration keeps meaning "model latency". Attributes are model /
+    // tokens / finish reason / cost only; prompt + completion text cannot reach a span attribute by
+    // construction (see the privacy note in @naary/observability's genai module).
+    const { result, usage, tokenCostUsd } = await withGenAiSpan(
+      {
+        operation: "chat",
+        provider,
+        model,
+        maxOutputTokens,
+        temperature: cfg.temperature,
+      },
+      async (recordGenAi) => {
+        const result = await generateText({
+          model: await buildModel(provider, model, apiKey),
+          ...(cachePrompt
+            ? {
+                messages: [
+                  {
+                    role: "system" as const,
+                    content: cfg.systemPrompt as string,
+                    providerOptions: {
+                      anthropic: { cacheControl: { type: "ephemeral" } },
+                    },
+                  },
+                  {
+                    role: "user" as const,
+                    content: JSON.stringify(modelInput),
+                  },
+                ],
+              }
+            : {
+                system: cfg.systemPrompt,
+                prompt: JSON.stringify(modelInput),
+              }),
+          ...(tooled
+            ? {
+                // Cast keeps generateText's tool generics shallow — combining ToolSet + Output
+                // inference otherwise risks a TS2589 deep-instantiation blow-up (see jsonSchema note).
+                tools: builtTools as Parameters<
+                  typeof generateText
+                >[0]["tools"],
+                stopWhen: stepCountIs(
+                  cfg.maxToolSteps ?? DEFAULT_MAX_TOOL_STEPS,
+                ),
+              }
+            : {}),
+          ...outputOpt,
+          maxOutputTokens,
+          ...(cfg.temperature !== undefined
+            ? { temperature: cfg.temperature }
+            : {}),
+        });
+
+        // BILLING (CLAUDE.md rule 6): totalUsage sums across tool steps; guard the
+        // ai@6 undefined-usage bug so we never silently record a free call.
+        // NOTE (QA#2): for Anthropic, `inputTokens` EXCLUDES cache-read tokens (those
+        // arrive separately as cache-read tokens), so input and cached are independent
+        // billing buckets — computeCost must not subtract one from the other.
+        // ai@7 moved the cache/reasoning counts into inputTokenDetails/outputTokenDetails.
+        const u = result.totalUsage ?? result.usage;
+        const real = {
+          inputTokens: u?.inputTokens ?? 0,
+          outputTokens: u?.outputTokens ?? 0,
+          totalTokens: u?.totalTokens,
+          cachedInputTokens: u?.inputTokenDetails?.cacheReadTokens,
+          reasoningTokens: u?.outputTokenDetails?.reasoningTokens,
+        };
+        // The provider reported nothing usable ⇒ the rule-6 fail-safe estimate. Flagged on the span
+        // so a dashboard can't mistake an estimate for a metered count.
+        const estimated = !(real.inputTokens || real.outputTokens);
+        const usage = estimated
+          ? estimateTokens(
+              cfg.systemPrompt,
+              modelInput,
+              // output text may be empty under structured output — fall back to the object
+              result.text || JSON.stringify(result.output ?? ""),
+            )
+          : real;
+        // Same cost recordUsage computes (pure — @naary/usage pricing table), derived here so the
+        // span can carry it; the node's TOTAL cost adds the flat MCP tool spend below.
+        const tokenCostUsd = computeCost({
+          provider,
+          model,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          cachedInputTokens: (usage as { cachedInputTokens?: number })
+            .cachedInputTokens,
+        });
+        recordGenAi({
+          responseModel: result.response?.modelId,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          cachedInputTokens: (usage as { cachedInputTokens?: number })
+            .cachedInputTokens,
+          // Convention shape is a list; ai exposes a single reason for the whole call.
+          finishReasons: result.finishReason
+            ? [result.finishReason]
+            : undefined,
+          costUsd: tokenCostUsd,
+          estimated,
+        });
+        return { result, usage, tokenCostUsd };
+      },
+    );
 
     // The node's output: the structured object when a schema drove the call, else the model's
     // final free-text answer as { text } (a stable shape downstream expressions can read).
     const nodeOutput: Record<string, unknown> = wantStructured
       ? (result.output as Record<string, unknown>)
       : { text: result.text };
-
-    // BILLING (CLAUDE.md rule 6): totalUsage sums across tool steps; guard the
-    // ai@6 undefined-usage bug so we never silently record a free call.
-    // NOTE (QA#2): for Anthropic, `inputTokens` EXCLUDES cache-read tokens (those
-    // arrive separately as cache-read tokens), so input and cached are independent
-    // billing buckets — computeCost must not subtract one from the other.
-    // ai@7 moved the cache/reasoning counts into inputTokenDetails/outputTokenDetails.
-    const u = result.totalUsage ?? result.usage;
-    const real = {
-      inputTokens: u?.inputTokens ?? 0,
-      outputTokens: u?.outputTokens ?? 0,
-      totalTokens: u?.totalTokens,
-      cachedInputTokens: u?.inputTokenDetails?.cacheReadTokens,
-      reasoningTokens: u?.outputTokenDetails?.reasoningTokens,
-    };
-    const usage =
-      real.inputTokens || real.outputTokens
-        ? real
-        : estimateTokens(
-            cfg.systemPrompt,
-            input,
-            // output text may be empty under structured output — fall back to the object
-            result.text || JSON.stringify(result.output ?? ""),
-          );
 
     await __agentDeps.recordUsage({
       tenantId: meta.tenantId,
@@ -531,19 +603,11 @@ export async function runAgent(
       usage,
     });
 
-    // Same cost recordUsage computed — returned so the workflow can accumulate
-    // it deterministically (no DB read in workflow code). For a tooled call, add the
-    // flat MCP tool costs accrued during the loop (#449): the ledger records token
-    // spend, while the returned costUsd is the node's total spend the run accumulates —
-    // exactly how the standalone mcpTool node contributes its flat cost (no UsageEvent).
-    const tokenCostUsd = computeCost({
-      provider,
-      model,
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      cachedInputTokens: (usage as { cachedInputTokens?: number })
-        .cachedInputTokens,
-    });
+    // The same token cost recordUsage computed (derived inside the GenAI span above) — returned so
+    // the workflow can accumulate it deterministically (no DB read in workflow code). For a tooled
+    // call, add the flat MCP tool costs accrued during the loop (#449): the ledger records token
+    // spend, while the returned costUsd is the node's total spend the run accumulates — exactly how
+    // the standalone mcpTool node contributes its flat cost (no UsageEvent).
     const costUsd = tokenCostUsd + toolCostUsd;
 
     log.info(

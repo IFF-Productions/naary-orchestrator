@@ -2,7 +2,7 @@
 import { createHmac } from "node:crypto";
 import {
   assertEgressAllowed,
-  assertHostPublic,
+  pinnedSmtpUri,
   resolveSmtpUri,
   safeFetch,
 } from "@naary/connections";
@@ -101,9 +101,10 @@ export const __notifyDeps = {
     safeFetch(url, init as never) as unknown as Promise<Response>,
   assertEgressAllowed,
   // Email-channel seam (mirrors the sendEmail node's __emailDeps): the SMTP-URI resolver,
-  // the host SSRF check, and the transport factory — swapped in tests so no SMTP is touched.
+  // the host SSRF check + connect-pin, and the transport factory — swapped in tests so no
+  // SMTP is touched.
   resolveSmtpUri,
-  assertHostPublic,
+  pinnedSmtpUri,
   createTransport: (uri: string) => nodemailer.createTransport(uri),
 };
 
@@ -341,13 +342,14 @@ export async function sendNotification(
           cfg.connectionId,
         );
         const parsed = new URL(uri);
-        // SSRF guard: reject a private/reserved SMTP host (checked at send time).
-        await __notifyDeps.assertHostPublic(parsed.hostname);
+        // SSRF guard: reject a private/reserved SMTP host, and dial the ONE address that
+        // check validated so nodemailer can't re-resolve it to something internal (#597).
+        const dialUri = await __notifyDeps.pinnedSmtpUri(uri);
         const from = parsed.username
           ? decodeURIComponent(parsed.username)
           : undefined;
         const mail = notificationEmail(input, links);
-        const transport = __notifyDeps.createTransport(uri);
+        const transport = __notifyDeps.createTransport(dialUri);
         await transport.sendMail({
           from,
           to: cfg.to,

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BlockedEgressError,
   MissingConnectionTokenError,
-  assertHostPublic,
+  resolvePinnedHost,
 } from "@naary/connections";
 import {
   __setObjectStore,
@@ -39,9 +39,12 @@ beforeEach(() => {
   });
   __sqlDeps.resolveDbConnection = resolveDbConnection as never;
   __sqlDeps.getAdapter = (() => ({ engine: "postgres", runReadOnly })) as never;
-  // Allow the egress host check by default (db.internal doesn't resolve in tests);
-  // the S-3 tests below use the REAL guard with a literal internal IP.
-  __sqlDeps.assertHostPublic = vi.fn().mockResolvedValue(undefined) as never;
+  // Allow the egress host check by default (db.internal doesn't resolve in tests) and hand
+  // back a pin, as the real resolver does; the S-3 tests below use the REAL guard with a
+  // literal internal IP.
+  __sqlDeps.resolvePinnedHost = vi
+    .fn()
+    .mockResolvedValue("93.184.216.34") as never;
   store = new MemoryObjectStore();
   __setObjectStore(store);
 });
@@ -59,19 +62,24 @@ describe("callSqlQuery activity", () => {
       costUsd: 0,
     });
     expect(resolveDbConnection).toHaveBeenCalledWith("t1", "db-1");
-    // DSN + sql + params reach the adapter; default 30s timeout applied.
+    // DSN + sql + params reach the adapter; default 30s timeout applied, and the
+    // validated address is handed down as the connect PIN (#597) — the adapter aims the
+    // driver's socket at it instead of letting the driver re-resolve db.internal.
     expect(runReadOnly).toHaveBeenCalledWith(
       "postgres://user:secret@db.internal:5432/app",
       "SELECT * FROM users WHERE id = $1",
       [7],
-      { timeoutMs: 30_000 },
+      { timeoutMs: 30_000, pinnedHost: "93.184.216.34" },
     );
   });
 
   it("clamps an over-large statement timeout to the hard cap", async () => {
     runReadOnly.mockResolvedValue({ rows: [], rowCount: 0 });
     await callSqlQuery({ ...CFG, statementTimeoutMs: 999_999 }, {}, META);
-    expect(runReadOnly.mock.calls[0][3]).toEqual({ timeoutMs: 120_000 });
+    expect(runReadOnly.mock.calls[0][3]).toEqual({
+      timeoutMs: 120_000,
+      pinnedHost: "93.184.216.34",
+    });
   });
 
   it("claim-checks a large result set to object storage (Arch§4.6)", async () => {
@@ -154,7 +162,7 @@ describe("callSqlQuery activity", () => {
 
   it("S-3: a DSN pointing at an internal IP → EGRESS_BLOCKED, never connects", async () => {
     // Use the REAL egress guard; 10.0.0.5 is an IP literal → blocked without DNS.
-    __sqlDeps.assertHostPublic = assertHostPublic as never;
+    __sqlDeps.resolvePinnedHost = resolvePinnedHost as never;
     resolveDbConnection.mockResolvedValue({
       engine: "postgres",
       dsn: "postgres://u:p@10.0.0.5:5432/app",
@@ -210,7 +218,7 @@ describe("callSqlExec activity (write)", () => {
       "postgres://user:secret@db.internal:5432/app",
       "UPDATE users SET seen = true WHERE id = $1",
       [7],
-      { timeoutMs: 30_000 },
+      { timeoutMs: 30_000, pinnedHost: "93.184.216.34" },
     );
   });
 
@@ -228,7 +236,7 @@ describe("callSqlExec activity (write)", () => {
       engine: "postgres",
       dsn: "postgres://u:p@10.0.0.5:5432/app",
     });
-    __sqlDeps.assertHostPublic = assertHostPublic as never; // real guard
+    __sqlDeps.resolvePinnedHost = resolvePinnedHost as never; // real guard
 
     await expect(callSqlExec(EXEC, {}, META)).rejects.toMatchObject({
       type: "EGRESS_BLOCKED",

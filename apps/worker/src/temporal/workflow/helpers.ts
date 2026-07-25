@@ -13,11 +13,60 @@ export const MAX_SUBWORKFLOW_DEPTH = 5;
  *  than this trips the circuit breaker — filter/limit upstream first. */
 export const MAX_FOREACH_ITEMS = 100;
 
+/**
+ * Claim-check reference shape (@naary/storage's `ClaimCheck`), DUPLICATED here on purpose: workflow
+ * code must not import @naary/storage — that would pull the AWS S3 SDK and `node:crypto` into the
+ * deterministic Temporal sandbox. The shape is one field and has not changed since Arch§4.6;
+ * packages/dsl/src/node-output.ts inlines it for the same reason. Keep in sync with claim-check.ts.
+ */
+function isClaimCheckRef(v: unknown): boolean {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    typeof (v as { __claimCheck?: unknown }).__claimCheck === "string"
+  );
+}
+
+/**
+ * True when `value` holds a claim-check reference ANYWHERE in its tree — the signal that an items
+ * source cannot be read in workflow code and must go through the `expandItems` activity (#479).
+ *
+ * PURE: no I/O, no clock, no randomness; issues no Temporal command. Bounded (the value already fit
+ * Temporal's payload cap to get here) and cycle-safe.
+ *
+ * Deliberately NOT path-aware. A reference may sit AT the source path (the whole `body` was
+ * offloaded) or ABOVE it (`body.items`, where `body` is the reference and getByPath silently yields
+ * `undefined`). Any reference in the tree routes us to the activity, which applies the REAL
+ * @naary/dsl getByPath after rehydrating — so there is no second path parser here to drift out of
+ * sync. The cost is a rare wasted activity when a reference sits off-path; the benefit is that a
+ * whole class of silent-wrong-answer bugs cannot exist.
+ */
+export function containsClaimCheckRef(
+  value: unknown,
+  seen = new WeakSet<object>(),
+): boolean {
+  if (isClaimCheckRef(value)) return true;
+  if (value === null || typeof value !== "object") return false;
+  if (seen.has(value)) return false;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.some((v) => containsClaimCheckRef(v, seen));
+  }
+  return Object.values(value).some((v) => containsClaimCheckRef(v, seen));
+}
+
 /** Items model A3: max items a single splitOut region batches through ONE mapNode activity. The N
  *  resolved configs (in) + N outputs (out) ride in Temporal history verbatim (no global codec), so
  *  a very large N would cross the ~2MB payload cap and hard-fail the history write. Fail closed
  *  BELOW the cap with a clear message; larger fan-out belongs in `forEach` (child runs, own history)
- *  or an upstream chunk. (Per-payload claim-check offload to lift this is a later slice.) */
+ *  or an upstream chunk.
+ *
+ *  #479 does NOT lift this cap, and can't: the mapNode ARGUMENT is built here, in workflow code, so
+ *  offloading it would require I/O on the deterministic side (Tier-1 rules 2/3) — and an activity
+ *  that offloaded it for us would receive the same oversized payload as its own argument. What #479
+ *  does fix is the SOURCE side: a claim-checked items array is now expanded per element by the
+ *  expandItems activity, so a few enormous items no longer blow the payload; MANY items still hit
+ *  this count cap. Lifting it properly means moving per-item config resolution into the activity. */
 export const MAX_MAP_BATCH_ITEMS = 100;
 
 /** Items model A4: max ACTIVITY executions across a per-item sub-DAG region in one run (design

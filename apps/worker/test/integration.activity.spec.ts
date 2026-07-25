@@ -291,6 +291,227 @@ describe("callIntegration activity", () => {
     expect(result.ok).toBe(true);
   });
 
+  /* ── batch 4: Mattermost · PagerDuty · Google Sheets · DeepL ── */
+
+  it("Mattermost send_message → POST the connection's server URL with a Bearer token", async () => {
+    connMock.mockResolvedValue({
+      serverUrl: "https://chat.acme.com",
+      authMode: "pat",
+    });
+    fetchMock.mockResolvedValue(res(201, { id: "p1" }));
+    const cfg: IntegrationNodeConfig = {
+      provider: "mattermost",
+      action: "send_message",
+      connectionId: "mm",
+      fields: { channel_id: "c1", message: "deploy finished" },
+    };
+    const result = await callIntegration(cfg, cfg.fields!, META);
+    expect(result.httpStatus).toBe(201);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url.toString()).toBe("https://chat.acme.com/api/v4/posts");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      channel_id: "c1",
+      message: "deploy finished",
+    });
+    // Mattermost API v4 really does take a Bearer — no rewrite.
+    expect(init.headers.Authorization).toBe("Bearer tok-123");
+  });
+
+  it("Mattermost get_channel_by_name → GET, no body, base from serverUrl", async () => {
+    connMock.mockResolvedValue({
+      serverUrl: "https://chat.acme.com/",
+      authMode: "pat",
+    });
+    fetchMock.mockResolvedValue(res(200, { id: "c1" }));
+    const cfg: IntegrationNodeConfig = {
+      provider: "mattermost",
+      action: "get_channel_by_name",
+      connectionId: "mm",
+      fields: { teamName: "acme", channelName: "town-square" },
+    };
+    await callIntegration(cfg, cfg.fields!, META);
+    const [url, init] = fetchMock.mock.calls[0];
+    // The trailing slash on the connection URL is trimmed, not doubled.
+    expect(url.toString()).toBe(
+      "https://chat.acme.com/api/v4/teams/name/acme/channels/name/town-square",
+    );
+    expect(init.method).toBe("GET");
+    expect(init.body).toBeUndefined();
+  });
+
+  it("PagerDuty create_incident → 'Authorization: Token token=<key>' (NOT a Bearer) + v2 Accept + From header", async () => {
+    connMock.mockResolvedValue({ serverUrl: null, authMode: "api_token" });
+    authMock.mockResolvedValue({ Authorization: "Bearer pd-key" });
+    fetchMock.mockResolvedValue(res(201, { incident: { id: "PT4KHLK" } }));
+    const cfg: IntegrationNodeConfig = {
+      provider: "pagerduty",
+      action: "create_incident",
+      connectionId: "pd",
+      fields: {
+        From: "oncall@acme.com",
+        title: "Checkout is down",
+        serviceId: "PW7YESS",
+        urgency: "high",
+      },
+    };
+    await callIntegration(cfg, cfg.fields!, META);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url.toString()).toBe("https://api.pagerduty.com/incidents");
+    // PagerDuty's real scheme — the raw key after a literal `Token token=` prefix.
+    expect(init.headers.Authorization).toBe("Token token=pd-key");
+    expect(init.headers.Accept).toBe(
+      "application/vnd.pagerduty+json;version=2",
+    );
+    // The `From` FIELD lands as a request header, not in the body.
+    expect(init.headers.From).toBe("oncall@acme.com");
+    expect(JSON.parse(init.body)).toEqual({
+      incident: {
+        type: "incident",
+        title: "Checkout is down",
+        service: { id: "PW7YESS", type: "service_reference" },
+        urgency: "high",
+      },
+    });
+  });
+
+  it("PagerDuty resolve_incident → PUT with the const discriminators; a non-2xx write fails loudly", async () => {
+    connMock.mockResolvedValue({ serverUrl: null, authMode: "api_token" });
+    authMock.mockResolvedValue({ Authorization: "Bearer pd-key" });
+    fetchMock.mockResolvedValue(res(403, { error: { message: "Forbidden" } }));
+    const cfg: IntegrationNodeConfig = {
+      provider: "pagerduty",
+      action: "resolve_incident",
+      connectionId: "pd",
+      fields: { From: "oncall@acme.com", id: "PT4KHLK" },
+    };
+    await expect(callIntegration(cfg, cfg.fields!, META)).rejects.toThrow(
+      /resolve_incident' failed: 403.*\/incidents\/PT4KHLK/s,
+    );
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url.toString()).toBe("https://api.pagerduty.com/incidents/PT4KHLK");
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body)).toEqual({
+      incident: { type: "incident_reference", status: "resolved" },
+    });
+    expect(fetchMock).toHaveBeenCalledOnce(); // at-most-once: not retried
+  });
+
+  it("a header FIELD can never clobber the resolved auth header", async () => {
+    connMock.mockResolvedValue({ serverUrl: null, authMode: "api_token" });
+    authMock.mockResolvedValue({ Authorization: "Bearer pd-key" });
+    fetchMock.mockResolvedValue(res(201, {}));
+    const cfg: IntegrationNodeConfig = {
+      provider: "pagerduty",
+      action: "create_incident",
+      connectionId: "pd",
+      fields: { title: "t", serviceId: "s" },
+    };
+    // A hostile/incorrect field value keyed like the auth header — the catalog's PD action
+    // declares `From` only, so `Authorization` isn't even built; assert auth survives.
+    await callIntegration(
+      cfg,
+      { ...cfg.fields!, Authorization: "Bearer attacker" },
+      META,
+    );
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers.Authorization).toBe("Token token=pd-key");
+    // …and the provider's own catalog header still wins over a field-built one.
+    expect(init.headers.Accept).toBe(
+      "application/vnd.pagerduty+json;version=2",
+    );
+  });
+
+  it("a CR/LF in a header field fails NON-retryably and never reaches fetch", async () => {
+    connMock.mockResolvedValue({ serverUrl: null, authMode: "api_token" });
+    const cfg: IntegrationNodeConfig = {
+      provider: "pagerduty",
+      action: "create_incident",
+      connectionId: "pd",
+      fields: { title: "t", serviceId: "s" },
+    };
+    // `From` bound from run data that carries an injected header.
+    await expect(
+      callIntegration(
+        cfg,
+        { ...cfg.fields!, From: "a@b.com\r\nX-Injected: 1" },
+        META,
+      ),
+    ).rejects.toMatchObject({
+      nonRetryable: true,
+      type: "INTEGRATION_INVALID_CONFIG",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("Google Sheets append_row → POST with an OAuth Bearer, range in A1 notation, :append kept", async () => {
+    fetchMock.mockResolvedValue(res(200, { updates: { updatedRows: 1 } }));
+    const cfg: IntegrationNodeConfig = {
+      provider: "googlesheets",
+      action: "append_row",
+      connectionId: "gs",
+      fields: {
+        spreadsheetId: "1AbC",
+        range: "Sheet1!A1",
+        valueInputOption: "USER_ENTERED",
+        values: [["Ada", "ada@acme.com"]],
+      },
+    };
+    await callIntegration(cfg, cfg.fields!, META);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url.toString()).toBe(
+      "https://sheets.googleapis.com/v4/spreadsheets/1AbC/values/Sheet1!A1:append?valueInputOption=USER_ENTERED",
+    );
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      values: [["Ada", "ada@acme.com"]],
+    });
+    // Google Sheets takes an OAuth access token as a plain Bearer.
+    expect(init.headers.Authorization).toBe("Bearer tok-123");
+    // No connection lookup is needed (static base + bearer).
+    expect(connMock).not.toHaveBeenCalled();
+  });
+
+  it("Google Sheets get_values → GET returns a non-2xx for the graph to branch on", async () => {
+    fetchMock.mockResolvedValue(res(404, { error: { code: 404 } }));
+    const cfg: IntegrationNodeConfig = {
+      provider: "googlesheets",
+      action: "get_values",
+      connectionId: "gs",
+      fields: { spreadsheetId: "1AbC", range: "Sheet1!A1:D20" },
+    };
+    const result = await callIntegration(cfg, cfg.fields!, META);
+    expect(result.httpStatus).toBe(404);
+    expect(result.ok).toBe(false);
+    const [url] = fetchMock.mock.calls[0];
+    expect(url.toString()).toBe(
+      "https://sheets.googleapis.com/v4/spreadsheets/1AbC/values/Sheet1!A1%3AD20",
+    );
+  });
+
+  it("DeepL translate_text → 'Authorization: DeepL-Auth-Key <key>' on the connection's host", async () => {
+    connMock.mockResolvedValue({
+      serverUrl: "https://api-free.deepl.com",
+      authMode: "api_token",
+    });
+    authMock.mockResolvedValue({ Authorization: "Bearer deepl-key:fx" });
+    fetchMock.mockResolvedValue(res(200, { translations: [] }));
+    const cfg: IntegrationNodeConfig = {
+      provider: "deepl",
+      action: "translate_text",
+      connectionId: "dl",
+      fields: { text: ["Hello world!"], target_lang: "DE" },
+    };
+    await callIntegration(cfg, cfg.fields!, META);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url.toString()).toBe("https://api-free.deepl.com/v2/translate");
+    expect(init.headers.Authorization).toBe("DeepL-Auth-Key deepl-key:fx");
+    expect(JSON.parse(init.body)).toEqual({
+      text: ["Hello world!"],
+      target_lang: "DE",
+    });
+  });
+
   it("fails non-retryable on an invalid config (missing required field)", async () => {
     const cfg: IntegrationNodeConfig = {
       provider: "github",

@@ -10,6 +10,7 @@ import {
   resolveMcpTarget,
 } from "@naary/connections";
 import { hasSecretRefDeep, resolveSecretsDeep } from "@naary/secrets";
+import { withGenAiToolSpan } from "@naary/observability";
 import {
   getObjectStore,
   maybeOffload,
@@ -102,12 +103,18 @@ export async function callMcpTool(
           makeSecretResolver(meta, __mcpDeps.getSecret),
         )) as Record<string, unknown>)
       : claimResolvedArgs;
-    const result = await __mcpDeps.callMcpTool({
-      serverUrl: target.serverUrl,
-      headers: target.headers,
-      tool: cfg.tool,
-      arguments: args,
-    });
+    // GenAI-convention `execute_tool` span (#581) around the remote call only — the connection
+    // resolution + secret/claim-check rehydration above are ours, not the tool's latency. The tool
+    // NAME only: arguments and result are never span attributes (the conventions' optional
+    // content capture stays OFF, mirroring the usage-ledger privacy rule).
+    const result = await withGenAiToolSpan({ toolName: cfg.tool }, () =>
+      __mcpDeps.callMcpTool({
+        serverUrl: target.serverUrl,
+        headers: target.headers,
+        tool: cfg.tool,
+        arguments: args,
+      }),
+    );
     // A tool-level error (isError) is NOT success — surface it instead of
     // letting the workflow proceed as if the call worked. Non-retryable: the
     // same arguments usually fail the same way, so don't burn Temporal retries.

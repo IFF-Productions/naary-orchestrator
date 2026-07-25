@@ -1,4 +1,5 @@
 import mysql from "mysql2/promise";
+import { connectPinned } from "./pin";
 import type { SqlEngineAdapter } from "./types";
 
 /** The slice of a mysql2 connection we use — narrowed so tests can supply a fake. */
@@ -12,10 +13,22 @@ export const __mysqlDeps = {
   createConnection: async (
     dsn: string,
     timeoutMs: number,
+    pinnedHost?: string,
   ): Promise<MysqlConnLike> =>
     (await mysql.createConnection({
       uri: dsn,
       connectTimeout: timeoutMs,
+      // Connect-pin: mysql2 would call `Net.connect(config.port, config.host)` itself (a
+      // second, unguarded DNS lookup — #597), so supply the socket via its `stream` factory
+      // instead. `config.host` stays the DSN hostname, which is what mysql2 uses for the TLS
+      // servername. Port comes from the parsed URI (ConnectionConfig defaults it to 3306
+      // before the factory runs; kept defensive anyway).
+      ...(pinnedHost
+        ? {
+            stream: (opts: { config: { port?: number } }) =>
+              connectPinned(opts.config.port || 3306, pinnedHost),
+          }
+        : {}),
     })) as unknown as MysqlConnLike,
 };
 
@@ -28,7 +41,11 @@ export const __mysqlDeps = {
 export const mysqlAdapter: SqlEngineAdapter = {
   engine: "mysql",
   async runReadOnly(dsn, sql, params, opts) {
-    const conn = await __mysqlDeps.createConnection(dsn, opts.timeoutMs);
+    const conn = await __mysqlDeps.createConnection(
+      dsn,
+      opts.timeoutMs,
+      opts.pinnedHost,
+    );
     try {
       // Bound SELECT runtime too (ms; MySQL 5.7+, best-effort — ignored if unsupported).
       await conn
@@ -44,7 +61,11 @@ export const mysqlAdapter: SqlEngineAdapter = {
     }
   },
   async runWrite(dsn, sql, params, opts) {
-    const conn = await __mysqlDeps.createConnection(dsn, opts.timeoutMs);
+    const conn = await __mysqlDeps.createConnection(
+      dsn,
+      opts.timeoutMs,
+      opts.pinnedHost,
+    );
     try {
       await conn.query("START TRANSACTION");
       const [result] = await conn.query(sql, params);

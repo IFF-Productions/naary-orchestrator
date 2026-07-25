@@ -5,8 +5,8 @@ import {
 } from "@nestjs/common";
 import {
   assertEgressAllowed,
-  assertHostPublic,
   BlockedEgressError,
+  pinnedSmtpUri,
   resolveSmtpUri,
   safeFetch,
 } from "@naary/connections";
@@ -39,13 +39,13 @@ function isChannelType(v: string): v is NotificationChannelType {
 
 /**
  * API-side email seam (mirrors the worker's `__notifyDeps`): the SMTP-URI resolver, the
- * host SSRF check, and the transport factory — swapped in unit tests so no SMTP/DNS is
+ * host SSRF check + connect-pin, and the transport factory — swapped in unit tests so no SMTP/DNS is
  * touched. The URI (with credentials) is resolved AT SEND TIME from the encrypted store
  * via the same machinery the sendEmail node uses, used in memory, never returned/logged.
  */
 export const __apiNotifyDeps = {
   resolveSmtpUri,
-  assertHostPublic,
+  pinnedSmtpUri,
   createTransport: (uri: string) => nodemailer.createTransport(uri),
 };
 
@@ -582,11 +582,13 @@ export class NotificationsService {
       cfg.connectionId,
     );
     const parsed = new URL(uri);
-    await __apiNotifyDeps.assertHostPublic(parsed.hostname);
+    // SSRF guard: reject a private/reserved SMTP host, and dial the ONE address that check
+    // validated so nodemailer can't re-resolve it to something internal (#597).
+    const dialUri = await __apiNotifyDeps.pinnedSmtpUri(uri);
     const from = parsed.username
       ? decodeURIComponent(parsed.username)
       : undefined;
-    const transport = __apiNotifyDeps.createTransport(uri);
+    const transport = __apiNotifyDeps.createTransport(dialUri);
     await transport.sendMail({
       from,
       to: cfg.to,

@@ -153,6 +153,10 @@ export async function callCodeAgent(
       .getDecryptedKey(meta.tenantId, envId, driver.credentialProvider);
 
     const write = cfg.mode === "write";
+    // Read can ALSO run in the isolated sandbox (#594/#680) when enabled — same dispatch as write,
+    // just read-only argv + no PR. OFF by default → read stays in-worker (legacy). Read env once.
+    const sandboxEnv = codeAgentWriteEnv();
+    const sandboxRead = !write && sandboxEnv.sandboxReadEnabled;
     const args = driver.buildArgs({
       prompt: cfg.prompt,
       systemPrompt: cfg.systemPrompt,
@@ -166,14 +170,16 @@ export async function callCodeAgent(
     let exitCode: number;
     let diff: string | undefined;
     let pr: { number: number; url: string; branch: string } | undefined;
-    if (write) {
-      // WRITE (Slice 2c): dispatch to the isolated sandbox-runner. The activity (here) clones the
-      // repo with the git token OUTSIDE the sandbox; the runner only ever gets the Claude Code
-      // credential (via the driver's chosen env var) — never the git token. The runner returns a diff.
+    if (write || sandboxRead) {
+      // Dispatch to the isolated sandbox-runner. The activity (here) clones the repo with the git
+      // token OUTSIDE the sandbox; the runner only ever gets the LLM credential (via the driver's
+      // chosen env var) — never the git token. Read differs from write ONLY in argv (Read/Grep/Glob
+      // + plan mode, built above with write:false) and opens no PR — so it runs jailed, off the
+      // worker's filesystem (closes #594).
       if (!cfg.repo || !cfg.connectionId) {
         throw ApplicationFailure.nonRetryable(
-          "codeAgent write mode requires `repo` and a GitHub App `connectionId`.",
-          "CODE_AGENT_WRITE_CONFIG",
+          `codeAgent ${write ? "write" : "sandboxed read"} mode requires \`repo\` and a GitHub App \`connectionId\`.`,
+          write ? "CODE_AGENT_WRITE_CONFIG" : "CODE_AGENT_READ_CONFIG",
         );
       }
       // authEnv gives { [varName]: value } — the contract is EXACTLY one entry (the CLI reads a
@@ -192,6 +198,7 @@ export async function callCodeAgent(
           tenantId: meta.tenantId,
           executionId: meta.executionId,
           nodeId: meta.nodeId,
+          mode: write ? "write" : "read",
           repo: cfg.repo,
           branch: cfg.branch,
           connectionId: cfg.connectionId,
@@ -199,22 +206,25 @@ export async function callCodeAgent(
           authKey,
           keyEnvVar,
           timeoutMs: cfg.timeoutMs,
-          // Write + PR (#444): commit the edits to a branch, push, open a PR — all OUTSIDE the sandbox.
-          openPr: cfg.openPr,
-          prTitle: cfg.prTitle,
-          prBody: cfg.prBody,
-          commitMessage: cfg.commitMessage,
-          headBranch: cfg.headBranch,
+          // Write + PR (#444): commit the edits to a branch, push, open a PR — all OUTSIDE the
+          // sandbox. Read never mutates the tree, so no PR fields.
+          openPr: write ? cfg.openPr : false,
+          prTitle: write ? cfg.prTitle : undefined,
+          prBody: write ? cfg.prBody : undefined,
+          commitMessage: write ? cfg.commitMessage : undefined,
+          headBranch: write ? cfg.headBranch : undefined,
         },
-        codeAgentWriteEnv(),
+        sandboxEnv,
       );
       stdout = w.stdout;
       exitCode = w.exitCode;
-      diff = w.diff;
-      pr = w.pr;
+      diff = write ? w.diff : undefined; // a read run makes no edits → no diff
+      pr = write ? w.pr : undefined;
     } else {
-      // READ (default): run the CLI IN the worker (plan mode, no repo). MINIMAL env — PATH/HOME +
-      // the driver's chosen auth var (exactly one, API key vs OAuth token). Never the git token.
+      // LEGACY in-worker READ (CODE_AGENT_SANDBOX_READ off): runs the CLI IN the worker process.
+      // #594: this can read the worker's filesystem (/proc/<pid>/environ → ENCRYPTION_KEY) — enable
+      // CODE_AGENT_SANDBOX_READ + deploy the runner to isolate it (the branch above). MINIMAL env —
+      // PATH/HOME + the driver's chosen auth var (exactly one). Never the git token.
       const r = await __codeAgentDeps.exec(driver.binary, args, {
         env: {
           PATH: process.env.PATH,

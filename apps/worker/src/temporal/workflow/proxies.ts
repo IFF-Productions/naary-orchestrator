@@ -33,6 +33,11 @@ export const {
   callRandom,
   loadChatHistory,
   appendChatTurn,
+  // Items claim-check expansion (#479): object-store READS plus per-element PUTs. Idempotent in
+  // effect (a retry re-reads the same objects and writes fresh copies of the large elements), so the
+  // shared retry policy is safe; the payloads it moves are bounded by MAX_EXPANDED_ITEMS_BYTES, which
+  // keeps it comfortably inside the 1-minute default.
+  expandItems,
 } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },

@@ -396,6 +396,12 @@ importers:
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1
+      '@types/nodemailer':
+        specifier: ^8.0.1
+        version: 8.0.1
+      nodemailer:
+        specifier: ^9.0.3
+        version: 9.0.3
 
   packages/contracts:
     dependencies:

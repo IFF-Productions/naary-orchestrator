@@ -25,6 +25,30 @@ function tracingActive(): boolean {
 export type SpanAttrs = Record<string, string | number | boolean>;
 
 /**
+ * Set attributes on the CURRENTLY ACTIVE span — for values only known AFTER the work finished
+ * (token counts, a finish reason), which {@link withSpan}'s creation-time `attributes` can't carry.
+ * No-op when tracing is off or there is no active span, so callers need no guard; a failure is
+ * swallowed (telemetry must never break the caller).
+ *
+ * SAME SECRETS RULE as withSpan (CLAUDE.md Tier-1 §4): ids, counts, and enum-ish strings only —
+ * never arguments, return values, prompt/completion text, or credentials. The list form is allowed
+ * because some OTel conventions are typed as string arrays (e.g. `gen_ai.response.finish_reasons`)
+ * and deepScrub walks arrays, so a list value is still scrubbed on egress.
+ */
+export function setSpanAttributes(
+  attrs: Record<string, string | number | boolean | string[]>,
+): void {
+  if (!tracingActive()) return;
+  const span = Sentry.getActiveSpan();
+  if (!span) return;
+  try {
+    span.setAttributes(attrs);
+  } catch {
+    /* telemetry must never break the caller */
+  }
+}
+
+/**
  * The ONLY fields lifted from an activity's arguments onto its span/log — a strict
  * allowlist of non-secret correlation ids (CLAUDE.md Tier-1 §4: secrets never enter
  * telemetry). Do NOT widen this to "all of meta" or spread an arg object: activity
