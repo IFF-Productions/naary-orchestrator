@@ -151,7 +151,7 @@ describe("runCodeAgentWrite", () => {
     expect(JSON.stringify(init.headers)).not.toContain(GIT_TOKEN);
   });
 
-  it("READ mode: independent gate — disabled unless CODE_AGENT_SANDBOX_READ is on", async () => {
+  it("READ mode: independent gate — disabled unless `sandboxReadEnabled` is set", async () => {
     await expect(
       runCodeAgentWrite(READ_PARAMS, {
         ...READ_ENV,
