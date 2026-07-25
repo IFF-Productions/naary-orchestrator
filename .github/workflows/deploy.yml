@@ -254,7 +254,7 @@ jobs:
             grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
             echo "swap after: $(($(awk '/^SwapTotal:/ {print $2}' /proc/meminfo) / 1024))MB"
           else
-            echo "swap already >= 4GiB ($((cur_kb / 1024))MB) — skipping"
+            echo "swap already >= 4GiB ($((cur_kb / 1024))MiB) — skipping"
           fi
           # Boxes cloud-init'd by the pre-GHCR template staged the .env one level up.
           if [ -f /opt/naary.env ] && [ ! -f /opt/naary/.env ]; then
@@ -322,11 +322,13 @@ jobs:
           echo "disk after reclaim:"; df -h / | tail -1
 
           # Fail EARLY with an actionable message rather than dying mid-layer-extract. The
-          # incoming backend image needs ~5GB unpacked, and web/netdata a little more; 12GB is
-          # headroom for both plus the 2x-scale rollout overlap. `--output=avail` is in KB.
+          # incoming backend image needs ~5GiB unpacked, and web/netdata a little more; 12GiB is
+          # headroom for both plus the 2x-scale rollout overlap. `df --output=avail` reports 1K
+          # (1024-byte) blocks, so the threshold and the message below are GiB, not GB.
           AVAIL_KB=$(df --output=avail / | tail -1 | tr -d ' ')
-          if [ "$AVAIL_KB" -lt 12000000 ]; then
-            echo "::error::Only $((AVAIL_KB / 1024 / 1024))GB free on / — need ~12GB to pull this release. Reclaim space on the box (docker image prune -af; docker builder prune -af), or grow the disk. Aborting BEFORE the pull so the running release stays untouched."
+          MIN_AVAIL_KB=$((12 * 1024 * 1024)) # 12 GiB, matching the message below exactly
+          if [ "$AVAIL_KB" -lt "$MIN_AVAIL_KB" ]; then
+            echo "::error::Only $((AVAIL_KB / 1024 / 1024))GiB free on / — need ~12GiB to pull this release. Reclaim space on the box (docker image prune -af; docker builder prune -af), or grow the disk. Aborting BEFORE the pull so the running release stays untouched."
             docker system df || true
             exit 1
           fi
