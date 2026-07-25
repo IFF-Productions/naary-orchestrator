@@ -1,4 +1,5 @@
 import { ConnectionPool, Request, Transaction } from "mssql";
+import { pinnedTediousConnector } from "./pin";
 import type { SqlEngineAdapter } from "./types";
 
 /**
@@ -23,8 +24,31 @@ export function augmentMssqlDsn(dsn: string, timeoutMs: number): string {
 
 /** Test seam: the pool constructor, swappable so adapter tests need no live DB. */
 export const __mssqlDeps = {
-  createPool: (dsn: string, timeoutMs: number): ConnectionPool =>
-    new ConnectionPool(augmentMssqlDsn(dsn, timeoutMs)),
+  createPool: (
+    dsn: string,
+    timeoutMs: number,
+    pinnedHost?: string,
+  ): ConnectionPool => {
+    const pool = new ConnectionPool(augmentMssqlDsn(dsn, timeoutMs));
+    // Connect-pin (#597): tedious re-resolves the server itself, so give it a `connector` —
+    // its own hook for supplying the socket. mssql copies unknown `config.options` keys
+    // straight through to tedious (tedious/connection-pool.js `_config`), and the tedious
+    // Connection is only built at `pool.connect()`, so setting it here is in time. Not in
+    // mssql's public types expose neither `pool.config` nor tedious' `connector` → cast.
+    // `config.server` keeps the hostname, which tedious uses as the TLS servername.
+    if (pinnedHost) {
+      const cfg = (
+        pool as unknown as {
+          config: { server?: string; options?: Record<string, unknown> };
+        }
+      ).config;
+      cfg.options = {
+        ...cfg.options,
+        connector: pinnedTediousConnector(String(cfg.server), pinnedHost),
+      };
+    }
+    return pool;
+  },
 };
 
 /**
@@ -37,7 +61,7 @@ export const __mssqlDeps = {
 export const mssqlAdapter: SqlEngineAdapter = {
   engine: "mssql",
   async runReadOnly(dsn, sql, params, opts) {
-    const pool = __mssqlDeps.createPool(dsn, opts.timeoutMs);
+    const pool = __mssqlDeps.createPool(dsn, opts.timeoutMs, opts.pinnedHost);
     await pool.connect();
     try {
       const tx = new Transaction(pool);
@@ -53,7 +77,7 @@ export const mssqlAdapter: SqlEngineAdapter = {
     }
   },
   async runWrite(dsn, sql, params, opts) {
-    const pool = __mssqlDeps.createPool(dsn, opts.timeoutMs);
+    const pool = __mssqlDeps.createPool(dsn, opts.timeoutMs, opts.pinnedHost);
     await pool.connect();
     try {
       const tx = new Transaction(pool);

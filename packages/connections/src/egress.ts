@@ -7,8 +7,14 @@ import { isIP } from "node:net";
  * bearer token attached — so an attacker could point it at cloud metadata
  * (169.254.169.254), the DB/Temporal host, or their own server to exfiltrate the
  * token. We enforce https + resolve the host and reject any private/loopback/
- * link-local/reserved address. Checking at CALL time (not just creation) also
- * defeats DNS rebinding.
+ * link-local/reserved address.
+ *
+ * Checking at CALL time (not just at creation) shrinks the rebinding window, but it does
+ * NOT close it on its own (audit #597): the caller then hands the hostname to a client
+ * that resolves it a SECOND time, and the second answer can be private. Only PINNING —
+ * connecting to the exact address that was validated — closes it. `safe-fetch.ts` pins
+ * HTTP at the undici connector; non-HTTP callers (SQL drivers, SMTP) pin via
+ * `resolvePinnedHost` below and pass the returned address to the driver.
  */
 export class BlockedEgressError extends Error {
   constructor(reason: string) {
@@ -124,21 +130,33 @@ type Lookup = (host: string) => Promise<{ address: string }[]>;
 const defaultLookup: Lookup = (host) => lookup(host, { all: true });
 
 /**
- * Resolve a bare host and reject if any address is private/loopback/link-local/
- * reserved — the SSRF guard for NON-HTTP outbound (e.g. an SMTP host), where the
- * https-only `assertEgressAllowed` doesn't apply. Checks at call time to defeat DNS
- * rebinding. `resolve` is injectable for tests.
+ * Resolve a bare host ONCE, reject if any address is private/loopback/link-local/reserved,
+ * and return the single address the caller MUST connect to — the SSRF guard for NON-HTTP
+ * outbound (SQL drivers, SMTP), where the https-only `assertEgressAllowed` doesn't apply.
+ *
+ * Returning the address is the whole point (#597): a caller that validates a hostname and
+ * then hands the *hostname* to a driver lets the driver re-resolve it, so DNS can answer
+ * public for us and private for the driver (rebinding TOCTOU). Pass this address to the
+ * driver as the connect target — keeping the ORIGINAL hostname as the TLS servername, so
+ * certificate validation is unchanged — and the connected address is exactly the checked
+ * one. An IP literal needs no lookup and is returned as-is (after validation).
+ *
+ * Note this deliberately collapses a multi-address (round-robin / dual-stack) host to one
+ * address: pinning and per-address failover are mutually exclusive. Same property as the
+ * pinned HTTP path. `resolve` is injectable for tests.
  */
-export async function assertHostPublic(
+export async function resolvePinnedHost(
   host: string,
   resolve: Lookup = defaultLookup,
-): Promise<void> {
+): Promise<string> {
   const h = host.replace(/^\[|\]$/g, ""); // strip IPv6 brackets
   if (!h) throw new BlockedEgressError("empty host");
   const addresses = isIP(h) ? [h] : (await resolve(h)).map((a) => a.address);
   if (addresses.length === 0) {
     throw new BlockedEgressError("host did not resolve");
   }
+  // Reject if ANY answer is internal — a record set that mixes public and private is
+  // exactly what a rebinding attack looks like, so don't cherry-pick the public one.
   for (const ip of addresses) {
     if (isBlockedIp(ip)) {
       throw new BlockedEgressError(
@@ -146,6 +164,19 @@ export async function assertHostPublic(
       );
     }
   }
+  return addresses[0];
+}
+
+/**
+ * Assert a bare host is public. Thin wrapper over `resolvePinnedHost` so there is ONE
+ * validation path — use it only where the caller genuinely cannot pin (it leaves the
+ * rebinding window open); prefer `resolvePinnedHost` and connect to what it returns.
+ */
+export async function assertHostPublic(
+  host: string,
+  resolve: Lookup = defaultLookup,
+): Promise<void> {
+  await resolvePinnedHost(host, resolve);
 }
 
 /**

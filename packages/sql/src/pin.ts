@@ -1,0 +1,128 @@
+import net from "node:net";
+
+/**
+ * Connect-pinning for the SQL drivers (audit #597).
+ *
+ * The activity resolves the DSN host ONCE and validates the address (SSRF guard, in
+ * @naary/connections), but pg/mysql2/tedious then resolve the hostname AGAIN themselves —
+ * so DNS can answer public for the guard and private for the driver (rebinding TOCTOU).
+ * These helpers give each driver a socket that is already aimed at the validated address,
+ * so no lookup happens at connect time and the connected address is exactly the checked one.
+ *
+ * The DSN keeps its ORIGINAL hostname in every case, which is deliberate: each driver
+ * derives its TLS servername from the configured host (pg `upgradeToSSL`, mysql2
+ * `base/connection.js`, tedious `config.server`), so certificate validation still checks
+ * the hostname — pinning changes where we connect, never what we trust.
+ *
+ * `pinnedHost` is a bare IP address. It is optional throughout: absent ⇒ the driver connects
+ * exactly as before (used for DSNs with no parseable host, e.g. a unix socket path).
+ */
+
+/** Open a socket to the pinned address on `port` — the one place we bypass DNS. */
+export function connectPinned(port: number, pinnedHost: string): net.Socket {
+  return net.connect({ port, host: pinnedHost });
+}
+
+/**
+ * A `stream` factory for pg. pg builds its own socket and calls `stream.connect(port, host)`
+ * with the DSN host, so we hand it a real `net.Socket` whose `connect` redirects the HOST to
+ * the pinned address. (pg has no `lookup`/connector option; `stream` is its documented seam.)
+ * A single-argument call is a unix-socket path — passed straight through, never pinned.
+ */
+export function pinnedPgStream(pinnedHost: string): () => net.Socket {
+  return () => {
+    const socket = new net.Socket();
+    const connect = socket.connect.bind(socket);
+    socket.connect = ((...args: unknown[]) => {
+      const [port, host, connectListener] = args;
+      if (typeof port !== "number" || typeof host !== "string") {
+        return (connect as (...a: unknown[]) => net.Socket)(...args);
+      }
+      // Preserve the optional `connectListener` of the (port, host, cb) overload — dropping it
+      // would silently swallow a caller's connect callback (net.Socket.connect's documented
+      // 3-arg form). Only the HOST is substituted; everything else passes through.
+      return typeof connectListener === "function"
+        ? connect({ port, host: pinnedHost }, connectListener as () => void)
+        : connect({ port, host: pinnedHost });
+    }) as typeof socket.connect;
+    return socket;
+  };
+}
+
+/**
+ * A tedious `options.connector` (mssql passes unknown `config.options` straight through).
+ * tedious calls it with the host it intends to dial and expects a CONNECTED socket back,
+ * honoring the abort signal it uses for its connect timeout.
+ *
+ * Fails closed when tedious asks for a DIFFERENT host than the one we pinned: that only
+ * happens on an Azure SQL routing (ROUTING_CHANGE) redirect, where the server names the next
+ * hop. Following it would connect to a server-supplied host that never passed the SSRF guard
+ * — i.e. it would hand the redirect an SSRF primitive — so it is rejected instead. Effect:
+ * an Azure SQL Database with the `Redirect` connection policy cannot be reached while pinning
+ * is on; `Proxy` policy (the default for outside-Azure clients) is unaffected.
+ */
+/**
+ * Host equality for the redirect check. DNS names are case-INSENSITIVE, and tedious may hand back
+ * a lightly normalized form (a `tcp:` prefix, or an IPv6 literal in brackets), so a strict `!==`
+ * would read a harmless normalization as an Azure routing redirect and fail closed on a connection
+ * that is actually the validated host (Copilot review, #597). Normalize both sides before comparing.
+ *
+ * This only ever makes the comparison MATCH more often for the SAME host — it never accepts a
+ * different hostname, so the redirect guard keeps its teeth.
+ */
+function normalizeHost(host: string): string {
+  return host
+    .trim()
+    .replace(/^tcp:/i, "") // tedious/ODBC-style protocol prefix
+    .replace(/^\[|\]$/g, "") // IPv6 literal brackets
+    .replace(/\.$/, "") // fully-qualified trailing dot
+    .toLowerCase();
+}
+
+function sameHost(a: string, b: string): boolean {
+  return normalizeHost(a) === normalizeHost(b);
+}
+
+export function pinnedTediousConnector(
+  dsnHost: string,
+  pinnedHost: string,
+): (
+  opts: { host: string; port: number },
+  lookup?: unknown,
+  signal?: AbortSignal,
+) => Promise<net.Socket> {
+  return (opts, _lookup, signal) =>
+    new Promise<net.Socket>((resolve, reject) => {
+      signal?.throwIfAborted();
+      if (!sameHost(opts.host, dsnHost)) {
+        reject(
+          new Error(
+            "Refusing a server-directed connection redirect (host is not the validated one)",
+          ),
+        );
+        return;
+      }
+      const socket = connectPinned(opts.port, pinnedHost);
+      const onAbort = () => {
+        cleanup();
+        socket.destroy();
+        reject(signal?.reason ?? new Error("aborted"));
+      };
+      const onError = (err: Error) => {
+        cleanup();
+        reject(err);
+      };
+      const onConnect = () => {
+        cleanup();
+        resolve(socket);
+      };
+      const cleanup = () => {
+        socket.removeListener("error", onError);
+        socket.removeListener("connect", onConnect);
+        signal?.removeEventListener("abort", onAbort);
+      };
+      socket.once("error", onError);
+      socket.once("connect", onConnect);
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+}

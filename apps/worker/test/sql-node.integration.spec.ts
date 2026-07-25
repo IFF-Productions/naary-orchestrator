@@ -17,9 +17,10 @@ import { runGraph } from "../src/temporal/workflows";
  *
  * Two seams are relaxed to point the real activities at the container (everything else is real):
  *  - __sqlDeps.resolveDbConnection → the container's DSN (instead of a tenant's stored connection).
- *  - __sqlDeps.assertHostPublic    → no-op: the container is on 127.0.0.1, which the SSRF guard
+ *  - __sqlDeps.resolvePinnedHost   → identity: the container is on 127.0.0.1, which the SSRF guard
  *    (rightly) blocks in prod. The guard itself is unit-tested in sql.activity.spec; here we're
- *    proving the query PATH, so we bypass just the host check. getAdapter stays REAL (real queries).
+ *    proving the query PATH, so we bypass just the host check — still returning a pin (the DSN
+ *    host) so the adapter's connect-pinning path is the one exercised. getAdapter stays REAL.
  *
  * Docker-gated, so it lives OUT of the default `pnpm test` (see vitest.integration.config.ts) —
  * run with `pnpm test:integration`.
@@ -38,12 +39,13 @@ beforeAll(async () => {
   // Claim-check offload store the SQL activities touch for large results (in-memory here).
   __setObjectStore(new MemoryObjectStore());
 
-  // Point the real SQL activities at the container; bypass ONLY the host-public guard.
+  // Point the real SQL activities at the container; bypass ONLY the host-public guard
+  // (identity pin: connect to the host in the DSN — 127.0.0.1 — as the driver would).
   activities.__sqlDeps.resolveDbConnection = async () => ({
     engine: "postgres",
     dsn: container.getConnectionUri(),
   });
-  activities.__sqlDeps.assertHostPublic = async () => undefined;
+  activities.__sqlDeps.resolvePinnedHost = async (host: string) => host;
 }, 180_000);
 
 afterAll(async () => {

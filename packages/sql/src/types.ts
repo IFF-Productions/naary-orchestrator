@@ -25,12 +25,23 @@ export interface SqlEngineAdapter {
     dsn: string,
     sql: string,
     params: unknown[],
-    opts: { timeoutMs: number },
+    opts: SqlRunOptions,
   ): Promise<SqlQueryRows>;
   runWrite(
     dsn: string,
     sql: string,
     params: unknown[],
-    opts: { timeoutMs: number },
+    opts: SqlRunOptions,
   ): Promise<SqlWriteResult>;
+}
+
+export interface SqlRunOptions {
+  timeoutMs: number;
+  /**
+   * The already-validated IP address to CONNECT to (SSRF connect-pinning, #597). The caller
+   * resolves the DSN host once, checks the address, and passes it here; the adapter aims the
+   * driver's socket at it while leaving the DSN's hostname in place for TLS. Omit to let the
+   * driver resolve the DSN host itself (no pinning) — e.g. a unix-socket DSN. See pin.ts.
+   */
+  pinnedHost?: string;
 }

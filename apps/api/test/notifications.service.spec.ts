@@ -40,7 +40,7 @@ vi.mock("@naary/connections", () => ({
   // Email seam defaults (the service captures these into __apiNotifyDeps; tests
   // re-point the seam per spec, so these only need to exist).
   resolveSmtpUri: vi.fn(),
-  assertHostPublic: vi.fn(),
+  pinnedSmtpUri: vi.fn(),
 }));
 
 import {
@@ -52,9 +52,9 @@ import {
 
 const svc = new NotificationsService();
 
-// Email seam spies (Slice 4): SMTP-URI resolver + SSRF check + transport.
+// Email seam spies (Slice 4): SMTP-URI resolver + SSRF check/connect-pin + transport.
 const resolveSmtpUri = vi.fn();
-const assertHostPublic = vi.fn();
+const pinnedSmtpUri = vi.fn();
 const sendMail = vi.fn();
 
 const row = (over: Record<string, unknown> = {}) => ({
@@ -93,10 +93,16 @@ beforeEach(() => {
   resolveSmtpUri
     .mockReset()
     .mockResolvedValue("smtps://ops%40acme.io:s3cret@smtp.acme.io:465");
-  assertHostPublic.mockReset().mockResolvedValue(undefined);
+  // Stands in for the real pin: the URI nodemailer should dial (host → the one validated
+  // address, hostname kept as the TLS servername).
+  pinnedSmtpUri
+    .mockReset()
+    .mockImplementation(
+      async (uri: string) => `${uri}?servername=smtp.acme.io`,
+    );
   sendMail.mockReset().mockResolvedValue({ messageId: "m1" });
   __apiNotifyDeps.resolveSmtpUri = resolveSmtpUri as never;
-  __apiNotifyDeps.assertHostPublic = assertHostPublic as never;
+  __apiNotifyDeps.pinnedSmtpUri = pinnedSmtpUri as never;
   __apiNotifyDeps.createTransport = (() => ({ sendMail })) as never;
 });
 
@@ -385,7 +391,9 @@ describe("NotificationsService.sendTest — email channel", () => {
     const out = await svc.sendTest("t-1", "e-1", "ch_mail");
     expect(out).toEqual({ ok: true, status: 200 });
     expect(resolveSmtpUri).toHaveBeenCalledWith("t-1", "conn-smtp-1");
-    expect(assertHostPublic).toHaveBeenCalledWith("smtp.acme.io");
+    expect(pinnedSmtpUri).toHaveBeenCalledWith(
+      "smtps://ops%40acme.io:s3cret@smtp.acme.io:465",
+    );
     const mail = sendMail.mock.calls[0][0];
     expect(mail.to).toEqual(["ops@acme.io"]);
     expect(mail.from).toBe("ops@acme.io"); // decoded from the URI's user

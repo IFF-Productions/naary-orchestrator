@@ -1,6 +1,7 @@
 export * from "./connection.service";
 export * from "./egress";
 export * from "./safe-fetch";
+export * from "./smtp-pin";
 export * from "./errors";
 export * from "./atlassian";
 export * from "./auth";

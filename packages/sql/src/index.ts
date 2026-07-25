@@ -7,8 +7,10 @@ export type {
   SqlEngine,
   SqlEngineAdapter,
   SqlQueryRows,
+  SqlRunOptions,
   SqlWriteResult,
 } from "./types";
+export { connectPinned, pinnedPgStream, pinnedTediousConnector } from "./pin";
 
 const ADAPTERS: Record<SqlEngine, SqlEngineAdapter> = {
   postgres: postgresAdapter,
