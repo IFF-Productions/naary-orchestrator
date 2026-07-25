@@ -111,6 +111,35 @@ describe("pinnedTediousConnector", () => {
     expect(seen).toBe(1);
   });
 
+  it("treats a case/prefix/bracket-normalized host as the SAME host (no false redirect)", async () => {
+    // DNS is case-insensitive and tedious may hand back `tcp:host`, `HOST`, or a trailing dot —
+    // a strict !== would read those as a routing redirect and fail closed on the real host
+    // (Copilot review). Each of these must still connect, via the pin.
+    const variants = [
+      UNRESOLVABLE.toUpperCase(),
+      `tcp:${UNRESOLVABLE}`,
+      `${UNRESOLVABLE}.`,
+    ];
+    for (const variant of variants) {
+      const connector = pinnedTediousConnector(UNRESOLVABLE, "127.0.0.1");
+      // Resolving at all IS the assertion: a false redirect would REJECT here.
+      const socket = await connector(
+        { host: variant, port },
+        undefined,
+        AbortSignal.timeout(5000),
+      );
+      expect(socket).toBeInstanceOf(net.Socket);
+      socket.destroy();
+    }
+    // `connectionSeen()` short-circuits once seen > 0, so it can't count successive
+    // accepts — poll for all of them instead (each connect went to the PIN, not the host).
+    const deadline = Date.now() + 5000;
+    while (seen < variants.length && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(seen).toBe(variants.length);
+  });
+
   it("fails closed when tedious asks for a DIFFERENT host (Azure routing redirect)", async () => {
     // A ROUTING_CHANGE names the next hop; following it would connect to a
     // server-supplied host that never passed the SSRF guard.

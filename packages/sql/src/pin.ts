@@ -61,6 +61,28 @@ export function pinnedPgStream(pinnedHost: string): () => net.Socket {
  * an Azure SQL Database with the `Redirect` connection policy cannot be reached while pinning
  * is on; `Proxy` policy (the default for outside-Azure clients) is unaffected.
  */
+/**
+ * Host equality for the redirect check. DNS names are case-INSENSITIVE, and tedious may hand back
+ * a lightly normalized form (a `tcp:` prefix, or an IPv6 literal in brackets), so a strict `!==`
+ * would read a harmless normalization as an Azure routing redirect and fail closed on a connection
+ * that is actually the validated host (Copilot review, #597). Normalize both sides before comparing.
+ *
+ * This only ever makes the comparison MATCH more often for the SAME host — it never accepts a
+ * different hostname, so the redirect guard keeps its teeth.
+ */
+function normalizeHost(host: string): string {
+  return host
+    .trim()
+    .replace(/^tcp:/i, "") // tedious/ODBC-style protocol prefix
+    .replace(/^\[|\]$/g, "") // IPv6 literal brackets
+    .replace(/\.$/, "") // fully-qualified trailing dot
+    .toLowerCase();
+}
+
+function sameHost(a: string, b: string): boolean {
+  return normalizeHost(a) === normalizeHost(b);
+}
+
 export function pinnedTediousConnector(
   dsnHost: string,
   pinnedHost: string,
@@ -72,7 +94,7 @@ export function pinnedTediousConnector(
   return (opts, _lookup, signal) =>
     new Promise<net.Socket>((resolve, reject) => {
       signal?.throwIfAborted();
-      if (opts.host !== dsnHost) {
+      if (!sameHost(opts.host, dsnHost)) {
         reject(
           new Error(
             "Refusing a server-directed connection redirect (host is not the validated one)",
