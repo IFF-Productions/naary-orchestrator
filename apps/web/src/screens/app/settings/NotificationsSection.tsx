@@ -198,9 +198,10 @@ function EventTile({
 
 /** Matrix grid: channel identity | 4 event columns | expand chevron.
  *  The identity floor (220px) is what keeps the channel NAME readable at the matrix's narrowest —
- *  at 180px the name was left ~58px after the type glyph and ellipsised to nothing (#665). It stays
- *  under the 620px scroll floor of the panel below (220 + 4×70 + 28 + 5×8 gaps + 36 padding = 604),
- *  so raising it does NOT widen the horizontal scroll at any viewport. */
+ *  at the old 180px floor the name was the only shrinkable element in the cell, so after the type
+ *  glyph and gaps it ellipsised to near-nothing (#665). It stays under the 620px scroll floor of
+ *  the panel below (220 + 4×70 + 28 + 5×8 gaps + 36 padding = 604), so raising it does NOT widen
+ *  the horizontal scroll at any viewport. */
 const GRID_COLUMNS = "minmax(220px,1.6fr) repeat(4, minmax(70px,1fr)) 28px";
 
 export function NotificationsSection({
