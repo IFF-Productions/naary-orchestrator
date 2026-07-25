@@ -1,14 +1,24 @@
 /**
  * Templates screen derivation model — every chip, chain, badge, and line of teaching
- * copy on the screen derives from the REAL template graphs the API returns
- * (`GET /templates/:key` → GraphDef). The API deliberately carries no presentation
- * metadata beyond name/description, so nothing here invents facts: categories,
- * node chains, approval indicators, "what you'll learn" lines, and the install
- * step cards are all computed from the graph's actual nodes/edges.
+ * copy on the screen derives from real data: the catalog metadata the API returns
+ * (`GET /templates` → key/name/description/category/tags) plus each template's REAL
+ * graph (`GET /templates/:key` → GraphDef). Nothing here invents facts: the category is
+ * the API's (with a graph-derived fallback for an API that predates the field), and node
+ * chains, approval indicators, "what you'll learn" lines, the required-connection
+ * checklist, and the install step cards are computed from the graph's actual nodes/edges.
  */
 import type { GraphDef, NodeType } from "@naary/dsl";
+import { getIntegrationProvider } from "@naary/dsl";
 import type { IconName } from "../../../components";
-import type { TemplateDetail } from "../../../lib/api";
+import type {
+  ConnectionRow,
+  ConnectionType,
+  TemplateDetail,
+} from "../../../lib/api";
+import {
+  CONNECTION_TYPES,
+  integrationsTabFor,
+} from "../../../lib/connection-types";
 import { ACCENT, nodeDisplayLabel } from "../../../lib/graph-model";
 import { orderedNodes } from "../../../lib/graph-order";
 
@@ -175,10 +185,10 @@ function nodeTargetsProvider(n: NodeDef, provider: string): boolean {
 }
 
 /**
- * A template's category is derived from what its graph actually talks to,
- * by precedence: named provider (GitHub/Jira) → database → email → plain
- * HTTP/API → agent basics. The API stores no category, so this is the honest
- * equivalent of the design's hand-authored categories.
+ * FALLBACK ONLY (#574): a category derived from what the graph actually talks to, by
+ * precedence: named provider (GitHub/Jira) → database → email → plain HTTP/API → agent
+ * basics. The API now ships a real `category`, so this is used only when a template
+ * carries none — i.e. an API deployed before the field existed.
  */
 export function categoryFor(graph: GraphDef): Category {
   const nodes = graph.nodes;
@@ -201,6 +211,35 @@ export function categoryFor(graph: GraphDef): Category {
   return CATEGORY_DEFS.agents;
 }
 
+/** Title-cases an unrecognized server category id ("code-review" → "Code review"). */
+function humanizeCategoryId(id: string): string {
+  const words = id.replace(/[-_]+/g, " ").trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : id;
+}
+
+/**
+ * The category to display for a template: the API's `category` id mapped to its
+ * presentation (label/accent/icon), falling back to the graph-derived category when the
+ * API sends none. An id the API knows but this bundle doesn't (newer API, older SPA) is
+ * shown humanized with neutral agent styling rather than crashing on a missing def —
+ * still the SERVER's taxonomy, just without local styling for it.
+ */
+export function resolveCategory(
+  serverCategory: string | undefined,
+  graph: GraphDef,
+): Category {
+  const id = serverCategory?.trim();
+  if (!id) return categoryFor(graph);
+  const known = CATEGORY_DEFS[id];
+  if (known) return known;
+  return {
+    id,
+    name: humanizeCategoryId(id),
+    accent: ACCENT.agent,
+    icon: "workflow",
+  };
+}
+
 /* ---------------------------------------------------------------- view */
 
 export interface TemplateView {
@@ -212,8 +251,12 @@ export interface TemplateView {
   chain: ChainNode[];
   hasApproval: boolean;
   category: Category;
+  /** The API's use-case tags (`GET /templates`); `[]` when it sends none. Searched. */
+  tags: string[];
   /** "What you'll learn" checklist — authored from the graph's real nodes. */
   learn: string[];
+  /** Connections the graph's nodes need before a run can work (#574). */
+  requirements: ConnectionRequirement[];
 }
 
 const TRIGGER_TYPES: ReadonlySet<NodeType> = new Set([
@@ -292,8 +335,10 @@ export function deriveTemplateView(t: TemplateDetail): TemplateView {
     graph: t.graph,
     chain: deriveChain(t.graph),
     hasApproval,
-    category: categoryFor(t.graph),
+    category: resolveCategory(t.category, t.graph),
+    tags: t.tags ?? [],
     learn: deriveLearn(t.graph, hasApproval),
+    requirements: deriveConnectionRequirements(t.graph),
   };
 }
 
@@ -311,6 +356,278 @@ export function deriveCategoryChips(
     .map(([id, c]) => ({ id, name: c.name, count: c.count }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   return [{ id: "all", name: "All", count: views.length }, ...chips];
+}
+
+/* ------------------------------------------------- connection requirements */
+
+/**
+ * One connection a template's graph needs before a run can actually work — the unit of
+ * the post-import setup checklist (#574 AC: "Import of a template requiring a connection
+ * the workspace lacks shows a setup checklist instead of a broken run").
+ */
+export interface ConnectionRequirement {
+  /** Stable id — also the dedupe key, so two sendEmail nodes are ONE row. */
+  id: string;
+  /** What must be connected, in the user's words ("GitHub", "Email (SMTP)"). */
+  label: string;
+  /** Connection types that satisfy it — matched against `ConnectionRow.type`. */
+  types: ConnectionType[];
+  /** Why the graph needs it, naming the real nodes involved. */
+  reason: string;
+  /** Integrations tab that hosts the connect form (drives the CTA's deep link). */
+  tab: "apps" | "providers";
+  /** Ids of the template's nodes that need it. */
+  nodeIds: string[];
+}
+
+/**
+ * Node types whose `connectionId` the registry marks OPTIONAL: they only need a connection
+ * when the template's config actually pins one (httpRequest against a public API needs
+ * none; codeAgent only clones through a GitHub App in write mode). Every other entry in
+ * CONNECTION_TYPES has a required `connectionId`, so its mere presence is a requirement.
+ * Mirrors the canvas's own resource check (useCanvasDerivations skips httpRequest).
+ */
+const OPTIONAL_CONNECTION_NODES: ReadonlySet<string> = new Set([
+  "httpRequest",
+  "codeAgent",
+]);
+
+/**
+ * `integration` node `provider` → the connection types that can actually authorize it.
+ * Deliberately NARROWER than CONNECTION_TYPES.integration (which offers all three app
+ * types for any provider, because the canvas can't stop you picking a wrong one): a
+ * checklist's entire value is naming the RIGHT provider, and a Jira call cannot run on a
+ * GitHub connection.
+ *
+ * Every other catalog provider (Slack, Notion, GitLab, …) has no dedicated connection
+ * type, so it is connected as a `custom` one — hence the fallback below. That trades a
+ * possible false MISSING (someone filed a Slack token under a github/atlassian
+ * connection) for never reporting a false SATISFIED, which is the direction that would
+ * actually mislead. No shipped template uses those providers today.
+ */
+const INTEGRATION_CONNECTION_TYPES: Record<string, ConnectionType[]> = {
+  github: ["github"],
+  jira: ["atlassian"],
+};
+const DEFAULT_INTEGRATION_CONNECTION_TYPES: ConnectionType[] = ["custom"];
+
+const plural = (n: number, one: string, many: string) =>
+  `${n} ${n === 1 ? one : many}`;
+
+/** How each connection-consuming node type reads in the checklist. */
+function requirementFor(
+  n: NodeDef,
+): Omit<ConnectionRequirement, "nodeIds" | "reason" | "tab"> | null {
+  switch (n.type) {
+    case "integration": {
+      const provider =
+        typeof n.config?.provider === "string" ? n.config.provider : "";
+      if (!provider) return null;
+      // Human-readable name comes from the DSL's integration catalog — the same source
+      // the palette and config panel label the provider with.
+      const label = getIntegrationProvider(provider)?.label ?? provider;
+      return {
+        id: `integration:${provider}`,
+        label,
+        types:
+          INTEGRATION_CONNECTION_TYPES[provider] ??
+          DEFAULT_INTEGRATION_CONNECTION_TYPES,
+      };
+    }
+    case "mcpTool":
+      return {
+        id: "mcp",
+        label: "MCP tool server",
+        types: CONNECTION_TYPES.mcpTool,
+      };
+    case "sqlQuery":
+    case "sqlExec":
+      return {
+        id: "database",
+        label: "SQL database",
+        types: CONNECTION_TYPES.sqlQuery,
+      };
+    case "sendEmail":
+      return {
+        id: "smtp",
+        label: "Email (SMTP)",
+        types: CONNECTION_TYPES.sendEmail,
+      };
+    case "hmac":
+    case "jwt":
+    case "totp":
+      // Read the types from the canonical map like every other case — the three signing
+      // node types all map to ["signing"] there, so hardcoding it here would silently drift
+      // if that ever changes (Copilot review).
+      return {
+        id: "signing",
+        label: "Signing key",
+        types: CONNECTION_TYPES[n.type],
+      };
+    case "httpRequest":
+      return {
+        id: "http-auth",
+        label: "HTTP API credential",
+        types: CONNECTION_TYPES.httpRequest,
+      };
+    case "codeAgent":
+      return {
+        id: "code-agent-github",
+        label: "GitHub (code agent)",
+        types: CONNECTION_TYPES.codeAgent,
+      };
+    default:
+      return null;
+  }
+}
+
+/** One-line "why", per requirement id, given how many of the graph's nodes want it. */
+function reasonFor(id: string, label: string, count: number): string {
+  switch (id) {
+    case "mcp":
+      return `${plural(count, "node calls", "nodes call")} a remote tool over an MCP connection.`;
+    case "database":
+      return `${plural(count, "node runs", "nodes run")} SQL against it.`;
+    case "smtp":
+      return `${plural(count, "node sends", "nodes send")} mail through it.`;
+    case "signing":
+      return `${plural(count, "node signs", "nodes sign")} a payload or mints a token with its secret.`;
+    case "http-auth":
+      return `${plural(count, "node authenticates", "nodes authenticate")} its outbound request with it.`;
+    case "code-agent-github":
+      return `${plural(count, "node clones", "nodes clone")} the repo and opens a pull request with it.`;
+    default:
+      return `${plural(count, "node calls", "nodes call")} the ${label} API through it.`;
+  }
+}
+
+/**
+ * Connections the template's graph needs, derived from its REAL nodes — never from the
+ * placeholder `connectionId` strings the seed graphs carry (`"smtp"`, `"app-db"`,
+ * `"github"` are edit-me placeholders, not real workspace ids, so matching on them would
+ * report every requirement missing every time). One row per distinct requirement, in
+ * first-appearance order.
+ */
+export function deriveConnectionRequirements(
+  graph: GraphDef,
+): ConnectionRequirement[] {
+  const byId = new Map<string, ConnectionRequirement>();
+
+  const add = (
+    base: Omit<ConnectionRequirement, "nodeIds" | "reason" | "tab">,
+    nodeId: string,
+  ) => {
+    const existing = byId.get(base.id);
+    if (existing) {
+      if (!existing.nodeIds.includes(nodeId)) existing.nodeIds.push(nodeId);
+      return;
+    }
+    byId.set(base.id, {
+      ...base,
+      nodeIds: [nodeId],
+      reason: "",
+      // The first satisfying type decides the tab; every type in a requirement's set lives
+      // on the same Integrations tab today (app types vs provider types never mix).
+      tab: integrationsTabFor(base.types[0]),
+    });
+  };
+
+  for (const n of graph.nodes) {
+    const cfg = (n.config ?? {}) as Record<string, unknown>;
+
+    // An agent may call MCP tools mid-reasoning; each tool authenticates through a tenant
+    // MCP connection, so a tools[] entry is a real requirement even though the agent node
+    // itself carries no connectionId.
+    if (
+      n.type === "agent" &&
+      Array.isArray(cfg.tools) &&
+      cfg.tools.length > 0
+    ) {
+      add(
+        {
+          id: "mcp",
+          label: "MCP tool server",
+          types: CONNECTION_TYPES.mcpTool,
+        },
+        n.id,
+      );
+    }
+
+    if (
+      OPTIONAL_CONNECTION_NODES.has(n.type) &&
+      !(typeof cfg.connectionId === "string" && cfg.connectionId.trim())
+    ) {
+      continue; // optional and unset — the node runs without a connection
+    }
+
+    const base = requirementFor(n);
+    if (base) add(base, n.id);
+  }
+
+  return [...byId.values()].map((r) => ({
+    ...r,
+    reason: reasonFor(r.id, r.label, r.nodeIds.length),
+  }));
+}
+
+/**
+ * Whether the workspace already satisfies a requirement.
+ * - `satisfied`  — a healthy connection of an acceptable type exists.
+ * - `unhealthy`  — one exists but is `needs_reauth`/`error`: it does NOT satisfy the
+ *   requirement, and the fix is repairing THAT one, not creating another.
+ * - `missing`    — the workspace has no connection of an acceptable type at all.
+ */
+export type RequirementStatus = "satisfied" | "unhealthy" | "missing";
+
+export interface CheckedRequirement extends ConnectionRequirement {
+  status: RequirementStatus;
+  /** Label of the workspace connection that matched (satisfied / unhealthy only). */
+  connectionLabel?: string;
+  /** That connection's real status — so the UI reports what it actually is (a
+   *  `needs_reauth` and an `error` connection are both unhealthy but read differently). */
+  connectionStatus?: ConnectionRow["status"];
+}
+
+/**
+ * Cross-references the requirements against the workspace's REAL connections, matched by
+ * TYPE (see deriveConnectionRequirements on why not by id).
+ *
+ * A connection that exists but is `needs_reauth`/`error` does NOT satisfy the requirement
+ * — that broken credential IS the broken run the AC is about — but it reports distinctly
+ * from "missing" so the user is told to repair it rather than to create a second one.
+ *
+ * The caller MUST NOT call this with a fabricated list: if listConnections failed, render
+ * the requirements without a verdict instead of passing `[]` (which would claim every
+ * requirement is missing).
+ */
+export function checkConnectionRequirements(
+  requirements: readonly ConnectionRequirement[],
+  connections: readonly ConnectionRow[],
+): CheckedRequirement[] {
+  return requirements.map((req) => {
+    const candidates = connections.filter((c) => req.types.includes(c.type));
+    const healthy = candidates.find((c) => c.status === "connected");
+    if (healthy)
+      return {
+        ...req,
+        status: "satisfied",
+        connectionLabel: healthy.label,
+        connectionStatus: healthy.status,
+      };
+    if (candidates.length > 0)
+      return {
+        ...req,
+        status: "unhealthy",
+        connectionLabel: candidates[0].label,
+        connectionStatus: candidates[0].status,
+      };
+    return { ...req, status: "missing" };
+  });
+}
+
+/** How many of the checked requirements still block a working run. */
+export function unmetCount(checked: readonly CheckedRequirement[]): number {
+  return checked.filter((c) => c.status !== "satisfied").length;
 }
 
 /* ---------------------------------------------------------------- install steps */

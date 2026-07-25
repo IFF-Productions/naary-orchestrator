@@ -1,11 +1,13 @@
 import { useEffect } from "react";
 import { Button, Icon } from "../../../components";
-import type { TemplateView } from "./model";
+import { ConnectionNeedsLine } from "./ConnectionChecklist";
+import type { CheckedRequirement, TemplateView } from "./model";
 
 /**
  * Template preview: identity header, description, "The flow" (the graph's real
  * nodes in order, each with its type accent + kind label), the derived "What
- * you'll learn" checklist, and the install CTA.
+ * you'll learn" checklist, the connections it needs (checked against the
+ * workspace, when they could be loaded), and the install CTA.
  *
  * The CTA reads "Install template" (not the design's "Install with sample
  * data") — installing saves the template's graph as a workflow in the active
@@ -15,11 +17,14 @@ import type { TemplateView } from "./model";
 export function PreviewModal({
   view,
   installing,
+  checkedRequirements,
   onInstall,
   onClose,
 }: {
   view: TemplateView;
   installing: boolean;
+  /** Requirement verdicts, or null when the workspace's connections couldn't be loaded. */
+  checkedRequirements: CheckedRequirement[] | null;
   onInstall: () => void;
   onClose: () => void;
 }) {
@@ -223,6 +228,15 @@ export function PreviewModal({
               </div>
             ))}
           </div>
+
+          {view.requirements.length > 0 && (
+            <div style={{ marginBottom: 18, marginTop: -4 }}>
+              <ConnectionNeedsLine
+                requirements={view.requirements}
+                checked={checkedRequirements}
+              />
+            </div>
+          )}
 
           <div style={{ display: "flex", gap: 11 }}>
             <Button
