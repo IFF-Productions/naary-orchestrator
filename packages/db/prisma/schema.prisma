@@ -17,18 +17,18 @@ datasource db {
 // Execution records bind a Temporal workflowId to its owning tenant.
 
 model ApiToken {
-  id            String       @id @default(uuid())
-  tenantId      String
-  tokenHash     String       @unique // sha256 hex of the bearer token; plaintext never stored
-  label         String
+  id         String    @id @default(uuid())
+  tenantId   String
+  tokenHash  String    @unique // sha256 hex of the bearer token; plaintext never stored
+  label      String
   // Optional env binding (design ENVIRONMENTS.md §3, Slice 4): a token scoped to ONE env (e.g. a
   // CI token → sandbox). Null = unbound (uses the request's X-Environment-Id, else the default).
   // A bound token's env is authoritative — a conflicting header is rejected. SetNull on env delete
   // so a deleted env just unbinds the token (falls back to default) rather than blocking the delete.
   environmentId String?
   environment   Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
-  createdAt     DateTime     @default(now())
-  lastUsedAt    DateTime?
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
 
   // Group membership as an RBAC subject (RBAC-GROUPS.md §4a): a restricted token's grants
   // resolve through these joins. Deleting the token cascades its rows.
@@ -38,22 +38,22 @@ model ApiToken {
 }
 
 model Execution {
-  workflowId      String    @id // Temporal workflowId
-  tenantId        String
+  workflowId  String   @id // Temporal workflowId
+  tenantId    String
   // The env this run executed in (design ENVIRONMENTS.md Slice 6) — a read-model TAG for per-env
   // Runs visibility + resolving a run's graph in its own env (approval-prompt/re-run). Nullable: a
   // pre-Slice-6 run has none (falls back to the default env), and no FK — a historical record must
   // not block env deletion, and a dangling id degrades gracefully (best-effort display reads).
-  environmentId   String?
-  workflowKey     String? // the graph key this run started (null for pre-migration rows)
+  environmentId String?
+  workflowKey String? // the graph key this run started (null for pre-migration rows)
   // The GraphDefinition.version this run snapshotted at start — shown on the Runs list /
   // run detail, and the anchor for "re-run at a chosen version". NULL for pre-migration
   // rows and any run whose version wasn't recorded (the memo/history still holds it).
-  graphVersion    Int?
+  graphVersion Int?
   // Read-model projection pushed by the interpreter (Temporal stays the source of
   // truth) so the Runs list is a single PG read — no per-run Temporal RPCs.
-  status          String    @default("running")
-  costUsd         Decimal?  @db.Decimal(12, 6)
+  status      String   @default("running")
+  costUsd     Decimal? @db.Decimal(12, 6)
   // Searchable projection of the run's TRIGGER INPUT (issue #463 "search executions by contained
   // data") — the user-supplied structured data the run was started with, serialized + length-capped
   // at start (see startGraph). It is NOT LLM prompt/completion text and NOT node outputs (those are
@@ -61,29 +61,29 @@ model Execution {
   // for pre-migration rows and for worker-created scheduled runs (their input is typically static).
   // Substring search (`?q=`) runs against this column, served by a pg_trgm GIN index that the
   // migration hand-authors (not expressible in the Prisma schema without preview extensions).
-  searchText      String?
-  createdAt       DateTime  @default(now())
+  searchText  String?
+  createdAt   DateTime @default(now())
   // When the run reached a TERMINAL status (Slice 2 — per-node timing + cost). Stamped
   // in-activity (setExecutionStatus) on the terminal push, so durationMs = finishedAt −
   // createdAt is derivable in one PG read. NULL for in-flight runs AND for runs that
   // predate this column (or closed at the Temporal level without a terminal push, e.g.
   // user-terminated) — consumers must render "—", never fabricate.
-  finishedAt      DateTime?
+  finishedAt  DateTime?
   // Compact failure classification on terminal FAILED runs (Slice 2):
   // timeout | upstream_5xx | rate_limit | budget | rejected | error. Derived in the worker
   // from the failure the interpreter/activity already observed (never re-parsed later).
   // NULL for successes, in-flight runs, and pre-feature rows — consumers fall back to the
   // close status.
-  failureKind     String?
+  failureKind String?
   // Slice 3 (budget pause-not-fail): when the run last entered `awaiting_budget` (stamped
   // in-activity by setExecutionStatus, cleared on any other status push). The month-rollover
   // boot reconcile signals `budgetResume` to awaiting_budget rows whose pause month < the
   // current month. NULL = not currently paused on budget.
-  budgetPausedAt  DateTime?
+  budgetPausedAt DateTime?
   // Soft-archive: a user hides a run from the Runs list without deleting it. NULL = active
   // (the default view); non-null = archived + when. Purely a read-model flag — no Temporal
   // interaction, and the worker's status/cost pushes never touch it.
-  archivedAt      DateTime?
+  archivedAt  DateTime?
   // Run-detail failed-run recovery (#525): a THROWN workflow's ctx isn't queryable after close,
   // so the interpreter stamps, on the failure path, which node it died on + which nodes had run.
   // Node IDs ONLY — never ctx output content (privacy checklist). failedNodeId NULL unless the
@@ -104,18 +104,18 @@ model Execution {
 // Recurring runs: a Temporal Schedule (cron) that starts a workflow. The row is
 // the tenant-scoped index/registry; Temporal owns the schedule + its firing.
 model Schedule {
-  id            String      @id // the Temporal scheduleId (env-scoped: poll-<tenant>-<env>-<wf> etc.)
-  tenantId      String
+  id          String   @id // the Temporal scheduleId (env-scoped: poll-<tenant>-<env>-<wf> etc.)
+  tenantId    String
   // Env-scoped (ENVIRONMENTS.md §7, env-scoped-schedules slice): the env is part of the schedule
   // IDENTITY — a sandbox poll schedule fires sandbox's graph, never prod's. Cascade: schedules are
   // disposable trigger config and must not block env deletion (the Temporal handle is torn down
   // best-effort by EnvironmentsService/sync — a missing row means nothing fires against the graph).
   environmentId String
-  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
-  workflowKey   String // which saved graph it runs
-  cron          String // cron expression
-  paused        Boolean     @default(false)
-  createdAt     DateTime    @default(now())
+  environment Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  workflowKey String // which saved graph it runs
+  cron        String // cron expression
+  paused      Boolean  @default(false)
+  createdAt   DateTime @default(now())
 
   @@index([tenantId, environmentId])
 }
@@ -126,13 +126,13 @@ model Schedule {
 // workflowKey (not executionId) so it persists ACROSS the scheduled runs; env-scoped
 // so sandbox's poll cursor never suppresses (or double-fires) prod's.
 model PollState {
-  tenantId      String
+  tenantId    String
   environmentId String
-  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
-  workflowKey   String
-  nodeId        String
-  lastKey       String // sha256 of the change value (or the whole body)
-  updatedAt     DateTime    @updatedAt
+  environment Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  workflowKey String
+  nodeId      String
+  lastKey     String // sha256 of the change value (or the whole body)
+  updatedAt   DateTime @updatedAt
 
   @@id([tenantId, environmentId, workflowKey, nodeId])
 }
@@ -141,36 +141,34 @@ model PollState {
 // run snapshots an immutable version (content-hashed) so editing a flow can't
 // corrupt an in-flight execution.
 model GraphDefinition {
-  id            String      @id @default(uuid())
-  tenantId      String
+  id          String   @id @default(uuid())
+  tenantId    String
   // Env-scoped (design ENVIRONMENTS.md Slice 2b): a workflow definition lives in ONE environment.
   // The same workflowKey can exist independently per env (copy-on-promote). Backfilled to each
   // tenant's default "prod" env.
   environmentId String
-  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
-  workflowKey   String // stable key the trigger/registry referenced, e.g. "github-review"
-  name          String
-  graph         Json // the GraphDef
-  contentHash   String // sha256 of canonical(graph)
-  version       Int // monotonically increasing per (tenantId, environmentId, workflowKey)
-  createdAt     DateTime    @default(now())
+  environment Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
+  workflowKey String // stable key the trigger/registry referenced, e.g. "github-review"
+  name        String
+  graph       Json // the GraphDef
+  contentHash String // sha256 of canonical(graph)
+  version     Int // monotonically increasing per (tenantId, environmentId, workflowKey)
+  createdAt   DateTime @default(now())
   // Version-history WHO/WHY (#488). savedBy = a display string for the actor who saved this
   // version (email for a user, "api-token" for a token); NULL for internal/promote copy-in +
   // pre-feature rows (a promoted version's "who" comes from the Promotion lineage instead).
   // saveMessage = an optional commit note (API/CLI-settable). when = createdAt above.
-  savedBy       String?
-  saveMessage   String?
+  savedBy     String?
+  saveMessage String?
 
   @@unique([tenantId, environmentId, workflowKey, version])
   @@index([tenantId, environmentId, workflowKey])
 }
 
-/**
- * Copy-on-promote lineage (design ENVIRONMENTS.md §6, Slice 3): one audit row per promote of a
- * workflow definition from one env to another. Records WHO promoted WHAT, WHEN, and the source→
- * target versions — the substrate RBAC's "who can promote to prod" enforcement + audit builds on.
- * Creds/connections are NOT copied on promote; only the graph definition is.
- */
+/** Copy-on-promote lineage (design ENVIRONMENTS.md §6, Slice 3): one audit row per promote of a
+ *  workflow definition from one env to another. Records WHO promoted WHAT, WHEN, and the source→
+ *  target versions — the substrate RBAC's "who can promote to prod" enforcement + audit builds on.
+ *  Creds/connections are NOT copied on promote; only the graph definition is. */
 model Promotion {
   id          String   @id @default(uuid())
   tenantId    String
@@ -187,11 +185,9 @@ model Promotion {
   @@index([tenantId, workflowKey, createdAt])
 }
 
-/**
- * Pinned node output — AUTHORING-ONLY sample data (design SINGLE-NODE-EXECUTION.md §4). Lets you
- * build downstream nodes against a saved output without re-running upstream. The interpreter NEVER
- * reads this (a real run always executes upstream) — it's a dev aid, invisible to production.
- */
+/** Pinned node output — AUTHORING-ONLY sample data (design SINGLE-NODE-EXECUTION.md §4). Lets you
+ *  build downstream nodes against a saved output without re-running upstream. The interpreter NEVER
+ *  reads this (a real run always executes upstream) — it's a dev aid, invisible to production. */
 model PinnedData {
   tenantId      String
   environmentId String
@@ -209,12 +205,10 @@ model PinnedData {
   @@id([tenantId, environmentId, workflowKey, nodeId])
 }
 
-/**
- * Per-workflow error-handler binding: when the run for `workflowKey` fails, the
- * interpreter starts the graph saved under `errorWorkflowKey` (detached) with the
- * failure context. One row per (tenant, env, workflowKey); absence = no handler.
- * Env-scoped (slice-6 cleanup): a sandbox failure triggers sandbox's handler, never prod's.
- */
+/** Per-workflow error-handler binding: when the run for `workflowKey` fails, the
+ *  interpreter starts the graph saved under `errorWorkflowKey` (detached) with the
+ *  failure context. One row per (tenant, env, workflowKey); absence = no handler.
+ *  Env-scoped (slice-6 cleanup): a sandbox failure triggers sandbox's handler, never prod's. */
 model ErrorHandler {
   tenantId         String
   environmentId    String
@@ -229,38 +223,34 @@ model ErrorHandler {
   @@id([tenantId, environmentId, workflowKey])
 }
 
-/**
- * Per-workflow activation flag (n8n parity). When a workflow is INACTIVE its automatic triggers
- * don't fire: webhook/form ingress is refused, and its Temporal cron/poll schedules are paused.
- * Manual runs are always allowed. One row per (tenant, workflowKey); ABSENCE ⇒ ACTIVE — a
- * deliberate divergence from n8n's default-inactive, so existing webhooks/schedules keep working
- * (the toggle's value is the pause capability). Don't "fix" this default to inactive.
- */
+/** Per-workflow activation flag (n8n parity). When a workflow is INACTIVE its automatic triggers
+ *  don't fire: webhook/form ingress is refused, and its Temporal cron/poll schedules are paused.
+ *  Manual runs are always allowed. One row per (tenant, workflowKey); ABSENCE ⇒ ACTIVE — a
+ *  deliberate divergence from n8n's default-inactive, so existing webhooks/schedules keep working
+ *  (the toggle's value is the pause capability). Don't "fix" this default to inactive. */
 model WorkflowActivation {
-  tenantId      String
+  tenantId    String
   // Env-scoped (design ENVIRONMENTS.md Slice 2b): the active flag is per-env, so toggling a
   // workflow in sandbox doesn't (de)activate the same key in prod. Backfilled to the default env.
   environmentId String
-  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
-  workflowKey   String
-  active        Boolean     @default(true)
-  updatedAt     DateTime    @default(now()) @updatedAt
+  environment Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
+  workflowKey String
+  active      Boolean  @default(true)
+  updatedAt   DateTime @default(now()) @updatedAt
 
   @@id([tenantId, environmentId, workflowKey])
 }
 
-/**
- * Workflow tag (n8n parity, RBAC program slice T1) — ORGANIZATIONAL metadata only. Tags are
- * NOT permission-bearing today; tag-scoped grants are a documented future seam in the upcoming
- * RBAC-GROUPS design. Name is unique per tenant; `color` is an optional hex the UI picks from
- * a fixed palette.
- */
+/** Workflow tag (n8n parity, RBAC program slice T1) — ORGANIZATIONAL metadata only. Tags are
+ *  NOT permission-bearing today; tag-scoped grants are a documented future seam in the upcoming
+ *  RBAC-GROUPS design. Name is unique per tenant; `color` is an optional hex the UI picks from
+ *  a fixed palette. */
 model Tag {
-  id        String        @id @default(uuid())
+  id        String   @id @default(uuid())
   tenantId  String
   name      String
-  color     String? // optional hex; UI offers a fixed palette
-  createdAt DateTime      @default(now())
+  color     String?  // optional hex; UI offers a fixed palette
+  createdAt DateTime @default(now())
   workflows WorkflowTag[]
   tagGrants TagGrant[]
 
@@ -273,7 +263,7 @@ model Tag {
 // Soft reference (no FK to GraphDefinition — no single row identity across versions/envs).
 model WorkflowTag {
   tagId       String
-  tag         Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  tag         Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
   tenantId    String
   workflowKey String
   createdAt   DateTime @default(now())
@@ -285,7 +275,7 @@ model WorkflowTag {
 // Slice #4 — external integrations.
 
 model WebhookEndpoint {
-  id            String      @id @default(uuid())
+  id            String   @id @default(uuid())
   workflowId    String // which graph to start (graphs are hardcoded for now)
   tenantId      String
   // Env-bound (design ENVIRONMENTS.md §3, Slice 4): a webhook fires runs in ITS env — the endpoint's
@@ -294,7 +284,7 @@ model WebhookEndpoint {
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
   provider      String // 'github' | 'atlassian' | 'generic'
   signingSecret String // plain column per plan §4 (HMAC secret; never logged)
-  createdAt     DateTime    @default(now())
+  createdAt     DateTime @default(now())
 
   @@index([tenantId, environmentId])
 }
@@ -305,13 +295,13 @@ model WebhookEndpoint {
 // is NOT stored here; it's read live from the current graph's formTrigger node so the
 // hosted form always reflects the latest definition.
 model FormEndpoint {
-  id            String      @id @default(uuid())
-  workflowId    String // which graph (workflowKey) this form starts
-  tenantId      String
+  id         String   @id @default(uuid())
+  workflowId String // which graph (workflowKey) this form starts
+  tenantId   String
   // Env-bound (Slice 4): the form fires runs in its env. Backfilled to the default env.
   environmentId String
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
-  createdAt     DateTime    @default(now())
+  createdAt  DateTime @default(now())
 
   @@index([tenantId, environmentId])
 }
@@ -320,13 +310,13 @@ model FormEndpoint {
 // NO secret — the opaque `id` is the only capability; the widget config is read live from the graph's
 // chatTrigger node. (design docs/design/CHAT-TRIGGER-RAG.md)
 model ChatEndpoint {
-  id            String      @id @default(uuid())
-  workflowId    String // which graph (workflowKey) this chat starts
-  tenantId      String
+  id         String   @id @default(uuid())
+  workflowId String // which graph (workflowKey) this chat starts
+  tenantId   String
   // Env-bound (Slice 4): the chat fires runs in its env. Backfilled to the default env.
   environmentId String
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
-  createdAt     DateTime    @default(now())
+  createdAt  DateTime @default(now())
 
   @@index([tenantId, environmentId])
 }
@@ -379,20 +369,20 @@ model WebhookDelivery {
 }
 
 model Connection {
-  id            String      @id @default(uuid())
-  tenantId      String
+  id        String   @id @default(uuid())
+  tenantId  String
   // Env-scoped (design ENVIRONMENTS.md §3, Slice 5): a sandbox run binds to sandbox connections,
   // prod to prod — separate live/test integrations. Backfilled to the tenant's default env.
   environmentId String
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
-  type          String // 'atlassian' | 'github' | 'custom'
-  label         String
-  serverUrl     String // e.g. https://mcp.atlassian.com/v1/mcp
-  authMode      String // 'api_token' | 'pat' | 'oauth'
-  scopes        String[]
-  status        String      @default("connected") // 'connected' | 'needs_reauth' | 'error'
+  type      String // 'atlassian' | 'github' | 'custom'
+  label     String
+  serverUrl String // e.g. https://mcp.atlassian.com/v1/mcp
+  authMode  String // 'api_token' | 'pat' | 'oauth'
+  scopes    String[]
+  status    String   @default("connected") // 'connected' | 'needs_reauth' | 'error'
   // secret/refresh token stored via the Slice #2 encrypted credential store, keyed by this id
-  createdAt     DateTime    @default(now())
+  createdAt DateTime @default(now())
 
   @@unique([tenantId, environmentId, type, label])
 }
@@ -416,7 +406,7 @@ model TenantBudget {
 }
 
 model TenantCredential {
-  id              String      @id @default(uuid())
+  id              String    @id @default(uuid())
   tenantId        String
   // Env-scoped (design ENVIRONMENTS.md §3, Slice 5): separate BYOK/provider keys per env — a sandbox
   // run uses test keys, prod live keys. Backfilled to the tenant's default env. NB the at-rest AAD
@@ -428,10 +418,10 @@ model TenantCredential {
   ciphertext      String // base64 AES-256-GCM ciphertext
   iv              String // base64 nonce
   authTag         String // base64 GCM auth tag
-  keyVersion      Int         @default(1) // at-rest format: 1 = legacy (no AAD), 2 = AAD-bound (Sec#7), 3 = per-tenant DEK (TenantKey envelope)
-  isValid         Boolean     @default(false)
+  keyVersion      Int       @default(1) // at-rest format: 1 = legacy (no AAD), 2 = AAD-bound (Sec#7), 3 = per-tenant DEK (TenantKey envelope)
+  isValid         Boolean   @default(false)
   lastValidatedAt DateTime?
-  createdAt       DateTime    @default(now())
+  createdAt       DateTime  @default(now())
 
   @@unique([tenantId, environmentId, provider])
 }
@@ -512,15 +502,15 @@ model Environment {
   isDefault Boolean  @default(false)
   createdAt DateTime @default(now())
 
-  graphDefinitions     GraphDefinition[]
-  workflowActivations  WorkflowActivation[]
-  apiTokens            ApiToken[]
-  webhookEndpoints     WebhookEndpoint[]
-  formEndpoints        FormEndpoint[]
-  chatEndpoints        ChatEndpoint[]
-  connections          Connection[]
-  tenantCredentials    TenantCredential[]
-  variables            Variable[]
+  graphDefinitions    GraphDefinition[]
+  workflowActivations WorkflowActivation[]
+  apiTokens           ApiToken[]
+  webhookEndpoints    WebhookEndpoint[]
+  formEndpoints       FormEndpoint[]
+  chatEndpoints       ChatEndpoint[]
+  connections         Connection[]
+  tenantCredentials   TenantCredential[]
+  variables           Variable[]
   templates            Template[]
   turnstileConfigs     TurnstileConfig[]
   notificationChannels NotificationChannel[]
@@ -529,11 +519,11 @@ model Environment {
   workflowGrants       WorkflowGrant[]
   schedules            Schedule[]
   pollStates           PollState[]
-  // NB: a PARTIAL unique index `("tenantId") WHERE "isDefault"` (in the migration, not expressible
-  // in Prisma's DSL) enforces exactly one default env per tenant at the DB level.
 
   @@unique([tenantId, slug])
   @@index([tenantId])
+  // NB: a PARTIAL unique index `("tenantId") WHERE "isDefault"` (in the migration, not expressible
+  // in Prisma's DSL) enforces exactly one default env per tenant at the DB level.
 }
 
 // NB: the legacy advisory `Member` directory (pre-U1 Team screen) was dropped in G3
@@ -588,10 +578,10 @@ model Invitation {
 // grant flips members AND ungrouped tokens to deny-by-default (§4/§4a — the cliff).
 
 model PermissionGroup {
-  id           String             @id @default(uuid())
-  tenantId     String
-  name         String
-  createdAt    DateTime           @default(now())
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  createdAt DateTime @default(now())
   members      GroupMember[]
   tokenMembers GroupTokenMember[]
   grants       WorkflowGrant[]
@@ -604,7 +594,7 @@ model GroupMember {
   groupId   String
   group     PermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
   userId    String // Firebase uid; must hold a Membership in the group's tenant
-  createdAt DateTime        @default(now())
+  createdAt DateTime @default(now())
 
   @@id([groupId, userId])
   @@index([userId])
@@ -619,7 +609,7 @@ model GroupTokenMember {
   group     PermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
   tokenId   String
   token     ApiToken        @relation(fields: [tokenId], references: [id], onDelete: Cascade)
-  createdAt DateTime        @default(now())
+  createdAt DateTime @default(now())
 
   @@id([groupId, tokenId])
   @@index([tokenId])
@@ -627,26 +617,26 @@ model GroupTokenMember {
 
 // A group may hold several grants (e.g. view-all + edit-selected); effective = union.
 model WorkflowGrant {
-  id            String             @id @default(uuid())
+  id            String  @id @default(uuid())
   tenantId      String // denormalized: "does ANY grant exist in tenant?" is THE restriction switch
   groupId       String
-  group         PermissionGroup    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  group         PermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
   // Env-scoped (§8.5 CONFIRMED — tenant-wide-only was rejected): null = every environment,
   // set = that environment only. Cascade FK: a grant naming a deleted env should vanish.
   environmentId String?
-  environment   Environment?       @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  environment   Environment? @relation(fields: [environmentId], references: [id], onDelete: Cascade)
   scope         String // 'all' | 'selected'
-  canView       Boolean            @default(false)
-  canRun        Boolean            @default(false)
-  canEdit       Boolean            @default(false)
-  canDelete     Boolean            @default(false)
-  canShare      Boolean            @default(false) // share = PROMOTE only (§8.2)
+  canView       Boolean @default(false)
+  canRun        Boolean @default(false)
+  canEdit       Boolean @default(false)
+  canDelete     Boolean @default(false)
+  canShare      Boolean @default(false) // share = PROMOTE only (§8.2)
   // §8.3: creation is its OWN permission, never inferred from edit. Valid ONLY on scope='all'
   // grants (400 otherwise) — a 'selected'-scope creator would immediately lose sight of their
   // own new workflow, which is incoherent.
-  canCreate     Boolean            @default(false)
-  workflows     WorkflowGrantKey[] // only for scope='selected'
-  tagGrants     TagGrant[] // only for scope='selected' (RBAC-GROUPS.md §9 seam, shipped)
+  canCreate     Boolean @default(false)
+  workflows WorkflowGrantKey[] // only for scope='selected'
+  tagGrants TagGrant[] // only for scope='selected' (RBAC-GROUPS.md §9 seam, shipped)
 
   @@index([tenantId])
   @@index([groupId])
@@ -724,10 +714,10 @@ model Template {
 // `turnstile:secret`), never here. `enabled` is a distinct toggle so a tenant can pause the gate
 // without clearing keys (Slice 2 ingress enforces when enabled AND both keys present).
 model TurnstileConfig {
-  tenantId         String
-  environmentId    String
-  siteKey          String
-  enabled          Boolean  @default(true)
+  tenantId      String
+  environmentId String
+  siteKey       String
+  enabled       Boolean  @default(true)
   // The SHARED "allowed domains" list for this tenant/env's public pages — deliberately ONE list,
   // not two (#617):
   //  1. #615 Turnstile: when non-empty, a submission's solved Turnstile hostname (from siteverify,
@@ -752,19 +742,19 @@ model TurnstileConfig {
 
 // Per-tenant settings (Settings screen). One row per tenant.
 model TenantSettings {
-  tenantId     String    @id
+  tenantId     String   @id
   displayName  String?
   defaultModel String? // e.g. 'claude-opus-4-8'
   // Nullable link to the org (Company) this workspace belongs to (COMPANIES.md). Additive:
   // standalone workspaces leave it null. onDelete: SetNull — deleting a company detaches, not
   // cascades. Company is NOT an isolation dimension; no tenantId-scoped query reads this.
   companyId    String?
-  company      Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  company      Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
   // Soft + REVERSIBLE archive (COMPANIES.md Slice 4): set → hidden from the workspace
   // switcher; null → live. Runs/schedules/budgets are untouched — this is a UI-visibility
   // flag, not a lifecycle change.
   archivedAt   DateTime?
-  updatedAt    DateTime  @default(now()) @updatedAt
+  updatedAt    DateTime @default(now()) @updatedAt
 
   @@index([companyId])
 }
@@ -773,13 +763,13 @@ model TenantSettings {
 /// NOT an isolation boundary — every tenantId-scoped query is unchanged; Company only adds a
 /// cross-workspace authorization + read-model path on top.
 model Company {
-  id               String                   @id @default(uuid())
-  name             String
-  slug             String                   @unique
-  createdAt        DateTime                 @default(now())
-  memberships      CompanyMembership[]
-  workspaces       TenantSettings[]
-  budget           CompanyBudget?
+  id          String              @id @default(uuid())
+  name        String
+  slug        String              @unique
+  createdAt   DateTime            @default(now())
+  memberships CompanyMembership[]
+  workspaces  TenantSettings[]
+  budget      CompanyBudget?
   permissionGroups CompanyPermissionGroup[]
 }
 
@@ -793,13 +783,13 @@ model Company {
 /// managed. uid-keyed only — API tokens are workspace-scoped subjects and can never receive
 /// company grants.
 model CompanyPermissionGroup {
-  id        String                 @id @default(uuid())
+  id        String   @id @default(uuid())
   companyId String
-  company   Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   name      String
-  createdAt DateTime               @default(now())
-  members   CompanyGroupMember[]
-  grants    CompanyWorkflowGrant[]
+  createdAt DateTime @default(now())
+  members CompanyGroupMember[]
+  grants  CompanyWorkflowGrant[]
 
   @@unique([companyId, name])
   @@index([companyId])
@@ -812,7 +802,7 @@ model CompanyGroupMember {
   groupId   String
   group     CompanyPermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
   userId    String // Firebase uid
-  createdAt DateTime               @default(now())
+  createdAt DateTime @default(now())
 
   @@id([groupId, userId])
   @@index([userId])
@@ -826,16 +816,16 @@ model CompanyGroupMember {
 /// resolution mapping — nothing here blocks it. Resolution maps each row to an EffectiveGrant
 /// {scope:'all', environmentId:null} unioned with the subject's workspace grants.
 model CompanyWorkflowGrant {
-  id        String                 @id @default(uuid())
+  id        String   @id @default(uuid())
   groupId   String
   group     CompanyPermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  canView   Boolean                @default(false)
-  canRun    Boolean                @default(false)
-  canEdit   Boolean                @default(false)
-  canDelete Boolean                @default(false)
-  canShare  Boolean                @default(false) // share = PROMOTE only, same as workspace grants
-  canCreate Boolean                @default(false) // coherent here: company grants are always 'all'-scope
-  createdAt DateTime               @default(now())
+  canView   Boolean  @default(false)
+  canRun    Boolean  @default(false)
+  canEdit   Boolean  @default(false)
+  canDelete Boolean  @default(false)
+  canShare  Boolean  @default(false) // share = PROMOTE only, same as workspace grants
+  canCreate Boolean  @default(false) // coherent here: company grants are always 'all'-scope
+  createdAt DateTime @default(now())
 
   @@index([groupId])
 }
@@ -920,20 +910,20 @@ model UserPreference {
 // successful mutating request, written by the AuditInterceptor. `actor` is the OIDC
 // subject (or "api-token"); `action` is a human label derived from method+route.
 model AuditEvent {
-  id            String   @id @default(uuid())
-  tenantId      String
-  actor         String // OIDC subject, or "api-token"
-  action        String // human label, e.g. "Saved a workflow"
-  method        String // HTTP method
-  path          String // request path (no query)
-  statusCode    Int
+  id         String   @id @default(uuid())
+  tenantId   String
+  actor      String // OIDC subject, or "api-token"
+  action     String // human label, e.g. "Saved a workflow"
+  method     String // HTTP method
+  path       String // request path (no query)
+  statusCode Int
   // The actor's SELECTED environment context when they made the request (#464), resolved to a
   // canonical Environment.id (the guard's env selection is a slug from the SPA but a uuid from an
   // env-bound token — both normalize here). NULL when no env was selected. This is the actor's
   // context, NOT a resource FK — tenant-global mutations carry whatever env was active. No FK: a
   // historical record must not block env deletion.
   environmentId String?
-  createdAt     DateTime @default(now())
+  createdAt  DateTime @default(now())
 
   @@index([tenantId, createdAt])
 }
