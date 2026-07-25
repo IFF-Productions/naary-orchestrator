@@ -117,7 +117,7 @@ export interface CatalogEntry {
   /** Stable id — the node type, or `integration:<provider>` for provider tiles. */
   id: string;
   nodeType: NodeType;
-  /** Set on integration tiles (github/jira/slack/notion). */
+  /** Set on integration tiles — one per INTEGRATION_CATALOG provider (github, stripe, …). */
   provider?: string;
   name: string;
   desc: string;
@@ -324,7 +324,9 @@ function buildCatalog(): CatalogEntry[] {
   const seen = new Set<NodeType>();
 
   // The canvas palette (NODE_KINDS) carries the display names/descriptions and
-  // expands `integration` into one tile per provider — reuse both decisions.
+  // expands `integration` into one tile per provider — reuse both decisions. Those
+  // integration rows are DERIVED from INTEGRATION_CATALOG (#688), so every shipped
+  // provider lands here (and in the rail popover + catalog modal) automatically.
   for (const kind of NODE_KINDS) {
     if (kind.type === "integration") {
       const providerKey = String(kind.defaultConfig?.provider ?? "");

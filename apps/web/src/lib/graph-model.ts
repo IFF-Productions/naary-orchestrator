@@ -3,7 +3,7 @@
  * by source/target) and compiles to the platform `@naary/dsl` GraphDef on save —
  * see compile-graph.ts. Positions are editor-only and don't reach the DSL.
  */
-import { getIntegrationProvider } from "@naary/dsl";
+import { INTEGRATION_PROVIDERS, getIntegrationProvider } from "@naary/dsl";
 import type { EdgeCondition, NodeType } from "@naary/dsl";
 
 export interface CanvasNode {
@@ -92,6 +92,124 @@ export interface NodeKind {
   defaultConfig?: Record<string, unknown>;
 }
 
+/**
+ * Curated palette ORDER for the derived integration tiles (issue #688). Every provider in
+ * `INTEGRATION_CATALOG` gets a tile — this list only decides which ones sit at the TOP of the
+ * Integrations group (the rail popover and the catalog modal both render tiles in NODE_KINDS
+ * order). Providers not named here follow, alphabetically by label, so a new catalog entry
+ * lands in a predictable place with NO web-side edit required. `github` MUST stay first:
+ * `defaultConfigFor("integration")` resolves the first integration row.
+ */
+const INTEGRATION_TILE_ORDER: string[] = [
+  "github",
+  "jira",
+  "slack",
+  "notion",
+  "stripe",
+  "linear",
+  "gitlab",
+  "hubspot",
+  "discord",
+  "sentry",
+  "airtable",
+  "asana",
+  "sendgrid",
+  "zendesk",
+];
+
+/**
+ * Per-provider tile copy that PREDATES the derivation (the original four hand-listed tiles).
+ * Their descriptions + default actions were hand-written for the palette and are kept
+ * byte-identical so nothing shifts for existing users: the catalog's own `description` is
+ * worded differently and its FIRST action is a read (`get_issue` / `get_page`), whereas these
+ * tiles have always defaulted to the common write. Every other provider derives both from the
+ * catalog — do NOT add entries here for new providers.
+ */
+const INTEGRATION_TILE_OVERRIDES: Record<
+  string,
+  { description: string; action: string }
+> = {
+  github: {
+    description: "Act on GitHub issues — create, comment, label, or read.",
+    action: "create_issue",
+  },
+  jira: {
+    description: "Manage Jira tickets — create, comment, transition, or read.",
+    action: "create_issue",
+  },
+  slack: {
+    description: "Post to Slack — send a message, reply in a thread, or react.",
+    action: "post_message",
+  },
+  notion: {
+    description:
+      "Read/write Notion — query a database, create a page, append blocks.",
+    action: "create_page",
+  },
+  // Batch 4 (#684) hand-authored these four tiles on main before this derivation landed.
+  // Their copy is better than the catalog's generic `description`, so it's preserved here.
+  // googlesheets ALSO needs its action pinned: the catalog's first action is `get_values`
+  // (a read), but the tile has always defaulted to the `append_row` write — same trap as
+  // github/jira/notion above. mattermost/pagerduty/deepl already lead with their write
+  // action, so only their copy is overridden.
+  mattermost: {
+    description:
+      "Post to Mattermost — send a message, reply in a thread, react, or read history.",
+    action: "send_message",
+  },
+  pagerduty: {
+    description:
+      "Manage PagerDuty incidents — create, acknowledge, resolve, annotate, or read.",
+    action: "create_incident",
+  },
+  googlesheets: {
+    description:
+      "Read and write a Google Sheet — append rows, read a range, update or clear values.",
+    action: "append_row",
+  },
+  deepl: {
+    description:
+      "Translate text with DeepL — translate, check quota usage, list languages.",
+    action: "translate_text",
+  },
+};
+
+/**
+ * The Integrations palette rows, DERIVED from the DSL provider catalog (issue #688): label,
+ * description and the default action all come from the provider itself, so adding a provider
+ * to `INTEGRATION_CATALOG` automatically yields a palette tile (previously these four rows
+ * were hand-listed, which left ~30 shipped providers unreachable from the canvas).
+ */
+export const INTEGRATION_NODE_KINDS: NodeKind[] = [...INTEGRATION_PROVIDERS]
+  .sort((a, b) => {
+    const ia = INTEGRATION_TILE_ORDER.indexOf(a.key);
+    const ib = INTEGRATION_TILE_ORDER.indexOf(b.key);
+    if (ia !== -1 || ib !== -1) {
+      // Curated providers first, in curated order; everything else after them.
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    }
+    // Explicit locale: the tail order must not depend on the browser's locale.
+    return a.label.localeCompare(b.label, "en");
+  })
+  .map((p) => {
+    const override = INTEGRATION_TILE_OVERRIDES[p.key];
+    return {
+      type: "integration" as const,
+      label: p.label,
+      group: "Integrations" as const,
+      accent: "var(--node-mcp)",
+      description: override?.description ?? p.description,
+      defaultConfig: {
+        provider: p.key,
+        action: override?.action ?? p.actions[0]?.key ?? "",
+        connectionId: "",
+        fields: {},
+      },
+    };
+  });
+
 // prettier-ignore
 export const NODE_KINDS: NodeKind[] = [
   { type: "start", label: "Start", group: "Triggers", accent: "var(--node-trigger)",
@@ -124,36 +242,8 @@ export const NODE_KINDS: NodeKind[] = [
   { type: "mcpTool", label: "MCP Tool", group: "AI & Tools", accent: "var(--node-mcp)",
     description: "Call a tool on a connected service (e.g. GitHub, Jira) via MCP.",
     defaultConfig: { connectionId: "", tool: "" } },
-  { type: "integration", label: "GitHub", group: "Integrations", accent: "var(--node-mcp)",
-    description: "Act on GitHub issues — create, comment, label, or read.",
-    defaultConfig: { provider: "github", action: "create_issue", connectionId: "", fields: {} } },
-  { type: "integration", label: "Jira", group: "Integrations", accent: "var(--node-mcp)",
-    description: "Manage Jira tickets — create, comment, transition, or read.",
-    defaultConfig: { provider: "jira", action: "create_issue", connectionId: "", fields: {} } },
-  { type: "integration", label: "Slack", group: "Integrations", accent: "var(--node-mcp)",
-    description: "Post to Slack — send a message, reply in a thread, or react.",
-    defaultConfig: { provider: "slack", action: "post_message", connectionId: "", fields: {} } },
-  { type: "integration", label: "Notion", group: "Integrations", accent: "var(--node-mcp)",
-    description: "Read/write Notion — query a database, create a page, append blocks.",
-    defaultConfig: { provider: "notion", action: "create_page", connectionId: "", fields: {} } },
-  // NOTE: the palette lists ONE tile per provider and the config panel's Provider input is
-  // read-only, so a catalog provider WITHOUT a tile here can't be added from the canvas at
-  // all (only via AI generation / raw graph JSON). The catalog holds 38 providers, but only
-  // the 8 tiled here — GitHub, Jira, Slack, Notion (above) plus the four below — are
-  // reachable. The other 30 are a known gap, not a design choice: the fix is to derive
-  // these tiles from INTEGRATION_CATALOG instead of hand-listing them.
-  { type: "integration", label: "Mattermost", group: "Integrations", accent: "var(--node-mcp)",
-    description: "Post to Mattermost — send a message, reply in a thread, react, or read history.",
-    defaultConfig: { provider: "mattermost", action: "send_message", connectionId: "", fields: {} } },
-  { type: "integration", label: "PagerDuty", group: "Integrations", accent: "var(--node-mcp)",
-    description: "Manage PagerDuty incidents — create, acknowledge, resolve, annotate, or read.",
-    defaultConfig: { provider: "pagerduty", action: "create_incident", connectionId: "", fields: {} } },
-  { type: "integration", label: "Google Sheets", group: "Integrations", accent: "var(--node-mcp)",
-    description: "Read and write a Google Sheet — append rows, read a range, update or clear values.",
-    defaultConfig: { provider: "googlesheets", action: "append_row", connectionId: "", fields: {} } },
-  { type: "integration", label: "DeepL", group: "Integrations", accent: "var(--node-mcp)",
-    description: "Translate text with DeepL — translate, check quota usage, list languages.",
-    defaultConfig: { provider: "deepl", action: "translate_text", connectionId: "", fields: {} } },
+  // One tile per INTEGRATION_CATALOG provider, derived above (#688) — never hand-list these.
+  ...INTEGRATION_NODE_KINDS,
   { type: "httpRequest", label: "HTTP Request", group: "Data sources", accent: "var(--node-http, #2f9e8f)",
     description: "Call any REST API and use the response in later steps.",
     defaultConfig: { method: "GET", url: "https://api.example.com/resource" } },
@@ -316,6 +406,39 @@ export function nodeDisplayLabel(
 export const NODE_DESCRIPTION = Object.fromEntries(
   NODE_KINDS.map((k) => [k.type, k.description]),
 ) as Record<NodeType, string>;
+
+/** Provider key → that integration tile's description (the palette copy, so the four
+ *  hand-written overrides win over the catalog's generic wording). */
+const INTEGRATION_TILE_DESCRIPTION: Record<string, string> = Object.fromEntries(
+  INTEGRATION_NODE_KINDS.map((k) => [
+    String(k.defaultConfig?.provider ?? ""),
+    k.description,
+  ]),
+);
+
+/**
+ * The description to SHOW for a node — provider-aware, for the same reason as
+ * `nodeDisplayLabel`: every integration tile shares the type `"integration"`, so
+ * `NODE_DESCRIPTION["integration"]` collapses to whichever tile is LAST in the registry.
+ * Rendering that verbatim describes the wrong provider. Use this at description render
+ * sites (config panel) — NODE_DESCRIPTION[type] alone is wrong for integrations.
+ */
+export function nodeDisplayDescription(
+  type: NodeType,
+  config?: Record<string, unknown> | null,
+): string {
+  if (type === "integration") {
+    const provider = (
+      (config as { provider?: string } | undefined)?.provider ?? ""
+    ).trim();
+    return (
+      INTEGRATION_TILE_DESCRIPTION[provider] ??
+      getIntegrationProvider(provider)?.description ??
+      "Call a connected service's API (provider + action from the catalog)."
+    );
+  }
+  return NODE_DESCRIPTION[type];
+}
 
 /** A fresh copy of the working example config a newly-placed node starts with
  *  (undefined = no config). Copied so canvas edits never mutate the registry. */
