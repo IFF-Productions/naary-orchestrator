@@ -397,13 +397,19 @@ const OPTIONAL_CONNECTION_NODES: ReadonlySet<string> = new Set([
  * Deliberately NARROWER than CONNECTION_TYPES.integration (which offers all three app
  * types for any provider, because the canvas can't stop you picking a wrong one): a
  * checklist's entire value is naming the RIGHT provider, and a Jira call cannot run on a
- * GitHub connection. Providers without an entry fall back to the generic app set, so an
- * integration we have no dedicated connection type for is never reported falsely missing.
+ * GitHub connection.
+ *
+ * Every other catalog provider (Slack, Notion, GitLab, …) has no dedicated connection
+ * type, so it is connected as a `custom` one — hence the fallback below. That trades a
+ * possible false MISSING (someone filed a Slack token under a github/atlassian
+ * connection) for never reporting a false SATISFIED, which is the direction that would
+ * actually mislead. No shipped template uses those providers today.
  */
 const INTEGRATION_CONNECTION_TYPES: Record<string, ConnectionType[]> = {
   github: ["github"],
   jira: ["atlassian"],
 };
+const DEFAULT_INTEGRATION_CONNECTION_TYPES: ConnectionType[] = ["custom"];
 
 const plural = (n: number, one: string, many: string) =>
   `${n} ${n === 1 ? one : many}`;
@@ -425,7 +431,7 @@ function requirementFor(
         label,
         types:
           INTEGRATION_CONNECTION_TYPES[provider] ??
-          CONNECTION_TYPES.integration,
+          DEFAULT_INTEGRATION_CONNECTION_TYPES,
       };
     }
     case "mcpTool":

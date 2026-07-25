@@ -1,4 +1,16 @@
 import type { GraphDef } from "@naary/dsl";
+import {
+  apiEnrichGraph,
+  dbReportGraph,
+  feedDigestGraph,
+  githubIssueTriageGraph,
+  githubReviewGraph,
+  jiraTicketGraph,
+  moderationGraph,
+  sampleGraph,
+  supportReplyGraph,
+  webhookSampleGraph,
+} from "@naary/dsl";
 import { describe, expect, it } from "vitest";
 import type { ConnectionRow, TemplateDetail } from "../src/lib/api";
 import {
@@ -91,7 +103,7 @@ describe("deriveConnectionRequirements", () => {
     ]);
   });
 
-  it("falls back to the generic app set for a provider with no dedicated connection type", () => {
+  it("uses a `custom` connection for a provider with no dedicated connection type", () => {
     const [req] = deriveConnectionRequirements(
       graph([
         {
@@ -106,8 +118,12 @@ describe("deriveConnectionRequirements", () => {
       ]),
     );
     expect(req.label).toBe("Slack");
-    // Never reported falsely missing: a custom connection can authorize it.
-    expect(req.types).toContain("custom");
+    // Slack/Notion/GitLab etc. are connected as `custom`; a GitHub connection must NOT
+    // read as satisfying one — a false "satisfied" is the misleading direction.
+    expect(req.types).toEqual(["custom"]);
+    expect(
+      checkConnectionRequirements([req], [conn({ type: "github" })])[0].status,
+    ).toBe("missing");
   });
 
   it("treats an OPTIONAL connectionId as a requirement only when the template pins one", () => {
@@ -192,6 +208,42 @@ describe("deriveConnectionRequirements", () => {
         ]),
       ),
     ).toEqual([]);
+  });
+});
+
+describe("the REAL shipped seed graphs (packages/dsl)", () => {
+  // The derivations above use hand-built graphs; this pins what the ACTUAL templates the
+  // API serves demand, so editing packages/dsl/src/templates.ts can't silently change the
+  // checklist. Keys mirror apps/api/src/templates/templates.controller.ts.
+  const cases: [string, GraphDef, string[]][] = [
+    ["default", sampleGraph, []],
+    ["wf-default", webhookSampleGraph, []],
+    ["moderation", moderationGraph, []],
+    // Unpinned httpRequest → nothing to connect.
+    ["api-enrich", apiEnrichGraph, []],
+    ["github-review", githubReviewGraph, ["integration:github"]],
+    // mcpTool nodes, NOT integration nodes — the non-obvious pair.
+    ["github-issue-triage", githubIssueTriageGraph, ["mcp"]],
+    ["jira-ticket", jiraTicketGraph, ["mcp"]],
+    ["feed-digest", feedDigestGraph, ["smtp"]],
+    ["support-reply", supportReplyGraph, ["smtp"]],
+    ["db-report", dbReportGraph, ["database", "smtp"]],
+  ];
+
+  it.each(cases)("%s requires %j", (_key, g, expected) => {
+    expect(ids(g)).toEqual(expected);
+  });
+
+  it("the GitHub PR review template is NOT satisfied by an SMTP-only workspace", () => {
+    // The AC's scenario end to end, on the real graph.
+    const checked = checkConnectionRequirements(
+      deriveConnectionRequirements(githubReviewGraph),
+      [conn({ type: "smtp", label: "Company mail" })],
+    );
+    expect(checked.map((c) => [c.label, c.status])).toEqual([
+      ["GitHub", "missing"],
+    ]);
+    expect(unmetCount(checked)).toBe(1);
   });
 });
 

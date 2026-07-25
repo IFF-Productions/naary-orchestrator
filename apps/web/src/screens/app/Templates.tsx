@@ -98,6 +98,12 @@ export function Templates() {
 
   // The workspace's connections — what the required-connection checklist is checked
   // against. A failure leaves it null on purpose (see the state declaration).
+  //
+  // Connections are ENV-scoped (the client sends X-Environment-Id), and `[]` deps are
+  // still correct: AppShell keys the routed screen by `pathname|activeEnv`, so switching
+  // environments REMOUNTS this screen and re-runs this fetch under the new env — the same
+  // contract the Integrations screen's loader relies on. Without that a verdict could be
+  // computed against a different env's connections.
   useEffect(() => {
     let alive = true;
     api
