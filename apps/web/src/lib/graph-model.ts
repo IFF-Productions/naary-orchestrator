@@ -164,7 +164,8 @@ export const INTEGRATION_NODE_KINDS: NodeKind[] = [...INTEGRATION_PROVIDERS]
       if (ib === -1) return -1;
       return ia - ib;
     }
-    return a.label.localeCompare(b.label);
+    // Explicit locale: the tail order must not depend on the browser's locale.
+    return a.label.localeCompare(b.label, "en");
   })
   .map((p) => {
     const override = INTEGRATION_TILE_OVERRIDES[p.key];
