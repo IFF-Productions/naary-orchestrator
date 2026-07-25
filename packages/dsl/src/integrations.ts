@@ -14,7 +14,11 @@
 import type { ArgBinding, IntegrationNodeConfig } from "./types";
 import { getByPath, hasForbiddenPathSegment } from "./mcp-args";
 
-export type FieldLocation = "path" | "query" | "body";
+/** `header` = a per-REQUEST header whose wire name IS the field key (mirroring how `query`
+ *  uses the key as the param name) — for APIs that require a caller-supplied header on a
+ *  write, e.g. PagerDuty's `From: user@company.com`. It NEVER carries auth: auth is resolved
+ *  in-activity and is merged AFTER built headers, so a header field can't clobber it. */
+export type FieldLocation = "path" | "query" | "body" | "header";
 /** `json` = a raw JSON value (object/array) for schema-driven payloads that a flat field can't
  *  express, e.g. Notion's `properties` or an Airtable record's `fields`. */
 export type FieldType = "string" | "number" | "boolean" | "string[]" | "json";
@@ -22,10 +26,18 @@ export type FieldType = "string" | "number" | "boolean" | "string[]" | "json";
 export interface IntegrationField {
   key: string;
   label: string;
-  /** Where the value goes: a `{placeholder}` in the path, a query param, or the JSON body. */
+  /** Where the value goes: a `{placeholder}` in the path, a query param, a request header,
+   *  or the JSON body. */
   in: FieldLocation;
   required: boolean;
   type?: FieldType;
+  /**
+   * A FIXED value the catalog supplies — the user never sees or sets it, and any configured
+   * value is ignored. For APIs whose payload carries constant type discriminators, e.g.
+   * PagerDuty's `incident.type: "incident"` / `service.type: "service_reference"`. A const
+   * field is always "supplied", so the save-gate never asks for it.
+   */
+  const?: string | number | boolean;
   /** For `in: "body"` only — the dotted path where this value lands in the JSON body
    *  (default: the field key at the top level). Lets a flat field feed a NESTED payload,
    *  e.g. Jira's `fields.project.key`. */
@@ -3659,7 +3671,691 @@ const ZENDESK: IntegrationProvider = {
     },
   ],
 };
+// ── Mattermost (self-hosted or Cloud; base = the connection's server URL, e.g.
+//    https://chat.acme.com. Auth: a personal access token or bot token as a Bearer —
+//    exactly what the API v4 expects, so the default "bearer" scheme is correct) ─────────
+const MATTERMOST: IntegrationProvider = {
+  key: "mattermost",
+  label: "Mattermost",
+  baseUrlFromConnection: true,
+  authScheme: "bearer",
+  description:
+    "Post to Mattermost — send a message, reply in a thread, react, or read channel history.",
+  auth: "A custom connection whose Server URL is your Mattermost base URL (e.g. https://chat.your-company.com) and whose token is a personal access token or bot token, sent as `Authorization: Bearer <token>` (Mattermost API v4).",
+  actions: [
+    {
+      key: "send_message",
+      label: "Send message",
+      description:
+        "Create a post in a channel — or reply in a thread by setting the root post id.",
+      method: "POST",
+      pathTemplate: "/api/v4/posts",
+      write: true,
+      fields: [
+        {
+          key: "channel_id",
+          label: "Channel id",
+          in: "body",
+          required: true,
+          hint: "26-char channel id — resolve a name with 'Get channel by name'",
+        },
+        { key: "message", label: "Message", in: "body", required: true },
+        {
+          key: "root_id",
+          label: "Thread root post id",
+          in: "body",
+          required: false,
+          hint: "reply inside that post's thread",
+        },
+      ],
+    },
+    {
+      key: "get_channel_by_name",
+      label: "Get channel by name",
+      description:
+        "Resolve a team + channel name to the channel (and its id) — feed it to Send message.",
+      method: "GET",
+      pathTemplate: "/api/v4/teams/name/{teamName}/channels/name/{channelName}",
+      write: false,
+      fields: [
+        {
+          key: "teamName",
+          label: "Team name",
+          in: "path",
+          required: true,
+          hint: "the team's URL slug, e.g. acme",
+        },
+        {
+          key: "channelName",
+          label: "Channel name",
+          in: "path",
+          required: true,
+          hint: "the channel's URL slug, e.g. town-square",
+        },
+      ],
+    },
+    {
+      key: "list_channel_posts",
+      label: "List channel posts",
+      description: "Read a channel's recent posts (newest first).",
+      method: "GET",
+      pathTemplate: "/api/v4/channels/{channelId}/posts",
+      write: false,
+      fields: [
+        { key: "channelId", label: "Channel id", in: "path", required: true },
+        {
+          key: "per_page",
+          label: "Per page",
+          in: "query",
+          required: false,
+          type: "number",
+        },
+        {
+          key: "page",
+          label: "Page",
+          in: "query",
+          required: false,
+          type: "number",
+        },
+      ],
+    },
+    {
+      key: "add_reaction",
+      label: "Add reaction",
+      description: "React to a post with an emoji.",
+      method: "POST",
+      pathTemplate: "/api/v4/reactions",
+      write: true,
+      fields: [
+        {
+          key: "user_id",
+          label: "User id",
+          in: "body",
+          required: true,
+          hint: "the reacting user — the token's own user id",
+        },
+        { key: "post_id", label: "Post id", in: "body", required: true },
+        {
+          key: "emoji_name",
+          label: "Emoji name",
+          in: "body",
+          required: true,
+          hint: "without colons, e.g. white_check_mark",
+        },
+      ],
+    },
+    {
+      key: "get_user_by_username",
+      label: "Get user by username",
+      description: "Look a user up by username (for their id / email).",
+      method: "GET",
+      pathTemplate: "/api/v4/users/username/{username}",
+      write: false,
+      fields: [
+        { key: "username", label: "Username", in: "path", required: true },
+      ],
+    },
+  ],
+};
+
+// ── PagerDuty (REST API v2, api.pagerduty.com). Auth is PD's OWN scheme —
+//    `Authorization: Token token=<key>` — expressed with the custom-header form (#655),
+//    NOT a Bearer. Mutating calls also need a `From:` header (the login email of a PD user)
+//    unless the key is user-scoped, so writes expose it as an `in: "header"` field. The
+//    payload's constant type discriminators (incident / service_reference) are `const`
+//    fields the catalog injects, so a user can't get them wrong. ─────────────────────────
+const PAGERDUTY: IntegrationProvider = {
+  key: "pagerduty",
+  label: "PagerDuty",
+  baseUrl: "https://api.pagerduty.com",
+  authScheme: { header: "Authorization", prefix: "Token token=" },
+  headers: { Accept: "application/vnd.pagerduty+json;version=2" },
+  description:
+    "Manage PagerDuty incidents — create, list, read, acknowledge, resolve, and annotate.",
+  auth: "A custom connection whose token is a PagerDuty REST API key, sent as `Authorization: Token token=<key>` (REST API v2's own scheme — not a Bearer). For write actions set the `From` field to the login email of a PagerDuty user, unless the key is user-scoped.",
+  actions: [
+    {
+      key: "create_incident",
+      label: "Create incident",
+      description: "Open (trigger) a new incident on a service.",
+      method: "POST",
+      pathTemplate: "/incidents",
+      write: true,
+      fields: [
+        {
+          key: "From",
+          label: "From (user email)",
+          in: "header",
+          required: false,
+          hint: "login email of a PagerDuty user — required for an account-level (General Access) key; omit for a user-scoped key",
+        },
+        // PD's payload type discriminators — catalog-supplied, never user-editable.
+        {
+          key: "type",
+          label: "Type",
+          in: "body",
+          required: true,
+          const: "incident",
+          bodyPath: "incident.type",
+        },
+        {
+          key: "title",
+          label: "Title",
+          in: "body",
+          required: true,
+          bodyPath: "incident.title",
+        },
+        {
+          key: "serviceId",
+          label: "Service id",
+          in: "body",
+          required: true,
+          bodyPath: "incident.service.id",
+          hint: "the PD service's id, e.g. PW7YESS",
+        },
+        {
+          key: "serviceType",
+          label: "Service type",
+          in: "body",
+          required: true,
+          const: "service_reference",
+          bodyPath: "incident.service.type",
+        },
+        {
+          key: "urgency",
+          label: "Urgency",
+          in: "body",
+          required: false,
+          bodyPath: "incident.urgency",
+          hint: "high | low",
+        },
+        {
+          key: "incident_key",
+          label: "Incident key",
+          in: "body",
+          required: false,
+          bodyPath: "incident.incident_key",
+          hint: "dedupe key — a second create with the same key + service is rejected while the incident is open",
+        },
+        // `incident.body` is an IncidentBody, whose own `type` is constant. It is always sent
+        // (as `{ type: "incident_body" }` when no details are given) — `details` is optional in
+        // PD's schema, so a type-only body is valid.
+        {
+          key: "bodyType",
+          label: "Body type",
+          in: "body",
+          required: true,
+          const: "incident_body",
+          bodyPath: "incident.body.type",
+        },
+        {
+          key: "details",
+          label: "Details",
+          in: "body",
+          required: false,
+          bodyPath: "incident.body.details",
+          hint: "free-text description shown on the incident",
+        },
+      ],
+    },
+    {
+      key: "list_incidents",
+      label: "List incidents",
+      description:
+        "List incidents, optionally filtered by status, service, or time window.",
+      method: "GET",
+      pathTemplate: "/incidents",
+      write: false,
+      fields: [
+        {
+          key: "statuses[]",
+          label: "Status",
+          in: "query",
+          required: false,
+          hint: "triggered | acknowledged | resolved (one value)",
+        },
+        {
+          key: "service_ids[]",
+          label: "Service id",
+          in: "query",
+          required: false,
+          hint: "restrict to one service id",
+        },
+        {
+          key: "since",
+          label: "Since",
+          in: "query",
+          required: false,
+          hint: "ISO 8601 timestamp",
+        },
+        {
+          key: "until",
+          label: "Until",
+          in: "query",
+          required: false,
+          hint: "ISO 8601 timestamp",
+        },
+        {
+          key: "limit",
+          label: "Limit",
+          in: "query",
+          required: false,
+          type: "number",
+        },
+        {
+          key: "offset",
+          label: "Offset",
+          in: "query",
+          required: false,
+          type: "number",
+        },
+        {
+          key: "sort_by",
+          label: "Sort by",
+          in: "query",
+          required: false,
+          hint: "e.g. created_at:desc",
+        },
+      ],
+    },
+    {
+      key: "get_incident",
+      label: "Get incident",
+      description: "Fetch a single incident by id.",
+      method: "GET",
+      pathTemplate: "/incidents/{id}",
+      write: false,
+      fields: [
+        {
+          key: "id",
+          label: "Incident id",
+          in: "path",
+          required: true,
+          hint: "e.g. PT4KHLK",
+        },
+      ],
+    },
+    {
+      key: "acknowledge_incident",
+      label: "Acknowledge incident",
+      description: "Mark an incident acknowledged (stops escalation).",
+      method: "PUT",
+      pathTemplate: "/incidents/{id}",
+      write: true,
+      fields: [
+        {
+          key: "From",
+          label: "From (user email)",
+          in: "header",
+          required: false,
+          hint: "login email of a PagerDuty user — required unless the key is user-scoped",
+        },
+        { key: "id", label: "Incident id", in: "path", required: true },
+        {
+          key: "type",
+          label: "Type",
+          in: "body",
+          required: true,
+          const: "incident_reference",
+          bodyPath: "incident.type",
+        },
+        {
+          key: "status",
+          label: "Status",
+          in: "body",
+          required: true,
+          const: "acknowledged",
+          bodyPath: "incident.status",
+        },
+      ],
+    },
+    {
+      key: "resolve_incident",
+      label: "Resolve incident",
+      description: "Resolve an incident, optionally with a resolution note.",
+      method: "PUT",
+      pathTemplate: "/incidents/{id}",
+      write: true,
+      fields: [
+        {
+          key: "From",
+          label: "From (user email)",
+          in: "header",
+          required: false,
+          hint: "login email of a PagerDuty user — required unless the key is user-scoped",
+        },
+        { key: "id", label: "Incident id", in: "path", required: true },
+        {
+          key: "type",
+          label: "Type",
+          in: "body",
+          required: true,
+          const: "incident_reference",
+          bodyPath: "incident.type",
+        },
+        {
+          key: "status",
+          label: "Status",
+          in: "body",
+          required: true,
+          const: "resolved",
+          bodyPath: "incident.status",
+        },
+        {
+          key: "resolution",
+          label: "Resolution",
+          in: "body",
+          required: false,
+          bodyPath: "incident.resolution",
+          hint: "note recorded on the incident when it resolves",
+        },
+      ],
+    },
+    {
+      key: "add_note",
+      label: "Add note",
+      description: "Append a note to an incident's timeline.",
+      method: "POST",
+      pathTemplate: "/incidents/{id}/notes",
+      write: true,
+      fields: [
+        {
+          key: "From",
+          label: "From (user email)",
+          in: "header",
+          required: false,
+          hint: "login email of a PagerDuty user — required unless the key is user-scoped",
+        },
+        { key: "id", label: "Incident id", in: "path", required: true },
+        {
+          key: "content",
+          label: "Note",
+          in: "body",
+          required: true,
+          bodyPath: "note.content",
+        },
+      ],
+    },
+  ],
+};
+
+// ── Google Sheets (Sheets API v4, sheets.googleapis.com). Auth: an OAuth access token as a
+//    Bearer — a Google API KEY is deliberately NOT supported, since an API key travels in a
+//    `?key=` query param and the catalog only sends credentials as headers. ──────────────
+const GOOGLESHEETS: IntegrationProvider = {
+  key: "googlesheets",
+  label: "Google Sheets",
+  baseUrl: "https://sheets.googleapis.com",
+  authScheme: "bearer",
+  description:
+    "Read and write a Google Sheet — append rows, read a range, update or clear values.",
+  auth: "A connection holding a Google OAuth access token for the `https://www.googleapis.com/auth/spreadsheets` scope, sent as `Authorization: Bearer <token>`. A Google API key will NOT work (API keys go in a `?key=` query param, which this node never sends).",
+  actions: [
+    {
+      key: "get_values",
+      label: "Get values",
+      description: "Read a range of cells in A1 notation.",
+      method: "GET",
+      pathTemplate: "/v4/spreadsheets/{spreadsheetId}/values/{range}",
+      write: false,
+      fields: [
+        {
+          key: "spreadsheetId",
+          label: "Spreadsheet id",
+          in: "path",
+          required: true,
+          hint: "the id in the sheet's URL",
+        },
+        {
+          key: "range",
+          label: "Range",
+          in: "path",
+          required: true,
+          hint: "A1 notation, e.g. Sheet1!A1:D20",
+        },
+        {
+          key: "majorDimension",
+          label: "Major dimension",
+          in: "query",
+          required: false,
+          hint: "ROWS (default) | COLUMNS",
+        },
+        {
+          key: "valueRenderOption",
+          label: "Value render option",
+          in: "query",
+          required: false,
+          hint: "FORMATTED_VALUE | UNFORMATTED_VALUE | FORMULA",
+        },
+      ],
+    },
+    {
+      key: "append_row",
+      label: "Append rows",
+      description:
+        "Append one or more rows after the last row of a range's table.",
+      method: "POST",
+      pathTemplate: "/v4/spreadsheets/{spreadsheetId}/values/{range}:append",
+      write: true,
+      fields: [
+        {
+          key: "spreadsheetId",
+          label: "Spreadsheet id",
+          in: "path",
+          required: true,
+        },
+        {
+          key: "range",
+          label: "Range",
+          in: "path",
+          required: true,
+          hint: "the table to append to, e.g. Sheet1!A1",
+        },
+        {
+          key: "valueInputOption",
+          label: "Value input option",
+          in: "query",
+          required: true,
+          hint: "USER_ENTERED (parse like typing) | RAW",
+        },
+        {
+          key: "insertDataOption",
+          label: "Insert data option",
+          in: "query",
+          required: false,
+          hint: "INSERT_ROWS | OVERWRITE",
+        },
+        {
+          key: "values",
+          label: "Values",
+          in: "body",
+          required: true,
+          type: "json",
+          hint: '[["Ada", "ada@acme.com"]] — an array of rows',
+        },
+      ],
+    },
+    {
+      key: "update_values",
+      label: "Update values",
+      description: "Overwrite the cells of a range.",
+      method: "PUT",
+      pathTemplate: "/v4/spreadsheets/{spreadsheetId}/values/{range}",
+      write: true,
+      fields: [
+        {
+          key: "spreadsheetId",
+          label: "Spreadsheet id",
+          in: "path",
+          required: true,
+        },
+        {
+          key: "range",
+          label: "Range",
+          in: "path",
+          required: true,
+          hint: "A1 notation, e.g. Sheet1!A2:B2",
+        },
+        {
+          key: "valueInputOption",
+          label: "Value input option",
+          in: "query",
+          required: true,
+          hint: "USER_ENTERED | RAW",
+        },
+        {
+          key: "values",
+          label: "Values",
+          in: "body",
+          required: true,
+          type: "json",
+          hint: '[["done", 42]] — rows matching the range',
+        },
+      ],
+    },
+    {
+      key: "clear_values",
+      label: "Clear values",
+      description: "Clear the values of a range (formatting is kept).",
+      method: "POST",
+      pathTemplate: "/v4/spreadsheets/{spreadsheetId}/values/{range}:clear",
+      write: true,
+      fields: [
+        {
+          key: "spreadsheetId",
+          label: "Spreadsheet id",
+          in: "path",
+          required: true,
+        },
+        { key: "range", label: "Range", in: "path", required: true },
+      ],
+    },
+    {
+      key: "get_spreadsheet",
+      label: "Get spreadsheet",
+      description:
+        "Fetch the spreadsheet's metadata (its sheets, titles, ids).",
+      method: "GET",
+      pathTemplate: "/v4/spreadsheets/{spreadsheetId}",
+      write: false,
+      fields: [
+        {
+          key: "spreadsheetId",
+          label: "Spreadsheet id",
+          in: "path",
+          required: true,
+        },
+        {
+          key: "includeGridData",
+          label: "Include grid data",
+          in: "query",
+          required: false,
+          type: "boolean",
+        },
+      ],
+    },
+  ],
+};
+
+// ── DeepL (base = the connection's API host: api-free.deepl.com for a Free key,
+//    api.deepl.com for Pro — a Free key only authenticates on the free host). Auth is
+//    DeepL's own `Authorization: DeepL-Auth-Key <key>`, i.e. the custom-header form. ─────
+const DEEPL: IntegrationProvider = {
+  key: "deepl",
+  label: "DeepL",
+  baseUrlFromConnection: true,
+  authScheme: { header: "Authorization", prefix: "DeepL-Auth-Key " },
+  description:
+    "Translate text with DeepL — translate, check quota usage, list supported languages.",
+  auth: "A custom connection whose Server URL is your DeepL API host (https://api-free.deepl.com for a Free key, https://api.deepl.com for Pro) and whose token is the DeepL auth key, sent as `Authorization: DeepL-Auth-Key <key>` — DeepL's own scheme, not a Bearer.",
+  actions: [
+    {
+      key: "translate_text",
+      label: "Translate text",
+      description:
+        "Translate one or more strings into a target language (not a mutation — safe to retry).",
+      method: "POST",
+      pathTemplate: "/v2/translate",
+      write: false,
+      fields: [
+        {
+          key: "text",
+          label: "Text",
+          in: "body",
+          required: true,
+          type: "json",
+          hint: '["Hello world!"] — an array of strings',
+        },
+        {
+          key: "target_lang",
+          label: "Target language",
+          in: "body",
+          required: true,
+          hint: "e.g. DE, FR, EN-GB (uppercase)",
+        },
+        {
+          key: "source_lang",
+          label: "Source language",
+          in: "body",
+          required: false,
+          hint: "omit to auto-detect",
+        },
+        {
+          key: "formality",
+          label: "Formality",
+          in: "body",
+          required: false,
+          hint: "default | more | less | prefer_more | prefer_less",
+        },
+        {
+          key: "context",
+          label: "Context",
+          in: "body",
+          required: false,
+          hint: "surrounding text that is NOT translated, to disambiguate",
+        },
+        {
+          key: "glossary_id",
+          label: "Glossary id",
+          in: "body",
+          required: false,
+        },
+      ],
+    },
+    {
+      key: "get_usage",
+      label: "Get usage",
+      description: "Read the key's character usage and quota for the period.",
+      method: "GET",
+      pathTemplate: "/v2/usage",
+      write: false,
+      fields: [],
+    },
+    {
+      key: "list_languages",
+      label: "List languages",
+      description: "List the supported source or target languages.",
+      method: "GET",
+      pathTemplate: "/v2/languages",
+      write: false,
+      fields: [
+        {
+          key: "type",
+          label: "Type",
+          in: "query",
+          required: false,
+          hint: "source (default) | target",
+        },
+      ],
+    },
+  ],
+};
+
 export const INTEGRATION_CATALOG: Record<string, IntegrationProvider> = {
+  mattermost: MATTERMOST,
+  pagerduty: PAGERDUTY,
+  googlesheets: GOOGLESHEETS,
+  deepl: DEEPL,
   stripe: STRIPE,
   shopify: SHOPIFY,
   twilio: TWILIO,
@@ -3761,6 +4457,9 @@ export interface BuiltIntegrationRequest {
   path: string;
   /** Assembled JSON body for write verbs (undefined when there are no body fields / for GETs). */
   body?: Record<string, unknown>;
+  /** Headers built from `in: "header"` fields (undefined when the action declares none).
+   *  The activity merges these UNDER the resolved auth headers — never over them. */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -3780,11 +4479,27 @@ export function buildIntegrationRequest(
   let path = act.pathTemplate;
   const queryParts: string[] = [];
   let body: Record<string, unknown> | undefined;
+  let headers: Record<string, string> | undefined;
 
   for (const field of act.fields) {
-    const value = fields[field.key];
+    // A const field's value comes from the CATALOG, not from config (an API type
+    // discriminator the user must not be able to break).
+    const value = field.const !== undefined ? field.const : fields[field.key];
     const missing = isEmptyFieldValue(value);
-    if (field.in === "path") {
+    if (field.in === "header") {
+      if (missing) continue;
+      const raw = String(value);
+      // A header value can arrive from an upstream BINDING, i.e. from run data — a CR/LF
+      // would let that data inject extra headers into the request. Reject in the pure
+      // builder so the failure is clean and deterministic; never echo the value.
+      if (/[\r\n]/.test(raw)) {
+        throw new Error(
+          `Integration ${provider}/${action}: header field '${field.key}' contains a newline`,
+        );
+      }
+      headers ??= {};
+      headers[field.key] = raw;
+    } else if (field.in === "path") {
       // A required path field is validated at save time; at runtime substitute what we have.
       path = path.replace(
         `{${field.key}}`,
@@ -3806,7 +4521,12 @@ export function buildIntegrationRequest(
   }
 
   const qs = queryParts.join("&");
-  return { method: act.method, path: qs ? `${path}?${qs}` : path, body };
+  return {
+    method: act.method,
+    path: qs ? `${path}?${qs}` : path,
+    body,
+    headers,
+  };
 }
 
 /**
@@ -3837,7 +4557,11 @@ export function validateIntegrationConfig(
     key in config.fields &&
     !isEmptyFieldValue(config.fields[key]);
   const supplied = (key: string): boolean =>
-    hasBinding(key) || hasStaticValue(key);
+    hasBinding(key) ||
+    hasStaticValue(key) ||
+    // A const field is supplied BY THE CATALOG (buildIntegrationRequest injects it), so
+    // never ask the user for it.
+    action.fields.some((f) => f.key === key && f.const !== undefined);
 
   for (const field of action.fields) {
     if (field.required && !supplied(field.key)) {

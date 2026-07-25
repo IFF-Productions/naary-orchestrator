@@ -1390,6 +1390,244 @@ describe("integration catalog — request construction", () => {
       user: { name: "Ada Lovelace", email: "ada@example.com" },
     });
   });
+
+  /* ── batch 4: Mattermost · PagerDuty · Google Sheets · DeepL ── */
+
+  it("Mattermost send_message → POST /api/v4/posts with channel_id + message (root_id only when set)", () => {
+    const req = buildIntegrationRequest("mattermost", "send_message", {
+      channel_id: "cccccccccccccccccccccccccc",
+      message: "deploy finished",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/api/v4/posts");
+    expect(req.body).toEqual({
+      channel_id: "cccccccccccccccccccccccccc",
+      message: "deploy finished",
+    });
+    // A thread reply adds root_id.
+    expect(
+      buildIntegrationRequest("mattermost", "send_message", {
+        channel_id: "c1",
+        message: "…and it passed",
+        root_id: "p1",
+      }).body,
+    ).toEqual({ channel_id: "c1", message: "…and it passed", root_id: "p1" });
+  });
+
+  it("Mattermost get_channel_by_name → GET the team/channel name path", () => {
+    const req = buildIntegrationRequest("mattermost", "get_channel_by_name", {
+      teamName: "acme",
+      channelName: "town-square",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/api/v4/teams/name/acme/channels/name/town-square");
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Mattermost list_channel_posts → GET channel posts with paging", () => {
+    const req = buildIntegrationRequest("mattermost", "list_channel_posts", {
+      channelId: "c1",
+      per_page: 20,
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/api/v4/channels/c1/posts?per_page=20");
+  });
+
+  it("Mattermost add_reaction → POST /api/v4/reactions with the emoji triple", () => {
+    const req = buildIntegrationRequest("mattermost", "add_reaction", {
+      user_id: "u1",
+      post_id: "p1",
+      emoji_name: "white_check_mark",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/api/v4/reactions");
+    expect(req.body).toEqual({
+      user_id: "u1",
+      post_id: "p1",
+      emoji_name: "white_check_mark",
+    });
+  });
+
+  it("PagerDuty create_incident → POST /incidents, const type discriminators injected, From as a HEADER", () => {
+    const req = buildIntegrationRequest("pagerduty", "create_incident", {
+      From: "oncall@acme.com",
+      title: "Checkout is down",
+      serviceId: "PW7YESS",
+      urgency: "high",
+      details: "5xx rate above 20%",
+      // A configured value must NOT be able to override a const field.
+      type: "not-an-incident",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/incidents");
+    expect(req.body).toEqual({
+      incident: {
+        type: "incident",
+        title: "Checkout is down",
+        service: { id: "PW7YESS", type: "service_reference" },
+        urgency: "high",
+        body: { type: "incident_body", details: "5xx rate above 20%" },
+      },
+    });
+    // `From` is a request HEADER, never part of the body/path.
+    expect(req.headers).toEqual({ From: "oncall@acme.com" });
+  });
+
+  it("PagerDuty create_incident → omitting From leaves the header off entirely", () => {
+    const req = buildIntegrationRequest("pagerduty", "create_incident", {
+      title: "Latency spike",
+      serviceId: "PSVC",
+    });
+    expect(req.headers).toBeUndefined();
+    expect(req.body).toEqual({
+      incident: {
+        type: "incident",
+        title: "Latency spike",
+        service: { id: "PSVC", type: "service_reference" },
+        body: { type: "incident_body" },
+      },
+    });
+  });
+
+  it("PagerDuty resolve_incident → PUT /incidents/{id} with the incident_reference + resolved consts", () => {
+    const req = buildIntegrationRequest("pagerduty", "resolve_incident", {
+      From: "oncall@acme.com",
+      id: "PT4KHLK",
+      resolution: "rolled back",
+    });
+    expect(req.method).toBe("PUT");
+    expect(req.path).toBe("/incidents/PT4KHLK");
+    expect(req.body).toEqual({
+      incident: {
+        type: "incident_reference",
+        status: "resolved",
+        resolution: "rolled back",
+      },
+    });
+    expect(req.headers).toEqual({ From: "oncall@acme.com" });
+  });
+
+  it("PagerDuty acknowledge_incident → same endpoint, status const 'acknowledged'", () => {
+    const req = buildIntegrationRequest("pagerduty", "acknowledge_incident", {
+      id: "PT4KHLK",
+    });
+    expect(req.method).toBe("PUT");
+    expect(req.body).toEqual({
+      incident: { type: "incident_reference", status: "acknowledged" },
+    });
+  });
+
+  it("PagerDuty add_note → POST /incidents/{id}/notes with note.content", () => {
+    const req = buildIntegrationRequest("pagerduty", "add_note", {
+      From: "oncall@acme.com",
+      id: "PT4KHLK",
+      content: "paging the DB team",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/incidents/PT4KHLK/notes");
+    expect(req.body).toEqual({ note: { content: "paging the DB team" } });
+  });
+
+  it("PagerDuty list_incidents → GET /incidents with the status/service filters", () => {
+    const req = buildIntegrationRequest("pagerduty", "list_incidents", {
+      "statuses[]": "triggered",
+      limit: 25,
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/incidents?statuses%5B%5D=triggered&limit=25");
+    // …and with no filters there's no query string at all.
+    expect(
+      buildIntegrationRequest("pagerduty", "list_incidents", {}).path,
+    ).toBe("/incidents");
+  });
+
+  it("PagerDuty rejects a CR/LF in a header field (a bound value must not inject headers)", () => {
+    expect(() =>
+      buildIntegrationRequest("pagerduty", "create_incident", {
+        From: "oncall@acme.com\r\nX-Injected: 1",
+        title: "t",
+        serviceId: "s",
+      }),
+    ).toThrow(/header field 'From' contains a newline/);
+  });
+
+  it("Google Sheets append_row → POST …/values/{range}:append with valueInputOption + rows", () => {
+    const req = buildIntegrationRequest("googlesheets", "append_row", {
+      spreadsheetId: "1AbC",
+      range: "Sheet1!A1",
+      valueInputOption: "USER_ENTERED",
+      values: [["Ada", "ada@acme.com"]],
+    });
+    expect(req.method).toBe("POST");
+    // The range is A1 notation, so it's percent-encoded into the path segment.
+    expect(req.path).toBe(
+      "/v4/spreadsheets/1AbC/values/Sheet1!A1:append?valueInputOption=USER_ENTERED",
+    );
+    expect(req.body).toEqual({ values: [["Ada", "ada@acme.com"]] });
+  });
+
+  it("Google Sheets get_values → GET the range, with the render options as query params", () => {
+    const req = buildIntegrationRequest("googlesheets", "get_values", {
+      spreadsheetId: "1AbC",
+      range: "Sheet1!A1:D20",
+      valueRenderOption: "UNFORMATTED_VALUE",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe(
+      "/v4/spreadsheets/1AbC/values/Sheet1!A1%3AD20?valueRenderOption=UNFORMATTED_VALUE",
+    );
+    expect(req.body).toBeUndefined();
+  });
+
+  it("Google Sheets update_values → PUT with valueInputOption; clear_values sends no body", () => {
+    const put = buildIntegrationRequest("googlesheets", "update_values", {
+      spreadsheetId: "1AbC",
+      range: "Sheet1!A2:B2",
+      valueInputOption: "RAW",
+      values: [["done", 42]],
+    });
+    expect(put.method).toBe("PUT");
+    expect(put.path).toBe(
+      "/v4/spreadsheets/1AbC/values/Sheet1!A2%3AB2?valueInputOption=RAW",
+    );
+    expect(put.body).toEqual({ values: [["done", 42]] });
+
+    const clear = buildIntegrationRequest("googlesheets", "clear_values", {
+      spreadsheetId: "1AbC",
+      range: "Sheet1!A1:D20",
+    });
+    expect(clear.method).toBe("POST");
+    expect(clear.path).toBe(
+      "/v4/spreadsheets/1AbC/values/Sheet1!A1%3AD20:clear",
+    );
+    expect(clear.body).toBeUndefined();
+  });
+
+  it("DeepL translate_text → POST /v2/translate with a text ARRAY + target_lang", () => {
+    const req = buildIntegrationRequest("deepl", "translate_text", {
+      text: ["Hello world!"],
+      target_lang: "DE",
+      formality: "more",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/v2/translate");
+    expect(req.body).toEqual({
+      text: ["Hello world!"],
+      target_lang: "DE",
+      formality: "more",
+    });
+  });
+
+  it("DeepL get_usage / list_languages → plain GETs, no body", () => {
+    const usage = buildIntegrationRequest("deepl", "get_usage", {});
+    expect(usage.method).toBe("GET");
+    expect(usage.path).toBe("/v2/usage");
+    expect(usage.body).toBeUndefined();
+    expect(
+      buildIntegrationRequest("deepl", "list_languages", { type: "target" })
+        .path,
+    ).toBe("/v2/languages?type=target");
+  });
 });
 
 describe("integration field resolution (static + bindings)", () => {
@@ -1478,6 +1716,28 @@ describe("integration save-gate validation", () => {
         fields: { parent: { database_id: "db" }, properties: {} },
       }),
     ).toMatch(/missing required field 'properties'/);
+  });
+
+  it("never asks for a const field — the catalog supplies it", () => {
+    // PagerDuty create_incident declares required const fields (incident.type,
+    // service.type, body.type); a config with only the USER-facing fields must pass.
+    expect(
+      validateIntegrationConfig({
+        provider: "pagerduty",
+        action: "create_incident",
+        connectionId: "pd",
+        fields: { title: "Checkout is down", serviceId: "PW7YESS" },
+      }),
+    ).toBeNull();
+    // …but a genuinely missing user field is still caught.
+    expect(
+      validateIntegrationConfig({
+        provider: "pagerduty",
+        action: "create_incident",
+        connectionId: "pd",
+        fields: { title: "Checkout is down" },
+      }),
+    ).toMatch(/missing required field 'serviceId'/);
   });
 
   it("rejects unknown provider / action", () => {

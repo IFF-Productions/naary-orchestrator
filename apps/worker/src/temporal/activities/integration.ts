@@ -130,6 +130,10 @@ export async function callIntegration(
       // Per-action header overrides (e.g. GitHub's diff media type) win over the provider
       // defaults but never over auth (auth is spread last so it can't be clobbered).
       ...(action?.headers ?? {}),
+      // Headers built from `in: "header"` FIELDS (e.g. PagerDuty's `From`). Their values can
+      // come from an upstream binding — i.e. from run data — so they are spread BEFORE auth:
+      // a field named `Authorization` must never be able to replace the resolved credential.
+      ...(req.headers ?? {}),
       ...authHeaders,
     };
     const init: RequestInit = { method: req.method, headers };
