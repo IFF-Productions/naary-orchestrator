@@ -8,6 +8,18 @@ x-backend-env: &backend-env
   # Decrypt-only fallback during master-key rotation (see rotate-master-key CLI).
   # Set alongside a NEW ENCRYPTION_KEY, run the rewrap, then remove it.
   OLD_ENCRYPTION_KEY: ${OLD_ENCRYPTION_KEY:-}
+  # External secret store for BYOK provider keys (#458). UNSET/`db` = the default
+  # Postgres envelope store (unchanged). `vault` = HashiCorp Vault KV v2: the key
+  # MATERIAL lives in Vault and Postgres keeps only the index row. Both the api (save)
+  # and the worker (in-activity resolve) must agree, so they share this anchor.
+  # ENCRYPTION_KEY stays REQUIRED either way — pre-existing rows and every other secret
+  # (connection tokens, env secrets) remain DB-encrypted.
+  SECRET_PROVIDER: ${SECRET_PROVIDER:-}
+  VAULT_ADDR: ${VAULT_ADDR:-}
+  VAULT_TOKEN: ${VAULT_TOKEN:-}
+  VAULT_KV_MOUNT: ${VAULT_KV_MOUNT:-}
+  VAULT_PATH_PREFIX: ${VAULT_PATH_PREFIX:-}
+  VAULT_NAMESPACE: ${VAULT_NAMESPACE:-}
   # Defaults to the in-stack dev server. Point at Temporal Cloud by overriding
   # TEMPORAL_ADDRESS + setting TEMPORAL_NAMESPACE and an auth method in .env
   # (TEMPORAL_API_KEY, or the mTLS cert/key paths). See @naary/temporal-config.
