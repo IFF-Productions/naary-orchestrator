@@ -456,7 +456,14 @@ function requirementFor(
     case "hmac":
     case "jwt":
     case "totp":
-      return { id: "signing", label: "Signing key", types: ["signing"] };
+      // Read the types from the canonical map like every other case — the three signing
+      // node types all map to ["signing"] there, so hardcoding it here would silently drift
+      // if that ever changes (Copilot review).
+      return {
+        id: "signing",
+        label: "Signing key",
+        types: CONNECTION_TYPES[n.type],
+      };
     case "httpRequest":
       return {
         id: "http-auth",
