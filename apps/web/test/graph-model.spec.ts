@@ -191,3 +191,30 @@ describe("node registry (simpler-UX metadata)", () => {
     }
   });
 });
+
+describe("provider coercion (malformed/legacy graphs must not crash rendering)", () => {
+  // config is Record<string, unknown>: a hand-edited / AI-generated / legacy graph can carry
+  // a non-string provider. Asserting {provider?: string} and calling .trim() threw at RENDER
+  // time and blanked the config panel (Copilot review on #691) — in BOTH the label and the
+  // description path.
+  for (const bad of [123, null, undefined, {}, [], true] as unknown[]) {
+    it(`degrades gracefully for provider: ${JSON.stringify(bad) ?? "undefined"}`, () => {
+      const cfg = { provider: bad } as Record<string, unknown>;
+      expect(() => nodeDisplayLabel("integration", cfg)).not.toThrow();
+      expect(() => nodeDisplayDescription("integration", cfg)).not.toThrow();
+      expect(nodeDisplayLabel("integration", cfg)).toBe("Integration");
+      expect(nodeDisplayDescription("integration", cfg)).toContain(
+        "Call a connected service's API",
+      );
+    });
+  }
+
+  it("still resolves a valid provider (and trims it)", () => {
+    expect(nodeDisplayLabel("integration", { provider: " github " })).toBe(
+      "GitHub",
+    );
+    expect(
+      nodeDisplayDescription("integration", { provider: " github " }),
+    ).toContain("GitHub issues");
+  });
+});
