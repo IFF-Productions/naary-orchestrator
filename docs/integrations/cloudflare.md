@@ -29,9 +29,10 @@ Manage Cloudflare zones and DNS records from a workflow.
 
 ## Get your credentials
 
-1. In the Cloudflare dashboard, open **My Profile → API Tokens** and create a token.
-2. Scope it to the specific zone(s) it should manage rather than all zones.
-3. Prefer a scoped **API token** over the legacy Global API Key, which cannot be limited and authenticates differently.
+1. In the Cloudflare dashboard, open **My Profile → API Tokens** (or **Manage Account → API Tokens** for an account-scoped token) and create a token.
+2. The **Edit zone DNS** template already grants exactly what the DNS actions need — start from it rather than hand-picking permissions.
+3. Scope it to the specific zone(s) it should manage rather than all zones.
+4. Prefer a scoped **API token** over the legacy Global API Key, which cannot be limited and authenticates differently.
 
 ## Connect it in Naary
 

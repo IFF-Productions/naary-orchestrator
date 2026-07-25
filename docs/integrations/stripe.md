@@ -28,8 +28,8 @@ Create customers, take payments and issue refunds from a workflow.
 
 ## Get your credentials
 
-1. In the Stripe dashboard, open **Developers → API keys** and copy a **secret** key.
-2. Start with a **test-mode** key (`sk_test_…`) and keep it in your sandbox environment.
+1. In the Stripe dashboard, open the **API keys** page (under Developers) and create or copy a **secret** key. A live secret key is shown once, at creation.
+2. Start with a **test-mode / sandbox** key (`sk_test_…`) and keep it in your sandbox environment. Test and live data are separate — objects in one mode are invisible to the other.
 3. Prefer a restricted key limited to the resources the workflow needs.
 
 ## Connect it in Naary

@@ -66,7 +66,7 @@ The 2 write actions run **at-most-once**: a transient failure fails the node ins
 
 ## Gotchas
 
-- Generated access tokens are **short-lived** unless you use a refresh-token flow — expect 401s on a long-lived workflow.
+- A token generated in the App Console expires after **4 hours** (14400s). For anything unattended you need a refresh token — request it with `token_access_type=offline` on the authorize URL; refresh tokens do not expire.
 - The root folder is the **empty string** `""`, not `/`. Paths are like `/Reports/2026`.
 - Dropbox's list/metadata endpoints are `POST` even though they only read. That is why they are still safe to call.
 

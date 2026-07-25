@@ -68,7 +68,7 @@ The 2 write actions run **at-most-once**: a transient failure fails the node ins
 ## Gotchas
 
 - Graph access tokens last about an hour — plan for rotation on any unattended workflow.
-- `userId` is the user's object id or UPN. `me` only works for delegated (user) tokens, never for application tokens.
+- `userId` is the user's object id or UPN. **`me` only works for delegated (user) tokens** — with an application (client-credentials) token you must address the user explicitly, e.g. `/users/{id}/sendMail`; `/me/sendMail` is rejected outright.
 - Application permissions reach the **whole tenant** unless you scope them — a mail-send app can send as anyone.
 
 ## Troubleshooting

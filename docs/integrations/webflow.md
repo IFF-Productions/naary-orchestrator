@@ -27,7 +27,7 @@ Read and create Webflow CMS collection items from a workflow.
 
 ## Get your credentials
 
-1. In Webflow, open the site's **Settings → Apps & integrations** and generate an API token.
+1. In Webflow, open the site's **Settings → Apps & integrations** and generate a site API token.
 
 ## Connect it in Naary
 
@@ -64,7 +64,7 @@ The 1 write action run **at-most-once**: a transient failure fails the node inst
 
 ## Gotchas
 
-- Created items are **staged, not published** — a separate publish step makes them live.
+- Created items are **staged drafts** (`isDraft: true`), not live: *Create item* posts to `/collections/{id}/items`. Webflow has a separate live-item endpoint that this catalog does not expose, so publishing is a step you take in Webflow (or via a `httpRequest` node).
 - `siteId` and `collectionId` come from the API or the site settings, not the editor URL.
 
 ## Troubleshooting

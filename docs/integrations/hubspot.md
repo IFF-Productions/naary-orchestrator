@@ -28,8 +28,8 @@ Create and update HubSpot contacts and deals from a workflow.
 
 ## Get your credentials
 
-1. In HubSpot, open **Settings → Integrations → Private apps** and create a private app.
-2. Select its CRM scopes, then copy the access token.
+1. In HubSpot, open **Settings → Integrations → Private Apps** and create a private app. You must be a **super admin**.
+2. Select its CRM scopes, then open the app's **Auth** tab and click **Show token**.
 
 ## Connect it in Naary
 

@@ -28,8 +28,9 @@ Raise, acknowledge and resolve PagerDuty incidents from a workflow.
 
 ## Get your credentials
 
-1. In PagerDuty, open **Integrations → API Access Keys** and create a REST API key.
-2. Note whether it is account-scoped or user-scoped — that decides whether you must send a `From` address.
+1. In PagerDuty, open **Integrations → Developer Tools → API Access Keys** and click **Create New API Key**. You need to be an Admin or Account Owner.
+2. Tick **Read-only API Key** unless the workflow needs to create or change incidents — a read-only key cannot page anyone by mistake.
+3. Note whether it is account-scoped or user-scoped — that decides whether you must send a `From` address.
 
 ## Connect it in Naary
 

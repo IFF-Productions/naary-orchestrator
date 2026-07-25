@@ -29,7 +29,7 @@ Read and manage Shopify products and orders from a workflow.
 
 ## Get your credentials
 
-1. In your Shopify admin, open **Settings → Apps and sales channels → Develop apps** and create an app.
+1. In your Shopify admin, open **Settings → Apps and sales channels → Develop apps** and create an app. The chosen app developer needs the *Develop apps* permission.
 2. Configure its Admin API scopes, install it on the store, then reveal the **Admin API access token**.
 
 ## Connect it in Naary

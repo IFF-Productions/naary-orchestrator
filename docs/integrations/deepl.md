@@ -29,7 +29,7 @@ Translate text mid-workflow and keep an eye on your character quota.
 ## Get your credentials
 
 1. Open your **DeepL account → API keys** and copy the authentication key.
-2. Note which plan the key belongs to — Free and Pro use **different hosts** (below).
+2. Check whether your key ends in `:fx` — that decides which host you use (below). Do not go by plan name: the original Free/Pro plans are no longer sold and current plans are named differently.
 
 ## Connect it in Naary
 
@@ -63,7 +63,7 @@ Fields can be typed in statically or **bound** to an upstream step's output (`{ 
 
 ## Gotchas
 
-- Using the wrong host for your plan returns 403 with a valid key — this is the single most common DeepL setup failure. Free keys end in `:fx`.
+- **A key ending `:fx` must use `api-free.deepl.com`; anything else uses `api.deepl.com`.** The wrong host returns 403 with a perfectly valid key — the single most common DeepL setup failure, and the suffix is a more reliable signal than the plan name.
 - *Get usage* is the cheapest way to confirm the key works: it takes no arguments and consumes no characters.
 
 ## Troubleshooting

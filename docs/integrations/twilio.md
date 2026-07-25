@@ -66,7 +66,7 @@ The 2 write actions run **at-most-once**: a transient failure fails the node ins
 
 ## Gotchas
 
-- **The write actions are currently broken — see issue #707.** `send_sms` and `make_call` send a JSON body, and Twilio's REST API requires form-encoding, so both are rejected. The read actions work. This is a known bug, not a setup mistake on your side.
+- **The write actions are currently broken — see issue #707.** `send_sms` and `make_call` send a JSON body, but Twilio's REST API requires `application/x-www-form-urlencoded` for POST bodies (their docs are explicit), so both are rejected. The read actions work. This is a known bug of ours, not a setup mistake on your side.
 - Set the node's `accountSid` field **as well as** the connection token: the URL path needs it explicitly and it is not derived from the credential.
 - Trial accounts can only message **verified** numbers.
 - Automated SMS and voice are legally regulated (consent, quiet hours, AI-voice disclosure). See `docs/design/OUTBOUND-VOICE-CALL.md` before running anything at volume.

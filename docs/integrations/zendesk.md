@@ -28,8 +28,9 @@ Read, create and update Zendesk tickets from a workflow.
 
 ## Get your credentials
 
-1. In Zendesk Admin Center, open **Apps and integrations → APIs → Zendesk API** and enable **token access**, then add an API token.
-2. Combine it as `your-email@company.com/token:your-api-token` — Naary sends that as HTTP Basic.
+1. In Zendesk **Admin Center → Apps and integrations → APIs → API configuration**, tick **Allow API token access** and save. You must be an administrator, and it is **off by default**.
+2. Then open **APIs → API tokens → Add API token** and copy the token.
+3. Combine it as `your-email@company.com/token:your-api-token` — Naary sends that as HTTP Basic.
 
 ## Connect it in Naary
 
@@ -76,7 +77,8 @@ You fill in flat fields; the node assembles the nested body the API expects.
 ## Gotchas
 
 - The credential format is unusual: the literal string `/token` sits between your email and the token. Getting it wrong is the usual cause of a 401 here.
-- Token access is **off by default** — enabling it is a separate admin step.
+- Turning token access back off silently breaks every existing token.
+- Zendesk is deprecating *password* auth for the API; the literal `/token` in the credential is what makes this token auth rather than password auth, so keep it.
 
 ## Troubleshooting
 

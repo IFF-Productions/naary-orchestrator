@@ -29,7 +29,7 @@ Send transactional email and manage contacts via SendGrid.
 
 ## Get your credentials
 
-1. In SendGrid, open **Settings → API Keys** and create a key with the access below.
+1. In SendGrid, open **Settings → API Keys** and create a key, choosing its scopes at creation.
 2. Verify a sender identity (**Settings → Sender Authentication**) — SendGrid rejects mail from unverified senders.
 
 ## Connect it in Naary

@@ -28,7 +28,7 @@ Read and write Airtable records as workflow steps.
 
 ## Get your credentials
 
-1. Open your Airtable **developer hub → Personal access tokens** and create a token.
+1. Open the Airtable **developer hub → Personal access tokens** (`airtable.com/create/tokens`) and click **Create token**.
 2. Grant it the data scopes below **and** add the specific base(s) it may touch — a token with no base added returns 403 on every call.
 3. Copy the token immediately; Airtable shows it once.
 

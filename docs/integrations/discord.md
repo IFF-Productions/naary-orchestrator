@@ -28,9 +28,9 @@ Post messages, open DMs and react in Discord from a workflow.
 
 ## Get your credentials
 
-1. In the **Discord Developer Portal**, create an application and add a **Bot** to it.
+1. In the **Discord Developer Portal**, create an application, open its **Bot** page, and click **Reset Token** to reveal one.
 2. Copy the bot token from the Bot page (reset it if it was never revealed).
-3. Invite the bot to your server with the permissions it needs, then enable **Developer Mode** in Discord to copy channel IDs.
+3. Invite the bot to your server with the permissions it needs. To copy channel IDs, enable **User Settings → Advanced → Developer Mode**, then right-click a channel → **Copy Channel ID**.
 
 ## Connect it in Naary
 

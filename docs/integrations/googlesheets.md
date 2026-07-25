@@ -30,7 +30,7 @@ Read and append Google Sheets rows as workflow steps.
 
 1. In **Google Cloud Console**, enable the Google Sheets API for your project.
 2. Create OAuth credentials (or a service account) and obtain an **access token** for the spreadsheets scope.
-3. If you use a service account, **share the spreadsheet with the service-account email** — otherwise every call 403s.
+3. If you use a service account, **share the spreadsheet with the service-account email** — otherwise every call 403s. Untick *Notify people* when you do; service accounts have no inbox, and the permission is still granted.
 
 ## Connect it in Naary
 

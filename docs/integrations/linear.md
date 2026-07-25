@@ -27,7 +27,8 @@ File, update and comment on Linear issues from a workflow.
 
 ## Get your credentials
 
-1. In Linear, open **Settings → API → Personal API keys** and create a key.
+1. In Linear, open **Settings → Account → Security & Access** and create a personal API key.
+2. You can restrict the key (Read / Write / Admin / Create issues / Create comments) and limit it to specific teams — do that rather than granting full access.
 
 ## Connect it in Naary
 

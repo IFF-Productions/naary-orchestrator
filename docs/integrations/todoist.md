@@ -28,7 +28,7 @@ Create, list and close Todoist tasks from a workflow.
 
 ## Get your credentials
 
-1. In Todoist, open **Settings → Integrations → Developer** and copy your API token.
+1. In Todoist (web), click your avatar → **Settings → Integrations** tab → **Developer** tab, and copy your API token.
 
 ## Connect it in Naary
 

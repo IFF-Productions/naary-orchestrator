@@ -27,8 +27,8 @@ Create and update Asana tasks, and comment on them, from a workflow.
 
 ## Get your credentials
 
-1. Open your Asana **developer console** (My Apps) and create a personal access token.
-2. Copy it at creation time — it is not shown again.
+1. Open the Asana **developer console** (`app.asana.com/0/my-apps`, or avatar → **My Settings → Apps → Manage Developer Apps**) and create a personal access token.
+2. Copy it at creation time — it is not shown again. Asana PATs are long-lived, so unlike Zoom/Box/Dropbox this one will not silently expire.
 
 ## Connect it in Naary
 

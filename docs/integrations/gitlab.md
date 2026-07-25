@@ -28,7 +28,7 @@ Read and file GitLab issues, and comment on them, from a workflow.
 
 ## Get your credentials
 
-1. In GitLab, open **Preferences → Access tokens** and create a personal access token.
+1. In GitLab, open **Edit profile → Access → Personal access tokens** and create a token.
 
 ## Connect it in Naary
 

@@ -27,7 +27,7 @@ Query PostHog events and people, and annotate releases, from a workflow.
 
 ## Get your credentials
 
-1. In PostHog, open **Settings → Personal API keys** and create a key.
+1. In PostHog, open **Settings → Organization → Security → Personal API key access** and create a key.
 2. Note your **project id** from the project settings — most endpoints need it.
 
 ## Connect it in Naary

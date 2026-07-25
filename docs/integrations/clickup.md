@@ -27,7 +27,7 @@ Create, update and comment on ClickUp tasks from a workflow.
 
 ## Get your credentials
 
-1. In ClickUp, open your **personal Settings → Apps** and generate an API token.
+1. In ClickUp, click your avatar → **Settings → Apps**, and under **API Token** click **Generate**. Any ClickUp user can do this.
 
 ## Connect it in Naary
 

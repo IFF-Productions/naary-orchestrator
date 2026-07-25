@@ -28,7 +28,7 @@ Create, list and cancel Zoom meetings from a workflow.
 
 ## Get your credentials
 
-1. In the **Zoom App Marketplace**, create a **Server-to-Server OAuth** app.
+1. In the **Zoom App Marketplace**, click **Develop → Build an App** and choose **Server-to-Server OAuth**.
 2. Add the meeting scopes, activate the app, then request an access token with its credentials.
 
 ## Connect it in Naary
@@ -72,7 +72,7 @@ You fill in flat fields; the node assembles the nested body the API expects.
 
 ## Gotchas
 
-- **Tokens expire in about an hour.** Zoom issues no long-lived token for this app type, so a stored token will start 401ing — rotate it, or expect scheduled workflows to fail after the first hour.
+- **Tokens live exactly one hour (3600s) and there is no refresh token** for this app type — you re-request one from the token endpoint. A stored token will start 401ing, so a scheduled workflow needs rotation, not a paste-once credential. (Multiple tokens can be live at once, so rotating does not invalidate the old one.)
 - `userId` is the Zoom user id or email; `me` works only for the token's own user.
 
 ## Troubleshooting

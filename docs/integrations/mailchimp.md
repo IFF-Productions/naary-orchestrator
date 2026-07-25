@@ -28,7 +28,8 @@ Add and update Mailchimp audience members, and create campaigns.
 ## Get your credentials
 
 1. In Mailchimp, open **Account → Extras → API keys** and create a key.
-2. Read the **datacenter suffix** off the end of the key (e.g. `…-us19` → `us19`) — you need it for the Server URL.
+2. Read your **server prefix** off the browser URL after logging in — `https://us19.admin.mailchimp.com/` means `us19`. It is also the suffix on the key itself.
+3. Read the **datacenter suffix** off the end of the key (e.g. `…-us19` → `us19`) — you need it for the Server URL.
 
 ## Connect it in Naary
 

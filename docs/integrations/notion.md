@@ -27,7 +27,7 @@ Read, query and create Notion pages and database rows — a common knowledge-bas
 
 ## Get your credentials
 
-1. Create an integration at **notion.so/my-integrations** and copy its internal integration token.
+1. Create an integration at **notion.so/my-integrations** — only a **workspace owner** can — then use the **•••** next to it to reveal the internal integration token.
 2. In Notion, open each page or database the workflow touches and **share it with the integration** — via the `…` menu → Connections.
 
 ## Connect it in Naary
@@ -77,7 +77,7 @@ You fill in flat fields; the node assembles the nested body the API expects.
 
 ## Gotchas
 
-- **Sharing is the step everyone misses.** A valid token returns 404 for any page the integration has not been added to — Notion does not distinguish "forbidden" from "does not exist".
+- **Sharing is the step everyone misses.** A valid token returns **404 `object_not_found`** for a page the integration has not been added to — Notion's own docs say that error "can also indicate that the resource has not been shared with owner of the bearer token". A 404 here usually means unshared, not a wrong id.
 - Ids are the UUIDs in the page/database URL (with or without dashes).
 - Creating a page requires a `parent` and `properties` matching the target database's schema exactly.
 
