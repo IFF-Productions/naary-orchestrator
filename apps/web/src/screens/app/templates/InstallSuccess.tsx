@@ -38,6 +38,11 @@ export function InstallSuccess({
   const unmet = checkedRequirements
     ? checkedRequirements.filter((r) => r.status !== "satisfied").length
     : 0;
+  // UNKNOWN ≠ satisfied: when the connections lookup failed we cannot claim the template is
+  // ready. Treating it as "all set" contradicted the checklist's own "couldn't load" note and
+  // could send a user to a run that fails on a missing credential (Copilot review, #574).
+  const requirementsUnknown =
+    checkedRequirements === null && view.requirements.length > 0;
   return (
     <div
       style={{
@@ -102,7 +107,9 @@ export function InstallSuccess({
             .{" "}
             {unmet > 0
               ? "Connect what it needs first, then here's exactly what happens when it runs."
-              : "Here's exactly what happens when it runs — the loop every workflow follows."}
+              : requirementsUnknown
+                ? "Check the connections it needs below, then here's exactly what happens when it runs."
+                : "Here's exactly what happens when it runs — the loop every workflow follows."}
           </div>
         </div>
 
