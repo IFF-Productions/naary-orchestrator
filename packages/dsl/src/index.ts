@@ -17,6 +17,18 @@ export {
   githubIssueTriageGraph,
   jiraTicketGraph,
 } from "./templates";
+// #574 wave 2 — the differentiator templates (handoff / RAG / code agent / MCP / budget).
+// Own module because templates.ts crossed the 1000-line maintainability gate.
+export {
+  supervisorHandoffGraph,
+  ragAnswerGraph,
+  ragIngestGraph,
+  codeAgentPrGraph,
+  budgetCappedResearchGraph,
+  mcpServerToolGraph,
+  formToDbGraph,
+  escalationGraph,
+} from "./templates-advanced";
 export { getByPath, resolveMcpArguments } from "./mcp-args";
 export {
   INTEGRATION_CATALOG,
@@ -131,6 +143,21 @@ export {
   validateGraph,
   type GraphValidation,
 } from "./branch";
+// Agent handoff (#580 Phase 1) — zod-free by design: `validateGraph` imports it, so it
+// lands in the deterministic workflow bundle. The agent ACTIVITY imports
+// `handoffOutputSchema` from here too, so the save-gate and the runtime schema are the
+// same function.
+export {
+  HANDOFF_TARGET_FIELD,
+  handoffConditionPath,
+  handoffEdges,
+  handoffOutputSchema,
+  handoffTargetName,
+  readHandoff,
+  validateHandoffs,
+  type AgentHandoff,
+  type HandoffTarget,
+} from "./handoff";
 // Runtime-free typed config accessor (Phase 2·2). Registry config TYPES are re-exported here for
 // the worker; the runtime schemas/validation stay behind ./registry so zod never enters the
 // worker's import surface (Tier-1 rule 2). node-config.ts uses `import type` only → no zod.

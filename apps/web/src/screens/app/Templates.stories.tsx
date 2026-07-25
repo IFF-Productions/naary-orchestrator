@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { delay, http, HttpResponse } from "msw";
 import { expect, userEvent, waitFor, within } from "storybook/test";
+import { supervisorHandoffGraph } from "@naary/dsl";
 import type { GraphDef } from "@naary/dsl";
 import { ModeProvider } from "../../mode";
 import { Templates } from "./Templates";
@@ -156,6 +157,16 @@ const TEMPLATES: {
       "Pull an RSS/Atom feed, let an agent write a skimmable digest, and email it.",
     graph: feedDigest,
   },
+  {
+    // The REAL shipped graph, imported from the DSL rather than re-fixtured — this is the
+    // branching case (a supervisor fanning out to three specialists on conditional edges),
+    // so it's what proves the read-only graph render draws branches and labels them.
+    key: "supervisor-handoff",
+    name: "Supervisor & specialist agents",
+    description:
+      "A supervisor agent reads an inbound request and hands it to exactly one specialist with a typed brief; that specialist answers and the reply is returned synchronously.",
+    graph: supervisorHandoffGraph,
+  },
 ];
 
 const summaries = TEMPLATES.map(({ key, name, description, graph }) => ({
@@ -238,6 +249,37 @@ export const Preview: Story = {
     await expect(
       within(dialog).getByRole("button", { name: /Install template/ }),
     ).toBeTruthy();
+  },
+};
+
+/**
+ * The preview of a BRANCHING template (#574 + #580): the read-only graph must show the
+ * supervisor fanning out to three specialists, with each conditional edge labelled by its
+ * real condition — the check that the diagram reports structure rather than a straight line.
+ */
+export const PreviewBranchingGraph: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      await canvas.findByRole("button", {
+        name: /Preview Supervisor & specialist agents/,
+      }),
+    );
+    const dialog = await canvas.findByRole("dialog");
+    // The lazily-imported react-flow chunk has to land before nodes exist.
+    await waitFor(
+      () =>
+        expect(
+          dialog.querySelectorAll(".react-flow__node").length,
+        ).toBeGreaterThan(5),
+      { timeout: 5000 },
+    );
+    // Three conditional handoff edges, each labelled with the target it routes to.
+    const labels = [...dialog.querySelectorAll(".react-flow__edge-text")].map(
+      (e) => e.textContent,
+    );
+    await expect(labels).toContain("billing_specialist");
+    await expect(labels).toContain("technical_specialist");
   },
 };
 

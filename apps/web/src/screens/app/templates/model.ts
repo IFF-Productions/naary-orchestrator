@@ -127,7 +127,14 @@ export function deriveChain(graph: GraphDef): ChainNode[] {
     .map((n) => ({
       id: n.id,
       kind: n.type,
-      label: nodeDisplayLabel(n.type, n.config),
+      // `NodeDef.name` is the graph's own display name, and it lives on the node — not in
+      // config, where `nodeDisplayLabel` looks for it (the canvas edits it as `config.__name`
+      // and lifts it on save). Lift it here too, otherwise three differently-named agents in
+      // a supervisor template all read as a bare "Agent".
+      label: nodeDisplayLabel(
+        n.type,
+        n.name ? { ...n.config, __name: n.name } : n.config,
+      ),
       accent: ACCENT[n.type],
       icon: iconForNode(n.type),
     }));
@@ -172,6 +179,21 @@ const CATEGORY_DEFS: Record<string, Category> = {
     id: "agents",
     name: "Agent basics",
     accent: ACCENT.agent,
+    icon: "agent",
+  },
+  // #574 wave 2. These two ids are part of the API's CLOSED TemplateCategory union —
+  // adding one there without an entry here degrades to a humanized, neutrally-styled chip
+  // (see resolveCategory) rather than breaking, but the two must be kept in sync.
+  rag: {
+    id: "rag",
+    name: "Knowledge & RAG",
+    accent: ACCENT.vectorQuery,
+    icon: "archive",
+  },
+  code: {
+    id: "code",
+    name: "Code agents",
+    accent: ACCENT.codeAgent,
     icon: "agent",
   },
 };

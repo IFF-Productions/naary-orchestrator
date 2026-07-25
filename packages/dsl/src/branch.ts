@@ -1,3 +1,4 @@
+import { validateHandoffs } from "./handoff";
 import { getIntegrationAction, getIntegrationProvider } from "./integrations";
 import { computeItemsRegions } from "./items-region";
 import { getByPath } from "./mcp-args";
@@ -244,5 +245,13 @@ export function validateGraph(graph: GraphDef): GraphValidation {
       };
     }
   }
+
+  // Agent handoff (#580): a supervisor's declared targets must be REAL nodes reached by
+  // correctly-conditioned edges. Only graphs that carry the new `handoff` field are
+  // checked, so nothing already saved can newly fail. See handoff.ts for why each rule
+  // exists — chiefly that an unconditional target edge would fan out on every run.
+  const handoffError = validateHandoffs(graph);
+  if (handoffError) return { valid: false, error: handoffError };
+
   return { valid: true };
 }

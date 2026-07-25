@@ -2,13 +2,21 @@ import { Controller, Get, NotFoundException, Param } from "@nestjs/common";
 import type { GraphDef } from "@naary/dsl";
 import {
   apiEnrichGraph,
+  budgetCappedResearchGraph,
+  codeAgentPrGraph,
   dbReportGraph,
+  escalationGraph,
   feedDigestGraph,
+  formToDbGraph,
   githubIssueTriageGraph,
   githubReviewGraph,
   jiraTicketGraph,
+  mcpServerToolGraph,
   moderationGraph,
+  ragAnswerGraph,
+  ragIngestGraph,
   sampleGraph,
+  supervisorHandoffGraph,
   supportReplyGraph,
   webhookSampleGraph,
 } from "@naary/dsl";
@@ -21,7 +29,7 @@ import {
  * presentation and must not leak into the control plane.
  */
 export type TemplateCategory =
-  "agents" | "api" | "database" | "email" | "github" | "jira";
+  "agents" | "api" | "code" | "database" | "email" | "github" | "jira" | "rag";
 
 /** A built-in workflow template, surfaced to the Templates screen. */
 export interface TemplateSummary {
@@ -148,6 +156,107 @@ const TEMPLATES: {
     category: "jira",
     tags: ["intake", "ticketing", "human-approval", "mcp"],
     graph: jiraTicketGraph,
+  },
+  // --- #574 wave 2: the differentiator templates ---
+  {
+    key: "supervisor-handoff",
+    name: "Supervisor & specialist agents",
+    description:
+      "A supervisor agent reads an inbound request and hands it to exactly one specialist (billing, technical, or general) with a typed brief; that specialist answers and the reply is returned synchronously. Multi-agent delegation where every sub-agent is a normal, durable, separately-billed node — not an opaque crew. Needs no connection: it runs on your model key alone.",
+    category: "agents",
+    tags: [
+      "multi-agent",
+      "handoff",
+      "supervisor",
+      "routing",
+      "structured-output",
+      "webhook",
+    ],
+    graph: supervisorHandoffGraph,
+  },
+  {
+    key: "rag-answer",
+    name: "Ask your documents (RAG chat)",
+    description:
+      "A hosted chat page that answers only from your indexed documents: the question is embedded, matched against a pgvector collection, and the agent answers from the retrieved chunks — quoting them, and saying so when the answer isn't there. Pair it with the RAG indexer to fill the collection.",
+    category: "rag",
+    tags: ["rag", "chat", "pgvector", "grounding", "citations"],
+    graph: ragAnswerGraph,
+  },
+  {
+    key: "rag-ingest",
+    name: "Keep a RAG collection fresh",
+    description:
+      "On a nightly schedule, pull a feed (changelog, docs RSS, status feed), embed each entry, and upsert it into the collection the RAG chat queries. Swap the feed node for an HTTP request or SQL query to index any source.",
+    category: "rag",
+    tags: ["rag", "embeddings", "schedule", "pgvector", "indexing"],
+    graph: ragIngestGraph,
+  },
+  {
+    key: "code-agent-pr",
+    name: "Issue → approved plan → pull request",
+    description:
+      "A GitHub issue opens; an agent judges whether it's small and safe enough to attempt and writes the plan; a human approves that plan (the run parks durably — for days if needed); only then does the code agent clone the repo in its sandbox, make the change, and open a PR. The coding run is capped in both dollars and turns.",
+    category: "code",
+    tags: [
+      "code-agent",
+      "pull-request",
+      "human-approval",
+      "budget-cap",
+      "github",
+      "webhook",
+    ],
+    graph: codeAgentPrGraph,
+  },
+  {
+    key: "budget-capped-research",
+    name: "Budget-capped research agent",
+    description:
+      "A scheduled agent that runs a bounded tool loop over an MCP connection and emails the brief it produced. Every cost lever is set on purpose — cheapest capable model, hard output-token cap, capped tool steps — so an agent left on a nightly schedule can't quietly become the biggest line on the bill.",
+    category: "agents",
+    tags: [
+      "budget-cap",
+      "mcp",
+      "tools",
+      "schedule",
+      "research",
+      "notification",
+    ],
+    graph: budgetCappedResearchGraph,
+  },
+  {
+    key: "mcp-server-tool",
+    name: "Publish this workflow as an MCP tool",
+    description:
+      "Because the entry node is an MCP Server Trigger, this workflow becomes a callable tool on your workspace's MCP endpoint — so Claude (or any MCP client) can invoke it by name, running on your prompt, your key, and your budget, with every call recorded as a durable run.",
+    category: "api",
+    tags: ["mcp", "mcp-server", "tool", "structured-output", "integration"],
+    graph: mcpServerToolGraph,
+  },
+  {
+    key: "form-to-db",
+    name: "Form submission → database row",
+    description:
+      "A hosted public form collects a free-text expense claim, an agent normalizes it into typed fields, and a parameterized INSERT writes the row — parameters are bound from the agent's output, never concatenated into the SQL.",
+    category: "database",
+    tags: ["form", "extraction", "sql", "structured-output", "parameterized"],
+    graph: formToDbGraph,
+  },
+  {
+    key: "escalation-sla",
+    name: "Severity routing with an SLA escalation",
+    description:
+      "An alert arrives and an agent grades it. High severity opens a Jira ticket and parks on a human acknowledgement that reminds, then escalates, if nobody responds in time; anything lower is simply filed by email. The clearest demonstration of durable waiting: it can sit for days, survives restarts, and chases someone while it waits.",
+    category: "agents",
+    tags: [
+      "escalation",
+      "sla",
+      "human-approval",
+      "branching",
+      "incident",
+      "webhook",
+    ],
+    graph: escalationGraph,
   },
 ];
 
