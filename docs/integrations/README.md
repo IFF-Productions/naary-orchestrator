@@ -44,10 +44,18 @@ shows one tile per provider.
 
 ## Providers
 
+The catalog holds **38 providers** (`packages/dsl/src/integrations.ts`). These four have a
+written page:
+
 - [GitHub](./github.md) — issues: get, create, comment, add labels.
 - [Jira](./jira.md) — tickets: get, create, comment, transition.
 - [Slack](./slack.md) — post message, update message, add reaction.
 - [Notion](./notion.md) — get page, query database, create page, append blocks.
 
+For the **complete list of all 38** — each with its cheapest read-only smoke action, whether
+it writes, and whether it has ever been proven against the real API — see
+**[VERIFICATION.md](./VERIFICATION.md)**, which also covers the non-catalog integrations
+(SQL, SMTP, MCP, LLM providers, notification channels) and the operator-side ones.
+
 More providers are a catalog entry away — see the prioritized backlog in
-`docs/design/INTEGRATION-NODES.md §9` (Linear, Airtable, …).
+`docs/design/INTEGRATION-NODES.md §9`.
