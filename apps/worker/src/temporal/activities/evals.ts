@@ -331,6 +331,10 @@ async function runJudge(
         score: 0,
         error: "judge-unavailable",
       }),
+      // 0 because a thrown call reports no cost. NOT a rule-6 hole: if `runAgent` failed AFTER the
+      // provider call, it already wrote its own UsageEvent (with the fail-safe estimate when usage
+      // was missing) — the LEDGER is correct and is the billing authority. This figure is the
+      // case's DISPLAY cost, which can therefore under-report a judge that died mid-call.
       costUsd: 0,
     };
   }

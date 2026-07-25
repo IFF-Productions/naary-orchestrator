@@ -566,8 +566,16 @@ export function containsPii(text: string, kinds?: PiiKind[]): boolean {
   return redactPii(text, kinds).count > 0;
 }
 
-/** Does this graph reference any tool at all? Lets the interpreter skip the policy lookup
- *  entirely for a tool-free graph (pure, deterministic scan). */
+/**
+ * Does this graph reference any tool at all? Pure, deterministic scan.
+ *
+ * NOT used by the interpreter's gate, deliberately: the gate evaluates the policy against the
+ * RESOLVED ref of each tool node it reaches, and its node-type check already costs nothing on a
+ * tool-free graph. Pre-filtering on a scan of the SAVED graph is precisely the static-refs
+ * assumption that let a `{{ }}`-templated tool name slip past the deny-list (see the memo note in
+ * `toolApprovalGate`). Use this for authoring-side questions only — never to decide that a runtime
+ * policy check can be skipped.
+ */
 export function graphHasToolNodes(graph: GraphDef): boolean {
   return graph.nodes.some((n) =>
     (TOOL_BEARING_NODE_TYPES as readonly string[]).includes(n.type),
