@@ -50,7 +50,15 @@ export interface StepDetail {
   error?: string | null;
 }
 
-export function StepDetailCard({ step }: { step: StepDetail }) {
+/** `runId` is optional so a caller without one (stories/fixtures) still renders; it's only used
+ *  to build the authenticated audio URL for a textToSpeech step (#689). */
+export function StepDetailCard({
+  step,
+  runId,
+}: {
+  step: StepDetail;
+  runId?: string;
+}) {
   const stats: { label: string; value: string; color?: string }[] = [
     {
       label: "DURATION",
@@ -227,7 +235,12 @@ export function StepDetailCard({ step }: { step: StepDetail }) {
                     : "No output was recorded for this step."}
           </div>
         ) : (
-          <NodeOutputBody output={step.output} />
+          <NodeOutputBody
+            output={step.output}
+            runId={runId}
+            // The trigger-input pseudo-step's id isn't a graph node, so don't claim it is one.
+            nodeId={step.isTriggerInput ? undefined : step.id}
+          />
         )}
       </div>
     </div>

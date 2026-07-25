@@ -50,6 +50,7 @@ import {
 import {
   handleAgent,
   handleCodeAgent,
+  handleTextToSpeech,
   handleMcpTool,
   handleIntegration,
 } from "./ai";
@@ -102,6 +103,7 @@ export const NODE_HANDLERS: Partial<Record<NodeDef["type"], NodeHandler>> = {
   // AI / tool / integration
   agent: handleAgent,
   codeAgent: handleCodeAgent,
+  textToSpeech: handleTextToSpeech,
   mcpTool: handleMcpTool,
   integration: handleIntegration,
   // comms

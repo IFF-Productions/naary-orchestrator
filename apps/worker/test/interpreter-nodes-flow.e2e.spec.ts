@@ -30,6 +30,8 @@ import {
   codeGraph,
   compareGraph,
   xmlGraph,
+  ttsGraph,
+  ttsCalls,
   forEachGraph,
   makeWorker,
 } from "./interpreter-harness";
@@ -550,6 +552,52 @@ describe("runGraph interpreter — per-node behavior: flow control, loops, feeds
         input: "<n>1</n>",
       });
       expect(result.ctx.x).toEqual({ parsed: "<n>1</n>" });
+    });
+  });
+
+  it("textToSpeech: resolves textBinding in the workflow; ctx gets a REFERENCE, never audio bytes", async () => {
+    ttsCalls.length = 0;
+    const worker = await makeWorker(env);
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          ttsGraph,
+          { message: "Your parcel is out for delivery." },
+          { tenantId: "t-tts" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-tts",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      // `textBinding` was resolved in DETERMINISTIC workflow code, so the activity received the
+      // concrete text (never a binding it would have to read ctx for).
+      expect(ttsCalls[0]).toMatchObject({
+        provider: "openai",
+        voice: "nova",
+        format: "mp3",
+        text: "Your parcel is out for delivery.",
+      });
+      // What lands in the run ctx (→ Temporal history) is the reference + metadata ONLY.
+      expect(result.ctx.tts).toEqual({
+        status: "ok",
+        output: {
+          audio: {
+            __objectRef: "mem://tts/t1/wf/tts1.mp3",
+            contentType: "audio/mpeg",
+            bytes: 2048,
+          },
+          format: "mp3",
+          voice: "nova",
+          provider: "openai",
+          model: "tts-1",
+          bytes: 2048,
+          characters: "Your parcel is out for delivery.".length,
+        },
+        costUsd: 0.001,
+      });
+      // TTS spend is metered into the run budget like any other cost-bearing node.
+      expect(result.ctx.__costUsd).toBeCloseTo(0.001, 12);
     });
   });
 

@@ -5235,6 +5235,91 @@
         ]
       }
     },
+    "/executions/{id}/nodes/{nodeId}/audio": {
+      "get": {
+        "description": "Streams the audio object a `textToSpeech` node produced. 404 when the node produced no audio or the object is no longer in storage (with the default in-memory store the objects live in the worker process, so this is expected in a dev setup).",
+        "operationId": "ExecutionsController_getNodeAudio",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "nodeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "audio/mpeg": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "audio/mpeg": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "audio/mpeg": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "audio/mpeg": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "audio/mpeg": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Download a node's synthesized audio (textToSpeech)",
+        "tags": [
+          "Executions"
+        ]
+      }
+    },
     "/executions/{id}": {
       "get": {
         "operationId": "ExecutionsController_getState",
@@ -12275,6 +12360,93 @@
         ]
       }
     },
+    "/mcp-registry/servers": {
+      "get": {
+        "description": "Lists connectable MCP servers: the curated (vetted) corpus first, then community entries from the public MCP registry. Registry data is sanitized server-side — https-only, credential-free, non-private transport URLs; plain-text descriptions; http/https links only. When the upstream registry is unavailable the response degrades to the curated list (`source: \"curated\"`) rather than failing.",
+        "operationId": "McpRegistryController_list",
+        "parameters": [
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Substring search over name/description/tags.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Max rows to return (1–200, default 50).",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpRegistryPageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Browse/search public MCP servers",
+        "tags": [
+          "McpRegistry"
+        ]
+      }
+    },
     "/v1/runs": {
       "post": {
         "description": "Starts a run of the given workflow (defaults to 'default'). Returns the run id.",
@@ -18496,6 +18668,110 @@
         },
         "required": [
           "tagIds"
+        ]
+      },
+      "McpRegistryServerResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable identifier for the server."
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable name."
+          },
+          "description": {
+            "type": "string",
+            "description": "Short description. PLAIN TEXT — sanitized server-side; clients must render it as text, never as HTML."
+          },
+          "transportUrl": {
+            "type": "string",
+            "description": "The https MCP endpoint to pre-fill as a connection's serverUrl. Always https, credential-free, and never a private/reserved host."
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "http"
+            ],
+            "description": "Transport. Only Streamable HTTP is supported today."
+          },
+          "authMode": {
+            "type": "string",
+            "enum": [
+              "api_token",
+              "pat",
+              "oauth",
+              "none"
+            ],
+            "description": "Auth scheme to pre-select on the connection form."
+          },
+          "requiresAuth": {
+            "type": "boolean",
+            "description": "Whether the user must supply a credential."
+          },
+          "trust": {
+            "type": "string",
+            "enum": [
+              "curated",
+              "community"
+            ],
+            "description": "Trust tier. 'curated' = vetted, shipped in this repo; 'community' = from the public registry (treat as untrusted)."
+          },
+          "homepage": {
+            "type": "string",
+            "description": "An http/https 'learn more' link. Absent when upstream supplied none or an unsafe scheme."
+          },
+          "tags": {
+            "description": "Tags/categories.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "transportUrl",
+          "transport",
+          "authMode",
+          "requiresAuth",
+          "trust",
+          "tags"
+        ]
+      },
+      "McpRegistryPageResponse": {
+        "type": "object",
+        "properties": {
+          "servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpRegistryServerResponse"
+            }
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "registry",
+              "curated"
+            ],
+            "description": "'curated' means the upstream registry was unavailable and this is the degraded (in-repo) list."
+          },
+          "degradedReason": {
+            "type": "string",
+            "description": "Why the response is degraded (present only when source is 'curated')."
+          },
+          "curatedAsOf": {
+            "type": "string",
+            "description": "Date the curated corpus was last reviewed."
+          }
+        },
+        "required": [
+          "servers",
+          "source",
+          "curatedAsOf"
         ]
       },
       "StartRunDto": {

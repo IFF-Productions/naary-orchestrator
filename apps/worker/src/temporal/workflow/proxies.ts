@@ -94,6 +94,17 @@ export const { mapNode } = wf.proxyActivities<typeof activities>({
   retry: { maximumAttempts: 1 },
 });
 
+// textToSpeech (#689): one provider round-trip that streams audio back, so it needs longer than the
+// shared 1-minute default but nothing like codeAgent's 40 minutes. RETRYABLE (maximumAttempts: 3):
+// synthesis is idempotent (no external side effect) and the object key is derived from
+// execution+node, so a retry overwrites the same object rather than orphaning one. The in-activity
+// AbortController (cfg.timeoutMs, capped at MAX_TTS_TIMEOUT_MS = 4 min) is the real deadline; a
+// 401/429 is thrown non-retryable by the activity so a bad key still can't burn the retries.
+export const { callTextToSpeech } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "5 minutes",
+  retry: { maximumAttempts: 3 },
+});
+
 // codeAgent runs an agentic coding CLI subprocess — minutes-long, and AT-MOST-ONCE
 // (maximumAttempts: 1): later slices commit/push/PR, so a partial write must never be
 // auto-retried. Its own block (like mapNode) keeps that long timeout off the shared 1-min

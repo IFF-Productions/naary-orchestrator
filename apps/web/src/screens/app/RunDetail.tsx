@@ -548,7 +548,7 @@ function RunView({ id }: { id: string }) {
       )}
       {detail && (
         // Keyed by step so picking a different step fades the swapped detail in.
-        <StepDetailCard key={detail.id} step={detail} />
+        <StepDetailCard key={detail.id} step={detail} runId={id} />
       )}
       <RegionTraceSection ctx={state.ctx} />
     </div>
@@ -869,7 +869,11 @@ function RunView({ id }: { id: string }) {
                         <StatusPill state="running" label="current" />
                       )}
                     </div>
-                    <NodeOutputBody output={output} />
+                    <NodeOutputBody
+                      output={output}
+                      runId={id}
+                      nodeId={nodeId}
+                    />
                   </div>
                 ))}
               </div>

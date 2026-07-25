@@ -122,6 +122,7 @@ const STRING_OPS = [
 export const ERRORABLE_KINDS = new Set<NodeType>([
   "agent",
   "codeAgent",
+  "textToSpeech",
   "mcpTool",
   "httpRequest",
   "sqlQuery",
@@ -143,6 +144,8 @@ export const ERRORABLE_KINDS = new Set<NodeType>([
  *  Excludes the at-most-once nodes (sqlExec/sendEmail/code) where a retry could double-act. */
 export const RETRYABLE_KINDS = new Set<NodeType>([
   "agent",
+  // Synthesis has no external side effect — a retry just re-renders the same audio.
+  "textToSpeech",
   "mcpTool",
   "httpRequest",
   "sqlQuery",

@@ -144,6 +144,9 @@ export function nodeIcon(type: NodeType): IconName {
     case "vectorUpsert":
     case "vectorQuery":
       return "agent";
+    // Waveform glyph — the closest honest mark for synthesized audio.
+    case "textToSpeech":
+      return "activity";
     case "mcpTool":
     case "integration":
       return "mcp";

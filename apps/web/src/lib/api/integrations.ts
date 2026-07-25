@@ -13,6 +13,7 @@ import type {
   ConnectionRow,
   FormDefinition,
   FormRow,
+  McpRegistryPage,
   ProviderCredential,
   RegisteredChat,
   RegisteredForm,
@@ -21,6 +22,19 @@ import type {
 } from "./types";
 
 export const integrationsApi = {
+  // --- MCP registry browser (#578) ---
+  // Discovery is CONTROL-PLANE side: the api fetches the public registry (through its SSRF-guarded
+  // fetch), sanitizes every field, and degrades to the curated in-repo list when the registry is
+  // unavailable — so this call never fails just because the registry is down. Not tenant-scoped:
+  // the catalog is global.
+  listMcpRegistry(q?: string, limit?: number): Promise<McpRegistryPage> {
+    const params = new URLSearchParams();
+    if (q?.trim()) params.set("q", q.trim());
+    if (limit !== undefined) params.set("limit", String(limit));
+    const qs = params.toString();
+    return http(`/mcp-registry/servers${qs ? `?${qs}` : ""}`);
+  },
+
   // --- Authoring-time introspection (node autocomplete) ---
   // Fetch + parse a remote OpenAPI/Swagger JSON spec into an operation list, to pre-fill an
   // httpRequest node. `token` (optional) is sent as an Authorization header for a private spec,

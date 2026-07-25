@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   hasConcreteConfig,
   nodeConfigJsonSchema,
+  nodeConfigKeys,
   nodeConfigSchema,
   validateGraphConfigs,
   type HttpRequestConfig,
@@ -289,5 +290,81 @@ describe("validateGraphConfigs — prototype-pollution binding keys (#591 save g
       ]),
     );
     expect(errs).toEqual([]);
+  });
+});
+
+describe("textToSpeech schema + save gate (#689)", () => {
+  const graph = (config: Record<string, unknown>) => ({
+    nodes: [{ id: "tts", type: "textToSpeech" as NodeType, config }],
+  });
+
+  it("has a concrete, parity-guarded schema (not the permissive fallback)", () => {
+    expect(hasConcreteConfig("textToSpeech")).toBe(true);
+    expect(nodeConfigKeys("textToSpeech").sort()).toEqual([
+      "costUsd",
+      "format",
+      "model",
+      "provider",
+      "speed",
+      "text",
+      "textBinding",
+      "timeoutMs",
+      "voice",
+    ]);
+  });
+
+  it("accepts a fully specified node and a text-bound node", () => {
+    expect(
+      validateGraphConfigs(
+        graph({
+          provider: "openai",
+          text: "Your order has shipped.",
+          voice: "alloy",
+          model: "tts-1",
+          format: "mp3",
+          speed: 1.25,
+        }),
+      ),
+    ).toEqual([]);
+    expect(
+      validateGraphConfigs(
+        graph({ textBinding: { from: "agent", path: "output.reply" } }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("still saves an EMPTY draft (the gate is lenient on missing fields)", () => {
+    // A freshly dropped node has neither `text` nor `textBinding`. Rejecting that would break
+    // authoring; the empty-text case is a non-retryable failure at RUN time instead.
+    expect(validateGraphConfigs(graph({}))).toEqual([]);
+  });
+
+  it("rejects a PRESENT-but-empty text (an empty synthesis would be a billable no-op)", () => {
+    const errs = validateGraphConfigs(graph({ text: "" }));
+    expect(errs).toHaveLength(1);
+    expect(errs[0]).toMatchObject({ nodeId: "tts", nodeType: "textToSpeech" });
+    expect(errs[0].issues[0].path).toBe("text");
+  });
+
+  it("rejects an out-of-range speed, an unknown format, and an unknown provider", () => {
+    for (const bad of [
+      { speed: 9 },
+      { speed: 0.1 },
+      { format: "midi" },
+      { provider: "elevenlabs" },
+      { costUsd: 0 }, // 0 would defeat the never-zero fallback intent
+      { timeoutMs: -5 },
+    ]) {
+      const errs = validateGraphConfigs(graph(bad));
+      expect(errs, JSON.stringify(bad)).toHaveLength(1);
+    }
+  });
+
+  it("exposes a concrete JSON Schema for the generator (no empty {} sub-schema)", () => {
+    const schema = nodeConfigJsonSchema("textToSpeech") as {
+      properties?: Record<string, unknown>;
+    };
+    expect(Object.keys(schema.properties ?? {})).toContain("voice");
+    expect(JSON.stringify(schema)).not.toContain('"voice":{}');
   });
 });

@@ -8,6 +8,7 @@ import {
   resolveIntegrationFields,
   getIntegrationAction,
   asNodeConfig,
+  getByPath,
 } from "@naary/dsl";
 import * as wf from "@temporalio/workflow";
 import type { NodeOutputMap } from "@naary/dsl";
@@ -18,6 +19,7 @@ import {
   callMcpTool,
   callCodeAgent,
   callCodeAgentHeavy,
+  callTextToSpeech,
   callIntegrationRead,
   callIntegrationWrite,
   retryOverride,
@@ -138,6 +140,47 @@ export const handleCodeAgent: NodeHandler = async ({
   );
   ctx[node.id] = caResult satisfies NodeOutputMap["codeAgent"];
   return { costUsd: caResult.costUsd };
+};
+
+export const handleTextToSpeech: NodeHandler = async ({
+  cfg,
+  ctx,
+  node,
+  metaFor,
+}) => {
+  // `text`'s {{…}} is already resolved in `cfg`; `textBinding` is resolved HERE because a ctx read
+  // is pure, deterministic graph work (same split as hash/hmac). The synthesis, the BYOK key fetch,
+  // and the object-storage write all live in the activity. NOTE: the resolved text is a workflow
+  // ARGUMENT, so it does appear in Temporal history — same as an agent node's prompt; it is the
+  // AUDIO (and the key) that must never be there.
+  const ttsCfg = asNodeConfig(cfg, "textToSpeech");
+  const bound = ttsCfg.textBinding
+    ? getByPath(ctx[ttsCfg.textBinding.from], ttsCfg.textBinding.path)
+    : undefined;
+  const text =
+    bound === undefined || bound === null
+      ? (ttsCfg.text ?? "")
+      : typeof bound === "string"
+        ? bound
+        : JSON.stringify(bound);
+  const over = retryOverride(node.retry, 300_000);
+  const result = await (over?.callTextToSpeech ?? callTextToSpeech)(
+    {
+      provider: ttsCfg.provider,
+      text,
+      voice: ttsCfg.voice,
+      model: ttsCfg.model,
+      format: ttsCfg.format,
+      speed: ttsCfg.speed,
+      timeoutMs: ttsCfg.timeoutMs,
+      costUsd: ttsCfg.costUsd,
+    },
+    ctx.__input,
+    metaFor(node.id),
+  );
+  ctx[node.id] = result satisfies NodeOutputMap["textToSpeech"];
+  // Meter TTS spend into the run budget (commutative accumulation, same as the agent node).
+  return { costUsd: result.costUsd };
 };
 
 export const handleMcpTool: NodeHandler = async ({

@@ -89,6 +89,25 @@ export const MODEL_PRICING: Record<string, Record<string, ModelPrice>> = {
       cachedInputPerMTok: 0.1,
     },
   },
+  // ---------------------------------------------------------------------------------------------
+  // TEXT-TO-SPEECH (#689) — the ONE table in here whose unit is CHARACTERS, not tokens.
+  //
+  // TTS providers bill per character synthesized, but the usage ledger is token-shaped
+  // (inputTokens/outputTokens/totalTokens). Rather than migrate the ledger to a unit+quantity pair
+  // (which would touch the schema AND the insights rollups), the textToSpeech activity records
+  // ONE SYNTHETIC TOKEN PER CHARACTER as `inputTokens` and 0 outputTokens — so `inputPerMTok` below
+  // is read as "USD per 1M CHARACTERS" and `computeCost` yields the EXACT provider price with no
+  // schema change. Because the unit differs, TTS gets its own provider key (`openai-tts`) instead
+  // of sharing the token-priced `openai` table above: mixing units inside one table would be a
+  // silent footgun, and a distinct key also makes TTS spend legible in the by-provider rollups.
+  // The CREDENTIAL slot is still plain `openai` (see tts-drivers.ts) — pricing provider and
+  // credential provider are deliberately decoupled here.
+  //
+  // As of 2026-06-25. Source: OpenAI API pricing (audio/speech, per 1M characters).
+  "openai-tts": {
+    "tts-1": { inputPerMTok: 15, outputPerMTok: 0, cachedInputPerMTok: 0 },
+    "tts-1-hd": { inputPerMTok: 30, outputPerMTok: 0, cachedInputPerMTok: 0 },
+  },
   // Google Gemini list prices, USD per million tokens (representative base-tier rates;
   // Gemini tiers by context length). As of 2026-06-25. Source: Google AI pricing.
   google: {

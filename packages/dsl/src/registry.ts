@@ -71,6 +71,7 @@ import type {
   StopAndErrorNodeConfig,
   SwitchNodeConfig,
   TextNodeConfig,
+  TextToSpeechNodeConfig,
   TotpNodeConfig,
   WaitNodeConfig,
   XmlNodeConfig,
@@ -86,12 +87,10 @@ const argBinding = z.object({ from: z.string(), path: z.string().optional() });
  * interpreter-side resolvers also skip such keys (defense in depth) — this rejects
  * them up front with a clear save error.
  */
-const bindingKey = z
-  .string()
-  .refine((k) => !hasForbiddenPathSegment(k), {
-    message:
-      "binding key must not contain __proto__/constructor/prototype segments",
-  });
+const bindingKey = z.string().refine((k) => !hasForbiddenPathSegment(k), {
+  message:
+    "binding key must not contain __proto__/constructor/prototype segments",
+});
 
 /**
  * The operator set as a LITERAL tuple, so `z.enum` infers the exact `ConditionOp` union (a plain
@@ -263,6 +262,23 @@ const CONFIG_SCHEMAS = {
     headBranch: z.string().optional(),
     // Positive: a manual fallback cost only makes sense > 0 (a negative would REDUCE the
     // run's accumulated __costUsd; a 0 defeats the never-zero fallback intent).
+    costUsd: z.number().positive().optional(),
+  }),
+  // textToSpeech (#689) — BYOK synthesis; the audio itself is offloaded to object storage by the
+  // activity, so nothing here carries bytes. `text` is min(1) so a present-but-empty value is a
+  // save-time error (an empty synthesis would be a billable zero-character call); a node that gets
+  // its text from upstream uses `textBinding` instead — the save gate below requires one of the two.
+  textToSpeech: z.object({
+    provider: z.enum(["openai"]).optional(),
+    text: z.string().min(1).optional(),
+    textBinding: argBinding.optional(),
+    voice: z.string().optional(),
+    model: z.string().optional(),
+    format: z.enum(["mp3", "opus", "aac", "flac", "wav", "pcm"]).optional(),
+    // OpenAI's documented range. Clamped here so a bad graph fails at save, not mid-run.
+    speed: z.number().min(0.25).max(4).optional(),
+    timeoutMs: z.number().int().positive().optional(),
+    // Positive for the same reason as codeAgent's: a 0 would defeat the never-zero fallback.
     costUsd: z.number().positive().optional(),
   }),
   mcpTool: z.object({
@@ -751,6 +767,7 @@ export type ScheduleTriggerConfig = z.infer<
 export type PollTriggerConfig = z.infer<typeof CONFIG_SCHEMAS.pollTrigger>;
 export type AgentConfig = z.infer<typeof CONFIG_SCHEMAS.agent>;
 export type CodeAgentConfig = z.infer<typeof CONFIG_SCHEMAS.codeAgent>;
+export type TextToSpeechConfig = z.infer<typeof CONFIG_SCHEMAS.textToSpeech>;
 export type McpToolConfig = z.infer<typeof CONFIG_SCHEMAS.mcpTool>;
 export type IntegrationConfig = z.infer<typeof CONFIG_SCHEMAS.integration>;
 export type HttpRequestConfig = z.infer<typeof CONFIG_SCHEMAS.httpRequest>;
@@ -815,6 +832,7 @@ const _configParity: {
   mcpServerTrigger: Exact<McpServerTriggerConfig, McpServerTriggerNodeConfig>;
   pollTrigger: Exact<PollTriggerConfig, PollTriggerNodeConfig>;
   codeAgent: Exact<CodeAgentConfig, CodeAgentNodeConfig>;
+  textToSpeech: Exact<TextToSpeechConfig, TextToSpeechNodeConfig>;
   mcpTool: Exact<McpToolConfig, McpToolNodeConfig>;
   integration: Exact<IntegrationConfig, IntegrationNodeConfig>;
   httpRequest: Exact<HttpRequestConfig, HttpRequestNodeConfig>;
@@ -868,6 +886,7 @@ const _configParity: {
   mcpServerTrigger: true,
   pollTrigger: true,
   codeAgent: true,
+  textToSpeech: true,
   mcpTool: true,
   integration: true,
   httpRequest: true,

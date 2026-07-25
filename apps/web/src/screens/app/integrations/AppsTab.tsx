@@ -4,13 +4,19 @@ import { Button, Dialog, StatusPill } from "../../../components";
 import {
   api,
   type ConnectionRow,
+  type McpRegistryServerRow,
   type ProviderCredential,
 } from "../../../lib/api";
 import { APP_CONNECTION_TYPES } from "../../../lib/connection-types";
 import { PHONE_QUERY, useMediaQuery } from "../../../lib/useMediaQuery";
 import { CodeAgentCard } from "./CodeAgentCard";
 import { CodeAgentCredentialCard } from "./CodeAgentCredentialCard";
-import { ConnectForm, GithubAppForm } from "./connection-forms";
+import {
+  ConnectForm,
+  GithubAppForm,
+  type ConnectFormPrefill,
+} from "./connection-forms";
+import { McpRegistryBrowser, prefillFor } from "./McpRegistryBrowser";
 import { cardShell, EnvChip, IconTile, introStyle } from "./shared";
 
 /** Connection types that are apps/servers (the rest live on the Providers tab). Defined in
@@ -58,7 +64,12 @@ export function AppsTab({
   onError: (msg: string) => void;
 }) {
   const phone = useMediaQuery(PHONE_QUERY);
-  const [dialog, setDialog] = useState<"github" | "mcp" | null>(null);
+  const [dialog, setDialog] = useState<
+    "github" | "mcp" | "mcp-registry" | null
+  >(null);
+  // Set when a registry row was picked (#578): the same ConnectForm, opened with the transport +
+  // auth scheme filled in, so the user only supplies credentials.
+  const [prefill, setPrefill] = useState<ConnectFormPrefill | undefined>();
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState<string | null>(null);
 
@@ -122,7 +133,22 @@ export function AppsTab({
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <Button variant="secondary" onClick={() => setDialog("mcp")}>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setPrefill(undefined);
+              setDialog("mcp-registry");
+            }}
+          >
+            Browse MCP servers
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setPrefill(undefined);
+              setDialog("mcp");
+            }}
+          >
             Connect MCP server
           </Button>
           <Button variant="primary" onClick={() => setDialog("github")}>
@@ -141,8 +167,8 @@ export function AppsTab({
               color: "var(--ink-3)",
             }}
           >
-            No apps connected in this environment — install the GitHub App or
-            connect an MCP server above.
+            No apps connected in this environment — install the GitHub App, or
+            browse the MCP registry above and connect a server.
           </div>
         )}
         {rows.map((c) => {
@@ -319,12 +345,32 @@ export function AppsTab({
           open={dialog !== null}
           onClose={() => setDialog(null)}
           title={
-            dialog === "github" ? "Install GitHub App" : "Connect MCP server"
+            dialog === "github"
+              ? "Install GitHub App"
+              : dialog === "mcp-registry"
+                ? "Browse MCP servers"
+                : "Connect MCP server"
           }
         >
           {dialog === "github" && <GithubAppForm tenant={tenant} />}
+          {dialog === "mcp-registry" && (
+            <McpRegistryBrowser
+              onPick={(server: McpRegistryServerRow) => {
+                // Hand the sanitized transport + auth scheme to the SAME connect form the manual
+                // path uses — one create path, one validation path.
+                setPrefill(prefillFor(server));
+                setDialog("mcp");
+              }}
+            />
+          )}
           {dialog === "mcp" && (
-            <ConnectForm tenant={tenant} onChanged={onChanged} />
+            <ConnectForm
+              // Remount on a prefill change so the form's initial state is re-read.
+              key={prefill?.serverUrl ?? "manual"}
+              tenant={tenant}
+              onChanged={onChanged}
+              prefill={prefill}
+            />
           )}
         </Dialog>
       )}

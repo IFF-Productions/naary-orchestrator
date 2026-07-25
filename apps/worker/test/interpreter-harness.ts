@@ -57,6 +57,7 @@ const WORKFLOWS_PATH = path.join(__dirname, "../src/temporal/workflows.ts");
 // a provider key is supplied.) Captures the meta to prove tenantId threading.
 const agentCalls: activities.AgentMeta[] = [];
 const codeAgentCalls: activities.CodeAgentActivityConfig[] = [];
+const ttsCalls: activities.TextToSpeechActivityConfig[] = [];
 const mockActivities = {
   runAgent: async (
     _cfg: activities.AgentConfig,
@@ -105,6 +106,32 @@ const mockActivities = {
         tool: cfg.tool ?? "claude",
       },
       costUsd: 0.02,
+    };
+  },
+  // textToSpeech (#689): returns an object-storage REFERENCE, never audio bytes — so an interpreter
+  // e2e can assert what lands in ctx without a provider or a bucket.
+  callTextToSpeech: async (
+    cfg: activities.TextToSpeechActivityConfig,
+    _input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.TextToSpeechResult> => {
+    ttsCalls.push(cfg);
+    return {
+      status: "ok",
+      output: {
+        audio: {
+          __objectRef: "mem://tts/t1/wf/tts1.mp3",
+          contentType: "audio/mpeg",
+          bytes: 2048,
+        },
+        format: cfg.format ?? "mp3",
+        voice: cfg.voice ?? "alloy",
+        provider: cfg.provider ?? "openai",
+        model: cfg.model ?? "tts-1",
+        bytes: 2048,
+        characters: cfg.text.length,
+      },
+      costUsd: 0.001,
     };
   },
   callMcpTool: async (
@@ -1043,6 +1070,30 @@ const compareGraph: GraphDef = {
 };
 
 // webhook → xml(parse) → end. The parse runs in the (mocked) activity.
+// webhookTrigger → textToSpeech (text bound from the trigger body) → end. Proves the interpreter
+// resolves `textBinding` in DETERMINISTIC workflow code and stores only the audio REFERENCE.
+const ttsGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "tts",
+      type: "textToSpeech",
+      config: {
+        provider: "openai",
+        voice: "nova",
+        format: "mp3",
+        textBinding: { from: "trigger", path: "message" },
+      },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "tts" },
+    { from: "tts", to: "end" },
+  ],
+};
+
 const xmlGraph: GraphDef = {
   startNodeId: "trigger",
   nodes: [
@@ -1138,6 +1189,7 @@ export {
   // capture arrays
   agentCalls,
   codeAgentCalls,
+  ttsCalls,
   mapNodeCalls,
   statusPushes,
   loadVariablesCalls,
@@ -1189,6 +1241,7 @@ export {
   respondGraph,
   codeGraph,
   compareGraph,
+  ttsGraph,
   xmlGraph,
   approvalTimeoutGraph,
   // fixture factories + helpers

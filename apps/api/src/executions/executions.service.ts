@@ -25,6 +25,7 @@ import {
 } from "@naary/contracts";
 import type { GraphDef, NodeDef } from "@naary/dsl";
 import { getPrisma } from "@naary/db";
+import { getObjectStore } from "@naary/storage";
 import { TracedClass } from "@naary/observability";
 import { getBudget } from "@naary/usage";
 import type { Principal } from "../auth/tenant.decorator";
@@ -54,6 +55,12 @@ import {
   projectSearchText,
   startSampleInput,
 } from "./executions.helpers";
+import {
+  audioFilename,
+  audioRefFromCtx,
+  isTenantOwnedAudioRef,
+  safeContentType,
+} from "./run-artifacts";
 import {
   type ExecutionsDeps,
   queryAwaiting,
@@ -1005,6 +1012,47 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     actor?: Principal,
   ): Promise<RunStateView> {
     return queryState(this.deps(), id, tenantId, actor);
+  }
+
+  /**
+   * A node's binary AUDIO artifact (textToSpeech, #689) — the bytes, streamed from object storage.
+   *
+   * The reference is read out of the RUN CTX at `<nodeId>.output.audio.__objectRef`, never from the
+   * request, and is additionally required to sit under this tenant's `tts/<tenantId>/` prefix — a
+   * graph author can write any `__objectRef` into ctx (e.g. via a `set` node), so ownership must be
+   * proven from the key, not inferred from the run. Auth/view-gating rides on `getState`, which
+   * already does assertOwner + assertRunAccess.
+   *
+   * A missing object is a clean 404, never a 500: with the default in-memory store the objects live
+   * in the WORKER process, so this legitimately has nothing to serve in a dev setup (the same
+   * limitation `resolveCtxRefs` documents for claim checks).
+   */
+  async nodeAudio(
+    id: string,
+    nodeId: string,
+    tenantId: string,
+    actor?: Principal,
+  ): Promise<{ body: Buffer; contentType: string; filename: string }> {
+    const state = await queryState(this.deps(), id, tenantId, actor);
+    const audio = audioRefFromCtx(state.ctx, nodeId);
+    if (!audio) {
+      throw new NotFoundException("No audio for that node in this run");
+    }
+    if (!isTenantOwnedAudioRef(audio.__objectRef, tenantId)) {
+      // Not this tenant's object (or an unknown/malformed reference) — indistinguishable from
+      // "absent" on purpose: never confirm the existence of someone else's object.
+      throw new NotFoundException("No audio for that node in this run");
+    }
+    const contentType = safeContentType(audio.contentType);
+    let body: Buffer;
+    try {
+      body = await getObjectStore().get(audio.__objectRef);
+    } catch {
+      throw new NotFoundException(
+        "The audio object is no longer available in storage",
+      );
+    }
+    return { body, contentType, filename: audioFilename(nodeId, contentType) };
   }
 
   /** The run's execution log — a curated timeline from Temporal history (maps by event

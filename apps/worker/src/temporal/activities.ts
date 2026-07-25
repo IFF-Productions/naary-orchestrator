@@ -21,6 +21,7 @@
  *   - activities/code          — QuickJS code node
  *   - activities/agent         — runAgent (AI SDK)
  *   - activities/code-agent    — callCodeAgent (headless coding CLI)
+ *   - activities/tts           — callTextToSpeech (BYOK TTS → object storage)
  *   - activities/mcp           — callMcpTool
  *   - activities/http          — callHttpRequest + callGraphQL
  *   - activities/integration   — native integration nodes (GitHub/Jira/…)
@@ -140,6 +141,13 @@ export type {
   CodeAgentActivityConfig,
   CodeAgentResult,
 } from "./activities/code-agent";
+
+export { __ttsDeps, callTextToSpeech } from "./activities/tts";
+export type {
+  AudioObjectRef,
+  TextToSpeechActivityConfig,
+  TextToSpeechResult,
+} from "./activities/tts";
 
 export { __mcpDeps, callMcpTool } from "./activities/mcp";
 export type { McpToolConfig, McpToolResult } from "./activities/mcp";

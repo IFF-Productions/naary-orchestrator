@@ -63,6 +63,7 @@ import type {
   StopAndErrorConfig,
   SwitchConfig,
   TextConfig,
+  TextToSpeechConfig,
   TotpConfig,
   WaitConfig,
   XmlConfig,
@@ -81,6 +82,7 @@ export interface NodeConfigMap {
   mcpServerTrigger: McpServerTriggerConfig;
   agent: AgentConfig;
   codeAgent: CodeAgentConfig;
+  textToSpeech: TextToSpeechConfig;
   mcpTool: McpToolConfig;
   integration: IntegrationConfig;
   httpRequest: HttpRequestConfig;

@@ -12,6 +12,39 @@ export interface McpToolNodeConfig {
 }
 
 /**
+ * textToSpeech node (#689). Synthesizes `text` into an audio object via a BYOK TTS provider.
+ *
+ * NOT a catalog integration: the declarative integration catalog is JSON-request → JSON-response
+ * (`integration.ts` JSON-stringifies the body and JSON-parses the reply), and TTS returns BINARY
+ * audio — so it needs its own node type + activity.
+ *
+ * The audio NEVER rides Temporal history (CLAUDE.md *Payloads*): the activity writes the bytes to
+ * object storage and the node output carries only a small `{ __objectRef, contentType, bytes }`
+ * reference plus metadata. Credentials come from the tenant's BYOK provider slot, fetched IN the
+ * activity (Tier-1 rule 4) — never from config.
+ */
+export interface TextToSpeechNodeConfig {
+  /** TTS driver. Defaults to "openai". */
+  provider?: "openai";
+  /** The text to speak. `{{ nodeId.path }}` templating is resolved before the activity. */
+  text?: string;
+  /** Upstream binding whose resolved value replaces `text` (non-strings are stringified). */
+  textBinding?: ArgBinding;
+  /** Provider voice id (e.g. OpenAI "alloy"). Defaults to the driver's default voice. */
+  voice?: string;
+  /** Provider model id (e.g. "tts-1"). Defaults to the driver's default model. */
+  model?: string;
+  /** Audio container/codec. Defaults to "mp3". */
+  format?: "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm";
+  /** Playback-rate multiplier passed to the provider (OpenAI accepts 0.25–4.0). */
+  speed?: number;
+  /** Overall wall-clock budget for the synthesis call (ms). */
+  timeoutMs?: number;
+  /** Flat fallback cost metered if character-derived pricing is unavailable (never zero). */
+  costUsd?: number;
+}
+
+/**
  * codeAgent node (design docs/design/CLAUDE-CODE-NODE.md). Runs an agentic coding CLI
  * (Claude Code / Cursor / Copilot) as a BYOK Temporal activity. Slice 1 is READ-ONLY —
  * `claude -p` in plan mode with tools clamped to Read/Grep/Glob (no Bash/write/clone/PR;

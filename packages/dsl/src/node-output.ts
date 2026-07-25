@@ -78,6 +78,34 @@ export interface NodeOutputMap {
     };
     costUsd: number;
   };
+  /**
+   * textToSpeech (#689): the synthesized audio NEVER rides Temporal history — the activity writes
+   * the bytes to object storage and this output carries only the reference + metadata.
+   *
+   * DELIBERATELY NOT the `{ __claimCheck, bytes }` shape used by codeAgent's diff/trace: the API's
+   * run-detail read resolves EVERY claim-check in the run ctx (`resolveCtxRefs`) by fetching the
+   * object and `JSON.parse`ing it — which for audio would either inline multi-MB of base64 into
+   * every run-detail response or fetch-and-discard the whole object on each poll. `__objectRef` is
+   * an opaque, NON-auto-resolved reference; the API streams it on demand from a dedicated
+   * artifact endpoint instead (see executions' audio route).
+   */
+  textToSpeech: {
+    status: "ok";
+    output: {
+      audio: { __objectRef: string; contentType: string; bytes: number };
+      format: string;
+      voice: string;
+      provider: string;
+      model: string;
+      /** Byte length of the audio object (mirrors `audio.bytes` for easy binding). */
+      bytes: number;
+      /** Characters synthesized — the BILLED quantity (never the text itself). */
+      characters: number;
+      /** Only when the provider reports it; never fabricated. */
+      durationSeconds?: number;
+    };
+    costUsd: number;
+  };
   mcpTool: { status: "ok"; content: unknown; costUsd: number };
   integration: {
     status: "ok";

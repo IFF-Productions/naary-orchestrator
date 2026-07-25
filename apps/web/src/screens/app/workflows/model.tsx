@@ -140,6 +140,8 @@ export function nodeIcon(type: NodeType): IconName {
     case "vectorUpsert":
     case "vectorQuery":
       return "agent";
+    case "textToSpeech":
+      return "activity";
     case "mcpTool":
     case "integration":
       return "mcp";

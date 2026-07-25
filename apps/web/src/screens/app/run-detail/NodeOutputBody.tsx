@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { type Column, CodeBlock, StatusPill, Table } from "../../../components";
 import { CodeAgentTrace, extractCodeAgentTrace } from "./CodeAgentTrace";
+import { extractAudioRef, NodeAudio } from "./NodeAudio";
 
 /* ---- Items table (items-model A5) ----------------------------------------------
  * A node whose output is an array of objects — e.g. a Loop End's collected per-item
@@ -56,13 +57,34 @@ function stripTrace(output: unknown): unknown {
 }
 
 /** One node's output: an items table when it's an array of objects (with a JSON
- *  toggle), otherwise raw JSON — plus, for a codeAgent node, its step-by-step trace. */
-export function NodeOutputBody({ output }: { output: unknown }) {
+ *  toggle), otherwise raw JSON — plus, for a codeAgent node, its step-by-step trace,
+ *  and for a textToSpeech node, a player/download for its synthesized audio.
+ *
+ *  `runId`/`nodeId` are OPTIONAL: they're only needed to build the authenticated audio
+ *  URL, and some call sites have no node (the run's trigger input). Without them the
+ *  audio block is simply not offered — the JSON dump still shows the reference. */
+export function NodeOutputBody({
+  output,
+  runId,
+  nodeId,
+}: {
+  output: unknown;
+  runId?: string;
+  nodeId?: string;
+}) {
   const [asJson, setAsJson] = useState(false);
   // codeAgent trace (if any) renders as its own collapsible log; strip it from the JSON below.
   const trace = extractCodeAgentTrace(output);
   const display = trace !== undefined ? stripTrace(output) : output;
   const traceEl = trace !== undefined ? <CodeAgentTrace trace={trace} /> : null;
+
+  // textToSpeech (#689): the bytes live in object storage, so play/download streams them from
+  // the API. The reference stays in the JSON dump below — it's small and it's the real output.
+  const audio = extractAudioRef(output);
+  const audioEl =
+    audio && runId && nodeId ? (
+      <NodeAudio runId={runId} nodeId={nodeId} audio={audio} />
+    ) : null;
 
   const tabular = isItemsArray(display);
   const rows = tabular ? (display as Record<string, unknown>[]) : [];
@@ -85,6 +107,7 @@ export function NodeOutputBody({ output }: { output: unknown }) {
   if (!tabular)
     return (
       <>
+        {audioEl}
         {traceEl}
         {jsonBlock}
       </>
@@ -109,6 +132,7 @@ export function NodeOutputBody({ output }: { output: unknown }) {
 
   return (
     <>
+      {audioEl}
       <div
         style={{
           display: "flex",
