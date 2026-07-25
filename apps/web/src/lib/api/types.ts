@@ -194,6 +194,24 @@ export interface ConnectionRow {
 }
 
 /**
+ * Result of testing a connection against its provider (#701). Mirrors the API's
+ * ConnectionTestResponse.
+ *
+ * `status` is the test OUTCOME, not an HTTP code — `unknown` (we declined to probe, because the
+ * provider has no read-only zero-argument action) is a different thing from `failed` (the provider
+ * rejected the credential). `connectionStatus` is null exactly when the test learned nothing and
+ * therefore left the connection's status alone.
+ */
+export interface ConnectionTestResult {
+  ok: boolean;
+  status: "ok" | "failed" | "unknown";
+  httpStatus: number | null;
+  checkedAction: string | null;
+  connectionStatus: "connected" | "needs_reauth" | "error" | null;
+  message: string;
+}
+
+/**
  * A browsable MCP server from the registry browser (#578). Mirrors the API's
  * McpRegistryServerResponse. Every field is SANITIZED server-side: `transportUrl` is always a
  * public https URL, `description` is plain text (render it as TEXT, never HTML), and `homepage`

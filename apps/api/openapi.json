@@ -7932,6 +7932,111 @@
         ]
       }
     },
+    "/tenants/{id}/connections/{connectionId}/test": {
+      "post": {
+        "description": "Calls the provider's cheapest read-only, zero-argument catalog action with this connection's credential and reports whether it was accepted, updating the connection's status. Never performs a write; providers with no such action report `unknown`.",
+        "operationId": "ConnectionsController_test",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "connectionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestConnectionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Test a connection against its provider",
+        "tags": [
+          "Connections"
+        ]
+      }
+    },
     "/tenants/{id}/connections/{connectionId}": {
       "delete": {
         "description": "Removes the connection and its stored secret (204 No Content).",
@@ -17767,6 +17872,115 @@
           "usedByNodeCount",
           "credentialLast4",
           "createdAt"
+        ]
+      },
+      "TestConnectionDto": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "mattermost",
+              "pagerduty",
+              "googlesheets",
+              "deepl",
+              "stripe",
+              "shopify",
+              "twilio",
+              "mailchimp",
+              "discord",
+              "linear",
+              "clickup",
+              "monday",
+              "pipedrive",
+              "zendesk",
+              "github",
+              "jira",
+              "slack",
+              "notion",
+              "gitlab",
+              "hubspot",
+              "sendgrid",
+              "airtable",
+              "asana",
+              "todoist",
+              "calendly",
+              "intercom",
+              "webflow",
+              "zoom",
+              "front",
+              "sentry",
+              "vercel",
+              "netlify",
+              "digitalocean",
+              "cloudflare",
+              "posthog",
+              "dropbox",
+              "msgraph",
+              "box"
+            ],
+            "example": "calendly",
+            "description": "Catalog provider to test this connection against (the same `provider` an `integration` node would use)."
+          }
+        },
+        "required": [
+          "provider"
+        ]
+      },
+      "ConnectionTestResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "example": true,
+            "description": "True only when the provider answered 2xx. `unknown` is not ok."
+          },
+          "status": {
+            "type": "string",
+            "example": "ok",
+            "enum": [
+              "ok",
+              "failed",
+              "unknown"
+            ],
+            "description": "`ok` = the provider accepted the credential. `failed` = it was rejected or unreachable. `unknown` = no safe read-only call exists for this provider, so nothing was called."
+          },
+          "httpStatus": {
+            "type": "number",
+            "nullable": true,
+            "example": 200,
+            "description": "The provider's HTTP status, or null when no call was made."
+          },
+          "checkedAction": {
+            "type": "string",
+            "nullable": true,
+            "example": "calendly.get_me",
+            "description": "The `provider.action` that was called — always a catalog action with `write: false` and no required fields. Null when nothing safe existed."
+          },
+          "connectionStatus": {
+            "type": "string",
+            "nullable": true,
+            "example": "connected",
+            "enum": [
+              "connected",
+              "needs_reauth",
+              "error"
+            ],
+            "description": "The connection's status after the test. Null when the test learned nothing about the token (`unknown`) and therefore left the status untouched."
+          },
+          "message": {
+            "type": "string",
+            "example": "Calendly answered 200 to calendly.get_me — this connection works.",
+            "description": "Human-readable explanation. Never contains the credential."
+          }
+        },
+        "required": [
+          "ok",
+          "status",
+          "httpStatus",
+          "checkedAction",
+          "connectionStatus",
+          "message"
         ]
       },
       "OAuthStartResponse": {

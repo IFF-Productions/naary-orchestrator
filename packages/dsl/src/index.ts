@@ -32,6 +32,13 @@ export {
   type BuiltIntegrationRequest,
 } from "./integrations";
 export {
+  planIntegrationCall,
+  pickConnectionTestAction,
+  type IntegrationCallPlan,
+  type IntegrationCallPlanInput,
+  type ConnectionTestProbe,
+} from "./integration-request";
+export {
   resolveTemplates,
   resolveTemplateString,
   templateTokens,
