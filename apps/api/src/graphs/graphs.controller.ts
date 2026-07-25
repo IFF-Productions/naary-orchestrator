@@ -19,8 +19,13 @@ import {
   ApiOperation,
   ApiProduces,
 } from "@nestjs/swagger";
-import type { GraphDef, N8nImportResult } from "@naary/dsl";
-import { parseN8nWorkflow } from "@naary/dsl";
+import type { GraphDef } from "@naary/dsl";
+// Deep import on purpose (mirrors graphs.service.ts's `@naary/dsl/dist/registry`): the n8n importer
+// is kept OUT of the @naary/dsl barrel so it can't reach the worker's deterministic bundle.
+import {
+  type N8nImportResult,
+  parseN8nWorkflow,
+} from "@naary/dsl/dist/n8n-import";
 import {
   CurrentPrincipal,
   EnvironmentSel,

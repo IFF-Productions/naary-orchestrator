@@ -22,14 +22,14 @@ import { describe, expect, it } from "vitest";
 import { NODE_TYPES } from "../src/node-catalog";
 import { validateGraph } from "../src/branch";
 import { validateGraphConfigs } from "../src/registry";
-import { convertN8nExpression, parseN8nWorkflow } from "../src/index";
+import { convertN8nExpression } from "../src/n8n-expressions";
 import {
   N8N_APP_TO_PROVIDER,
   N8N_NODE_MAP,
   N8N_SUB_NODE_TYPES,
 } from "../src/n8n-map";
 import { getIntegrationProvider } from "../src/integrations";
-import { N8nImportError } from "../src/n8n-import";
+import { N8nImportError, parseN8nWorkflow } from "../src/n8n-import";
 
 const FIXTURES = join(__dirname, "fixtures", "n8n");
 const files = readdirSync(FIXTURES)
@@ -502,6 +502,28 @@ describe("06 — legacy v1 node shapes and an error-trigger entry", () => {
     expect((node(tg.nodeId!).config?.__n8n as { type: string }).type).toBe(
       "n8n-nodes-base.telegram",
     );
+  });
+});
+
+describe("the importer stays OUT of the worker's deterministic bundle", () => {
+  it("is not reachable from the @naary/dsl barrel", async () => {
+    // Workflow code imports the barrel for real values (computeItemsRegions, resolveHmac, …), so
+    // anything re-exported there lands in the Temporal workflow bundle. ~1300 lines of one-shot
+    // authoring-time translation must not (Tier-1 rule 2 — the same reasoning that keeps zod behind
+    // ./registry). The API imports `@naary/dsl/dist/n8n-import` directly instead.
+    const barrel: Record<string, unknown> = await import("../src/index");
+    for (const name of [
+      "parseN8nWorkflow",
+      "N8nImportError",
+      "N8N_NODE_MAP",
+      "translateConfig",
+      "convertN8nExpression",
+    ]) {
+      expect(
+        Object.hasOwn(barrel, name),
+        `${name} must not be in the barrel`,
+      ).toBe(false);
+    }
   });
 });
 
