@@ -1,0 +1,160 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { INTEGRATION_PROSE } from "../src/docs/integration-prose";
+import {
+  LIVE_VERIFIED,
+  needsServerUrl,
+  probeAction,
+  renderIntegrationDoc,
+} from "../src/docs/render";
+import { INTEGRATION_PROVIDERS } from "../src/integrations";
+
+/**
+ * The setup guides in `docs/integrations/` are GENERATED from the catalog (see
+ * `src/docs/render.ts`). This suite is what makes them trustworthy enough for the marketing site
+ * to consume: it re-renders every provider and diffs against the committed file, so
+ *
+ *   - editing a generated section by hand fails here, and
+ *   - changing the catalog without regenerating fails here.
+ *
+ * Motivation, not hypothetical: before the generator existed, `docs/integrations/github.md` listed
+ * 4 of GitHub's 5 catalog actions. Prose and catalog drift silently, and a wrong setup guide costs a
+ * user more time than a missing one.
+ */
+const DOCS_DIR = join(__dirname, "..", "..", "..", "docs", "integrations");
+
+describe("integration setup guides are in sync with the catalog", () => {
+  it.each(INTEGRATION_PROVIDERS.map((p) => [p.key, p] as const))(
+    "%s.md matches the generator output",
+    (key, provider) => {
+      const path = join(DOCS_DIR, `${key}.md`);
+      expect(
+        existsSync(path),
+        `docs/integrations/${key}.md is missing — run \`pnpm gen:integration-docs\``,
+      ).toBe(true);
+      const prose = INTEGRATION_PROSE[key];
+      expect(prose, `no prose entry for '${key}'`).toBeDefined();
+      const expected = renderIntegrationDoc(provider, prose, {
+        liveVerified: LIVE_VERIFIED.has(key),
+      });
+      expect(
+        readFileSync(path, "utf8"),
+        `docs/integrations/${key}.md is stale or hand-edited — run \`pnpm gen:integration-docs\``,
+      ).toBe(expected);
+    },
+  );
+
+  /** Every provider must be documented: an undocumented integration is unusable in practice. */
+  it("every catalog provider has a prose entry", () => {
+    const missing = INTEGRATION_PROVIDERS.filter(
+      (p) => !INTEGRATION_PROSE[p.key],
+    ).map((p) => p.key);
+    expect(missing).toEqual([]);
+  });
+
+  /** And no prose entry may outlive its provider (a page nothing links to, describing nothing). */
+  it("has no prose entry without a catalog provider", () => {
+    const keys = new Set(INTEGRATION_PROVIDERS.map((p) => p.key));
+    expect(Object.keys(INTEGRATION_PROSE).filter((k) => !keys.has(k))).toEqual(
+      [],
+    );
+  });
+});
+
+describe("what the guides claim is derived, not asserted", () => {
+  /**
+   * A probe action must be safe to call unattended: never a write, and never needing an argument
+   * the user has to invent. If this ever passes something mutating, a "test your connection"
+   * button would start changing customer data.
+   */
+  it("no probe action writes or requires a field", () => {
+    for (const p of INTEGRATION_PROVIDERS) {
+      const probe = probeAction(p);
+      if (!probe) continue;
+      expect(probe.write, `${p.key}.${probe.key} is a write`).toBe(false);
+      expect(probe.method, `${p.key}.${probe.key} is not a GET`).toBe("GET");
+      expect(
+        probe.fields.filter((f) => f.required && f.const === undefined),
+        `${p.key}.${probe.key} needs a user-supplied field`,
+      ).toEqual([]);
+    }
+  });
+
+  /**
+   * Pins how much of the catalog can be checked WITHOUT the user supplying anything. Not a vanity
+   * number — it is the honest ceiling on one-click verification, and it should move only
+   * deliberately. A drop means someone made a read action mutating or added a required field to a
+   * probe; a rise means a new argument-free read (good, update the list).
+   */
+  it("14 providers are one-click testable, 24 are not", () => {
+    const testable = INTEGRATION_PROVIDERS.filter((p) => probeAction(p));
+    expect(testable.map((p) => p.key).sort()).toEqual([
+      "calendly",
+      "cloudflare",
+      "deepl",
+      "digitalocean",
+      "front",
+      "netlify",
+      "pagerduty",
+      "pipedrive",
+      "sendgrid",
+      "shopify",
+      "stripe",
+      "todoist",
+      "vercel",
+      "zendesk",
+    ]);
+    expect(INTEGRATION_PROVIDERS.length - testable.length).toBe(24);
+  });
+
+  /** The 6 Server-URL providers are the top setup failure; the guides must say so for exactly them. */
+  it("exactly 6 providers require a Server URL", () => {
+    expect(
+      INTEGRATION_PROVIDERS.filter(needsServerUrl)
+        .map((p) => p.key)
+        .sort(),
+    ).toEqual([
+      "deepl",
+      "jira",
+      "mailchimp",
+      "mattermost",
+      "shopify",
+      "zendesk",
+    ]);
+  });
+
+  /**
+   * `liveVerified` must never outrun the live suite. If someone adds a key here without a
+   * `*.live.spec.ts` behind it, every downstream surface starts claiming proof we don't have.
+   */
+  it("liveVerified covers only providers with a live spec", () => {
+    expect([...LIVE_VERIFIED].sort()).toEqual(["github"]);
+  });
+
+  /**
+   * A provider whose credential prose says nothing about where to get the token is worse than no
+   * page — it looks authoritative and answers nothing.
+   */
+  it("every prose entry has a tagline, a credential name and at least one step", () => {
+    for (const [key, prose] of Object.entries(INTEGRATION_PROSE)) {
+      expect(prose.tagline.length, `${key}: empty tagline`).toBeGreaterThan(10);
+      expect(
+        prose.credentialName.length,
+        `${key}: empty credentialName`,
+      ).toBeGreaterThan(2);
+      expect(prose.steps.length, `${key}: no steps`).toBeGreaterThan(0);
+      expect(prose.category.length, `${key}: no category`).toBeGreaterThan(2);
+    }
+  });
+
+  /** Server-URL providers must document the FORMAT — "set a server URL" helps nobody. */
+  it("every Server-URL provider documents its URL format", () => {
+    for (const p of INTEGRATION_PROVIDERS.filter(needsServerUrl)) {
+      expect(
+        INTEGRATION_PROSE[p.key].serverUrl,
+        `${p.key} needs a Server URL but its prose gives no format`,
+      ).toBeTruthy();
+    }
+  });
+});
