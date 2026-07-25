@@ -194,6 +194,44 @@ export interface ConnectionRow {
 }
 
 /**
+ * n8n import (#579) — an unsaved draft graph plus an honest per-node mapping report. Mirrors the
+ * API's ImportN8nResponse (re-declared here rather than imported from @naary/dsl so the SPA's view
+ * model stays independent of the DSL's internal report types).
+ */
+export interface N8nNodeReport {
+  n8nName: string;
+  n8nType: string;
+  /** Null when the node is intentionally NOT a graph node (`skipped`). */
+  nodeId: string | null;
+  nodeType: string | null;
+  status: "imported" | "approximated" | "unmapped" | "skipped";
+  /** Always non-empty unless `status === "imported"`. */
+  notes: string[];
+}
+
+export interface N8nCredentialReport {
+  n8nType: string;
+  usedBy: string[];
+  suggestedConnectionType: string | null;
+}
+
+export interface N8nImportResult {
+  name: string;
+  graph: GraphDef;
+  /** One entry per node in the export — nothing is dropped silently. */
+  nodes: N8nNodeReport[];
+  credentials: N8nCredentialReport[];
+  unconvertedExpressions: {
+    nodeId: string;
+    field: string;
+    expression: string;
+    reason: string;
+  }[];
+  warnings: string[];
+  counts: Record<N8nNodeReport["status"], number>;
+}
+
+/**
  * Result of testing a connection against its provider (#701). Mirrors the API's
  * ConnectionTestResponse.
  *

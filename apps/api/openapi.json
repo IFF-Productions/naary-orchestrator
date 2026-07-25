@@ -1993,6 +1993,84 @@
         ]
       }
     },
+    "/graphs/import/n8n": {
+      "post": {
+        "description": "Translates an n8n workflow JSON into an unsaved draft graph plus a per-node mapping report (imported / approximated / unmapped-with-placeholder / skipped). Credentials are never imported. Save the draft via POST /graphs.",
+        "operationId": "GraphsController_importN8n",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportN8nDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportN8nResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Import an n8n workflow export as a draft",
+        "tags": [
+          "Graphs"
+        ]
+      }
+    },
     "/graphs/generate/stream": {
       "post": {
         "description": "Same as POST /graphs/generate, delivered as text/event-stream with `: ping` heartbeats. For the API-model providers the graph streams live: `event: meta` ({name}) once known, then `event: node` (a node) + `event: edge` (an edge) as each completes. Terminal frames: `event: result` ({name, graph} — the authoritative validated graph) or `event: error` ({status, message, code?}). Clients that only handle result/error stay compatible (node/edge/meta are ignored).",
@@ -15535,6 +15613,185 @@
         "required": [
           "name",
           "graph"
+        ]
+      },
+      "ImportN8nDto": {
+        "type": "object",
+        "properties": {
+          "workflow": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The n8n workflow export: `{ name, nodes: [...], connections: {...} }`. Credentials in it are IGNORED — the response reports which connection types to create instead."
+          }
+        },
+        "required": [
+          "workflow"
+        ]
+      },
+      "N8nNodeReportResponse": {
+        "type": "object",
+        "properties": {
+          "n8nName": {
+            "type": "string",
+            "example": "High value?",
+            "description": "The node's name in n8n."
+          },
+          "n8nType": {
+            "type": "string",
+            "example": "n8n-nodes-base.if"
+          },
+          "nodeId": {
+            "type": "string",
+            "nullable": true,
+            "example": "high-value",
+            "description": "Our node id in the draft graph. Null when the node is intentionally NOT a graph node (`skipped`: an n8n sticky note, a disabled node, or an AI sub-node)."
+          },
+          "nodeType": {
+            "type": "string",
+            "nullable": true,
+            "example": "if"
+          },
+          "status": {
+            "type": "string",
+            "example": "imported",
+            "enum": [
+              "imported",
+              "approximated",
+              "unmapped",
+              "skipped"
+            ],
+            "description": "`imported` = faithful. `approximated` = runs, but something was reshaped. `unmapped` = no equivalent, so it became a noOp placeholder carrying its original n8n config under `__n8n`. `skipped` = deliberately not a graph node."
+          },
+          "notes": {
+            "description": "What was lost or is left to do. Always non-empty unless status is `imported`.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "n8nName",
+          "n8nType",
+          "nodeId",
+          "nodeType",
+          "status",
+          "notes"
+        ]
+      },
+      "N8nCredentialReportResponse": {
+        "type": "object",
+        "properties": {
+          "n8nType": {
+            "type": "string",
+            "example": "httpHeaderAuth"
+          },
+          "usedBy": {
+            "description": "n8n node names that used it.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "suggestedConnectionType": {
+            "type": "string",
+            "nullable": true,
+            "example": "custom",
+            "description": "The connection type to create here, or null when we have no equivalent."
+          }
+        },
+        "required": [
+          "n8nType",
+          "usedBy",
+          "suggestedConnectionType"
+        ]
+      },
+      "N8nUnconvertedExpressionResponse": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string",
+            "example": "high-value"
+          },
+          "field": {
+            "type": "string",
+            "example": "subject"
+          },
+          "expression": {
+            "type": "string",
+            "example": "{{ $now.toISO() }}"
+          },
+          "reason": {
+            "type": "string",
+            "example": "n8n's $now is a DateTime object; use a dateTime node instead"
+          }
+        },
+        "required": [
+          "nodeId",
+          "field",
+          "expression",
+          "reason"
+        ]
+      },
+      "ImportN8nResponse": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Order webhook triage"
+          },
+          "graph": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The draft graph { nodes, edges, startNodeId }. Not saved."
+          },
+          "nodes": {
+            "description": "One entry per node in the export — nothing is dropped silently.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/N8nNodeReportResponse"
+            }
+          },
+          "credentials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/N8nCredentialReportResponse"
+            }
+          },
+          "unconvertedExpressions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/N8nUnconvertedExpressionResponse"
+            }
+          },
+          "warnings": {
+            "description": "Whole-workflow warnings to read BEFORE saving (e.g. a schedule trigger goes live on save).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "counts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            },
+            "example": {
+              "imported": 4,
+              "approximated": 1,
+              "unmapped": 0,
+              "skipped": 1
+            }
+          }
+        },
+        "required": [
+          "name",
+          "graph",
+          "nodes",
+          "credentials",
+          "unconvertedExpressions",
+          "warnings",
+          "counts"
         ]
       },
       "GraphVersionResponse": {

@@ -1,0 +1,184 @@
+{
+  "name": "Error handler (legacy nodes)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "E0000000-0000-4000-8000-000000000000",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [-400, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "items[0].json.summary = items[0].json.execution.error.message;\nreturn items;"
+      },
+      "id": "E1111111-1111-4111-8111-111111111111",
+      "name": "Extract message",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [-180, 200]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "workflowName",
+              "value": "={{ $node[\"Error Trigger\"].json.workflow.name }}"
+            },
+            {
+              "name": "retryHint",
+              "value": "=Retry after {{ $now.plus(1, 'hour').toISO() }}"
+            }
+          ],
+          "number": [
+            {
+              "name": "attempts",
+              "value": "={{ $runIndex }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "E2222222-2222-4222-8222-222222222222",
+      "name": "Build context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [40, 200]
+    },
+    {
+      "parameters": {
+        "amount": 5,
+        "unit": "minutes"
+      },
+      "id": "E3333333-3333-4333-8333-333333333333",
+      "name": "Wait 5 min",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [260, 200],
+      "webhookId": "e4444444-4444-4444-8444-444444444444"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.summary }}",
+              "operation": "contains",
+              "value2": "timeout"
+            }
+          ]
+        }
+      },
+      "id": "E4444444-4444-4444-8444-444444444444",
+      "name": "Transient?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [480, 200]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Permanent failure in {{ $json.workflowName }}"
+      },
+      "id": "E5555555-5555-4555-8555-555555555555",
+      "name": "Give up",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [700, 320]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "-100200300",
+        "text": "=Transient failure: {{ $json.summary }}",
+        "additionalFields": {}
+      },
+      "id": "E6666666-6666-4666-8666-666666666666",
+      "name": "Telegram alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [700, 80],
+      "credentials": {
+        "telegramApi": {
+          "id": "77",
+          "name": "Telegram bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract message": {
+      "main": [
+        [
+          {
+            "node": "Build context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build context": {
+      "main": [
+        [
+          {
+            "node": "Wait 5 min",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 5 min": {
+      "main": [
+        [
+          {
+            "node": "Transient?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transient?": {
+      "main": [
+        [
+          {
+            "node": "Telegram alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Give up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "active": false,
+  "versionId": "99887766-5544-4332-8110-aabbccddeeff",
+  "meta": {
+    "instanceId": "99887766554433221100aabbccddeeff99887766554433221100aabbccddeeff"
+  },
+  "tags": []
+}

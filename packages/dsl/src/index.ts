@@ -65,6 +65,27 @@ export { resolveHttpRequest, type ResolvedHttpRequest } from "./http-request";
 export { resolveGraphQL, type ResolvedGraphQL } from "./graphql";
 export { parseCurl, type CurlImportResult } from "./curl-import";
 export {
+  parseN8nWorkflow,
+  N8nImportError,
+  type N8nImportResult,
+  type N8nNodeReport,
+  type N8nCredentialReport,
+} from "./n8n-import";
+export {
+  N8N_NODE_MAP,
+  N8N_APP_TO_PROVIDER,
+  N8N_CREDENTIAL_HINT,
+  N8N_SUB_NODE_TYPES,
+  lookupN8nNode,
+  type N8nMapStatus,
+  type N8nMapping,
+} from "./n8n-map";
+export {
+  convertN8nExpression,
+  isN8nExpression,
+  type UnconvertedExpression,
+} from "./n8n-expressions";
+export {
   parseOpenApi,
   parseIntrospection,
   GRAPHQL_INTROSPECTION_QUERY,

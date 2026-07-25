@@ -19,7 +19,8 @@ import {
   ApiOperation,
   ApiProduces,
 } from "@nestjs/swagger";
-import type { GraphDef } from "@naary/dsl";
+import type { GraphDef, N8nImportResult } from "@naary/dsl";
+import { parseN8nWorkflow } from "@naary/dsl";
 import {
   CurrentPrincipal,
   EnvironmentSel,
@@ -28,12 +29,18 @@ import {
 } from "../auth/tenant.decorator";
 import { EnvironmentsService } from "../environments/environments.service";
 import { ApiEndpoint, ApiStandardErrors } from "../swagger/api-decorators";
-import { GenerateGraphDto, PromoteGraphDto, SaveGraphDto } from "./graph.dto";
+import {
+  GenerateGraphDto,
+  ImportN8nDto,
+  PromoteGraphDto,
+  SaveGraphDto,
+} from "./graph.dto";
 import { GraphGeneratorService } from "./graph-generator.service";
 import {
   ErrorHandlerResponse,
   GenerateGraphResponse,
   GraphDetailResponse,
+  ImportN8nResponse,
   GraphSummaryResponse,
   GraphVersionResponse,
   PromoteGraphResponse,
@@ -128,6 +135,38 @@ export class GraphsController {
     // Generate against the ACTIVE env's provider key + connections (Slice 5).
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
     return this.generator.generate(tenantId, envId, body.prompt, body.provider);
+  }
+
+  /**
+   * Import an n8n workflow export into a DRAFT graph + an honest mapping report (#579).
+   *
+   * Same shape as `POST /graphs/generate`: nothing is persisted. The canvas loads the draft, the
+   * user reads the report, reconnects credentials, and saves via `POST /graphs` — which is where
+   * the save gates and versioning happen (there is no draft state in the schema).
+   *
+   * Pure and tenant-agnostic: the translation reads only the posted JSON, so no env resolution and
+   * no provider key are involved. **Credentials in the export are never imported** — the response
+   * reports which connection types to create.
+   */
+  @ApiEndpoint({
+    summary: "Import an n8n workflow export as a draft",
+    description:
+      "Translates an n8n workflow JSON into an unsaved draft graph plus a per-node mapping report " +
+      "(imported / approximated / unmapped-with-placeholder / skipped). Credentials are never " +
+      "imported. Save the draft via POST /graphs.",
+    ok: ImportN8nResponse,
+  })
+  @Post("import/n8n")
+  importN8n(@Body() body: ImportN8nDto): N8nImportResult {
+    try {
+      return parseN8nWorkflow(body.workflow);
+    } catch (e) {
+      // The importer throws only when the payload isn't an n8n workflow at all; everything else
+      // degrades into a placeholder + a report entry. That distinction is the 400 boundary.
+      throw new BadRequestException(
+        e instanceof Error ? e.message : "Could not read the n8n workflow.",
+      );
+    }
   }
 
   /**
