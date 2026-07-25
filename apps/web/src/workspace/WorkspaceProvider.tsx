@@ -15,6 +15,7 @@ import {
 } from "react";
 import {
   AccessNotAllowedError,
+  MfaRequiredError,
   type Workspace,
   api,
   getActiveWorkspace,
@@ -31,6 +32,9 @@ export interface WorkspaceState {
   needsWorkspace: boolean;
   /** Signed in, but the server's access allowlist rejected this user → show NotAvailable. */
   accessDenied: boolean;
+  /** Signed in WITHOUT a second factor while the instance requires MFA (#457) → show the
+   *  enrol-to-continue screen. Like accessDenied this is a distinct state, not a load error. */
+  mfaRequired: boolean;
   /** Failed to load the workspace list (network/server). */
   error?: string;
   /** Switch the active workspace (persists + re-scopes subsequent requests). */
@@ -64,6 +68,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState<string | undefined>(undefined);
   const [accessDenied, setAccessDenied] = useState(false);
+  const [mfaRequired, setMfaRequired] = useState(false);
 
   const load = useCallback(async (): Promise<Workspace[]> => {
     const list = await api.getMyWorkspaces();
@@ -84,6 +89,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         // A rejected user is a distinct state (NotAvailable screen), not a load error.
         if (e instanceof AccessNotAllowedError) setAccessDenied(true);
+        // Instance-wide MFA enforcement (#457) — a distinct gated state, not a failure.
+        else if (e instanceof MfaRequiredError) setMfaRequired(true);
         else setError(e instanceof Error ? e.message : String(e));
       } finally {
         if (!cancelled) setLoading(false);
@@ -118,8 +125,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     workspaces,
     activeId,
     needsWorkspace:
-      !loading && !error && !accessDenied && workspaces.length === 0,
+      !loading &&
+      !error &&
+      !accessDenied &&
+      !mfaRequired &&
+      workspaces.length === 0,
     accessDenied,
+    mfaRequired,
     error,
     setActive,
     create,

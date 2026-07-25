@@ -170,6 +170,11 @@ services:
       # deploy/.env.prod.example. Gates Firebase user logins only; nry_ tokens + public
       # ingress are unaffected.
       ACCESS_ALLOWED_EMAILS: ${ACCESS_ALLOWED_EMAILS:-}
+      # Instance-wide 2FA requirement (#457). Unset/false ⇒ off (default). `true` ⇒ a Firebase
+      # session without a second factor gets 403 `mfa_required` (the SPA shows an enrolment
+      # screen). nry_ tokens + all @Public() ingress are exempt. Enrol before enabling — see
+      # deploy/.env.prod.example.
+      REQUIRE_MFA: ${REQUIRE_MFA:-}
       # Feature flags (OpenFeature + Flagsmith) — api-only (only @naary/api imports
       # @naary/flags). OFF unless FLAGSMITH_ENVIRONMENT_KEY (server-side `ser.` key) is
       # set: no key ⇒ every flag resolves to its safe code default (fail-safe). For a

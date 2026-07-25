@@ -34,6 +34,7 @@ export {
   getActiveEnvironment,
   getActiveWorkspace,
   HttpError,
+  MfaRequiredError,
   setActiveEnvironment,
   setActiveWorkspace,
   subscribeActiveEnvironment,

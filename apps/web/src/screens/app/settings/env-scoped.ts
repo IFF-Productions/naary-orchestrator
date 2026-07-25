@@ -162,15 +162,17 @@ export interface TurnstileConfig {
   siteKey: string;
   enabled: boolean;
   hasSecret: boolean;
-  /** Allowed solved-Turnstile hostnames (empty ⇒ any). */
+  /** The SHARED public-pages domain allowlist (empty ⇒ any): gates both Turnstile solved hostnames
+   *  (#615) and the embed CORS origins on the public form/chat routes (#617). */
   allowedHostnames: string[];
 }
 
-/** Save payload — site key required; secret key write-only (omit to keep the existing one). */
+/** Save payload — the site key is required only when `enabled` (a domains-only config is valid,
+ *  #617); an empty site key keeps the stored one. Secret key write-only (omit to keep it). */
 export interface TurnstileConfigInput {
   siteKey: string;
   secretKey?: string;
   enabled: boolean;
-  /** Allowed domains (solved hostnames); omit to leave unchanged, [] to clear. */
+  /** The shared domain allowlist; omit to leave unchanged, [] to clear. */
   allowedHostnames?: string[];
 }

@@ -32,6 +32,46 @@ export interface FirebaseUser {
    *  single-tenant users — the AuthGuard migrates it to a Membership on first request.
    *  Undefined for new (post-provisioning) users. */
   claimTenant?: string;
+  /** The second factor THIS SESSION signed in with (#457), e.g. "phone" | "totp" — or
+   *  undefined for a single-factor session. Firebase stamps the factor it used into the ID
+   *  token, so the TOKEN (not our DB) is the authority on whether the user completed MFA.
+   *  Deliberately optional rather than a boolean `false`: "no second factor" is the absence
+   *  of a claim, and it leaves the shape of an ordinary user unchanged. */
+  secondFactor?: string;
+}
+
+/**
+ * Pure: which second factor did this ID token's session complete? (#457)
+ *
+ * Firebase Auth (Identity Platform) MFA puts the factor used into the token's `firebase`
+ * claim as `sign_in_second_factor` — "phone" or "totp" — alongside `sign_in_provider`.
+ * A single-factor sign-in simply omits it. As a secondary signal we accept a standard OIDC
+ * `amr` (authentication-method-references) array carrying an MFA/OTP method, which some
+ * Identity Platform configurations emit. That's safe to trust: `amr` is on firebase-admin's
+ * RESERVED_CLAIMS list (auth-api-request.ts) alongside `firebase`/`sub`/`aud`, so neither
+ * `setCustomUserClaims` nor a minted custom token can self-assert it — only the issuer can.
+ *
+ * Returns the factor name when present, else undefined — so a missing/unknown claim fails
+ * CLOSED under enforcement (no factor ⇒ gated), never the other way around.
+ */
+export function secondFactorFromClaims(
+  claims: Record<string, unknown>,
+): string | undefined {
+  const fb = claims.firebase;
+  if (fb && typeof fb === "object" && !Array.isArray(fb)) {
+    const sf = (fb as Record<string, unknown>).sign_in_second_factor;
+    if (typeof sf === "string" && sf.trim().length > 0) return sf.trim();
+  }
+  const amr = claims.amr;
+  if (Array.isArray(amr)) {
+    const hit = amr.find(
+      (m): m is string =>
+        typeof m === "string" &&
+        ["mfa", "otp", "sms", "totp"].includes(m.trim().toLowerCase()),
+    );
+    if (hit !== undefined) return hit.trim().toLowerCase();
+  }
+  return undefined;
 }
 
 /** A verify function over the raw token → decoded claims. Injectable so the
@@ -68,6 +108,9 @@ export function userFromClaims(
         : undefined,
     claimTenant:
       typeof claim === "string" && claim.length > 0 ? claim : undefined,
+    // #457: surface the MFA state of the SESSION so the guard can enforce an instance-wide
+    // "require MFA" policy without any extra round-trip.
+    secondFactor: secondFactorFromClaims(claims),
   };
 }
 
@@ -151,8 +194,10 @@ export class FirebaseVerifier {
     if (!this.verifyFn) {
       const auth = getAuth(this.initApp());
       this.verifyFn = async (token, checkRevoked) =>
-        (await auth.verifyIdToken(token, checkRevoked === true)) as unknown as
-          Record<string, unknown>;
+        (await auth.verifyIdToken(
+          token,
+          checkRevoked === true,
+        )) as unknown as Record<string, unknown>;
     }
     return this.verifyFn;
   }

@@ -40,7 +40,7 @@ const SECTIONS = [
   },
   {
     id: "botprotection",
-    label: "Bot protection",
+    label: "Bot protection & domains",
     icon: "M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7zM9.5 12l1.8 1.8L15 10",
   },
   {

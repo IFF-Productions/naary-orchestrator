@@ -7,7 +7,7 @@ import {
 import type { Reflector } from "@nestjs/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiTokenService } from "../src/auth/api-token.service";
-import { AuthGuard } from "../src/auth/auth.guard";
+import { AuthGuard, parseRequireMfa } from "../src/auth/auth.guard";
 import type { FirebaseVerifier } from "../src/auth/firebase-verifier";
 import type { MembershipService } from "../src/membership/membership.service";
 import type { PermissionsService } from "../src/permissions/permissions.service";
@@ -685,5 +685,108 @@ describe("AuthGuard — access allowlist (ACCESS_ALLOWED_EMAILS)", () => {
     };
     await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
     expect(firebaseVerify).not.toHaveBeenCalled();
+  });
+});
+
+// ── #457: instance-wide MFA enforcement (REQUIRE_MFA) ───────────────────────────────────────
+// The verifier is the mock seam (no live Firebase MFA enrolment is possible here): a session
+// WITH a second factor is a verified user carrying `secondFactor`, one WITHOUT simply omits it
+// — exactly what userFromClaims produces from a real ID token (see firebase-verifier.spec.ts).
+describe("AuthGuard — MFA enforcement (REQUIRE_MFA, #457)", () => {
+  const KEY = "REQUIRE_MFA";
+  const saved = process.env[KEY];
+  afterEach(() => {
+    if (saved === undefined) delete process.env[KEY];
+    else process.env[KEY] = saved;
+  });
+
+  function bearerFirebase(user: unknown): FakeReq {
+    firebaseEnabled = true;
+    firebaseVerify.mockResolvedValue(user);
+    return { headers: { authorization: "Bearer good.jwt" } };
+  }
+
+  it("parseRequireMfa: only explicit truthy values enable it (default OFF)", () => {
+    for (const on of ["1", "true", "TRUE", " yes ", "on"]) {
+      expect(parseRequireMfa(on)).toBe(true);
+    }
+    for (const off of [undefined, "", "0", "false", "no", "maybe", "  "]) {
+      expect(parseRequireMfa(off)).toBe(false);
+    }
+  });
+
+  it("403s `mfa_required` for a session with NO second factor", async () => {
+    process.env[KEY] = "true";
+    userScoped = true; // isolate the gate from workspace resolution
+    const req = bearerFirebase({
+      userId: "u-1",
+      email: "me@acme.com",
+      emailVerified: true, // enrolment, not verification, is what's missing
+    });
+    await expect(makeGuard().canActivate(ctx(req))).rejects.toMatchObject({
+      response: { code: "mfa_required", statusCode: 403 },
+    });
+    // Gated BEFORE any membership write — an un-enrolled user provisions nothing.
+    expect(ensureMembership).not.toHaveBeenCalled();
+    expect(acceptPendingInvitations).not.toHaveBeenCalled();
+  });
+
+  it("lets a session WITH a second factor through", async () => {
+    process.env[KEY] = "true";
+    userScoped = true;
+    const req = bearerFirebase({
+      userId: "u-1",
+      email: "me@acme.com",
+      emailVerified: true,
+      secondFactor: "totp",
+    });
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+  });
+
+  it("changes NOTHING when unset — a single-factor user still passes (default off)", async () => {
+    delete process.env[KEY];
+    userScoped = true;
+    const req = bearerFirebase({
+      userId: "u-1",
+      email: "me@acme.com",
+      emailVerified: true,
+    });
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+  });
+
+  it("does NOT gate `nry_` API tokens (CLI/MCP have no interactive login)", async () => {
+    process.env[KEY] = "true";
+    verify.mockResolvedValue({ tenantId: "t-1", environmentId: null });
+    const req: FakeReq = {
+      headers: { authorization: "Bearer nry_owner" },
+      path: "/executions",
+    };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(firebaseVerify).not.toHaveBeenCalled();
+  });
+
+  it("does NOT gate @Public() routes — they carry no user at all", async () => {
+    process.env[KEY] = "true";
+    // IS_PUBLIC_KEY → true (webhook ingress, hosted forms/chat, OAuth callbacks, signed
+    // approve/reject links, /healthz, /metrics): no token needed, so nothing to enrol.
+    getAllAndOverride.mockReset().mockReturnValue(true);
+    const req: FakeReq = { headers: {}, path: "/hooks/abc" };
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(firebaseVerify).not.toHaveBeenCalled();
+  });
+
+  it("still gates a workspace-scoped route (not just user-scoped ones)", async () => {
+    process.env[KEY] = "true";
+    userScoped = false;
+    listForUser.mockResolvedValue([{ tenantId: "t-1", role: "owner" }]);
+    const req = bearerFirebase({
+      userId: "u-1",
+      email: "me@acme.com",
+      emailVerified: true,
+    });
+    req.path = "/tenants/t-1/credentials";
+    await expect(makeGuard().canActivate(ctx(req))).rejects.toMatchObject({
+      response: { code: "mfa_required" },
+    });
   });
 });

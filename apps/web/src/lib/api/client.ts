@@ -27,6 +27,7 @@ import {
   getActiveEnvironment,
   getActiveWorkspace,
   HttpError,
+  MfaRequiredError,
   UnauthorizedError,
 } from "./http";
 import type { paths } from "./schema";
@@ -87,6 +88,12 @@ export function unwrap<T>(result: {
     // A 403 carrying the access-allowlist marker → the NotAvailable screen (exact code only).
     if (response.status === 403 && body?.code === "access_not_allowed") {
       throw new AccessNotAllowedError(
+        typeof body.message === "string" ? body.message : undefined,
+      );
+    }
+    // A 403 carrying the MFA marker → the enrol-to-continue screen (#457), mirroring http().
+    if (response.status === 403 && body?.code === "mfa_required") {
+      throw new MfaRequiredError(
         typeof body.message === "string" ? body.message : undefined,
       );
     }

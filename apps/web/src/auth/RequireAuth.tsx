@@ -8,6 +8,7 @@
 import { Navigate, Outlet } from "react-router-dom";
 import { Button } from "../components";
 import { hasToken } from "../lib/auth";
+import { MfaRequired } from "../screens/MfaRequired";
 import { NotAvailable } from "../screens/NotAvailable";
 import { CreateWorkspace } from "../workspace/CreateWorkspace";
 import { FlagsProvider } from "../workspace/FlagsProvider";
@@ -36,12 +37,15 @@ export function RequireAuth() {
 /** Gates the app on workspace resolution: loading → nothing; error → retry; no workspace →
  *  create screen; otherwise the routed app. */
 function WorkspaceGate() {
-  const { loading, error, needsWorkspace, accessDenied, refresh } =
+  const { loading, error, needsWorkspace, accessDenied, mfaRequired, refresh } =
     useWorkspace();
 
   if (loading) return null;
   // Signed in, but the server's access allowlist rejected this user (early access).
   if (accessDenied) return <NotAvailable />;
+  // Signed in with a single factor while the instance requires MFA (#457) — a distinct,
+  // actionable state (enrol + sign in again), checked before the generic error branch.
+  if (mfaRequired) return <MfaRequired />;
   if (error) {
     return (
       <div
