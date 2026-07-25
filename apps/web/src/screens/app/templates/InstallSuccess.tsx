@@ -1,8 +1,14 @@
 import { Button, Icon } from "../../../components";
-import { deriveInstallSteps, type TemplateView } from "./model";
+import { ConnectionChecklist } from "./ConnectionChecklist";
+import {
+  type CheckedRequirement,
+  deriveInstallSteps,
+  type TemplateView,
+} from "./model";
 
 /**
- * Post-install view: green pop check, "<name> installed", and the staggered
+ * Post-install view: green pop check, "<name> installed", the connection setup checklist
+ * (#574 — what still has to be connected before a run can work), and the staggered
  * TRIGGER → RUN → (APPROVAL) → DONE walkthrough derived from the installed
  * template's real graph — the APPROVAL beat collapses when the graph has no
  * approval node. "Open in canvas" opens the workflow the install actually
@@ -11,18 +17,27 @@ import { deriveInstallSteps, type TemplateView } from "./model";
 export function InstallSuccess({
   view,
   workflowKey,
+  checkedRequirements,
   openLabel = "Open in canvas",
   onOpen,
+  onConnect,
   onBack,
 }: {
   view: TemplateView;
   workflowKey: string;
+  /** Requirement verdicts, or null when the workspace's connections couldn't be loaded. */
+  checkedRequirements: CheckedRequirement[] | null;
   /** CTA label — the parent points it at the canvas (Builder) or the automation (Simple). */
   openLabel?: string;
   onOpen: () => void;
+  /** Open Integrations on the tab hosting a missing connection's form. */
+  onConnect: (tab: "apps" | "providers") => void;
   onBack: () => void;
 }) {
   const steps = deriveInstallSteps(view);
+  const unmet = checkedRequirements
+    ? checkedRequirements.filter((r) => r.status !== "satisfied").length
+    : 0;
   return (
     <div
       style={{
@@ -84,10 +99,22 @@ export function InstallSuccess({
             <span className="mono" style={{ color: "var(--ink)" }}>
               {workflowKey}
             </span>
-            . Here&apos;s exactly what happens when it runs — the loop every
-            workflow follows.
+            .{" "}
+            {unmet > 0
+              ? "Connect what it needs first, then here's exactly what happens when it runs."
+              : "Here's exactly what happens when it runs — the loop every workflow follows."}
           </div>
         </div>
+
+        {view.requirements.length > 0 && (
+          <div style={{ marginTop: 30 }}>
+            <ConnectionChecklist
+              requirements={view.requirements}
+              checked={checkedRequirements}
+              onConnect={onConnect}
+            />
+          </div>
+        )}
 
         <div
           style={{

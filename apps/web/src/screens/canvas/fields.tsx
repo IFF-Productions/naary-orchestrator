@@ -40,21 +40,11 @@ export interface BindingRow {
   path?: string;
 }
 
-/** Which connection types each connection-based node can use — mirrors the Integrations
- *  forms (MCP servers = github/atlassian/custom; DB engines; smtp; signing). */
-export const CONNECTION_TYPES: Record<string, ConnectionRow["type"][]> = {
-  mcpTool: ["github", "atlassian", "custom"],
-  integration: ["github", "atlassian", "custom"],
-  // codeAgent write mode authorizes the clone + PR via a GitHub App connection.
-  codeAgent: ["github"],
-  httpRequest: ["github", "atlassian", "custom"],
-  sqlQuery: ["postgres", "mssql", "mysql"],
-  sqlExec: ["postgres", "mssql", "mysql"],
-  sendEmail: ["smtp"],
-  hmac: ["signing"],
-  jwt: ["signing"],
-  totp: ["signing"],
-};
+/** Which connection types each connection-based node can use. The map itself now lives in
+ *  lib/connection-types.ts (pure, so the Templates screen's connection checklist can reuse
+ *  it without pulling this canvas chunk); re-exported here so every existing
+ *  `from "./fields"` import keeps working. */
+export { CONNECTION_TYPES } from "../../lib/connection-types";
 
 /** Pick a connection by LABEL instead of pasting a raw connectionId. Filtered to the node's
  *  connection types; keeps an unknown current value visible so older configs don't break. */

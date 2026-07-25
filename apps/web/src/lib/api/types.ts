@@ -105,6 +105,13 @@ export interface TemplateSummary {
   name: string;
   description: string;
   nodeCount: number;
+  /** Server-owned taxonomy id (#574) — mirrors the api's TemplateCategory. OPTIONAL on
+   *  purpose: an API predating the field returns nothing, and the gallery must still
+   *  render (it falls back to deriving a category from the graph). Typed as a plain
+   *  string, not a union, so a category the API adds first can't fail the build. */
+  category?: string;
+  /** Use-case tags (#574) — searched alongside name/description. Optional for the same reason. */
+  tags?: string[];
 }
 export interface TemplateDetail extends TemplateSummary {
   graph: GraphDef;
