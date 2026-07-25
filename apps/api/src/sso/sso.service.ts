@@ -99,7 +99,9 @@ export class SsoService {
     private readonly memberships: MembershipService,
     /** Replay-cache store. `@Optional()` + a symbol token so Nest doesn't try to resolve the
      *  class itself and tests can inject an in-memory double. */
-    @Optional() @Inject(SSO_SECRET_STORE) private readonly injectedStore?: SecretStore,
+    @Optional()
+    @Inject(SSO_SECRET_STORE)
+    private readonly injectedStore?: SecretStore,
   ) {}
 
   private get secrets(): SecretStore {
@@ -166,9 +168,6 @@ export class SsoService {
       );
     }
 
-    // --- Replay: an assertion id is single-use. --------------------------------------------
-    await this.consumeAssertionId(conn.tenantId, verified.assertionId);
-
     // --- Instance-wide policies. The ACS is @Public(), so the guard has NOT applied these; a
     // SAML login must not be a way around early-access lockdown or REQUIRE_MFA. Checked
     // BEFORE any membership write, same ordering rationale as the guard. ---------------------
@@ -180,6 +179,13 @@ export class SsoService {
       // AuthnContextClassRef (SAML-SSO.md).
       throw new SsoLoginError("mfa_required");
     }
+
+    // --- Replay: the assertion id is consumed SINGLE-USE, atomically. -----------------------
+    // Runs AFTER the policy checks on purpose: a login refused for `mfa_required` /
+    // `access_not_allowed` must not burn the id, or the user's retry would report `replay`
+    // instead of the real reason. It runs BEFORE any membership write, so a replayed assertion
+    // can never provision.
+    await this.consumeAssertionId(conn.tenantId, verified.assertionId);
 
     // --- Link or provision, always scoped to conn.tenantId. --------------------------------
     const { userId, outcome } = await this.resolveUser(conn, verified.email);
@@ -218,9 +224,16 @@ export class SsoService {
   ): Promise<void> {
     const envId = await getDefaultEnvironmentId(tenantId);
     const key = `${REPLAY_PREFIX}${createHash("sha256").update(assertionId).digest("hex")}`;
-    const seen = await this.secrets.get(tenantId, envId, key);
-    if (seen !== null) throw new SsoLoginError("replay");
-    await this.secrets.put(tenantId, envId, key, new Date().toISOString());
+    // ATOMIC: `putIfAbsent` is a unique-constrained insert, so two concurrent POSTs of the same
+    // assertion cannot both win. A read-then-write check would let both see "unseen" and both
+    // mint a session — which is the entire replay defence, so it has to be the DB deciding.
+    const won = await this.secrets.putIfAbsent(
+      tenantId,
+      envId,
+      key,
+      new Date().toISOString(),
+    );
+    if (!won) throw new SsoLoginError("replay");
     // Best-effort hygiene; never fails a login.
     await this.secrets
       .prunePrefixOlderThan(tenantId, envId, REPLAY_PREFIX, REPLAY_TTL_MS)

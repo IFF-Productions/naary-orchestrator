@@ -55,7 +55,9 @@ export class SsoSessionService {
   private readonly ttlSeconds: number;
 
   constructor(
-    @Optional() @Inject(SSO_ENV) envOverride?: Record<string, string | undefined>,
+    @Optional()
+    @Inject(SSO_ENV)
+    envOverride?: Record<string, string | undefined>,
   ) {
     const env = envOverride ?? process.env;
     const raw = (env.SSO_SESSION_SECRET ?? "").trim();
@@ -120,15 +122,27 @@ export class SsoSessionService {
   }
 
   /**
-   * Verify a session token → the authenticated user, or null (⇒ the guard 401s). Returns the
-   * SAME shape as a Firebase user so the whole downstream path (allowlist, MFA gate,
-   * invitation accept-on-login, membership resolution) is shared, not duplicated.
+   * Verify a session token → the authenticated user AND the ONE workspace it may act in, or
+   * null (⇒ the guard 401s). The user shape matches a Firebase user so the whole downstream
+   * path (allowlist, MFA gate, invitation accept-on-login, membership resolution) is shared,
+   * not duplicated.
+   *
+   * WHY THE TENANT COMES BACK WITH THE USER (security-critical, see SAML-SSO.md "A session is
+   * confined to one workspace"): an SSO identity is asserted by ONE tenant's IdP, so it must
+   * never be usable outside that tenant. A Firebase identity proves mailbox ownership
+   * instance-wide; a SAML identity proves only "this IdP says so", and that IdP speaks for a
+   * single workspace. Handing the guard a global identity would let a workspace's own IdP mint
+   * an `email_verified` principal for any address, which every email-keyed path in the
+   * instance (invitation accept-on-login, company member resolution) would then honour.
    *
    * `claimTenant` is deliberately LEFT UNSET: the legacy `tenant` claim is a transitional
-   * OWNER grant, so passing the connection's tenant here would silently promote every
-   * federated user to owner. Authority stays the Membership row the ACS wrote.
+   * OWNER grant, so putting the connection's tenant there would silently promote every
+   * federated user to owner. Authority stays the Membership row the ACS wrote; the returned
+   * `tenantId` is a CONFINEMENT, not a grant.
    */
-  async verify(token: string): Promise<FirebaseUser | null> {
+  async verify(
+    token: string,
+  ): Promise<{ user: FirebaseUser; tenantId: string } | null> {
     if (!this.secret || !this.isSessionToken(token)) return null;
     const compact = token.slice(SSO_TOKEN_PREFIX.length);
     try {
@@ -139,18 +153,25 @@ export class SsoSessionService {
         algorithms: ["HS256"],
       });
       const userId = typeof payload.sub === "string" ? payload.sub : "";
-      if (userId.length === 0) return null;
+      const tenantId = typeof payload.tenant === "string" ? payload.tenant : "";
+      // A session with no tenant cannot be confined, so it is not a session. (Belt and
+      // braces: `mint` always sets it.)
+      if (userId.length === 0 || tenantId.length === 0) return null;
       return {
-        userId,
-        email: typeof payload.email === "string" ? payload.email : undefined,
-        // The IdP asserted this address and the assertion signature was verified, so it is
-        // verified by our trust model. This is what lets invitation accept-on-login work
-        // for a federated user (SAML-SSO.md "Provisioning / linking", step 2).
-        emailVerified: payload.email_verified === true,
-        name: typeof payload.name === "string" ? payload.name : undefined,
-        secondFactor: secondFactorFromClaims(
-          payload as Record<string, unknown>,
-        ),
+        tenantId,
+        user: {
+          userId,
+          email: typeof payload.email === "string" ? payload.email : undefined,
+          // The IdP asserted this address and the signature was verified, so it counts as
+          // verified WITHIN this workspace — which is why the guard confines the session to
+          // `tenantId`. This is what lets invitation accept-on-login work for a federated
+          // user (SAML-SSO.md "Provisioning / linking", step 2), scoped to that workspace.
+          emailVerified: payload.email_verified === true,
+          name: typeof payload.name === "string" ? payload.name : undefined,
+          secondFactor: secondFactorFromClaims(
+            payload as Record<string, unknown>,
+          ),
+        },
       };
     } catch {
       // Expired / tampered / wrong secret / wrong iss-aud — all indistinguishable to the

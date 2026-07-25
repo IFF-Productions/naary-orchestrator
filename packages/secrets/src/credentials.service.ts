@@ -154,6 +154,9 @@ export class CredentialsService {
           { provider: { startsWith: "conn:" } },
           { provider: { startsWith: "secret:" } },
           { provider: { startsWith: "turnstile:" } },
+          // Single-use SAML assertion ids (#455) live in the same table under `saml:`; they are
+          // not credentials and must never show up as a "configured provider".
+          { provider: { startsWith: "saml:" } },
         ],
       },
       select: { provider: true, isValid: true },
@@ -202,9 +205,13 @@ export class CredentialsService {
     environmentId: string,
     provider: string,
   ): Promise<void> {
+    // MATERIAL FIRST, then the index row. If the external delete fails we throw with the row
+    // still present, so the credential remains listed and a retry can finish the job. The other
+    // order would drop the row and orphan a LIVE secret in Vault — the exact outcome this
+    // method exists to prevent.
+    await this.secrets.remove({ tenantId, environmentId, provider });
     await getPrisma().tenantCredential.deleteMany({
       where: { tenantId, environmentId, provider },
     });
-    await this.secrets.remove({ tenantId, environmentId, provider });
   }
 }

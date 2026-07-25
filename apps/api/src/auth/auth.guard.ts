@@ -233,11 +233,25 @@ export class AuthGuard implements CanActivate {
     // federated session is subject to exactly the same instance-wide policies as a Firebase
     // one. It is an extra identity source, not a policy bypass.
     let user: FirebaseUser | null;
+    /**
+     * The ONE workspace an SSO session may act in — undefined for Firebase/`nry_`.
+     *
+     * A SAML identity is asserted by a single tenant's IdP, so it is CONFINED to that
+     * tenant: memberships in other workspaces are filtered out below and invitation
+     * acceptance is scoped to it. Without this, a workspace's own IdP could mint an
+     * `email_verified` principal for any address and every email-keyed path in the instance
+     * (invitation accept-on-login, company member resolution) would honour it — a
+     * cross-tenant escalation. A Firebase identity proves mailbox ownership instance-wide
+     * and is therefore NOT confined; a SAML one proves only "this IdP says so".
+     */
+    let ssoTenant: string | undefined;
     // Optional-chained so a hand-built guard in an older unit test (5 positional deps, no SSO
     // service) still takes the Firebase path instead of throwing. Nest always injects it —
     // SsoModule is @Global and apps/api/test/auth-guard-di.spec.ts is the boot gate for that.
     if (this.sso?.isSessionToken(token)) {
-      user = await this.sso.verify(token);
+      const session = await this.sso.verify(token);
+      user = session?.user ?? null;
+      ssoTenant = session?.tenantId;
     } else {
       if (!this.firebase.enabled) {
         throw new UnauthorizedException("Invalid credentials");
@@ -283,9 +297,17 @@ export class AuthGuard implements CanActivate {
     // Membership table) and fail-quiet, same posture as the claim backfill below: a DB
     // error here must not 500 an authenticated user. Runs AFTER authentication (and the
     // allowlist) — it never widens who may sign in.
+    // For an SSO session it is SCOPED to the session's workspace (`ssoTenant`): the email was
+    // asserted by that workspace's IdP, so it may only satisfy that workspace's invitations.
+    // Instance-wide conversion here would be the cross-tenant escalation described above.
     if (user.emailVerified === true && user.email) {
       await this.memberships
-        .acceptPendingInvitations(user.userId, user.email, user.emailVerified)
+        .acceptPendingInvitations(
+          user.userId,
+          user.email,
+          user.emailVerified,
+          ssoTenant,
+        )
         .catch((err) =>
           this.logger.warn(
             `invitation accept-on-login failed for user=${user.userId}: ${
@@ -299,7 +321,14 @@ export class AuthGuard implements CanActivate {
     // a TRANSITIONAL owner grant (existing single-tenant users); migrate it to a Membership
     // on first sight so enforcement moves fully onto the table. (Slice 3's member-removal
     // must never target claim-holders — they own their own workspace.)
-    const memberships = await this.memberships.listForUser(user.userId);
+    // CONFINEMENT (see `ssoTenant` above): an SSO session sees ONLY its own workspace's
+    // membership, even if the linked user really is a member of others. So a workspace's IdP
+    // can never mint a session that reaches a workspace it does not speak for — including via
+    // a linked pre-existing Firebase userId.
+    const allMemberships = await this.memberships.listForUser(user.userId);
+    const memberships = ssoTenant
+      ? allMemberships.filter((m) => m.tenantId === ssoTenant)
+      : allMemberships;
     const claim = user.claimTenant;
     if (claim && !memberships.some((m) => m.tenantId === claim)) {
       // Best-effort, NON-authorizing: access is granted via the claim union below, not by

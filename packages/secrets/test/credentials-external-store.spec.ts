@@ -186,6 +186,21 @@ describe("CredentialsService with an external SecretProvider (#458)", () => {
     );
   });
 
+  it("deleteCredential drops the MATERIAL FIRST: a failed external delete leaves the row", async () => {
+    // Row-first would orphan a LIVE secret in the external store — exactly what this method
+    // exists to prevent. Keeping the row means the credential stays visible and a retry can
+    // finish the job.
+    const { svc, kv } = withVault();
+    await svc.saveCredential(TENANT, ENV, "anthropic", KEY);
+    const broken = withVault({ status: 503 });
+    // Same index row, but this service's external store refuses every call.
+    await expect(
+      broken.svc.deleteCredential(TENANT, ENV, "anthropic"),
+    ).rejects.toThrow(/status 503/);
+    expect(rows.size).toBe(1); // row intact ⇒ retryable, nothing orphaned silently
+    expect(kv.size).toBe(1);
+  });
+
   it("the default provider (no config) is unchanged: writes keyVersion 3, not 0", async () => {
     const svc = new CredentialsService({
       encryptor: new AesGcmKeyEncryptor(randomBytes(32).toString("hex")),

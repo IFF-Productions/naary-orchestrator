@@ -196,6 +196,11 @@ services:
       SSO_SP_ENTITY_ID: ${SSO_SP_ENTITY_ID:-}
       SSO_ACS_URL: ${SSO_ACS_URL:-}
       SSO_SESSION_TTL_SECONDS: ${SSO_SESSION_TTL_SECONDS:-}
+      # May a workspace owner/admin REGISTER an IdP themselves (PUT /tenants/:id/sso)? Default
+      # NO: registering declares "this cert may assert these email domains" and no request can
+      # prove domain ownership. Operators register connections with
+      # src/sso/register-sso-connection.ts after checking the claim.
+      SSO_SELF_SERVICE: ${SSO_SELF_SERVICE:-}
       # Feature flags (OpenFeature + Flagsmith) — api-only (only @naary/api imports
       # @naary/flags). OFF unless FLAGSMITH_ENVIRONMENT_KEY (server-side `ser.` key) is
       # set: no key ⇒ every flag resolves to its safe code default (fail-safe). For a

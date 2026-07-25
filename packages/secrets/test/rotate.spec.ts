@@ -24,8 +24,15 @@ vi.mock("@naary/db", () => ({
       },
     },
     tenantCredential: {
+      // Honours BOTH bounds of the sweep's filter, so the `gt: 0` that excludes EXTERNAL
+      // (Vault-backed, keyVersion 0) rows is actually exercised (#458).
       findMany: async ({ where }: any) =>
-        [...creds.values()].filter((r) => r.keyVersion < where.keyVersion.lt),
+        [...creds.values()].filter(
+          (r) =>
+            r.keyVersion < where.keyVersion.lt &&
+            (where.keyVersion.gt === undefined ||
+              r.keyVersion > where.keyVersion.gt),
+        ),
       update: async ({ where, data }: any) => {
         const row = { ...creds.get(where.id), ...data };
         creds.set(where.id, row);
@@ -195,5 +202,31 @@ describe("rotateMasterKey", () => {
       "id",
       "table",
     ]);
+  });
+
+  it("SKIPS external (Vault-backed, keyVersion 0) rows rather than failing on them (#458)", async () => {
+    // A row whose material lives in Vault: the crypto columns are empty BY DESIGN. The sweep
+    // must not try to master-decrypt it — otherwise every Vault-backed row is reported as a
+    // failure and rotation can never be certified complete (the runbook then tells the operator
+    // to keep OLD_ENCRYPTION_KEY set, indefinitely).
+    creds.set("cred_external", {
+      id: "cred_external",
+      tenantId: "t1",
+      provider: "google",
+      ciphertext: "",
+      iv: "",
+      authTag: "",
+      keyVersion: 0,
+    });
+
+    const res = await rotateMasterKey({ master: chain });
+
+    expect(res.failures).toEqual([]);
+    expect(res.credentialsConverged).toBe(1); // only the legacy v2 row
+    // Untouched — still the external sentinel, no rewrite attempted.
+    expect(creds.get("cred_external")).toMatchObject({
+      keyVersion: 0,
+      ciphertext: "",
+    });
   });
 });

@@ -123,6 +123,14 @@ export class MembershipService {
     userId: string,
     email: string,
     emailVerified: boolean,
+    /**
+     * Restrict conversion to ONE workspace's invitations (#455). Passed by the guard for a
+     * SAML SSO session: that email was asserted by one workspace's IdP, which is authority
+     * only within that workspace — converting invitations instance-wide on that basis would
+     * let a workspace's own IdP claim any invited address anywhere. Undefined (Firebase, whose
+     * verified email proves mailbox ownership) keeps the instance-wide behaviour.
+     */
+    onlyTenantId?: string,
   ): Promise<void> {
     if (!emailVerified || !email) return;
     if (this.cache.get(userId)) return; // hot path: cached principal, no invitation scan
@@ -132,6 +140,7 @@ export class MembershipService {
       where: {
         email: { equals: email, mode: "insensitive" },
         acceptedAt: null,
+        ...(onlyTenantId ? { tenantId: onlyTenantId } : {}),
       },
     });
     if (pending.length === 0) return;

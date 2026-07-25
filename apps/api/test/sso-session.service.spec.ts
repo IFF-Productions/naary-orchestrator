@@ -44,18 +44,21 @@ describe("SsoSessionService — mint / verify round trip", () => {
     const s = svc();
     const token = await s.mint(claims);
     expect(token.startsWith(SSO_TOKEN_PREFIX)).toBe(true);
-    const user = await s.verify(token);
-    expect(user).toMatchObject({
+    const session = await s.verify(token);
+    expect(session?.user).toMatchObject({
       userId: "user-123",
       email: "alice@corp.example.com",
       emailVerified: true,
       name: "Alice Example",
     });
+    // The session is CONFINED to the workspace whose IdP asserted it (the guard enforces this).
+    expect(session?.tenantId).toBe("ws-1");
   });
 
   it("NEVER sets claimTenant (that would be a legacy OWNER grant)", async () => {
     const s = svc();
-    const user = await s.verify(await s.mint({ ...claims, tenantId: "ws-9" }));
+    const session = await s.verify(await s.mint({ ...claims, tenantId: "ws-9" }));
+    const user = session?.user;
     // The tenant travels in the token for diagnostics, but the guard must resolve access from
     // the Membership table — a claimTenant would silently make every federated user an owner.
     expect(user?.claimTenant).toBeUndefined();
@@ -64,9 +67,9 @@ describe("SsoSessionService — mint / verify round trip", () => {
   it("an IdP-asserted second factor surfaces as secondFactor (satisfies REQUIRE_MFA)", async () => {
     const s = svc();
     const withMfa = await s.verify(await s.mint({ ...claims, mfa: true }));
-    expect(withMfa?.secondFactor).toBe("mfa");
+    expect(withMfa?.user.secondFactor).toBe("mfa");
     const without = await s.verify(await s.mint({ ...claims, mfa: false }));
-    expect(without?.secondFactor).toBeUndefined(); // fails CLOSED under REQUIRE_MFA
+    expect(without?.user.secondFactor).toBeUndefined(); // fails CLOSED under REQUIRE_MFA
   });
 
   it("rejects a tampered token", async () => {

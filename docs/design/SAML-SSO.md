@@ -90,6 +90,46 @@ email", i.e. the hole itself). Membership lookup is `(tenantId, email)`, never e
 The `defaultRole` is the connection's, never an assertion attribute (JIT role mapping is
 deferred precisely because it makes the IdP an authorization source).
 
+But scoping the ACS is **not sufficient on its own**, and the first draft of this design was
+wrong about that. Two further constraints are load-bearing:
+
+### 1. A session is confined to one workspace
+
+The ACS mints a session for an `email_verified` identity. Before SAML, `emailVerified === true`
+could only come from Firebase, which proves *mailbox ownership*; a SAML assertion proves only
+"this IdP says so". If the resulting principal were a **global** identity, a workspace's own IdP
+could assert any address and every email-keyed path in the instance would honour it — invitation
+accept-on-login (`acceptPendingInvitations`, historically instance-wide) and the company-member
+resolution that maps an email to a `userId`. That is a cross-tenant escalation, not a scoping
+nit; and *linking* makes it worse, because a linked session carries a real user's `userId`, whose
+`listForUser` spans all their workspaces.
+
+So the session carries its tenant, and the guard **confines** it:
+
+- memberships are filtered to the session's workspace, so a linked user's other workspaces are
+  invisible (and cannot be selected as the "sole membership" default);
+- invitation acceptance is passed that workspace and converts only its invitations;
+- the session never carries `claimTenant` (a legacy *owner* grant).
+
+A Firebase session is NOT confined — its verified email genuinely is instance-wide authority.
+The confinement is the price of accepting an IdP's word for an address.
+
+### 2. Registering an IdP is an operator action by default
+
+Nothing in an HTTP request can prove the registrant owns the domains they list. Left
+self-service, any user who can create a workspace could register their own certificate for
+`victim.com`, self-sign an assertion, and obtain a session asserting a colleague's address
+(confined to their own workspace, but still writing a `Membership` row carrying someone else's
+email — which the company-member email lookup would later honour). So:
+
+- `PUT /tenants/:id/sso` requires `SSO_SELF_SERVICE=true` — **default off**;
+- the default path is the operator CLI `apps/api/src/sso/register-sso-connection.ts`, run after
+  checking the domain claim;
+- reads and deletes stay owner/admin — neither can widen who may sign in.
+
+A future domain-ownership proof (a DNS TXT challenge) is what would make self-service safe by
+default; that is deferred, and the flag exists so an operator can opt in knowingly.
+
 ## Assertion validation
 
 In `apps/api/src/sso/saml.ts` (pure functions — no DB, no Nest), using `xml-crypto`
@@ -106,12 +146,19 @@ exclusive-c14n is where signature-wrapping bugs live.
 3. `Issuer` (Response and Assertion, when present) equals `connection.idpEntityId`.
 4. `Audience` equals our SP entity ID; `SubjectConfirmationData/@Recipient`, when present,
    equals our ACS URL.
-5. Time window: `Conditions/@NotBefore` ≤ now ≤ `NotOnOrAfter`, and the subject
-   confirmation's `NotOnOrAfter`, with 60 s clock skew.
+5. Time window: `Conditions/@NotOnOrAfter` is **required** (≤ now ≤ it, 60 s skew), `NotBefore`
+   is honoured when present, and a bearer `SubjectConfirmationData` binding this assertion to
+   our ACS (`Recipient` == our ACS URL) **with** a `NotOnOrAfter` is required. Both are
+   mandatory rather than "checked if present" on purpose: an unbound assertion is usable at any
+   SP, and one with no expiry is a credential that never dies — our replay record is pruned
+   after 30 minutes, so rejecting the absence is what keeps single-use meaningful.
 6. `Status` is `urn:oasis:names:tc:SAML:2.0:status:Success`.
-7. **Replay**: the assertion `ID` is consumed single-use through the existing `SecretStore`
-   (`saml:<assertionId>`, same persist → consume-before-create → TTL pattern as the GitHub App
-   install `state`), with `prunePrefixOlderThan` for hygiene. No new table.
+7. **Replay**: the assertion `ID` is consumed single-use through the existing `SecretStore`,
+   keyed `saml:<sha256(id)>`. The write is `putIfAbsent` — a unique-constrained INSERT, not a
+   read-then-write: two concurrent POSTs of the same assertion must not both see "unseen" and
+   both mint a session, so the DB decides the race. Consumed *after* the policy checks (a
+   `mfa_required` refusal must not burn the id) and *before* any membership write. No new table;
+   `prunePrefixOlderThan` for hygiene.
 
 Rejections are coarse to the browser (a redirect with an error code) and detailed only in the
 server log — the `connect-return.ts` house rule for browser-facing callbacks.
@@ -172,7 +219,8 @@ In order, all scoped to `connection.tenantId`:
 | `GET /sso/metadata` | `@Public` | SP metadata XML: our entity ID, the ACS URL (HTTP-POST binding), NameIDFormat |
 | `POST /sso/saml/acs` | `@Public`, throttled | the assertion consumer; 302s back to the SPA with a one-time-use session in the URL **fragment** |
 | `GET /sso/:slug` | `@Public` | IdP-initiated convenience redirect to `idpSsoUrl` |
-| `GET/PUT/DELETE /tenants/:id/sso` | owner/admin | the tenant→IdP mapping (never echoes anything secret) |
+| `GET/DELETE /tenants/:id/sso` | owner/admin | read + remove the tenant→IdP mapping (nothing in it is secret) |
+| `PUT /tenants/:id/sso` | owner/admin **and** `SSO_SELF_SERVICE=true` | register a mapping; default off, operator CLI instead |
 
 The redirect target is always **server-derived** (`appBaseUrl()`), never a request parameter —
 the `connect-return.ts` open-redirect rule. `RelayState` is deliberately **not** echoed.
@@ -192,6 +240,14 @@ listed as deferred.
 - `apps/api/test/sso.service.spec.ts` — link vs. auto-provision vs. invitation vs. refusal;
   **cross-tenant email refusal** (the invariant); disallowed domain; replay refusal; the two
   instance policies at the ACS; disabled connection.
+- `apps/api/test/sso-connections.controller.spec.ts` — self-service is refused by default and
+  works when opted in; a member and an `nry_` token cannot configure SSO; an empty domain list is
+  refused; entity-id and slug cannot be stolen from another workspace; delete and list are
+  tenant-scoped.
+- `packages/secrets/test/secret-store.spec.ts` — `putIfAbsent` is atomic (5 concurrent writers,
+  exactly one winner), which is the replay guarantee.
+- `packages/secrets/test/rotate.spec.ts` — the master-rotation sweep skips external
+  (`keyVersion 0`) rows instead of reporting them as failures.
 - `apps/api/test/sso-session.service.spec.ts` — mint/verify round trip, `amr` → `secondFactor`,
   expiry, tampering, wrong secret, disabled when unconfigured, and that the token body carries
   no secret material.
@@ -229,6 +285,8 @@ whether it signs the response instead of the assertion), which only a live round
   "SSO-only" (blocking password login for a federated domain), and the SPA screens for
   managing a connection.
 - Replacing the fragment hand-off with a one-time-code exchange.
+- **Domain-ownership verification** (a DNS TXT challenge), which is what would make
+  `SSO_SELF_SERVICE` safe to default on.
 - **The SPA side.** The ACS redirects to `${APP_BASE_URL}/app#sso_token=…&workspace=…`, but no
   web code reads that fragment yet, so a federated login does not *complete in the browser* in
   this slice — the API half is what shipped. The follow-up is small (read the fragment, store

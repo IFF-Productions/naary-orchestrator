@@ -23,9 +23,32 @@ import { UpsertSsoConnectionDto } from "./sso-connection.dto";
  * so reads echo it back in full — there is deliberately no write-only field here, unlike the
  * credential/secret endpoints.
  */
+/**
+ * Is a workspace admin allowed to REGISTER an IdP themselves? DEFAULT NO.
+ *
+ * Registering a connection means declaring "this certificate may assert these email domains",
+ * and nothing here can prove the registrant owns those domains. Left self-service, any user who
+ * can create a workspace could register a cert for `victim.com`, self-sign an assertion, and
+ * obtain a session asserting a colleague's address. The guard's per-session tenant confinement
+ * contains the blast radius to the attacker's own workspace, but the row it writes still carries
+ * someone else's email — so registration itself is an OPERATOR action by default (CLI:
+ * `apps/api/src/sso/register-sso-connection.ts`), and only an operator who accepts the
+ * domain-ownership caveat turns self-service on.
+ *
+ * Reads and deletes stay owner/admin: neither can widen who may sign in.
+ */
+export function parseSsoSelfService(raw: string | undefined): boolean {
+  return ["1", "true", "yes", "on"].includes((raw ?? "").trim().toLowerCase());
+}
+
 @ApiBearerAuth("bearer")
 @Controller("tenants/:id/sso")
 export class SsoConnectionsController {
+  /** Read once at boot, same shape as REQUIRE_MFA / ACCESS_ALLOWED_EMAILS. */
+  private readonly selfService = parseSsoSelfService(
+    process.env.SSO_SELF_SERVICE,
+  );
+
   /** Same bar as API-token management (tokens.controller.ts): owner or admin. */
   private assertAdmin(principal: Principal | undefined): void {
     if (!principal?.userId) {
@@ -69,6 +92,13 @@ export class SsoConnectionsController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     this.assertAdmin(principal);
+    if (!this.selfService) {
+      // Fails CLOSED (see parseSsoSelfService): an operator registers the connection with the
+      // CLI after checking the domain claim, unless they explicitly opt in to self-service.
+      throw new ForbiddenException(
+        "Registering an identity provider is an operator action on this instance (SSO_SELF_SERVICE is off).",
+      );
+    }
 
     const domains = body.allowedEmailDomains
       .map((d) => d.trim().toLowerCase().replace(/^@/, ""))

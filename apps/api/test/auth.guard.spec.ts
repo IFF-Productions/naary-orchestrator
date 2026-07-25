@@ -551,6 +551,10 @@ describe("AuthGuard", () => {
       "u-1",
       "invited@x.com",
       true,
+      // No tenant scope for a FIREBASE session (#455): a verified Firebase email proves
+      // mailbox ownership instance-wide, so it may satisfy an invitation in any workspace.
+      // Only an IdP-asserted (SSO) email is confined — see the SSO suite below.
+      undefined,
     );
     expect(acceptPendingInvitations.mock.invocationCallOrder[0]).toBeLessThan(
       listForUser.mock.invocationCallOrder[0],
@@ -822,9 +826,9 @@ describe("AuthGuard — SAML SSO session (#455)", () => {
     }
   });
 
-  /** An `nrys_` bearer whose session resolves to `user`. */
-  function bearerSso(user: unknown): FakeReq {
-    ssoVerify.mockResolvedValue(user);
+  /** An `nrys_` bearer whose session resolves to `user`, CONFINED to `tenantId`. */
+  function bearerSso(user: unknown, tenantId = "ws-a"): FakeReq {
+    ssoVerify.mockResolvedValue({ user, tenantId });
     return { headers: { authorization: "Bearer nrys_session.jwt" } };
   }
 
@@ -885,13 +889,65 @@ describe("AuthGuard — SAML SSO session (#455)", () => {
     );
   });
 
+  // ── CONFINEMENT: the session is bound to the workspace whose IdP asserted it ──────────────
+  // This is the escalation this design must not allow: an IdP speaks for ONE workspace, so even
+  // a LINKED session carrying a real user's id must not reach that user's OTHER workspaces.
+  it("a linked user's OTHER workspaces are invisible to an SSO session", async () => {
+    // The linked identity really is a member of two workspaces…
+    listForUser.mockResolvedValue([
+      { tenantId: "ws-a", role: "member" },
+      { tenantId: "ws-victim", role: "owner" },
+    ]);
+    // …but this session was minted by ws-a's IdP.
+    const req = bearerSso(ssoUser, "ws-a");
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    // Confined: the ACTIVE workspace can only be ws-a — the sole-membership default cannot
+    // silently pick ws-victim, and the owner role there is unreachable.
+    expect(req.principal).toMatchObject({ tenantId: "ws-a", role: "member" });
+  });
+
+  it("403s when an SSO session explicitly targets the linked user's other workspace", async () => {
+    listForUser.mockResolvedValue([
+      { tenantId: "ws-a", role: "member" },
+      { tenantId: "ws-victim", role: "owner" },
+    ]);
+    const req = bearerSso(ssoUser, "ws-a");
+    req.path = "/tenants/ws-victim/credentials";
+    await expect(makeGuard().canActivate(ctx(req))).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it("a user-scoped route sees ONLY the session's workspace (no enumeration of the others)", async () => {
+    userScoped = true;
+    listForUser.mockResolvedValue([
+      { tenantId: "ws-a", role: "member" },
+      { tenantId: "ws-victim", role: "owner" },
+    ]);
+    const req = bearerSso(ssoUser, "ws-a");
+    await expect(makeGuard().canActivate(ctx(req))).resolves.toBe(true);
+    expect(req.principal).toMatchObject({ tenantId: "ws-a" });
+  });
+
+  it("a session with no tenant is refused (it could not be confined)", async () => {
+    ssoVerify.mockResolvedValue(null); // what the verifier returns for a tenant-less token
+    await expect(
+      makeGuard().canActivate(
+        ctx({ headers: { authorization: "Bearer nrys_no.tenant" } }),
+      ),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
   it("runs invitation accept-on-login (an SSO session is email_verified)", async () => {
     listForUser.mockResolvedValue([{ tenantId: "ws-a", role: "member" }]);
     await makeGuard().canActivate(ctx(bearerSso(ssoUser)));
+    // …SCOPED to the session's workspace: an email asserted by ws-a's IdP must not satisfy
+    // another workspace's invitation.
     expect(acceptPendingInvitations).toHaveBeenCalledWith(
       "sso:conn-a:deadbeef",
       "alice@tenant-a.com",
       true,
+      "ws-a",
     );
   });
 

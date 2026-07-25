@@ -49,6 +49,10 @@ interface Opts {
   privateKey?: string;
   sign?: boolean;
   signResponseInstead?: boolean;
+  /** Emit an assertion with NO Conditions window and NO SubjectConfirmationData expiry. */
+  noTimeBounds?: boolean;
+  /** Keep the bearer confirmation intact but drop Conditions/@NotOnOrAfter. */
+  noConditionsExpiry?: boolean;
 }
 
 /** Build an (optionally signed) SAML Response. `iso(+/-minutes)` keeps the window realistic. */
@@ -60,6 +64,18 @@ function buildResponse(o: Opts = {}): string {
   const assertionId = o.assertionId ?? "_assertion-id-1";
   const recipientAttr =
     o.recipient === null ? "" : ` Recipient="${o.recipient ?? ACS_URL}"`;
+  const scdExpiry = o.noTimeBounds
+    ? ""
+    : ` NotOnOrAfter="${o.notOnOrAfter ?? iso(5)}"`;
+  const conditions = o.noTimeBounds || o.noConditionsExpiry
+    ? "<saml:Conditions><saml:AudienceRestriction><saml:Audience>" +
+      (o.audience ?? SP_ENTITY) +
+      "</saml:Audience></saml:AudienceRestriction></saml:Conditions>"
+    : `<saml:Conditions NotBefore="${o.notBefore ?? iso(-5)}" NotOnOrAfter="${
+        o.notOnOrAfter ?? iso(5)
+      }"><saml:AudienceRestriction><saml:Audience>${
+        o.audience ?? SP_ENTITY
+      }</saml:Audience></saml:AudienceRestriction></saml:Conditions>`;
   const authn =
     o.authnContext === null
       ? ""
@@ -85,18 +101,10 @@ function buildResponse(o: Opts = {}): string {
           o.nameId ?? "alice-nameid-42"
         }</saml:NameID>
         <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
-          <saml:SubjectConfirmationData${recipientAttr} NotOnOrAfter="${
-            o.notOnOrAfter ?? iso(5)
-          }"/>
+          <saml:SubjectConfirmationData${recipientAttr}${scdExpiry}/>
         </saml:SubjectConfirmation>
       </saml:Subject>
-      <saml:Conditions NotBefore="${o.notBefore ?? iso(-5)}" NotOnOrAfter="${
-        o.notOnOrAfter ?? iso(5)
-      }">
-        <saml:AudienceRestriction><saml:Audience>${
-          o.audience ?? SP_ENTITY
-        }</saml:Audience></saml:AudienceRestriction>
-      </saml:Conditions>
+      ${conditions}
       ${authn}
       ${emailAttr}
     </saml:Assertion>`;
@@ -279,10 +287,24 @@ describe("verifySamlResponse — conditions", () => {
     ).toBe("recipient_mismatch");
   });
 
-  it("accepts a missing Recipient (optional attribute)", () => {
-    expect(verify(buildResponse({ recipient: null })).email).toBe(
-      "alice@corp.example.com",
+  it("REJECTS a missing Recipient: an unbound bearer assertion is usable at any SP", () => {
+    expect(codeOf(() => verify(buildResponse({ recipient: null })))).toBe(
+      "recipient_mismatch",
     );
+  });
+
+  it("REJECTS an assertion with no time bounds at all (a credential that never dies)", () => {
+    // Built (not stripped) without them, so the signature still covers what we verify. The
+    // bearer-confirmation requirement fires first — either way it is refused, never accepted.
+    expect(codeOf(() => verify(buildResponse({ noTimeBounds: true })))).toBe(
+      "recipient_mismatch",
+    );
+  });
+
+  it("REJECTS a bearer-bound assertion whose Conditions carry no NotOnOrAfter", () => {
+    expect(
+      codeOf(() => verify(buildResponse({ noConditionsExpiry: true }))),
+    ).toBe("expired");
   });
 
   it("rejects an expired assertion", () => {

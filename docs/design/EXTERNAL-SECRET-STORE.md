@@ -68,9 +68,17 @@ Consequences:
 - Flipping back is also safe for rows written before the flip; a `keyVersion 0` row read by
   a DB-only process fails **loudly** (`"…stored in an external secret store; this process has
   SECRET_PROVIDER=db"`) instead of returning an empty key.
-- `deleteCredential(tenantId, envId, provider)` drops the row **and** the external material.
-  Deleting only the row would leave an orphaned live secret in Vault forever; there is no
-  delete route today, so this is the hook one must use.
+- `deleteCredential(tenantId, envId, provider)` drops the external material **first**, then the
+  row: if the external delete fails it throws with the row intact, so the credential stays visible
+  and a retry can finish. Row-first would drop the index and orphan a *live* secret in Vault
+  forever — the exact outcome this hook exists to prevent. There is no delete route today, so a
+  future one must call this rather than deleting the row itself.
+- The master-key rotation sweep (`rotate.ts`) **skips** `keyVersion 0` rows: they are neither
+  legacy nor rewrappable, and master-decrypting their empty ciphertext would report every
+  Vault-backed row as a failure, leaving rotation permanently uncertifiable (the runbook tells the
+  operator to keep `OLD_ENCRYPTION_KEY` set while failures remain).
+- `listProviders` excludes the `saml:` namespace alongside `conn:` / `secret:` / `turnstile:` —
+  SAML replay records share the table and must never appear as configured providers.
 
 ## Config, and failing closed
 

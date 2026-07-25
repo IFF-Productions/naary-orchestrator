@@ -118,6 +118,13 @@ function fakeStore() {
     put: async (t: string, e: string, k: string, v: string) => {
       kv.set(`${t}/${e}/${k}`, v);
     },
+    /** Mirrors the real unique-constrained insert: only the FIRST caller wins. */
+    putIfAbsent: async (t: string, e: string, k: string, v: string) => {
+      const key = `${t}/${e}/${k}`;
+      if (kv.has(key)) return false;
+      kv.set(key, v);
+      return true;
+    },
     prunePrefixOlderThan: async () => 0,
   };
 }
@@ -443,7 +450,7 @@ describe("SsoService — the instance policies the @Public() ACS would otherwise
     expect(res.outcome).toBe("provisioned");
     // …and the minted session carries the second factor, so the GUARD also lets it through.
     const sessions = new SsoSessionService({ SSO_SESSION_SECRET: SECRET });
-    expect((await sessions.verify(res.token))?.secondFactor).toBe("mfa");
+    expect((await sessions.verify(res.token))?.user.secondFactor).toBe("mfa");
   });
 });
 

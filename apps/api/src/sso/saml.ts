@@ -243,9 +243,15 @@ export function verifySamlResponse(
   );
   if (!nameId) throw new SamlError("no_subject");
 
+  // The Web-Browser-SSO profile REQUIRES a bearer SubjectConfirmationData carrying both
+  // Recipient and NotOnOrAfter, and we enforce that rather than treating them as optional: an
+  // assertion with no bound recipient is usable at any SP, and one with no expiry is a
+  // credential that never dies (our replay record is pruned after 30 min, so "reject when
+  // absent" is the only thing that keeps it single-use forever).
   const scds = subject
     ? elements(subject, NS_ASSERTION, "SubjectConfirmationData")
     : [];
+  let boundToUs = false;
   for (const scd of scds) {
     const recipient = scd.getAttribute("Recipient");
     if (recipient && recipient !== opts.acsUrl) {
@@ -255,6 +261,13 @@ export function verifySamlResponse(
     if (scdNotOnOrAfter && now.getTime() > scdNotOnOrAfter.getTime() + skew) {
       throw new SamlError("expired", "subject confirmation expired");
     }
+    if (recipient === opts.acsUrl && scdNotOnOrAfter) boundToUs = true;
+  }
+  if (!boundToUs) {
+    throw new SamlError(
+      "recipient_mismatch",
+      "no SubjectConfirmationData binding this assertion to our ACS with an expiry",
+    );
   }
 
   // --- Conditions window -----------------------------------------------------------------
@@ -264,7 +277,11 @@ export function verifySamlResponse(
   if (notBefore && now.getTime() + skew < notBefore.getTime()) {
     throw new SamlError("not_yet_valid");
   }
-  if (notOnOrAfter && now.getTime() - skew >= notOnOrAfter.getTime()) {
+  // REQUIRED, not optional — same reasoning as the subject confirmation above.
+  if (!notOnOrAfter) {
+    throw new SamlError("expired", "assertion has no Conditions/@NotOnOrAfter");
+  }
+  if (now.getTime() - skew >= notOnOrAfter.getTime()) {
     throw new SamlError("expired");
   }
 
