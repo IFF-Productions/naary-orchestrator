@@ -25,12 +25,13 @@ import {
 } from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
 import type * as activities from "../../activities";
-import { expandItems, mapNode } from "../proxies";
+import { expandItems, mapNode, offloadCtxEntry } from "../proxies";
 import {
   MAX_MAP_BATCH_ITEMS,
   MAX_A4_REGION_ACTIVITY_EXECUTIONS,
   MAX_TRACE_ITEMS,
   containsClaimCheckRef,
+  planCtxOffload,
   MAX_TRACE_TOTAL_BYTES,
   isBudgetPauseFailure,
   traceCell,
@@ -574,15 +575,64 @@ export async function execChain(
         topLevel &&
         current !== undefined &&
         shouldContinue &&
-        state.approval === undefined &&
-        wf.allHandlersFinished()
+        wf.allHandlersFinished() &&
+        // SIGNAL DURABILITY (#681). Originally an un-consumed approval Signal BLOCKED the boundary
+        // (the signal lived only in EngineState, so continuing would drop it) — at the cost of a run
+        // that received a stray/duplicate decision never continuing again, i.e. the unbounded history
+        // this whole mechanism exists to prevent. It is now CARRIED instead (see ResumeState).
+        // ORDER IS LOAD-BEARING (replay safety): `state.approval === undefined` — true on every
+        // ordinary boundary — MUST short-circuit before patched(), so a normal run never records the
+        // marker and its history is byte-identical to before. The marker is only ever reached in the
+        // one case that would diverge (a boundary WITH a pending signal), where a replaying pre-#681
+        // history correctly gets `false` and keeps its original "don't continue" decision.
+        (state.approval === undefined || wf.patched("can-carry-signals-v1"))
       ) {
+        // Claim-check the snapshot if `ctx` would push the continueAsNew payload past Temporal's ~2MB
+        // cap (#681). PURE plan first, activity second — and `plan.length > 0` MUST short-circuit
+        // before patched() for the same replay reason as above: an ordinary (small-ctx) run never
+        // reaches the marker, so its history keeps exactly the commands it had. Only a run whose ctx
+        // is genuinely over budget takes the new path — and before #681 such a run did not continue
+        // successfully at all, it failed on the payload cap.
+        let carried = ctx;
+        const plan = planCtxOffload(ctx);
+        if (plan.length > 0 && wf.patched("can-claim-check-v1")) {
+          carried = { ...ctx };
+          for (const key of plan) {
+            // Sequential (not Promise.all): one object-store PUT each, and the plan is deliberately
+            // the SMALLEST set that fits the budget, so this is a handful of calls at most.
+            carried[key] = await offloadCtxEntry(
+              { value: carried[key] },
+              metaFor(key),
+            );
+          }
+          // Visible marker (node ids only — never their content) so the run detail / support can tell
+          // "this output is a reference because the run continued as new", not "it vanished".
+          const already = Array.isArray(carried.__offloaded)
+            ? (carried.__offloaded as string[])
+            : [];
+          carried.__offloaded = [
+            ...already,
+            ...plan.filter((k) => !already.includes(k)),
+          ];
+        }
         await wf.continueAsNew<typeof runGraph>(graph, engine.input, runCtx, {
-          ctx,
+          ctx: carried,
           costUsd: state.costUsd,
           stepCount: state.stepCount,
           startNodeId: current,
           mergeArrivals: state.mergeArrivals,
+          // Pending/produced signal state — data-only additions to the continueAsNew PAYLOAD (no new,
+          // removed or reordered command), and the recomputed payload is discarded on replay anyway:
+          // the continued run reads its args from its OWN WorkflowExecutionStarted event. So these
+          // need no patched() gate of their own; each is conditional purely to keep an ordinary
+          // snapshot's shape unchanged.
+          ...(state.approval !== undefined ? { approval: state.approval } : {}),
+          ...(state.webhookResume !== undefined
+            ? { webhookResume: state.webhookResume }
+            : {}),
+          ...(state.webhookResponse !== undefined
+            ? { webhookResponse: state.webhookResponse }
+            : {}),
         });
       }
     } else {

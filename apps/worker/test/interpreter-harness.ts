@@ -15,7 +15,10 @@ import { TASK_QUEUE, type ApprovalAwaitingRecord } from "@naary/contracts";
 import { resolveTemplates } from "@naary/dsl";
 import type { ApprovalNodeConfig, GraphDef } from "@naary/dsl";
 import type * as activities from "../src/temporal/activities";
-import { expandItems as realExpandItems } from "../src/temporal/activities/items";
+import {
+  expandItems as realExpandItems,
+  offloadCtxEntry as realOffloadCtxEntry,
+} from "../src/temporal/activities/items";
 
 // Mutable knobs the mockActivities read; tests fix these per-scenario. (Reassigning
 // an ESM import binding is illegal, so they hang off this one exported object.)
@@ -444,6 +447,10 @@ const mockActivities = {
   // exercising the actual rehydrate → getByPath → per-element-offload path the interpreter relies on.
   // Imported from its own module (not the activities barrel) to keep DB/AWS clients out of the test.
   expandItems: realExpandItems,
+  // continueAsNew ctx offload (#681): also the REAL activity, for the same reason as expandItems —
+  // its only I/O is the object store (in-memory by default), so the chaos/CAN specs exercise the
+  // actual claim-check PUT + reference the interpreter carries across the boundary.
+  offloadCtxEntry: realOffloadCtxEntry,
 };
 const mapNodeCalls: { nodeType: string; count: number }[] = [];
 const statusPushes: {

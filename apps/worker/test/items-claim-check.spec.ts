@@ -10,8 +10,15 @@ import {
   ITEM_CLAIM_CHECK_THRESHOLD,
   MAX_EXPANDED_ITEMS_BYTES,
   expandItems,
+  offloadCtxEntry,
 } from "../src/temporal/activities/items";
-import { containsClaimCheckRef } from "../src/temporal/workflow/helpers";
+import {
+  CAN_CTX_BUDGET_BYTES,
+  CAN_CTX_ENTRY_FLOOR_BYTES,
+  CAN_CTX_MAX_OFFLOADABLE_ENTRY_BYTES,
+  containsClaimCheckRef,
+  planCtxOffload,
+} from "../src/temporal/workflow/helpers";
 
 /**
  * Items claim-check offload (#479). Two halves:
@@ -135,5 +142,86 @@ describe("expandItems", () => {
     await expect(expandItems({ source, path: "items" }, META)).rejects.toThrow(
       /too large to iterate/,
     );
+  });
+});
+
+/**
+ * continueAsNew snapshot offload (#681). Same two halves as above: a PURE workflow-side planner
+ * (legal in the deterministic interpreter) and the ACTIVITY that does the object-store PUT.
+ */
+describe("planCtxOffload (pure — safe in workflow code)", () => {
+  /** A ctx entry of roughly `bytes` serialized size. */
+  const entry = (bytes: number) => ({ blob: "x".repeat(bytes) });
+
+  it("plans NOTHING for a ctx that already fits the budget (the ordinary run's byte-identical path)", () => {
+    expect(planCtxOffload({ __input: { a: 1 }, n1: { ok: true } })).toEqual([]);
+    // Even a single large-but-affordable output stays inline.
+    expect(planCtxOffload({ n1: entry(500_000) })).toEqual([]);
+  });
+
+  it("offloads LARGEST-first and stops as soon as the snapshot fits (minimum readability loss)", () => {
+    // ~1.9MB total, budget 1.2MB: offloading the single biggest already brings it to ~1.0MB, so the
+    // plan STOPS there — `big`/`mid`/`small` stay inline and readable in workflow code.
+    expect(
+      planCtxOffload({
+        small: entry(1_000),
+        mid: entry(300_000),
+        big: entry(700_000),
+        huge: entry(900_000),
+      }),
+    ).toEqual(["huge"]);
+    // Two are needed only when one is not enough (~2.4MB → 1.5MB → 1.0MB).
+    expect(
+      planCtxOffload({
+        big: entry(700_000),
+        bigger: entry(800_000),
+        huge: entry(900_000),
+      }),
+    ).toEqual(["huge", "bigger"]);
+  });
+
+  it("is deterministic for equal-sized entries (node id tie-break, never insertion order)", () => {
+    const a = planCtxOffload({ b: entry(700_000), a: entry(700_000) });
+    const b = planCtxOffload({ a: entry(700_000), b: entry(700_000) });
+    expect(a).toEqual(b);
+    expect(a[0]).toBe("a");
+  });
+
+  it("never offloads reserved keys — `__*` bookkeeping and `$vars` (expressions read them constantly)", () => {
+    const plan = planCtxOffload({
+      __input: entry(700_000),
+      $vars: entry(700_000),
+      n1: entry(700_000),
+    });
+    expect(plan).toEqual(["n1"]);
+  });
+
+  it("skips entries below the per-entry floor and above the offloadable ceiling (fails closed, visibly)", () => {
+    const belowFloor = CAN_CTX_ENTRY_FLOOR_BYTES - 5_000;
+    const many = Object.fromEntries(
+      Array.from({ length: 30 }, (_, i) => [`n${i}`, entry(belowFloor)]),
+    );
+    // ~1.7MB of SMALL entries: over budget, but no single one is worth a reference — nothing to do
+    // (the honest remaining limit, same as expandItems' many-small-items case).
+    expect(planCtxOffload(many)).toEqual([]);
+    // A single entry too large to even pass to the offload activity is skipped, not attempted.
+    expect(
+      planCtxOffload({ giant: entry(CAN_CTX_MAX_OFFLOADABLE_ENTRY_BYTES + 1) }),
+    ).toEqual([]);
+  });
+
+  it("the budget it enforces is well under Temporal's ~2MB payload cap", () => {
+    expect(CAN_CTX_BUDGET_BYTES).toBeLessThan(2_000_000);
+  });
+});
+
+describe("offloadCtxEntry (activity)", () => {
+  it("returns a small REFERENCE that still resolves to the original value", async () => {
+    const store = useStore();
+    const value = { body: "y".repeat(200_000) };
+    const ref = await offloadCtxEntry({ value }, META);
+    expect(isClaimCheck(ref)).toBe(true);
+    expect(JSON.stringify(ref).length).toBeLessThan(300); // references, not blobs
+    expect(await resolveClaimChecks(ref, store)).toEqual(value);
   });
 });
