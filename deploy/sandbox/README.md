@@ -38,8 +38,8 @@ the proxy (an upstream 4xx); `example.com` (via proxy), a public IP (direct), an
 endpoint all **blocked**. Prints `✅ EGRESS OK …` or fails non-zero.
 
 > Note: the sandbox network/proxy use **fixed names** (`naary-sandbox-*`) because the runner
-> dials them by name — so run the test when the sandbox stack is **not** already up, or it
-> will reuse/conflict on those names.
+> dials them by name — so run the test when the sandbox stack is **not** already up (that
+> now includes the prod stack's `sandbox` profile), or it will reuse/conflict on those names.
 
 **codeAgent write/Bash mode stays disabled until this passes on the deploy host.** Slice 1's
 read-only path (in-worker, capability-clamped) is unaffected.
@@ -55,7 +55,23 @@ by the runner (`@naary/sandbox-runner`), which **pins this image** and construct
 `docker run` (`--rm`, `--cap-drop ALL`, `no-new-privileges`, cpu/mem/pids caps, key forwarded
 by name — never inline). The git token never enters the sandbox.
 
-## Not in this slice (next)
+## In production
 
-The runner **HTTP service** + the worker→runner **dispatch** + the two-box **clone → diff**.
-Those layer on now that the boundary is proven.
+The proxy + runner now live in the **prod compose set**
+([`deploy/docker-compose.prod.yml`](../docker-compose.prod.yml), profile `sandbox`) — this
+file's compose is the standalone/dev version and what `egress-test.sh` drives. On the deploy
+host `deploy/sandbox/` is shipped to `/opt/naary/deploy/sandbox` (the prod overlay
+bind-mounts the squid allowlist from there), and enabling the runner is three steps:
+
+```bash
+docker build -t naary-claude-sandbox:latest /opt/naary/deploy/sandbox   # 1. sandbox image
+/opt/naary/deploy/sandbox/egress-test.sh                                # 2. the gate above
+# 3. add SANDBOX_RUNNER_TOKEN=<random> + COMPOSE_PROFILES=sandbox to /opt/naary/.env
+```
+
+The runner image itself is built + pushed by CI (`naary-sandbox-runner`, per release tag),
+so the box only pulls it. The runner publishes **no port**: the worker reaches it in-network
+at `SANDBOX_RUNNER_URL` with `SANDBOX_RUNNER_TOKEN` (see `deploy/.env.prod.example`).
+
+Running the profile and enabling `CODE_AGENT_WRITE_ENABLED` are separate decisions — the
+first only makes the infrastructure available.

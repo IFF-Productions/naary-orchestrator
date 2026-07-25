@@ -1,6 +1,10 @@
 # codeAgent sandbox isolation (design CLAUDE-CODE-NODE.md §8b.1). Two networks realize the
-# containment; the sandbox-runner service (a later slice) launches ephemeral `claude` containers
-# onto `sandbox-internal` only.
+# containment; the sandbox-runner service launches ephemeral `claude` containers onto
+# `sandbox-internal` only.
+#
+# THIS FILE is the standalone/dev stack + what egress-test.sh drives. PRODUCTION runs the same
+# two services from deploy/docker-compose.prod.yml (profile `sandbox`), where the runner is
+# also joined to the app network so the worker can dispatch to it — see README.md.
 #
 #   sandbox-internal   — internal:true → NO default gateway. A container here cannot route to
 #                        the internet, the host, cloud metadata (169.254.169.254), or other
@@ -43,8 +47,9 @@ services:
       - no-new-privileges:true
 
   # The runner: the ONLY container with Docker access (host-root-adjacent). It launches the
-  # ephemeral sandboxes. Kept off the worker on purpose. The worker→runner wiring (shared
-  # network + the runs bind mount on the worker side) is finalized with the dispatch slice (2c).
+  # ephemeral sandboxes. Kept off the worker on purpose. NOTE: standalone, nothing dispatches
+  # to it — the worker→runner wiring (shared app network + the runs bind mount on the worker
+  # side) lives in the PROD overlay.
   sandbox-runner:
     build:
       context: ../..
@@ -53,7 +58,7 @@ services:
     container_name: naary-sandbox-runner
     restart: unless-stopped
     networks:
-      - sandbox-egress # reachable by the worker (finalized in 2c) + can reach the docker socket
+      - sandbox-egress # a route out; in prod it is on the APP network instead (worker dials it)
     environment:
       SANDBOX_RUNNER_TOKEN: ${SANDBOX_RUNNER_TOKEN:?set a shared runner token}
       SANDBOX_RUNS_DIR: /var/lib/naary/sandbox-runs

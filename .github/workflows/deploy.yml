@@ -104,17 +104,19 @@ jobs:
       - name: Check which images already exist for this tag
         id: exists
         run: |
-          for img in backend web; do
+          for img in backend web sandbox-runner; do
+            # Output keys go through a GH expression, where a dash reads as minus → _.
+            key="${img//-/_}"
             if docker manifest inspect "$IMAGE_BASE/naary-$img:$DEPLOY_REF" >/dev/null 2>&1; then
-              echo "$img=true" >> "$GITHUB_OUTPUT"
+              echo "$key=true" >> "$GITHUB_OUTPUT"
               echo "naary-$img:$DEPLOY_REF already in GHCR — will not rebuild/overwrite it."
             else
-              echo "$img=false" >> "$GITHUB_OUTPUT"
+              echo "$key=false" >> "$GITHUB_OUTPUT"
             fi
           done
 
       - uses: docker/setup-buildx-action@v4
-        if: steps.exists.outputs.backend != 'true' || steps.exists.outputs.web != 'true'
+        if: steps.exists.outputs.backend != 'true' || steps.exists.outputs.web != 'true' || steps.exists.outputs.sandbox_runner != 'true'
 
       - name: Build + push backend image (api / worker / migrate)
         if: steps.exists.outputs.backend != 'true'
@@ -153,6 +155,23 @@ jobs:
             VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE=${{ secrets.VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE }}
             VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE=${{ secrets.VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE }}
             VITE_APP_VERSION=${{ env.DEPLOY_REF }}
+
+      # codeAgent sandbox runner (apps/sandbox-runner): the one container that holds the
+      # Docker socket, so it is its OWN image — deliberately not the shared backend image
+      # (no app secrets, no DB access, no workspace deps). Compose can only pull it from
+      # GHCR like the others; the SANDBOX image it launches (naary-claude-sandbox) is NOT
+      # built here — the runner starts it through the host Docker, so it is built on the box
+      # (deploy/sandbox/README.md), which is also where its egress gate must be proven.
+      - name: Build + push sandbox-runner image (codeAgent sandbox launcher)
+        if: steps.exists.outputs.sandbox_runner != 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/sandbox/runner.Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_BASE }}/naary-sandbox-runner:${{ env.DEPLOY_REF }}
+          cache-from: type=gha,scope=sandbox-runner
+          cache-to: type=gha,scope=sandbox-runner,mode=max
 
   deploy:
     needs: build
@@ -199,8 +218,12 @@ jobs:
           SSH="ssh -i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=accept-new root@$DEPLOY_HOST"
 
           # The box needs only the compose files (+ its .env, which stays put) — no repo.
+          # deploy/sandbox/ rides along because the prod overlay bind-mounts its squid
+          # allowlist, and enabling the sandbox profile needs its Dockerfile + egress test
+          # ON the box (see deploy/docker-compose.prod.yml's sandbox services).
           tar czf - docker-compose.yml \
             deploy/docker-compose.prod.yml deploy/docker-compose.neon.yml deploy/docker-compose.ghcr.yml \
+            deploy/sandbox \
             | $SSH "mkdir -p /opt/naary && tar xzf - -C /opt/naary"
 
           $SSH "DEPLOY_REF='$DEPLOY_REF' IMAGE_BASE='$IMAGE_BASE' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' SENTRY_DSN='$SENTRY_DSN' SENTRY_TRACES_SAMPLE_RATE='$SENTRY_TRACES_SAMPLE_RATE' SENTRY_PROFILES_SAMPLE_RATE='$SENTRY_PROFILES_SAMPLE_RATE' OTEL_EXPORTER_OTLP_ENDPOINT='$OTEL_EXPORTER_OTLP_ENDPOINT' OTEL_EXPORTER_OTLP_HEADERS='$OTEL_EXPORTER_OTLP_HEADERS' OTEL_EXPORTER_OTLP_PROTOCOL='$OTEL_EXPORTER_OTLP_PROTOCOL' bash -s" <<'REMOTE'
