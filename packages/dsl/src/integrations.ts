@@ -4453,6 +4453,10 @@ function hasObjectAtPath(
   let obj: unknown = target;
   for (const key of path.split(".")) {
     if (obj == null || typeof obj !== "object") return false;
+    // OWN properties only — an inherited member must never read as "this sub-object already
+    // carries data" (#591); the forbidden-segment check above is belt, this is braces.
+    // (`hasOwnProperty.call`, not `Object.hasOwn` — the es2021 lib, as in registry.ts.)
+    if (!Object.prototype.hasOwnProperty.call(obj, key)) return false;
     obj = (obj as Record<string, unknown>)[key];
   }
   return obj != null && typeof obj === "object";
