@@ -103,6 +103,26 @@ describe("n8n corpus — every import is SAVEABLE", () => {
     },
   );
 
+  it.each(files)("%s only uses node types that really exist in n8n", (file) => {
+    // The AC asks for a corpus of REAL sample workflows, so a fixture must not lean on an invented
+    // type to exercise the unmapped path — the value of "unmapped" coverage is that it reflects what
+    // an actual export contains. Every type here is either in our mapping table, in the sub-node
+    // set, a provider we map, or one of the genuinely-unsupported real n8n types listed below.
+    const REAL_BUT_UNSUPPORTED = new Set([
+      "n8n-nodes-base.awsS3",
+      "n8n-nodes-base.telegram",
+    ]);
+    const raw = load(file) as { nodes: Array<{ name: string; type: string }> };
+    for (const n of raw.nodes) {
+      const known =
+        Object.hasOwn(N8N_NODE_MAP, n.type) ||
+        N8N_SUB_NODE_TYPES.has(n.type) ||
+        Object.hasOwn(N8N_APP_TO_PROVIDER, n.type) ||
+        REAL_BUT_UNSUPPORTED.has(n.type);
+      expect(known, `${file}: ${n.name} has type ${n.type}`).toBe(true);
+    }
+  });
+
   it.each(files)("%s never imports a credential", (file) => {
     const out = parseN8nWorkflow(load(file));
     const json = JSON.stringify(out.graph);
@@ -369,11 +389,11 @@ describe("04 — switch → branches → merge, plus a sticky note and a disable
     const disabled = byName("Audit (disabled)");
     expect(disabled.status).toBe("skipped");
     expect(disabled.nodeId).toBeNull();
-    // Merge → (disabled Audit) → Stringify becomes Merge → Stringify directly.
+    // Merge → (disabled Audit) → Render summary becomes Merge → Render summary directly.
     const mergeId = byName("Merge outcomes").nodeId!;
-    const stringifyId = byName("Stringify").nodeId!;
+    const renderId = byName("Render summary").nodeId!;
     expect(
-      out.graph.edges.some((e) => e.from === mergeId && e.to === stringifyId),
+      out.graph.edges.some((e) => e.from === mergeId && e.to === renderId),
     ).toBe(true);
   });
 });
