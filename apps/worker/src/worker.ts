@@ -19,8 +19,10 @@ initMetrics({ component: "worker" });
 // is set; attributes are scrubbed on egress (see @naary/observability otlp.ts).
 initOtlp({ component: "worker" });
 
+import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { hostname } from "node:os";
+import { join } from "node:path";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { disconnectPrisma } from "@naary/db";
 import { createLogger } from "@naary/logging";
@@ -99,6 +101,22 @@ async function run(): Promise<void> {
     metadata,
   });
   try {
+    // Prefer the PREBUILT workflow bundle (produced at image-build time by
+    // scripts/build-workflow-bundle.cjs) so the worker does NOT run an in-process webpack
+    // compile at boot — that ~4.3MB build spiked RSS and OOM-killed the worker during 2x-scale
+    // rolling deploys on the 8GB box (fix #676). Fall back to runtime bundling from source when
+    // the file is absent (local dev / a plain checkout), so `npm run worker` is unchanged.
+    const prebuiltBundlePath = join(
+      __dirname,
+      "..",
+      "dist",
+      "workflow-bundle.js",
+    );
+    const usePrebuilt = existsSync(prebuiltBundlePath);
+    log.info(
+      { source: usePrebuilt ? "prebuilt-bundle" : "runtime-bundle" },
+      "workflow code source",
+    );
     const worker = await Worker.create({
       connection,
       namespace,
@@ -107,7 +125,11 @@ async function run(): Promise<void> {
       // told apart; the registry keys on it. Capacity/drain knobs come from env (unset → defaults).
       identity: workerIdentity(),
       ...workerTuning(),
-      workflowsPath: require.resolve("./temporal/workflows"),
+      // Prebuilt: load the finished V8-isolate bundle (no webpack at boot). Dev: bundle from
+      // source. With a prebuilt bundle, workflowsPath is ignored — so set only one.
+      ...(usePrebuilt
+        ? { workflowBundle: { codePath: prebuiltBundlePath } }
+        : { workflowsPath: require.resolve("./temporal/workflows") }),
       // Wrap each activity inner→outer: countActivities tracks live slot usage (the heartbeat
       // reports it); logActivities emits a completion line so every side-effecting node is visible;
       // traceActivities opens the `activity.<name>` span AROUND that log so the line is stamped with
@@ -117,14 +139,18 @@ async function run(): Promise<void> {
         logActivities(countActivities(activities), log),
       ),
       // Distributed tracing across the Temporal boundary (one connected Sentry trace for
-      // API→workflow→activity). The workflow module (sandbox-safe, deterministic) forwards the
-      // Sentry trace headers from the run's start headers onto each scheduled activity; the
-      // activity interceptor continues that trace so the activity.<name> span above becomes a
-      // CHILD of the API request span instead of a disconnected root. No-op when tracing is off.
+      // API→workflow→activity). The WORKFLOW-side interceptor is sandbox-bundled: with a prebuilt
+      // bundle it's baked in via bundleWorkflowCode's workflowInterceptorModules (Worker.create's
+      // workflowModules would be IGNORED there — Temporal warns), so only pass it in the
+      // runtime-bundle path. The ACTIVITY interceptor runs in the main thread → always here.
       interceptors: {
-        workflowModules: [
-          require.resolve("./temporal/workflow-trace-interceptors"),
-        ],
+        ...(usePrebuilt
+          ? {}
+          : {
+              workflowModules: [
+                require.resolve("./temporal/workflow-trace-interceptors"),
+              ],
+            }),
         activity: [sentryTraceActivityInterceptors],
       },
     });

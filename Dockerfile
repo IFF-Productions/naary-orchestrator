@@ -79,11 +79,19 @@ COPY . .
 # install re-links from cache instead of re-downloading ~800 packages. Build-only — the
 # store isn't in the final image, so runtime is byte-identical. Needs BuildKit (compose
 # v2 / Docker Desktop default; the `# syntax` directive enables the --mount frontend).
+#
+# The final step PRECOMPILES the Temporal workflow bundle (apps/worker/dist/workflow-bundle.js)
+# so the worker doesn't run an in-process webpack compile at boot — that ~4.3MB build spiked RSS
+# and OOM-killed the worker during 2x-scale rolling deploys on the 8GB box (fix #676). Building it
+# here runs the spike on the CI runner (ample RAM); worker.ts then loads the finished bundle. Runs
+# AFTER `tsc -b` so the @naary/* deps the workflow imports are already built to dist/. The api/
+# migrate services share this image and simply ignore the extra artifact.
 RUN --mount=type=cache,target=/pnpm-store \
   pnpm install --frozen-lockfile --store-dir /pnpm-store \
   && DATABASE_URL="postgresql://build:build@localhost:5432/build" \
      pnpm --filter @naary/db exec prisma generate \
-  && pnpm exec tsc -b
+  && pnpm exec tsc -b \
+  && pnpm --filter @naary/worker run build:bundle
 
 # Secrets (ENCRYPTION_KEY, DB/Keycloak passwords) are injected at RUNTIME via
 # compose env — never baked here. DATABASE_URL / TEMPORAL_ADDRESS are set per
