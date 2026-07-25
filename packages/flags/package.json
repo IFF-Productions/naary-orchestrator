@@ -1,6 +1,6 @@
 {
   "name": "@naary/flags",
-  "version": "0.0.28",
+  "version": "0.0.29",
   "private": true,
   "description": "Feature flags for api (+ later worker activities). OpenFeature abstraction with a Flagsmith provider, env-gated + fail-safe (no key ⇒ code defaults). Server-side eval keyed on tenantId; NEVER imported by workflow code (varying network call breaks determinism).",
   "main": "dist/index.js",
