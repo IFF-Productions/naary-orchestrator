@@ -201,10 +201,13 @@ export class ConnectionTestService {
         ...Object.values(authHeaders),
         ...authNames.map((k) => plan.headers[k]).filter(Boolean),
       ];
+      // REDACT THEN SLICE, not the other way round: slicing first can cut a credential in half and
+      // leave the surviving prefix in the message, which the redaction pass would then no longer
+      // recognise. The body is capped afterwards (untrusted input can be huge).
       const excerpt = redactToken(
-        (await res.text().catch(() => "")).slice(0, 200),
+        await res.text().catch(() => ""),
         secretValues,
-      );
+      ).slice(0, 200);
 
       if (res.ok) {
         await this.connections.setStatus(tenantId, connectionId, "connected");

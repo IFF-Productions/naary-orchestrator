@@ -144,8 +144,14 @@ function convertToken(
     return { path: `$vars.${m[1]}` };
   }
 
+  // Own-property lookup on an untrusted key. Safe here even without it (the regex forces a leading
+  // `$`, which no prototype member has) — guarded anyway so the invariant doesn't depend on that
+  // regex staying exactly as it is.
   const rootMatch = /^(\$[A-Za-z]\w*)/.exec(src);
-  if (rootMatch && UNSUPPORTED_ROOTS[rootMatch[1]]) {
+  if (
+    rootMatch &&
+    Object.prototype.hasOwnProperty.call(UNSUPPORTED_ROOTS, rootMatch[1])
+  ) {
     return { reason: UNSUPPORTED_ROOTS[rootMatch[1]] };
   }
   if (JS_SIGNALS.test(src)) return { reason: JS_REASON };

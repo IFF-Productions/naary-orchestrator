@@ -696,6 +696,105 @@ describe("expression translation", () => {
 });
 
 describe("degrading rather than failing", () => {
+  it("a prototype-member operator name cannot yield an unsaveable graph", () => {
+    // `OP_MAP[rawOp]` with an untrusted key: an operator named `constructor` returns an INHERITED
+    // function — truthy, so the `exists` fallback would never fire and `op` would become a function
+    // that serializes to nothing, handing the user a draft that fails the save gate on a field the
+    // report never mentioned.
+    const out = parseN8nWorkflow({
+      nodes: [
+        { name: "Hook", type: "n8n-nodes-base.webhook", parameters: {} },
+        {
+          name: "Gate",
+          type: "n8n-nodes-base.if",
+          parameters: {
+            conditions: {
+              conditions: [
+                {
+                  leftValue: "={{ $json.a }}",
+                  rightValue: "b",
+                  operator: { type: "string", operation: "constructor" },
+                },
+              ],
+              combinator: "and",
+            },
+          },
+        },
+      ],
+      connections: {
+        Hook: { main: [[{ node: "Gate", type: "main", index: 0 }]] },
+      },
+    });
+    expect(validateGraph(out.graph).valid).toBe(true);
+    expect(validateGraphConfigs(out.graph)).toEqual([]);
+    const conditions = out.graph.nodes[1].config?.conditions as Array<{
+      op: string;
+    }>;
+    expect(conditions[0].op).toBe("exists");
+    // And it is REPORTED, not quietly downgraded.
+    expect(
+      out.nodes.find((r) => r.n8nName === "Gate")!.notes.join(" "),
+    ).toMatch(/has no equivalent/);
+  });
+
+  it("`$json` after a mid-flow Respond node resolves past it to the real data", () => {
+    // respondToWebhook outputs `{statusCode}` and the interpreter KEEPS GOING, so a successor's
+    // `$json` bound to it would resolve to nothing at run time — invisible to both save gates.
+    const out = parseN8nWorkflow({
+      nodes: [
+        { name: "Hook", type: "n8n-nodes-base.webhook", parameters: {} },
+        {
+          name: "Respond",
+          type: "n8n-nodes-base.respondToWebhook",
+          parameters: {},
+        },
+        {
+          name: "Later",
+          type: "n8n-nodes-base.httpRequest",
+          parameters: { method: "GET", url: "=https://x.test/{{ $json.id }}" },
+        },
+      ],
+      connections: {
+        Hook: { main: [[{ node: "Respond", type: "main", index: 0 }]] },
+        Respond: { main: [[{ node: "Later", type: "main", index: 0 }]] },
+      },
+    });
+    const later = out.graph.nodes.find((n) => n.id === "later")!;
+    expect(later.config?.url).toBe("https://x.test/{{ hook.id }}");
+  });
+
+  it("a null entry inside nodes[] degrades instead of throwing", () => {
+    const out = parseN8nWorkflow({
+      nodes: [
+        { name: "Hook", type: "n8n-nodes-base.webhook", parameters: {} },
+        null,
+        { name: "Step", type: "n8n-nodes-base.noOp", parameters: {} },
+      ],
+      connections: {
+        Hook: { main: [[{ node: "Step", type: "main", index: 0 }]] },
+      },
+    });
+    expect(validateGraph(out.graph).valid).toBe(true);
+    // Still one report entry per export entry — nothing dropped, even the junk one.
+    expect(out.nodes).toHaveLength(3);
+    expect(out.nodes[1].n8nName).toBe("(unnamed)");
+  });
+
+  it("warns when two n8n nodes share a name (connections are keyed by name)", () => {
+    const out = parseN8nWorkflow({
+      nodes: [
+        { name: "Hook", type: "n8n-nodes-base.webhook", parameters: {} },
+        { name: "Dup", type: "n8n-nodes-base.noOp", parameters: {} },
+        { name: "Dup", type: "n8n-nodes-base.set", parameters: {} },
+      ],
+      connections: {
+        Hook: { main: [[{ node: "Dup", type: "main", index: 0 }]] },
+      },
+    });
+    expect(out.warnings.join(" ")).toMatch(/both named "Dup"/);
+    expect(validateGraph(out.graph).valid).toBe(true);
+  });
+
   it("throws only when the input is not an n8n workflow at all", () => {
     expect(() => parseN8nWorkflow({})).toThrow(N8nImportError);
     expect(() => parseN8nWorkflow({ nodes: [] })).toThrow(N8nImportError);

@@ -60,6 +60,9 @@ export function ImportN8n() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<N8nImportResult | null>(null);
+  /** Editable so the user can avoid overwriting an existing workflow whose key this would collide
+   *  with — saving an existing key creates its NEXT VERSION, it does not make a new workflow. */
+  const [name, setName] = useState("");
 
   const counts = result?.counts;
   const attention = useMemo(
@@ -82,7 +85,9 @@ export function ImportN8n() {
       return;
     }
     try {
-      setResult(await api.importN8nWorkflow(parsed));
+      const out = await api.importN8nWorkflow(parsed);
+      setResult(out);
+      setName(out.name);
     } catch (e) {
       setError(
         e instanceof Error
@@ -105,8 +110,9 @@ export function ImportN8n() {
     setSaving(true);
     setError(null);
     try {
-      const key = slugifyName(result.name);
-      await api.saveGraph(key, result.name, result.graph);
+      const finalName = name.trim() || result.name;
+      const key = slugifyName(finalName);
+      await api.saveGraph(key, finalName, result.graph);
       navigate(`/app/canvas?key=${encodeURIComponent(key)}`);
     } catch (e) {
       setSaving(false);
@@ -116,7 +122,7 @@ export function ImportN8n() {
           : "Could not save the imported workflow.",
       );
     }
-  }, [navigate, result]);
+  }, [name, navigate, result]);
 
   return (
     <div style={{ maxWidth: 860 }}>
@@ -201,15 +207,32 @@ export function ImportN8n() {
       {result && counts && (
         <>
           <div style={{ ...card, marginBottom: 16 }}>
-            <div
+            <label
               style={{
+                fontSize: "var(--text-xs)",
+                color: "var(--ink-3)",
+                display: "block",
+                marginBottom: 4,
+              }}
+              htmlFor="import-n8n-name"
+            >
+              Workflow name
+            </label>
+            <input
+              id="import-n8n-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              style={{
+                width: "100%",
                 fontSize: "var(--text-md)",
                 fontWeight: "var(--weight-semibold)",
                 color: "var(--ink)",
+                background: "var(--card-2)",
+                border: "1px solid var(--line-mid)",
+                borderRadius: "var(--radius-xs)",
+                padding: "6px 9px",
               }}
-            >
-              {result.name}
-            </div>
+            />
             <div
               style={{
                 display: "flex",
@@ -382,7 +405,15 @@ export function ImportN8n() {
               {saving ? "Saving…" : "Save & open in canvas"}
             </Button>
             <span style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
-              Saves as a new workflow. It is never activated automatically.
+              {/* Honest about the collision case: saving uses the name's slug as the workflow key,
+                  and an existing key gets a NEW VERSION rather than a new workflow — so re-importing
+                  the same export, or one whose name slugs onto an existing workflow, overwrites it.
+                  Never activated automatically either way. */}
+              Saves under the key{" "}
+              <code>{slugifyName(name.trim() || result.name)}</code>. If a
+              workflow already uses that key this becomes its next VERSION
+              rather than a new workflow — change the name above if you want a
+              separate one. Never activated automatically.
             </span>
           </div>
         </>

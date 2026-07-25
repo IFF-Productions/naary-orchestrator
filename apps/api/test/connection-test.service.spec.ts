@@ -376,6 +376,43 @@ describe("the probe can only ever be a safe read (catalog-derived)", () => {
     }
   });
 
+  it("no non-GET action is marked write:false unless it is a known POST-style READ", () => {
+    // #701 makes the catalog's `write` flag load-bearing for safety: it is the ONLY thing standing
+    // between this route and a mutation. A mutating action mismarked `write: false` is therefore a
+    // security bug, not a metadata slip — discord.add_reaction (a PUT that adds a reaction) was
+    // exactly that. The allowlist below is the set of genuinely read-only non-GETs: GraphQL/RPC
+    // endpoints that take their query in a POST body, and DeepL's translate (a transform, not a
+    // mutation — billable, which is why it is never probe-selected: it has required fields).
+    const POST_READS = new Set([
+      "linear.get_issue",
+      "linear.list_issues",
+      "monday.get_item",
+      "monday.list_items",
+      "notion.query_database",
+      "dropbox.list_folder",
+      "dropbox.get_metadata",
+      "deepl.translate_text",
+    ]);
+    const offenders: string[] = [];
+    for (const p of INTEGRATION_PROVIDERS) {
+      for (const a of p.actions) {
+        const key = `${p.key}.${a.key}`;
+        if (!a.write && a.method !== "GET" && !POST_READS.has(key)) {
+          offenders.push(`${key} (${a.method} ${a.pathTemplate})`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("every action the probe can select is a GET", () => {
+    // Belt to the `write` flag's braces: even a mismarked POST-read can't be probed.
+    for (const p of INTEGRATION_PROVIDERS) {
+      const probe = pickConnectionTestAction(p.key);
+      if (probe.kind === "read") expect(probe.method).toBe("GET");
+    }
+  });
+
   it("is honest about coverage: 14 of the 38 providers have a zero-arg read", () => {
     // A tripwire, not a target. If a catalog entry gains or loses a zero-argument read this fails
     // and the number in docs/integrations/VERIFICATION.md must be updated with it.

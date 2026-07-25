@@ -88,7 +88,14 @@ function toCondition(
   const operator = asRecord(c.operator);
   const rawOp =
     asString(operator.operation) ?? asString(c.operation) ?? "exists";
-  const op = OP_MAP[rawOp];
+  // Own-property lookup, not a bare index: the export is untrusted, and an operator named
+  // `constructor`/`toString`/`valueOf` would otherwise return an INHERITED function — truthy, so the
+  // `!op` fallback below never fires and `op` becomes a function. That serializes away to nothing,
+  // handing the user a draft that fails the save gate on a field the report never mentioned.
+  // (Same guard the rest of the importer uses for lookupN8nNode / N8N_APP_TO_PROVIDER.)
+  const op = Object.prototype.hasOwnProperty.call(OP_MAP, rawOp)
+    ? OP_MAP[rawOp]
+    : undefined;
   if (!op) {
     notes.push(
       `condition operator '${rawOp}' has no equivalent — imported as 'exists', which is always true; fix the condition.`,

@@ -181,9 +181,23 @@ export function parseN8nWorkflow(input: unknown): N8nImportResult {
   /** n8n name → the sub-node record, for folding LLM/tool sub-nodes into their parent agent. */
   const subNodes = new Map<string, RawN8nNode>();
 
-  for (const raw of rawNodes) {
+  const seenNames = new Set<string>();
+  for (const entry of rawNodes) {
+    // `nodes[]` is untrusted: a null/undefined or non-object entry must degrade like anything else,
+    // not throw a TypeError that surfaces as a baffling 400.
+    const raw: RawN8nNode = asRecord(entry);
     const n8nName = asString(raw.name) ?? "(unnamed)";
     const n8nType = asString(raw.type) ?? "(unknown)";
+
+    // n8n forbids duplicate node names, but a hand-edited export can carry them — and `connections`
+    // is keyed by NAME, so the second node would quietly steal the first one's edges and leave it
+    // isolated. Warn rather than let that pass as a clean import.
+    if (seenNames.has(n8nName)) {
+      warnings.push(
+        `Two nodes are both named "${n8nName}". n8n connections are keyed by name, so only one of them keeps the wiring — rename them in n8n and re-export, or reconnect the stray node by hand.`,
+      );
+    }
+    seenNames.add(n8nName);
 
     if (N8N_SUB_NODE_TYPES.has(n8nType)) {
       // A sub-node is CONFIGURATION of its parent, not a step. It gets no id and no edges; what
@@ -393,13 +407,24 @@ export function parseN8nWorkflow(input: unknown): N8nImportResult {
    * `{{ high-value.orderId }}`, which resolves to nothing at run time: a silently broken import that
    * no validator would catch. So walk up until a node that actually carries data.
    *
-   * `wait` and `noOp` (which every unmapped placeholder is) are transparent for the same reason.
+   * The set is derived from what each type's output actually IS (see `node-output.ts`), not from
+   * intuition:
+   *  - `if` → `{result}`, `switch` → `{matched}` — predicates.
+   *  - `respondToWebhook` → `{statusCode}`. The interpreter responds and KEEPS GOING, so a Respond
+   *    node mid-flow has successors, and n8n passes the item through it.
+   *  - `noOp` → `{}` — and every unmapped placeholder is a `noOp`, so `$json` correctly reaches
+   *    past a node we couldn't translate to the last one that produced data.
+   *  - duration-mode `wait` writes nothing. (Webhook-mode wait DOES produce a payload here, but
+   *    n8n's Wait passes the original items through by default, so walking past it is the faithful
+   *    reading.)
+   * `merge` and `filter` are deliberately NOT in the set — both carry data forward.
    */
   const PASS_THROUGH_TYPES: ReadonlySet<string> = new Set([
     "if",
     "switch",
     "wait",
     "noOp",
+    "respondToWebhook",
   ]);
   const plannedById = new Map<string, Planned>();
   for (const p of planned) if (p.id) plannedById.set(p.id, p);
@@ -683,7 +708,8 @@ export function parseN8nWorkflow(input: unknown): N8nImportResult {
 
   // ── Credentials: types only, never an id or an account name ─────────────────────────────────
   const credMap = new Map<string, Set<string>>();
-  for (const raw of rawNodes) {
+  for (const entry of rawNodes) {
+    const raw: RawN8nNode = asRecord(entry);
     const creds = asRecord(raw.credentials);
     const owner = asString(raw.name) ?? "(unnamed)";
     for (const credType of Object.keys(creds)) {
