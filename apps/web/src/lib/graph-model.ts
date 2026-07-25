@@ -138,8 +138,10 @@ export const NODE_KINDS: NodeKind[] = [
     defaultConfig: { provider: "notion", action: "create_page", connectionId: "", fields: {} } },
   // NOTE: the palette lists ONE tile per provider and the config panel's Provider input is
   // read-only, so a catalog provider WITHOUT a tile here can't be added from the canvas at
-  // all (only via AI generation / raw graph JSON). The catalog holds 38 providers; only the
-  // ones below have tiles — the rest are a known gap, not a design choice.
+  // all (only via AI generation / raw graph JSON). The catalog holds 38 providers, but only
+  // the 8 tiled here — GitHub, Jira, Slack, Notion (above) plus the four below — are
+  // reachable. The other 30 are a known gap, not a design choice: the fix is to derive
+  // these tiles from INTEGRATION_CATALOG instead of hand-listing them.
   { type: "integration", label: "Mattermost", group: "Integrations", accent: "var(--node-mcp)",
     description: "Post to Mattermost — send a message, reply in a thread, react, or read history.",
     defaultConfig: { provider: "mattermost", action: "send_message", connectionId: "", fields: {} } },
