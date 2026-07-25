@@ -6,7 +6,7 @@ import type { ConnectionRow, TestNodeResult } from "../../lib/api";
 import { useFlag } from "../../workspace/FlagsProvider";
 import {
   ACCENT,
-  NODE_DESCRIPTION,
+  nodeDisplayDescription,
   nodeDisplayLabel,
 } from "../../lib/graph-model";
 import type { NaaryData } from "./flow";
@@ -192,7 +192,7 @@ export function ConfigPanel({
           lineHeight: 1.4,
         }}
       >
-        {NODE_DESCRIPTION[kind]}
+        {nodeDisplayDescription(kind, config)}
       </div>
 
       {/* Rename (n8n's node name) — a display-only label. References/expressions key on the id
