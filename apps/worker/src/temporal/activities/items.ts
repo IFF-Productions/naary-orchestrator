@@ -86,7 +86,11 @@ export async function expandItems(
     });
     if (el !== raw[i]) offloaded++;
     items[i] = el;
-    bytes += Buffer.byteLength(JSON.stringify(el ?? null), "utf8") + 1; // +1 for the comma
+    // A JSON array has N-1 separating commas, not N — count one only from the SECOND element on.
+    // This is a hard fail-closed ceiling, so over-counting would reject payloads that do fit
+    // (Copilot review, #479).
+    bytes +=
+      Buffer.byteLength(JSON.stringify(el ?? null), "utf8") + (i > 0 ? 1 : 0);
     if (bytes > MAX_EXPANDED_ITEMS_BYTES) {
       throw ApplicationFailure.nonRetryable(
         `items source is too large to iterate: ${i + 1} of ${raw.length} items already exceed ${MAX_EXPANDED_ITEMS_BYTES} bytes after per-item offload — chunk upstream or use forEach`,
