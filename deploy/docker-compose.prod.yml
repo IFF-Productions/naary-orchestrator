@@ -116,3 +116,59 @@ services:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env (terraform output -raw tunnel_token)}
     depends_on:
       - web
+
+  # HOST + per-container resource monitor (memory/swap/CPU/disk + OOM events) — the layer
+  # Sentry (app-code profiling) and the OTLP app metrics don't cover. Prod-only sidecar,
+  # NOT rolled on deploy (fixed name, like cloudflared/worker-heavy). Standard Netdata
+  # host-monitoring mounts: read-only host /proc, /sys, /, and the docker socket (for
+  # container names). SYS_PTRACE + apparmor:unconfined let it read per-process/cgroup stats.
+  #
+  # Access — two options, both keep the box's "no public ports" posture:
+  #   • SSH tunnel (default, zero exposure): the dashboard is published on the LOOPBACK
+  #     only (127.0.0.1:19999, mirroring postgres). Reach it with:
+  #       ssh -L 19999:localhost:19999 root@<box>   →  http://localhost:19999
+  #   • Netdata Cloud (no inbound at all): set NETDATA_CLAIM_TOKEN (+ NETDATA_CLAIM_ROOMS)
+  #     in the box /opt/naary/.env; the agent connects OUTBOUND and you view it at
+  #     app.netdata.cloud. Leave the token empty to stay SSH-tunnel-only.
+  #
+  # mem_limit caps the monitor itself (~256MB) so a monitoring sidecar can never be the
+  # thing that pushes the box into OOM — the very failure it exists to watch for.
+  netdata:
+    image: netdata/netdata:stable # pin a digest/tag for reproducibility
+    container_name: naary-netdata
+    hostname: ${PUBLIC_HOSTNAME:-naary-prod} # the node's display name in Netdata
+    restart: unless-stopped
+    pid: host # accurate per-application process charts (apps.plugin)
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    mem_limit: 256m
+    ports:
+      - "127.0.0.1:19999:19999" # loopback only — SSH-tunnel to view; never public
+    environment:
+      # Optional Netdata Cloud claim (outbound-only; no inbound port needed). Empty ⇒ the
+      # agent stays local-only, reachable solely via the SSH tunnel above.
+      NETDATA_CLAIM_TOKEN: ${NETDATA_CLAIM_TOKEN:-}
+      NETDATA_CLAIM_URL: ${NETDATA_CLAIM_URL:-https://app.netdata.cloud}
+      NETDATA_CLAIM_ROOMS: ${NETDATA_CLAIM_ROOMS:-}
+    volumes:
+      - netdata-config:/etc/netdata
+      - netdata-lib:/var/lib/netdata
+      - netdata-cache:/var/cache/netdata
+      - /:/host/root:ro,rslave
+      - /etc/passwd:/host/etc/passwd:ro
+      - /etc/group:/host/etc/group:ro
+      - /etc/os-release:/host/etc/os-release:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /var/log:/host/var/log:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro # container names (read-only)
+
+# Named volumes for the Netdata sidecar. Compose MERGES this top-level `volumes:` with the
+# base file's (naary-pgdata / naary-temporal), so declaring only the new ones here is safe.
+volumes:
+  netdata-config:
+  netdata-lib:
+  netdata-cache:
