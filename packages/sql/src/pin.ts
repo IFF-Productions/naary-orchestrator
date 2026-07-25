@@ -34,11 +34,16 @@ export function pinnedPgStream(pinnedHost: string): () => net.Socket {
     const socket = new net.Socket();
     const connect = socket.connect.bind(socket);
     socket.connect = ((...args: unknown[]) => {
-      const [port, host] = args;
+      const [port, host, connectListener] = args;
       if (typeof port !== "number" || typeof host !== "string") {
         return (connect as (...a: unknown[]) => net.Socket)(...args);
       }
-      return connect({ port, host: pinnedHost });
+      // Preserve the optional `connectListener` of the (port, host, cb) overload — dropping it
+      // would silently swallow a caller's connect callback (net.Socket.connect's documented
+      // 3-arg form). Only the HOST is substituted; everything else passes through.
+      return typeof connectListener === "function"
+        ? connect({ port, host: pinnedHost }, connectListener as () => void)
+        : connect({ port, host: pinnedHost });
     }) as typeof socket.connect;
     return socket;
   };

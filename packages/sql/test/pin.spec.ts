@@ -60,6 +60,20 @@ describe("pinnedPgStream", () => {
     expect(seen).toBe(1);
   });
 
+  it("forwards the (port, host, connectListener) callback overload while still pinning", async () => {
+    // net.Socket.connect's documented 3-arg form takes a connect callback; dropping it would
+    // silently swallow a caller's notification (Copilot review, #597).
+    const socket = pinnedPgStream("127.0.0.1")();
+    const called = new Promise<void>((resolve, reject) => {
+      socket.once("error", reject);
+      socket.connect(port, UNRESOLVABLE, () => resolve()); // cb must fire…
+    });
+    await called;
+    await connectionSeen(); // …and the connection still went to the PIN, not the bad host
+    socket.destroy();
+    expect(seen).toBe(1);
+  });
+
   it("passes a unix-socket path straight through (never pinned)", () => {
     // pg calls connect() with ONE argument for a socket-path DSN; redirecting that to an
     // IP would break local-socket connections outright.
