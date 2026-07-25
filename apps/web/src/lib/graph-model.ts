@@ -394,12 +394,22 @@ export function nodeDisplayLabel(
   const custom = (config as { __name?: unknown } | undefined)?.__name;
   if (typeof custom === "string" && custom.trim()) return custom.trim();
   if (type === "integration") {
-    const provider = (config as { provider?: string } | undefined)?.provider;
-    return (
-      getIntegrationProvider((provider ?? "").trim())?.label ?? "Integration"
-    );
+    return getIntegrationProvider(providerKey(config))?.label ?? "Integration";
   }
   return NODE_LABEL[type];
+}
+
+/**
+ * The `provider` key out of a node's config, defensively. `config` is
+ * `Record<string, unknown>` — a hand-edited, AI-generated, or legacy graph can carry
+ * `provider: 123` (or an object), and asserting `{provider?: string}` then calling `.trim()`
+ * THROWS at render time and blanks the config panel / canvas label. Mirrors the `typeof`
+ * guard `nodeDisplayLabel` already uses for `__name`. Non-strings resolve to "" → the
+ * generic "Integration" label + catalog-fallback description, which is the right degrade.
+ */
+function providerKey(config?: Record<string, unknown> | null): string {
+  const raw = config?.provider;
+  return typeof raw === "string" ? raw.trim() : "";
 }
 
 /** DSL node type → plain-language description, derived from the one registry. */
@@ -428,9 +438,7 @@ export function nodeDisplayDescription(
   config?: Record<string, unknown> | null,
 ): string {
   if (type === "integration") {
-    const provider = (
-      (config as { provider?: string } | undefined)?.provider ?? ""
-    ).trim();
+    const provider = providerKey(config);
     return (
       INTEGRATION_TILE_DESCRIPTION[provider] ??
       getIntegrationProvider(provider)?.description ??
