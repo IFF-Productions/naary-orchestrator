@@ -4442,6 +4442,22 @@ function setPath(
   obj[keys[keys.length - 1]] = value;
 }
 
+/** True when `path` already resolves to an object on `target` — i.e. some field has already
+ *  put data in that sub-object. Used to decide whether a nested `const` discriminator has a
+ *  payload to describe. Pure; never walks prototype-chain keys (#591). */
+function hasObjectAtPath(
+  target: Record<string, unknown> | undefined,
+  path: string,
+): boolean {
+  if (!target || hasForbiddenPathSegment(path)) return false;
+  let obj: unknown = target;
+  for (const key of path.split(".")) {
+    if (obj == null || typeof obj !== "object") return false;
+    obj = (obj as Record<string, unknown>)[key];
+  }
+  return obj != null && typeof obj === "object";
+}
+
 /** A field value that carries nothing to send: unset, blank, empty array, or empty object.
  *  Shared by request construction (omit it) and validation (treat as missing) so they agree. */
 export function isEmptyFieldValue(v: unknown): boolean {
@@ -4481,17 +4497,15 @@ export function buildIntegrationRequest(
   let body: Record<string, unknown> | undefined;
   let headers: Record<string, string> | undefined;
 
-  for (const field of act.fields) {
-    // A const field's value comes from the CATALOG, not from config (an API type
-    // discriminator the user must not be able to break).
-    const value = field.const !== undefined ? field.const : fields[field.key];
+  const applyField = (field: IntegrationField, value: unknown): void => {
     const missing = isEmptyFieldValue(value);
     if (field.in === "header") {
-      if (missing) continue;
-      const raw = String(value);
-      // A header value can arrive from an upstream BINDING, i.e. from run data — a CR/LF
-      // would let that data inject extra headers into the request. Reject in the pure
-      // builder so the failure is clean and deterministic; never echo the value.
+      if (missing) return;
+      // Trailing whitespace/newlines are common on a value bound from upstream text — trim
+      // rather than fail. An INTERIOR CR/LF would let run data inject extra headers into the
+      // request, so that still hard-fails in the pure builder (never echoing the value).
+      const raw = String(value).trim();
+      if (raw === "") return;
       if (/[\r\n]/.test(raw)) {
         throw new Error(
           `Integration ${provider}/${action}: header field '${field.key}' contains a newline`,
@@ -4514,10 +4528,29 @@ export function buildIntegrationRequest(
     } else {
       // Empty optional body fields are dropped — UNLESS keepEmpty (an empty string is meaningful,
       // e.g. Dropbox root path ""). A truly-absent value still coalesces to "" via the field default.
-      if (missing && !field.keepEmpty) continue;
+      if (missing && !field.keepEmpty) return;
       body ??= {};
       setPath(body, field.bodyPath ?? field.key, value ?? "");
     }
+  };
+
+  // Pass 1 — the user's fields.
+  for (const field of act.fields) {
+    if (field.const === undefined) applyField(field, fields[field.key]);
+  }
+  // Pass 2 — catalog `const` fields (API type discriminators). They run AFTER the user's
+  // fields so a const inside a DEEPER sub-object can see whether that sub-object actually
+  // carries data: PagerDuty's `incident.body.type` must not conjure an otherwise-empty
+  // `body: { type: "incident_body" }` when no details were given. A const at the top of the
+  // payload envelope (`incident.type`) or at the root is always sent.
+  for (const field of act.fields) {
+    if (field.const === undefined) continue;
+    if (field.in === "body") {
+      const target = field.bodyPath ?? field.key;
+      const parent = target.slice(0, Math.max(0, target.lastIndexOf(".")));
+      if (parent.includes(".") && !hasObjectAtPath(body, parent)) continue;
+    }
+    applyField(field, field.const);
   }
 
   const qs = queryParts.join("&");

@@ -7,7 +7,10 @@ import {
   getIntegrationProvider,
   validateIntegrationConfig,
 } from "@naary/dsl";
-import type { IntegrationNodeConfig } from "@naary/dsl";
+import type {
+  BuiltIntegrationRequest,
+  IntegrationNodeConfig,
+} from "@naary/dsl";
 import {
   AuthConfigError,
   BlockedEgressError,
@@ -84,7 +87,18 @@ export async function callIntegration(
       );
     }
   }
-  const req = buildIntegrationRequest(cfg.provider, cfg.action, fields);
+  // Request construction is pure but CAN reject its input (e.g. a CR/LF in a header field
+  // bound from run data — a header-injection attempt). That's a data/config fault a retry
+  // can never fix, so it must surface as NON-retryable, like validateIntegrationConfig above.
+  let req: BuiltIntegrationRequest;
+  try {
+    req = buildIntegrationRequest(cfg.provider, cfg.action, fields);
+  } catch (e) {
+    throw ApplicationFailure.nonRetryable(
+      e instanceof Error ? e.message : String(e),
+      "INTEGRATION_INVALID_CONFIG",
+    );
+  }
   const url = `${base!.replace(/\/$/, "")}${req.path}`;
   const action = getIntegrationAction(cfg.provider, cfg.action);
   // req.path is "path + query string" — log the PATH ONLY so query-param values can't leak

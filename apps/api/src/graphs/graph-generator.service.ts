@@ -143,8 +143,10 @@ export class GraphGeneratorService {
     );
     for (const p of INTEGRATION_PROVIDERS) {
       for (const a of p.actions) {
+        // `const` fields are catalog-supplied (API type discriminators) — the request
+        // builder injects them, so never ask the model to fill them.
         const req = a.fields
-          .filter((f) => f.required)
+          .filter((f) => f.required && f.const === undefined)
           .map((f) => f.key)
           .join(", ");
         lines.push(

@@ -371,7 +371,6 @@ describe("callIntegration activity", () => {
         title: "Checkout is down",
         service: { id: "PW7YESS", type: "service_reference" },
         urgency: "high",
-        body: { type: "incident_body" },
       },
     });
   });
@@ -417,6 +416,28 @@ describe("callIntegration activity", () => {
     );
     const [, init] = fetchMock.mock.calls[0];
     expect(init.headers.Authorization).toBe("Token token=pd-key");
+  });
+
+  it("a CR/LF in a header field fails NON-retryably and never reaches fetch", async () => {
+    connMock.mockResolvedValue({ serverUrl: null, authMode: "api_token" });
+    const cfg: IntegrationNodeConfig = {
+      provider: "pagerduty",
+      action: "create_incident",
+      connectionId: "pd",
+      fields: { title: "t", serviceId: "s" },
+    };
+    // `From` bound from run data that carries an injected header.
+    await expect(
+      callIntegration(
+        cfg,
+        { ...cfg.fields!, From: "a@b.com\r\nX-Injected: 1" },
+        META,
+      ),
+    ).rejects.toMatchObject({
+      nonRetryable: true,
+      type: "INTEGRATION_INVALID_CONFIG",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("Google Sheets append_row → PUT/POST with an OAuth Bearer, range percent-encoded, :append kept", async () => {

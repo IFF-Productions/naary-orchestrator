@@ -1479,12 +1479,33 @@ describe("integration catalog — request construction", () => {
       serviceId: "PSVC",
     });
     expect(req.headers).toBeUndefined();
+    // No `details` → no `incident.body` at all: a nested const must not conjure a sub-object
+    // that exists only to hold its own type tag.
     expect(req.body).toEqual({
       incident: {
         type: "incident",
         title: "Latency spike",
         service: { id: "PSVC", type: "service_reference" },
-        body: { type: "incident_body" },
+      },
+    });
+  });
+
+  it("PagerDuty create_incident → the nested body const appears only WITH details", () => {
+    const withDetails = buildIntegrationRequest(
+      "pagerduty",
+      "create_incident",
+      {
+        title: "Latency spike",
+        serviceId: "PSVC",
+        details: "p99 over 4s",
+      },
+    );
+    expect(withDetails.body).toEqual({
+      incident: {
+        type: "incident",
+        title: "Latency spike",
+        service: { id: "PSVC", type: "service_reference" },
+        body: { type: "incident_body", details: "p99 over 4s" },
       },
     });
   });
@@ -1549,6 +1570,23 @@ describe("integration catalog — request construction", () => {
         serviceId: "s",
       }),
     ).toThrow(/header field 'From' contains a newline/);
+  });
+
+  it("a header field's value is TRIMMED (trailing whitespace from a binding is not a failure)", () => {
+    const req = buildIntegrationRequest("pagerduty", "add_note", {
+      From: "  oncall@acme.com\n",
+      id: "PT4KHLK",
+      content: "noted",
+    });
+    expect(req.headers).toEqual({ From: "oncall@acme.com" });
+    // …and a whitespace-only value carries nothing, so no header is sent.
+    expect(
+      buildIntegrationRequest("pagerduty", "add_note", {
+        From: "   ",
+        id: "PT4KHLK",
+        content: "noted",
+      }).headers,
+    ).toBeUndefined();
   });
 
   it("Google Sheets append_row → POST …/values/{range}:append with valueInputOption + rows", () => {
