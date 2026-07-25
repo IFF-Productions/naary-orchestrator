@@ -12,8 +12,9 @@ liveVerified: false
 ---
 
 <!-- Sections marked GENERATED come from packages/dsl/src/integrations.ts via
-     `pnpm gen:integration-docs`. Edit the catalog (or docs/integration-prose.ts for the
-     prose), never this file — packages/dsl/test/integration-docs.spec.ts fails on drift. -->
+     `pnpm gen:integration-docs`. Edit the catalog (or
+     packages/dsl/src/docs/integration-prose.ts for the prose), never this file —
+     packages/dsl/test/integration-docs.spec.ts fails on drift. -->
 
 # Slack
 
@@ -44,7 +45,9 @@ Post and update Slack messages, and react to them, from a workflow.
 
 **No one-click check:** every action here writes, so there is no safe argument-free call to probe with.
 
-Either way, the definitive check is **single-node Test** on the canvas: drop a **Slack** node, pick this connection, choose a read action and fill its ids, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
+Either way, the definitive check is **single-node Test** on the canvas: drop a **Slack** node, pick this connection, choose an action and fill its fields, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
+
+Every Slack action writes, so this test performs a **real** action on your account — send to a scratch channel or test record, not a live one.
 
 A concrete first run:
 

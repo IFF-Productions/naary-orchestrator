@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { INTEGRATION_PROSE } from "../src/docs/integration-prose";
 import {
+  GENERATED_NOTICE,
   LIVE_VERIFIED,
   needsServerUrl,
   probeAction,
@@ -22,7 +23,10 @@ import { INTEGRATION_PROVIDERS } from "../src/integrations";
  * 4 of GitHub's 5 catalog actions. Prose and catalog drift silently, and a wrong setup guide costs a
  * user more time than a missing one.
  */
-const DOCS_DIR = join(__dirname, "..", "..", "..", "docs", "integrations");
+const REPO_ROOT = join(__dirname, "..", "..", "..");
+const DOCS_DIR = join(REPO_ROOT, "docs", "integrations");
+/** The committed page for a provider key. */
+const pagePath = (key: string) => join(DOCS_DIR, `${key}.md`);
 
 describe("integration setup guides are in sync with the catalog", () => {
   it.each(INTEGRATION_PROVIDERS.map((p) => [p.key, p] as const))(
@@ -78,6 +82,44 @@ describe("what the guides claim is derived, not asserted", () => {
         probe.fields.filter((f) => f.required && f.const === undefined),
         `${p.key}.${probe.key} needs a user-supplied field`,
       ).toEqual([]);
+    }
+  });
+
+  /**
+   * A provider with NO read action at all can't be told to "choose a read action" — that sends
+   * the reader looking for something the catalog doesn't have. Slack is the only one today; the
+   * page must instead say to pick any action, and warn that the test really writes.
+   */
+  it("never tells an all-write provider to pick a read action", () => {
+    const allWrite = INTEGRATION_PROVIDERS.filter(
+      (p) =>
+        (p.actions ?? []).length > 0 && (p.actions ?? []).every((a) => a.write),
+    );
+    expect(allWrite.map((p) => p.key)).toEqual(["slack"]);
+    for (const p of allWrite) {
+      const page = readFileSync(pagePath(p.key), "utf8");
+      expect(
+        page,
+        `${p.key} names a read action it does not have`,
+      ).not.toContain("choose a read action");
+      expect(page, `${p.key} omits the real-write warning`).toContain(
+        "performs a **real** action",
+      );
+    }
+  });
+
+  /** The generated notice must point at paths that EXIST, or it sends contributors nowhere. */
+  it("the generated-file notice cites real source paths", () => {
+    for (const rel of [
+      "packages/dsl/src/integrations.ts",
+      "packages/dsl/src/docs/integration-prose.ts",
+      "packages/dsl/test/integration-docs.spec.ts",
+    ]) {
+      expect(GENERATED_NOTICE, `notice omits ${rel}`).toContain(rel);
+      expect(
+        existsSync(join(REPO_ROOT, rel)),
+        `${rel} is cited by the notice but does not exist`,
+      ).toBe(true);
     }
   });
 

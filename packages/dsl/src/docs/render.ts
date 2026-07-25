@@ -33,8 +33,9 @@ export const LIVE_VERIFIED: ReadonlySet<string> = new Set(["github"]);
 /** Marker written into every generated file so a human editing one knows what will be lost. */
 export const GENERATED_NOTICE =
   "<!-- Sections marked GENERATED come from packages/dsl/src/integrations.ts via\n" +
-  "     `pnpm gen:integration-docs`. Edit the catalog (or docs/integration-prose.ts for the\n" +
-  "     prose), never this file — packages/dsl/test/integration-docs.spec.ts fails on drift. -->";
+  "     `pnpm gen:integration-docs`. Edit the catalog (or\n" +
+  "     packages/dsl/src/docs/integration-prose.ts for the prose), never this file —\n" +
+  "     packages/dsl/test/integration-docs.spec.ts fails on drift. -->";
 
 /** How the token actually reaches the wire, derived from `authScheme` (see integration.ts). */
 export function authStyle(p: IntegrationProvider): {
@@ -168,6 +169,8 @@ export function renderIntegrationDoc(
   const probe = probeAction(p);
   const actions = p.actions ?? [];
   const writes = actions.filter((a) => a.write);
+  /** No reads at all (e.g. Slack): the docs must not send the reader looking for one. */
+  const allWrite = actions.length > 0 && writes.length === actions.length;
   const out: string[] = [];
 
   out.push(frontmatter(p, prose, opts.liveVerified));
@@ -232,21 +235,32 @@ export function renderIntegrationDoc(
       `**One-click:** this provider has an argument-free read (\`${probe.key}\` → \`${probe.method} ${probe.pathTemplate}\`), so a connection test can confirm the credential without touching your data.`,
     );
   } else {
-    const why = actions.every((a) => a.write)
-      ? "every action here writes"
-      : "its read actions all need an id you have to supply";
     out.push(
-      `**No one-click check:** ${why}, so there is no safe argument-free call to probe with.`,
+      `**No one-click check:** ${
+        allWrite
+          ? "every action here writes"
+          : "its read actions all need an id you have to supply"
+      }, so there is no safe argument-free call to probe with.`,
     );
   }
   out.push("");
+  // The action to suggest depends on what the provider actually has. Telling a reader of an
+  // ALL-WRITE provider (Slack, say) to "choose a read action" sends them looking for something
+  // that doesn't exist — and testing a write here really does post, so say so.
+  const testAction = probe
+    ? ` and the *${probe.label}* action`
+    : allWrite
+      ? ", choose an action and fill its fields"
+      : ", choose a read action and fill its ids";
   out.push(
-    `Either way, the definitive check is **single-node Test** on the canvas: drop a **${p.label}** node, pick this connection${
-      probe
-        ? ` and the *${probe.label}* action`
-        : ", choose a read action and fill its ids"
-    }, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.`,
+    `Either way, the definitive check is **single-node Test** on the canvas: drop a **${p.label}** node, pick this connection${testAction}, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.`,
   );
+  if (!probe && allWrite) {
+    out.push("");
+    out.push(
+      `Every ${p.label} action writes, so this test performs a **real** action on your account — send to a scratch channel or test record, not a live one.`,
+    );
+  }
   out.push("");
   if (prose.verifyExample?.length) {
     out.push("A concrete first run:");

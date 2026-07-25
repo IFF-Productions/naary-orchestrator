@@ -12,8 +12,9 @@ liveVerified: false
 ---
 
 <!-- Sections marked GENERATED come from packages/dsl/src/integrations.ts via
-     `pnpm gen:integration-docs`. Edit the catalog (or docs/integration-prose.ts for the
-     prose), never this file — packages/dsl/test/integration-docs.spec.ts fails on drift. -->
+     `pnpm gen:integration-docs`. Edit the catalog (or
+     packages/dsl/src/docs/integration-prose.ts for the prose), never this file —
+     packages/dsl/test/integration-docs.spec.ts fails on drift. -->
 
 # Asana
 
