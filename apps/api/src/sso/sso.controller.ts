@@ -13,7 +13,6 @@ import type { Response } from "express";
 import { Public } from "../auth/public.decorator";
 import { appBaseUrl } from "../connections/connect-return";
 import { spMetadataXml } from "./saml";
-import { SSO_TOKEN_PREFIX } from "./sso-session.service";
 import { SsoLoginError, SsoService, ssoConfig } from "./sso.service";
 
 /**
@@ -129,6 +128,3 @@ export class SsoController {
     }
   }
 }
-
-/** Exported for the tests that assert the guard/token contract stays in sync. */
-export const SSO_BEARER_PREFIX = SSO_TOKEN_PREFIX;
