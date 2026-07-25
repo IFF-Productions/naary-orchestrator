@@ -302,6 +302,35 @@ jobs:
           echo "${ROLLOUT_SHA256}  ${ROLLOUT_PLUGIN}" | sha256sum -c -
           chmod +x "$ROLLOUT_PLUGIN"
 
+          # RECLAIM DISK **BEFORE** THE PULL. The backend image is ~4-5GB (it keeps devDeps and
+          # installs three coding CLIs), so every release adds that much. The old post-deploy
+          # `docker image prune -f` could never reclaim it: without `-a` it removes only
+          # DANGLING images, and a previous release is TAGGED (naary-backend:v0.0.27), so it was
+          # never collected — ~4GB accumulated per release until a pull died mid-extract with
+          # "no space left on device" (v0.0.29). Running here, before the pull, is what actually
+          # makes room for the incoming images.
+          #
+          # `-a` is required to touch tagged images, but it only ever removes images NOT USED by
+          # a container — the running release is protected by its own containers. KEEP_HOURS
+          # preserves recent tags so a rollback (`Deploy` with an older tag) still finds its
+          # image locally instead of re-pulling; older ones re-pull on demand, which is slower
+          # but never wrong. `|| true` so a prune hiccup never fails an otherwise-good deploy.
+          KEEP_HOURS="${DEPLOY_IMAGE_KEEP_HOURS:-336}" # 14 days of rollback targets
+          echo "disk before reclaim:"; df -h / | tail -1
+          docker image prune -af --filter "until=${KEEP_HOURS}h" >/dev/null 2>&1 || true
+          docker builder prune -af >/dev/null 2>&1 || true
+          echo "disk after reclaim:"; df -h / | tail -1
+
+          # Fail EARLY with an actionable message rather than dying mid-layer-extract. The
+          # incoming backend image needs ~5GB unpacked, and web/netdata a little more; 12GB is
+          # headroom for both plus the 2x-scale rollout overlap. `--output=avail` is in KB.
+          AVAIL_KB=$(df --output=avail / | tail -1 | tr -d ' ')
+          if [ "$AVAIL_KB" -lt 12000000 ]; then
+            echo "::error::Only $((AVAIL_KB / 1024 / 1024))GB free on / — need ~12GB to pull this release. Reclaim space on the box (docker image prune -af; docker builder prune -af), or grow the disk. Aborting BEFORE the pull so the running release stays untouched."
+            docker system df || true
+            exit 1
+          fi
+
           $COMPOSE pull
 
           # 1) Migrations first, to completion. The OLD api/worker keep serving while these
@@ -337,6 +366,10 @@ jobs:
           #    changes) — api/worker/web already match the target config, so this is a
           #    no-op for them.
           $COMPOSE up -d --no-build --remove-orphans
+          # Dangling-only sweep of what THIS deploy just orphaned (the retired containers'
+          # untagged layers). The real reclamation is the pre-pull `prune -af` above — this
+          # cannot remove a previous release's TAGGED image and is not meant to.
           docker image prune -f >/dev/null
           echo "Deployed $DEPLOY_REF — rolling replace complete, all services healthy."
+          echo "disk after deploy:"; df -h / | tail -1
           REMOTE
