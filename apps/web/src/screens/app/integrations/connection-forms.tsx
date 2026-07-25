@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { Button } from "../../../components";
 import { api } from "../../../lib/api";
-import { fieldLabel, fieldStyle } from "./shared";
+import { fieldLabel, fieldStyle, introStyle } from "./shared";
 
 /** Connect a SQL database (postgres/mssql) for the SQL Query node. The connection
  *  string (DSN) is the secret → stored encrypted as the connection token; the host
@@ -382,18 +382,34 @@ export function GithubAppForm({ tenant }: { tenant: string }) {
   );
 }
 
+/** Values the MCP registry browser (#578) can pre-fill. Used only as the initial state — the form
+ *  is mounted inside a Dialog and unmounted on close, so a remount resets it (no effect-sync). */
+export interface ConnectFormPrefill {
+  label?: string;
+  serverUrl?: string;
+  type?: "github" | "atlassian" | "custom";
+  authMode?: "api_token" | "pat" | "oauth";
+  /** A short, already-sanitized note shown above the fields (e.g. "needs no credential"). */
+  note?: string;
+}
+
 export function ConnectForm({
   tenant,
   onChanged,
+  prefill,
 }: {
   tenant: string;
   onChanged: () => Promise<void> | void;
+  /** Pre-filled transport/auth from a picked registry server; the user still supplies credentials. */
+  prefill?: ConnectFormPrefill;
 }) {
-  const [label, setLabel] = useState("");
-  const [serverUrl, setServerUrl] = useState("");
-  const [type, setType] = useState<"github" | "atlassian" | "custom">("custom");
+  const [label, setLabel] = useState(prefill?.label ?? "");
+  const [serverUrl, setServerUrl] = useState(prefill?.serverUrl ?? "");
+  const [type, setType] = useState<"github" | "atlassian" | "custom">(
+    prefill?.type ?? "custom",
+  );
   const [authMode, setAuthMode] = useState<"api_token" | "pat" | "oauth">(
-    "api_token",
+    prefill?.authMode ?? "api_token",
   );
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
@@ -451,6 +467,11 @@ export function ConnectForm({
 
   return (
     <>
+      {prefill?.note && (
+        // Plain TEXT (React escapes it) and the string is sanitized server-side — registry
+        // descriptions are attacker-authorable, so this is never rendered as HTML.
+        <div style={{ ...introStyle, marginBottom: 10 }}>{prefill.note}</div>
+      )}
       <div style={{ marginBottom: 10 }}>
         <span style={fieldLabel}>Label</span>
         <input

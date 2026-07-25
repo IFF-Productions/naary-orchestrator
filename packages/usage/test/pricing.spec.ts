@@ -153,3 +153,73 @@ describe("computeCost", () => {
     }
   });
 });
+
+describe("openai-tts (per-CHARACTER pricing, #689)", () => {
+  // The textToSpeech activity records ONE SYNTHETIC TOKEN PER CHARACTER, so `inputPerMTok` in the
+  // `openai-tts` table is read as USD per 1M CHARACTERS. These assertions pin that contract — if
+  // someone "normalizes" the table into the token-priced `openai` map, TTS silently mis-bills.
+  it("prices tts-1 at $15 per 1M characters (exact, non-zero)", () => {
+    const cost = computeCost({
+      provider: "openai-tts",
+      model: "tts-1",
+      inputTokens: 1_000_000, // = 1M characters
+      outputTokens: 0,
+    });
+    expect(cost).toBeCloseTo(15, 10);
+    expect(cost).toBeGreaterThan(0);
+  });
+
+  it("prices tts-1-hd at double the standard rate", () => {
+    const chars = 12_345;
+    const std = computeCost({
+      provider: "openai-tts",
+      model: "tts-1",
+      inputTokens: chars,
+      outputTokens: 0,
+    });
+    const hd = computeCost({
+      provider: "openai-tts",
+      model: "tts-1-hd",
+      inputTokens: chars,
+      outputTokens: 0,
+    });
+    expect(hd).toBeCloseTo(std * 2, 12);
+  });
+
+  it("bills nothing for output tokens (TTS has no output-token bucket)", () => {
+    const withOutput = computeCost({
+      provider: "openai-tts",
+      model: "tts-1",
+      inputTokens: 1000,
+      outputTokens: 999_999,
+    });
+    const withoutOutput = computeCost({
+      provider: "openai-tts",
+      model: "tts-1",
+      inputTokens: 1000,
+      outputTokens: 0,
+    });
+    expect(withOutput).toBe(withoutOutput);
+  });
+
+  it("stays SEPARATE from the token-priced `openai` table (different units)", () => {
+    // A TTS model must NOT be resolvable under `openai`, and a chat model must not be resolvable
+    // under `openai-tts` — mixing the units in one table is the footgun this split prevents.
+    expect(() =>
+      computeCost({
+        provider: "openai",
+        model: "tts-1",
+        inputTokens: 1,
+        outputTokens: 0,
+      }),
+    ).toThrow(UnknownModelPricingError);
+    expect(() =>
+      computeCost({
+        provider: "openai-tts",
+        model: "gpt-4o",
+        inputTokens: 1,
+        outputTokens: 0,
+      }),
+    ).toThrow(UnknownModelPricingError);
+  });
+});

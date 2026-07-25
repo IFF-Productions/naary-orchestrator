@@ -239,6 +239,12 @@ export const NODE_KINDS: NodeKind[] = [
   { type: "codeAgent", label: "Code Agent", group: "AI & Tools", accent: "var(--node-agent)",
     description: "Run an agentic coding CLI (Claude Code) on a task — reads code and returns a plan (read-only).",
     defaultConfig: { tool: "claude", prompt: "" } },
+  // No `text` default on purpose: the schema is `min(1)` when present (so a blank "" would make
+  // the whole graph unsaveable), and pre-filling sample copy would make a placed-and-forgotten
+  // node do a real, billable synthesis of nonsense. Same call as codeAgent's blank `prompt`.
+  { type: "textToSpeech", label: "Text to Speech", group: "AI & Tools", accent: "var(--node-agent)",
+    description: "Turn text into spoken audio you can play or download from the run.",
+    defaultConfig: { provider: "openai", voice: "alloy", model: "tts-1", format: "mp3", speed: 1 } },
   { type: "mcpTool", label: "MCP Tool", group: "AI & Tools", accent: "var(--node-mcp)",
     description: "Call a tool on a connected service (e.g. GitHub, Jira) via MCP.",
     defaultConfig: { connectionId: "", tool: "" } },
@@ -466,6 +472,11 @@ export function nodeSubtitle(
   if (kind === "codeAgent") {
     const tool = (config.tool as string | undefined) ?? "claude";
     return `${tool} · read-only`;
+  }
+  if (kind === "textToSpeech") {
+    const voice = config.voice as string | undefined;
+    const format = (config.format as string | undefined) ?? "mp3";
+    return [voice, format].filter(Boolean).join(" · ");
   }
   if (kind === "mcpTool") {
     const tool = config.tool as string | undefined;

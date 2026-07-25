@@ -41,6 +41,7 @@ const NODE_ICON: Partial<Record<NodeType, IconName>> = {
   chatTrigger: "activity",
   agent: "agent",
   codeAgent: "agent",
+  textToSpeech: "activity",
   mcpTool: "mcp",
   integration: "mcp",
   httpRequest: "http",

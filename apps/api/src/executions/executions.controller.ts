@@ -1,3 +1,4 @@
+import type { ServerResponse } from "node:http";
 import {
   Body,
   Controller,
@@ -6,8 +7,9 @@ import {
   Param,
   Post,
   Query,
+  Res,
 } from "@nestjs/common";
-import { ApiBearerAuth, ApiQuery } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiProduces, ApiQuery } from "@nestjs/swagger";
 import {
   CurrentPrincipal,
   EnvironmentSel,
@@ -376,6 +378,51 @@ export class ExecutionsController {
     workflowKey: string | null;
   }> {
     return this.executions.runGraph(id, tenantId, principal);
+  }
+
+  /**
+   * Stream a node's synthesized AUDIO (textToSpeech, #689) so the run view can play/download it.
+   *
+   * Takes only (run id, node id) — the object reference is read out of the run ctx and checked
+   * against this tenant's storage prefix. A client-supplied ref is NEVER accepted (that would be an
+   * arbitrary cross-tenant object read). Declared BEFORE `GET :id` for readability; the 4-segment
+   * path can't collide with it either way.
+   */
+  @ApiEndpoint({
+    summary: "Download a node's synthesized audio (textToSpeech)",
+    description:
+      "Streams the audio object a `textToSpeech` node produced. 404 when the node produced no " +
+      "audio or the object is no longer in storage (with the default in-memory store the objects " +
+      "live in the worker process, so this is expected in a dev setup).",
+    notFound: true,
+  })
+  @ApiProduces("audio/mpeg")
+  @Get(":id/nodes/:nodeId/audio")
+  async getNodeAudio(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+    @Param("nodeId") nodeId: string,
+    @Res() res: ServerResponse,
+    @CurrentPrincipal() principal?: Principal,
+  ): Promise<void> {
+    const { body, contentType, filename } = await this.executions.nodeAudio(
+      id,
+      nodeId,
+      tenantId,
+      principal,
+    );
+    res.writeHead(200, {
+      // Only an allow-listed audio type ever reaches this header (see safeContentType) — a stored
+      // `text/html` would otherwise make an object read a stored-XSS sink.
+      "content-type": contentType,
+      "content-length": String(body.byteLength),
+      // Inline so an <audio> element can play it; the filename drives "Save as".
+      "content-disposition": `inline; filename="${filename}"`,
+      // Belt-and-braces for a binary body served from a user-controlled bucket path.
+      "x-content-type-options": "nosniff",
+      "cache-control": "private, max-age=300",
+    });
+    res.end(body);
   }
 
   @ApiEndpoint({

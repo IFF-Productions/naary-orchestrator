@@ -648,6 +648,117 @@ export function renderAgentSections(c: ConfigSectionCtx) {
         </>
       )}
 
+      {kind === "textToSpeech" && (
+        <>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              lineHeight: "var(--leading-snug)",
+              marginBottom: 4,
+            }}
+          >
+            Speaks the text with your tenant's OpenAI key (BYOK). The audio goes
+            to object storage — the node output carries a reference plus{" "}
+            <code>format</code> / <code>voice</code> / <code>bytes</code>, and
+            the run view can play or download it.
+          </div>
+
+          <Labeled label="Voice">
+            <input
+              value={str("voice")}
+              onChange={(e) => onChange({ voice: e.target.value || undefined })}
+              style={inputStyle}
+              placeholder="alloy"
+            />
+          </Labeled>
+
+          {/* A free-text input, NOT a select, for the same reason codeAgent's Model field is one:
+              the schema is an open `z.string()`, so a graph can legitimately carry a model a
+              fixed option list doesn't know (gpt-4o-mini-tts, or whatever ships next). A select
+              would render blank for that value and overwrite it on the first click. */}
+          <Labeled label="Model">
+            <input
+              value={str("model")}
+              onChange={(e) => onChange({ model: e.target.value || undefined })}
+              style={inputStyle}
+              placeholder="tts-1 (or tts-1-hd for higher quality)"
+            />
+          </Labeled>
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <Labeled label="Format">
+              <select
+                value={str("format") || "mp3"}
+                onChange={(e) => onChange({ format: e.target.value })}
+                style={inputStyle}
+              >
+                {["mp3", "opus", "aac", "flac", "wav", "pcm"].map((f) => (
+                  <option key={f} value={f}>
+                    {f}
+                  </option>
+                ))}
+              </select>
+            </Labeled>
+            <Labeled label="Speed (0.25–4)">
+              <input
+                type="number"
+                min={0.25}
+                max={4}
+                step={0.25}
+                value={num("speed") ?? ""}
+                onChange={(e) => {
+                  // Schema clamps 0.25–4 — anything outside that (or a partial/empty input,
+                  // which reads as NaN) becomes undefined so an out-of-range keystroke can't
+                  // make the whole GRAPH unsaveable from a different screen.
+                  const v = e.target.valueAsNumber;
+                  onChange({
+                    speed:
+                      Number.isFinite(v) && v >= 0.25 && v <= 4 ? v : undefined,
+                  });
+                }}
+                style={inputStyle}
+                placeholder="1"
+              />
+            </Labeled>
+          </div>
+
+          <div>
+            <RowHead label="Text" value={`${str("text").length} chars`} />
+            {/* Not exprText: that writes "" when cleared, and the schema is `min(1)` when
+                `text` is PRESENT — a blank string would 400 the whole save. Empty → undefined
+                (the node then takes its text from the binding below). */}
+            <ExpressionField
+              value={str("text")}
+              onChange={(v) => onChange({ text: v || undefined })}
+              nodeId={node.id}
+              edges={edges}
+              pins={pins}
+              nodeKinds={nodeKinds}
+              multiline
+              minHeight="5em"
+              placeholder="Text to speak, or {{ upstream.path }}…"
+            />
+          </div>
+
+          <BindingsEditor
+            bindings={
+              config.textBinding
+                ? { text: config.textBinding as BindingRow }
+                : undefined
+            }
+            upstreamIds={upstreamIds}
+            onChange={(v) =>
+              onChange({ textBinding: v ? Object.values(v)[0] : undefined })
+            }
+          />
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
+            Bind <code>text</code> from an upstream output instead of typing it
+            (the resolved value replaces the field above).
+          </div>
+        </>
+      )}
+
       {kind === "mcpTool" && (
         <>
           <Labeled label="Connection">

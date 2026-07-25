@@ -149,6 +149,9 @@ const NODE_IPATH: Partial<Record<NodeType, string>> = {
     "M12 8v5m0 3h.01M10.3 4l-7 12a2 2 0 0 0 1.7 3h14a2 2 0 0 0 1.7-3l-7-12a2 2 0 0 0-3.4 0z",
   agent: "M12 3l2.1 4.6L19 9l-3.4 3.3.8 4.7L12 15l-4.4 2 .8-4.7L5 9z",
   codeAgent: "M8 8l-4 4 4 4m8-8 4 4-4 4M13 5l-2 14",
+  // Speaker cone + two radiating waves.
+  textToSpeech:
+    "M4 10v4h3l4 3V7l-4 3H4zM15.5 9.5a4 4 0 0 1 0 5M18 7a7 7 0 0 1 0 10",
   mcpTool: "M12 3v6m0 6v6M5 12h6m2 0h6M7 7l3 3m4 4 3 3",
   httpRequest:
     "M4 12h16M12 4a15 15 0 0 1 0 16M12 4a15 15 0 0 0 0 16M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0z",

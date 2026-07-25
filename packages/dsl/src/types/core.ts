@@ -14,6 +14,7 @@ export type NodeType =
   | "mcpServerTrigger" // entry node: hosts the workflow as a tool on naary's MCP server; output is the invocation args
   | "agent"
   | "codeAgent" // runs an agentic coding CLI (Claude Code/Cursor/Copilot) as a BYOK activity
+  | "textToSpeech" // synthesizes text → an audio object in storage (BYOK); output is a ref + metadata
   | "mcpTool" // Slice #4: calls a remote MCP server tool via a connection
   | "integration" // native provider action (GitHub/Jira/…) via a catalog + connection
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}

@@ -193,6 +193,35 @@ export interface ConnectionRow {
   createdAt: string;
 }
 
+/**
+ * A browsable MCP server from the registry browser (#578). Mirrors the API's
+ * McpRegistryServerResponse. Every field is SANITIZED server-side: `transportUrl` is always a
+ * public https URL, `description` is plain text (render it as TEXT, never HTML), and `homepage`
+ * is http/https or absent. `trust: "community"` means the row came from the public registry and
+ * is authored by a third party.
+ */
+export interface McpRegistryServerRow {
+  id: string;
+  name: string;
+  description: string;
+  transportUrl: string;
+  transport: "http";
+  authMode: "api_token" | "pat" | "oauth" | "none";
+  requiresAuth: boolean;
+  trust: "curated" | "community";
+  homepage?: string;
+  tags: string[];
+}
+
+/** One page of registry results. `source: "curated"` = the upstream registry was unavailable and
+ *  this is the degraded, in-repo list. */
+export interface McpRegistryPage {
+  servers: McpRegistryServerRow[];
+  source: "registry" | "curated";
+  degradedReason?: string;
+  curatedAsOf: string;
+}
+
 /** A registered webhook endpoint (no signing secret; Date → string over JSON). */
 export interface WebhookRow {
   id: string;

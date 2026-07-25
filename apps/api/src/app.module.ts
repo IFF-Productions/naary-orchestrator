@@ -18,6 +18,7 @@ import { FormsModule } from "./forms/forms.module";
 import { GraphsModule } from "./graphs/graphs.module";
 import { HealthModule } from "./health/health.module";
 import { McpModule } from "./mcp/mcp.module";
+import { McpRegistryModule } from "./mcp-registry/mcp-registry.module";
 import { MembersModule } from "./members/members.module";
 import { V1Module } from "./v1/v1.module";
 import { WorkersModule } from "./workers/workers.module";
@@ -97,6 +98,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     TemplatesModule,
     SchedulesModule,
     McpModule,
+    McpRegistryModule,
     V1Module,
     WorkersModule,
     BuilderModule,
