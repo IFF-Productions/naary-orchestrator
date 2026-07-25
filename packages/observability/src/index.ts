@@ -14,6 +14,7 @@ import type { SpanAttrs } from "./spans";
 export { redactString, deepScrub, scrubEvent } from "./scrub";
 export {
   withSpan,
+  setSpanAttributes,
   Traced,
   TracedClass,
   traceActivities,
@@ -21,6 +22,21 @@ export {
   type SpanAttrs,
   type SpanOptions,
 } from "./spans";
+export {
+  GEN_AI_SEMCONV_VERSION,
+  genAiProviderName,
+  genAiRequestAttrs,
+  genAiResponseAttrs,
+  genAiSpanName,
+  genAiToolAttrs,
+  withGenAiSpan,
+  withGenAiToolSpan,
+  type GenAiAttrs,
+  type GenAiOperation,
+  type GenAiRequest,
+  type GenAiResponse,
+  type GenAiToolCall,
+} from "./genai";
 export {
   metricCount,
   metricDistribution,
@@ -140,6 +156,51 @@ export function initSentry(opts: { component: "api" | "worker" }): void {
 
 export function isSentryEnabled(): boolean {
   return enabled;
+}
+
+/**
+ * TEST SEAM (#581) — never called in production code. Initializes Sentry with tracing FULLY ON and
+ * a CAPTURING transport, so a spec can assert what actually reaches the exporter rather than what a
+ * pure mapping function returned. That distinction is the whole point of the privacy assertion: the
+ * only way to prove no prompt/completion text egresses is to inspect the finished envelope.
+ *
+ * Deliberately reuses initSentry's `beforeSend*` hooks (the shared {@link safeScrub}), so the
+ * captured payload IS the post-scrub egress payload. The DSN is syntactically valid but points
+ * nowhere — the transport is replaced, so nothing leaves the process.
+ */
+export function __initSentryForTest(sink: unknown[]): void {
+  Sentry.init({
+    dsn: "https://0123456789abcdef0123456789abcdef@o0.ingest.sentry.io/1",
+    tracesSampleRate: 1,
+    sendDefaultPii: false,
+    // Skip the default integrations: pino/prisma/runtime-metrics auto-instrumentation would add
+    // noise (and real timers) to a unit test that only cares about our own spans.
+    defaultIntegrations: false,
+    transport: () =>
+      ({
+        send: (envelope: unknown) => {
+          sink.push(envelope);
+          return Promise.resolve({});
+        },
+        flush: () => Promise.resolve(true),
+      }) as never,
+    beforeSend: (event) => safeScrub(event) as never,
+    beforeSendTransaction: (event) => safeScrub(event) as never,
+    beforeSendLog: (log) => safeScrub(log) as never,
+    beforeBreadcrumb: (crumb) => safeScrub(crumb) as never,
+  });
+  enabled = true;
+}
+
+/** TEST SEAM: flush + detach the capturing client so it can't leak into another spec's assertions. */
+export async function __closeSentryForTest(): Promise<void> {
+  enabled = false;
+  try {
+    await Sentry.close(2000);
+  } catch {
+    /* ignore */
+  }
+  Sentry.getGlobalScope().setClient(undefined);
 }
 
 /** Non-secret context only — tenantId/executionId/nodeId are safe identifiers. */

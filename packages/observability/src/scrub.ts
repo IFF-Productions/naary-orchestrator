@@ -13,6 +13,34 @@ const REDACTED = "[REDACTED]";
 const SENSITIVE_KEY =
   /(authorization|cookie|set-cookie|token|secret|password|passwd|api[_-]?key|apikey|encryption|ciphertext|auth[_-]?tag|^iv$|credential|signing|bearer|private[_-]?key)/i;
 
+/**
+ * Exact key names that LOOK sensitive to {@link SENSITIVE_KEY} but provably are not (#581). The
+ * OTel GenAI conventions spell token COUNTS as `gen_ai.usage.input_tokens` etc., and the `token`
+ * substring in the pattern above was blanking every one of them to "[REDACTED]" — silently gutting
+ * the GenAI spans/metrics (caught by the exported-envelope test, not by a mapper unit test).
+ *
+ * Deliberately EXACT full-key names, never a pattern: this is a hole in a security-critical filter,
+ * so it must not be widenable by accident. A value under one of these keys is still deep-scrubbed
+ * (recursed / redactString'd) — we only skip the key-NAME blanking. Every entry is a name WE emit
+ * from genai.ts and whose value is a count or a fixed enum, never credential material.
+ */
+const SAFE_TELEMETRY_KEYS = new Set([
+  "gen_ai.usage.input_tokens",
+  "gen_ai.usage.output_tokens",
+  "gen_ai.usage.cached_input_tokens",
+  "gen_ai.usage.total_tokens",
+  "gen_ai.request.max_tokens",
+  "gen_ai.token.type", // metric dimension: "input" | "output"
+  // The same bug in our OWN structured logs + ledger fields: `log.info({ inputTokens, … })` from the
+  // agent activity shipped "[REDACTED]" for every count. Same exact-name, count-only reasoning.
+  "inputTokens",
+  "outputTokens",
+  "totalTokens",
+  "cachedInputTokens",
+  "reasoningTokens",
+  "maxOutputTokens",
+]);
+
 /** Secret-shaped substrings to redact inside any string value. */
 const PATTERNS: RegExp[] = [
   /\b(?:sk|pk|rk)-[A-Za-z0-9_-]{8,}/g, // OpenAI-style
@@ -64,7 +92,7 @@ export function deepScrub<T>(value: T, depth = 0, seen = new WeakSet()): T {
     // place — we just never write the slot itself.
     const desc = Object.getOwnPropertyDescriptor(obj, key);
     const settable = !desc || (desc.writable !== false && !desc.get);
-    if (SENSITIVE_KEY.test(key)) {
+    if (SENSITIVE_KEY.test(key) && !SAFE_TELEMETRY_KEYS.has(key)) {
       if (settable) obj[key] = REDACTED;
     } else if (settable) {
       obj[key] = deepScrub(obj[key], depth + 1, seen);

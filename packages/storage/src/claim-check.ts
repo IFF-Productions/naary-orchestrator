@@ -41,6 +41,26 @@ export async function maybeOffload(
   return { __claimCheck: ref, bytes } satisfies ClaimCheck;
 }
 
+/**
+ * True when `value` contains a {@link ClaimCheck} anywhere in its tree. PURE — no I/O, so it is the
+ * cheap pre-check that lets a caller skip {@link resolveClaimChecks} (and the object-store
+ * construction it needs) entirely for the overwhelmingly common ref-free payload. Bounded by the
+ * ~2MB payload cap that got the value here in the first place, and cycle-safe.
+ */
+export function containsClaimCheck(
+  value: unknown,
+  seen = new WeakSet(),
+): boolean {
+  if (isClaimCheck(value)) return true;
+  if (value === null || typeof value !== "object") return false;
+  if (seen.has(value)) return false;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.some((v) => containsClaimCheck(v, seen));
+  }
+  return Object.values(value).some((v) => containsClaimCheck(v, seen));
+}
+
 /** Deeply resolve any {@link ClaimCheck} references in `value` by fetching them. */
 export async function resolveClaimChecks(
   value: unknown,

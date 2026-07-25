@@ -6,7 +6,14 @@ import { createLocalTestEnv } from "./local-test-env";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { stateQuery } from "@naary/contracts";
 import type { GraphDef } from "@naary/dsl";
+import {
+  getObjectStore,
+  isClaimCheck,
+  maybeOffload,
+  resolveClaimChecks,
+} from "@naary/storage";
 import { runGraph } from "../src/temporal/workflows";
+import { ITEM_CLAIM_CHECK_THRESHOLD } from "../src/temporal/activities/items";
 import {
   TASK_QUEUE,
   mapNodeCalls,
@@ -652,6 +659,138 @@ describe("runGraph interpreter — items model (splitOut region)", () => {
       });
       // Fails closed (rejects) rather than crossing the ~2MB history payload cap.
       await expect(handle.result()).rejects.toThrow();
+    });
+  });
+
+  // ── Items claim-check offload (#479) ──────────────────────────────────────────────────────────
+  // The harness registers the REAL expandItems activity (its only I/O is the in-memory object
+  // store), so these run the actual workflow → activity → object-store path end to end.
+
+  it("#479: a splitOut over a CLAIM-CHECKED source expands via the activity (was: silent 0 items)", async () => {
+    const store = getObjectStore();
+    // Exactly the shape an offloaded httpRequest leaves in ctx: `body` is a reference and the
+    // splitOut path descends INTO it. Pre-#479 the workflow's getByPath returned undefined here and
+    // the region mapped zero times — a silent wrong answer, no error anywhere.
+    const bodyRef = await maybeOffload(
+      { items: [{ n: 1 }, { n: 2 }, { n: 3 }] },
+      store,
+      { keyPrefix: "e2e", thresholdBytes: 0 }, // force the reference
+    );
+    const graph: GraphDef = {
+      ...itemsGraph(),
+      nodes: itemsGraph().nodes.map((n) =>
+        n.id === "sp"
+          ? {
+              ...n,
+              config: { from: "__input", path: "body.items" },
+            }
+          : n,
+      ),
+    };
+    const worker = await makeWorker(env);
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [graph, { body: bodyRef }, { tenantId: "t-items-cc" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-claimcheck",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const final = await handle.query(stateQuery);
+      // All three items were iterated, each region pass reading its own current item.
+      expect(final.ctx.le).toEqual([
+        { doubled: 1 },
+        { doubled: 2 },
+        { doubled: 3 },
+      ]);
+    });
+  });
+
+  it("#479: an INLINE array is left alone even when a SIBLING field is a reference", async () => {
+    // Guard against the obvious over-reach: `containsClaimCheckRef` scans the whole node output, and a
+    // node can offload one field while another holds a perfectly readable array (codeAgent's
+    // `{diff: ref, trace: ref, …}` is the shipped example). Routing that through expandItems would
+    // re-represent the array as per-element references and break a pure region node's `{{ sp.n }}`.
+    // The `!Array.isArray(direct)` condition keeps this byte-identical to pre-#479.
+    const store = getObjectStore();
+    const unrelatedRef = await maybeOffload({ big: "blob" }, store, {
+      keyPrefix: "e2e",
+      thresholdBytes: 0,
+    });
+    const worker = await makeWorker(env);
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          itemsGraph(), // splits `__input.items`
+          { items: [{ n: 4 }, { n: 5 }], trace: unrelatedRef },
+          { tenantId: "t-items-sibling" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-sibling-ref",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const final = await handle.query(stateQuery);
+      // The pure region node still read real item values (it would see undefined off a reference).
+      expect(final.ctx.le).toEqual([{ doubled: 4 }, { doubled: 5 }]);
+    });
+  });
+
+  it("#479: an oversized ITEM rides as a reference, not a blob (A3 batch sees the ref)", async () => {
+    const store = getObjectStore();
+    // Two items well over the per-item offload threshold. Pre-#479 both would have had to ride in
+    // Temporal history verbatim; now each becomes a small reference the activity boundary resolves.
+    const big = "x".repeat(ITEM_CLAIM_CHECK_THRESHOLD + 1);
+    const sourceRef = await maybeOffload(
+      {
+        items: [
+          { big, i: 0 },
+          { big, i: 1 },
+        ],
+      },
+      store,
+      { keyPrefix: "e2e", thresholdBytes: 0 },
+    );
+    // An `agent` region node makes this an A3 node-major region → ONE batched mapNode, whose echoed
+    // `on` field lets us see exactly what the interpreter passed per item.
+    const graph: GraphDef = {
+      startNodeId: "start",
+      nodes: [
+        { id: "start", type: "start" },
+        {
+          id: "sp",
+          type: "splitOut",
+          config: { from: "__input", path: "items" },
+        },
+        { id: "ag", type: "agent", config: { systemPrompt: "x" } },
+        { id: "le", type: "loopEnd", config: { from: "ag" } },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "start", to: "sp" },
+        { from: "sp", to: "ag" },
+        { from: "ag", to: "le" },
+        { from: "le", to: "end" },
+      ],
+    };
+    const worker = await makeWorker(env);
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [graph, sourceRef, { tenantId: "t-items-bigitem" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-items-bigitem",
+      });
+      expect((await handle.result()).status).toBe("completed");
+      const collected = (await handle.query(stateQuery)).ctx.le as {
+        ran: string;
+        on: unknown;
+      }[];
+      expect(collected).toHaveLength(2);
+      // THE assertion: what crossed the workflow boundary is a REFERENCE, not the payload…
+      for (const out of collected) expect(isClaimCheck(out.on)).toBe(true);
+      // …and it resolves back to the real item (what every activity does on entry).
+      expect(await resolveClaimChecks(collected[0].on, store)).toEqual({
+        big,
+        i: 0,
+      });
     });
   });
 

@@ -15,6 +15,7 @@ import { TASK_QUEUE, type ApprovalAwaitingRecord } from "@naary/contracts";
 import { resolveTemplates } from "@naary/dsl";
 import type { ApprovalNodeConfig, GraphDef } from "@naary/dsl";
 import type * as activities from "../src/temporal/activities";
+import { expandItems as realExpandItems } from "../src/temporal/activities/items";
 
 // Mutable knobs the mockActivities read; tests fix these per-scenario. (Reassigning
 // an ESM import binding is illegal, so they hang off this one exported object.)
@@ -438,6 +439,11 @@ const mockActivities = {
       costUsd: items.length * 0.01,
     };
   },
+  // Items claim-check expansion (#479): the REAL activity, not a mock. Its only I/O is the object
+  // store, which defaults to the in-memory implementation — so the e2e stays hermetic while
+  // exercising the actual rehydrate → getByPath → per-element-offload path the interpreter relies on.
+  // Imported from its own module (not the activities barrel) to keep DB/AWS clients out of the test.
+  expandItems: realExpandItems,
 };
 const mapNodeCalls: { nodeType: string; count: number }[] = [];
 const statusPushes: {

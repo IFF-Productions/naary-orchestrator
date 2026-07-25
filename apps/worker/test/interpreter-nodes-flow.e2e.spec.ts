@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { webhookResponseQuery } from "@naary/contracts";
 import { sampleGraph } from "@naary/dsl";
 import type { GraphDef } from "@naary/dsl";
+import { getObjectStore, maybeOffload } from "@naary/storage";
 import { runGraph } from "../src/temporal/workflows";
 import {
   TASK_QUEUE,
@@ -106,6 +107,38 @@ describe("runGraph interpreter — per-node behavior: flow control, loops, feeds
       ]);
       // each child's mocked agent cost (0.01) summed into the parent (3 × 0.01)
       expect(result.ctx.__costUsd).toBeCloseTo(0.03, 5);
+    });
+  });
+
+  it("#479: forEach over a CLAIM-CHECKED source expands via the activity (was: 0 children)", async () => {
+    // Same gap as the splitOut region: a large upstream array is offloaded, so ctx holds a
+    // `{__claimCheck}` reference and the workflow's getByPath silently yielded undefined → zero
+    // children fanned out, with no error. containsClaimCheckRef + expandItems now expand it.
+    const store = getObjectStore();
+    const bodyRef = await maybeOffload({ items: [{ n: 7 }, { n: 8 }] }, store, {
+      keyPrefix: "e2e",
+      thresholdBytes: 0, // force the reference regardless of size
+    });
+    const worker = await makeWorker(env);
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          forEachGraph("body.items"),
+          { body: bodyRef },
+          { tenantId: "t-foreach-cc" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-foreach-claimcheck",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      const loop = result.ctx.loop as {
+        status: string;
+        output: Record<string, unknown>;
+      }[];
+      // One child per REAL item, each fed its own item — not zero children.
+      expect(loop).toHaveLength(2);
+      expect(loop.map((r) => r.output.trigger)).toEqual([{ n: 7 }, { n: 8 }]);
     });
   });
 

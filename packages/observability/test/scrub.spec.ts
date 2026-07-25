@@ -45,6 +45,30 @@ describe("deepScrub", () => {
     expect(o.nested.ciphertext).toBe("[REDACTED]");
     expect(o.nested.ok).toBe("fine");
   });
+  it("keeps the GenAI token-COUNT keys (#581) while still dropping real token keys", () => {
+    // The `token` substring in SENSITIVE_KEY was blanking every `*_tokens` count, so GenAI spans
+    // shipped "[REDACTED]" instead of usage. The allowlist is EXACT-NAME only — anything else
+    // containing "token" must still be dropped.
+    const o = deepScrub({
+      "gen_ai.usage.input_tokens": 1234,
+      "gen_ai.usage.output_tokens": 56,
+      "gen_ai.usage.cached_input_tokens": 7,
+      "gen_ai.request.max_tokens": 1024,
+      "gen_ai.token.type": "input",
+      access_token: "nry_secret123456",
+      refresh_token: "nry_secret123456",
+      "gen_ai.usage.input_tokens_extra": 9, // not an exact allowlist match
+    });
+    expect(o["gen_ai.usage.input_tokens"]).toBe(1234);
+    expect(o["gen_ai.usage.output_tokens"]).toBe(56);
+    expect(o["gen_ai.usage.cached_input_tokens"]).toBe(7);
+    expect(o["gen_ai.request.max_tokens"]).toBe(1024);
+    expect(o["gen_ai.token.type"]).toBe("input");
+    expect(o.access_token).toBe("[REDACTED]");
+    expect(o.refresh_token).toBe("[REDACTED]");
+    expect(o["gen_ai.usage.input_tokens_extra"]).toBe("[REDACTED]");
+  });
+
   it("is cycle-safe", () => {
     const a: Record<string, unknown> = { name: "x" };
     a.self = a;
