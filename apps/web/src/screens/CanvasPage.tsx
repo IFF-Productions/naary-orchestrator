@@ -69,6 +69,7 @@ import { AiPromptPanel } from "./canvas/AiPromptPanel";
 import { CanvasInspectorDock } from "./canvas/CanvasInspectorDock";
 import { CanvasIssuesPanel } from "./canvas/CanvasIssuesPanel";
 import { CanvasStage } from "./canvas/CanvasStage";
+import { nextNodePosition } from "./canvas/node-placement";
 import { CanvasToasts } from "./canvas/CanvasToasts";
 import { NARROW_QUERY, type NodeTestRun } from "./canvas/canvas-types";
 import { CategoryRail } from "./canvas/CategoryRail";
@@ -606,10 +607,12 @@ export function CanvasPage() {
         {
           id,
           type: "naary",
-          position: {
-            x: 160 + (ns.length % 5) * 40,
-            y: 300 + (ns.length % 3) * 30,
-          },
+          // A collision-checked free slot (#756). The previous `ns.length % 5 / % 3` offsets gave only
+          // 15 positions across a 160x60 area for cards up to 244px wide, so every added node
+          // overlapped the last, the 16th landed exactly on the 1st, and deleting-then-adding dropped
+          // a node straight onto an existing card. Position now depends on where cards ARE, not how
+          // many there are.
+          position: nextNodePosition(ns.map((n) => n.position)),
           data: { kind, config },
           // Appear animation: scale(.85)+translateY(6px)→1 + a brief ember glow
           // (canvas.css). Mount-once — React Flow keys nodes by id.

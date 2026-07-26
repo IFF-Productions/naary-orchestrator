@@ -18,6 +18,7 @@ import {
   asNodeConfig,
 } from "@naary/dsl";
 import type { NodeOutputMap } from "@naary/dsl";
+import * as wf from "@temporalio/workflow";
 import {
   computeDateTime,
   callXml,
@@ -41,7 +42,17 @@ export const handleSet: NodeHandler = async ({ cfg, ctx, node }) => {
 export const handleRenameKeys: NodeHandler = async ({ cfg, ctx, node }) => {
   // Pure node: reshape an upstream object's keys, entirely in the interpreter.
   const rkCfg = asNodeConfig(cfg, "renameKeys");
-  ctx[node.id] = resolveRenameKeys(rkCfg, ctx);
+  // #766: the original `rename[k] ?? k` read the PROTOTYPE CHAIN, so an upstream object carrying a
+  // literal `constructor` key produced an output key of `"function Object() { [native code] }"` —
+  // reachable from an innocent config, since arbitrary API responses do contain such fields.
+  // `ownRenameLookup` switches to an own-property lookup + a null-prototype accumulator.
+  //
+  // Behind patched() because this changes the output of DETERMINISTIC workflow code: an in-flight run
+  // would otherwise replay differently and fail with a nondeterminism error (CLAUDE.md: version
+  // interpreter changes with workflow.patched()). Histories predating the gate keep the old path.
+  ctx[node.id] = resolveRenameKeys(rkCfg, ctx, {
+    ownRenameLookup: wf.patched("rename-keys-own-lookup-v1"),
+  });
   return;
 };
 
