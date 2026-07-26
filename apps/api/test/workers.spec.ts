@@ -54,18 +54,40 @@ describe("toWorkerResponse", () => {
 describe("WorkersController (platform operators only)", () => {
   const OPERATOR = "ops@acme.io";
 
-  /** The env is read at call time, so set/restore around each case rather than mocking the module. */
-  function withOperators<T>(value: string | undefined, fn: () => T): T {
+  /**
+   * The env is read at call time, so set/restore around each case rather than mocking the module.
+   *
+   * AWAITS `fn` — the first version returned it directly, so with an async body the `finally` restored
+   * the env before the awaited work finished. It happened to pass (the controller reads the env
+   * synchronously before its first await) but the helper wasn't actually scoping anything, and would
+   * have started lying the moment the read moved after an await.
+   */
+  async function withOperators(
+    value: string | undefined,
+    fn: () => Promise<void>,
+  ): Promise<void> {
     const prev = process.env.PLATFORM_OPERATORS;
     if (value === undefined) delete process.env.PLATFORM_OPERATORS;
     else process.env.PLATFORM_OPERATORS = value;
     try {
-      return fn();
+      await fn();
     } finally {
       if (prev === undefined) delete process.env.PLATFORM_OPERATORS;
       else process.env.PLATFORM_OPERATORS = prev;
     }
   }
+
+  /**
+   * Guards the fix: proves the env is still set INSIDE an awaited body. Without the await above this
+   * reads undefined, so the helper's own contract is now tested rather than assumed.
+   */
+  it("scopes the env for the whole awaited body", async () => {
+    await withOperators("scoped@acme.io", async () => {
+      await Promise.resolve();
+      expect(process.env.PLATFORM_OPERATORS).toBe("scoped@acme.io");
+    });
+    expect(process.env.PLATFORM_OPERATORS).toBeUndefined();
+  });
 
   it("returns the fleet for a listed operator", async () => {
     const service = { list: vi.fn().mockResolvedValue([{ identity: "w1" }]) };
