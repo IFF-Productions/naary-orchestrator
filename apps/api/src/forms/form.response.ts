@@ -44,6 +44,62 @@ export class FormDefinitionResponse {
   @ApiProperty({ type: [FormFieldResponse] }) fields!: FormFieldResponse[];
 }
 
+/** How to submit the form the schema describes — the `x-naary-submit` annotation. JSON Schema
+ *  ignores unknown keywords, so this rides along inside the schema document itself. */
+export class FormSubmitHintResponse {
+  @ApiProperty({ example: "POST" }) method!: string;
+  @ApiProperty({ example: "/forms/3f9a1c2e-…" }) path!: string;
+  @ApiProperty({
+    example: false,
+    description:
+      "True when this environment's Turnstile gate is active. A solved `turnstileToken` is then " +
+      "required, and because Turnstile tokens are browser-solved, script submission is not " +
+      "supported while it is on.",
+  })
+  botProtection!: boolean;
+  @ApiProperty({ type: [String] }) notes!: string[];
+}
+
+/**
+ * A JSON Schema (draft 2020-12) for a form's submission body — the contract for POSTing to a form
+ * without our hosted page. `properties`/`required` mirror the form's declared fields.
+ *
+ * The guarantee is one-directional: a payload this schema accepts is a payload the submit route
+ * accepts. The reverse does not hold (the route additionally coerces numeric strings and strips
+ * unknown keys), so a stricter client is always safe. See src/forms/form-schema.ts.
+ */
+export class FormJsonSchemaResponse {
+  @ApiProperty({ example: "https://json-schema.org/draft/2020-12/schema" })
+  $schema!: string;
+  @ApiProperty({ required: false, example: "/forms/3f9a1c2e-…/schema" })
+  $id?: string;
+  @ApiProperty({ example: "Contact us" }) title!: string;
+  @ApiProperty({ required: false, example: "We'll get back to you." })
+  description?: string;
+  @ApiProperty({ example: "object" }) type!: string;
+  @ApiProperty({
+    type: "object",
+    additionalProperties: true,
+    description: "One JSON Schema property per declared form field.",
+    example: {
+      email: { type: "string", format: "email", maxLength: 10000 },
+      priority: { type: "string", enum: ["Low", "High"] },
+    },
+  })
+  properties!: Record<string, unknown>;
+  @ApiProperty({ required: false, type: [String], example: ["email"] })
+  required?: string[];
+  @ApiProperty({
+    example: true,
+    description:
+      "Always true: undeclared properties are accepted but discarded, so forbidding them here " +
+      "would reject payloads the endpoint takes.",
+  })
+  additionalProperties!: boolean;
+  @ApiProperty({ type: FormSubmitHintResponse, name: "x-naary-submit" })
+  "x-naary-submit"!: FormSubmitHintResponse;
+}
+
 /** Acknowledgement that a form submission started a run. Deliberately carries NO workflowId —
  *  the internal id embeds the tenantId, and the anonymous submitter has no use for it. */
 export class FormSubmitResponse {

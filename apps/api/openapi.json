@@ -7908,6 +7908,36 @@
         ]
       }
     },
+    "/forms/{formId}/schema": {
+      "get": {
+        "operationId": "FormsController_schema",
+        "parameters": [
+          {
+            "name": "formId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A JSON Schema (draft 2020-12) for this form's submission body. Sound, not complete: a payload it accepts is a payload POST /forms/{formId} accepts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormJsonSchemaResponse"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Forms"
+        ]
+      }
+    },
     "/tenants/{id}/forms": {
       "post": {
         "description": "Returns the public form path. Requires a monthly budget cap (the anonymous endpoint's spend backstop).",
@@ -19107,6 +19137,105 @@
         },
         "required": [
           "deleted"
+        ]
+      },
+      "FormSubmitHintResponse": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "example": "POST"
+          },
+          "path": {
+            "type": "string",
+            "example": "/forms/3f9a1c2e-…"
+          },
+          "botProtection": {
+            "type": "boolean",
+            "example": false,
+            "description": "True when this environment's Turnstile gate is active. A solved `turnstileToken` is then required, and because Turnstile tokens are browser-solved, script submission is not supported while it is on."
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "method",
+          "path",
+          "botProtection",
+          "notes"
+        ]
+      },
+      "FormJsonSchemaResponse": {
+        "type": "object",
+        "properties": {
+          "$schema": {
+            "type": "string",
+            "example": "https://json-schema.org/draft/2020-12/schema"
+          },
+          "$id": {
+            "type": "string",
+            "example": "/forms/3f9a1c2e-…/schema"
+          },
+          "title": {
+            "type": "string",
+            "example": "Contact us"
+          },
+          "description": {
+            "type": "string",
+            "example": "We'll get back to you."
+          },
+          "type": {
+            "type": "string",
+            "example": "object"
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "One JSON Schema property per declared form field.",
+            "example": {
+              "email": {
+                "type": "string",
+                "format": "email",
+                "maxLength": 10000
+              },
+              "priority": {
+                "type": "string",
+                "enum": [
+                  "Low",
+                  "High"
+                ]
+              }
+            }
+          },
+          "required": {
+            "example": [
+              "email"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": {
+            "type": "boolean",
+            "example": true,
+            "description": "Always true: undeclared properties are accepted but discarded, so forbidding them here would reject payloads the endpoint takes."
+          },
+          "x-naary-submit": {
+            "$ref": "#/components/schemas/FormSubmitHintResponse"
+          }
+        },
+        "required": [
+          "$schema",
+          "title",
+          "type",
+          "properties",
+          "additionalProperties",
+          "x-naary-submit"
         ]
       },
       "RegisterFormDto": {
