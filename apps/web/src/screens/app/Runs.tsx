@@ -16,6 +16,7 @@ import {
 } from "../../lib/run-status";
 import { useMode } from "../../mode";
 import { RerunMenu, VersionBadge } from "./RerunMenu";
+import { RunsPagination } from "./RunsPagination";
 import { fmtDurMs } from "./run-detail/run-view-model";
 
 const COLS = "28px 1.4fr 1fr 0.5fr 0.8fr 0.6fr 0.6fr 0.7fr 0.6fr";
@@ -91,8 +92,26 @@ export function Runs() {
   // other view) can't clobber the current one.
   const loadSeq = useRef(0);
 
-  async function load(archived = showArchived, q = debouncedQuery) {
-    const seq = ++loadSeq.current;
+  /**
+   * Invalidate every in-flight list request — page 1 AND any "load more" — and return the new seq.
+   *
+   * Called at the moment a view input is COMMITTED (search debounce firing, archived toggle), not
+   * just when `load()` starts. `load()` runs from an effect, i.e. after the commit, and in that
+   * window an in-flight `loadMore` still matched the old seq and appended rows from the previous
+   * result set. Usually `load()`'s `setRuns(rows)` then overwrote the damage — but if that request
+   * FAILS it only sets `error` and leaves `runs` alone, so the stale rows persist: the archived view
+   * showing active runs. Invalidating at the source removes the window instead of relying on a later
+   * write to paper over it.
+   */
+  function invalidateLoads(): number {
+    return ++loadSeq.current;
+  }
+
+  async function load(
+    archived = showArchived,
+    q = debouncedQuery,
+    seq = invalidateLoads(),
+  ) {
     try {
       // First page only — `loadMore` appends the rest. Any (re)load resets pagination, since the
       // cursor from a previous view/search doesn't address this result set.
@@ -163,8 +182,13 @@ export function Runs() {
   }
 
   // Debounce the search box so a server search fires ~300ms after typing stops, not per keystroke.
+  // Invalidating here (not just in load()) is what makes an in-flight "load more" for the PREVIOUS
+  // query stale the instant the new one is committed — see invalidateLoads.
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedQuery(query), 300);
+    const t = setTimeout(() => {
+      invalidateLoads();
+      setDebouncedQuery(query);
+    }, 300);
     return () => clearTimeout(t);
   }, [query]);
 
@@ -181,6 +205,7 @@ export function Runs() {
     setShowArchived(next);
     setRuns(null);
     setNextCursor(null); // the old view's cursor doesn't address this result set
+    invalidateLoads(); // any in-flight page for the OTHER view must not append into this one
     setSelected(new Set()); // selection is per-view
     setNotice(null);
     // The load effect (keyed on showArchived) does the refetch — no explicit load() here.
@@ -954,60 +979,15 @@ export function Runs() {
           );
         })}
 
-        {/* Pagination footer. Only rendered once a first page has arrived, so it never shows
-            beside the loading skeleton or the empty state. */}
-        {runs && runs.length > 0 && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 12,
-              flexWrap: "wrap",
-              padding: "14px 18px",
-            }}
-          >
-            <span
-              style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
-              aria-live="polite"
-            >
-              {/* Deliberately "N loaded", not "N runs": the tenant almost certainly has more, and
-                  claiming a total we never queried would be a lie. `showing` reflects the active
-                  status tab, which filters the LOADED rows (see the note by `rows`). */}
-              {rows.length === runs.length
-                ? `${runs.length} loaded`
-                : `${rows.length} of ${runs.length} loaded`}
-              {nextCursor ? "" : " · all runs"}
-            </span>
-            {nextCursor && (
-              <Button
-                variant="secondary"
-                onClick={() => void loadMore()}
-                disabled={loadingMore || bulkBusy}
-                loading={loadingMore}
-                data-testid="runs-load-more"
-              >
-                {loadingMore ? "Loading…" : "Load more"}
-              </Button>
-            )}
-          </div>
-        )}
-
-        {/* A status tab can hide every LOADED row while older matches sit unfetched — without this
-            the screen looks like "no failed runs" when it means "none in the newest N". */}
-        {runs && runs.length > 0 && rows.length === 0 && nextCursor && (
-          <div
-            style={{
-              padding: "18px",
-              textAlign: "center",
-              fontSize: "var(--text-xs)",
-              color: "var(--ink-3)",
-            }}
-          >
-            No {filter.toLowerCase()} runs among the {runs.length} loaded — load
-            more to search further back.
-          </div>
-        )}
+        <RunsPagination
+          loadedCount={runs?.length ?? 0}
+          visibleCount={rows.length}
+          filterLabel={filter}
+          nextCursor={nextCursor}
+          loadingMore={loadingMore}
+          disabled={bulkBusy}
+          onLoadMore={() => void loadMore()}
+        />
       </div>
     </div>
   );
