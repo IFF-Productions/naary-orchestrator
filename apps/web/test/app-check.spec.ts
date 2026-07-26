@@ -154,6 +154,20 @@ describe("explainAppCheckFailure", () => {
     expect(msg).toContain("recaptcha/enterprise.js?render=6Lsite");
   });
 
+  /**
+   * #792's actual root cause: the key existed, but as a CHALLENGE-BASED (checkbox) key.
+   * `render=` rejects those outright, and App Check — which calls execute() with no user
+   * interaction — can only use a score-based key. Key type is immutable, so "create a new
+   * one" is the fix and nothing about the provider setting helps. Named explicitly because
+   * the generic "check for a typo" advice sends you looking for a problem that isn't there.
+   */
+  it("names the checkbox-key cause for a 400 on both endpoints", () => {
+    const msg = explainAppCheckFailure(V3, recaptchaErr);
+    expect(msg).toMatch(/CHALLENGE-BASED \(checkbox\)/);
+    expect(msg).toMatch(/SCORE-BASED/);
+    expect(msg).toMatch(/immutable/);
+  });
+
   /** A DIFFERENT failure: reCAPTCHA worked, the App Check exchange didn't. */
   it("distinguishes a fetch-status error from a reCAPTCHA error", () => {
     const msg = explainAppCheckFailure(V3, {

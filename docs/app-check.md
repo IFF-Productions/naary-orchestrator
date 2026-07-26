@@ -36,6 +36,12 @@ the GH-Actions path the value comes from a repo secret, not the server `.env`.
 1. Firebase console → **App Check** → **Apps** → register the web app. Pick a provider
    (reCAPTCHA **Enterprise** is the current default) and copy the **site key** — it is
    public and belongs in the bundle.
+
+   The key **must be score-based**, not challenge-based (checkbox). App Check calls
+   `execute()` with no user interaction, so a checkbox key cannot work and fails with a
+   400 from `render=` (see Troubleshooting — this cost a debug cycle in #792). In Google
+   Cloud → Security → reCAPTCHA → Create key, that is the *score-based* option, not
+   "challenge (checkbox)"; the type cannot be changed afterwards.
 2. Add repo secrets (Settings → Secrets and variables → Actions):
    - `VITE_FIREBASE_APPCHECK_SITE_KEY` — the site key
    - `VITE_FIREBASE_APPCHECK_PROVIDER` — `enterprise` (default) or `v3`, matching the
@@ -85,12 +91,27 @@ curl -s -o /dev/null -w '%{http_code}\n' "https://www.google.com/recaptcha/enter
 
 - **200 on exactly one** ⇒ that is the key's real type. Set
   `VITE_FIREBASE_APPCHECK_PROVIDER` to `v3` or `enterprise` to match, then **run a release**.
-- **400 on both** ⇒ Google does not recognise the key. Nothing about the provider, the
-  domain list or CSP is relevant yet. Causes: a transposed/truncated paste (`-` vs `_` is a
-  classic), the wrong field copied (the reCAPTCHA *secret*, the Firebase Web API key, an app
-  id), a deleted key, or a key in a different project than `VITE_FIREBASE_PROJECT_ID`.
-  Re-copy it from the console. A 400 is also exactly what makes a `<script>` tag fire
-  `onerror`, so this and "the reCAPTCHA script won't load" are one symptom, not two.
+- **400 on both** ⇒ `render=` does not accept this key, and no provider setting will fix it.
+  In order of likelihood:
+  1. **It is a challenge-based (checkbox) key.** This is what actually happened in #792. If
+     the console's integration snippet for your key looks like
+
+     ```html
+     <script src="https://www.google.com/recaptcha/enterprise.js" async defer></script>
+     <div class="g-recaptcha" data-sitekey="…" data-action="LOGIN"></div>
+     ```
+
+     — a `g-recaptcha` **div**, and a script tag with **no `render=`** — then it is a
+     checkbox key. App Check calls `execute()` with no user interaction, so it needs a
+     **score-based** key, whose snippet is `enterprise.js?render=KEY` plus
+     `grecaptcha.enterprise.execute(...)`. `render=` rejects a checkbox key outright, which
+     is the 400. **Key type is immutable**: create a new score-based key, you cannot convert.
+  2. A transposed/truncated paste (`-` vs `_` is a classic), or the wrong field copied (the
+     reCAPTCHA *secret*, the Firebase Web API key, an app id).
+  3. A deleted key, or one in a different project than `VITE_FIREBASE_PROJECT_ID`.
+
+  A 400 is also exactly what makes a `<script>` tag fire `onerror`, so this and "the reCAPTCHA
+  script won't load" are one symptom, not two.
 
 For reference: Google's own public test key has the same 40-char shape (`6L` + `AAAAA` + 27)
 and returns **200**, so "it looks like a valid key" proves nothing.
