@@ -124,6 +124,17 @@ describe("explainAppCheckFailure", () => {
     ).toMatch(/DOES THE KEY RESOLVE/);
   });
 
+  /**
+   * A 200 from `render=` proves the key LOADS, not which provider to use — a freshly created
+   * score-based key returned 200 from BOTH endpoints (measured), so the earlier "200 on exactly
+   * one tells you the type" advice was wrong. The Firebase App Check registration is what decides.
+   */
+  it("does not claim a 200 identifies the provider", () => {
+    const msg = explainAppCheckFailure(V3, recaptchaErr);
+    expect(msg).not.toMatch(/200 on exactly one/);
+    expect(msg).toMatch(/App Check → Apps registered/);
+  });
+
   /** The swap is a SECRET change, not a code change — the cheapest fix, so it leads. */
   it("suggests the OPPOSITE provider, in the direction that fixes it", () => {
     expect(explainAppCheckFailure(V3, recaptchaErr)).toContain(
@@ -154,7 +165,7 @@ describe("explainAppCheckFailure", () => {
   it("leads with the does-the-key-resolve check, ahead of the provider swap", () => {
     const msg = explainAppCheckFailure(V3, recaptchaErr);
     const resolve = msg.indexOf("DOES THE KEY RESOLVE");
-    const swap = msg.indexOf("WRONG KEY TYPE");
+    const swap = msg.indexOf("WRONG PROVIDER");
     expect(resolve).toBeGreaterThan(-1);
     expect(swap).toBeGreaterThan(resolve);
     // Copy-pasteable, with the real key substituted in — both endpoints, since a 400 on
