@@ -1,6 +1,6 @@
 {
   "name": "@naary/contracts",
-  "version": "0.0.29",
+  "version": "0.0.30",
   "private": true,
   "description": "Execution protocol shared by worker + api: task queue, signal/query definitions, execution-state type. Client-safe.",
   "main": "dist/index.js",
