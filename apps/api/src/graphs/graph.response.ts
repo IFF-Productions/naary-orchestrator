@@ -35,6 +35,106 @@ export class GenerateGraphResponse {
   >;
 }
 
+/** One node's honest translation record from an n8n import (#579). */
+export class N8nNodeReportResponse {
+  @ApiProperty({
+    example: "High value?",
+    description: "The node's name in n8n.",
+  })
+  n8nName!: string;
+  @ApiProperty({ example: "n8n-nodes-base.if" }) n8nType!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: "high-value",
+    description:
+      "Our node id in the draft graph. Null when the node is intentionally NOT a graph node " +
+      "(`skipped`: an n8n sticky note, a disabled node, or an AI sub-node).",
+  })
+  nodeId!: string | null;
+  @ApiProperty({ type: String, nullable: true, example: "if" })
+  nodeType!: string | null;
+  @ApiProperty({
+    example: "imported",
+    enum: ["imported", "approximated", "unmapped", "skipped"],
+    description:
+      "`imported` = faithful. `approximated` = runs, but something was reshaped. `unmapped` = no " +
+      "equivalent, so it became a noOp placeholder carrying its original n8n config under " +
+      "`__n8n`. `skipped` = deliberately not a graph node.",
+  })
+  status!: string;
+  @ApiProperty({
+    type: [String],
+    description:
+      "What was lost or is left to do. Always non-empty unless status is `imported`.",
+  })
+  notes!: string[];
+}
+
+/** A credential TYPE the n8n workflow used. Never an id, an account name, or a secret. */
+export class N8nCredentialReportResponse {
+  @ApiProperty({ example: "httpHeaderAuth" }) n8nType!: string;
+  @ApiProperty({ type: [String], description: "n8n node names that used it." })
+  usedBy!: string[];
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: "custom",
+    description:
+      "The connection type to create here, or null when we have no equivalent.",
+  })
+  suggestedConnectionType!: string | null;
+}
+
+/** One n8n expression we could not translate. */
+export class N8nUnconvertedExpressionResponse {
+  @ApiProperty({ example: "high-value" }) nodeId!: string;
+  @ApiProperty({ example: "subject" }) field!: string;
+  @ApiProperty({ example: "{{ $now.toISO() }}" }) expression!: string;
+  @ApiProperty({
+    example: "n8n's $now is a DateTime object; use a dateTime node instead",
+  })
+  reason!: string;
+}
+
+/**
+ * An imported n8n workflow: an UNSAVED draft graph plus the mapping report (#579).
+ *
+ * Save it with `POST /graphs` once credentials have been reconnected — there is no draft state in
+ * the schema, so saving creates version 1.
+ */
+export class ImportN8nResponse {
+  @ApiProperty({ example: "Order webhook triage" }) name!: string;
+  @ApiProperty({
+    type: "object",
+    additionalProperties: true,
+    description: "The draft graph { nodes, edges, startNodeId }. Not saved.",
+  })
+  graph!: Record<string, unknown>;
+  @ApiProperty({
+    type: [N8nNodeReportResponse],
+    description:
+      "One entry per node in the export — nothing is dropped silently.",
+  })
+  nodes!: N8nNodeReportResponse[];
+  @ApiProperty({ type: [N8nCredentialReportResponse] })
+  credentials!: N8nCredentialReportResponse[];
+  @ApiProperty({ type: [N8nUnconvertedExpressionResponse] })
+  unconvertedExpressions!: N8nUnconvertedExpressionResponse[];
+  @ApiProperty({
+    type: [String],
+    description:
+      "Whole-workflow warnings to read BEFORE saving (e.g. a schedule trigger goes live on save).",
+  })
+  warnings!: string[];
+  @ApiProperty({
+    type: "object",
+    additionalProperties: { type: "number" },
+    example: { imported: 4, approximated: 1, unmapped: 0, skipped: 1 },
+  })
+  counts!: Record<string, number>;
+}
+
 /** The latest graph for a key (opened in the canvas). */
 export class GraphDetailResponse {
   @ApiProperty() workflowKey!: string;

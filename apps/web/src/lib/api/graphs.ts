@@ -17,6 +17,7 @@ import {
 import type {
   GraphSummary,
   GraphVersion,
+  N8nImportResult,
   NamedGraph,
   Promotion,
   Tag,
@@ -145,6 +146,16 @@ export const graphsApi = {
         }),
       },
     );
+  },
+  // n8n import (#579): an n8n workflow export → an UNSAVED draft graph plus a per-node mapping
+  // report (imported / approximated / unmapped-with-placeholder / skipped). Nothing is persisted;
+  // save the draft with saveGraph. Credentials in the export are never imported — the response says
+  // which connection types to create instead. `workflow` is the already-parsed JSON object.
+  importN8nWorkflow(workflow: unknown): Promise<N8nImportResult> {
+    return http("/graphs/import/n8n", {
+      method: "POST",
+      body: JSON.stringify({ workflow }),
+    });
   },
   // AI workflow builder: describe a workflow → a validated DRAFT graph (unsaved).
   // `provider` (optional) picks the model provider; omitted ⇒ the server auto-selects

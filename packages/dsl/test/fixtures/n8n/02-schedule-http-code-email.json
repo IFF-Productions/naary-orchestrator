@@ -1,0 +1,129 @@
+{
+  "name": "Nightly metrics digest",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 6,
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      },
+      "id": "11111111-2222-4333-8444-555555555555",
+      "name": "Every morning",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-200, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://metrics.example.com/api/summary",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "window",
+              "value": "24h"
+            }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "22222222-3333-4444-8555-666666666666",
+      "name": "Fetch summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [20, 0],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "4",
+          "name": "Metrics API key"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.first().json.rows;\nconst total = rows.reduce((a, r) => a + r.count, 0);\nreturn [{ json: { total, rows: rows.length } }];"
+      },
+      "id": "33333333-4444-4555-8666-777777777777",
+      "name": "Summarise rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0],
+      "notes": "Totals the per-endpoint counts."
+    },
+    {
+      "parameters": {
+        "fromEmail": "reports@example.com",
+        "toEmail": "ops@example.com",
+        "subject": "=Daily metrics — {{ $json.total }} events",
+        "emailFormat": "text",
+        "text": "={{ $json.rows }} endpoints reported {{ $json.total }} events in the last 24h.",
+        "options": {}
+      },
+      "id": "44444444-5555-4666-8777-888888888888",
+      "name": "Email the digest",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [460, 0],
+      "credentials": {
+        "smtp": {
+          "id": "9",
+          "name": "Company SMTP"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every morning": {
+      "main": [
+        [
+          {
+            "node": "Fetch summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch summary": {
+      "main": [
+        [
+          {
+            "node": "Summarise rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarise rows": {
+      "main": [
+        [
+          {
+            "node": "Email the digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "active": true,
+  "versionId": "aaaa1111-bbbb-4ccc-8ddd-eeeeffff0000",
+  "meta": {
+    "instanceId": "ffffeeeeddddccccbbbbaaaa99998888777766665555444433332222111100009"
+  },
+  "tags": ["reporting"]
+}

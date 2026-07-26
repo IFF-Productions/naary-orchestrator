@@ -44,6 +44,13 @@ export {
   type BuiltIntegrationRequest,
 } from "./integrations";
 export {
+  planIntegrationCall,
+  pickConnectionTestAction,
+  type IntegrationCallPlan,
+  type IntegrationCallPlanInput,
+  type ConnectionTestProbe,
+} from "./integration-request";
+export {
   resolveTemplates,
   resolveTemplateString,
   templateTokens,
@@ -69,6 +76,11 @@ export {
 export { resolveHttpRequest, type ResolvedHttpRequest } from "./http-request";
 export { resolveGraphQL, type ResolvedGraphQL } from "./graphql";
 export { parseCurl, type CurlImportResult } from "./curl-import";
+// The n8n importer (#579) is deliberately NOT re-exported here. Workflow code imports this barrel
+// for real values (computeItemsRegions, resolveHmac, …), so anything reachable from it lands in the
+// deterministic workflow bundle — and ~1300 lines of one-shot authoring-time translation has no
+// business there (Tier-1 rule 2; same reasoning that keeps zod behind ./registry). The API imports
+// `@naary/dsl/dist/n8n-import` directly, mirroring graphs.service.ts's `@naary/dsl/dist/registry`.
 export {
   parseOpenApi,
   parseIntrospection,

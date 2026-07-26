@@ -332,13 +332,23 @@ export function Workflows() {
             onChange={setFilter}
           />
           {canCreateWorkflow(perms) && (
-            <Button
-              variant="primary"
-              icon="plus"
-              onClick={() => navigate("/app/canvas")}
-            >
-              New workflow
-            </Button>
+            <>
+              {/* n8n migration path (#579) — gated on the same permission as creating a workflow,
+                  because that is what finishing an import does. */}
+              <Button
+                variant="secondary"
+                onClick={() => navigate("/app/import/n8n")}
+              >
+                Import from n8n
+              </Button>
+              <Button
+                variant="primary"
+                icon="plus"
+                onClick={() => navigate("/app/canvas")}
+              >
+                New workflow
+              </Button>
+            </>
           )}
         </div>
       </div>
