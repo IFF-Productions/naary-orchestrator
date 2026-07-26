@@ -74,27 +74,56 @@ describe("guardrail routes are OWNER/ADMIN only", () => {
   // holding `edit` on a workflow must not be able to switch the workspace's controls off.
   it.each(["member", "viewer", "editor"])("403s for role %s", async (role) => {
     findUnique.mockResolvedValue({ agentGuardrails: POLICY });
-    expect(() => controller.getGuardrails("t1", principal(role))).toThrow(
-      ForbiddenException,
-    );
-    expect(() => controller.saveGuardrails("t1", {}, principal(role))).toThrow(
-      ForbiddenException,
-    );
+    // `rejects`, not a sync throw: the routes are async (they await the service), so the
+    // ForbiddenException arrives as a rejected promise.
+    await expect(
+      controller.getGuardrails("t1", principal(role)),
+    ).rejects.toThrow(ForbiddenException);
+    await expect(
+      controller.saveGuardrails("t1", {}, principal(role)),
+    ).rejects.toThrow(ForbiddenException);
     expect(upsert).not.toHaveBeenCalled();
   });
 
   it.each(["owner", "admin"])("allows role %s", async (role) => {
     findUnique.mockResolvedValue({ agentGuardrails: POLICY });
+    // ENVELOPED — the declared GuardrailPolicyResponse is `{ policy: <object> }`, and the
+    // route used to return the bare policy, so every generated client had the wrong shape.
     await expect(
       controller.getGuardrails("t1", principal(role)),
-    ).resolves.toEqual(POLICY);
+    ).resolves.toEqual({ policy: POLICY });
     await expect(
       controller.saveGuardrails("t1", POLICY, principal(role)),
-    ).resolves.toEqual(POLICY);
+    ).resolves.toEqual({ policy: POLICY });
   });
 
-  it("allows an actor-less internal call (no principal ⇒ no role to check)", async () => {
-    findUnique.mockResolvedValue({ agentGuardrails: POLICY });
-    await expect(controller.getGuardrails("t1")).resolves.toEqual(POLICY);
+  /**
+   * FAILS CLOSED with no principal. This previously ASSERTED the opposite ("no principal ⇒ no
+   * role to check"), which made an authz gate on the workspace's agent controls dependent on
+   * `@CurrentPrincipal()` always resolving — a wiring change elsewhere would have silently
+   * opened both routes. An internal, actor-less caller belongs on GuardrailsService directly,
+   * not on the HTTP route.
+   */
+  it.each([undefined, null])(
+    "refuses a call with no principal (%s) rather than skipping the role check",
+    async (missing) => {
+      findUnique.mockResolvedValue({ agentGuardrails: POLICY });
+      await expect(
+        controller.getGuardrails("t1", missing as never),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        controller.saveGuardrails("t1", POLICY, missing as never),
+      ).rejects.toThrow(ForbiddenException);
+    },
+  );
+
+  it("does not read or write the policy when the principal is missing", async () => {
+    findUnique.mockClear();
+    upsert.mockClear();
+    await expect(
+      controller.saveGuardrails("t1", POLICY, undefined as never),
+    ).rejects.toThrow(ForbiddenException);
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
   });
 });

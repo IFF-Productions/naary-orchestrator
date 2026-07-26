@@ -11,6 +11,7 @@ import {
   InvalidEvalDatasetError,
   isLlmJudge,
   judgeOutcome,
+  MAX_ASSERTIONS_PER_CASE,
   parseEvalDatasetBody,
   type Assertion,
 } from "../src/assertions";
@@ -401,5 +402,70 @@ describe("evalDatasetBodySchema — the write gate", () => {
       InvalidEvalDatasetError,
     );
     expect(parseEvalDatasetBody(ok).cases).toHaveLength(2);
+  });
+});
+
+describe("the merged assertion cap is enforced at SAVE, not silently truncated", () => {
+  const assertion = (i: number) => ({
+    kind: "jsonPathEquals" as const,
+    path: `a${i}`,
+    value: i,
+  });
+  const dataset = (datasetLevel: number, caseLevel: number) => ({
+    assertions: Array.from({ length: datasetLevel }, (_, i) => assertion(i)),
+    cases: [
+      {
+        name: "c1",
+        input: {},
+        assertions: Array.from({ length: caseLevel }, (_, i) =>
+          assertion(1000 + i),
+        ),
+      },
+    ],
+  });
+
+  it("accepts a dataset whose merged total is exactly at the cap", () => {
+    const res = evalDatasetBodySchema.safeParse(
+      dataset(MAX_ASSERTIONS_PER_CASE - 1, 1),
+    );
+    expect(res.success).toBe(true);
+  });
+
+  /**
+   * The hole: the two array limits are independent, so 50 + 50 parsed fine and
+   * `assertionsForCase` then sliced the merged list back to 50 — dropping the CASE's own
+   * assertions, which come last. A case could report a pass on checks that never ran.
+   */
+  it("REJECTS a merged total over the cap instead of dropping the case's own assertions", () => {
+    const res = evalDatasetBodySchema.safeParse(
+      dataset(MAX_ASSERTIONS_PER_CASE, MAX_ASSERTIONS_PER_CASE),
+    );
+    expect(res.success).toBe(false);
+  });
+
+  it("rejects when only ONE case of several is over the cap", () => {
+    const body = {
+      assertions: Array.from({ length: 40 }, (_, i) => assertion(i)),
+      cases: [
+        { name: "ok", input: {}, assertions: [assertion(900)] },
+        {
+          name: "over",
+          input: {},
+          assertions: Array.from({ length: 20 }, (_, i) => assertion(1000 + i)),
+        },
+      ],
+    };
+    expect(evalDatasetBodySchema.safeParse(body).success).toBe(false);
+  });
+
+  it("a dataset that PASSES the gate never loses an assertion to the slice", () => {
+    const body = dataset(MAX_ASSERTIONS_PER_CASE - 3, 3);
+    const parsed = evalDatasetBodySchema.parse(body) as never as {
+      assertions: unknown[];
+      cases: { assertions: unknown[] }[];
+    };
+    expect(
+      assertionsForCase(parsed as never, parsed.cases[0] as never),
+    ).toHaveLength(MAX_ASSERTIONS_PER_CASE);
   });
 });

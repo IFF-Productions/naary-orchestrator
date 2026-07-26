@@ -160,7 +160,27 @@ export class EvalsService implements OnModuleInit, OnModuleDestroy {
       },
     });
     if (!row) throw new NotFoundException("Eval dataset not found");
-    return row.body as unknown as EvalDatasetBody;
+    return this.parseStored(row.body, name);
+  }
+
+  /**
+   * Validate a STORED dataset body before it leaves the service. The write gate gained its rules
+   * over time (the merged-assertion cap most recently), so a row written earlier — or seeded, or
+   * promoted in — can be shapes the current schema rejects. Casting instead of parsing sent those
+   * straight to a client, and worse into `startRun`, where a missing field surfaces as a confusing
+   * child-workflow failure rather than "this dataset is invalid". Fail closed and VISIBLY, the
+   * same posture as the stored guardrail policy.
+   */
+  private parseStored(body: unknown, name: string): EvalDatasetBody {
+    const parsed = evalDatasetBodySchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(
+        `Stored eval dataset '${name}' is invalid — ${parsed.error.issues
+          .map((i) => `${i.path.join(".") || "dataset"} ${i.message}`)
+          .join("; ")}. Re-save it to fix.`,
+      );
+    }
+    return parsed.data as EvalDatasetBody;
   }
 
   /**
@@ -283,7 +303,9 @@ export class EvalsService implements OnModuleInit, OnModuleDestroy {
       },
     });
     if (!dataset) throw new NotFoundException("Eval dataset not found");
-    const body = dataset.body as unknown as EvalDatasetBody;
+    // Validate before launching N child workflows off it — an invalid dataset must fail here,
+    // not as a confusing per-case failure once the run is under way.
+    const body = this.parseStored(dataset.body, datasetName);
     if (!body?.cases?.length) {
       throw new BadRequestException("Eval dataset has no cases");
     }

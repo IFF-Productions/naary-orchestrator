@@ -146,6 +146,63 @@ describe("saveDataset", () => {
   });
 });
 
+/**
+ * A STORED body is not automatically a valid one: the write gate gained rules over time (the
+ * merged-assertion cap most recently), and rows can also arrive by seed or promotion. Casting
+ * instead of parsing handed those to clients and, worse, into `startRun` — where a missing field
+ * surfaces as a confusing child-workflow failure instead of "this dataset is invalid".
+ */
+describe("a stored dataset is validated on the way OUT", () => {
+  it.each([
+    ["no cases", { cases: [] }],
+    ["a case with no name", { cases: [{ input: {} }] }],
+    ["duplicate case names", { cases: [{ name: "a", input: {} }, { name: "a", input: {} }] }],
+    ["an unknown top-level key", { cases: [{ name: "a", input: {} }], bogus: 1 }],
+    ["not an object at all", "corrupted"],
+  ])("getDataset 400s on %s", async (_label, body) => {
+    datasetFindUnique.mockResolvedValue({ name: "golden", body });
+    await expect(
+      service().getDataset("t1", "e1", "refunds", "golden"),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("startRun refuses an invalid stored dataset BEFORE launching any child workflow", async () => {
+    datasetFindUnique.mockResolvedValue({
+      name: "golden",
+      // 50 dataset-level + 50 case-level: accepted by the OLD gate, then silently truncated.
+      body: {
+        assertions: Array.from({ length: 50 }, (_, i) => ({
+          kind: "jsonPathEquals",
+          path: `a${i}`,
+          value: i,
+        })),
+        cases: [
+          {
+            name: "c1",
+            input: {},
+            assertions: Array.from({ length: 50 }, (_, i) => ({
+              kind: "jsonPathEquals",
+              path: `b${i}`,
+              value: i,
+            })),
+          },
+        ],
+      },
+    });
+    await expect(
+      service().startRun("t1", "e1", "refunds", "golden"),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(runCreate).not.toHaveBeenCalled();
+  });
+
+  it("passes a VALID stored dataset through untouched", async () => {
+    datasetFindUnique.mockResolvedValue({ name: "golden", body: DATASET });
+    await expect(
+      service().getDataset("t1", "e1", "refunds", "golden"),
+    ).resolves.toEqual(DATASET);
+  });
+});
+
 describe("deleteDataset — must not cascade away the eval history", () => {
   it("REFUSES while the dataset has runs (EvalRun cascades; that history IS the AC2 record)", async () => {
     datasetFindUnique.mockResolvedValue({ id: "ds-1", _count: { runs: 3 } });

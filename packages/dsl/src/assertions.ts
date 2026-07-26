@@ -318,6 +318,10 @@ export function assertionsForCase(
   dataset: EvalDatasetBody,
   c: EvalCase,
 ): Assertion[] {
+  // The save gate now REFUSES a dataset whose merged total exceeds the cap, so this slice is a
+  // backstop for rows written before that check existed — not the enforcement point. (It used to
+  // be the only one, which meant a case could silently lose its own assertions and still report
+  // a pass.)
   return [...(dataset.assertions ?? []), ...(c.assertions ?? [])].slice(
     0,
     MAX_ASSERTIONS_PER_CASE,
@@ -393,6 +397,20 @@ export const evalDatasetBodySchema = z
   .refine(
     (d) => new Set(d.cases.map((c) => c.name)).size === d.cases.length,
     "case names must be unique within a dataset",
+  )
+  // MAX_ASSERTIONS_PER_CASE is documented as the cap AFTER MERGING, but the two array limits
+  // above are independent — so 50 dataset-level + 50 case-level parsed fine and then
+  // `assertionsForCase` sliced the merged list back to 50, silently dropping the CASE's own
+  // assertions (they come last in the merge). A case can then score green on checks that were
+  // never run. Enforce the real contract here, so it's a 400 at save instead of a quiet gap.
+  .refine(
+    (d) =>
+      d.cases.every(
+        (c) =>
+          (d.assertions?.length ?? 0) + (c.assertions?.length ?? 0) <=
+          MAX_ASSERTIONS_PER_CASE,
+      ),
+    `a case's dataset-level + case-level assertions must total at most ${MAX_ASSERTIONS_PER_CASE}`,
   );
 
 /** A stored dataset body that does not match the schema. */

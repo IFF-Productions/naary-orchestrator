@@ -50,9 +50,21 @@ export class SettingsController {
   // activity, makes resolveToolPolicy return nothing, and makes the save gate a no-op). A member
   // who merely holds `edit` on a workflow must not be able to switch off the workspace's controls.
 
-  /** 403 unless the caller is a workspace owner/admin. Same shape as tokens.controller. */
-  private assertAdmin(principal?: Principal): void {
-    if (principal && principal.role !== "owner" && principal.role !== "admin") {
+  /**
+   * 403 unless the caller is a workspace owner/admin. FAILS CLOSED on a missing principal:
+   * `if (principal && …)` skipped the check entirely whenever `@CurrentPrincipal()` didn't
+   * resolve, which on an authz gate for the workspace's agent controls is the wrong default —
+   * a wiring change elsewhere would have quietly opened it. tokens.controller and
+   * workers.controller both take a NON-optional principal for the same reason. An internal,
+   * actor-less caller should use `GuardrailsService` directly rather than this HTTP route.
+   */
+  private assertAdmin(principal: Principal): void {
+    if (!principal) {
+      throw new ForbiddenException(
+        "Changing the agent guardrail policy requires a signed-in owner or admin.",
+      );
+    }
+    if (principal.role !== "owner" && principal.role !== "admin") {
       throw new ForbiddenException(
         "Only workspace owners or admins can view or change the agent guardrail policy.",
       );
@@ -64,12 +76,15 @@ export class SettingsController {
     ok: GuardrailPolicyResponse,
   })
   @Get("guardrails")
-  getGuardrails(
+  async getGuardrails(
     @Param("id") tenantId: string,
-    @CurrentPrincipal() principal?: Principal,
-  ): Promise<AgentGuardrailPolicy> {
+    @CurrentPrincipal() principal: Principal,
+  ): Promise<{ policy: AgentGuardrailPolicy }> {
     this.assertAdmin(principal);
-    return this.guardrails.get(tenantId);
+    // ENVELOPED to match GuardrailPolicyResponse, which models `{ policy: <object> }`. Returning
+    // the bare policy made the OpenAPI contract wrong for every generated client, and an envelope
+    // also leaves room to report derived facts (e.g. "empty") later without a breaking change.
+    return { policy: await this.guardrails.get(tenantId) };
   }
 
   @ApiEndpoint({
@@ -77,15 +92,16 @@ export class SettingsController {
     ok: GuardrailPolicyResponse,
   })
   @Put("guardrails")
-  saveGuardrails(
+  async saveGuardrails(
     @Param("id") tenantId: string,
     // Untyped body on purpose: the shape is validated by `agentGuardrailPolicySchema` (zod) in the
     // service, which is the SAME schema the worker and the save gate parse with — a second
     // class-validator DTO would be a drifting duplicate of the security contract.
     @Body() body: unknown,
-    @CurrentPrincipal() principal?: Principal,
-  ): Promise<AgentGuardrailPolicy> {
+    @CurrentPrincipal() principal: Principal,
+  ): Promise<{ policy: AgentGuardrailPolicy }> {
     this.assertAdmin(principal);
-    return this.guardrails.save(tenantId, body);
+    // Same envelope as the GET, so a client can round-trip one shape.
+    return { policy: await this.guardrails.save(tenantId, body) };
   }
 }

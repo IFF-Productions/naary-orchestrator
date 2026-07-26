@@ -191,10 +191,19 @@ async function toolApprovalGate(
   // therefore TOTAL (an "allow" verdict is stored explicitly) and a miss means "not yet evaluated",
   // which triggers a real policy evaluation for exactly this ref. Cost: one activity call per
   // DISTINCT resolved ref per run segment.
-  const memo = (ctx[TOOL_POLICY_CTX_KEY] ??= {}) as Record<
-    string,
-    ToolPolicyVerdict
-  >;
+  // A node's output lands at `ctx[node.id]`, so a graph is free to have a node id equal to this
+  // reserved key — in which case the slot holds that node's output (possibly a string or number)
+  // and `memo[ref] = …` would throw, wedging an otherwise valid run. Reset anything that isn't a
+  // plain record. Pure ctx read/write, no Temporal command, so replay-safe without a patch marker.
+  const existing = ctx[TOOL_POLICY_CTX_KEY];
+  if (
+    !existing ||
+    typeof existing !== "object" ||
+    Array.isArray(existing)
+  ) {
+    ctx[TOOL_POLICY_CTX_KEY] = {};
+  }
+  const memo = ctx[TOOL_POLICY_CTX_KEY] as Record<string, ToolPolicyVerdict>;
   if (!Object.prototype.hasOwnProperty.call(memo, ref)) {
     const resolved = await resolveToolPolicy({
       tenantId: runCtx.tenantId,
@@ -228,17 +237,18 @@ async function toolApprovalGate(
   // Record-before-status, the same ATOMIC-AWAIT invariant the humanApproval gate documents: the
   // API's stateQuery reads `__approval` whenever status is awaiting_approval, so the record must
   // exist first or a query can observe a pause with no record.
-  const snapshot: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(ctx)) {
-    if (!k.startsWith("__")) snapshot[k] = v;
-  }
   const record: ApprovalAwaitingRecord = await prepareApproval({
     tenantId: runCtx.tenantId,
     nodeId: node.id,
     // No routing/SLA config: a tool gate is policy-driven, not authored on a node. prepareApproval
     // still supplies the pausedAt clock stamp (a side effect, hence the activity).
     config: {},
-    ctx: snapshot,
+    // EMPTY on purpose. prepareApproval reads `ctx` only to resolve `config.contextFields`
+    // templates, and a tool gate has no config — so a ctx snapshot here would be copied into the
+    // activity input and the workflow history, then replayed on every workflow task, for a pause
+    // that can last days. Nothing would ever read it. (An authored humanApproval still sends its
+    // snapshot, because its contextFields need it.)
+    ctx: {},
   });
   // Pure ctx write of the ref so the inbox/Slack/public prompt can say WHAT is being approved.
   record.toolRef = ref;
