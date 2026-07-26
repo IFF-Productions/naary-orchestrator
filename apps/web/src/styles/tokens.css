@@ -5,7 +5,30 @@
    Dark-first; light theme via [data-theme="light"].
    ============================================================ */
 
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+/* IBM Plex, SELF-HOSTED (@fontsource) — deliberately not the fonts.googleapis.com CSS API.
+
+   Three reasons this can't be a Google Fonts @import:
+
+   1. It didn't work. Our CSP is `style-src 'self' 'unsafe-inline'; font-src 'self' data:`
+      (apps/web/nginx.conf), so the browser blocked BOTH the stylesheet and the .woff2 files it
+      points at — in production every surface silently fell back to system-ui. `font-src 'self'`
+      shows the intended posture was always self-hosting; only this @import disagreed.
+   2. The public pages (`/f/:id`, `/c/:id`) are embedded on TENANT sites. Hotlinking Google Fonts
+      from an embedded widget leaks the end user's IP to a third party on our customers' behalf —
+      the practice German courts have already ruled a GDPR violation.
+   3. It was a render-blocking request to a third-party origin on first paint.
+
+   Behaviour is preserved, not narrowed: these are the all-subset stylesheets, so each `@font-face`
+   carries a `unicode-range` and the browser downloads only the subsets a page actually uses —
+   exactly what the css2 API was doing. Weights match the old query (Sans 400/500/600/700,
+   Mono 400/500/600); adding a weight to `--font-sans` usage means adding its import here. */
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-sans/700.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
 
 :root {
   /* --- Base neutrals (dark) --- */
