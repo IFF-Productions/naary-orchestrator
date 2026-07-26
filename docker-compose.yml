@@ -343,6 +343,10 @@ services:
         VITE_FIREBASE_STORAGE_BUCKET: ${VITE_FIREBASE_STORAGE_BUCKET:-}
         VITE_FIREBASE_MESSAGING_SENDER_ID: ${VITE_FIREBASE_MESSAGING_SENDER_ID:-}
         VITE_FIREBASE_APP_ID: ${VITE_FIREBASE_APP_ID:-}
+        # App Check: public reCAPTCHA site key + which provider it is
+        # (enterprise|v3). UNSET ⇒ App Check not initialized (see apps/web/src/lib/app-check.ts).
+        VITE_FIREBASE_APPCHECK_SITE_KEY: ${VITE_FIREBASE_APPCHECK_SITE_KEY:-}
+        VITE_FIREBASE_APPCHECK_PROVIDER: ${VITE_FIREBASE_APPCHECK_PROVIDER:-}
         # Sentry browser DSN (publishable) — UNSET ⇒ Sentry off in the SPA.
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
         VITE_SENTRY_TRACES_SAMPLE_RATE: ${VITE_SENTRY_TRACES_SAMPLE_RATE:-}
