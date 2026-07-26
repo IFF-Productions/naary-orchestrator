@@ -16,10 +16,9 @@
 # - one image is built once and reused by api + worker.
 # Production-grade images (distroless, non-root, pruned, dist-only) are a later
 # infra task — see PRODUCTION-READINESS.md §3.A.
-# Node 22 (LTS): pnpm 11 requires Node >= 22 (uses a builtin absent in Node 20).
 # Node major. Keep in lockstep with /.nvmrc and package.json `engines` — those are what CI and
-# local dev read. Overridable at build time (`--build-arg NODE_VERSION=24`) so a rollback is a
-# flag, not an edit. 24 is the ACTIVE LTS (Krypton); 26 is Current until Oct 2026.
+# local dev read. Overridable at build time (`--build-arg NODE_VERSION=26`) so trying another
+# major is a flag, not an edit across four files. 24 is the ACTIVE LTS (Krypton); 26 is Current until Oct 2026.
 ARG NODE_VERSION=24
 
 FROM node:${NODE_VERSION}-bookworm-slim

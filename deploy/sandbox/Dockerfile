@@ -9,8 +9,8 @@
 # egress-test.sh). Runs as a non-root user with a read-only root fs (+ /tmp tmpfs).
 
 # Node major. Keep in lockstep with /.nvmrc and package.json `engines` — those are what CI and
-# local dev read. Overridable at build time (`--build-arg NODE_VERSION=24`) so a rollback is a
-# flag, not an edit. 24 is the ACTIVE LTS (Krypton); 26 is Current until Oct 2026.
+# local dev read. Overridable at build time (`--build-arg NODE_VERSION=26`) so trying another
+# major is a flag, not an edit across four files. 24 is the ACTIVE LTS (Krypton); 26 is Current until Oct 2026.
 ARG NODE_VERSION=24
 
 FROM node:${NODE_VERSION}-bookworm-slim

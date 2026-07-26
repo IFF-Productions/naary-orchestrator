@@ -33,7 +33,8 @@ style nit.
 
 ## Stack
 
-- **TypeScript** (Node 24 LTS — pinned in `/.nvmrc`, which CI and the Dockerfiles both read),
+- **TypeScript** (Node 24 LTS — the MAJOR is declared in `/.nvmrc`, which CI and the Dockerfiles
+  both read; patch releases float deliberately, so security fixes arrive without a repo change),
   **NestJS** (control plane / HTTP).
 - **Temporal** (TS SDK) — durable execution. `@temporalio/{client,worker,workflow,activity,testing}`.
 - **Postgres** + **Prisma** — graph definitions, tenant credentials, usage ledger.

@@ -37,9 +37,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # No `version:` on purpose — pnpm/action-setup reads `packageManager` from
+      # package.json, so CI can't drift from what corepack gives a developer locally.
       - uses: pnpm/action-setup@v6
         with:
-          version: 11.9.0
           dest: ${{ runner.temp }}/setup-pnpm
 
       # A follow-up could add `cache: pnpm` now we're on a hosted runner, where the pnpm

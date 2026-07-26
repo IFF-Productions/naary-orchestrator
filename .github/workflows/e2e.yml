@@ -125,9 +125,10 @@ jobs:
       # account (NetworkService), so the default ~/setup-pnpm is ONE shared folder — two
       # concurrent jobs race on it and the loser dies with "EPERM: operation not permitted,
       # rmdir ...\setup-pnpm\...". runner.temp is per-runner (and wiped between jobs).
+      # No `version:` on purpose — pnpm/action-setup reads `packageManager` from
+      # package.json, so CI can't drift from what corepack gives a developer locally.
       - uses: pnpm/action-setup@v6
         with:
-          version: 11.9.0
           dest: ${{ runner.temp }}/setup-pnpm
 
       # A follow-up could add `cache: pnpm` now we're on a hosted runner, where the pnpm
