@@ -35,7 +35,9 @@ export const Signup: Story = { args: { initialMode: "signup" } };
 
 /** Typing a valid email/password drives nodes 2–3 to done; submit starts the
  *  staged run (verify → paused approval gate → provision) and lands on done
- *  when the mocked auth promise resolves (~4.2s). */
+ *  when the mocked auth promise resolves (~4.2s). Also the best look at the
+ *  bot-protection SIDE gate: it runs first (dashed spur off the trigger,
+ *  animating during `verify`) and then settles to done. */
 export const SimulationRunning: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
