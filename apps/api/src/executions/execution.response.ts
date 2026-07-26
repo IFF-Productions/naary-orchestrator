@@ -71,6 +71,25 @@ export class RunListItemResponse {
   graphVersion!: number | null;
 }
 
+/**
+ * A cursor-paged page of runs — the Runs screen's list (`GET /executions/page`).
+ *
+ * Keyset-paged on (createdAt DESC, workflowId DESC), so `nextCursor` picks up exactly after the
+ * last row even as new runs land at the top. An offset would drift and silently duplicate or skip
+ * rows on an actively-running tenant. Mirrors the public v1 `GET /runs` envelope.
+ */
+export class RunPageResponse {
+  @ApiProperty({ type: [RunListItemResponse] }) items!: RunListItemResponse[];
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: "MjAyNi0wNy0wNFQxMjowMDowMC4wMDBafHJ1bi04ZjNhMWMyZQ==",
+    description:
+      "Opaque cursor for the next page — pass as ?cursor=. Null when this is the last page.",
+  })
+  nextCursor!: string | null;
+}
+
 /** One approver group on an awaiting row (display summary). */
 export class ApproverGroupResponse {
   @ApiProperty({ example: "9f3a…" }) id!: string;

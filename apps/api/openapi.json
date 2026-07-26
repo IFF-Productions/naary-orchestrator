@@ -4594,6 +4594,109 @@
         ]
       }
     },
+    "/executions/page": {
+      "get": {
+        "description": "Runs for the tenant (newest first), keyset-paged on (createdAt, workflowId). Pass the previous page's `nextCursor` as `?cursor=` for the next page; `nextCursor` is null on the last page. `archived` and `q` behave as on GET /executions and compose with paging.",
+        "operationId": "ExecutionsController_listRunsPage",
+        "parameters": [
+          {
+            "name": "archived",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "The previous page's `nextCursor`. Omit for the first page.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Page size, 1–100 (default 50). Clamped, never rejected.",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunPageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List runs (cursor-paged)",
+        "tags": [
+          "Executions"
+        ]
+      }
+    },
     "/executions/awaiting": {
       "get": {
         "description": "The tenant's runs paused for approval (the inbox).",
@@ -17589,6 +17692,27 @@
           "failureKind",
           "archived",
           "graphVersion"
+        ]
+      },
+      "RunPageResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunListItemResponse"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "example": "MjAyNi0wNy0wNFQxMjowMDowMC4wMDBafHJ1bi04ZjNhMWMyZQ==",
+            "description": "Opaque cursor for the next page — pass as ?cursor=. Null when this is the last page."
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
         ]
       },
       "ApproverGroupResponse": {
