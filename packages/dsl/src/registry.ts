@@ -227,6 +227,28 @@ const CONFIG_SCHEMAS = {
       .optional(),
     /** Max reasoning+tool steps before the loop must produce a final answer (default 8). */
     maxToolSteps: z.number().int().positive().optional(),
+    /** Multi-agent handoff (#580 Phase 1). Zod mirror of `AgentHandoff` in handoff.ts —
+     *  that module owns the shape (it must stay zod-free for the workflow bundle), and
+     *  test/handoff.spec.ts type-asserts the two agree. Mutually exclusive with
+     *  `outputSchema`: the handoff DERIVES the schema (an enum of target names), which is
+     *  what makes an invalid route unrepresentable. Graph-level wiring (targets resolve,
+     *  edges carry the right condition) is enforced by `validateGraph`, not here — it
+     *  needs the edges, which a per-node config schema never sees. */
+    handoff: z
+      .object({
+        targets: z
+          .array(
+            z.object({
+              to: z.string(),
+              name: z.string().optional(),
+              description: z.string().optional(),
+            }),
+          )
+          .min(1),
+        payloadSchema: z.record(z.string(), z.unknown()).optional(),
+        explain: z.boolean().optional(),
+      })
+      .optional(),
     /** Opt-in Anthropic prompt caching of the (stable) system prompt. Default OFF: it only
      *  pays off for HIGH-VOLUME agents reusing the same large system prompt within Anthropic's
      *  ~5-min cache TTL — a one-shot call PAYS a ~25% cache-WRITE premium with no read to offset

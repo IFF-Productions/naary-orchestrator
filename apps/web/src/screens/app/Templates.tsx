@@ -70,20 +70,24 @@ export function Templates() {
   useEffect(() => {
     let alive = true;
     api
-      .listTemplates()
-      .then((rows) =>
-        Promise.allSettled(rows.map((r) => api.getTemplate(r.key))),
-      )
-      .then((settled) => {
+      // ONE request for the catalog AND every graph. This used to be `listTemplates()`
+      // followed by a `getTemplate()` per key — a 19-request fan-out at 18 templates,
+      // against the API's 120-req/min per-IP throttle. Any throttled (429) detail request
+      // was swallowed by `Promise.allSettled`, so the template silently VANISHED from the
+      // gallery: no error, no retry, just a shorter list. Reproduced locally at ~133
+      // requests from one IP (6 of 18 cards gone). One request cannot partially fail.
+      .listTemplatesWithGraphs()
+      .then((rows) => {
         if (!alive) return;
-        const ok = settled.flatMap((s) =>
-          s.status === "fulfilled" ? [deriveTemplateView(s.value)] : [],
-        );
-        if (ok.length === 0 && settled.length > 0) {
+        // Defence in depth against an older API that ignores `?include=graph` and returns
+        // summaries: render nothing rather than crash in deriveTemplateView on a missing
+        // graph, and say so — the one thing the old code got wrong was failing quietly.
+        const withGraphs = rows.filter((r) => r.graph?.nodes);
+        if (withGraphs.length !== rows.length) {
           setError("Could not load the template graphs. Try again.");
           return;
         }
-        setViews(ok);
+        setViews(withGraphs.map((r) => deriveTemplateView(r)));
         setError(null);
       })
       .catch((e) => {

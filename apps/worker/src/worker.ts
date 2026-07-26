@@ -27,7 +27,7 @@ import { NativeConnection, Worker } from "@temporalio/worker";
 import { disconnectPrisma } from "@naary/db";
 import { createLogger } from "@naary/logging";
 import { metricsContentType, renderMetrics } from "@naary/metrics";
-import { createKeyEncryptor } from "@naary/secrets";
+import { assertSecretProviderConfig, createKeyEncryptor } from "@naary/secrets";
 import { temporalConnectionConfig } from "@naary/temporal-config";
 import { sentryTraceActivityInterceptors } from "./temporal/activity-trace-interceptor";
 import * as activities from "./temporal/activities";
@@ -83,6 +83,12 @@ async function run(): Promise<void> {
   // Fail fast at boot if ENCRYPTION_KEY is missing/invalid (mirrors the API),
   // rather than discovering it on the first agent activity (a burned retry).
   createKeyEncryptor();
+  // Same reasoning for the external secret store (#458): a `SECRET_PROVIDER=vault` with
+  // missing VAULT_ADDR/VAULT_TOKEN must stop startup, not fail inside the first agent
+  // activity. Logs the MODE only — never the token. The api asserts the same thing in
+  // SecretsModule, so a half-configured fleet can't have the api writing to Vault while a
+  // worker reads from Postgres.
+  log.info({ secretStore: assertSecretProviderConfig() }, "secret store mode");
 
   const metricsServer = startMetricsServer();
 

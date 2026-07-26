@@ -16,6 +16,7 @@ import {
   GithubAppForm,
   type ConnectFormPrefill,
 } from "./connection-forms";
+import { ConnectionTestControl } from "./ConnectionTestControl";
 import { McpRegistryBrowser, prefillFor } from "./McpRegistryBrowser";
 import { cardShell, EnvChip, IconTile, introStyle } from "./shared";
 
@@ -265,7 +266,21 @@ export function AppsTab({
                   )}
                 </div>
               </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  alignItems: "flex-start",
+                }}
+              >
+                {/* Ask the provider whether this token still works (#701) — the check that used to
+                    require putting an integration node on a canvas. Read-only; never writes. */}
+                <ConnectionTestControl
+                  tenant={tenant}
+                  connectionId={c.id}
+                  onTested={onChanged}
+                />
                 {warn && c.authMode === "oauth" && (
                   <Button
                     variant="primary"

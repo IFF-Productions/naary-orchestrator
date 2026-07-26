@@ -4,4 +4,6 @@ export * from "./rotate";
 export * from "./credentials.service";
 export * from "./provider-validate";
 export * from "./secret-store";
+export * from "./secret-provider";
+export * from "./vault-secret-provider";
 export * from "./secret-refs";

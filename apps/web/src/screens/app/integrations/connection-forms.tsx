@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Button } from "../../../components";
 import { api } from "../../../lib/api";
+import { ConnectionTestControl } from "./ConnectionTestControl";
 import { fieldLabel, fieldStyle, introStyle } from "./shared";
 
 /** Connect a SQL database (postgres/mssql) for the SQL Query node. The connection
@@ -414,10 +415,13 @@ export function ConnectForm({
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  /** Id of the connection just saved, so its Test control can be offered inline (#701). */
+  const [tested, setTested] = useState<string | null>(null);
 
   async function submit() {
     setBusy(true);
     setMsg(null);
+    setTested(null);
     try {
       const conn = await api.createConnection(tenant, {
         type,
@@ -450,9 +454,14 @@ export function ConnectForm({
       setLabel("");
       setServerUrl("");
       setToken("");
-      setMsg("Connected ✓");
+      // "Connected" here means STORED, not verified — nothing has asked the provider yet (#701).
+      // Surface the Test control for the connection we just made so the user can find out now
+      // rather than at runtime, inside a workflow, as a 401 on a node.
+      setMsg("Saved — not yet verified.");
+      setTested(conn.id);
       await onChanged();
     } catch (e) {
+      setTested(null);
       setMsg(
         e instanceof Error && /400/.test(e.message)
           ? "Check the fields (server URL must be https)."
@@ -546,6 +555,16 @@ export function ConnectForm({
           </span>
         )}
       </div>
+      {tested && (
+        // Offered right after a save so "is this token good?" is answered before the user leaves.
+        <div style={{ marginTop: 12 }}>
+          <ConnectionTestControl
+            tenant={tenant}
+            connectionId={tested}
+            onTested={onChanged}
+          />
+        </div>
+      )}
     </>
   );
 }

@@ -296,55 +296,64 @@ export function WorkflowSimulation({
           minHeight: wide ? 0 : Math.ceil(730 * scale),
         }}
       >
-        <div
-          style={{
-            position: "relative",
-            width: 560,
-            height: 730,
-            margin: "0 auto",
-            transform: `scale(${scale})`,
-            transformOrigin: "top center",
-          }}
-        >
-          <svg
-            viewBox="0 0 560 720"
-            width={560}
+        {/* `transform` does NOT change layout width: the inner box still lays out 560px
+            wide, and `margin: 0 auto` collapses to a 0 left margin once the parent is
+            narrower than that. With `transform-origin: top center` the scaled art was
+            therefore centred on x=280 of a 390px viewport — pushed right, with ~69px
+            cropped off by this panel's `overflow: hidden` (#511). Since `scale` exists
+            precisely to make the comp FIT (min(1,(vw-32)/560)), scale from the top-LEFT
+            and let an outer box of the SCALED width do the centring — so what gets
+            centred is the visual box, at every width. */}
+        <div style={{ width: Math.ceil(560 * scale), margin: "0 auto" }}>
+          <div
             style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              height: "100%",
-              pointerEvents: "none",
-              overflow: "visible",
+              position: "relative",
+              width: 560,
+              height: 730,
+              transform: `scale(${scale})`,
+              transformOrigin: "top left",
             }}
-            aria-hidden
           >
-            {EDGE_PATHS.map((d, i) => {
-              const e = edgeVisual(statuses[i + 1]);
-              return (
-                <path
-                  key={d}
-                  d={d}
-                  fill="none"
-                  strokeWidth={2.2}
-                  strokeLinecap="round"
-                  stroke={e.stroke}
-                  strokeDasharray={e.dash}
-                  className={e.flowing ? "authEdgeFlow" : undefined}
-                  style={{ transition: "stroke .4s" }}
-                />
-              );
-            })}
-          </svg>
-          {statuses.map((status, i) => (
-            <SimNode
-              key={labels[i][0]}
-              index={i}
-              status={status}
-              label={labels[i][0]}
-              sub={labels[i][1]}
-            />
-          ))}
+            <svg
+              viewBox="0 0 560 720"
+              width={560}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                height: "100%",
+                pointerEvents: "none",
+                overflow: "visible",
+              }}
+              aria-hidden
+            >
+              {EDGE_PATHS.map((d, i) => {
+                const e = edgeVisual(statuses[i + 1]);
+                return (
+                  <path
+                    key={d}
+                    d={d}
+                    fill="none"
+                    strokeWidth={2.2}
+                    strokeLinecap="round"
+                    stroke={e.stroke}
+                    strokeDasharray={e.dash}
+                    className={e.flowing ? "authEdgeFlow" : undefined}
+                    style={{ transition: "stroke .4s" }}
+                  />
+                );
+              })}
+            </svg>
+            {statuses.map((status, i) => (
+              <SimNode
+                key={labels[i][0]}
+                index={i}
+                status={status}
+                label={labels[i][0]}
+                sub={labels[i][1]}
+              />
+            ))}
+          </div>
         </div>
       </div>
 

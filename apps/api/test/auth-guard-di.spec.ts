@@ -6,6 +6,8 @@ import { MembershipModule } from "../src/membership/membership.module";
 import { MembershipService } from "../src/membership/membership.service";
 import { PermissionsModule } from "../src/permissions/permissions.module";
 import { PermissionsService } from "../src/permissions/permissions.service";
+import { SsoModule } from "../src/sso/sso.module";
+import { SsoSessionService } from "../src/sso/sso-session.service";
 
 // The guard rewrite added MembershipService (and, in RBAC G1, PermissionsService — the §4a
 // restricted-token stamping) as dependencies of AuthGuard, which Nest must resolve across
@@ -16,16 +18,21 @@ import { PermissionsService } from "../src/permissions/permissions.service";
 describe("AuthGuard DI wiring", () => {
   it("compiles AuthModule with the guard's Membership + Permissions dependencies resolved", async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [MembershipModule, PermissionsModule, AuthModule],
+      imports: [MembershipModule, PermissionsModule, SsoModule, AuthModule],
     }).compile();
 
-    // Reaching here means the eager APP_GUARD (AuthGuard) instantiated — all five deps,
+    // Reaching here means the eager APP_GUARD (AuthGuard) instantiated — all six deps,
     // including the globally-provided Membership + Permissions services, resolved.
     expect(moduleRef.get(MembershipService, { strict: false })).toBeInstanceOf(
       MembershipService,
     );
     expect(moduleRef.get(PermissionsService, { strict: false })).toBeInstanceOf(
       PermissionsService,
+    );
+    // #455 added a THIRD cross-@Global dependency: the SAML session verifier. Same trap — a
+    // missing SsoModule would only surface as a boot-time APP_GUARD failure in production.
+    expect(moduleRef.get(SsoSessionService, { strict: false })).toBeInstanceOf(
+      SsoSessionService,
     );
   });
 });

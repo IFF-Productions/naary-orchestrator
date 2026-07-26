@@ -2947,7 +2947,12 @@ const DISCORD: IntegrationProvider = {
       method: "PUT",
       pathTemplate:
         "/channels/{channelId}/messages/{messageId}/reactions/{emoji}/@me",
-      write: false,
+      // A mutation: it adds a visible reaction to someone's message. Was mismarked `write: false`,
+      // which (a) made the interpreter RETRY it — Discord's PUT is idempotent so no duplicate
+      // reaction, but a failed call read as a branchable result instead of failing the node — and
+      // (b) put it in the pool "Test connection" (#701) selects a safe read from, where the only
+      // thing keeping it out was its required fields. Slack's identical `add_reaction` is `true`.
+      write: true,
       fields: [
         { key: "channelId", label: "Channel id", in: "path", required: true },
         { key: "messageId", label: "Message id", in: "path", required: true },

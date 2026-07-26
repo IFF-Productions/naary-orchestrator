@@ -197,6 +197,62 @@ export interface ConnectionRow {
 }
 
 /**
+ * n8n import (#579) — an unsaved draft graph plus an honest per-node mapping report. Mirrors the
+ * API's ImportN8nResponse (re-declared here rather than imported from @naary/dsl so the SPA's view
+ * model stays independent of the DSL's internal report types).
+ */
+export interface N8nNodeReport {
+  n8nName: string;
+  n8nType: string;
+  /** Null when the node is intentionally NOT a graph node (`skipped`). */
+  nodeId: string | null;
+  nodeType: string | null;
+  status: "imported" | "approximated" | "unmapped" | "skipped";
+  /** Always non-empty unless `status === "imported"`. */
+  notes: string[];
+}
+
+export interface N8nCredentialReport {
+  n8nType: string;
+  usedBy: string[];
+  suggestedConnectionType: string | null;
+}
+
+export interface N8nImportResult {
+  name: string;
+  graph: GraphDef;
+  /** One entry per node in the export — nothing is dropped silently. */
+  nodes: N8nNodeReport[];
+  credentials: N8nCredentialReport[];
+  unconvertedExpressions: {
+    nodeId: string;
+    field: string;
+    expression: string;
+    reason: string;
+  }[];
+  warnings: string[];
+  counts: Record<N8nNodeReport["status"], number>;
+}
+
+/**
+ * Result of testing a connection against its provider (#701). Mirrors the API's
+ * ConnectionTestResponse.
+ *
+ * `status` is the test OUTCOME, not an HTTP code — `unknown` (we declined to probe, because the
+ * provider has no read-only zero-argument action) is a different thing from `failed` (the provider
+ * rejected the credential). `connectionStatus` is null exactly when the test learned nothing and
+ * therefore left the connection's status alone.
+ */
+export interface ConnectionTestResult {
+  ok: boolean;
+  status: "ok" | "failed" | "unknown";
+  httpStatus: number | null;
+  checkedAction: string | null;
+  connectionStatus: "connected" | "needs_reauth" | "error" | null;
+  message: string;
+}
+
+/**
  * A browsable MCP server from the registry browser (#578). Mirrors the API's
  * McpRegistryServerResponse. Every field is SANITIZED server-side: `transportUrl` is always a
  * public https URL, `description` is plain text (render it as TEXT, never HTML), and `homepage`

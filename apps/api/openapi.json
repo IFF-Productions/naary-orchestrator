@@ -1993,6 +1993,84 @@
         ]
       }
     },
+    "/graphs/import/n8n": {
+      "post": {
+        "description": "Translates an n8n workflow JSON into an unsaved draft graph plus a per-node mapping report (imported / approximated / unmapped-with-placeholder / skipped). Credentials are never imported. Save the draft via POST /graphs.",
+        "operationId": "GraphsController_importN8n",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportN8nDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportN8nResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Import an n8n workflow export as a draft",
+        "tags": [
+          "Graphs"
+        ]
+      }
+    },
     "/graphs/generate/stream": {
       "post": {
         "description": "Same as POST /graphs/generate, delivered as text/event-stream with `: ping` heartbeats. For the API-model providers the graph streams live: `event: meta` ({name}) once known, then `event: node` (a node) + `event: edge` (an edge) as each completes. Terminal frames: `event: result` ({name, graph} — the authoritative validated graph) or `event: error` ({status, message, code?}). Clients that only handle result/error stay compatible (node/edge/meta are ignored).",
@@ -5747,6 +5825,300 @@
         ]
       }
     },
+    "/sso/metadata": {
+      "get": {
+        "description": "The XML an IdP admin imports: our entity id, the ACS URL (HTTP-POST binding) and the supported NameID formats. Public and non-secret.",
+        "operationId": "SsoController_metadata",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "SP metadata XML."
+          }
+        },
+        "summary": "SAML SP metadata",
+        "tags": [
+          "Sso"
+        ]
+      }
+    },
+    "/sso/saml/acs": {
+      "post": {
+        "description": "The IdP POSTs a signed assertion here (form-urlencoded SAMLResponse). On success, redirects to the SPA with a short-lived session token in the URL FRAGMENT; on any failure, redirects with a coarse sso_error code.",
+        "operationId": "SsoController_acs",
+        "parameters": [],
+        "responses": {
+          "302": {
+            "description": "Redirect to the SPA."
+          }
+        },
+        "summary": "SAML assertion consumer service (ACS)",
+        "tags": [
+          "Sso"
+        ]
+      }
+    },
+    "/sso/{slug}": {
+      "get": {
+        "description": "Redirects to the IdP's SSO URL for this connection slug. Convenience only — the flow is IdP-initiated, so no AuthnRequest is generated.",
+        "operationId": "SsoController_start",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the IdP."
+          }
+        },
+        "summary": "IdP-initiated login entry point",
+        "tags": [
+          "Sso"
+        ]
+      }
+    },
+    "/tenants/{id}/sso": {
+      "get": {
+        "description": "Non-secret IdP metadata (entity id, SSO URL, public cert).",
+        "operationId": "SsoConnectionsController_list",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the workspace's SAML connections",
+        "tags": [
+          "SsoConnections"
+        ]
+      },
+      "put": {
+        "description": "Keyed by the IdP entity id, which is unique across the instance — that uniqueness is what makes an anonymous ACS POST unambiguous. An entity id or slug already mapped to ANOTHER workspace is refused with 403 (a 409 would confirm it exists elsewhere); a slug already used by a different connection in THIS workspace is a 409.",
+        "operationId": "SsoConnectionsController_upsert",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertSsoConnectionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The resource is in a state that conflicts with the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create or replace a SAML connection",
+        "tags": [
+          "SsoConnections"
+        ]
+      }
+    },
+    "/tenants/{id}/sso/{connectionId}": {
+      "delete": {
+        "description": "Federated users keep their Membership; they can no longer sign in via SSO.",
+        "operationId": "SsoConnectionsController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "connectionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a SAML connection",
+        "tags": [
+          "SsoConnections"
+        ]
+      }
+    },
     "/tenants/{id}/usage": {
       "get": {
         "description": "Aggregated + line-item spend from the usage ledger. Optional from/to (ISO date) window. Restricted members see only events of workflows they can view.",
@@ -7927,6 +8299,111 @@
           }
         ],
         "summary": "List connections",
+        "tags": [
+          "Connections"
+        ]
+      }
+    },
+    "/tenants/{id}/connections/{connectionId}/test": {
+      "post": {
+        "description": "Calls the provider's cheapest read-only, zero-argument catalog action with this connection's credential and reports whether it was accepted, updating the connection's status. Never performs a write; providers with no such action report `unknown`.",
+        "operationId": "ConnectionsController_test",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "connectionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestConnectionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Test a connection against its provider",
         "tags": [
           "Connections"
         ]
@@ -12326,7 +12803,20 @@
     "/templates": {
       "get": {
         "operationId": "TemplatesController_list",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "include",
+            "required": false,
+            "in": "query",
+            "description": "Pass `graph` to get every template's graph in this one response instead of fetching /templates/:key per template.",
+            "schema": {
+              "enum": [
+                "graph"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": ""
@@ -15439,6 +15929,185 @@
           "graph"
         ]
       },
+      "ImportN8nDto": {
+        "type": "object",
+        "properties": {
+          "workflow": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The n8n workflow export: `{ name, nodes: [...], connections: {...} }`. Credentials in it are IGNORED — the response reports which connection types to create instead."
+          }
+        },
+        "required": [
+          "workflow"
+        ]
+      },
+      "N8nNodeReportResponse": {
+        "type": "object",
+        "properties": {
+          "n8nName": {
+            "type": "string",
+            "example": "High value?",
+            "description": "The node's name in n8n."
+          },
+          "n8nType": {
+            "type": "string",
+            "example": "n8n-nodes-base.if"
+          },
+          "nodeId": {
+            "type": "string",
+            "nullable": true,
+            "example": "high-value",
+            "description": "Our node id in the draft graph. Null when the node is intentionally NOT a graph node (`skipped`: an n8n sticky note, a disabled node, or an AI sub-node)."
+          },
+          "nodeType": {
+            "type": "string",
+            "nullable": true,
+            "example": "if"
+          },
+          "status": {
+            "type": "string",
+            "example": "imported",
+            "enum": [
+              "imported",
+              "approximated",
+              "unmapped",
+              "skipped"
+            ],
+            "description": "`imported` = faithful. `approximated` = runs, but something was reshaped. `unmapped` = no equivalent, so it became a noOp placeholder carrying its original n8n config under `__n8n`. `skipped` = deliberately not a graph node."
+          },
+          "notes": {
+            "description": "What was lost or is left to do. Always non-empty unless status is `imported`.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "n8nName",
+          "n8nType",
+          "nodeId",
+          "nodeType",
+          "status",
+          "notes"
+        ]
+      },
+      "N8nCredentialReportResponse": {
+        "type": "object",
+        "properties": {
+          "n8nType": {
+            "type": "string",
+            "example": "httpHeaderAuth"
+          },
+          "usedBy": {
+            "description": "n8n node names that used it.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "suggestedConnectionType": {
+            "type": "string",
+            "nullable": true,
+            "example": "custom",
+            "description": "The connection type to create here, or null when we have no equivalent."
+          }
+        },
+        "required": [
+          "n8nType",
+          "usedBy",
+          "suggestedConnectionType"
+        ]
+      },
+      "N8nUnconvertedExpressionResponse": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string",
+            "example": "high-value"
+          },
+          "field": {
+            "type": "string",
+            "example": "subject"
+          },
+          "expression": {
+            "type": "string",
+            "example": "{{ $now.toISO() }}"
+          },
+          "reason": {
+            "type": "string",
+            "example": "n8n's $now is a DateTime object; use a dateTime node instead"
+          }
+        },
+        "required": [
+          "nodeId",
+          "field",
+          "expression",
+          "reason"
+        ]
+      },
+      "ImportN8nResponse": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Order webhook triage"
+          },
+          "graph": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The draft graph { nodes, edges, startNodeId }. Not saved."
+          },
+          "nodes": {
+            "description": "One entry per node in the export — nothing is dropped silently.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/N8nNodeReportResponse"
+            }
+          },
+          "credentials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/N8nCredentialReportResponse"
+            }
+          },
+          "unconvertedExpressions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/N8nUnconvertedExpressionResponse"
+            }
+          },
+          "warnings": {
+            "description": "Whole-workflow warnings to read BEFORE saving (e.g. a schedule trigger goes live on save).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "counts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            },
+            "example": {
+              "imported": 4,
+              "approximated": 1,
+              "unmapped": 0,
+              "skipped": 1
+            }
+          }
+        },
+        "required": [
+          "name",
+          "graph",
+          "nodes",
+          "credentials",
+          "unconvertedExpressions",
+          "warnings",
+          "counts"
+        ]
+      },
       "GraphVersionResponse": {
         "type": "object",
         "properties": {
@@ -16673,6 +17342,65 @@
           "isValid"
         ]
       },
+      "UpsertSsoConnectionDto": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "example": "acme-okta",
+            "description": "URL-safe slug for /sso/:slug (IdP-initiated entry)."
+          },
+          "label": {
+            "type": "string",
+            "example": "Acme Okta",
+            "description": "Display label."
+          },
+          "idpEntityId": {
+            "type": "string",
+            "example": "http://www.okta.com/exk1a2b3c4",
+            "description": "The IdP's SAML entity id — the assertion <Issuer>. Unique across the instance: it is how an unauthenticated ACS POST maps to this workspace."
+          },
+          "idpSsoUrl": {
+            "type": "string",
+            "example": "https://acme.okta.com/app/acme_naary/exk1a2b3c4/sso/saml",
+            "description": "The IdP's SSO (login) URL."
+          },
+          "idpCertPem": {
+            "type": "string",
+            "description": "The IdP's SIGNING CERTIFICATE (PEM, or the bare base64 from its metadata <X509Certificate>). Public key material only."
+          },
+          "allowedEmailDomains": {
+            "example": [
+              "acme.com"
+            ],
+            "description": "Email domains this IdP may assert. REQUIRED and non-empty — an empty list would let this IdP assert any address, which is exactly the cross-tenant linking hole.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "defaultRole": {
+            "type": "string",
+            "example": "member",
+            "description": "Role granted when auto-provisioning. Never read from the assertion."
+          },
+          "autoProvision": {
+            "type": "boolean",
+            "description": "Create a Membership on first login (JIT). Default true."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Kill switch. Default true."
+          }
+        },
+        "required": [
+          "slug",
+          "idpEntityId",
+          "idpSsoUrl",
+          "idpCertPem",
+          "allowedEmailDomains"
+        ]
+      },
       "UsageByModelResponse": {
         "type": "object",
         "properties": {
@@ -17774,6 +18502,115 @@
           "usedByNodeCount",
           "credentialLast4",
           "createdAt"
+        ]
+      },
+      "TestConnectionDto": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "mattermost",
+              "pagerduty",
+              "googlesheets",
+              "deepl",
+              "stripe",
+              "shopify",
+              "twilio",
+              "mailchimp",
+              "discord",
+              "linear",
+              "clickup",
+              "monday",
+              "pipedrive",
+              "zendesk",
+              "github",
+              "jira",
+              "slack",
+              "notion",
+              "gitlab",
+              "hubspot",
+              "sendgrid",
+              "airtable",
+              "asana",
+              "todoist",
+              "calendly",
+              "intercom",
+              "webflow",
+              "zoom",
+              "front",
+              "sentry",
+              "vercel",
+              "netlify",
+              "digitalocean",
+              "cloudflare",
+              "posthog",
+              "dropbox",
+              "msgraph",
+              "box"
+            ],
+            "example": "calendly",
+            "description": "Catalog provider to test this connection against (the same `provider` an `integration` node would use)."
+          }
+        },
+        "required": [
+          "provider"
+        ]
+      },
+      "ConnectionTestResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "example": true,
+            "description": "True only when the provider answered 2xx. `unknown` is not ok."
+          },
+          "status": {
+            "type": "string",
+            "example": "ok",
+            "enum": [
+              "ok",
+              "failed",
+              "unknown"
+            ],
+            "description": "`ok` = the provider accepted the credential. `failed` = it was rejected or unreachable. `unknown` = no safe read-only call exists for this provider, so nothing was called."
+          },
+          "httpStatus": {
+            "type": "number",
+            "nullable": true,
+            "example": 200,
+            "description": "The provider's HTTP status, or null when no call was made."
+          },
+          "checkedAction": {
+            "type": "string",
+            "nullable": true,
+            "example": "calendly.get_me",
+            "description": "The `provider.action` that was called — always a catalog action with `write: false` and no required fields. Null when nothing safe existed."
+          },
+          "connectionStatus": {
+            "type": "string",
+            "nullable": true,
+            "example": "connected",
+            "enum": [
+              "connected",
+              "needs_reauth",
+              "error"
+            ],
+            "description": "The connection's status after the test. Null when the test learned nothing about the token (`unknown`) and therefore left the status untouched."
+          },
+          "message": {
+            "type": "string",
+            "example": "Calendly answered 200 to calendly.get_me — this connection works.",
+            "description": "Human-readable explanation. Never contains the credential."
+          }
+        },
+        "required": [
+          "ok",
+          "status",
+          "httpStatus",
+          "checkedAction",
+          "connectionStatus",
+          "message"
         ]
       },
       "OAuthStartResponse": {

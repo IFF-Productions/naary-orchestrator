@@ -5,6 +5,7 @@ import {
   buildIntegrationRequest,
   getIntegrationAction,
   getIntegrationProvider,
+  planIntegrationCall,
   validateIntegrationConfig,
 } from "@naary/dsl";
 import type {
@@ -87,9 +88,11 @@ export async function callIntegration(
       );
     }
   }
-  // Request construction is pure but CAN reject its input (e.g. a CR/LF in a header field
+  // Path/query templating is pure but CAN reject its input (e.g. a CR/LF in a header field
   // bound from run data — a header-injection attempt). That's a data/config fault a retry
   // can never fix, so it must surface as NON-retryable, like validateIntegrationConfig above.
+  // Done up-front because the failure log below needs the method + path even when auth
+  // resolution is what fails.
   let req: BuiltIntegrationRequest;
   try {
     req = buildIntegrationRequest(cfg.provider, cfg.action, fields);
@@ -99,7 +102,6 @@ export async function callIntegration(
       "INTEGRATION_INVALID_CONFIG",
     );
   }
-  const url = `${base!.replace(/\/$/, "")}${req.path}`;
   const action = getIntegrationAction(cfg.provider, cfg.action);
   // req.path is "path + query string" — log the PATH ONLY so query-param values can't leak
   // into logs (and to keep cardinality low). The template placeholders are non-secret ids.
@@ -111,53 +113,23 @@ export async function callIntegration(
       meta.tenantId,
       cfg.connectionId,
     );
-    // A "basic"-scheme provider (Jira Cloud) with an API TOKEN uses HTTP Basic
-    // (`base64(email:token)`): the connection stores `email:token`, resolveAuthHeader hands it
-    // back as `Bearer email:token`, and we re-wrap it. But an OAuth connection's access token IS
-    // a Bearer — pass it through unchanged (so Jira-over-OAuth keeps working).
-    if (
-      provider.authScheme === "basic" &&
-      conn?.authMode !== "oauth" &&
-      authHeaders.Authorization
-    ) {
-      const raw = authHeaders.Authorization.replace(/^Bearer\s+/i, "");
-      authHeaders.Authorization = `Basic ${Buffer.from(raw).toString("base64")}`;
-    }
-    // A CUSTOM-HEADER-scheme provider (#655): Shopify (`X-Shopify-Access-Token`), Discord
-    // (`Authorization: Bot <token>`), Monday/ClickUp (bare `Authorization`, no prefix). The
-    // resolver returns the raw token as `Bearer <token>`; strip that and place it in the
-    // declared header with the optional literal prefix. Only for api_token/pat connections —
-    // an OAuth access token stays a genuine Bearer (mirrors the "basic" guard above).
-    if (
-      typeof provider.authScheme === "object" &&
-      conn?.authMode !== "oauth" &&
-      authHeaders.Authorization
-    ) {
-      const raw = authHeaders.Authorization.replace(/^Bearer\s+/i, "");
-      delete authHeaders.Authorization;
-      authHeaders[provider.authScheme.header] =
-        `${provider.authScheme.prefix ?? ""}${raw}`;
-    }
-    const headers: Record<string, string> = {
-      Accept: "application/json",
-      ...(provider.headers ?? {}),
-      // Headers built from `in: "header"` FIELDS (e.g. PagerDuty's `From`). Their values can
-      // come from an upstream binding — i.e. from run data — so they sit BELOW both the
-      // catalog's own headers and auth: a field can never replace the resolved credential,
-      // nor a per-action media type the endpoint depends on.
-      ...(req.headers ?? {}),
-      // Per-action header overrides (e.g. GitHub's diff media type) win over the provider
-      // defaults but never over auth (auth is spread last so it can't be clobbered).
-      ...(action?.headers ?? {}),
-      ...authHeaders,
-    };
-    const init: RequestInit = { method: req.method, headers };
-    if (req.method !== "GET" && req.body !== undefined) {
-      init.body = JSON.stringify(req.body);
-      headers["Content-Type"] = "application/json";
-    }
+    // The auth-scheme rewrites (HTTP Basic re-wrap, custom-header placement, the OAuth
+    // pass-through) and the header MERGE ORDER live ONCE in @naary/dsl's planIntegrationCall,
+    // so the API's "Test connection" route (#701) provably composes the same request this node
+    // sends. The planner is pure: the resolved credential is handed IN and never stored, logged
+    // or returned by it.
+    const plan = planIntegrationCall({
+      provider: cfg.provider,
+      action: cfg.action,
+      fields,
+      baseUrl: base!,
+      authHeaders,
+      authMode: conn?.authMode,
+    });
+    const init: RequestInit = { method: plan.method, headers: plan.headers };
+    if (plan.body !== undefined) init.body = plan.body;
 
-    const checked = await __httpDeps.assertEgressAllowed(url);
+    const checked = await __httpDeps.assertEgressAllowed(plan.url);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), DEFAULT_HTTP_TIMEOUT_MS);
     let res: Response;

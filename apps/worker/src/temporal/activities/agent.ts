@@ -11,6 +11,12 @@ import {
   resolveMcpTarget,
 } from "@naary/connections";
 import { MissingCredentialError } from "@naary/secrets";
+import {
+  type AgentHandoff,
+  HANDOFF_TARGET_FIELD,
+  handoffOutputSchema,
+  handoffTargetName,
+} from "@naary/dsl";
 import { withGenAiSpan, withGenAiToolSpan } from "@naary/observability";
 import {
   containsClaimCheck,
@@ -93,6 +99,13 @@ export interface AgentConfig {
   tools?: AgentToolConfig[];
   /** Max reasoning+tool steps before the loop must produce a final answer (default 8). */
   maxToolSteps?: number;
+  /** Multi-agent handoff (#580 Phase 1). When set, the output schema is DERIVED from the
+   *  declared targets (`handoffOutputSchema`) so the model must pick one of their names —
+   *  an invalid route is unrepresentable — and the roster is appended to the system prompt
+   *  so it knows what each specialist handles. `validateGraph` guarantees each target has a
+   *  matching conditional edge, so routing is plain edge evaluation: the interpreter is
+   *  untouched and the choice is made HERE, in an activity, keeping replay deterministic. */
+  handoff?: AgentHandoff;
 }
 
 export interface AgentOutput {
@@ -156,6 +169,25 @@ function mapMcpToolError(
     );
   }
   return undefined;
+}
+
+/**
+ * The routing roster appended to a handoff supervisor's system prompt (#580). Prompt COPY,
+ * so it lives here rather than in the DSL — but the names come from `handoffTargetName`,
+ * the same function the derived enum and the edge conditions use, so the roster can never
+ * name a target the model isn't allowed to pick.
+ */
+function handoffRoster(handoff: AgentHandoff): string {
+  const lines = handoff.targets.map((t) => {
+    const name = handoffTargetName(t);
+    return t.description ? `- ${name}: ${t.description}` : `- ${name}`;
+  });
+  return [
+    "You are routing this work to exactly ONE of the following specialists:",
+    ...lines,
+    "",
+    `Set "${HANDOFF_TARGET_FIELD}" to the name of the single best specialist, and put everything that specialist needs to do its job into "payload" — the graph hands your payload to it as its brief.`,
+  ].join("\n");
 }
 
 async function buildModel(provider: string, model: string, apiKey: string) {
@@ -467,16 +499,39 @@ export async function runAgent(
     // Structured output is applied ONLY when the node configures an `outputSchema` (#450) — for
     // both plain and tooled agents alike. No schema ⇒ free text `{ text }`, the well-trodden
     // AI-SDK path; there is no hardcoded fallback shape.
-    const wantStructured = cfg.outputSchema !== undefined;
+    //
+    // A `handoff` (#580) DERIVES that schema from its declared targets rather than the author
+    // hand-writing one: `target` is an enum of the target names, so the provider constrains
+    // generation and the run can never route to an edge that doesn't exist. The save-gate
+    // rejects handoff + outputSchema together, so there is exactly one schema either way.
+    const effectiveOutputSchema = cfg.handoff
+      ? handoffOutputSchema(cfg.handoff)
+      : cfg.outputSchema;
+    const wantStructured = effectiveOutputSchema !== undefined;
     const outputOpt = wantStructured
       ? {
           output: Output.object({
             schema: jsonSchema<Record<string, unknown>>(
-              cfg.outputSchema as unknown as Parameters<typeof jsonSchema>[0],
+              effectiveOutputSchema as unknown as Parameters<
+                typeof jsonSchema
+              >[0],
             ),
           }),
         }
       : {};
+
+    // A handoff supervisor is told WHO it can route to. Without the roster the model sees an
+    // enum of bare names and has to guess what each one handles; with it, the descriptions the
+    // author already wrote do the work. Appended (never replacing the author's prompt), and
+    // derived from the same `targets` the enum and the edges come from — one source of truth.
+    // `systemPrompt` is OPTIONAL (the save gate allows a handoff agent without one), so it is
+    // filtered rather than interpolated — a template literal turned the missing case into a
+    // prompt that literally began "undefined", which the model reads and the token estimate bills.
+    const systemPrompt = cfg.handoff
+      ? [cfg.systemPrompt?.trim(), handoffRoster(cfg.handoff)]
+          .filter((part): part is string => Boolean(part))
+          .join("\n\n")
+      : cfg.systemPrompt;
 
     // GenAI-convention span (#581). It wraps ONLY the model call + the PURE usage/cost derivation
     // whose numbers it reports — the credential fetch, budget reservation, and the recordUsage write
@@ -499,7 +554,7 @@ export async function runAgent(
                 messages: [
                   {
                     role: "system" as const,
-                    content: cfg.systemPrompt as string,
+                    content: systemPrompt as string,
                     providerOptions: {
                       anthropic: { cacheControl: { type: "ephemeral" } },
                     },
@@ -511,7 +566,7 @@ export async function runAgent(
                 ],
               }
             : {
-                system: cfg.systemPrompt,
+                system: systemPrompt,
                 prompt: JSON.stringify(modelInput),
               }),
           ...(tooled
@@ -552,7 +607,7 @@ export async function runAgent(
         const estimated = !(real.inputTokens || real.outputTokens);
         const usage = estimated
           ? estimateTokens(
-              cfg.systemPrompt,
+              systemPrompt,
               modelInput,
               // output text may be empty under structured output — fall back to the object
               result.text || JSON.stringify(result.output ?? ""),

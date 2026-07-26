@@ -479,7 +479,26 @@ export function nodeSubtitle(
   }
   if (kind === "codeAgent") {
     const tool = (config.tool as string | undefined) ?? "claude";
-    return `${tool} · read-only`;
+    // Report the node's REAL mode. This used to hardcode "read-only", which was true when
+    // write mode didn't exist and is now a lie on any write-mode node — the exact case that
+    // matters most, since a write-mode codeAgent clones a repo and can open a pull request.
+    const mode = config.mode === "write" ? "write" : "read-only";
+    const repo = config.repo as string | undefined;
+    return mode === "write" && repo
+      ? `${tool} · write · ${repo}`
+      : `${tool} · ${mode}`;
+  }
+  if (kind === "vectorQuery" || kind === "vectorUpsert") {
+    const collection = config.collection as string | undefined;
+    const topK = config.topK as number | undefined;
+    if (!collection) return undefined;
+    return topK ? `${collection} · top ${topK}` : collection;
+  }
+  if (kind === "mcpServerTrigger") {
+    // The name this workflow is published under on the MCP endpoint — the one fact that
+    // makes an mcpServerTrigger node legible at a glance.
+    const toolName = config.toolName as string | undefined;
+    return toolName ? `tool: ${toolName}` : undefined;
   }
   if (kind === "textToSpeech") {
     const voice = config.voice as string | undefined;

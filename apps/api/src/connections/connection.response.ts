@@ -64,6 +64,63 @@ export class ConnectionResponse {
   @ApiProperty({ format: "date-time" }) createdAt!: Date;
 }
 
+/**
+ * Result of testing a connection against its provider (#701).
+ *
+ * `status` is the OUTCOME of the test, not an HTTP code: `unknown` means we declined to probe
+ * (the provider has no non-write, zero-argument read action — e.g. Slack, whose every catalog
+ * action writes), which is different from a token that failed. The provider's own HTTP code is
+ * `httpStatus`.
+ */
+export class ConnectionTestResponse {
+  @ApiProperty({
+    example: true,
+    description:
+      "True only when the provider answered 2xx. `unknown` is not ok.",
+  })
+  ok!: boolean;
+  @ApiProperty({
+    example: "ok",
+    enum: ["ok", "failed", "unknown"],
+    description:
+      "`ok` = the provider accepted the credential. `failed` = it was rejected or unreachable. " +
+      "`unknown` = no safe read-only call exists for this provider, so nothing was called.",
+  })
+  status!: string;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 200,
+    description: "The provider's HTTP status, or null when no call was made.",
+  })
+  httpStatus!: number | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: "calendly.get_me",
+    description:
+      "The `provider.action` that was called — always a catalog action with `write: false` and no " +
+      "required fields. Null when nothing safe existed.",
+  })
+  checkedAction!: string | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: "connected",
+    enum: ["connected", "needs_reauth", "error"],
+    description:
+      "The connection's status after the test. Null when the test learned nothing about the " +
+      "token (`unknown`) and therefore left the status untouched.",
+  })
+  connectionStatus!: string | null;
+  @ApiProperty({
+    example:
+      "Calendly answered 200 to calendly.get_me — this connection works.",
+    description: "Human-readable explanation. Never contains the credential.",
+  })
+  message!: string;
+}
+
 /** Result of starting interactive OAuth consent — the authorize URL for the browser. */
 export class OAuthStartResponse {
   @ApiProperty({

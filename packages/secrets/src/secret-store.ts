@@ -71,6 +71,47 @@ export class SecretStore {
     });
   }
 
+  /**
+   * Write ONLY if the key is absent; returns false if it already existed. Atomic where `put`
+   * (an upsert) is not: the unique constraint on (tenantId, environmentId, provider) decides
+   * the race, so two concurrent callers cannot both believe they were first.
+   *
+   * This is what a single-use token needs — a read-then-write "have I seen this?" check lets two
+   * simultaneous requests both read "no" and both proceed (SAML assertion replay, #455).
+   */
+  async putIfAbsent(
+    tenantId: string,
+    environmentId: string,
+    key: string,
+    plaintext: string,
+  ): Promise<boolean> {
+    const enc = await this.keys.encrypt(
+      tenantId,
+      plaintext,
+      this.aad(tenantId, key),
+    );
+    try {
+      await getPrisma().tenantCredential.create({
+        data: {
+          tenantId,
+          environmentId,
+          provider: key,
+          ciphertext: enc.ciphertext,
+          iv: enc.iv,
+          authTag: enc.authTag,
+          keyVersion: enc.keyVersion ?? 1,
+          isValid: true,
+          lastValidatedAt: new Date(),
+        },
+      });
+      return true;
+    } catch (err) {
+      // P2002 = unique violation ⇒ somebody else got there first. Any other error is real.
+      if ((err as { code?: string })?.code === "P2002") return false;
+      throw err;
+    }
+  }
+
   async get(
     tenantId: string,
     environmentId: string,

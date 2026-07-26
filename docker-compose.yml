@@ -8,6 +8,18 @@ x-backend-env: &backend-env
   # Decrypt-only fallback during master-key rotation (see rotate-master-key CLI).
   # Set alongside a NEW ENCRYPTION_KEY, run the rewrap, then remove it.
   OLD_ENCRYPTION_KEY: ${OLD_ENCRYPTION_KEY:-}
+  # External secret store for BYOK provider keys (#458). UNSET/`db` = the default
+  # Postgres envelope store (unchanged). `vault` = HashiCorp Vault KV v2: the key
+  # MATERIAL lives in Vault and Postgres keeps only the index row. Both the api (save)
+  # and the worker (in-activity resolve) must agree, so they share this anchor.
+  # ENCRYPTION_KEY stays REQUIRED either way — pre-existing rows and every other secret
+  # (connection tokens, env secrets) remain DB-encrypted.
+  SECRET_PROVIDER: ${SECRET_PROVIDER:-}
+  VAULT_ADDR: ${VAULT_ADDR:-}
+  VAULT_TOKEN: ${VAULT_TOKEN:-}
+  VAULT_KV_MOUNT: ${VAULT_KV_MOUNT:-}
+  VAULT_PATH_PREFIX: ${VAULT_PATH_PREFIX:-}
+  VAULT_NAMESPACE: ${VAULT_NAMESPACE:-}
   # Defaults to the in-stack dev server. Point at Temporal Cloud by overriding
   # TEMPORAL_ADDRESS + setting TEMPORAL_NAMESPACE and an auth method in .env
   # (TEMPORAL_API_KEY, or the mTLS cert/key paths). See @naary/temporal-config.
@@ -181,6 +193,20 @@ services:
       # screen). nry_ tokens + all @Public() ingress are exempt. Enrol before enabling — see
       # deploy/.env.prod.example.
       REQUIRE_MFA: ${REQUIRE_MFA:-}
+      # SAML SSO (#455, docs/design/SAML-SSO.md) — api-only (the worker has no auth surface).
+      # OFF unless all three are set: no SSO_SESSION_SECRET / SSO_SP_ENTITY_ID / SSO_ACS_URL
+      # ⇒ /sso/metadata answers 503, the ACS refuses, and the guard's `nrys_` branch verifies
+      # nothing. Firebase login is unaffected either way. The SP entity id + ACS URL must match
+      # what the IdP admin entered, so they are explicit (never derived from a request Host).
+      SSO_SESSION_SECRET: ${SSO_SESSION_SECRET:-}
+      SSO_SP_ENTITY_ID: ${SSO_SP_ENTITY_ID:-}
+      SSO_ACS_URL: ${SSO_ACS_URL:-}
+      SSO_SESSION_TTL_SECONDS: ${SSO_SESSION_TTL_SECONDS:-}
+      # May a workspace owner/admin REGISTER an IdP themselves (PUT /tenants/:id/sso)? Default
+      # NO: registering declares "this cert may assert these email domains" and no request can
+      # prove domain ownership. Operators register connections with
+      # src/sso/register-sso-connection.ts after checking the claim.
+      SSO_SELF_SERVICE: ${SSO_SELF_SERVICE:-}
       # Feature flags (OpenFeature + Flagsmith) — api-only (only @naary/api imports
       # @naary/flags). OFF unless FLAGSMITH_ENVIRONMENT_KEY (server-side `ser.` key) is
       # set: no key ⇒ every flag resolves to its safe code default (fail-safe). For a

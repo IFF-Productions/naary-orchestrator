@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { delay, http, HttpResponse } from "msw";
 import { expect, userEvent, waitFor, within } from "storybook/test";
+import { codeAgentPrGraph, supervisorHandoffGraph } from "@naary/dsl";
 import type { GraphDef } from "@naary/dsl";
 import { ModeProvider } from "../../mode";
 import { Templates } from "./Templates";
@@ -156,6 +157,25 @@ const TEMPLATES: {
       "Pull an RSS/Atom feed, let an agent write a skimmable digest, and email it.",
     graph: feedDigest,
   },
+  {
+    // The REAL shipped graph, imported from the DSL rather than re-fixtured — this is the
+    // branching case (a supervisor fanning out to three specialists on conditional edges),
+    // so it's what proves the read-only graph render draws branches and labels them.
+    key: "supervisor-handoff",
+    name: "Supervisor & specialist agents",
+    description:
+      "A supervisor agent reads an inbound request and hands it to exactly one specialist with a typed brief; that specialist answers and the reply is returned synchronously.",
+    graph: supervisorHandoffGraph,
+  },
+  {
+    // Also the REAL graph: it is the one template with a WRITE-mode codeAgent (whose
+    // subtitle used to claim "read-only") and the one with an explicit decline branch.
+    key: "code-agent-pr",
+    name: "Issue to approved plan to pull request",
+    description:
+      "An agent judges whether an issue is safe to attempt and writes the plan; a human approves it; only then does the code agent open a PR. Capped in dollars and turns.",
+    graph: codeAgentPrGraph,
+  },
 ];
 
 const summaries = TEMPLATES.map(({ key, name, description, graph }) => ({
@@ -166,7 +186,15 @@ const summaries = TEMPLATES.map(({ key, name, description, graph }) => ({
 }));
 
 const handlers = [
-  http.get("*/api/templates", () => HttpResponse.json(summaries)),
+  // The gallery now asks for `?include=graph` (one request instead of a per-key fan-out);
+  // serve the graphs when it does, and the bare summaries otherwise.
+  http.get("*/api/templates", ({ request }) =>
+    HttpResponse.json(
+      new URL(request.url).searchParams.get("include") === "graph"
+        ? TEMPLATES.map((t) => ({ ...t, nodeCount: t.graph.nodes.length }))
+        : summaries,
+    ),
+  ),
   http.get("*/api/templates/:key", ({ params }) => {
     const t = TEMPLATES.find((x) => x.key === params.key);
     if (!t) return new HttpResponse(null, { status: 404 });
@@ -241,6 +269,37 @@ export const Preview: Story = {
   },
 };
 
+/**
+ * The preview of a BRANCHING template (#574 + #580): the read-only graph must show the
+ * supervisor fanning out to three specialists, with each conditional edge labelled by its
+ * real condition — the check that the diagram reports structure rather than a straight line.
+ */
+export const PreviewBranchingGraph: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      await canvas.findByRole("button", {
+        name: /Preview Supervisor & specialist agents/,
+      }),
+    );
+    const dialog = await canvas.findByRole("dialog");
+    // The lazily-imported react-flow chunk has to land before nodes exist.
+    await waitFor(
+      () =>
+        expect(
+          dialog.querySelectorAll(".react-flow__node").length,
+        ).toBeGreaterThan(5),
+      { timeout: 5000 },
+    );
+    // Three conditional handoff edges, each labelled with the target it routes to.
+    const labels = [...dialog.querySelectorAll(".react-flow__edge-text")].map(
+      (e) => e.textContent,
+    );
+    await expect(labels).toContain("billing_specialist");
+    await expect(labels).toContain("technical_specialist");
+  },
+};
+
 /** Full install: preview → Install template → the staggered success walkthrough. */
 export const InstalledSuccess: Story = {
   play: async ({ canvasElement }) => {
@@ -277,5 +336,39 @@ export const InstalledNoApproval: Story = {
     );
     await canvas.findByText(/Scheduled database report installed/);
     await waitFor(() => expect(canvas.queryByText("APPROVAL")).toBeNull());
+  },
+};
+
+/**
+ * The code-agent template's preview. Two things this pins that no other story does: a
+ * WRITE-mode codeAgent must not be subtitled "read-only" (it clones a repo and can open a
+ * pull request), and the decline branch (`attempt` false) must be drawn and labelled rather
+ * than dead-ending.
+ */
+export const PreviewCodeAgent: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      await canvas.findByRole("button", {
+        name: /Preview Issue to approved plan/,
+      }),
+    );
+    const dialog = await canvas.findByRole("dialog");
+    await waitFor(
+      () =>
+        expect(
+          dialog.querySelectorAll(".react-flow__node").length,
+        ).toBeGreaterThan(4),
+      { timeout: 5000 },
+    );
+    const shown = dialog.textContent ?? "";
+    await expect(shown).toContain("write");
+    await expect(shown).not.toContain("read-only");
+    // Both branches off the plan node are conditional, and both are labelled.
+    const labels = [...dialog.querySelectorAll(".react-flow__edge-text")].map(
+      (e) => e.textContent,
+    );
+    await expect(labels).toContain("attempt = true");
+    await expect(labels).toContain("attempt ≠ true");
   },
 };

@@ -137,6 +137,12 @@ export const router = createRouter([
                 ...lazy(() => import("./screens/app/Workflows"), "Workflows"),
               },
               {
+                // n8n migration path (#579): translate an export into a draft, show the mapping
+                // report, then save through the ordinary POST /graphs path.
+                path: "import/n8n",
+                ...lazy(() => import("./screens/app/ImportN8n"), "ImportN8n"),
+              },
+              {
                 path: "workflows/:key",
                 ...lazy(
                   () => import("./screens/app/WorkflowDetail"),

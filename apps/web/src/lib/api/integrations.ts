@@ -11,6 +11,7 @@ import type {
   ChatRow,
   ConnectionInput,
   ConnectionRow,
+  ConnectionTestResult,
   FormDefinition,
   FormRow,
   McpRegistryPage,
@@ -121,6 +122,22 @@ export const integrationsApi = {
     return http(
       `/tenants/${encodeURIComponent(tenantId)}/connections/github-app/install/start`,
       { method: "POST", body: JSON.stringify(input) },
+    );
+  },
+  // Ask the provider whether this connection's credential actually works (#701). Runs the
+  // provider's cheapest read-only, ZERO-ARGUMENT catalog action through the same request builder
+  // the integration node uses, and updates the connection's status from the answer. Never writes:
+  // a provider with no such action comes back `status: "unknown"` with the reason.
+  // `provider` is required — a connection row carries no provider (a `custom` connection is
+  // provider-agnostic; the provider is picked at the node), so the caller must say which API.
+  testConnection(
+    tenantId: string,
+    connectionId: string,
+    provider: string,
+  ): Promise<ConnectionTestResult> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/connections/${encodeURIComponent(connectionId)}/test`,
+      { method: "POST", body: JSON.stringify({ provider }) },
     );
   },
   // Disconnect (delete) a connection. Also removes its stored secret server-side.
