@@ -121,6 +121,7 @@ and the page renders exactly as before.
 | **Theme** | Force light or dark, or follow the visitor's own setting. |
 | **Desktop layout** | One or two columns. |
 | **Card width** | Narrow (460px) or wide (640px). |
+| **Logo** | Replaces the Naary mark in the page header. |
 
 A few behaviours worth knowing, because they're deliberate rather than incidental:
 
@@ -138,6 +139,33 @@ A few behaviours worth knowing, because they're deliberate rather than incidenta
   button is picked from the accent's luminance, so a pale brand colour stays readable.
 - **Two columns is a desktop-only idea.** Phones always get one column, and long-answer and choice
   fields keep a full row even on desktop — a paragraph box in half a row is worse than no columns.
+
+### The logo
+
+Upload it in the canvas (PNG, JPEG, GIF or WebP, up to 512 KB) and we store it — **the config holds an
+asset id, not a URL**, and the image is served from your form's own origin at `/forms/assets/:id`.
+
+That's deliberate. An external URL would make every visitor's browser fetch a third-party address from
+a page we serve: egress we don't control, a tracking pixel we'd be laundering on your behalf, and a
+logo that breaks the moment that host does. An id we issued is also checked against your workspace
+environment when the workflow is saved, so it can't point at another workspace's asset.
+
+Two things follow from how uploads are validated:
+
+- **The file's contents decide, not its name.** We read the image's magic bytes and ignore the
+  `Content-Type` you send, because these bytes are served back from our origin and a file labelled
+  `image/png` can be anything. Renaming a file won't get it accepted.
+- **SVG isn't accepted.** It's scriptable XML with no signature to identify it, so "is this really an
+  SVG" can only be answered by parsing — and a hostile one served from our origin would be a real
+  problem. Export a PNG instead.
+
+Re-uploading the same file returns the same asset id rather than storing another copy, which is also
+why the image is cached aggressively: a given id's bytes can never change.
+
+**Self-hosting?** Logo uploads need object storage configured (`STORAGE_PROVIDER=s3` + `S3_BUCKET`,
+plus a region and credentials; set `S3_ENDPOINT` for R2/B2/MinIO). Without it an upload fails with a
+clear 503 rather than appearing to work — a logo held in one API process's memory would vanish on the
+next deploy and differ between replicas.
 
 Invalid values are **dropped, not repaired**: a malformed accent falls back to the default and a
 rejected redirect falls back to the success card, so a bad setting degrades the page instead of

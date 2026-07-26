@@ -1,5 +1,7 @@
 import type { FormBrandingConfig } from "@naary/dsl";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { api } from "../../lib/api";
+import { useWorkspace } from "../../workspace/WorkspaceProvider";
 import { inputStyle, Labeled } from "./fields";
 
 /**
@@ -203,6 +205,23 @@ export function FormBrandingSection({
         ))}
       </div>
 
+      <Labeled label="Logo (optional)">
+        <LogoPicker
+          assetId={branding.logoAssetId}
+          onPicked={(logoAssetId) => onChange({ logoAssetId })}
+        />
+      </Labeled>
+      {branding.logoAssetId && (
+        <Labeled label="Logo alt text (optional)">
+          <input
+            value={branding.logoAlt ?? ""}
+            onChange={(e) => onChange({ logoAlt: e.target.value })}
+            style={inputStyle}
+            placeholder="Acme logo"
+          />
+        </Labeled>
+      )}
+
       <Labeled label="Theme">
         <select
           value={branding.theme ?? "auto"}
@@ -253,6 +272,124 @@ export function FormBrandingSection({
           <option value="wide">Wide (640px)</option>
         </select>
       </Labeled>
+    </div>
+  );
+}
+
+/**
+ * Upload + preview for the form logo.
+ *
+ * Uploads to OUR storage and stores the returned asset id — never a URL the author types. A
+ * tenant-supplied URL would make every visitor's browser fetch a third-party address from our page
+ * (egress we don't control, a tracking pixel we'd be laundering) and would break silently whenever
+ * their host did. An id we issued is also verified to belong to this workspace environment at save
+ * time, so it can't point at another tenant's asset.
+ *
+ * The client checks size/type only to fail fast with a friendly message — the SERVER re-checks, and it
+ * decides from the file's magic bytes rather than its name or content type.
+ */
+function LogoPicker({
+  assetId,
+  onPicked,
+}: {
+  assetId?: string;
+  onPicked: (assetId: string | undefined) => void;
+}) {
+  const { activeId: tenantId } = useWorkspace();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function pick(file: File | undefined) {
+    if (!file || !tenantId) return;
+    setError(null);
+    // Mirrors the server's cap; a friendlier failure than a 400 after uploading half a megabyte.
+    if (file.size > 512 * 1024) {
+      setError("Image is larger than 512 KB — try a smaller PNG.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const { assetId: id } = await api.uploadFormLogo(tenantId, file);
+      onPicked(id);
+    } catch (e) {
+      setError(
+        e instanceof Error && e.message
+          ? // The server's message is specific and useful here (unsupported format, storage not
+            // configured), so surface it rather than a generic failure.
+            e.message
+          : "Could not upload the image.",
+      );
+    } finally {
+      setBusy(false);
+      // Clear the input so re-picking the SAME file fires another change event.
+      if (fileInput.current) fileInput.current.value = "";
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {assetId && (
+          // Rendered from our own origin — same URL the public page will use, so a broken preview
+          // here means a broken logo there.
+          <img
+            src={api.formAssetUrl(assetId)}
+            alt="Current logo"
+            style={{
+              height: 32,
+              maxWidth: 120,
+              objectFit: "contain",
+              borderRadius: 6,
+              background: "var(--card)",
+              border: "1px solid var(--line-2)",
+              padding: 2,
+            }}
+          />
+        )}
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          onChange={(e) => void pick(e.target.files?.[0])}
+          disabled={busy || !tenantId}
+          aria-label="Upload a logo"
+          style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
+        />
+        {assetId && (
+          <button
+            type="button"
+            onClick={() => onPicked(undefined)}
+            style={{
+              background: "none",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              fontFamily: "var(--font-sans)",
+            }}
+          >
+            Remove
+          </button>
+        )}
+      </div>
+      {busy && (
+        <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
+          Uploading…
+        </div>
+      )}
+      {error && (
+        <div
+          style={{ fontSize: "var(--text-xs)", color: "var(--state-error)" }}
+        >
+          {error}
+        </div>
+      )}
+      <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
+        PNG, JPEG, GIF or WebP, up to 512 KB. Stored by us and served from your
+        form's own domain — SVG isn't accepted.
+      </div>
     </div>
   );
 }

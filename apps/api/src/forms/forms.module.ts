@@ -3,6 +3,7 @@ import { ContentTemplatesModule } from "../content-templates/content-templates.m
 import { EnvironmentsModule } from "../environments/environments.module";
 import { ExecutionsModule } from "../executions/executions.module";
 import { TurnstileConfigModule } from "../turnstile/turnstile-config.module";
+import { FormAssetModule } from "./form-asset.module";
 import { FormService } from "./form.service";
 import { FormsAdminController } from "./forms-admin.controller";
 import { FormsController } from "./forms.controller";
@@ -15,6 +16,8 @@ import { FormsController } from "./forms.controller";
     ExecutionsModule,
     ContentTemplatesModule,
     TurnstileConfigModule,
+    // Shared with GraphsModule (the save-time logo ownership check) — see FormAssetModule.
+    FormAssetModule,
   ], // FormsController reuses ExecutionsService.startForm
   // GraphsService is provided globally (@Global GraphsModule).
   controllers: [FormsController, FormsAdminController],

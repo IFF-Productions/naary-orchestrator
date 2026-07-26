@@ -76,6 +76,16 @@ export class FormBrandingResponse {
   desktopColumns?: number;
   @ApiProperty({ required: false, enum: ["narrow", "wide"] })
   width?: string;
+  @ApiProperty({
+    required: false,
+    example: "9f3a1c2e-4b5d-4e6f-8a9b-0c1d2e3f4a5b",
+    description:
+      "An uploaded logo, as an OPAQUE ASSET ID — never a URL. Fetch it from " +
+      "`GET /forms/assets/{assetId}` on this origin. Ids are verified to belong to the owning " +
+      "workspace environment at save time.",
+  })
+  logoAssetId?: string;
+  @ApiProperty({ required: false, example: "Acme logo" }) logoAlt?: string;
 }
 
 /** Public form definition served to an anonymous browser — NO tenant/workflow identifiers. */
@@ -173,4 +183,15 @@ export class FormSubmitResponse {
 /** Acknowledgement that a form endpoint was deleted. */
 export class FormDeletedResponse {
   @ApiProperty({ example: true }) deleted!: boolean;
+}
+
+/** A stored hosted-page image. The id is opaque and is the only capability needed to fetch it. */
+export class FormAssetResponse {
+  @ApiProperty({ example: "9f3a1c2e-…" }) assetId!: string;
+  @ApiProperty({
+    example: "image/png",
+    description:
+      "Derived from the file's magic bytes, not from the request's Content-Type header.",
+  })
+  contentType!: string;
 }

@@ -138,7 +138,16 @@ export function SecureFooter({ children }: { children: ReactNode }) {
 }
 
 /** Brand row for card headers: ember flame tile (optionally + a name when one exists). */
-export function BrandRow({ name }: { name?: string }) {
+export function BrandRow({
+  name,
+  logoUrl,
+  logoAlt,
+}: {
+  name?: string;
+  /** A tenant's uploaded logo, served from OUR origin (never an external URL) — replaces the mark. */
+  logoUrl?: string;
+  logoAlt?: string;
+}) {
   return (
     <div
       style={{
@@ -148,7 +157,18 @@ export function BrandRow({ name }: { name?: string }) {
         marginBottom: 14,
       }}
     >
-      <Logo size={34} />
+      {logoUrl ? (
+        // `alt=""` when the author gave no text: the logo is decorative next to the form's own
+        // title, and a screen reader announcing a filename-ish guess is worse than silence.
+        // Height-bounded so an oversized upload can't push the header around.
+        <img
+          src={logoUrl}
+          alt={logoAlt ?? ""}
+          style={{ height: 34, maxWidth: 180, objectFit: "contain" }}
+        />
+      ) : (
+        <Logo size={34} />
+      )}
       {name && (
         <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-2)" }}>
           {name}

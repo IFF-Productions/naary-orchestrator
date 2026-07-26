@@ -4,7 +4,7 @@
  * flows), webhooks, hosted forms, and hosted chats.
  */
 import type { GraphQLSchemaSummary, OpenApiSummary } from "@naary/dsl";
-import { http, introspectFetch } from "./http";
+import { BASE, http, introspectFetch } from "./http";
 import type {
   ChatDefinition,
   ChatReply,
@@ -200,6 +200,25 @@ export const integrationsApi = {
       method: "POST",
       body: JSON.stringify(input),
     });
+  },
+  // Upload a hosted-form logo. The RAW file is the body with its own content type — no multipart, and
+  // no base64 (which would inflate past the JSON body limit). The server IGNORES this content type and
+  // sniffs the file's magic bytes, so a mislabelled file is rejected on its contents, not its name.
+  // Identical bytes return the existing asset id rather than creating a duplicate.
+  uploadFormLogo(
+    tenantId: string,
+    file: File,
+  ): Promise<{ assetId: string; contentType: string }> {
+    return http(`/tenants/${encodeURIComponent(tenantId)}/forms/assets`, {
+      method: "POST",
+      // Overrides http()'s default application/json (init.headers is spread last).
+      headers: { "content-type": file.type || "application/octet-stream" },
+      body: file,
+    });
+  },
+  /** Public URL for an uploaded asset — same `/api` proxy as every other call. */
+  formAssetUrl(assetId: string): string {
+    return `${BASE}/forms/assets/${encodeURIComponent(assetId)}`;
   },
   deleteForm(tenantId: string, formId: string): Promise<void> {
     return http(

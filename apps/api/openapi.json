@@ -7967,6 +7967,29 @@
         ]
       }
     },
+    "/forms/assets/{assetId}": {
+      "get": {
+        "operationId": "FormsController_asset",
+        "parameters": [
+          {
+            "name": "assetId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The image bytes. Anonymous; the opaque asset id is the only capability. Cached immutably — asset ids are content-addressed, so an id's bytes never change."
+          }
+        },
+        "tags": [
+          "Forms"
+        ]
+      }
+    },
     "/forms/{formId}": {
       "get": {
         "operationId": "FormsController_definition",
@@ -8045,6 +8068,113 @@
         },
         "tags": [
           "Forms"
+        ]
+      }
+    },
+    "/tenants/{id}/forms/assets": {
+      "post": {
+        "description": "Raw image bytes as the body (PNG, JPEG, GIF or WebP, max 512 KB). The file's magic bytes decide the stored type — the Content-Type header is ignored. SVG is not accepted. Re-uploading identical bytes returns the existing asset id rather than creating a duplicate.",
+        "operationId": "FormsAdminController_uploadAsset",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The raw image bytes.",
+          "content": {
+            "image/png": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/jpeg": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/gif": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/webp": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormAssetResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Upload a hosted-form logo",
+        "tags": [
+          "FormsAdmin"
         ]
       }
     },
@@ -19361,6 +19491,15 @@
               "narrow",
               "wide"
             ]
+          },
+          "logoAssetId": {
+            "type": "string",
+            "example": "9f3a1c2e-4b5d-4e6f-8a9b-0c1d2e3f4a5b",
+            "description": "An uploaded logo, as an OPAQUE ASSET ID — never a URL. Fetch it from `GET /forms/assets/{assetId}` on this origin. Ids are verified to belong to the owning workspace environment at save time."
+          },
+          "logoAlt": {
+            "type": "string",
+            "example": "Acme logo"
           }
         }
       },
@@ -19508,6 +19647,24 @@
           "properties",
           "additionalProperties",
           "x-naary-submit"
+        ]
+      },
+      "FormAssetResponse": {
+        "type": "object",
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "example": "9f3a1c2e-…"
+          },
+          "contentType": {
+            "type": "string",
+            "example": "image/png",
+            "description": "Derived from the file's magic bytes, not from the request's Content-Type header."
+          }
+        },
+        "required": [
+          "assetId",
+          "contentType"
         ]
       },
       "RegisterFormDto": {

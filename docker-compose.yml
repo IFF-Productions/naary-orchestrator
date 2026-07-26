@@ -51,11 +51,18 @@ x-backend-env: &backend-env
   # Server-derived SPA base for links in transactional emails / connect callbacks (never a
   # request param). Falls back to the first http(s) CORS_ORIGINS entry, else a relative path.
   APP_BASE_URL: ${APP_BASE_URL:-}
-  # Claim-check object storage (optional; unset = in-memory). Forwarded from .env
-  # so a real S3 bucket can be used without editing this file.
+  # Object storage: large-payload claim-checks AND hosted-form logo uploads. Unset = in-memory,
+  # which is fine for claim-checks in a smoke test but makes logo UPLOADS fail closed with a 503
+  # (a logo in a process's heap would vanish on the next rollout and differ per replica).
+  # Credentials are forwarded too — without them a bucket is configured but unreachable, which was
+  # the state of this file before logo uploads existed. S3_ENDPOINT targets an S3-compatible
+  # provider (R2/B2/MinIO) and switches the client to path-style addressing.
   STORAGE_PROVIDER: ${STORAGE_PROVIDER:-}
   S3_BUCKET: ${S3_BUCKET:-}
   AWS_REGION: ${AWS_REGION:-}
+  S3_ENDPOINT: ${S3_ENDPOINT:-}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
   # Observability (Sentry) — OFF unless a DSN is set. Events are scrubbed.
   # SENTRY_DSN is the SHARED fallback. Each app can instead report to its OWN Sentry project
   # via SENTRY_DSN_API / SENTRY_DSN_WORKER (set per-service below) — separate issue streams,

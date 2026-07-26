@@ -168,3 +168,37 @@ describe("copy is length-capped", () => {
     expect(parse({ successMessage: "A".repeat(2_001) }).success).toBe(false);
   });
 });
+
+describe("logoAssetId is an id we issued, never a URL", () => {
+  it("accepts a uuid", () => {
+    expect(
+      parse({ logoAssetId: "9f3a1c2e-4b5d-4e6f-8a9b-0c1d2e3f4a5b" }).success,
+    ).toBe(true);
+  });
+
+  /**
+   * A URL here would mean every visitor's browser fetching a tenant-controlled address from our page:
+   * egress we don't control, a tracking pixel we'd be laundering, and a logo that breaks whenever
+   * their host does. `javascript:`/`data:` would be worse still. Only an id we minted is accepted, and
+   * ownership of that id is checked against the tenant+env at save time.
+   */
+  it.each([
+    "https://evil.example/logo.png",
+    "http://acme.test/logo.png",
+    "//acme.test/logo.png",
+    "/relative/logo.png",
+    "data:image/png;base64,iVBORw0KGgo=",
+    "javascript:alert(1)",
+    "not-a-uuid",
+    "9f3a1c2e-4b5d-4e6f-8a9b",
+    "9f3a1c2e4b5d4e6f8a9b0c1d2e3f4a5b",
+    "",
+  ])("rejects %s", (v) => {
+    expect(parse({ logoAssetId: v }).success).toBe(false);
+  });
+
+  it("caps the alt text", () => {
+    expect(parse({ logoAlt: "Acme logo" }).success).toBe(true);
+    expect(parse({ logoAlt: "A".repeat(121) }).success).toBe(false);
+  });
+});

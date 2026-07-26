@@ -8,8 +8,10 @@ import {
   NotFoundException,
   Param,
   Post,
+  Res,
 } from "@nestjs/common";
-import { ApiOkResponse } from "@nestjs/swagger";
+import type { Response } from "express";
+import { ApiOkResponse, ApiProduces } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
 import { Public } from "../auth/public.decorator";
 import {
@@ -26,6 +28,7 @@ import {
   validateSubmission,
 } from "./form-definition";
 import { buildFormJsonSchema } from "./form-schema";
+import { FormAssetService } from "./form-asset.service";
 import { FormService } from "./form.service";
 
 /**
@@ -51,7 +54,51 @@ export class FormsController {
     private readonly executions: ExecutionsService,
     private readonly templates: ContentTemplatesService,
     private readonly turnstile: TurnstileConfigService,
+    private readonly assets: FormAssetService,
   ) {}
+
+  /**
+   * Serve a hosted-page image (a form logo). ANONYMOUS, like the definition route — the page that
+   * displays it is anonymous, so its images have to be too. The opaque asset id is the only
+   * capability and nothing in the response identifies the owning tenant.
+   *
+   * Declared BEFORE `@Get(":formId")` so "assets" isn't captured as a form id.
+   *
+   * Response hardening, all of it load-bearing because these bytes are tenant-supplied and served from
+   * OUR origin:
+   *  - `nosniff` stops a browser from content-sniffing its way to `text/html` and executing the file.
+   *  - `Content-Security-Policy: default-src 'none'; sandbox` neutralises anything scriptable that got
+   *    past the magic-byte check — belt to the sniffer's braces, and what would make SVG safe later.
+   *  - `Content-Disposition: inline` with no filename: the stored bytes have no author-controlled name
+   *    to echo back into a header.
+   *  - `immutable` caching is honest here BECAUSE ids are content-addressed: the same id can never
+   *    return different bytes, since different bytes get a different id.
+   */
+  @Get("assets/:assetId")
+  @ApiProduces("image/png", "image/jpeg", "image/gif", "image/webp")
+  @ApiOkResponse({
+    description:
+      "The image bytes. Anonymous; the opaque asset id is the only capability. Cached immutably — " +
+      "asset ids are content-addressed, so an id's bytes never change.",
+  })
+  async asset(
+    @Param("assetId") assetId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const found = await this.assets.get(assetId);
+    // 404 for an unknown id AND for a row whose object is missing — a broken logo must not 500 the
+    // page it decorates.
+    if (!found) throw new NotFoundException("Unknown asset");
+    res.setHeader("content-type", found.contentType);
+    res.setHeader("x-content-type-options", "nosniff");
+    res.setHeader("content-security-policy", "default-src 'none'; sandbox");
+    res.setHeader("content-disposition", "inline");
+    res.setHeader("cache-control", "public, max-age=31536000, immutable");
+    // Content-addressed, so the hash IS the validator — a conditional request can be answered
+    // without reading the object again.
+    res.setHeader("etag", `"${found.sha256}"`);
+    res.end(found.bytes);
+  }
 
   /** Serve the public form definition (title/description/fields). 404 if the endpoint is unknown
    *  or its current graph's entry node isn't a formTrigger. Includes `turnstileSiteKey` when the
