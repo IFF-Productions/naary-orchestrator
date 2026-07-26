@@ -9,6 +9,9 @@ const groupTokenMemberFindFirst = vi.fn();
 const tenantSettingsFindUnique = vi.fn();
 vi.mock("@naary/db", () => ({
   getPrisma: () => ({
+    // Run rows now carry the workflow NAME, resolved with one batched
+    // graphDefinition lookup per page — an empty list leaves workflowName null.
+    graphDefinition: { findMany: async () => [] },
     execution: { findUnique, findMany },
     groupMember: { findFirst: groupMemberFindFirst },
     groupTokenMember: { findFirst: groupTokenMemberFindFirst },

@@ -43,7 +43,7 @@ export function NotificationsBell() {
         kind: "approval",
         key: `ap-${a.workflowId}-${a.nodeId}`,
         title: `Approval needed: ${a.title}`,
-        sub: a.workflowKey ?? a.workflowId,
+        sub: a.workflowName ?? a.workflowKey ?? a.workflowId,
         at: a.createdAt,
         to: `/app/runs/${a.workflowId}`,
       }));
@@ -53,7 +53,7 @@ export function NotificationsBell() {
         .map((r) => ({
           kind: "failed",
           key: `run-${r.workflowId}`,
-          title: `Run failed: ${r.workflowKey ?? "workflow"}`,
+          title: `Run failed: ${r.workflowName ?? r.workflowKey ?? "workflow"}`,
           sub: runStatusUi(r.status).label,
           at: r.startedAt,
           to: `/app/runs/${r.workflowId}`,

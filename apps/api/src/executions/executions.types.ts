@@ -10,6 +10,15 @@ export const DEFAULT_WORKFLOW_KEY = "default";
 export interface RunSummary {
   workflowId: string;
   workflowKey: string | null;
+  /**
+   * The workflow's display NAME at read time, or null when it can't be resolved (a pre-migration run
+   * with no key, or a workflow since deleted). Callers render `workflowName ?? workflowKey ?? "—"`.
+   *
+   * Resolved rather than stored: a run records the KEY it started (stable, and what the trigger
+   * referenced), while the name is editable and env-scoped. Snapshotting it would show the old name
+   * after a rename — and renaming a workflow is precisely when you go looking at its runs.
+   */
+  workflowName?: string | null;
   /** App status (running | awaiting_approval | awaiting_webhook | awaiting_budget |
    *  completed | rejected | budget_exceeded | circuit_open | invalid_graph) or a
    *  Temporal close reason (failed | timed_out | terminated | canceled) or "unknown"
@@ -89,6 +98,9 @@ export interface ApproverSummary {
 export interface AwaitingApproval {
   workflowId: string;
   workflowKey: string | null;
+  /** The workflow's display name at read time, or null when unresolvable. Same resolve-don't-store
+   *  reasoning as RunSummary.workflowName. */
+  workflowName?: string | null;
   nodeId: string;
   title: string;
   instructions: string | null;

@@ -16,6 +16,19 @@ export class RunListItemResponse {
   @ApiProperty({ type: String, nullable: true, example: "support-triage" })
   workflowKey!: string | null;
   @ApiProperty({
+    required: false,
+    type: String,
+    nullable: true,
+    example: "Refund triage",
+    description:
+      "The workflow's display NAME at read time, or null when unresolvable (a pre-migration run, or " +
+      "a deleted workflow). Resolved, not snapshotted — a run records the stable KEY, while the name " +
+      "is editable, so snapshotting would show a stale name after a rename. Render " +
+      "`workflowName ?? workflowKey`.",
+  })
+  workflowName?: string | null;
+
+  @ApiProperty({
     example: "completed",
     description:
       "App status or a Temporal close reason (failed | timed_out | terminated | canceled | unknown).",
@@ -110,6 +123,18 @@ export class AwaitingApprovalResponse {
   @ApiProperty({ example: "run-8f3a1c2e" }) workflowId!: string;
   @ApiProperty({ type: String, nullable: true, example: "support-triage" })
   workflowKey!: string | null;
+  @ApiProperty({
+    required: false,
+    type: String,
+    nullable: true,
+    example: "Refund triage",
+    description:
+      "The workflow's display NAME at read time, or null when unresolvable (a pre-migration run, or " +
+      "a deleted workflow). Resolved, not snapshotted — a run records the stable KEY, while the name " +
+      "is editable, so snapshotting would show a stale name after a rename. Render " +
+      "`workflowName ?? workflowKey`.",
+  })
+  workflowName?: string | null;
   @ApiProperty({ example: "approve-summary" }) nodeId!: string;
   @ApiProperty({ example: "Approve the drafted summary" }) title!: string;
   @ApiProperty({

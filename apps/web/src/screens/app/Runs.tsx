@@ -859,7 +859,11 @@ export function Runs() {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {r.workflowKey ?? "—"}
+                    {/* Name first: a slug is an implementation detail the operator didn't choose.
+                        The key stays on hover, since it's what the API/CLI and triggers reference. */}
+                    <span title={r.workflowKey ?? undefined}>
+                      {r.workflowName ?? r.workflowKey ?? "—"}
+                    </span>
                   </div>
                   <div
                     className="mono"
@@ -944,7 +948,9 @@ export function Runs() {
                 className="mono"
                 style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
               >
-                {r.workflowKey ?? "—"}
+                <span title={r.workflowKey ?? undefined}>
+                  {r.workflowName ?? r.workflowKey ?? "—"}
+                </span>
               </span>
               <span>
                 <VersionBadge version={r.graphVersion} />

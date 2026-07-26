@@ -16754,8 +16754,14 @@
           },
           "actor": {
             "type": "string",
+            "example": "9xK2mQ…",
+            "description": "The STORED actor id: a Firebase uid, an `sso:…` id, or \"api-token\". Stable — never rewritten."
+          },
+          "actorEmail": {
+            "type": "string",
+            "nullable": true,
             "example": "user@example.com",
-            "description": "Who performed the action."
+            "description": "The actor's email from their Membership in this workspace, or null when unresolvable (an API token, a member who left, or a Membership predating the email stamp). Render `actorEmail ?? actor`; it is never a fabricated value."
           },
           "action": {
             "type": "string",
@@ -16788,6 +16794,7 @@
         "required": [
           "id",
           "actor",
+          "actorEmail",
           "action",
           "method",
           "path",
@@ -17766,6 +17773,12 @@
             "nullable": true,
             "example": "support-triage"
           },
+          "workflowName": {
+            "type": "string",
+            "nullable": true,
+            "example": "Refund triage",
+            "description": "The workflow's display NAME at read time, or null when unresolvable (a pre-migration run, or a deleted workflow). Resolved, not snapshotted — a run records the stable KEY, while the name is editable, so snapshotting would show a stale name after a rename. Render `workflowName ?? workflowKey`."
+          },
           "status": {
             "type": "string",
             "example": "completed",
@@ -17904,6 +17917,12 @@
             "type": "string",
             "nullable": true,
             "example": "support-triage"
+          },
+          "workflowName": {
+            "type": "string",
+            "nullable": true,
+            "example": "Refund triage",
+            "description": "The workflow's display NAME at read time, or null when unresolvable (a pre-migration run, or a deleted workflow). Resolved, not snapshotted — a run records the stable KEY, while the name is editable, so snapshotting would show a stale name after a rename. Render `workflowName ?? workflowKey`."
           },
           "nodeId": {
             "type": "string",

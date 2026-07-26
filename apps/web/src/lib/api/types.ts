@@ -410,6 +410,8 @@ export interface ApproverSummary {
 export interface AwaitingApproval {
   workflowId: string;
   workflowKey: string | null;
+  /** The workflow's display name, or null/absent when unresolvable. */
+  workflowName?: string | null;
   nodeId: string;
   title: string;
   instructions: string | null;
@@ -429,7 +431,11 @@ export interface AwaitingApproval {
 
 export interface RunSummary {
   workflowId: string;
+  /** The stable key the trigger/API references. Shown on hover; prefer `workflowName` for display. */
   workflowKey: string | null;
+  /** The workflow's display name, or null/absent when unresolvable (pre-migration run, deleted
+   *  workflow). Optional so story fixtures and cached responses without it still typecheck. */
+  workflowName?: string | null;
   /** Live status from Temporal: running | awaiting_approval | completed |
    *  rejected | budget_exceeded | circuit_open | invalid_graph | failed |
    *  timed_out | terminated | canceled | unknown. */
@@ -638,7 +644,11 @@ export interface CompanyGroup {
 /** One entry in the activity feed (who did what, when). */
 export interface AuditEvent {
   id: string;
+  /** The stored actor id (Firebase uid / `sso:…` / "api-token"). Stable; render `actorEmail` instead. */
   actor: string;
+  /** The actor's email in this workspace, or null when unresolvable — never a fabricated value.
+   *  Optional so a story fixture or an older cached response doesn't have to carry it. */
+  actorEmail?: string | null;
   action: string;
   method: string;
   path: string;

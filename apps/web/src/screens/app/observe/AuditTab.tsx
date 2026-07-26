@@ -5,6 +5,8 @@
  * data actually supports (derived from method+path — there is no stored type).
  * The env chip (#464) shows the actor's selected environment when the row carries
  * one (resolved id→name via `envName`); rows with no env context show nothing.
+ * The actor line shows the resolved `actorEmail` in preference to the stored id — the same
+ * id→label shape as `envName`, resolved server-side from the actor's Membership.
  */
 import type { AuditEvent } from "../../../lib/api";
 import { Icon, type IconName } from "../../../components";
@@ -123,8 +125,16 @@ export function AuditTab({
                     whiteSpace: "nowrap",
                   }}
                 >
-                  <strong style={{ fontWeight: "var(--weight-semibold)" }}>
-                    {e.actor}
+                  {/* The email when we could resolve it, else the raw id — never a fabricated
+                      name. The id stays reachable on hover, because an audit log's value is the
+                      stable actor, not the friendly label (emails get reassigned; ids don't). */}
+                  <strong
+                    style={{ fontWeight: "var(--weight-semibold)" }}
+                    title={
+                      e.actorEmail ? `${e.actorEmail} · ${e.actor}` : e.actor
+                    }
+                  >
+                    {e.actorEmail ?? e.actor}
                   </strong>{" "}
                   <span style={{ color: "var(--ink-soft)" }}>{e.action}</span>
                 </div>

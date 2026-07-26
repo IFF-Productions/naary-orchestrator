@@ -122,7 +122,10 @@ export function DetailPanel({
                 marginTop: 3,
               }}
             >
-              {item.workflowKey ?? noun} ·{" "}
+              <span title={item.workflowKey ?? undefined}>
+                {item.workflowName ?? item.workflowKey ?? noun}
+              </span>{" "}
+              ·{" "}
               <span style={{ fontFamily: "var(--font-mono)" }}>
                 {item.workflowId}
               </span>
