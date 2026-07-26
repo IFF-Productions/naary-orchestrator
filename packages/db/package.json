@@ -1,6 +1,6 @@
 {
   "name": "@naary/db",
-  "version": "0.0.32",
+  "version": "0.0.33",
   "private": true,
   "description": "Prisma client + schema (tenant credentials, usage ledger). Consumed by worker activities + api — NEVER by workflow code.",
   "main": "dist/index.js",
