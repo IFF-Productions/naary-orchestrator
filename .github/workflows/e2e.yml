@@ -131,11 +131,12 @@ jobs:
         with:
           dest: ${{ runner.temp }}/setup-pnpm
 
-      # A follow-up could add `cache: pnpm` now we're on a hosted runner, where the pnpm
-      # store no longer persists between runs.
+      # `cache: pnpm` caches the pnpm store keyed on the lockfile (the ~31s install here).
+      # Needs pnpm on PATH already, hence the ordering.
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc # single source of truth (see /.nvmrc)
+          cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
@@ -173,7 +174,17 @@ jobs:
             fi
           done
 
+      # Measured split of this workflow (~5-7 min): 256s here, 119s in Playwright. So the
+      # build is the target, NOT the tests — sharding Playwright across jobs would pay this
+      # 256s per shard to save ~90s, which is why it isn't done.
+      #
+      # COMPOSE_BAKE routes the build through `buildx bake`, which builds the backend and web
+      # images CONCURRENTLY instead of one after the other (compose's own builder is serial).
+      # They share no layers (different base images, different Dockerfiles), so this is close
+      # to a straight halving of the build step on a 2-vCPU runner's IO-bound npm/apt work.
       - name: Build + start the stack
+        env:
+          COMPOSE_BAKE: "true"
         run: ${{ steps.compose.outputs.cmd }} up -d --build
 
       # The overlay publishes EPHEMERAL host ports (Docker picks free ones), so ask compose
