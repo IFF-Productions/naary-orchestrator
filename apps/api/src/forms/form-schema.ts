@@ -131,7 +131,21 @@ export function buildFormJsonSchema(
     botProtection: boolean;
   },
 ): FormJsonSchema {
-  const properties: Record<string, JsonSchemaProperty> = {};
+  /**
+   * NULL-PROTOTYPE, and this is load-bearing rather than hygiene. `field.key` is tenant-authored and
+   * unconstrained (`key: z.string()`), so a field keyed `__proto__` would hit `Object.prototype`'s
+   * `__proto__` setter on a plain `{}` — the assignment would set the object's prototype instead of
+   * creating an own property, and `JSON.stringify` would then emit NOTHING for that field.
+   *
+   * That silently breaks this module's whole guarantee: the field would still be listed in
+   * `required`, but with no property schema and `additionalProperties: true` a validator would
+   * accept ANY value for it, while `validateSubmission` still enforces its type/pattern/length. A
+   * payload the schema accepts would 400 — exactly the direction that must never fail. Verified:
+   * `JSON.stringify(Object.assign({}, {"__proto__": x}))` is `{}`, while the null-prototype map keeps
+   * the key. (`constructor` and other inherited names are plain own-property writes either way, but
+   * a null prototype removes the whole class of surprise.)
+   */
+  const properties = Object.create(null) as Record<string, JsonSchemaProperty>;
   const required: string[] = [];
 
   for (const field of fields) {
@@ -149,6 +163,33 @@ export function buildFormJsonSchema(
   }
 
   const notes: string[] = [];
+  /**
+   * Field keys that JSON Schema cannot actually constrain, so the document must not pretend
+   * otherwise. `ajv` SILENTLY SKIPS a `__proto__` property — it applies neither `pattern` nor even
+   * `required` (verified in form-schema.spec.ts, which pins that behaviour) — because generating an
+   * accessor for it would be a pollution vector. Every mainstream validator does something similar.
+   *
+   * We still emit the property (it accurately describes what the endpoint accepts, and a consumer
+   * that handles the key gets the real constraint), but a caller has to be told that their validator
+   * will wave it through. Separately, `validateSubmission` writes the sanitized value with
+   * `data[key] = raw`, and assigning a string to `__proto__` is a silent no-op — so a field with such
+   * a key never reaches the workflow at all. That's a pre-existing bug worth fixing at the save gate
+   * (the codebase already strips these elsewhere, see `POLLUTING_KEYS` in the DSL); until then,
+   * saying so is far better than a form that appears to work and quietly discards its input.
+   */
+  const unenforceable = fields
+    .map((f) => f.key)
+    .filter(
+      (k) => k === "__proto__" || k === "constructor" || k === "prototype",
+    );
+  if (unenforceable.length > 0) {
+    notes.push(
+      `The field(s) ${unenforceable.map((k) => `\`${k}\``).join(", ")} use names that JSON ` +
+        "Schema validators special-case: most (including ajv) ignore constraints on them entirely, " +
+        "so validating locally will not reproduce this endpoint's answer. Such a value is also " +
+        "dropped before it reaches the workflow. Rename the field on the canvas.",
+    );
+  }
   if (opts.botProtection) {
     // Required in the ONLY sense that matters to a caller: omit it and the request 403s.
     properties[TURNSTILE_PROPERTY] = {

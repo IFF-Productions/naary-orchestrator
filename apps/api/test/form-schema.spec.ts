@@ -113,7 +113,13 @@ function payloads(fields: FormFieldDef[]): unknown[] {
     42,
     // Unknown keys only — accepted-and-stripped, so additionalProperties must not forbid them.
     { unexpected: "value" },
-    { __proto__: { polluted: true } },
+    // Prototype-pollution shapes as a real request body carries them. NOTE the JSON.parse: in an
+    // object LITERAL, `__proto__:` is special-cased by the spec and sets the prototype instead of
+    // creating an own property, so `{ __proto__: {...} }` would be an object with no `__proto__` key
+    // at all — testing nothing. JSON.parse (what Express actually does to the request body) creates a
+    // genuine own property, which is the case that matters.
+    JSON.parse(String.raw`{"__proto__":{"polluted":true}}`),
+    JSON.parse(String.raw`{"constructor":{"prototype":{"polluted":true}}}`),
     { constructor: "x" },
   ];
   for (const field of fields) {
@@ -366,6 +372,85 @@ describe("the document is a usable JSON Schema", () => {
       { botProtection: false },
     );
     expect(schema.properties.email.examples).toEqual(["you@example.com"]);
+  });
+
+  /**
+   * A field KEYED `__proto__` is savable (`key: z.string()` constrains nothing), and it breaks in TWO
+   * independent ways that this test pins so neither regresses quietly.
+   *
+   * 1. OUR side: on a plain `{}`, `properties["__proto__"] = {…}` hits Object.prototype's setter — it
+   *    sets the prototype instead of creating an own property, and `JSON.stringify` then emits
+   *    nothing for that field. The field would still be listed in `required` while carrying NO
+   *    constraints. Fixed with a null-prototype map; asserted through a real serialize/parse cycle,
+   *    because that is where a plain object loses the key.
+   *
+   * 2. THE VALIDATOR's side, which we cannot fix: ajv silently skips a `__proto__` property, applying
+   *    neither `pattern` nor `required` (generating an accessor for it would itself be a pollution
+   *    vector). So the soundness invariant is genuinely UNVERIFIABLE for such a key — not because the
+   *    schema is wrong (it accurately describes what the endpoint accepts) but because no mainstream
+   *    validator will honour it. The document therefore DISCLOSES it instead of pretending, and this
+   *    test asserts the disclosure. If ajv ever starts enforcing it, the pinned expectations below
+   *    fail and the note can go.
+   */
+  it("serializes a __proto__-keyed field instead of silently dropping its constraints", () => {
+    const fields: FormFieldDef[] = [
+      { key: "__proto__", label: "Sneaky", type: "email", required: true },
+    ];
+    const schema = buildFormJsonSchema("form-1", fields, {
+      botProtection: false,
+    });
+
+    // Survives serialization — the whole point. A plain `{}` map would emit `"properties": {}` here.
+    const roundTripped = JSON.parse(JSON.stringify(schema)) as {
+      properties: Record<string, { pattern?: string }>;
+      required?: string[];
+      "x-naary-submit": { notes: string[] };
+    };
+    expect(Object.keys(roundTripped.properties)).toEqual(["__proto__"]);
+    expect(roundTripped.properties.__proto__.pattern).toBeTypeOf("string");
+    expect(roundTripped.required).toEqual(["__proto__"]);
+
+    // Building the schema must not have polluted Object.prototype along the way.
+    expect(
+      ({} as Record<string, unknown>).pattern,
+      "Object.prototype was polluted",
+    ).toBeUndefined();
+
+    // And the caller is TOLD their validator won't reproduce our answer.
+    const notes = roundTripped["x-naary-submit"].notes.join(" ");
+    expect(notes).toMatch(/special-case/i);
+    expect(notes).toMatch(/__proto__/);
+  });
+
+  /**
+   * Pins the ajv behaviour that forces the disclosure above: constraints on a `__proto__` property
+   * are ignored outright. Asserting it here means the note's justification is checked rather than
+   * asserted in a comment — and if a future ajv enforces it, this test fails and tells us to drop it.
+   */
+  it("documents that ajv ignores constraints on a __proto__ property", () => {
+    const validate = validator(
+      buildFormJsonSchema(
+        "form-1",
+        [{ key: "__proto__", label: "Sneaky", type: "email", required: true }],
+        { botProtection: false },
+      ),
+    );
+    // An invalid email under a pattern the schema DOES declare — ajv passes it anyway.
+    expect(validate(JSON.parse(String.raw`{"__proto__":"not-an-email"}`))).toBe(
+      true,
+    );
+    // And `required` is not enforced either.
+    expect(validate(JSON.parse("{}"))).toBe(true);
+    // Which is exactly the gap: the endpoint disagrees on the first one.
+    const fields: FormFieldDef[] = [
+      { key: "__proto__", label: "Sneaky", type: "email", required: true },
+    ];
+    expect(
+      validateSubmission(
+        fields,
+        JSON.parse(String.raw`{"__proto__":"not-an-email"}`),
+      ).ok,
+    ).toBe(false);
   });
 
   it("handles a form with no fields at all", () => {
