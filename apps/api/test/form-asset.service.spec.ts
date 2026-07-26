@@ -247,3 +247,32 @@ describe("readBodyCapped", () => {
     await expect(promise).rejects.toThrow(/Upload failed/i);
   });
 });
+
+describe("getMeta (the 304 path)", () => {
+  /**
+   * The point of this method: a logo is fetched on every view of a public page, and answering
+   * `If-None-Match` from the metadata row means one indexed read and a 304 — no S3 GetObject at all.
+   * If it ever started reading bytes, the ETag would save only bandwidth and the serve route's comment
+   * would become the inaccurate claim a reviewer already caught once.
+   */
+  it("reads content type + hash WITHOUT touching object storage", async () => {
+    const objects = fakeS3();
+    const getSpy = vi.spyOn(objects, "get");
+    findUnique.mockResolvedValue({ contentType: "image/png", sha256: "abc" });
+
+    const meta = await new FormAssetService(objects).getMeta("asset-1");
+
+    expect(meta).toEqual({ contentType: "image/png", sha256: "abc" });
+    expect(getSpy).not.toHaveBeenCalled();
+    // And it selects only the two columns it needs — no bytes, no objectRef.
+    expect(findUnique.mock.calls[0][0].select).toEqual({
+      contentType: true,
+      sha256: true,
+    });
+  });
+
+  it("returns null for an unknown id", async () => {
+    findUnique.mockResolvedValue(null);
+    expect(await new FormAssetService(fakeS3()).getMeta("nope")).toBeNull();
+  });
+});

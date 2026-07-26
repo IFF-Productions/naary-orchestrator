@@ -8,9 +8,10 @@ import {
   NotFoundException,
   Param,
   Post,
+  Req,
   Res,
 } from "@nestjs/common";
-import type { Response } from "express";
+import type { Request, Response } from "express";
 import { ApiOkResponse, ApiProduces } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
 import { Public } from "../auth/public.decorator";
@@ -73,6 +74,10 @@ export class FormsController {
    *    to echo back into a header.
    *  - `immutable` caching is honest here BECAUSE ids are content-addressed: the same id can never
    *    return different bytes, since different bytes get a different id.
+   *
+   * A logo is requested on every view of a public page, so `If-None-Match` is answered from the
+   * METADATA row alone (the sha256 lives in Postgres) — one indexed read and a 304, skipping the S3
+   * GetObject entirely rather than only saving the response body.
    */
   @Get("assets/:assetId")
   @ApiProduces("image/png", "image/jpeg", "image/gif", "image/webp")
@@ -83,20 +88,39 @@ export class FormsController {
   })
   async asset(
     @Param("assetId") assetId: string,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
+    // Metadata first — it decides a 304 without touching object storage.
+    const meta = await this.assets.getMeta(assetId);
+    if (!meta) throw new NotFoundException("Unknown asset");
+
+    const etag = `"${meta.sha256}"`;
+    const setCommonHeaders = () => {
+      res.setHeader("x-content-type-options", "nosniff");
+      res.setHeader("content-security-policy", "default-src 'none'; sandbox");
+      res.setHeader("cache-control", "public, max-age=31536000, immutable");
+      res.setHeader("etag", etag);
+    };
+
+    // `If-None-Match` may carry a list, and a `W/` prefix for a weak validator. Ours is strong and
+    // content-derived, so a plain membership test over the split list is the correct comparison.
+    const inm = req.headers["if-none-match"];
+    const candidates = (Array.isArray(inm) ? inm.join(",") : (inm ?? ""))
+      .split(",")
+      .map((v) => v.trim().replace(/^W\//, ""));
+    if (candidates.includes(etag) || candidates.includes("*")) {
+      setCommonHeaders();
+      res.status(304).end();
+      return;
+    }
+
     const found = await this.assets.get(assetId);
-    // 404 for an unknown id AND for a row whose object is missing — a broken logo must not 500 the
-    // page it decorates.
+    // 404 for a row whose object is missing — a broken logo must not 500 the page it decorates.
     if (!found) throw new NotFoundException("Unknown asset");
+    setCommonHeaders();
     res.setHeader("content-type", found.contentType);
-    res.setHeader("x-content-type-options", "nosniff");
-    res.setHeader("content-security-policy", "default-src 'none'; sandbox");
     res.setHeader("content-disposition", "inline");
-    res.setHeader("cache-control", "public, max-age=31536000, immutable");
-    // Content-addressed, so the hash IS the validator — a conditional request can be answered
-    // without reading the object again.
-    res.setHeader("etag", `"${found.sha256}"`);
     res.end(found.bytes);
   }
 

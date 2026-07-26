@@ -24,6 +24,12 @@ export interface StoredAsset {
   sha256: string;
 }
 
+/** An asset's metadata WITHOUT its bytes — enough to answer a conditional request. */
+export interface AssetMeta {
+  contentType: string;
+  sha256: string;
+}
+
 /**
  * Read a request body into a Buffer, ABORTING once it exceeds `limit`.
  *
@@ -174,6 +180,22 @@ export class FormAssetService {
    * lifecycle rule, a restored database ahead of its bucket) — the caller 404s either way rather than
    * 500ing, because a missing logo must not take down the page it decorates.
    */
+  /**
+   * An asset's content type + hash, WITHOUT fetching the bytes.
+   *
+   * This is what makes the serve route's ETag worth having. A form logo is requested on every view of
+   * a public page, and the hash lives in Postgres — so a conditional request can be answered with one
+   * indexed row read and a 304, skipping both the S3 GetObject and the response body. Without this,
+   * `get()` would have already downloaded the bytes before there was anything to compare, and the
+   * ETag would save only bandwidth, never a storage round-trip.
+   */
+  async getMeta(assetId: string): Promise<AssetMeta | null> {
+    return getPrisma().formAsset.findUnique({
+      where: { id: assetId },
+      select: { contentType: true, sha256: true },
+    });
+  }
+
   async get(assetId: string): Promise<StoredAsset | null> {
     const row = await getPrisma().formAsset.findUnique({
       where: { id: assetId },

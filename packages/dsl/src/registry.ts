@@ -212,8 +212,10 @@ const CONFIG_SCHEMAS = {
         desktopColumns: z.union([z.literal(1), z.literal(2)]).optional(),
         width: z.enum(["narrow", "wide"]).optional(),
         // An asset id WE issued, not a URL — see FormBrandingConfig.logoAssetId for why a
-        // tenant-supplied URL is refused. Shape-checked here (a uuid) and ownership-checked against
-        // the tenant+env at save time by the graphs service; a stale/foreign id degrades to no logo.
+        // tenant-supplied URL is refused. This is a SHAPE check (a uuid) only; ownership is verified
+        // separately by the graphs service, which REJECTS the save when the id belongs to another
+        // tenant/environment. An id that is ours but whose object has since gone renders a broken
+        // image (the asset route 404s) — it does not silently fall back to no logo.
         logoAssetId: z
           .string()
           .regex(

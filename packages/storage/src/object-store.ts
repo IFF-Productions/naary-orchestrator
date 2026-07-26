@@ -79,7 +79,8 @@ let singleton: ObjectStore | undefined;
  * R2/MinIO don't serve, so a custom endpoint without it 404s on every object.
  *
  * Credentials come from the standard AWS chain (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, or an
- * instance role) — the SDK reads them itself, so they are never named here.
+ * instance role) — the SDK reads them itself, so they are never named here. Region resolution is left
+ * to the SDK too; see the inline note on why an unset `AWS_REGION` is not treated as an error.
  */
 export function getObjectStore(): ObjectStore {
   if (singleton) return singleton;
@@ -88,8 +89,18 @@ export function getObjectStore(): ObjectStore {
     if (!bucket)
       throw new Error("S3_BUCKET is required when STORAGE_PROVIDER=s3");
     const endpoint = process.env.S3_ENDPOINT?.trim();
+    // Region is NOT validated here on purpose. Passing `undefined` lets the AWS SDK run its own
+    // resolution chain (AWS_REGION → AWS_DEFAULT_REGION → ~/.aws/config → an instance profile), so
+    // hard-failing on an unset AWS_REGION would reject deployments that legitimately configure it
+    // another way. The SDK's own "Region is missing" error names the problem clearly enough.
+    //
+    // The one case worth helping: an S3-COMPATIBLE endpoint (R2/B2/MinIO) has no meaningful region
+    // but the SDK still demands one, and those providers document "auto". Defaulting it there turns a
+    // confusing SDK failure into a working client.
+    const region =
+      process.env.AWS_REGION?.trim() || (endpoint ? "auto" : undefined);
     const client = new S3Client({
-      region: process.env.AWS_REGION,
+      ...(region ? { region } : {}),
       ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
     });
     singleton = new S3ObjectStore(client, bucket);

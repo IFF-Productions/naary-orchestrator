@@ -305,7 +305,9 @@ function LogoPicker({
     setError(null);
     // Mirrors the server's cap; a friendlier failure than a 400 after uploading half a megabyte.
     if (file.size > 512 * 1024) {
-      setError("Image is larger than 512 KB — try a smaller PNG.");
+      setError(
+        "Image is larger than 512 KB — try a smaller or more compressed image.",
+      );
       return;
     }
     setBusy(true);
