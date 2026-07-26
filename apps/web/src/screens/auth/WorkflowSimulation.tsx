@@ -236,7 +236,13 @@ function SideGate({ status }: { status: NodeStatus }) {
         >
           {/* Inline SVG like NODE_ICONS above — this comp is hardcoded dark and doesn't use the
               shared Icon set (which has no shield glyph). */}
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden
+          >
             <path
               d="M12 3l7 3v5c0 4.2-2.9 8-7 10-4.1-2-7-5.8-7-10V6z"
               stroke="currentColor"
@@ -276,7 +282,7 @@ function SideGate({ status }: { status: NodeStatus }) {
           </div>
         </div>
         {/* State as its own badge, mirroring the main cards' anatomy — folding it into the sublabel
-            meant BOT_GATE_LABEL[1] ("turnstile · side gate") never actually rendered. */}
+            meant BOT_GATE_LABEL[1] ("app check · side gate") never actually rendered. */}
         <span
           style={{
             fontSize: 9,

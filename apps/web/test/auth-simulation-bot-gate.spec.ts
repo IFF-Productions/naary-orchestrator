@@ -80,7 +80,11 @@ describe("it stays a SIDE process", () => {
 
   it("names the mechanism, so the card isn't a vague badge", () => {
     expect(BOT_GATE_LABEL[0]).toBe("Bot protection");
-    expect(BOT_GATE_LABEL[1]).toMatch(/turnstile/i);
+    // App Check, not Turnstile: the gate in front of THIS page's sign-in is Firebase App Check
+    // (#782 option A / #785). Turnstile guards the anonymous tenant form/chat ingress — a different
+    // surface — so naming it here would point at the wrong mechanism.
+    expect(BOT_GATE_LABEL[1]).toMatch(/app check/i);
+    expect(BOT_GATE_LABEL[1]).not.toMatch(/turnstile/i);
     // "side" in the sublabel is the whole point of the node.
     expect(BOT_GATE_LABEL[1]).toMatch(/side/i);
   });
