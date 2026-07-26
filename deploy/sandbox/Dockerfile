@@ -8,7 +8,12 @@
 # allowlist proxy, so its only reachable destination is api.anthropic.com (proven by
 # egress-test.sh). Runs as a non-root user with a read-only root fs (+ /tmp tmpfs).
 
-FROM node:22-bookworm-slim
+# Node major. Keep in lockstep with /.nvmrc and package.json `engines` — those are what CI and
+# local dev read. Overridable at build time (`--build-arg NODE_VERSION=26`) so trying another
+# major is a flag, not an edit across four files. 24 is the ACTIVE LTS (Krypton); 26 is Current until Oct 2026.
+ARG NODE_VERSION=24
+
+FROM node:${NODE_VERSION}-bookworm-slim
 
 # Pin the CLI for reproducible, security-sensitive builds — a VERSIONED default (not `latest`)
 # so a rebuild can't silently pull a new/breaking/vulnerable release. Bump deliberately; or

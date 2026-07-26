@@ -4,8 +4,12 @@
 # resolves — the web app may import browser-safe workspace types (@naary/contracts).
 
 # --- build stage ---------------------------------------------------------------
-# Node 22 (LTS): pnpm 11 requires Node >= 22.
-FROM node:22-bookworm-slim AS build
+# Node major. Keep in lockstep with /.nvmrc and package.json `engines` — those are what CI and
+# local dev read. Overridable at build time (`--build-arg NODE_VERSION=26`) so trying another
+# major is a flag, not an edit across four files. 24 is the ACTIVE LTS (Krypton); 26 is Current until Oct 2026.
+ARG NODE_VERSION=24
+
+FROM node:${NODE_VERSION}-bookworm-slim AS build
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 WORKDIR /app
