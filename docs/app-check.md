@@ -73,10 +73,31 @@ the deployed key, the host, and the fix — see `explainAppCheckFailure` in
 Authentication). While it is on and no token can be minted, *every* sign-in is refused.
 With it off this error is console noise and auth keeps working, so you can debug calmly.
 
-Then settle the key type — the usual cause, and the two types are **indistinguishable by
-inspection** (both look like `6L…`). Rather than burning a release per guess, test both
-providers in the browser console on the deployed page (`script-src` already allows
-`www.google.com`/`www.gstatic.com`, so this runs as-is):
+**Then ask whether the key resolves at Google at all** — two curls, no browser, no rebuild.
+This is the step that actually resolved the one real occurrence (#792), *after* three more
+elaborate theories had been ruled out:
+
+```sh
+KEY=…your site key…
+curl -s -o /dev/null -w '%{http_code}\n' "https://www.google.com/recaptcha/api.js?render=$KEY"
+curl -s -o /dev/null -w '%{http_code}\n' "https://www.google.com/recaptcha/enterprise.js?render=$KEY"
+```
+
+- **200 on exactly one** ⇒ that is the key's real type. Set
+  `VITE_FIREBASE_APPCHECK_PROVIDER` to `v3` or `enterprise` to match, then **run a release**.
+- **400 on both** ⇒ Google does not recognise the key. Nothing about the provider, the
+  domain list or CSP is relevant yet. Causes: a transposed/truncated paste (`-` vs `_` is a
+  classic), the wrong field copied (the reCAPTCHA *secret*, the Firebase Web API key, an app
+  id), a deleted key, or a key in a different project than `VITE_FIREBASE_PROJECT_ID`.
+  Re-copy it from the console. A 400 is also exactly what makes a `<script>` tag fire
+  `onerror`, so this and "the reCAPTCHA script won't load" are one symptom, not two.
+
+For reference: Google's own public test key has the same 40-char shape (`6L` + `AAAAA` + 27)
+and returns **200**, so "it looks like a valid key" proves nothing.
+
+Only once a script loads does the key *type* become the question. If you want to confirm the
+type interactively rather than by status code, run both providers in the browser console on
+the deployed page (`script-src` already allows `www.google.com`/`www.gstatic.com`):
 
 ```js
 const KEY = "…your site key…";
@@ -103,19 +124,25 @@ grecaptcha.enterprise.ready(() =>
   ));
 ```
 
-Whichever returns a token is the key's real type — set
-`VITE_FIREBASE_APPCHECK_PROVIDER` to `v3` or `enterprise` to match and **run a release**.
-Changing it in the server's `.env` does nothing: `VITE_*` is inlined when the web image is
-built, so the value that matters is the repo secret at build time. To read what is actually
-live, grep the deployed bundle — Vite leaves the whole env object in it:
+Whichever returns a token is the key's real type. If **neither** script even loads, you are
+back at the 400 above — that is a key problem, not a provider problem.
+
+Once a script does load but `execute()` still fails, the remaining causes are the reCAPTCHA
+key's **allowed domains** (must cover this host; a registered apex also covers its
+subdomains) and the key belonging to a different project than `VITE_FIREBASE_PROJECT_ID`.
+
+To read what is actually deployed rather than what you think is — Vite leaves the whole env
+object in the bundle:
 
 ```sh
-curl -s https://app.naar-y.com/assets/firebase-*.js | grep -o 'VITE_FIREBASE_APPCHECK_[A-Z_]*:`[^`]*`'
+BASE=https://app.naar-y.com
+F=$(curl -s "$BASE/" | grep -oE '/assets/firebase-[A-Za-z0-9_-]+\.js' | head -1)
+curl -s "$BASE$F" | grep -o 'VITE_FIREBASE_APPCHECK_[A-Z_]*:`[^`]*`'
 ```
 
-If *both* probes fail, the key is not a key problem: check the reCAPTCHA key's **allowed
-domains** include this host, and that the key lives in the same project as
-`VITE_FIREBASE_PROJECT_ID`.
+This is the fastest way to confirm a release actually carried a changed secret — remember the
+value is inlined at **build** time, so the repo secret at build is the one that matters and
+the server's `.env` is irrelevant.
 
 ### Unrelated console noise: Cloudflare
 

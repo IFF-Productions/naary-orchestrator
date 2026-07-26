@@ -180,18 +180,26 @@ export function explainAppCheckFailure(
   ];
 
   if (code.endsWith("/recaptcha-error")) {
-    // Ranked by what actually goes wrong first. The provider swap leads because it is a
-    // SECRET change (VITE_FIREBASE_APPCHECK_PROVIDER) rather than a code change, and
-    // because the two key types are indistinguishable by inspection.
+    // Ordered by what the ONE real occurrence of this taught us (#792): the key did not
+    // resolve at Google at all, so every downstream theory (provider type, domain
+    // allowlist, CSP) was wrong. That check is also the cheapest — two curls, no browser,
+    // no rebuild — so it goes first.
     lines.push(
-      "  reCAPTCHA itself rejected the key. In order of likelihood:",
-      `  1. WRONG KEY TYPE. reCAPTCHA Enterprise and v3 site keys are not interchangeable.`,
-      `     If the Firebase console registered ${other === "v3" ? "reCAPTCHA v3" : "reCAPTCHA Enterprise"} for this app,`,
-      `     set VITE_FIREBASE_APPCHECK_PROVIDER=${other} and rebuild the web image (VITE_* is`,
-      `     inlined at BUILD time, so changing it on the server has no effect).`,
-      "  2. DOMAIN NOT REGISTERED. Add this host to the key's allowed domains",
-      "     (reCAPTCHA admin for v3, Google Cloud → Security → reCAPTCHA for Enterprise).",
-      "  3. WRONG PROJECT. The key must belong to the same project as VITE_FIREBASE_PROJECT_ID.",
+      "  reCAPTCHA refused to serve for this key. Check, in this order:",
+      "  1. DOES THE KEY RESOLVE AT ALL? Run both:",
+      `       curl -s -o /dev/null -w '%{http_code}\\n' "https://www.google.com/recaptcha/api.js?render=${plan.siteKey}"`,
+      `       curl -s -o /dev/null -w '%{http_code}\\n' "https://www.google.com/recaptcha/enterprise.js?render=${plan.siteKey}"`,
+      "     400 on BOTH ⇒ Google does not recognize this key: a typo/truncated paste, a",
+      "     deleted key, the wrong project, or not a site key at all. No provider setting",
+      "     fixes that — re-copy the key. (A 400 also explains a <script> load failure here.)",
+      `  2. WRONG KEY TYPE. 200 on exactly one of the two above tells you which. Enterprise`,
+      `     and v3 keys are NOT interchangeable and look identical. If it is ${other},`,
+      `     set VITE_FIREBASE_APPCHECK_PROVIDER=${other} and rebuild the web image — VITE_* is`,
+      `     inlined at BUILD time, so changing it on the server has no effect.`,
+      "  3. DOMAIN NOT REGISTERED — only once the script loads (200). Add this host to the",
+      "     key's allowed domains (reCAPTCHA admin for v3, Google Cloud → Security →",
+      "     reCAPTCHA for Enterprise).",
+      "  4. WRONG PROJECT. The key must belong to the same project as VITE_FIREBASE_PROJECT_ID.",
     );
   } else if (code.endsWith("/fetch-status-error")) {
     lines.push(

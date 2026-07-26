@@ -136,6 +136,24 @@ describe("explainAppCheckFailure", () => {
     expect(msg).toMatch(/VITE_FIREBASE_PROJECT_ID/);
   });
 
+  /**
+   * The one real occurrence (#792) was a key Google returned 400 for on BOTH endpoints —
+   * so provider type, domain allowlist and CSP were all red herrings. That check is also
+   * the cheapest available (two curls, no browser, no release), so it must come FIRST or
+   * the message sends people down the same wrong path we went down.
+   */
+  it("leads with the does-the-key-resolve check, ahead of the provider swap", () => {
+    const msg = explainAppCheckFailure(V3, recaptchaErr);
+    const resolve = msg.indexOf("DOES THE KEY RESOLVE");
+    const swap = msg.indexOf("WRONG KEY TYPE");
+    expect(resolve).toBeGreaterThan(-1);
+    expect(swap).toBeGreaterThan(resolve);
+    // Copy-pasteable, with the real key substituted in — both endpoints, since a 400 on
+    // both is what distinguishes "dead key" from "wrong provider".
+    expect(msg).toContain("recaptcha/api.js?render=6Lsite");
+    expect(msg).toContain("recaptcha/enterprise.js?render=6Lsite");
+  });
+
   /** A DIFFERENT failure: reCAPTCHA worked, the App Check exchange didn't. */
   it("distinguishes a fetch-status error from a reCAPTCHA error", () => {
     const msg = explainAppCheckFailure(V3, {
