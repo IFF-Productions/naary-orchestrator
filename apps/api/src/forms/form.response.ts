@@ -34,6 +34,50 @@ export class FormFieldResponse {
   options?: string[];
 }
 
+/**
+ * Tenant presentation of the hosted page. Every key optional; an absent block renders the stock page.
+ *
+ * Values are validated at save time (`CONFIG_SCHEMAS.formTrigger`) AND re-validated on read
+ * (`projectBranding`) — anything failing either check is DROPPED rather than repaired, so a bad
+ * accent falls back to the default and a bad redirect falls back to the success card.
+ */
+export class FormBrandingResponse {
+  @ApiProperty({ required: false, example: "Thanks — we're on it" })
+  successTitle?: string;
+  @ApiProperty({
+    required: false,
+    example: "Someone will reach out within one business day.",
+    description: "Plain text (rendered as a text node, never HTML).",
+  })
+  successMessage?: string;
+  @ApiProperty({
+    required: false,
+    example: "https://example.com/thank-you",
+    description:
+      "Where to send the visitor after a successful submit, instead of the success card. Always " +
+      "https with no embedded credentials. Takes precedence over the success copy — except on an " +
+      "embedded form, which offers it as a link rather than navigating the host's iframe.",
+  })
+  redirectUrl?: string;
+  @ApiProperty({
+    required: false,
+    example: "#3355ff",
+    description: "Brand accent, exactly `#rrggbb`.",
+  })
+  accentColor?: string;
+  @ApiProperty({ required: false, enum: ["light", "dark", "auto"] })
+  theme?: string;
+  @ApiProperty({
+    required: false,
+    enum: [1, 2],
+    description:
+      "Desktop field columns. Phones always render one; long-answer and choice fields keep a full row.",
+  })
+  desktopColumns?: number;
+  @ApiProperty({ required: false, enum: ["narrow", "wide"] })
+  width?: string;
+}
+
 /** Public form definition served to an anonymous browser — NO tenant/workflow identifiers. */
 export class FormDefinitionResponse {
   @ApiProperty({ example: "3f9a1c2e-…" }) formId!: string;
@@ -42,6 +86,26 @@ export class FormDefinitionResponse {
   description?: string;
   @ApiProperty({ required: false, example: "Send" }) submitLabel?: string;
   @ApiProperty({ type: [FormFieldResponse] }) fields!: FormFieldResponse[];
+  @ApiProperty({
+    required: false,
+    type: "array",
+    items: { type: "object", additionalProperties: true },
+    description:
+      "Present only when a form template drives this form: the template's ordered content blocks, " +
+      "so the page can render headings/text/images interleaved with the inputs. `fields` stays " +
+      "authoritative for validation — both are derived from the same array.",
+  })
+  blocks?: unknown[];
+  @ApiProperty({ required: false, type: FormBrandingResponse })
+  branding?: FormBrandingResponse;
+  @ApiProperty({
+    required: false,
+    example: "0x4AAA…",
+    description:
+      "Cloudflare Turnstile site key — present only when this environment has an active bot gate. " +
+      "The page renders the widget and sends the solved token back on submit.",
+  })
+  turnstileSiteKey?: string;
 }
 
 /** How to submit the form the schema describes — the `x-naary-submit` annotation. JSON Schema

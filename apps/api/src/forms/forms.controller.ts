@@ -12,7 +12,10 @@ import {
 import { ApiOkResponse } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
 import { Public } from "../auth/public.decorator";
-import { FormJsonSchemaResponse } from "./form.response";
+import {
+  FormDefinitionResponse,
+  FormJsonSchemaResponse,
+} from "./form.response";
 import { ContentTemplatesService } from "../content-templates/content-templates.service";
 import { ExecutionsService } from "../executions/executions.service";
 import { GraphsService } from "../graphs/graphs.service";
@@ -54,6 +57,13 @@ export class FormsController {
    *  or its current graph's entry node isn't a formTrigger. Includes `turnstileSiteKey` when the
    *  tenant has an active Turnstile gate for this env (so the page renders the widget). */
   @Get(":formId")
+  @ApiOkResponse({
+    type: FormDefinitionResponse,
+    description:
+      "The public form definition: title/description/fields, the tenant's page branding, and the " +
+      "Turnstile site key when this environment has an active bot gate. Carries no tenant or " +
+      "workflow identifiers.",
+  })
   async definition(@Param("formId") formId: string) {
     const { endpoint, def } = await this.resolve(formId);
     const turnstileSiteKey = await this.turnstile.publicSiteKey(

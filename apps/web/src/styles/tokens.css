@@ -171,7 +171,17 @@
   --ring-width: 3px;
 }
 
-:root[data-theme="light"] {
+/* The second selector makes the light palette usable on ANY subtree, not just <html>.
+   Needed by the hosted public pages (`/f/:id`, `/c/:id`), where a tenant can pin their form to a
+   light or dark presentation regardless of the visitor: `data-theme` on <html> is owned by
+   ThemeProvider, whose effect runs AFTER a page's own (parent effects run last in React), so a page
+   writing to <html> would be overwritten on mount. Scoping to a wrapper element sidesteps that
+   entirely and avoids duplicating the palette inline.
+
+   Specificity is not the mechanism here — custom properties INHERIT, so the value set on the nearest
+   ancestor wins for that subtree even though `[data-theme="light"]` (0,1,0) only ties `:root`. */
+:root[data-theme="light"],
+[data-theme="light"] {
   --bg: #eaeef3;
   --bg-2: #ffffff;
   --panel: #ffffff;

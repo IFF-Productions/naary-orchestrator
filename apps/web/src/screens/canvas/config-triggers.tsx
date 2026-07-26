@@ -1,8 +1,10 @@
 // Poll / schedule / chat / form trigger config sections of the node inspector (extracted verbatim from CanvasPage).
+import type { FormBrandingConfig } from "@naary/dsl";
 import type { ConfigSectionCtx } from "./ConfigPanel";
 import { Button } from "../../components";
 import { api } from "../../lib/api";
 import { inputStyle, Labeled } from "./fields";
+import { FormBrandingSection } from "./FormBrandingSection";
 import { TemplateSelect } from "./TemplateSelect";
 
 export function renderTriggerSections(c: ConfigSectionCtx) {
@@ -217,6 +219,17 @@ export function renderTriggerSections(c: ConfigSectionCtx) {
                   placeholder="Submit"
                 />
               </Labeled>
+
+              {/* Hosted-page presentation. `obj("branding")` so an unset branding block reads as {}
+                  and each patch merges rather than replacing the other keys. */}
+              <FormBrandingSection
+                branding={(obj("branding") ?? {}) as FormBrandingConfig}
+                onChange={(patch) =>
+                  onChange({
+                    branding: { ...(obj("branding") ?? {}), ...patch },
+                  })
+                }
+              />
 
               <Labeled label="Form template (optional)">
                 <TemplateSelect

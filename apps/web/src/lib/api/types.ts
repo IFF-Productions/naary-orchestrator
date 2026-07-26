@@ -2,7 +2,11 @@
  * Every shared type of the API client — the view models the SPA renders. All of
  * these remain importable from the ../api barrel (`import type { X } from "../lib/api"`).
  */
-import type { GraphDef, TemplateBlock } from "@naary/dsl";
+import type {
+  FormBrandingConfig,
+  GraphDef,
+  TemplateBlock,
+} from "@naary/dsl";
 
 export type ExecutionStatus =
   | "running"
@@ -344,6 +348,10 @@ export interface FormDefinition {
    *  renders content (heading/text/image/…) interleaved with fields. Absent for inline forms (render
    *  the flat `fields`). `fields` stays authoritative for validation. */
   blocks?: TemplateBlock[];
+  /** Tenant presentation of the hosted page — success copy, redirect, accent, theme, layout. Every
+   *  key optional; absent ⇒ the stock page. Already validated at save time AND re-projected
+   *  server-side, but the accent is re-checked at the point of use (see public/form-branding.ts). */
+  branding?: FormBrandingConfig;
   /** Cloudflare Turnstile site key — present only when the tenant has an active bot gate for this
    *  env; the page renders the widget and sends the solved token on submit. */
   turnstileSiteKey?: string;
