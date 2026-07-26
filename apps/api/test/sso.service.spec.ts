@@ -64,6 +64,9 @@ function signedResponse(opts: {
   privateKey: string;
   assertionId?: string;
   mfa?: boolean;
+  /** A NameID that differs from the email — what a `persistent`-format IdP sends. The email
+   *  then has to arrive as an attribute, which is the fallback saml.ts already implements. */
+  nameId?: string;
 }): string {
   const iso = (m: number) => new Date(Date.now() + m * 60_000).toISOString();
   const ctx = opts.mfa
@@ -78,7 +81,7 @@ function signedResponse(opts: {
   }" IssueInstant="${iso(-1)}" Version="2.0">
     <saml:Issuer>${opts.issuer}</saml:Issuer>
     <saml:Subject>
-      <saml:NameID>${opts.email}</saml:NameID>
+      <saml:NameID>${opts.nameId ?? opts.email}</saml:NameID>
       <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
         <saml:SubjectConfirmationData Recipient="${ACS_URL}" NotOnOrAfter="${iso(5)}"/>
       </saml:SubjectConfirmation>
@@ -86,7 +89,12 @@ function signedResponse(opts: {
     <saml:Conditions NotBefore="${iso(-5)}" NotOnOrAfter="${iso(5)}">
       <saml:AudienceRestriction><saml:Audience>${SP_ENTITY}</saml:Audience></saml:AudienceRestriction>
     </saml:Conditions>
-    <saml:AuthnStatement AuthnInstant="${iso(-1)}"><saml:AuthnContext><saml:AuthnContextClassRef>${ctx}</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement>
+    <saml:AuthnStatement AuthnInstant="${iso(-1)}"><saml:AuthnContext><saml:AuthnContextClassRef>${ctx}</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement>${
+    opts.nameId
+      ? `
+    <saml:AttributeStatement><saml:Attribute Name="email"><saml:AttributeValue>${opts.email}</saml:AttributeValue></saml:Attribute></saml:AttributeStatement>`
+      : ""
+  }
   </saml:Assertion>
 </samlp:Response>`;
   const sig = new SignedXml({
@@ -210,6 +218,56 @@ describe("SsoService — provisioning and linking", () => {
     // Synthetic id: stable, namespaced, and it does not contain the email/NameID.
     expect(userId).toMatch(/^sso:conn-a:[0-9a-f]{32}$/);
     expect(userId).not.toContain("alice");
+  });
+
+  /**
+   * The synthetic id is keyed on the NAME ID, not the email (SAML-SSO.md). This is the
+   * property that matters: someone's address changes (marriage, domain migration) and they
+   * must still be the SAME user. Hashing the email would mint a new synthetic id on that
+   * first post-change login and silently orphan their membership and role.
+   */
+  it("keys the synthetic id on the NameID, so an email change keeps one identity", async () => {
+    const svc = makeService();
+    const idFor = async (email: string) => {
+      ensureMembership.mockClear();
+      await svc.consumeAssertion(
+        signedResponse({
+          issuer: IDP_A,
+          email,
+          nameId: "persistent-subject-42",
+          privateKey: keysA.privateKey,
+          // A fresh assertion id each time — replay protection consumes them.
+          assertionId: `_a-${email}`,
+        }),
+      );
+      return ensureMembership.mock.calls[0][0] as string;
+    };
+
+    const before = await idFor("alice@tenant-a.com");
+    const after = await idFor("alice.smith@tenant-a.com");
+    expect(after).toBe(before);
+    // …and the id leaks neither the email nor the NameID.
+    expect(before).toMatch(/^sso:conn-a:[0-9a-f]{32}$/);
+    expect(before).not.toContain("alice");
+    expect(before).not.toContain("persistent-subject-42");
+  });
+
+  it("gives two different NameIDs different synthetic ids", async () => {
+    const svc = makeService();
+    const idFor = async (nameId: string) => {
+      ensureMembership.mockClear();
+      await svc.consumeAssertion(
+        signedResponse({
+          issuer: IDP_A,
+          email: "shared@tenant-a.com",
+          nameId,
+          privateKey: keysA.privateKey,
+          assertionId: `_a-${nameId}`,
+        }),
+      );
+      return ensureMembership.mock.calls[0][0] as string;
+    };
+    expect(await idFor("subject-1")).not.toBe(await idFor("subject-2"));
   });
 
   it("LINKS to an existing membership for that email, reusing its userId", async () => {

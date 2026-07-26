@@ -41,6 +41,47 @@ import {
   planIntegrationCall,
 } from "@naary/dsl";
 
+/**
+ * How much of a provider's response body to read for the error excerpt. We display 200 chars;
+ * reading a few KB leaves room for the redaction pass to see a whole credential (so it can't be
+ * cut in half) while keeping a hostile or merely verbose response from being buffered in full.
+ */
+const BODY_EXCERPT_READ_LIMIT = 8 * 1024;
+
+/**
+ * Read AT MOST `limit` bytes of a response body, then stop and discard the rest. `res.text()`
+ * would buffer everything first — unacceptable for an external host whose response size we do
+ * not control. Never throws: an excerpt is a diagnostic nicety, so a stream error degrades to "".
+ */
+async function readCapped(res: Response, limit: number): Promise<string> {
+  const body = res.body;
+  if (!body) return await res.text().catch(() => "");
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (size < limit) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      chunks.push(value);
+      size += value.byteLength;
+    }
+  } catch {
+    return "";
+  } finally {
+    // Stop the transfer rather than draining a body we have decided not to read.
+    await reader.cancel().catch(() => undefined);
+  }
+  const joined = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) {
+    joined.set(c, at);
+    at += c.byteLength;
+  }
+  return new TextDecoder().decode(joined.subarray(0, limit));
+}
+
 /** How long we give a provider to answer a probe. Well under any HTTP client timeout — this is a
  *  synchronous request/response for a user staring at a button, not a workflow step. */
 const TEST_TIMEOUT_MS = 10_000;
@@ -203,9 +244,14 @@ export class ConnectionTestService {
       ];
       // REDACT THEN SLICE, not the other way round: slicing first can cut a credential in half and
       // leave the surviving prefix in the message, which the redaction pass would then no longer
-      // recognise. The body is capped afterwards (untrusted input can be huge).
+      // recognise.
+      //
+      // The read itself is BOUNDED (readCapped): `res.text()` buffers the entire body first, so a
+      // provider returning a huge error page would cost us that memory before any cap applied —
+      // and this is a request to an external host we don't control. We only ever show 200 chars,
+      // so a few KB is all we need; anything past that is discarded without being buffered.
       const excerpt = redactToken(
-        await res.text().catch(() => ""),
+        await readCapped(res, BODY_EXCERPT_READ_LIMIT),
         secretValues,
       ).slice(0, 200);
 

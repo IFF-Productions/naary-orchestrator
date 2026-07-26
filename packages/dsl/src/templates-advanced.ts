@@ -543,7 +543,11 @@ export const formToDbGraph: GraphDef = {
         provider: "anthropic",
         model: "claude-sonnet-4-6",
         systemPrompt:
-          "Extract structured expense fields from the submission. Amounts are in the currency the submitter wrote; if a field genuinely is not stated, leave it out rather than inventing it.\n\nSubmission: {{ form.description }}",
+          // Only `vendor` is optional below, so only `vendor` may be omitted: with structured
+          // output the model CANNOT leave a required field out, and a blanket "leave it out"
+          // instruction just invites a hallucinated amount. Each required field gets an explicit
+          // fallback instead, and 0 is a reviewable sentinel rather than an invented figure.
+          "Extract structured expense fields from the submission. Amounts are in the currency the submitter wrote.\n\n- vendor: omit it if the submission does not name one.\n- currency: if it is not stated, use USD.\n- category: pick the closest one, or 'other'.\n- amount: never invent a figure — if no amount is stated, use 0 and say so in the summary, so a reviewer can correct the row.\n\nSubmission: {{ form.description }}",
         outputSchema: {
           type: "object",
           properties: {
@@ -605,7 +609,7 @@ export const escalationGraph: GraphDef = {
         provider: "anthropic",
         model: "claude-sonnet-4-6",
         systemPrompt:
-          "Grade the inbound alert. `severity` is high only when customers are affected right now or data is at risk. Say what you are unsure about instead of rounding up.",
+          "Grade the inbound alert. `severity` is high only when customers are affected right now or data is at risk. Say what you are unsure about instead of rounding up. `firstStep` is the single most useful thing the on-call engineer should do first — it is emailed to them, so always give one.",
         outputSchema: {
           type: "object",
           properties: {
@@ -614,7 +618,9 @@ export const escalationGraph: GraphDef = {
             impact: { type: "string" },
             firstStep: { type: "string" },
           },
-          required: ["severity", "title", "impact"],
+          // firstStep is REQUIRED because the notify email prints it unconditionally
+          // ("Suggested first step: …"); optional, it produced an email with a dangling label.
+          required: ["severity", "title", "impact", "firstStep"],
         },
       },
     },

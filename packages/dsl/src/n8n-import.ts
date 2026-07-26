@@ -23,8 +23,9 @@
  */
 import type { EdgeDef, GraphDef, NodeDef, NodeType } from "./types/core";
 import {
-  type UnconvertedExpression,
   convertN8nValueDeep,
+  stripPollutingKeys,
+  type UnconvertedExpression,
 } from "./n8n-expressions";
 import {
   type TranslateCtx,
@@ -484,7 +485,14 @@ export function parseN8nWorkflow(input: unknown): N8nImportResult {
       config.__n8n = {
         type: p.n8nType,
         typeVersion: p.raw.typeVersion ?? null,
-        parameters: asRecord(p.raw.parameters),
+        // Verbatim EXCEPT the prototype-polluting keys. This is the one path that stores raw
+        // imported parameters (convertN8nValueDeep's guarded output is discarded below, because
+        // converting would rewrite the strings we promised to preserve), so the guard has to be
+        // applied here or an untrusted `__proto__` survives into the stored graph.
+        parameters: stripPollutingKeys(asRecord(p.raw.parameters)) as Record<
+          string,
+          unknown
+        >,
       };
       // A placeholder's parameters aren't translated (there is nothing to translate them INTO), but
       // any expression inside them is still work the user must redo — so scan for the unconvertible

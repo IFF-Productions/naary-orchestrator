@@ -930,6 +930,109 @@ describe("degrading rather than failing", () => {
     expect(validateGraph(out.graph).valid).toBe(true);
   });
 
+  // Order-dependence is exactly what a shared mutable visited-set invites, so assert the union
+  // is the same with the branches declared the other way round.
+  it("bridged reconvergence is order-independent — the union is complete either way", () => {
+    const dis = (name: string) => ({
+      name,
+      type: "n8n-nodes-base.noOp",
+      parameters: {},
+      disabled: true,
+    });
+    const build = (first: string, second: string) =>
+      parseN8nWorkflow({
+        nodes: [
+          { name: "Hook", type: "n8n-nodes-base.webhook", parameters: {} },
+          dis("Off"),
+          dis("Mid1"),
+          dis("Mid2"),
+          { name: "Shared", type: "n8n-nodes-base.noOp", parameters: {} },
+          { name: "Only", type: "n8n-nodes-base.noOp", parameters: {} },
+        ],
+        connections: {
+          Hook: { main: [[{ node: "Off", type: "main", index: 0 }]] },
+          Off: {
+            main: [
+              [
+                { node: first, type: "main", index: 0 },
+                { node: second, type: "main", index: 0 },
+              ],
+            ],
+          },
+          // Mid2 is the one with the extra target, so which of the two is walked first
+          // decides which branch short-circuits.
+          Mid1: { main: [[{ node: "Shared", type: "main", index: 0 }]] },
+          Mid2: {
+            main: [
+              [
+                { node: "Shared", type: "main", index: 0 },
+                { node: "Only", type: "main", index: 0 },
+              ],
+            ],
+          },
+        },
+      });
+    for (const [a, b] of [
+      ["Mid1", "Mid2"],
+      ["Mid2", "Mid1"],
+    ]) {
+      const out = build(a, b);
+      const hook = out.nodes.find((r) => r.n8nName === "Hook")!.nodeId;
+      expect(
+        out.graph.edges
+          .filter((e) => e.from === hook)
+          .map((e) => e.to)
+          .sort(),
+        `order ${a} before ${b}`,
+      ).toEqual(["only", "shared"]);
+    }
+  });
+
+  /**
+   * `config.__n8n` keeps an unmapped node's original parameters so the user can rebuild it — and
+   * it is the ONE path that stores RAW imported JSON (the deep converter's guarded output is
+   * discarded there, because converting would rewrite strings we promised to preserve). JSON.parse
+   * makes `__proto__` an OWN property, so without a guard it survives into the stored graph and
+   * pollutes the moment anything Object.assigns it.
+   */
+  it("strips prototype-polluting keys from a placeholder's preserved parameters", () => {
+    const out = parseN8nWorkflow(
+      JSON.parse(`{
+        "nodes": [
+          { "name": "Hook", "type": "n8n-nodes-base.webhook", "parameters": {} },
+          { "name": "Weird", "type": "n8n-nodes-base.totallyUnknownThing",
+            "parameters": {
+              "__proto__": { "polluted": true },
+              "constructor": { "polluted": true },
+              "prototype": { "polluted": true },
+              "keepMe": "verbatim {{ $json.x }}",
+              "nested": { "__proto__": { "polluted": true }, "alsoKeep": 1 }
+            } }
+        ],
+        "connections": { "Hook": { "main": [[{ "node": "Weird", "type": "main", "index": 0 }]] } }
+      }`),
+    );
+    const placeholder = out.graph.nodes.find((n) => n.type === "noOp")!;
+    const kept = (placeholder.config as { __n8n: { parameters: Record<string, unknown> } })
+      .__n8n.parameters;
+
+    for (const bad of ["__proto__", "constructor", "prototype"]) {
+      expect(
+        Object.hasOwn(kept, bad),
+        `${bad} survived into the stored graph`,
+      ).toBe(false);
+    }
+    // …and nothing legitimate was lost or rewritten.
+    expect(kept.keepMe).toBe("verbatim {{ $json.x }}");
+    expect((kept.nested as Record<string, unknown>).alsoKeep).toBe(1);
+    expect(
+      Object.hasOwn(kept.nested as object, "__proto__"),
+      "nested __proto__ survived",
+    ).toBe(false);
+    // The global prototype is untouched.
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
   it("emits ONE edge when a bridge diamond reconverges on the same target", () => {
     const out = parseN8nWorkflow({
       nodes: [

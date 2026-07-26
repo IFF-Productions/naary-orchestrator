@@ -146,6 +146,69 @@ describe("handoff — save gate", () => {
     expect(r.error).toMatch(/no edge to it/);
   });
 
+  /**
+   * The gap the unconditional-edge check had: it looked at the FIRST edge to a target, so a
+   * correct edge sitting beside an accidental duplicate passed the gate — while `nextNodes`
+   * still followed both, fanning out to the specialist on every run. Exactly the failure the
+   * validator exists to prevent, so two edges to one target is refused outright.
+   */
+  it("rejects a DUPLICATE edge to a target even when one of them is correct", () => {
+    const g = supervisorGraph();
+    g.edges.push({ from: "sup", to: "tech" }); // unconditional twin beside the good edge
+    const r = validateGraph(g);
+    expect(r.valid).toBe(false);
+    expect(r.error).toMatch(/2 edges to 'tech'/);
+  });
+
+  it("rejects duplicate target edges regardless of their order", () => {
+    const g = supervisorGraph();
+    // Unconditional one FIRST — `find` would previously have returned this and reported
+    // "unconditional"; either way it must not be accepted.
+    g.edges.unshift({ from: "sup", to: "tech" });
+    expect(validateGraph(g).valid).toBe(false);
+  });
+
+  /**
+   * `targets` comes from stored/imported JSON, so its ELEMENTS are untrusted. These used to
+   * reach handoffTargetName and throw — and validateGraph is the save gate, so a throw is a
+   * 500 where a returned `{ valid: false }` (a 400) belongs.
+   */
+  describe("malformed target data is rejected, never thrown", () => {
+    const withTargets = (targets: unknown) => {
+      const g = supervisorGraph();
+      const sup = g.nodes.find((n) => n.id === "sup")!;
+      (sup.config as Record<string, unknown>).handoff = { targets };
+      return g;
+    };
+
+    it.each([
+      ["null element", [null]],
+      ["undefined element", [undefined]],
+      ["a bare string", ["tech"]],
+      ["a number", [42]],
+      ["a nested array", [[]]],
+      ["a non-string name", [{ to: "tech", name: 42 }]],
+      ["a missing 'to'", [{ name: "tech" }]],
+      ["an empty 'to'", [{ to: "   " }]],
+    ])("%s", (_label, targets) => {
+      const r = validateGraph(withTargets(targets));
+      expect(r.valid).toBe(false);
+      expect(typeof r.error).toBe("string");
+    });
+
+    it("does not throw for any of them", () => {
+      for (const targets of [
+        [null],
+        ["tech"],
+        [42],
+        [{ to: "tech", name: 42 }],
+        [{ name: "tech" }],
+      ]) {
+        expect(() => validateGraph(withTargets(targets))).not.toThrow();
+      }
+    });
+  });
+
   it("rejects an UNCONDITIONAL target edge (it would fire on every run)", () => {
     // The important one. `nextNodes` returns EVERY passing edge, so an unconditioned
     // handoff edge silently runs that specialist on every single run no matter what the
