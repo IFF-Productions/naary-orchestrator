@@ -8,6 +8,15 @@
   }
 }
 
+/* The side-gate spur is a DIV with a repeating gradient, not an SVG stroke, so authDash above
+   (stroke-dashoffset) has no effect on it — the spur would sit static while "running". Shifting the
+   background by exactly one tile (backgroundSize is 12px) gives a seamless march. */
+@keyframes authSpurFlow {
+  to {
+    background-position-x: 12px;
+  }
+}
+
 @keyframes authSpin {
   to {
     transform: rotate(360deg);

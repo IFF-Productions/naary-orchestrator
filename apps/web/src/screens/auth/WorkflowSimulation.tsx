@@ -194,8 +194,12 @@ function SideGate({ status }: { status: NodeStatus }) {
           height: 1,
           backgroundImage: `linear-gradient(90deg, ${v.borderColor} 0 6px, transparent 6px 12px)`,
           backgroundSize: "12px 1px",
+          // authSpurFlow, NOT authDash: that one animates stroke-dashoffset, which does nothing to a
+          // div's gradient — the spur would have sat static while "running".
           animation:
-            status === "running" ? "authDash .7s linear infinite" : undefined,
+            status === "running"
+              ? "authSpurFlow .7s linear infinite"
+              : undefined,
           transition: "background-image .4s",
         }}
       />
@@ -204,7 +208,7 @@ function SideGate({ status }: { status: NodeStatus }) {
           position: "absolute",
           left: NODE_POS[0].left + 268,
           top: NODE_POS[0].top + 12,
-          width: 150,
+          width: 186,
           height: 50,
           borderRadius: 11,
           border: `1px dashed ${v.borderColor}`,
@@ -268,9 +272,23 @@ function SideGate({ status }: { status: NodeStatus }) {
               whiteSpace: "nowrap",
             }}
           >
-            {STATE_WORD[status]} · side
+            {BOT_GATE_LABEL[1]}
           </div>
         </div>
+        {/* State as its own badge, mirroring the main cards' anatomy — folding it into the sublabel
+            meant BOT_GATE_LABEL[1] ("turnstile · side gate") never actually rendered. */}
+        <span
+          style={{
+            fontSize: 9,
+            fontWeight: 600,
+            letterSpacing: ".06em",
+            textTransform: "uppercase",
+            fontFamily: "var(--font-mono)",
+            flex: "none",
+          }}
+        >
+          {STATE_WORD[status]}
+        </span>
       </div>
     </>
   );
