@@ -14,6 +14,7 @@ import {
   useMediaQuery,
 } from "../../../lib/useMediaQuery";
 import { CanvasStage } from "./CanvasStage";
+import type { AiBuilderProvider, ProviderOption } from "./providers";
 import {
   type BuildPhase,
   type ChatMsg,
@@ -66,12 +67,21 @@ export const INITIAL_BUILD_STATE: BuildWithAiState = {
 export function BuildWithAiView({
   state,
   onSend,
+  providerOptions,
+  provider,
+  onProvider,
+  providerHint,
   onResume,
   onOpenInCanvas,
   onReset,
 }: {
   state: BuildWithAiState;
   onSend: (text: string) => void;
+  /** Model/agent selection for the next turn — see ./providers. */
+  providerOptions: ProviderOption[];
+  provider: AiBuilderProvider | null;
+  onProvider: (next: AiBuilderProvider | null) => void;
+  providerHint: string | null;
   onResume: (id: string) => void;
   onOpenInCanvas: () => void;
   onReset: () => void;
@@ -243,6 +253,10 @@ export function BuildWithAiView({
           resumables={resumables}
           opening={opening}
           onSend={onSend}
+          providerOptions={providerOptions}
+          provider={provider}
+          onProvider={onProvider}
+          providerHint={providerHint}
           onResume={onResume}
           onOpenInCanvas={onOpenInCanvas}
           compact={compact}
