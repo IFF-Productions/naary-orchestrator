@@ -17,6 +17,15 @@ import {
   checkAssetBytes,
 } from "./form-asset";
 
+/**
+ * Prisma's unique-constraint violation. Matched on the CODE rather than the message so it survives a
+ * Prisma version bump, and without importing the error class (which pulls the generated client's
+ * runtime into a module that is otherwise cheap to load in tests).
+ */
+function isUniqueViolation(e: unknown): boolean {
+  return (e as { code?: unknown } | null)?.code === "P2002";
+}
+
 /** A stored asset, as the serve route needs it. */
 export interface StoredAsset {
   contentType: string;
@@ -154,32 +163,45 @@ export class FormAssetService {
     const key = `form-assets/${tenantId}/${environmentId}/${kind}/${sha256}`;
     const objectRef = await this.objects.put(key, bytes);
 
-    const row = await getPrisma().formAsset.create({
-      data: {
-        tenantId,
-        environmentId,
-        kind,
-        contentType: check.contentType,
-        objectRef,
-        byteSize: bytes.length,
-        sha256,
-      },
-      select: { id: true },
-    });
-    return { assetId: row.id, contentType: check.contentType };
+    const data = {
+      tenantId,
+      environmentId,
+      kind,
+      contentType: check.contentType,
+      objectRef,
+      byteSize: bytes.length,
+      sha256,
+    };
+    try {
+      const row = await getPrisma().formAsset.create({
+        data,
+        select: { id: true },
+      });
+      return { assetId: row.id, contentType: check.contentType };
+    } catch (e) {
+      // Two concurrent uploads of the SAME file (a double-clicked picker, two authors, a retry) can
+      // both miss the findUnique above and race to create. One loses the composite unique and would
+      // 500 — for a request whose intent was already satisfied by the winner. Re-read and return the
+      // winner's id instead: the object is byte-identical, so there is nothing to reconcile.
+      if (!isUniqueViolation(e)) throw e;
+      const winner = await getPrisma().formAsset.findUnique({
+        where: {
+          tenantId_environmentId_kind_sha256: {
+            tenantId,
+            environmentId,
+            kind,
+            sha256,
+          },
+        },
+        select: { id: true },
+      });
+      // Absent only if the winner was deleted between the conflict and this read — genuinely
+      // exceptional, so surface the original error rather than inventing an id.
+      if (!winner) throw e;
+      return { assetId: winner.id, contentType: check.contentType };
+    }
   }
 
-  /**
-   * Fetch an asset by id for the PUBLIC serve route — deliberately NOT tenant-scoped.
-   *
-   * The id is an opaque uuid and the only capability, exactly like `formId`: the anonymous browser
-   * rendering a hosted form has no tenant context to scope by. Nothing in the response identifies the
-   * owning tenant, so serving it reveals only the image the form already displays.
-   *
-   * Returns null both for an unknown id and for a row whose object has gone missing (a bucket
-   * lifecycle rule, a restored database ahead of its bucket) — the caller 404s either way rather than
-   * 500ing, because a missing logo must not take down the page it decorates.
-   */
   /**
    * An asset's content type + hash, WITHOUT fetching the bytes.
    *
@@ -196,6 +218,17 @@ export class FormAssetService {
     });
   }
 
+  /**
+   * Fetch an asset by id for the PUBLIC serve route — deliberately NOT tenant-scoped.
+   *
+   * The id is an opaque uuid and the only capability, exactly like `formId`: the anonymous browser
+   * rendering a hosted form has no tenant context to scope by. Nothing in the response identifies the
+   * owning tenant, so serving it reveals only the image the form already displays.
+   *
+   * Returns null both for an unknown id and for a row whose object has gone missing (a bucket
+   * lifecycle rule, a restored database ahead of its bucket) — the caller 404s either way rather than
+   * 500ing, because a missing logo must not take down the page it decorates.
+   */
   async get(assetId: string): Promise<StoredAsset | null> {
     const row = await getPrisma().formAsset.findUnique({
       where: { id: assetId },

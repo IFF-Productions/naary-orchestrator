@@ -138,8 +138,10 @@ export class GraphsService {
      *  constructions). Unwired ⇒ the tool-policy save gate is skipped, which is safe: it is
      *  DEFENSE IN DEPTH, and the worker enforces the same policy in-activity regardless. */
     @Optional() private readonly guardrails?: GuardrailsService,
-    /** @Optional like the others. Unwired ⇒ the logo ownership check is skipped, which is safe: a
-     *  foreign/stale asset id resolves to a 404 image, never to another tenant's data. */
+    /** @Optional for the same reason as the others (many `new GraphsService()` test/CLI
+     *  constructions), but the logo check FAILS CLOSED when it's unwired and a graph actually carries
+     *  a logo — see the upsert() gate. It cannot be skipped: the asset route is deliberately not
+     *  tenant-scoped, so an unverified foreign id is served successfully, not 404'd. */
     @Optional() private readonly formAssets?: FormAssetService,
   ) {}
 
@@ -219,8 +221,22 @@ export class GraphsService {
     // serve it as their own — cross-tenant hotlinking of an image we host and pay to serve. The zod
     // schema only checks the id's shape; ownership needs a lookup, so it lives here. Rejected at save
     // rather than dropped on read, because an author pasting the wrong id deserves to be told.
-    if (this.formAssets) {
-      const logoIds = formLogoAssetIds(graph);
+    //
+    // FAILS CLOSED, and that matters: `GET /forms/assets/:id` is deliberately NOT tenant-scoped (the
+    // anonymous browser rendering a hosted form has no tenant context), so an unverified foreign id is
+    // served SUCCESSFULLY — it does not 404. Treating an unwired verifier as "skip" would therefore
+    // leave cross-tenant hotlinking wide open on every DI-less save path (scripts, seeds, the CLI).
+    // Note the gate only trips when a graph actually CARRIES a logo, so the many bare
+    // `new GraphsService()` constructions keep working untouched.
+    const logoIds = formLogoAssetIds(graph);
+    if (logoIds.length > 0) {
+      if (!this.formAssets) {
+        throw new Error(
+          "Cannot verify a form logo's ownership: FormAssetService is not wired into GraphsService. " +
+            "Refusing to save rather than accept an unverified asset id (the asset route is not " +
+            "tenant-scoped, so a foreign id would be served, not rejected).",
+        );
+      }
       for (const assetId of logoIds) {
         const owned = await this.formAssets.ownedBy(
           assetId,

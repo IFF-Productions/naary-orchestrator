@@ -118,6 +118,43 @@ describe("store", () => {
     const service = new FormAssetService(new MemoryObjectStore());
     await expect(service.store("t-1", "e-1", PNG)).rejects.toThrow(/S3_BUCKET/);
   });
+
+  /**
+   * The concurrent-identical-upload race. Two requests for the same file (a double-clicked picker, two
+   * authors, a retry) can both miss the dedupe read and race to create; one loses the composite unique.
+   * 500ing there would fail a request whose intent the winner already satisfied, so the loser re-reads
+   * and returns the winner's id — the bytes are identical, so there's nothing to reconcile.
+   */
+  it("returns the winner's id when a concurrent upload wins the unique constraint", async () => {
+    const objects = fakeS3();
+    findUnique
+      .mockResolvedValueOnce(null) // dedupe read: not there yet
+      .mockResolvedValueOnce({ id: "asset-winner" }); // re-read after the conflict
+    create.mockRejectedValue(Object.assign(new Error("unique"), { code: "P2002" }));
+
+    const out = await new FormAssetService(objects).store("t-1", "e-1", PNG);
+    expect(out).toEqual({ assetId: "asset-winner", contentType: "image/png" });
+  });
+
+  /** Any OTHER database error must still surface — only the unique violation is recoverable. */
+  it("rethrows a non-unique database error", async () => {
+    findUnique.mockResolvedValue(null);
+    create.mockRejectedValue(
+      Object.assign(new Error("connection lost"), { code: "P1001" }),
+    );
+    await expect(
+      new FormAssetService(fakeS3()).store("t-1", "e-1", PNG),
+    ).rejects.toThrow(/connection lost/);
+  });
+
+  /** A conflict whose winner then vanished is genuinely exceptional — don't invent an id. */
+  it("rethrows when the conflicting row cannot be re-read", async () => {
+    findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    create.mockRejectedValue(Object.assign(new Error("unique"), { code: "P2002" }));
+    await expect(
+      new FormAssetService(fakeS3()).store("t-1", "e-1", PNG),
+    ).rejects.toThrow(/unique/);
+  });
 });
 
 describe("get", () => {

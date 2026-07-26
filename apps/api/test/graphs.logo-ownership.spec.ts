@@ -191,17 +191,38 @@ describe("logoAssetId ownership at save time", () => {
   });
 
   /**
-   * The service is constructed without the asset service in many places (tests, the CLI). Skipping is
-   * the safe degradation: a foreign id resolves to a 404 image, never to another tenant's data.
+   * FAILS CLOSED when the verifier isn't wired — the correction to an earlier version of this code that
+   * skipped the check and justified it with "a foreign id resolves to a 404". That justification was
+   * false: `GET /forms/assets/:id` is deliberately NOT tenant-scoped, so an unverified foreign id is
+   * served SUCCESSFULLY. Skipping would have left cross-tenant hotlinking open on every DI-less save
+   * path (scripts, seeds, the CLI).
    */
-  it("skips the check (and still saves) when the asset service isn't wired", async () => {
-    await new GraphsService().upsert(
-      "t-1",
-      "e-1",
-      "wk",
-      "My form",
-      formGraph({ logoAssetId: LOGO }),
-    );
+  it("REFUSES to save a logo when the asset service isn't wired", async () => {
+    await expect(
+      new GraphsService().upsert(
+        "t-1",
+        "e-1",
+        "wk",
+        "My form",
+        formGraph({ logoAssetId: LOGO }),
+      ),
+    ).rejects.toThrow(/not wired/i);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  /**
+   * ...but the gate only trips when a logo is actually present, so the many bare
+   * `new GraphsService()` constructions (tests, CLI, seeds) keep saving ordinary graphs untouched.
+   */
+  it("still saves a logo-less graph with no asset service wired", async () => {
+    await new GraphsService().upsert("t-1", "e-1", "wk", "My form", {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        { id: "end", type: "end" },
+      ],
+      edges: [{ from: "s", to: "end" }],
+    });
     expect(create).toHaveBeenCalled();
   });
 });
