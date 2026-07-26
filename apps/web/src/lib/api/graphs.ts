@@ -31,6 +31,18 @@ export const graphsApi = {
   listTemplates(): Promise<TemplateSummary[]> {
     return http("/templates");
   },
+  /**
+   * Every template WITH its graph, in ONE request.
+   *
+   * The gallery needs all the graphs (it derives chains, categories, approval badges and
+   * connection requirements from them). Fetching them per key was a 19-request fan-out
+   * against a 120-req/min per-IP throttle, and any throttled request made that template
+   * silently DISAPPEAR from the gallery — `Promise.allSettled` dropped it with no error.
+   * One request removes the fan-out, the 429s, and the silent drop.
+   */
+  listTemplatesWithGraphs(): Promise<TemplateDetail[]> {
+    return http("/templates?include=graph");
+  },
   // A template + its graph — the canvas loads this as a new draft to fork.
   getTemplate(key: string): Promise<TemplateDetail> {
     return http(`/templates/${encodeURIComponent(key)}`);

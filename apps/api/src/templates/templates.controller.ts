@@ -1,14 +1,29 @@
-import { Controller, Get, NotFoundException, Param } from "@nestjs/common";
+import {
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  Query,
+} from "@nestjs/common";
+import { ApiQuery } from "@nestjs/swagger";
 import type { GraphDef } from "@naary/dsl";
 import {
   apiEnrichGraph,
+  budgetCappedResearchGraph,
+  codeAgentPrGraph,
   dbReportGraph,
+  escalationGraph,
   feedDigestGraph,
+  formToDbGraph,
   githubIssueTriageGraph,
   githubReviewGraph,
   jiraTicketGraph,
+  mcpServerToolGraph,
   moderationGraph,
+  ragAnswerGraph,
+  ragIngestGraph,
   sampleGraph,
+  supervisorHandoffGraph,
   supportReplyGraph,
   webhookSampleGraph,
 } from "@naary/dsl";
@@ -21,7 +36,7 @@ import {
  * presentation and must not leak into the control plane.
  */
 export type TemplateCategory =
-  "agents" | "api" | "database" | "email" | "github" | "jira";
+  "agents" | "api" | "code" | "database" | "email" | "github" | "jira" | "rag";
 
 /** A built-in workflow template, surfaced to the Templates screen. */
 export interface TemplateSummary {
@@ -149,6 +164,107 @@ const TEMPLATES: {
     tags: ["intake", "ticketing", "human-approval", "mcp"],
     graph: jiraTicketGraph,
   },
+  // --- #574 wave 2: the differentiator templates ---
+  {
+    key: "supervisor-handoff",
+    name: "Supervisor & specialist agents",
+    description:
+      "A supervisor agent reads an inbound request and hands it to exactly one specialist (billing, technical, or general) with a typed brief; that specialist answers and the reply is returned synchronously. Multi-agent delegation where every sub-agent is a normal, durable, separately-billed node — not an opaque crew. Needs no connection: it runs on your model key alone.",
+    category: "agents",
+    tags: [
+      "multi-agent",
+      "handoff",
+      "supervisor",
+      "routing",
+      "structured-output",
+      "webhook",
+    ],
+    graph: supervisorHandoffGraph,
+  },
+  {
+    key: "rag-answer",
+    name: "Ask your documents (RAG chat)",
+    description:
+      "A hosted chat page that answers only from your indexed documents: the question is embedded, matched against a pgvector collection, and the agent answers from the retrieved chunks — quoting them, and saying so when the answer isn't there. Pair it with the RAG indexer to fill the collection.",
+    category: "rag",
+    tags: ["rag", "chat", "pgvector", "grounding", "citations"],
+    graph: ragAnswerGraph,
+  },
+  {
+    key: "rag-ingest",
+    name: "Keep a RAG collection fresh",
+    description:
+      "On a nightly schedule, pull a feed (changelog, docs RSS, status feed), embed each entry, and upsert it into the collection the RAG chat queries. Swap the feed node for an HTTP request or SQL query to index any source.",
+    category: "rag",
+    tags: ["rag", "embeddings", "schedule", "pgvector", "indexing"],
+    graph: ragIngestGraph,
+  },
+  {
+    key: "code-agent-pr",
+    name: "Issue → approved plan → pull request",
+    description:
+      "A GitHub issue opens; an agent judges whether it's small and safe enough to attempt and writes the plan; a human approves that plan (the run parks durably — for days if needed); only then does the code agent clone the repo in its sandbox, make the change, and open a PR. The coding run is capped in both dollars and turns.",
+    category: "code",
+    tags: [
+      "code-agent",
+      "pull-request",
+      "human-approval",
+      "budget-cap",
+      "github",
+      "webhook",
+    ],
+    graph: codeAgentPrGraph,
+  },
+  {
+    key: "budget-capped-research",
+    name: "Budget-capped research agent",
+    description:
+      "A scheduled agent that runs a bounded tool loop over an MCP connection and emails the brief it produced. Every cost lever is set on purpose — cheapest capable model, hard output-token cap, capped tool steps — so an agent left on a nightly schedule can't quietly become the biggest line on the bill.",
+    category: "agents",
+    tags: [
+      "budget-cap",
+      "mcp",
+      "tools",
+      "schedule",
+      "research",
+      "notification",
+    ],
+    graph: budgetCappedResearchGraph,
+  },
+  {
+    key: "mcp-server-tool",
+    name: "Publish this workflow as an MCP tool",
+    description:
+      "Because the entry node is an MCP Server Trigger, this workflow becomes a callable tool on your workspace's MCP endpoint — so Claude (or any MCP client) can invoke it by name, running on your prompt, your key, and your budget, with every call recorded as a durable run.",
+    category: "api",
+    tags: ["mcp", "mcp-server", "tool", "structured-output", "integration"],
+    graph: mcpServerToolGraph,
+  },
+  {
+    key: "form-to-db",
+    name: "Form submission → database row",
+    description:
+      "A hosted public form collects a free-text expense claim, an agent normalizes it into typed fields, and a parameterized INSERT writes the row — parameters are bound from the agent's output, never concatenated into the SQL.",
+    category: "database",
+    tags: ["form", "extraction", "sql", "structured-output", "parameterized"],
+    graph: formToDbGraph,
+  },
+  {
+    key: "escalation-sla",
+    name: "Severity routing with an SLA escalation",
+    description:
+      "An alert arrives and an agent grades it. High severity opens a Jira ticket and parks on a human acknowledgement that reminds, then escalates, if nobody responds in time; anything lower is simply filed by email. The clearest demonstration of durable waiting: it can sit for days, survives restarts, and chases someone while it waits.",
+    category: "agents",
+    tags: [
+      "escalation",
+      "sla",
+      "human-approval",
+      "branching",
+      "incident",
+      "webhook",
+    ],
+    graph: escalationGraph,
+  },
 ];
 
 /**
@@ -158,8 +274,25 @@ const TEMPLATES: {
  */
 @Controller("templates")
 export class TemplatesController {
+  // OPTIONAL in the spec: without this the Nest plugin marks it required, which would force
+  // every generated client (including apps/web's schema.d.ts) to send `?include=` — and the
+  // whole point of the param is that omitting it returns the untouched legacy response.
+  // Same reason mcp-registry.controller.ts declares its query params.
+  @ApiQuery({
+    name: "include",
+    required: false,
+    enum: ["graph"],
+    description:
+      "Pass `graph` to get every template's graph in this one response instead of fetching /templates/:key per template.",
+  })
   @Get()
-  list(): TemplateSummary[] {
+  list(
+    @Query("include") include?: string,
+  ): TemplateSummary[] | TemplateDetail[] {
+    // Opt-in ONLY: without `?include=graph` the response is byte-identical to before, so an
+    // existing GET /templates consumer is unaffected (#574 AC). See detailOf's docblock for
+    // why the graphs-in-one-response variant exists.
+    if (include === "graph") return TEMPLATES.map((t) => this.detailOf(t));
     // ADDITIVE projection: key/name/description/nodeCount keep their exact meaning and
     // type, so an existing GET /templates consumer is unaffected (#574 AC).
     return TEMPLATES.map(
@@ -174,11 +307,22 @@ export class TemplatesController {
     );
   }
 
-  /** The template + its graph — the canvas loads this as a NEW draft to fork. */
-  @Get(":key")
-  get(@Param("key") key: string): TemplateDetail {
-    const t = TEMPLATES.find((x) => x.key === key);
-    if (!t) throw new NotFoundException(`Unknown template '${key}'`);
+  /**
+   * `?include=graph` returns each template WITH its graph, in ONE response.
+   *
+   * Why this exists: the gallery derives every chip, chain, badge and connection
+   * requirement from the real graphs, so it used to fetch `/templates` and then
+   * `/templates/:key` once PER template. At 18 templates that is a 19-request fan-out per
+   * page load, against a 120-req/min per-IP throttle — and because the screen collects the
+   * results with `Promise.allSettled`, every throttled (429) detail request silently
+   * DROPPED that template from the gallery. No error, no retry: cards just went missing.
+   * Reproduced at ~133 requests from one IP; it was already possible at 10 templates and
+   * became easy at 18.
+   *
+   * One request instead of nineteen removes the fan-out, the 429s, and the silent drop —
+   * and costs a user 1/19th of their rate-limit budget to open the screen.
+   */
+  private detailOf(t: (typeof TEMPLATES)[number]): TemplateDetail {
     return {
       key: t.key,
       name: t.name,
@@ -188,5 +332,13 @@ export class TemplatesController {
       tags: [...t.tags],
       graph: t.graph,
     };
+  }
+
+  /** The template + its graph — the canvas loads this as a NEW draft to fork. */
+  @Get(":key")
+  get(@Param("key") key: string): TemplateDetail {
+    const t = TEMPLATES.find((x) => x.key === key);
+    if (!t) throw new NotFoundException(`Unknown template '${key}'`);
+    return this.detailOf(t);
   }
 }

@@ -335,6 +335,7 @@ export const apiEnrichGraph: GraphDef = {
     },
     {
       id: "summarize",
+      name: "Summarize ticket",
       type: "agent",
       config: {
         provider: "anthropic",
