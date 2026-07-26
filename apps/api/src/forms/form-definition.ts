@@ -42,9 +42,16 @@ export interface FormDefinition {
  *  into the workflow ctx (the whole payload is additionally bounded by the body-size limit). */
 export const MAX_FIELD_LENGTH = 10_000;
 
-/** Loose email shape check — deliberately permissive (real deliverability isn't our job), just
- *  enough that a `type: "email"` field can't carry arbitrary multi-line junk. */
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/**
+ * Loose email shape check — deliberately permissive (real deliverability isn't our job), just
+ * enough that a `type: "email"` field can't carry arbitrary multi-line junk.
+ *
+ * Exported as a PATTERN STRING because `form-schema.ts` emits it as a JSON Schema `pattern` for
+ * `type: "email"` fields. Sharing the source (rather than re-typing the regex there) is what makes
+ * "schema-valid ⇒ this validator accepts" hold for email by construction instead of by luck.
+ */
+export const EMAIL_PATTERN = "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$";
+const EMAIL_RE = new RegExp(EMAIL_PATTERN);
 
 /** The formTrigger entry node's referenced form-template id, if any (Slice 4b). Returns undefined
  *  when the entry isn't a formTrigger or carries no `templateId` — the caller then serves inline

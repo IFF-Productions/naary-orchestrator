@@ -9,8 +9,10 @@ import {
   Param,
   Post,
 } from "@nestjs/common";
+import { ApiOkResponse } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
 import { Public } from "../auth/public.decorator";
+import { FormJsonSchemaResponse } from "./form.response";
 import { ContentTemplatesService } from "../content-templates/content-templates.service";
 import { ExecutionsService } from "../executions/executions.service";
 import { GraphsService } from "../graphs/graphs.service";
@@ -20,6 +22,7 @@ import {
   formTemplateId,
   validateSubmission,
 } from "./form-definition";
+import { buildFormJsonSchema } from "./form-schema";
 import { FormService } from "./form.service";
 
 /**
@@ -58,6 +61,39 @@ export class FormsController {
       endpoint.environmentId,
     );
     return turnstileSiteKey ? { ...def, turnstileSiteKey } : def;
+  }
+
+  /**
+   * Serve a JSON Schema for this form's submission body — the contract for POSTing to the form
+   * WITHOUT our hosted page (generate types from it, validate against it, then submit).
+   *
+   * The schema is sound, not complete: a payload it accepts is a payload `POST /forms/:formId`
+   * accepts (see form-schema.ts for why the converse is deliberately not claimed). `botProtection`
+   * is resolved here because it's an I/O lookup, and it matters — with the gate active the submit
+   * route 403s before validating, so the schema must name `turnstileToken` rather than describe a
+   * body that cannot succeed.
+   *
+   * Anonymous like the definition route: it reveals strictly less than `GET /forms/:formId`, which
+   * already serves the same field list.
+   */
+  @Get(":formId/schema")
+  @ApiOkResponse({
+    type: FormJsonSchemaResponse,
+    description:
+      "A JSON Schema (draft 2020-12) for this form's submission body. Sound, not complete: a " +
+      "payload it accepts is a payload POST /forms/{formId} accepts.",
+  })
+  async schema(@Param("formId") formId: string) {
+    const { endpoint, def } = await this.resolve(formId);
+    const siteKey = await this.turnstile.publicSiteKey(
+      endpoint.tenantId,
+      endpoint.environmentId,
+    );
+    return buildFormJsonSchema(formId, def.fields, {
+      ...(def.title ? { title: def.title } : {}),
+      ...(def.description ? { description: def.description } : {}),
+      botProtection: siteKey != null,
+    });
   }
 
   /** Accept an anonymous submission: verify the Turnstile challenge (if the tenant enabled it),
