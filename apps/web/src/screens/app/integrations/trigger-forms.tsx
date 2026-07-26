@@ -16,6 +16,33 @@ import {
   formUrl,
   UrlCopy,
 } from "./shared";
+import { WorkflowPicker } from "./WorkflowPicker";
+
+/**
+ * The tenant's saved workflows in the ACTIVE environment, for the registration pickers.
+ * All three endpoint kinds need the same list, and `loading` keeps the pickers from claiming
+ * "no workflows yet" during the first fetch.
+ */
+function useWorkflowList(): { workflows: GraphSummary[]; loading: boolean } {
+  const [workflows, setWorkflows] = useState<GraphSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    api
+      .listGraphs()
+      .then((gs) => {
+        if (alive) setWorkflows(gs);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return { workflows, loading };
+}
 
 /** Register a hosted chat for a workflow whose entry node is a chatTrigger. Mirrors FormForm; on
  *  success it surfaces the shareable /c/ URL. 400s (with a hint) if the tenant has no budget cap. */
@@ -30,6 +57,7 @@ export function ChatForm({
   const [busy, setBusy] = useState(false);
   const [registered, setRegistered] = useState<RegisteredChat | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const { workflows, loading } = useWorkflowList();
 
   async function submit() {
     setBusy(true);
@@ -55,14 +83,14 @@ export function ChatForm({
   return (
     <>
       <div style={{ marginBottom: 12 }}>
-        <span style={fieldLabel}>
-          Workflow key (its entry node must be a Chat)
-        </span>
-        <input
-          style={fieldStyle}
+        <span style={fieldLabel}>Workflow to host as a chat</span>
+        <WorkflowPicker
+          workflows={workflows}
+          loading={loading}
           value={workflowId}
-          onChange={(e) => setWorkflowId(e.target.value)}
-          placeholder="support-chat"
+          onChange={setWorkflowId}
+          entryType="chatTrigger"
+          requires="a Chat trigger"
         />
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -143,6 +171,7 @@ export function FormForm({
   const [busy, setBusy] = useState(false);
   const [registered, setRegistered] = useState<RegisteredForm | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const { workflows, loading } = useWorkflowList();
 
   async function submit() {
     setBusy(true);
@@ -168,14 +197,14 @@ export function FormForm({
   return (
     <>
       <div style={{ marginBottom: 12 }}>
-        <span style={fieldLabel}>
-          Workflow key (its entry node must be a Form)
-        </span>
-        <input
-          style={fieldStyle}
+        <span style={fieldLabel}>Workflow to host as a form</span>
+        <WorkflowPicker
+          workflows={workflows}
+          loading={loading}
           value={workflowId}
-          onChange={(e) => setWorkflowId(e.target.value)}
-          placeholder="contact-form"
+          onChange={setWorkflowId}
+          entryType="formTrigger"
+          requires="a Form trigger"
         />
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -255,22 +284,10 @@ export function WebhookForm({
   const [registered, setRegistered] = useState<RegisteredWebhook | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  // The tenant's saved workflows, for the picker below. Typing a key by hand was the
-  // #1 registration footgun ("No graph seeded for workflowKey '…'" 404s on a typo /
-  // an unsaved key) — so the workflow is CHOSEN from real, saved graphs, never typed.
-  const [workflows, setWorkflows] = useState<GraphSummary[]>([]);
-  useEffect(() => {
-    let alive = true;
-    api
-      .listGraphs()
-      .then((gs) => {
-        if (alive) setWorkflows(gs);
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-  }, []);
+  // Typing a key by hand was the #1 registration footgun ("No graph seeded for workflowKey
+  // '…'" 404s on a typo / an unsaved key) — so the workflow is CHOSEN from real, saved
+  // graphs, never typed. No entryType filter here: ANY workflow can be webhook-triggered.
+  const { workflows, loading } = useWorkflowList();
 
   async function submit() {
     setBusy(true);
@@ -294,31 +311,12 @@ export function WebhookForm({
     <>
       <div style={{ marginBottom: 10 }}>
         <span style={fieldLabel}>Workflow to trigger</span>
-        {workflows.length === 0 ? (
-          <div
-            style={{
-              fontSize: "var(--text-sm)",
-              color: "var(--ink-2)",
-              padding: "8px 0",
-            }}
-          >
-            No saved workflows yet — save one on the canvas first, then it'll
-            appear here.
-          </div>
-        ) : (
-          <select
-            style={fieldStyle}
-            value={workflowId}
-            onChange={(e) => setWorkflowId(e.target.value)}
-          >
-            <option value="">Select a workflow…</option>
-            {workflows.map((w) => (
-              <option key={w.workflowKey} value={w.workflowKey}>
-                {w.name} ({w.workflowKey})
-              </option>
-            ))}
-          </select>
-        )}
+        <WorkflowPicker
+          workflows={workflows}
+          loading={loading}
+          value={workflowId}
+          onChange={setWorkflowId}
+        />
       </div>
       <div style={{ marginBottom: 12 }}>
         <span style={fieldLabel}>Provider</span>

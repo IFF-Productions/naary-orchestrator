@@ -225,6 +225,22 @@ at image build): `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`,
 (The server `.env` copies of `VITE_*` are ignored in this variant — the web image is
 already built when it reaches the box.)
 
+**A Sentry project per app (optional).** `SENTRY_DSN` is the shared backend fallback; set
+the repo secrets `SENTRY_DSN_API` and/or `SENTRY_DSN_WORKER` to point an app at its own
+Sentry project instead — separate issue streams, alert rules, ownership and quota, so a
+noisy worker can't bury an API regression. `SENTRY_DSN_WORKER` covers **both** worker pools
+(`worker` and `worker-heavy`), which run identical code. The SPA already reports separately
+via the build-time `VITE_SENTRY_DSN`. Any of these unset ⇒ that app falls back to
+`SENTRY_DSN`, and the `component` tag keeps a single shared project filterable.
+
+The **sandbox-runner is deliberately not instrumented**: it is the one container with Docker
+access (host-root-adjacent) and is kept dependency-minimal on purpose
+(`docs/design/CLAUDE-CODE-NODE.md` §8b.1) — its image is built standalone with plain `npm
+install`, so it cannot take a `workspace:*` dependency, and wiring a bare SDK there would add
+an un-scrubbed egress path in the process that handles tenant keys per request. Its failures
+are visible as **worker** activity failures. `SENTRY_DSN_SANDBOX_RUNNER` is already the name
+`initSentry` would read if that changes.
+
 It deploys via a GitHub-**hosted** runner (prod credentials stay off the shared
 self-hosted CI runner), so `ssh_allowed_cidrs` must keep port 22 reachable from GitHub
 (the default `0.0.0.0/0` is fine — SSH is key-only). To require a human click before

@@ -19,6 +19,14 @@ export class GraphSummaryResponse {
   })
   active!: boolean;
   @ApiProperty({
+    type: String,
+    nullable: true,
+    example: "formTrigger",
+    description:
+      "Node type of the graph's entry node (startNodeId), or null if unresolvable. Hosted-endpoint registration requires a matching entry node, so clients can use this to offer only eligible workflows.",
+  })
+  entryType!: string | null;
+  @ApiProperty({
     type: [GraphTagResponse],
     description:
       "Organizational tags (tenant-wide per workflowKey, identical in every environment).",

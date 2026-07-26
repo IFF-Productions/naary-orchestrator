@@ -42,6 +42,7 @@ const SUMMARIES = [
     version: 3,
     updatedAt: "2026-07-15T09:00:00.000Z",
     active: true,
+    entryType: "scheduleTrigger",
     tags: [{ id: "tag-billing", name: "billing", color: "#4a9dff" }],
   },
   {
@@ -50,6 +51,7 @@ const SUMMARIES = [
     version: 5,
     updatedAt: "2026-07-14T09:00:00.000Z",
     active: false,
+    entryType: "scheduleTrigger",
     tags: [],
   },
   {
@@ -58,6 +60,7 @@ const SUMMARIES = [
     version: 1,
     updatedAt: "2026-07-16T09:00:00.000Z",
     active: true,
+    entryType: "scheduleTrigger",
     tags: [],
   },
 ] satisfies GraphSummary[];

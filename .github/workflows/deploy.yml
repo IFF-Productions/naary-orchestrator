@@ -204,6 +204,10 @@ jobs:
           # Backend Sentry env (worker + api). The DSN is near-publishable, but flows the
           # same env-prefix path as GHCR_TOKEN: never written to disk on the box.
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          # Per-app DSNs (optional). Set these to give each app its OWN Sentry project —
+          # separate issue streams, alerts and quotas. Unset ⇒ that app uses SENTRY_DSN.
+          SENTRY_DSN_API: ${{ secrets.SENTRY_DSN_API }}
+          SENTRY_DSN_WORKER: ${{ secrets.SENTRY_DSN_WORKER }}
           SENTRY_TRACES_SAMPLE_RATE: ${{ secrets.SENTRY_TRACES_SAMPLE_RATE }}
           SENTRY_PROFILES_SAMPLE_RATE: ${{ secrets.SENTRY_PROFILES_SAMPLE_RATE }}
           # OTLP metrics export (Datadog/OTLP, #462) — OFF unless the endpoint is set.
@@ -226,7 +230,7 @@ jobs:
             deploy/sandbox \
             | $SSH "mkdir -p /opt/naary && tar xzf - -C /opt/naary"
 
-          $SSH "DEPLOY_REF='$DEPLOY_REF' IMAGE_BASE='$IMAGE_BASE' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' SENTRY_DSN='$SENTRY_DSN' SENTRY_TRACES_SAMPLE_RATE='$SENTRY_TRACES_SAMPLE_RATE' SENTRY_PROFILES_SAMPLE_RATE='$SENTRY_PROFILES_SAMPLE_RATE' OTEL_EXPORTER_OTLP_ENDPOINT='$OTEL_EXPORTER_OTLP_ENDPOINT' OTEL_EXPORTER_OTLP_HEADERS='$OTEL_EXPORTER_OTLP_HEADERS' OTEL_EXPORTER_OTLP_PROTOCOL='$OTEL_EXPORTER_OTLP_PROTOCOL' bash -s" <<'REMOTE'
+          $SSH "DEPLOY_REF='$DEPLOY_REF' IMAGE_BASE='$IMAGE_BASE' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' SENTRY_DSN='$SENTRY_DSN' SENTRY_DSN_API='$SENTRY_DSN_API' SENTRY_DSN_WORKER='$SENTRY_DSN_WORKER' SENTRY_TRACES_SAMPLE_RATE='$SENTRY_TRACES_SAMPLE_RATE' SENTRY_PROFILES_SAMPLE_RATE='$SENTRY_PROFILES_SAMPLE_RATE' OTEL_EXPORTER_OTLP_ENDPOINT='$OTEL_EXPORTER_OTLP_ENDPOINT' OTEL_EXPORTER_OTLP_HEADERS='$OTEL_EXPORTER_OTLP_HEADERS' OTEL_EXPORTER_OTLP_PROTOCOL='$OTEL_EXPORTER_OTLP_PROTOCOL' bash -s" <<'REMOTE'
           set -euo pipefail
           cd /opt/naary
           # Ensure swap exists BEFORE the rolling replace. docker-rollout scales a service
@@ -278,6 +282,9 @@ jobs:
           # secret must not blank a manually-set .env value — compose treats a set-but-EMPTY
           # shell var as set, so unset the empties. Release defaults to the deployed tag.
           [ -n "${SENTRY_DSN:-}" ] || unset SENTRY_DSN
+          # Per-app DSN overrides — same rule: set-but-empty would blank a box .env value.
+          [ -n "${SENTRY_DSN_API:-}" ] || unset SENTRY_DSN_API
+          [ -n "${SENTRY_DSN_WORKER:-}" ] || unset SENTRY_DSN_WORKER
           [ -n "${SENTRY_TRACES_SAMPLE_RATE:-}" ] || unset SENTRY_TRACES_SAMPLE_RATE
           [ -n "${SENTRY_PROFILES_SAMPLE_RATE:-}" ] || unset SENTRY_PROFILES_SAMPLE_RATE
           # An unset OTLP secret must not blank a manually-set box .env value (same as Sentry).

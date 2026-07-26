@@ -1,7 +1,12 @@
 /**
- * Sentry wiring shared by the API + worker. OFF unless SENTRY_DSN is set (mirrors
- * the OIDC pattern), so existing deployments are unchanged. Every event passes
+ * Sentry wiring shared by the API, worker and sandbox-runner. OFF unless a DSN is set
+ * (mirrors the OIDC pattern), so existing deployments are unchanged. Every event passes
  * through scrubEvent first — secrets must never reach telemetry (CLAUDE.md).
+ *
+ * DSN per application: each component reads its OWN `SENTRY_DSN_<COMPONENT>` first and falls
+ * back to the shared `SENTRY_DSN`. Point them at separate Sentry projects to get per-app
+ * issue streams, alert rules and quotas; leave them unset to keep one shared project. The
+ * `component` tag is still set either way, so a shared project stays filterable.
  *
  * Do NOT import this from workflow code (workflows.ts): capturing is I/O and would
  * break deterministic replay. API bootstrap, the exception filter, and activities
@@ -104,8 +109,32 @@ function buildIntegrations(profilesSampleRate: number): SentryIntegration[] {
   return integrations;
 }
 
-export function initSentry(opts: { component: "api" | "worker" }): void {
-  const dsn = process.env.SENTRY_DSN;
+/** The applications that report to Sentry. Each may have its OWN Sentry project. */
+export type SentryComponent = "api" | "worker" | "sandbox-runner";
+
+/**
+ * The env var carrying a component's OWN dsn: `api` → `SENTRY_DSN_API`,
+ * `sandbox-runner` → `SENTRY_DSN_SANDBOX_RUNNER`. Exported so the deploy/compose wiring and
+ * its tests name the same variable the code reads.
+ */
+export function componentDsnVar(component: SentryComponent): string {
+  return `SENTRY_DSN_${component.toUpperCase().replace(/-/g, "_")}`;
+}
+
+/**
+ * Resolve which DSN this component reports to: its own if configured, else the shared
+ * `SENTRY_DSN`. Values are TRIMMED and empty-checked because docker-compose passes an unset
+ * variable through as the empty string (`${SENTRY_DSN_WORKER:-}`) — treating "" as configured
+ * would hand Sentry.init an invalid DSN and disable reporting for that component entirely.
+ */
+export function sentryDsnFor(component: SentryComponent): string | undefined {
+  const own = process.env[componentDsnVar(component)]?.trim();
+  if (own) return own;
+  return process.env.SENTRY_DSN?.trim() || undefined;
+}
+
+export function initSentry(opts: { component: SentryComponent }): void {
+  const dsn = sentryDsnFor(opts.component);
   if (!dsn) return; // disabled — no DSN configured
   // Opt-in CPU profiling; 0 (off) unless explicitly configured. Requires tracing on.
   const profilesSampleRate = Number(

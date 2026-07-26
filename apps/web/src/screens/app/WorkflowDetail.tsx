@@ -21,6 +21,7 @@ import {
 } from "@xyflow/react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useCanvasLink } from "../../lib/useCanvasLink";
 import type { GraphDef, NodeType } from "@naary/dsl";
 import { Button, Card, Icon, Toast } from "../../components";
 import {
@@ -111,6 +112,8 @@ function edgeLabel(c?: {
 export function WorkflowDetail() {
   const { key = "" } = useParams();
   const navigate = useNavigate();
+  // Canvas links carry ?from= so the canvas's back control returns HERE.
+  const canvasLink = useCanvasLink();
   const phone = useMediaQuery(PHONE_QUERY);
   const perms = usePermissions();
   const [g, setG] = useState<NamedGraph | null>(null);
@@ -389,7 +392,7 @@ export function WorkflowDetail() {
             variant="secondary"
             icon="edit"
             onClick={() =>
-              navigate(`/app/canvas?key=${encodeURIComponent(key)}`)
+              navigate(canvasLink(`/app/canvas?key=${encodeURIComponent(key)}`))
             }
           >
             Edit in canvas

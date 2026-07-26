@@ -8,7 +8,12 @@ import { useNavigate } from "react-router-dom";
 import { Button, Icon, Skeleton, StatusPill } from "../../components";
 import { api, type RunSummary, UnauthorizedError } from "../../lib/api";
 import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
-import { isFailure, isTerminal, runStatusUi } from "../../lib/run-status";
+import {
+  isRejected,
+  isSystemFailure,
+  isTerminal,
+  runStatusUi,
+} from "../../lib/run-status";
 import { useMode } from "../../mode";
 import { RerunMenu, VersionBadge } from "./RerunMenu";
 import { fmtDurMs } from "./run-detail/run-view-model";
@@ -43,7 +48,10 @@ const FILTERS: { label: string; match: (s: string) => boolean }[] = [
   },
   { label: "Running", match: (s) => s === "running" },
   { label: "Completed", match: (s) => s === "completed" },
-  { label: "Failed", match: isFailure },
+  // "Failed" is what BROKE; "Rejected" is what a human said no to at an approval gate.
+  // Lumping them together made a working approval flow look like an outage.
+  { label: "Failed", match: isSystemFailure },
+  { label: "Rejected", match: isRejected },
 ];
 
 export function Runs() {

@@ -18,6 +18,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useCanvasLink } from "../../lib/useCanvasLink";
 import {
   Button,
   Card,
@@ -69,6 +70,8 @@ interface Row {
 
 export function Workflows() {
   const navigate = useNavigate();
+  // Canvas links carry ?from= so the canvas's back control returns HERE.
+  const canvasLink = useCanvasLink();
   const phone = useMediaQuery(PHONE_QUERY); // phone: rows render as stacked cards
   // Affordance gating (RBAC-GROUPS G2): hide what /me/permissions says the server
   // would 403. Gating only — the API enforces; a forced request still fails.
@@ -357,7 +360,9 @@ export function Workflows() {
               <Button
                 variant="primary"
                 icon="plus"
-                onClick={() => navigate("/app/canvas")}
+                // canvasLink so the canvas's back control returns to Workflows. The import
+                // route above is NOT the canvas, so it needs no return target.
+                onClick={() => navigate(canvasLink("/app/canvas"))}
               >
                 New workflow
               </Button>

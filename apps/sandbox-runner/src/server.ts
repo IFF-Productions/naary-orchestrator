@@ -106,6 +106,17 @@ export function createRunnerServer(cfg: RunnerConfig, exec?: Exec): Server {
         if (e instanceof BadRequestError)
           return send(400, { error: e.message });
         // Don't leak an internal error's message (could echo argv/env). Generic 500.
+        //
+        // Log the error's TYPE only, never its message/stack — same reason. Without this an
+        // internal failure was completely invisible: no response detail, no log line, and
+        // this service is deliberately NOT wired to Sentry (it holds Docker access and stays
+        // dependency-minimal — design CLAUDE-CODE-NODE.md §8b.1). The type alone is enough to
+        // tell "docker missing" from "timeout" from "programming error" in container logs.
+        console.error(
+          `[sandbox-runner] run failed: ${
+            e instanceof Error ? e.constructor.name : typeof e
+          }`,
+        );
         return send(500, { error: "sandbox run failed" });
       }
     })();

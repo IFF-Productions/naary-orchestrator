@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
+import { expectWorkflowOffered, pickWorkflow } from "./workflow-picker";
 
 /**
  * Regression e2e for the fixes made during the deploy/smoke-test session:
@@ -118,19 +119,13 @@ test("webhook registration: pick the workflow from a dropdown of saved workflows
   // Open the webhook registration dialog ("New webhook" → "Register a webhook").
   await page.getByRole("button", { name: "New webhook" }).click();
 
-  // The workflow is now a SELECT populated with real saved workflows — not a free-text
-  // field (typing an unsaved/typo key was the "No graph seeded for '…'" 404 footgun).
-  const workflowSelect = page.locator("select", {
-    has: page.locator('option[value="default"]'),
-  });
-  await expect(workflowSelect).toBeVisible();
-  // Seeded workflows appear as options (label shows the name + key).
-  await expect(
-    workflowSelect.locator('option[value="e2e-integration"]'),
-  ).toHaveCount(1);
+  // The workflow is CHOSEN from real saved workflows — never free text (typing an unsaved or
+  // typo'd key was the "No graph seeded for '…'" 404 footgun). It is a filterable combobox now,
+  // because a tenant can have hundreds and a plain select can't be searched.
+  await expectWorkflowOffered(page, "e2e-integration");
 
   // Choosing one enables Register and the registration succeeds.
-  await workflowSelect.selectOption("default");
+  await pickWorkflow(page, "default");
   await page.getByRole("button", { name: "Register", exact: true }).click();
   await expect(page.getByText("Trigger it (copy & run)")).toBeVisible();
 });

@@ -16572,6 +16572,12 @@
             "example": true,
             "description": "Whether automatic triggers fire."
           },
+          "entryType": {
+            "type": "string",
+            "nullable": true,
+            "example": "formTrigger",
+            "description": "Node type of the graph's entry node (startNodeId), or null if unresolvable. Hosted-endpoint registration requires a matching entry node, so clients can use this to offer only eligible workflows."
+          },
           "tags": {
             "description": "Organizational tags (tenant-wide per workflowKey, identical in every environment).",
             "type": "array",
@@ -16585,6 +16591,7 @@
           "name",
           "version",
           "active",
+          "entryType",
           "tags"
         ]
       },

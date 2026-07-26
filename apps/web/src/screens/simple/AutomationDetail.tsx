@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useCanvasLink } from "../../lib/useCanvasLink";
 import type { GraphDef } from "@naary/dsl";
 import { Button, Icon, LoadingBlock, StatusPill } from "../../components";
 import {
@@ -192,6 +193,8 @@ function RunView({
   name: string;
 }) {
   const navigate = useNavigate();
+  // Canvas links carry ?from= so the canvas's back control returns HERE.
+  const canvasLink = useCanvasLink();
   const phone = useMediaQuery(PHONE_QUERY);
   const [state, setState] = useState<ExecutionState | null>(null);
   const [graph, setGraph] = useState<GraphDef | null>(null);
@@ -394,7 +397,7 @@ function RunView({
             variant="secondary"
             icon="workflow"
             onClick={() =>
-              navigate(`/app/canvas?key=${encodeURIComponent(automationKey)}`)
+              navigate(canvasLink(`/app/canvas?key=${encodeURIComponent(automationKey)}`))
             }
           >
             Open in Builder
@@ -816,6 +819,8 @@ function EmptyRun({
   onStarted: (runId: string) => void;
 }) {
   const navigate = useNavigate();
+  // Canvas links carry ?from= so the canvas's back control returns HERE.
+  const canvasLink = useCanvasLink();
   const phone = useMediaQuery(PHONE_QUERY);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -945,7 +950,7 @@ function EmptyRun({
           variant="secondary"
           icon="workflow"
           onClick={() =>
-            navigate(`/app/canvas?key=${encodeURIComponent(automationKey)}`)
+            navigate(canvasLink(`/app/canvas?key=${encodeURIComponent(automationKey)}`))
           }
         >
           Open in Builder

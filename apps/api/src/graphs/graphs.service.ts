@@ -42,6 +42,24 @@ export interface GraphSnapshot {
   version: number;
 }
 
+/**
+ * The node type of a stored graph's ENTRY node, or null when it can't be resolved.
+ *
+ * Defensive on purpose: `graph` arrives as Prisma JSON, so a legacy or hand-edited row may
+ * not have the shape the DSL type promises. A listing endpoint must never 500 because one
+ * row is odd — an unresolvable entry just means "no trigger to offer" for that workflow.
+ */
+function entryNodeType(graph: unknown): string | null {
+  const g = graph as
+    | { startNodeId?: unknown; nodes?: { id?: unknown; type?: unknown }[] }
+    | null
+    | undefined;
+  if (!g || typeof g.startNodeId !== "string" || !Array.isArray(g.nodes))
+    return null;
+  const entry = g.nodes.find((n) => n?.id === g.startNodeId);
+  return typeof entry?.type === "string" ? entry.type : null;
+}
+
 /** Listing row: identity + latest version, no graph body. */
 export interface GraphSummary {
   workflowKey: string;
@@ -50,6 +68,16 @@ export interface GraphSummary {
   updatedAt: string;
   /** Whether the workflow's automatic triggers fire (n8n parity). Default true. */
   active: boolean;
+  /**
+   * The node type of the graph's ENTRY node (`startNodeId`), e.g. "formTrigger" — null if the
+   * graph has no resolvable entry. This is exactly the eligibility rule the hosted-endpoint
+   * registrations enforce (extractFormDefinition / extractChatDefinition both require the
+   * entry node to be their trigger), so a client can offer a PICKER of eligible workflows
+   * instead of asking a user to type a workflow key and find out on submit.
+   *
+   * Free to compute: `list` already reads the full rows, graph body included.
+   */
+  entryType: string | null;
   /** Organizational tags (tenant-wide per workflowKey — NOT env-scoped). Never permissions. */
   tags: { id: string; name: string; color: string | null }[];
 }
@@ -174,6 +202,19 @@ export class GraphsService {
       }
     }
     if (latest && latest.contentHash === contentHash) {
+      // The hash covers the GRAPH only, so a pure RENAME lands here: identical graph, new
+      // display name. Returning early without writing silently DROPPED the rename — the
+      // canvas kept showing the new name until a reload, then reverted to the old one.
+      // Persist the name on the latest row rather than minting a version: a version is a
+      // graph snapshot identified by contentHash, and renaming isn't a new snapshot. Earlier
+      // versions keep the name they were saved under, which is what a history should show.
+      // The `edit` gate above already ran, so this is authorized.
+      if (name !== latest.name) {
+        await getPrisma().graphDefinition.update({
+          where: { id: latest.id },
+          data: { name },
+        });
+      }
       return {
         graph: latest.graph as unknown as GraphDef,
         contentHash,
@@ -246,6 +287,7 @@ export class GraphsService {
           version: r.version,
           updatedAt: r.createdAt.toISOString(),
           active: !inactive.has(r.workflowKey),
+          entryType: entryNodeType(r.graph),
           tags: [],
         });
       }

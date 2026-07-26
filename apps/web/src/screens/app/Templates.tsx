@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useCanvasLink } from "../../lib/useCanvasLink";
 import { SearchInput, Skeleton, Toast } from "../../components";
 import { api, type ConnectionRow, UnauthorizedError } from "../../lib/api";
 import { useMode } from "../../mode";
@@ -40,6 +41,8 @@ interface Installed {
 
 export function Templates() {
   const navigate = useNavigate();
+  // Canvas links carry ?from= so the canvas's back control returns HERE.
+  const canvasLink = useCanvasLink();
   const { mode } = useMode();
   const [views, setViews] = useState<TemplateView[] | null>(null);
   // The workspace's real connections, for the required-connection checklist. `null` means
@@ -207,8 +210,10 @@ export function Templates() {
   const simple = mode === "simple";
   // Closest real AI-generation entry point per variant: the canvas hosts the
   // Build-with-AI panel (Builder); Simple's describe-it flow is /app/automations/new.
-  const generateTo = simple ? "/app/automations/new" : "/app/canvas";
-  const blankTo = simple ? "/app/automations/new" : "/app/canvas";
+  const generateTo = simple
+    ? "/app/automations/new"
+    : canvasLink("/app/canvas");
+  const blankTo = generateTo;
 
   return (
     <div ref={rootRef}>
@@ -230,7 +235,9 @@ export function Templates() {
             navigate(
               simple
                 ? `/app/automations/${encodeURIComponent(installed.workflowKey)}`
-                : `/app/canvas?key=${encodeURIComponent(installed.workflowKey)}`,
+                : canvasLink(
+                    `/app/canvas?key=${encodeURIComponent(installed.workflowKey)}`,
+                  ),
             )
           }
           onConnect={(tab) => navigate(`/app/integrations?tab=${tab}`)}

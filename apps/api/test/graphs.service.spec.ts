@@ -6,6 +6,10 @@ const findFirst = vi.fn();
 const findUnique = vi.fn();
 const findMany = vi.fn();
 const create = vi.fn();
+const update = vi.fn();
+// list() also reads activations (active-by-default) and tags (one batched query).
+const activationFindMany = vi.fn();
+const tagFindMany = vi.fn();
 // deleteWorkflow fans a $transaction across every table that points at a workflow key.
 // Each model's deleteMany is a spy so we can assert WHAT got deleted (and that nothing
 // touches the Execution history). $transaction just runs the array of prisma promises.
@@ -27,9 +31,14 @@ vi.mock("@naary/db", () => ({
       findUnique,
       findMany,
       create,
+      update,
       deleteMany: del.graphDefinition,
     },
-    workflowActivation: { deleteMany: del.workflowActivation },
+    workflowActivation: {
+      findMany: activationFindMany,
+      deleteMany: del.workflowActivation,
+    },
+    workflowTag: { findMany: tagFindMany },
     pinnedData: { deleteMany: del.pinnedData },
     pollState: { deleteMany: del.pollState },
     errorHandler: { deleteMany: del.errorHandler },
@@ -58,6 +67,11 @@ beforeEach(() => {
   findUnique.mockReset();
   findMany.mockReset();
   create.mockReset();
+  update.mockReset();
+  activationFindMany.mockReset();
+  activationFindMany.mockResolvedValue([]);
+  tagFindMany.mockReset();
+  tagFindMany.mockResolvedValue([]);
   $transaction.mockClear();
   for (const spy of Object.values(del)) spy.mockReset();
 });
@@ -201,9 +215,64 @@ describe("GraphsService.upsert", () => {
     expect(create.mock.calls[0][0].data.saveMessage).toBeNull();
   });
 
-  it("is a no-op (same version) when the content hash is unchanged", async () => {
+  // The listing carries the ENTRY node's type so a client can offer only the workflows a
+  // hosted endpoint could actually be registered for (the same rule extractFormDefinition /
+  // extractChatDefinition enforce), instead of asking for a hand-typed key.
+  describe("entryType on the listing", () => {
+    const listRow = (workflowKey: string, graphBody: unknown) => ({
+      workflowKey,
+      name: workflowKey,
+      version: 1,
+      createdAt: new Date("2026-07-25T00:00:00Z"),
+      graph: graphBody,
+    });
+
+    /** One listing row with the given stored graph body → its resolved entryType. */
+    async function entryTypeOf(graphBody: unknown) {
+      findMany.mockResolvedValue([listRow("wf", graphBody)]);
+      const [row] = await new GraphsService().list("t1", "e1");
+      return row.entryType;
+    }
+
+    it("reports the type of the node named by startNodeId, not the first node", async () => {
+      const entryType = await entryTypeOf({
+        startNodeId: "t",
+        nodes: [
+          { id: "x", type: "agent" },
+          { id: "t", type: "formTrigger" },
+        ],
+        edges: [],
+      });
+      expect(entryType).toBe("formTrigger");
+    });
+
+    it("distinguishes the trigger kinds a registration cares about", async () => {
+      for (const type of ["formTrigger", "chatTrigger", "webhookTrigger"]) {
+        expect(
+          await entryTypeOf({ startNodeId: "t", nodes: [{ id: "t", type }] }),
+        ).toBe(type);
+      }
+    });
+
+    // Prisma JSON: a legacy/hand-edited row may not match the DSL type. A listing endpoint
+    // must not 500 over one odd row — it just has no trigger to offer.
+    it.each([
+      ["no startNodeId", { nodes: [{ id: "a", type: "start" }] }],
+      ["nodes missing", { startNodeId: "a" }],
+      ["nodes not an array", { startNodeId: "a", nodes: "nope" }],
+      ["entry id not present", { startNodeId: "zzz", nodes: [{ id: "a" }] }],
+      ["entry without a type", { startNodeId: "a", nodes: [{ id: "a" }] }],
+      ["graph null", null],
+    ])("is null for a malformed graph (%s)", async (_label, body) => {
+      expect(await entryTypeOf(body)).toBeNull();
+    });
+  });
+
+  it("is a no-op (same version) when the content hash AND name are unchanged", async () => {
     findFirst.mockResolvedValue({
+      id: "g3",
       graph,
+      name: "Demo",
       contentHash: hashGraph(graph),
       version: 3,
     });
@@ -218,6 +287,64 @@ describe("GraphsService.upsert", () => {
 
     expect(snap.version).toBe(3);
     expect(create).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  // A RENAME changes only the display name, so hashGraph (graph-only) still matches and the
+  // dedup branch above returns early. It used to return WITHOUT writing, silently discarding
+  // the rename — the canvas showed the new name until a reload reverted it.
+  it("persists a rename when the graph is unchanged, without minting a version", async () => {
+    findFirst.mockResolvedValue({
+      id: "g7",
+      graph,
+      name: "Old name",
+      contentHash: hashGraph(graph),
+      version: 3,
+    });
+
+    const snap = await new GraphsService().upsert(
+      "t1",
+      "e1",
+      "default",
+      "New name",
+      graph,
+    );
+
+    // Renaming is not a new graph snapshot: same version, no new row.
+    expect(snap.version).toBe(3);
+    expect(create).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "g7" },
+      data: { name: "New name" },
+    });
+  });
+
+  it("requires `edit` before a rename can be persisted", async () => {
+    findFirst.mockResolvedValue({
+      id: "g7",
+      graph,
+      name: "Old name",
+      contentHash: hashGraph(graph),
+      version: 3,
+    });
+    const svc = new GraphsService();
+    const assertEdit = vi
+      .spyOn(
+        svc as unknown as { assertActor: (...a: unknown[]) => Promise<void> },
+        "assertActor",
+      )
+      .mockRejectedValue(new Error("forbidden"));
+
+    await expect(
+      svc.upsert("t1", "e1", "default", "New name", graph, {
+        tenantId: "t1",
+        role: "member",
+      } as never),
+    ).rejects.toThrow("forbidden");
+
+    expect(assertEdit).toHaveBeenCalled();
+    // The rename must NOT land when the actor lacks edit on the key.
+    expect(update).not.toHaveBeenCalled();
   });
 
   it("bumps the version + records a new hash when the graph changes", async () => {

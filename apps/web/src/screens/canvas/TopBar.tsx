@@ -1,17 +1,62 @@
 /**
  * Canvas top bar (redesign: Canvas Authoring Loop) — 56px, --panel, hairline
- * bottom: flame tile (back to /app) · editable workflow name (styled as plain
- * bold text) · mono "<key> · v<N>|draft" meta · valid/invalid pill (+ issues
- * pill) · the ACTIVE environment chip (real env, colored by envAccent) ·
- * right side: status text · "RUN CAP" mono chip (only when the real budget
- * policy sets a per-execution cap) · Build with AI · "…" overflow menu
- * (Import / Export / Run input / workflow switcher) · Save · Save & run.
+ * bottom: flame tile (back to where the user came from) · editable workflow
+ * name (styled as plain bold text) · mono "<key> · v<N>|draft" meta ·
+ * valid/invalid pill (+ issues pill) · the ACTIVE environment chip (real env,
+ * colored by envAccent) · right side: status text · "RUN CAP" mono chip (only
+ * when the real budget policy sets a per-execution cap) · Build with AI ·
+ * feedback · "…" overflow menu (Import / Export / Run input / workflow
+ * switcher) · Save · Save & run.
  */
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Icon, StatusPill } from "../../components";
 import type { GraphSummary } from "../../lib/api";
+import { CANVAS_HOME } from "../../lib/canvas-return";
+import { attachFeedback, feedbackAvailable } from "../../lib/feedback";
 import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
+
+/**
+ * "Send feedback" for the canvas — opens the Sentry User Feedback dialog. The nav drawer's
+ * button (NavRail) lives in AppShell, and the canvas is a SIBLING route of /app, so the
+ * canvas had no way to report anything from the screen where users spend the most time.
+ *
+ * Deliberately always mounted rather than an item in the "…" menu: `attachTo` hands the
+ * dialog's lifecycle to the SDK, and a menu item unmounts on the very click that opens it
+ * (the handler closes the menu), so the cleanup would race the dialog it just created.
+ * Renders nothing when Sentry isn't configured at build time.
+ */
+function CanvasFeedbackButton() {
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    return attachFeedback(ref.current);
+  }, []);
+  if (!feedbackAvailable) return null;
+  return (
+    <button
+      ref={ref}
+      type="button"
+      title="Send feedback"
+      aria-label="Send feedback"
+      style={{
+        width: 34,
+        height: 34,
+        flex: "none",
+        borderRadius: 9,
+        border: "1px solid var(--line-2)",
+        background: "var(--card)",
+        color: "var(--ink-2)",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Icon name="chat" size={16} />
+    </button>
+  );
+}
 
 export interface TopBarEnv {
   name: string;
@@ -29,6 +74,8 @@ const monoLabel: React.CSSProperties = {
 export function CanvasTopBar({
   name,
   onNameChange,
+  backTo,
+  backLabel,
   activeKey,
   version,
   generating,
@@ -59,6 +106,10 @@ export function CanvasTopBar({
 }: {
   name: string;
   onNameChange: (v: string) => void;
+  /** Where the back control goes — the validated `?from=` target, else CANVAS_HOME. */
+  backTo?: string;
+  /** Its label/tooltip, e.g. "Back to Runs". Defaults to the generic "Back to Naary". */
+  backLabel?: string;
   activeKey: string;
   /** Saved version of the open workflow; null = unsaved draft. */
   version: number | null;
@@ -128,15 +179,17 @@ export function CanvasTopBar({
         minWidth: 0,
       }}
     >
-      {/* Back to the app. On desktop it's the brand flame tile; on a phone it's an explicit,
-          labeled "Exit" pill so a user dropped onto the full-screen canvas (e.g. via Simple mode's
-          "Open in Builder") is never trapped — the app nav isn't on this route. */}
+      {/* Back to where the user came from (the validated ?from= target), falling back to /app.
+          On desktop it's the brand flame tile; on a phone it's an explicit, labeled pill so a
+          user dropped onto the full-screen canvas (e.g. via Simple mode's "Open in Builder") is
+          never trapped — the app nav isn't on this route. The LABEL names the destination
+          ("Back to Runs") so the control says where it goes rather than just "out". */}
       {phone ? (
         <button
           type="button"
-          aria-label="Exit to app"
-          title="Exit to app"
-          onClick={() => navigate("/app")}
+          aria-label={backLabel ?? "Exit to app"}
+          title={backLabel ?? "Exit to app"}
+          onClick={() => navigate(backTo ?? CANVAS_HOME)}
           style={{
             flex: "none",
             display: "flex",
@@ -156,12 +209,50 @@ export function CanvasTopBar({
           <Icon name="arrow-left" size={16} />
           Exit
         </button>
+      ) : backTo && backTo !== CANVAS_HOME ? (
+        // Arrived from a specific screen ⇒ show a LABELED back control instead of the flame.
+        // An icon-only tile can't say where it goes, and "get me back to the run I was
+        // reading" is the whole point; the flame stays for a direct visit to the canvas,
+        // where there's nothing specific to name.
+        <button
+          type="button"
+          aria-label={backLabel ?? "Back to Naary"}
+          title={backLabel ?? "Back to Naary"}
+          onClick={() => navigate(backTo)}
+          style={{
+            flex: "none",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            height: 30,
+            padding: "0 10px 0 8px",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--line-2)",
+            background: "var(--card)",
+            color: "var(--ink-2)",
+            fontSize: "var(--text-sm)",
+            cursor: "pointer",
+            maxWidth: 200,
+            overflow: "hidden",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <Icon name="arrow-left" size={15} />
+          <span
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {(backLabel ?? "Back").replace(/^Back to /, "")}
+          </span>
+        </button>
       ) : (
         <button
           type="button"
-          aria-label="Back to Naary"
-          title="Back to Naary"
-          onClick={() => navigate("/app")}
+          aria-label={backLabel ?? "Back to Naary"}
+          title={backLabel ?? "Back to Naary"}
+          onClick={() => navigate(backTo ?? CANVAS_HOME)}
           style={{
             width: 28,
             height: 28,
@@ -354,6 +445,10 @@ export function CanvasTopBar({
             {showAi ? "Close AI" : "✨ Build with AI"}
           </Button>
         )}
+
+        {/* Send feedback. Desktop/tablet only — the phone bar is a protected single row (same
+            reason Build with AI is hidden there), and the nav drawer's button covers phones. */}
+        {!phone && <CanvasFeedbackButton />}
 
         {/* overflow menu: import / export / run input / workflow switcher */}
         <div ref={menuRef} style={{ position: "relative", flex: "none" }}>
