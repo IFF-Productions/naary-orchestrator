@@ -180,8 +180,15 @@ jobs:
       #
       # COMPOSE_BAKE routes the build through `buildx bake`, which builds the backend and web
       # images CONCURRENTLY instead of one after the other (compose's own builder is serial).
-      # They share no layers (different base images, different Dockerfiles), so this is close
-      # to a straight halving of the build step on a 2-vCPU runner's IO-bound npm/apt work.
+      #
+      # Measured, not projected: 256s → 230s. Modest, because two concurrent builds contend
+      # for the same 2 vCPU — concurrency helps the npm/apt wait, not the CPU-bound `tsc -b`
+      # and webpack work. Keep expectations here: the remaining ~230s is a cold layer cache on
+      # every run (hosted runners are ephemeral, and BuildKit's `--mount=type=cache` pnpm store
+      # is local to the builder, so it never survives). Cutting it materially needs the LAYERS
+      # cached across runs — `cache_from/cache_to: type=gha` on both build stanzas — which
+      # would restore the apt + three global npm installs above `COPY . .`, but not the pnpm
+      # install inside the final RUN (cache mounts are not exported).
       - name: Build + start the stack
         env:
           COMPOSE_BAKE: "true"
