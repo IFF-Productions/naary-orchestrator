@@ -2,6 +2,9 @@
 
 **AC:** *SP metadata + ACS endpoint; tenant maps IdP; login provisions/links a user.*
 
+> **Testing it:** see [../sso-testing.md](../sso-testing.md) — configuration, a throwaway IdP, the
+> rejection paths worth probing, and why LDAP isn't testable yet.
+
 Supersedes the "SSO/SAML" v1 non-goal in `PROVISIONING-MULTIUSER.md §2` (and is the piece
 `APP-AUTH.md` deferred).
 
