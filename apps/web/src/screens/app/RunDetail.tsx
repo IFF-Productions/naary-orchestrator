@@ -12,7 +12,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useCanvasLink } from "../../lib/useCanvasLink";
 import type { GraphDef } from "@naary/dsl";
-import { Button, Card, Icon, LoadingBlock, StatusPill } from "../../components";
+import {
+  Button,
+  Card,
+  Icon,
+  LoadingBlock,
+  StatusPill,
+  useConfirm,
+} from "../../components";
 import { api, type ExecutionState, UnauthorizedError } from "../../lib/api";
 import { ACCENT, nodeDisplayLabel, nodeSubtitle } from "../../lib/graph-model";
 import { canDo } from "../../lib/permissions-logic";
@@ -207,6 +214,7 @@ function TopStat({ label, value }: { label: string; value: string }) {
 
 /* ------------- Real run: polls the control plane for live + closed runs ------------- */
 function RunView({ id }: { id: string }) {
+  const confirm = useConfirm();
   const navigate = useNavigate();
   // Canvas links carry ?from= so the canvas's back control returns HERE.
   const canvasLink = useCanvasLink();
@@ -337,12 +345,14 @@ function RunView({ id }: { id: string }) {
   }
 
   async function cancelRun() {
-    if (
-      !window.confirm(
-        "Cancel this run? It will be terminated and can't resume.",
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: "Cancel this run?",
+      body: "The run will be terminated and can't resume.",
+      confirmLabel: "Cancel run",
+      cancelLabel: "Keep running",
+      danger: true,
+    });
+    if (!ok) return;
     setActing(true);
     try {
       await api.cancelRun(id);

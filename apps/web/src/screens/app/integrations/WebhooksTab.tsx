@@ -6,6 +6,7 @@ import {
   Icon,
   type IconName,
   StatusPill,
+  useConfirm,
 } from "../../../components";
 import {
   api,
@@ -124,6 +125,7 @@ export function WebhooksTab({
   onChanged: () => Promise<void> | void;
   onError: (msg: string) => void;
 }) {
+  const confirm = useConfirm();
   const phone = useMediaQuery(PHONE_QUERY);
   const [dialog, setDialog] = useState<"webhook" | "form" | "chat" | null>(
     null,
@@ -131,10 +133,15 @@ export function WebhooksTab({
   const [deletingForm, setDeletingForm] = useState<string | null>(null);
   const [deletingChat, setDeletingChat] = useState<string | null>(null);
 
-  function removeForm(id: string) {
+  async function removeForm(id: string) {
     if (!tenant || deletingForm) return;
-    if (!window.confirm("Delete this form? Its public URL will stop working."))
-      return;
+    const ok = await confirm({
+      title: "Delete this form?",
+      body: "Its public URL will stop working immediately, and anyone with the link gets a 404.",
+      confirmLabel: "Delete form",
+      danger: true,
+    });
+    if (!ok) return;
     setDeletingForm(id);
     void api
       .deleteForm(tenant, id)
@@ -143,10 +150,15 @@ export function WebhooksTab({
       .finally(() => setDeletingForm(null));
   }
 
-  function removeChat(id: string) {
+  async function removeChat(id: string) {
     if (!tenant || deletingChat) return;
-    if (!window.confirm("Delete this chat? Its public URL will stop working."))
-      return;
+    const ok = await confirm({
+      title: "Delete this chat?",
+      body: "Its public URL will stop working immediately, and anyone with the link gets a 404.",
+      confirmLabel: "Delete chat",
+      danger: true,
+    });
+    if (!ok) return;
     setDeletingChat(id);
     void api
       .deleteChat(tenant, id)

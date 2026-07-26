@@ -9,7 +9,7 @@
  * env not in the new workspace falls back to that workspace's default).
  */
 import { useEffect, useState } from "react";
-import { Icon } from "../components";
+import { Icon, useConfirm } from "../components";
 import {
   type Environment,
   api,
@@ -41,6 +41,7 @@ export function envAccent(env: Pick<Environment, "slug" | "name">): string {
 const MAX_SEGMENTS = 4;
 
 export function EnvironmentSwitcher() {
+  const confirm = useConfirm();
   const { activeId: tenantId } = useWorkspace();
   // The segmented pill control is wide + doesn't shrink — on the compact shell (<= 1024, phones
   // incl. zoomed-out ones a strict phone query would miss) collapse to the single-button dropdown
@@ -166,13 +167,13 @@ export function EnvironmentSwitcher() {
 
   async function onDelete(env: Environment) {
     if (!tenantId) return;
-    if (
-      !window.confirm(
-        `Delete environment "${env.name}"? This can't be undone. It must have no workflows, credentials, connections, or triggers.`,
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Delete environment "${env.name}"?`,
+      body: "This can't be undone. The environment must have no workflows, credentials, connections, or triggers.",
+      confirmLabel: "Delete environment",
+      danger: true,
+    });
+    if (!ok) return;
     setRowBusy(env.id);
     setError(undefined);
     try {

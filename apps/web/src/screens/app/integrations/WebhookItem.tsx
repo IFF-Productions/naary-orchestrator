@@ -1,6 +1,6 @@
 // Registered webhook row (view + inline edit + rotate secret) for the Integrations screen.
 import { useEffect, useState } from "react";
-import { Icon, StatusPill } from "../../../components";
+import { Icon, StatusPill, useConfirm } from "../../../components";
 import { api, type GraphSummary, type WebhookRow } from "../../../lib/api";
 import { EnvChip, fieldLabel, fieldStyle, UrlCopy } from "./shared";
 
@@ -27,6 +27,7 @@ export function WebhookItem({
   onChanged: () => Promise<void> | void;
   onError: (msg: string) => void;
 }) {
+  const confirm = useConfirm();
   const [editing, setEditing] = useState(false);
   const [wf, setWf] = useState(w.workflowId);
   const [provider, setProvider] = useState(w.provider);
@@ -72,12 +73,13 @@ export function WebhookItem({
 
   async function rotate() {
     if (!tenant) return;
-    if (
-      !window.confirm(
-        "Rotate the signing secret? Any provider still using the old secret will fail until you reconfigure it with the new one.",
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: "Rotate the signing secret?",
+      body: "Any provider still using the old secret will fail until you reconfigure it with the new one.",
+      confirmLabel: "Rotate secret",
+      danger: true,
+    });
+    if (!ok) return;
     setRotating(true);
     try {
       const { signingSecret } = await api.rotateWebhookSecret(tenant, w.id);
@@ -89,14 +91,15 @@ export function WebhookItem({
     }
   }
 
-  function remove() {
+  async function remove() {
     if (!tenant || deleting) return;
-    if (
-      !window.confirm(
-        "Delete this webhook endpoint? Calls to its URL will stop working.",
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: "Delete this webhook endpoint?",
+      body: "Calls to its URL will stop working immediately.",
+      confirmLabel: "Delete webhook",
+      danger: true,
+    });
+    if (!ok) return;
     setDeleting(true);
     void api
       .deleteWebhook(tenant, w.id)

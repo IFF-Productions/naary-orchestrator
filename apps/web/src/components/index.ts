@@ -37,6 +37,7 @@ export {
   Drawer,
   Toast,
 } from "./feedback";
+export { ConfirmProvider, useConfirm, type ConfirmOptions } from "./confirm";
 export { Card, SectionLabel, Logo } from "./layout";
 export { Spinner, LoadingBlock } from "./Spinner";
 export { SafeHtml, sanitizeHtml } from "./SafeHtml";

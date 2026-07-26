@@ -18,7 +18,14 @@
  * handlers, and composes the presentational panels under ./groups/*.
  */
 import { useEffect, useMemo, useState } from "react";
-import { Button, Card, EmptyState, Icon, LoadingBlock } from "../../components";
+import {
+  Button,
+  Card,
+  EmptyState,
+  Icon,
+  LoadingBlock,
+  useConfirm,
+} from "../../components";
 import {
   api,
   type ApiTokenRow,
@@ -72,6 +79,7 @@ interface EditorTarget {
 }
 
 export function Groups() {
+  const confirm = useConfirm();
   const [tenant, setTenant] = useState<string | null>(null);
   const [myRole, setMyRole] = useState<string | null>(null);
   const [groups, setGroups] = useState<PermissionGroup[] | null>(null);
@@ -268,15 +276,17 @@ export function Groups() {
     const liftsCliff =
       g.grants.length > 0 &&
       (groups ?? []).every((x) => x.id === g.id || x.grants.length === 0);
-    if (
-      !window.confirm(
-        `Delete group "${g.name}"? Its members, attached tokens, and grants are removed.` +
-          (liftsCliff
-            ? " This deletes the workspace's LAST grant — members and API tokens go back to full access."
-            : ""),
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: `Delete group "${g.name}"?`,
+      body:
+        "Its members, attached tokens, and grants are removed." +
+        (liftsCliff
+          ? " This deletes the workspace's LAST grant — members and API tokens go back to full access."
+          : ""),
+      confirmLabel: "Delete group",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await api.deleteGroup(tenant, g.id);
@@ -351,15 +361,15 @@ export function Groups() {
     if (!tenant) return;
     const isLast =
       (groups ?? []).reduce((n, g) => n + g.grants.length, 0) === 1;
-    if (
-      !window.confirm(
-        "Delete this grant?" +
-          (isLast
-            ? " It is the workspace's LAST grant — members and API tokens go back to full access."
-            : ""),
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: "Delete this grant?",
+      body: isLast
+        ? "It is the workspace's LAST grant — members and API tokens go back to full access."
+        : undefined,
+      confirmLabel: "Delete grant",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await api.deleteGrant(tenant, groupId, grant.id);

@@ -1,6 +1,6 @@
 // Apps & agents tab — GitHub App installs, MCP/OAuth app connections, and the coding agent.
 import { useState } from "react";
-import { Button, Dialog, StatusPill } from "../../../components";
+import { Button, Dialog, StatusPill, useConfirm } from "../../../components";
 import {
   api,
   type ConnectionRow,
@@ -64,6 +64,7 @@ export function AppsTab({
   onChanged: () => Promise<void> | void;
   onError: (msg: string) => void;
 }) {
+  const confirm = useConfirm();
   const phone = useMediaQuery(PHONE_QUERY);
   const [dialog, setDialog] = useState<
     "github" | "mcp" | "mcp-registry" | null
@@ -76,15 +77,15 @@ export function AppsTab({
 
   const rows = connections.filter((c) => APP_CONNECTION_TYPES.includes(c.type));
 
-  function disconnect(c: ConnectionRow) {
+  async function disconnect(c: ConnectionRow) {
     if (!tenant || disconnecting) return;
-    if (
-      !window.confirm(
-        `Disconnect "${c.label}"? This removes its stored secret.`,
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Disconnect "${c.label}"?`,
+      body: "This removes its stored secret. Workflow nodes using this connection will fail until you reconnect.",
+      confirmLabel: "Disconnect",
+      danger: true,
+    });
+    if (!ok) return;
     setDisconnecting(c.id);
     void api
       .deleteConnection(tenant, c.id)

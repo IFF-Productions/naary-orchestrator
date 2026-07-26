@@ -23,7 +23,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useCanvasLink } from "../../lib/useCanvasLink";
 import type { GraphDef, NodeType } from "@naary/dsl";
-import { Button, Card, Icon, Toast } from "../../components";
+import { Button, Card, Icon, Toast, useConfirm } from "../../components";
 import {
   api,
   type GraphVersion,
@@ -110,6 +110,7 @@ function edgeLabel(c?: {
 }
 
 export function WorkflowDetail() {
+  const confirm = useConfirm();
   const { key = "" } = useParams();
   const navigate = useNavigate();
   // Canvas links carry ?from= so the canvas's back control returns HERE.
@@ -271,13 +272,13 @@ export function WorkflowDetail() {
 
   async function remove(): Promise<void> {
     if (deleting || !g) return;
-    if (
-      !window.confirm(
-        `Delete workflow "${g.name}"? This removes the workflow and its webhooks, forms, chats, and schedules. Run history is kept. This can't be undone.`,
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Delete workflow "${g.name}"?`,
+      body: "This removes the workflow and its webhooks, forms, chats, and schedules. Run history is kept. This can't be undone.",
+      confirmLabel: "Delete workflow",
+      danger: true,
+    });
+    if (!ok) return;
     setDeleting(true);
     try {
       await api.deleteGraph(key);

@@ -7,6 +7,7 @@ import {
   Icon,
   type IconName,
   StatusPill,
+  useConfirm,
 } from "../../../components";
 import {
   api,
@@ -197,6 +198,7 @@ export function ProvidersTab({
   onChanged: () => Promise<void> | void;
   onError: (msg: string) => void;
 }) {
+  const confirm = useConfirm();
   // Which model-provider key dialog is open (provider key), and which group form dialog.
   const [keyFor, setKeyFor] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
@@ -224,13 +226,15 @@ export function ProvidersTab({
     }
   }
 
-  function removeConnection(c: ConnectionRow) {
+  async function removeConnection(c: ConnectionRow) {
     if (!tenant || removing) return;
-    if (
-      !window.confirm(`Remove "${c.label}"? This deletes its stored secret.`)
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Remove "${c.label}"?`,
+      body: "This deletes its stored secret. Workflow nodes using this connection will fail until you reconnect.",
+      confirmLabel: "Remove connection",
+      danger: true,
+    });
+    if (!ok) return;
     setRemoving(c.id);
     void api
       .deleteConnection(tenant, c.id)
