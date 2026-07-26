@@ -15786,7 +15786,7 @@
     },
     "/workers": {
       "get": {
-        "description": "The connected worker fleet with live slot usage (activeActivities/maxActivities), version, and online/stale. Owner/admin only.",
+        "description": "The connected worker fleet with live slot usage (activeActivities/maxActivities), version, and online/stale. PLATFORM OPERATORS only (PLATFORM_OPERATORS env allowlist) — infra telemetry, not tenant data. 403s for everyone when that env is unset.",
         "operationId": "WorkersController_list",
         "parameters": [],
         "responses": {
@@ -16333,10 +16333,16 @@
             "type": "string",
             "example": "user@example.com",
             "description": "The authenticated subject (user id / email), if any."
+          },
+          "isOperator": {
+            "type": "boolean",
+            "example": false,
+            "description": "True when this caller is a PLATFORM OPERATOR (the PLATFORM_OPERATORS email allowlist) — i.e. runs the deployment, as distinct from owning a workspace in it. False for everyone when that env is unset, and always false for API-token callers (they carry no email). Sent so the SPA can hide operator-only surfaces; every such endpoint re-checks server-side."
           }
         },
         "required": [
-          "tenantId"
+          "tenantId",
+          "isOperator"
         ]
       },
       "ErrorResponse": {

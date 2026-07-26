@@ -15,6 +15,12 @@ export interface NavItem {
   badgeKey?: "approvals";
   /** Opens outside the shell chrome (full-bleed canvas). */
   external?: boolean;
+  /**
+   * Visible only to a PLATFORM OPERATOR (`/me.isOperator`, the PLATFORM_OPERATORS allowlist) — the
+   * deployment's operator, not a workspace owner. Used for infra surfaces whose data spans every
+   * tenant. Hiding is presentation only; the endpoint behind it re-checks server-side.
+   */
+  operatorOnly?: boolean;
 }
 
 export interface NavMode {
@@ -94,7 +100,9 @@ export const BUILDER_MODES: NavMode[] = [
       { to: "/app/team", label: "Team", icon: "users" },
       { to: "/app/groups", label: "Groups", icon: "key" },
       { to: "/app/company", label: "Company", icon: "mode-admin" },
-      { to: "/app/workers", label: "Workers", icon: "grid" },
+      // Operator-only: infra telemetry (hostnames, versions, live slot usage) for the whole fleet,
+      // not workspace data. Filtered out unless /me says isOperator — see operatorFilteredModes.
+      { to: "/app/workers", label: "Workers", icon: "grid", operatorOnly: true },
       { to: "/app/settings", label: "Settings", icon: "settings" },
     ],
   },
@@ -161,4 +169,21 @@ export function findCrumb(
     }
   }
   return best;
+}
+
+/**
+ * Drop operator-only items unless the caller is a platform operator.
+ *
+ * A filter rather than a second set of mode arrays: the only difference is one item, and forking the
+ * whole nav to express that would guarantee the two copies drift. Modes left with no items at all are
+ * dropped too — an empty section in the rail is worse than an absent one.
+ */
+export function operatorFilteredModes(
+  modes: NavMode[],
+  isOperator: boolean,
+): NavMode[] {
+  if (isOperator) return modes;
+  return modes
+    .map((m) => ({ ...m, items: m.items.filter((i) => !i.operatorOnly) }))
+    .filter((m) => m.items.length > 0);
 }

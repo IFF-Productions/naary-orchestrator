@@ -8,6 +8,9 @@ describe("MeController", () => {
     expect(c.me({ tenantId: "t-1", subject: "u-9" })).toEqual({
       tenantId: "t-1",
       subject: "u-9",
+      // Platform-operator flag (PLATFORM_OPERATORS allowlist) — false here: unset in tests, and this
+      // principal has no email anyway. Sent so the SPA can hide operator-only nav.
+      isOperator: false,
     });
   });
 
@@ -16,6 +19,8 @@ describe("MeController", () => {
     expect(c.me({ tenantId: "t-2" })).toEqual({
       tenantId: "t-2",
       subject: undefined,
+      // An API-token principal carries no email, so it can never be an operator.
+      isOperator: false,
     });
   });
 

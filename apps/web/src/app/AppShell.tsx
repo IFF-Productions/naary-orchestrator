@@ -25,7 +25,12 @@ import { BreadcrumbBar } from "./BreadcrumbBar";
 import { ContextBar, VariantSwitcher } from "./ContextBar";
 import { NavigationProgress } from "./NavigationProgress";
 import { NavRail } from "./NavRail";
-import { BUILDER_MODES, SIMPLE_ALLOWED, SIMPLE_MODES } from "./nav-model";
+import {
+  BUILDER_MODES,
+  operatorFilteredModes,
+  SIMPLE_ALLOWED,
+  SIMPLE_MODES,
+} from "./nav-model";
 import { useApprovalsCount } from "./useApprovalsCount";
 
 export function AppShell() {
@@ -87,9 +92,30 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [drawerOpen]);
 
+  // Is this caller a platform operator? One /me read on shell mount; false until it answers, and false
+  // forever if it fails, so an operator-only item is never shown speculatively.
+  const [isOperator, setIsOperator] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getMe()
+      .then((me) => !cancelled && setIsOperator(me.isOperator === true))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Mode gating: Simple users get the subset nav + are redirected away from Builder-only routes.
   const simple = mode === "simple";
-  const modes = simple ? SIMPLE_MODES : BUILDER_MODES;
+  // Operator gating (separate axis from mode): infra surfaces like the Workers fleet view span EVERY
+  // tenant, so they're shown only to a platform operator (`PLATFORM_OPERATORS` allowlist). Defaults to
+  // false and stays false if /me fails — hiding on error is the safe direction, and the endpoints
+  // behind these items re-check server-side, so this is purely about not offering a link that 403s.
+  const modes = operatorFilteredModes(
+    simple ? SIMPLE_MODES : BUILDER_MODES,
+    isOperator,
+  );
   const simpleBlocked =
     simple &&
     !SIMPLE_ALLOWED.some((p) => pathname === p || pathname.startsWith(`${p}/`));
