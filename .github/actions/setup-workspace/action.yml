@@ -1,0 +1,41 @@
+name: Set up the pnpm workspace
+description: >-
+  Install pnpm + Node, restore the pnpm store from cache, install dependencies, and seed the
+  dummy .env that prisma generate's dotenv wrapper needs. Extracted because ci.yml now runs
+  three parallel jobs that all need exactly this — one copy means the Node/pnpm resolution
+  cannot drift between them.
+
+runs:
+  using: composite
+  steps:
+    # dest MUST be per-runner: all runner services on the Windows CI VM run as the SAME
+    # account (NetworkService), so the default ~/setup-pnpm is ONE shared folder — two
+    # concurrent jobs race on it and the loser dies with "EPERM: operation not permitted,
+    # rmdir ...\setup-pnpm\...". runner.temp is per-runner (and wiped between jobs).
+    # No `version:` on purpose — pnpm/action-setup reads `packageManager` from package.json,
+    # so CI can't drift from what corepack gives a developer locally.
+    - uses: pnpm/action-setup@v6
+      with:
+        dest: ${{ runner.temp }}/setup-pnpm
+
+    # `cache: pnpm` caches the pnpm STORE keyed on the lockfile — worth more now than when
+    # this was a single job, since the ~28s install is paid once per job and there are now
+    # six. Requires pnpm on PATH already, hence the ordering.
+    - uses: actions/setup-node@v7
+      with:
+        node-version-file: .nvmrc # single source of truth (see /.nvmrc)
+        cache: pnpm
+
+    - run: pnpm install --frozen-lockfile
+      shell: bash
+
+    # prisma generate runs via a `dotenv -e ../../.env` wrapper; provide a dummy .env so it
+    # resolves. Values are placeholders — generate doesn't connect, and the test suite mocks
+    # the DB. NOT real secrets.
+    - name: Seed a dummy .env for prisma generate
+      shell: bash
+      run: |
+        cat > .env <<'ENV'
+        DATABASE_URL="postgresql://ci:ci@localhost:5432/ci?schema=public"
+        ENCRYPTION_KEY="0000000000000000000000000000000000000000000000000000000000000000"
+        ENV
