@@ -10,6 +10,7 @@
  * caller sends reaches the interpreter unchecked.
  */
 import type {
+  FormBrandingConfig,
   FormFieldDef,
   FormTriggerNodeConfig,
   GraphDef,
@@ -32,10 +33,65 @@ export interface FormDefinition {
    * blocks here and `fields` are derived from the SAME array, so they can't drift.
    */
   blocks?: TemplateBlock[];
+  /**
+   * Hosted-page presentation, re-projected to the known keys (see `projectBranding`). Absent when the
+   * author set none, so the page renders exactly as it did before branding existed.
+   */
+  branding?: FormBrandingConfig;
   /** Cloudflare Turnstile public site key — present only when the tenant has an ACTIVE bot gate for
    *  this env (added by the controller, not this pure extractor). The page renders the widget and
    *  sends the solved token back on submit. */
   turnstileSiteKey?: string;
+}
+
+/** Exactly `#rrggbb`. Mirrors the save-time check in `CONFIG_SCHEMAS.formTrigger`; re-tested here
+ *  because the value lands in a CSS custom property and a graph row can be written without passing
+ *  through the save gate (a direct DB write, or a row predating the constraint). */
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+/**
+ * Re-project the author's branding to the known keys and DISCARD anything that fails the same checks
+ * the save gate applies. Drop-on-read, never repair: a rejected `accentColor` falls back to the
+ * default ember, and a rejected `redirectUrl` falls back to the success card. Both are correct
+ * degradations — the alternative (serving an unvalidated value to an anonymous browser) turns an
+ * authoring mistake into an injection.
+ *
+ * The redirect check is intentionally duplicated rather than imported from the zod schema: this is
+ * the LAST gate before the value reaches a visitor's browser, and it must hold for a graph that
+ * never passed through `POST /graphs` at all.
+ */
+function projectBranding(raw: unknown): FormBrandingConfig | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const b = raw as Record<string, unknown>;
+  const out: FormBrandingConfig = {};
+
+  if (typeof b.successTitle === "string" && b.successTitle.trim()) {
+    out.successTitle = b.successTitle.slice(0, 200);
+  }
+  if (typeof b.successMessage === "string" && b.successMessage.trim()) {
+    out.successMessage = b.successMessage.slice(0, 2_000);
+  }
+  // https only, no embedded credentials — see the zod schema for why each clause is load-bearing.
+  if (
+    typeof b.redirectUrl === "string" &&
+    b.redirectUrl.length <= 2_000 &&
+    /^https:\/\//i.test(b.redirectUrl) &&
+    !/^https:\/\/[^/?#]*@/i.test(b.redirectUrl)
+  ) {
+    out.redirectUrl = b.redirectUrl;
+  }
+  if (typeof b.accentColor === "string" && HEX_COLOR_RE.test(b.accentColor)) {
+    out.accentColor = b.accentColor;
+  }
+  if (b.theme === "light" || b.theme === "dark" || b.theme === "auto") {
+    out.theme = b.theme;
+  }
+  if (b.desktopColumns === 1 || b.desktopColumns === 2) {
+    out.desktopColumns = b.desktopColumns;
+  }
+  if (b.width === "narrow" || b.width === "wide") out.width = b.width;
+
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /** Cap on a single submitted value's length — an anonymous caller can't push a megabyte string
@@ -169,6 +225,13 @@ export function extractFormDefinition(
         ? { options: f.options }
         : {}),
     })),
+    // Presentation, re-projected + re-validated (projectBranding). Comes from the NODE even when a
+    // template drives the fields — a form template carries content blocks, not page chrome, exactly
+    // like title/description/submitLabel above.
+    ...(() => {
+      const branding = projectBranding((cfg as { branding?: unknown }).branding);
+      return branding ? { branding } : {};
+    })(),
     // A template drives this form → serve its ordered blocks (projected) so the page can render
     // content interleaved with fields. Inline forms carry no blocks (the flat `fields` render).
     ...(templateBlocks != null

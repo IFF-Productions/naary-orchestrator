@@ -171,6 +171,48 @@ const CONFIG_SCHEMAS = {
     // Optional form content-template reference (fields come from its `field` blocks; see the
     // FormTriggerNodeConfig doc). Deleted/missing → fall back to inline `fields`.
     templateId: z.string().optional(),
+    // Hosted-page presentation (see FormBrandingConfig). The two constrained fields are validated
+    // HERE as well as re-projected on read, because both reach an anonymous browser in a position
+    // where a bad value is an injection rather than a cosmetic bug.
+    branding: z
+      .object({
+        successTitle: z.string().max(200).optional(),
+        successMessage: z.string().max(2_000).optional(),
+        // https ONLY. A `javascript:` or `data:` URL here would be stored XSS on our own origin,
+        // triggerable by anyone holding the public form link; `http:` is refused too, because
+        // downgrading a visitor who just submitted over TLS is our fault, not theirs.
+        //
+        // `z.url({ protocol })` does the parse — deliberately NOT a hand-rolled regex, which is how
+        // `javascript:https://x`-style bypasses get in, and not `new URL` either (this package is
+        // platform-agnostic and carries no DOM/Node lib types).
+        //
+        // The extra refine rejects embedded credentials, which `z.url` accepts. Not pedantry: the
+        // canvas and the success card SHOW this target to a human, and `https://trusted.com@evil.com`
+        // reads as `trusted.com` to a person while resolving to `evil.com`. Refusing it means what we
+        // display can't be a lie.
+        redirectUrl: z
+          .url({ protocol: /^https$/ })
+          .max(2_000)
+          .refine((raw) => !/^https:\/\/[^/?#]*@/i.test(raw), {
+            message:
+              "Redirect URL must not embed credentials (user:pass@host) — it reads as a different site than it resolves to.",
+          })
+          .optional(),
+        // Exactly `#rrggbb`. This value is interpolated into a CSS custom property, and CSS `var()`
+        // substitution can land inside `url()` — so anything looser than a fixed-length hex literal
+        // is an injection surface, not a validation nicety.
+        accentColor: z
+          .string()
+          .regex(
+            /^#[0-9a-fA-F]{6}$/,
+            "Accent colour must be a 6-digit hex colour like #d4562a.",
+          )
+          .optional(),
+        theme: z.enum(["light", "dark", "auto"]).optional(),
+        desktopColumns: z.union([z.literal(1), z.literal(2)]).optional(),
+        width: z.enum(["narrow", "wide"]).optional(),
+      })
+      .optional(),
   }),
   chatTrigger: z.object({
     title: z.string().optional(),

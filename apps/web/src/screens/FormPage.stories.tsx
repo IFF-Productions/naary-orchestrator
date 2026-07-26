@@ -92,3 +92,107 @@ export const Standalone: Story = {
     router: { path: "/f/:formId", initialEntries: ["/f/demo"] },
   },
 };
+
+// ---------------------------------------------------------------------------------------------
+// Branding (successTitle/successMessage, accentColor, theme, desktopColumns, width, redirectUrl).
+// Every key is optional and the stories above are the unbranded baseline — comparing them is the
+// point: an unset branding block must render byte-identically to the pre-branding page.
+// ---------------------------------------------------------------------------------------------
+
+/** A longer field set, so the two-column layout has something to pair up. */
+const BRANDED_FIELDS = [
+  { key: "first", label: "First name", type: "text", required: true },
+  { key: "last", label: "Last name", type: "text", required: true },
+  { key: "email", label: "Work email", type: "email", required: true },
+  { key: "company", label: "Company", type: "text" },
+  { key: "seats", label: "Seats", type: "number" },
+  {
+    key: "plan",
+    label: "Plan",
+    type: "select",
+    options: ["Starter", "Growth", "Enterprise"],
+  },
+  { key: "message", label: "Anything else?", type: "textarea" },
+];
+
+const brandedHandlers = (branding: Record<string, unknown>) => [
+  http.get("*/api/forms/demo", () =>
+    HttpResponse.json({
+      formId: "demo",
+      title: "Request a demo",
+      description: "Tell us a little about your team.",
+      submitLabel: "Request demo",
+      fields: BRANDED_FIELDS,
+      branding,
+    }),
+  ),
+  // 202, so submitting in the story reaches the success card.
+  http.post("*/api/forms/demo", () => HttpResponse.json({ status: "started" })),
+];
+
+const brandedStory = (branding: Record<string, unknown>): Story => ({
+  parameters: {
+    msw: { handlers: brandedHandlers(branding) },
+    router: { path: "/f/:formId", initialEntries: ["/f/demo"] },
+  },
+});
+
+/**
+ * A blue accent on a wide two-column card. Note the SUBMIT BUTTON: `EMBER_BUTTON` hardcodes its
+ * gradient rather than reading `var(--brand)`, so `accentButton` has to override it — without that the
+ * strip and focus rings would recolour while the most prominent control stayed orange.
+ *
+ * Long-answer and choice fields keep a full row on purpose (a paragraph box in half a row is worse
+ * than no columns), and phones always collapse to one column.
+ */
+export const BrandedTwoColumn = brandedStory({
+  accentColor: "#3355ff",
+  desktopColumns: 2,
+  width: "wide",
+  successTitle: "Thanks — we're on it",
+  successMessage:
+    "Someone from the team will reach out within one business day.",
+});
+
+/**
+ * A PALE accent, which is the readability trap: with the stock light ink this button would be
+ * white-on-near-white. `readableInkOn` picks dark ink from the accent's own luminance instead.
+ */
+export const BrandedPaleAccent = brandedStory({
+  accentColor: "#ffe066",
+  successTitle: "Got it!",
+});
+
+/** Forced light presentation regardless of the visitor's own theme. */
+export const BrandedForcedLight = brandedStory({
+  accentColor: "#12a594",
+  theme: "light",
+  desktopColumns: 2,
+  width: "wide",
+});
+
+/** Forced dark, same accent — the pair shows the theme is genuinely scoped to the page wrapper. */
+export const BrandedForcedDark = brandedStory({
+  accentColor: "#12a594",
+  theme: "dark",
+  desktopColumns: 2,
+  width: "wide",
+});
+
+/**
+ * Embedded WITH a redirect configured. Submitting shows the success card plus a "Continue" link
+ * rather than navigating: auto-navigating would either strand the visitor inside a frame with no URL
+ * bar, or frame-bust the host page on its behalf. Submit this one to see it.
+ */
+export const BrandedEmbeddedRedirect: Story = {
+  parameters: {
+    msw: {
+      handlers: brandedHandlers({
+        accentColor: "#8b5cf6",
+        redirectUrl: "https://example.com/thank-you",
+        successTitle: "Submitted",
+      }),
+    },
+    router: { path: "/f/:formId", initialEntries: ["/f/demo?embed=1"] },
+  },
+};

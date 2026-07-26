@@ -7982,7 +7982,14 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "The public form definition: title/description/fields, the tenant's page branding, and the Turnstile site key when this environment has an active bot gate. Carries no tenant or workflow identifiers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormDefinitionResponse"
+                }
+              }
+            }
           }
         },
         "tags": [
@@ -19261,6 +19268,147 @@
         },
         "required": [
           "deleted"
+        ]
+      },
+      "FormFieldResponse": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "example": "email"
+          },
+          "label": {
+            "type": "string",
+            "example": "Email"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "textarea",
+              "number",
+              "email",
+              "select"
+            ],
+            "example": "email"
+          },
+          "required": {
+            "type": "boolean",
+            "example": true
+          },
+          "placeholder": {
+            "type": "string",
+            "example": "you@example.com"
+          },
+          "options": {
+            "example": [
+              "Low",
+              "High"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "type"
+        ]
+      },
+      "FormBrandingResponse": {
+        "type": "object",
+        "properties": {
+          "successTitle": {
+            "type": "string",
+            "example": "Thanks — we're on it"
+          },
+          "successMessage": {
+            "type": "string",
+            "example": "Someone will reach out within one business day.",
+            "description": "Plain text (rendered as a text node, never HTML)."
+          },
+          "redirectUrl": {
+            "type": "string",
+            "example": "https://example.com/thank-you",
+            "description": "Where to send the visitor after a successful submit, instead of the success card. Always https with no embedded credentials. Takes precedence over the success copy — except on an embedded form, which offers it as a link rather than navigating the host's iframe."
+          },
+          "accentColor": {
+            "type": "string",
+            "example": "#3355ff",
+            "description": "Brand accent, exactly `#rrggbb`."
+          },
+          "theme": {
+            "type": "string",
+            "enum": [
+              "light",
+              "dark",
+              "auto"
+            ]
+          },
+          "desktopColumns": {
+            "type": "number",
+            "enum": [
+              1,
+              2
+            ],
+            "description": "Desktop field columns. Phones always render one; long-answer and choice fields keep a full row."
+          },
+          "width": {
+            "type": "string",
+            "enum": [
+              "narrow",
+              "wide"
+            ]
+          }
+        }
+      },
+      "FormDefinitionResponse": {
+        "type": "object",
+        "properties": {
+          "formId": {
+            "type": "string",
+            "example": "3f9a1c2e-…"
+          },
+          "title": {
+            "type": "string",
+            "example": "Contact us"
+          },
+          "description": {
+            "type": "string",
+            "example": "We'll get back to you."
+          },
+          "submitLabel": {
+            "type": "string",
+            "example": "Send"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FormFieldResponse"
+            }
+          },
+          "blocks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "Present only when a form template drives this form: the template's ordered content blocks, so the page can render headings/text/images interleaved with the inputs. `fields` stays authoritative for validation — both are derived from the same array."
+          },
+          "branding": {
+            "$ref": "#/components/schemas/FormBrandingResponse"
+          },
+          "turnstileSiteKey": {
+            "type": "string",
+            "example": "0x4AAA…",
+            "description": "Cloudflare Turnstile site key — present only when this environment has an active bot gate. The page renders the widget and sends the solved token back on submit."
+          }
+        },
+        "required": [
+          "formId",
+          "fields"
         ]
       },
       "FormSubmitHintResponse": {

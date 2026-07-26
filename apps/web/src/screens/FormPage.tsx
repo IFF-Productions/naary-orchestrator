@@ -4,6 +4,15 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { TemplateContentBlock } from "../components";
 import { api, type FormDefinition, type FormFieldView } from "../lib/api";
 import { useEmbedResize } from "../lib/embed-resize";
+import { PHONE_QUERY, useMediaQuery } from "../lib/useMediaQuery";
+import {
+  accentButton,
+  accentVars,
+  cardMaxWidth,
+  fieldGridStyle,
+  redirectMode,
+  spansFullRow,
+} from "./public/form-branding";
 import { TurnstileWidget } from "./public/TurnstileWidget";
 import {
   ButtonSpinner,
@@ -46,6 +55,17 @@ export function FormPage() {
   // Turnstile: a solved (single-use) token, and a counter to re-arm the widget after a failed submit.
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstileReset, setTurnstileReset] = useState(0);
+  // Below the phone breakpoint a 2-column form collapses to one — the desktop/mobile difference is
+  // available width, so it's expressed as that rather than as two authored layouts.
+  const phone = useMediaQuery(PHONE_QUERY);
+
+  // Tenant presentation (all optional). Absent ⇒ every derived style below returns {} and the page
+  // renders exactly as it did before branding existed.
+  const branding = def?.branding;
+  const accentStyle = accentVars(branding?.accentColor);
+  const submitFace = accentButton(branding?.accentColor);
+  const gridStyle = fieldGridStyle(branding?.desktopColumns, phone);
+  const gridded = Object.keys(gridStyle).length > 0;
 
   const load = useCallback(async () => {
     if (!formId) return;
@@ -92,6 +112,13 @@ export function FormPage() {
       }
       await api.submitForm(formId, data, turnstileToken ?? undefined);
       setSubmitted(true);
+      // Honour redirectUrl only for a TOP-LEVEL page. Embedded, we render the destination as a link
+      // instead of navigating — see redirectMode for why auto-navigating inside a tenant's iframe is
+      // the wrong move. The submission has already succeeded either way, so a redirect that never
+      // fires can't lose data.
+      if (redirectMode(branding?.redirectUrl, embed) === "navigate") {
+        window.location.assign(branding?.redirectUrl as string);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
       // The Turnstile token is single-use — a failed submit consumed it, so re-arm the widget for a
@@ -114,7 +141,16 @@ export function FormPage() {
 
   return (
     <PublicFrame embed={embed}>
-      <div style={{ width: "100%", maxWidth: 460 }}>
+      {/* The accent custom properties and the forced theme both live on this wrapper. `data-theme`
+          works here (not just on <html>) because tokens.css exposes the light palette to any subtree
+          — deliberately, since ThemeProvider owns the <html> attribute and its effect would overwrite
+          a page-level write on mount. `theme: "auto"`/absent leaves the visitor's own theme alone. */}
+      <div
+        style={{ width: "100%", maxWidth: cardMaxWidth(branding?.width), ...accentStyle }}
+        {...(branding?.theme === "light" || branding?.theme === "dark"
+          ? { "data-theme": branding.theme }
+          : {})}
+      >
         {state === "loading" && (
           <div style={{ ...PUBLIC_CARD, overflow: "hidden" }}>
             <EmberBar />
@@ -150,7 +186,7 @@ export function FormPage() {
           >
             <ResultBadge tone="ok" icon="check" />
             <div style={{ fontSize: 20, fontWeight: 700, marginTop: 18 }}>
-              Request received
+              {branding?.successTitle ?? "Request received"}
             </div>
             <div
               style={{
@@ -161,14 +197,33 @@ export function FormPage() {
                 maxWidth: 340,
                 marginLeft: "auto",
                 marginRight: "auto",
+                // Author copy may contain newlines; honour them without accepting HTML (this is a
+                // text node, so a tenant can never inject markup into their own public page).
+                whiteSpace: branding?.successMessage ? "pre-wrap" : undefined,
               }}
             >
-              {/* The submit response carries only `status: "started"` — the workflow is running
-                  (it may finish instantly or pause for a human), so the copy claims exactly that. */}
-              Your response was submitted and the workflow has started. If a
-              step needs a human decision, it will wait safely until someone
-              decides.
+              {/* Default copy: the submit response carries only `status: "started"`, so it claims
+                  exactly that and no more — the workflow may finish instantly or pause for days. An
+                  author who knows their flow can say something more useful via successMessage. */}
+              {branding?.successMessage ??
+                "Your response was submitted and the workflow has started. If a step needs a human decision, it will wait safely until someone decides."}
             </div>
+
+            {/* Embedded with a redirect configured: we do NOT navigate the iframe (see redirectMode)
+                — the destination is offered as a link so the visitor stays in control and can see
+                where they're going. `noopener noreferrer` because this is a tenant-supplied URL. */}
+            {redirectMode(branding?.redirectUrl, embed) === "link" && (
+              <div style={{ marginTop: 16, fontSize: 13 }}>
+                <a
+                  href={branding?.redirectUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: "var(--brand)", fontWeight: 600 }}
+                >
+                  Continue →
+                </a>
+              </div>
+            )}
             <button
               onClick={() => {
                 setValues({});
@@ -236,29 +291,42 @@ export function FormPage() {
               {/* A template drives this form → render its blocks in the authored order (content
                   interleaved with inputs), matching the block editor's preview. Otherwise the flat
                   field list (an inline formTrigger form). */}
-              {def.blocks
-                ? def.blocks.map((b) =>
-                    b.type === "field" ? (
+              <div style={gridStyle}>
+                {def.blocks
+                  ? def.blocks.map((b) =>
+                      b.type === "field" ? (
+                        <FormField
+                          key={b.id}
+                          field={fieldViewFromBlock(b)}
+                          value={values[b.key] ?? ""}
+                          onChange={(v) => set(b.key, v)}
+                          fullRow={gridded && spansFullRow(b.fieldType)}
+                        />
+                      ) : (
+                        // Content blocks always span the full row: a heading or paragraph squeezed
+                        // into one column of a two-column form reads as a caption for the field
+                        // beside it rather than as the section it is.
+                        <div
+                          key={b.id}
+                          style={{
+                            marginBottom: 14,
+                            ...(gridded ? { gridColumn: "1 / -1" } : {}),
+                          }}
+                        >
+                          <TemplateContentBlock block={b} />
+                        </div>
+                      ),
+                    )
+                  : def.fields.map((f) => (
                       <FormField
-                        key={b.id}
-                        field={fieldViewFromBlock(b)}
-                        value={values[b.key] ?? ""}
-                        onChange={(v) => set(b.key, v)}
+                        key={f.key}
+                        field={f}
+                        value={values[f.key] ?? ""}
+                        onChange={(v) => set(f.key, v)}
+                        fullRow={gridded && spansFullRow(f.type)}
                       />
-                    ) : (
-                      <div key={b.id} style={{ marginBottom: 14 }}>
-                        <TemplateContentBlock block={b} />
-                      </div>
-                    ),
-                  )
-                : def.fields.map((f) => (
-                    <FormField
-                      key={f.key}
-                      field={f}
-                      value={values[f.key] ?? ""}
-                      onChange={(v) => set(f.key, v)}
-                    />
-                  ))}
+                    ))}
+              </div>
 
               {def.turnstileSiteKey && (
                 <TurnstileWidget
@@ -288,6 +356,9 @@ export function FormPage() {
                 }
                 style={{
                   ...EMBER_BUTTON,
+                  // AFTER the ember face: EMBER_BUTTON hardcodes its gradient rather than reading
+                  // var(--brand), so the accent has to override it explicitly (see accentButton).
+                  ...submitFace,
                   width: "100%",
                   height: 46,
                   borderRadius: 11,
@@ -346,10 +417,13 @@ function FormField({
   field,
   value,
   onChange,
+  fullRow,
 }: {
   field: FormFieldView;
   value: string;
   onChange: (v: string) => void;
+  /** In a 2-column layout, make this field span both columns (see spansFullRow). */
+  fullRow?: boolean;
 }) {
   const label = (
     <label htmlFor={`f-${field.key}`} style={fieldLabelStyle}>
@@ -435,7 +509,9 @@ function FormField({
   }
 
   return (
-    <div style={{ marginBottom: 14 }}>
+    <div
+      style={{ marginBottom: 14, ...(fullRow ? { gridColumn: "1 / -1" } : {}) }}
+    >
       {field.type === "select" ? (
         <div style={fieldLabelStyle}>
           {field.label}

@@ -107,6 +107,42 @@ If you need headless submission, either use the hosted page (or the
 off for the environment your integration submits to. Environments are separate here — a sandbox form
 can stay ungated while production is protected.
 
+## Branding the hosted page
+
+If you *do* use the hosted page (`/f/:formId`), the Form Trigger's **Hosted page** section on the
+canvas controls how it looks and what happens after a submit. Everything is optional — leave it alone
+and the page renders exactly as before.
+
+| Option | What it does |
+| --- | --- |
+| **Success heading / message** | Replaces the default "Request received" copy. Plain text — newlines are honoured, HTML is not. |
+| **Redirect after submit** | Sends the visitor to your own thank-you page instead of the success card. |
+| **Accent colour** | Recolours the submit button, top strip, focus rings and chips from one `#rrggbb`. |
+| **Theme** | Force light or dark, or follow the visitor's own setting. |
+| **Desktop layout** | One or two columns. |
+| **Card width** | Narrow (460px) or wide (640px). |
+
+A few behaviours worth knowing, because they're deliberate rather than incidental:
+
+- **The redirect wins.** With a redirect set, the success heading and message never appear on a
+  top-level page — the canvas says so next to the field, so you don't write copy nobody sees.
+- **Embedded forms are never auto-redirected.** On `?embed=1` the visitor gets the success card with a
+  **Continue** link instead. Navigating your iframe would either strand them in a frame with no URL
+  bar and no back button, or frame-bust your page on your behalf; neither is ours to decide.
+- **Redirects must be `https://`, with no `user:pass@`.** `javascript:` and `data:` would be stored
+  XSS on our origin runnable by anyone with your form link; `http://` would downgrade a visitor who
+  just submitted over TLS. Credentials are refused because `https://trusted.com@evil.com` reads as one
+  site and resolves to another, and we show the destination.
+- **The accent must be a full 6-digit hex** (`#f2622e`, not `#f62` or `orange`). It becomes a CSS
+  custom property, and one accepted syntax is far easier to keep safe than several. Text ink on the
+  button is picked from the accent's luminance, so a pale brand colour stays readable.
+- **Two columns is a desktop-only idea.** Phones always get one column, and long-answer and choice
+  fields keep a full row even on desktop — a paragraph box in half a row is worse than no columns.
+
+Invalid values are **dropped, not repaired**: a malformed accent falls back to the default and a
+rejected redirect falls back to the success card, so a bad setting degrades the page instead of
+breaking it.
+
 ## Rate limits and cost
 
 `POST` is throttled per IP (10/minute). That's per-IP, so it bounds accidents more than a

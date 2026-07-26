@@ -36,12 +36,52 @@ export interface FormFieldDef {
  * output IS the event). The public form-serving + submit endpoint is a later slice; this is
  * just the node + its field schema.
  */
+/**
+ * How the hosted form presents itself. All optional — an omitted branding block renders exactly the
+ * page that shipped before it existed, so no saved graph changes appearance on upgrade.
+ *
+ * Every value here is served to an ANONYMOUS browser and re-projected on read
+ * (`extractFormDefinition`), and the constrained ones are ALSO validated at save time in
+ * `CONFIG_SCHEMAS.formTrigger` — `accentColor` because it lands in a CSS custom property (where
+ * `var()` substitution can reach inside `url()`), `redirectUrl` because it navigates the visitor.
+ * Validating at both ends means a graph written directly to the DB still can't inject.
+ */
+export interface FormBrandingConfig {
+  /** Heading on the success card (default "Request received"). */
+  successTitle?: string;
+  /** Body copy on the success card. Plain text — never HTML, it's rendered as a text node. */
+  successMessage?: string;
+  /**
+   * Where to send the visitor after a successful submit, INSTEAD of the success card. `https:` only
+   * (see the save-time check): a `javascript:` or `data:` URL here would be stored XSS on our origin,
+   * runnable by anyone with the form link.
+   *
+   * Takes precedence over successTitle/successMessage — the card never renders, so the canvas says so
+   * rather than letting an author write copy nobody sees.
+   */
+  redirectUrl?: string;
+  /** Brand accent as `#rrggbb`. Replaces the default ember on the submit button + top strip. */
+  accentColor?: string;
+  /** Force a light/dark page instead of following the visitor's `prefers-color-scheme`. */
+  theme?: "light" | "dark" | "auto";
+  /**
+   * Desktop field layout. `2` flows fields into two columns ABOVE the mobile breakpoint and collapses
+   * to one below it — the desktop/mobile difference, expressed as the only thing that actually
+   * differs (available width) rather than as two separately-authored layouts to keep in sync.
+   */
+  desktopColumns?: 1 | 2;
+  /** Card width on desktop: `narrow` is the 460px default, `wide` (640px) suits 2-column forms. */
+  width?: "narrow" | "wide";
+}
+
 export interface FormTriggerNodeConfig {
   title?: string;
   description?: string;
   /** Submit-button label (default "Submit"). */
   submitLabel?: string;
   fields: FormFieldDef[];
+  /** Presentation of the hosted page — see FormBrandingConfig. Omitted ⇒ the stock page. */
+  branding?: FormBrandingConfig;
   /**
    * Optional reference to a `kind: "form"` content template (Settings › Content templates). When
    * set, the hosted form's inputs come from the template's `field` blocks instead of the inline
