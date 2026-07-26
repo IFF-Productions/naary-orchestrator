@@ -8005,7 +8005,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The public form definition: title/description/fields, the tenant's page branding, and the Turnstile site key when this environment has an active bot gate. Carries no tenant or workflow identifiers.",
+            "description": "The public form definition: title/description/fields, the tenant's page branding, and the active bot gate (`botGate`, plus the deprecated `turnstileSiteKey` for Turnstile). Carries no tenant or workflow identifiers.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8970,6 +8970,64 @@
           }
         ],
         "summary": "Remove the Turnstile config (active environment)",
+        "tags": [
+          "TurnstileConfig"
+        ]
+      }
+    },
+    "/turnstile-config/capabilities": {
+      "get": {
+        "description": "`appCheckAvailable` is false when no Firebase service account is configured, in which case only Turnstile can be selected. Deployment-level, identical for every tenant.",
+        "operationId": "TurnstileConfigController_capabilities",
+        "parameters": [],
+        "responses": {
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Which bot-protection providers this instance supports",
         "tags": [
           "TurnstileConfig"
         ]
@@ -19567,7 +19625,46 @@
           "turnstileSiteKey": {
             "type": "string",
             "example": "0x4AAA…",
-            "description": "Cloudflare Turnstile site key — present only when this environment has an active bot gate. The page renders the widget and sends the solved token back on submit."
+            "deprecated": true,
+            "description": "DEPRECATED — use `botGate`. Cloudflare Turnstile site key, emitted only for a Turnstile gate. Kept for one release because an embedded iframe on a tenant's site may be running a cached bundle that only knows this field."
+          },
+          "botGate": {
+            "description": "The active bot gate, absent when this environment has none. `turnstile` carries the tenant's public site key (render the widget, send the solved token back as `botToken`); `app_check` carries no key at all — the page mints a Firebase App Check token instead. See docs/design/TENANT-BOT-GATE-PROVIDERS.md.",
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "provider",
+                  "siteKey"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "turnstile"
+                    ]
+                  },
+                  "siteKey": {
+                    "type": "string",
+                    "example": "0x4AAA…"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "provider"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "app_check"
+                    ]
+                  }
+                }
+              }
+            ]
           }
         },
         "required": [
@@ -19813,8 +19910,20 @@
             "type": "boolean",
             "description": "Whether a secret key is stored (write-only — the value is never returned)."
           },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "turnstile",
+              "app_check"
+            ],
+            "description": "Which bot gate guards this env's public pages: 'turnstile' (the tenant's own Cloudflare keys) or 'app_check' (the platform's Firebase App Check — no tenant keys). App Check is the weaker option: it attests the request came from our app but does not challenge each submission and does NOT enforce allowedHostnames as a bot check."
+          },
+          "appCheckAvailable": {
+            "type": "boolean",
+            "description": "Whether this deployment can verify App Check tokens at all (a Firebase service account is configured). False ⇒ the 'app_check' provider cannot be selected."
+          },
           "allowedHostnames": {
-            "description": "Allowed solved-Turnstile hostnames (empty ⇒ any). A submission's hostname must match.",
+            "description": "Allowed solved-Turnstile hostnames (empty ⇒ any). A submission's hostname must match. Enforced as a bot check for the 'turnstile' provider ONLY — an App Check token carries no solved hostname. Independently drives embed CORS for both providers.",
             "type": "array",
             "items": {
               "type": "string"
@@ -19825,6 +19934,8 @@
           "siteKey",
           "enabled",
           "hasSecret",
+          "provider",
+          "appCheckAvailable",
           "allowedHostnames"
         ]
       },

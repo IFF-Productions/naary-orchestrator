@@ -33,6 +33,11 @@ function makeController(opts: {
   templateBlocks?: unknown[] | null;
   /** Turnstile: site key advertised on the definition (null = no gate). */
   siteKey?: string | null;
+  /** An arbitrary bot gate (#782), e.g. `{ provider: "app_check" }`. Overrides `siteKey`. */
+  gate?:
+    | { provider: "turnstile"; siteKey: string }
+    | { provider: "app_check" }
+    | null;
   /** Turnstile: verify() verdict on submit (default allow). */
   verify?: boolean;
 }) {
@@ -51,8 +56,17 @@ function makeController(opts: {
   const templates = {
     loadFormBlocks: vi.fn().mockResolvedValue(opts.templateBlocks ?? null),
   };
+  // `publicGate` is the seam the controllers use (#782: App Check has no site key, so a bare string
+  // couldn't express both providers). `opts.siteKey` still drives the Turnstile case so existing
+  // cases read unchanged; `opts.gate` sets an arbitrary gate (e.g. `{ provider: "app_check" }`).
+  const gate =
+    opts.gate ??
+    (opts.siteKey ? { provider: "turnstile", siteKey: opts.siteKey } : null);
   const turnstile = {
-    publicSiteKey: vi.fn().mockResolvedValue(opts.siteKey ?? null),
+    publicGate: vi.fn().mockResolvedValue(gate),
+    publicSiteKey: vi
+      .fn()
+      .mockResolvedValue(gate?.provider === "turnstile" ? gate.siteKey : null),
     verify: vi.fn().mockResolvedValue(opts.verify ?? true),
   };
   // FormAssetService — only the public asset-serving route uses it.
@@ -195,11 +209,30 @@ describe("FormsController (public)", () => {
         siteKey: "0xSITEKEY",
       }).controller.definition("f-1");
       expect(withGate.turnstileSiteKey).toBe("0xSITEKEY");
-      // …and omits it when no gate is configured.
+      // Both shapes for a Turnstile gate: the new provider-neutral `botGate` AND the deprecated flat
+      // key, because an embedded iframe may be running a cached bundle that only knows the old one.
+      expect((withGate as { botGate?: unknown }).botGate).toEqual({
+        provider: "turnstile",
+        siteKey: "0xSITEKEY",
+      });
+      // …and omits both when no gate is configured.
       const noGate = await makeController({
         endpoint: ENDPOINT,
       }).controller.definition("f-1");
       expect(noGate).not.toHaveProperty("turnstileSiteKey");
+      expect(noGate).not.toHaveProperty("botGate");
+    });
+
+    /** An App Check gate has NO site key, so the page has to learn about it from `botGate` alone. */
+    it("advertises an app_check gate with no site key at all", async () => {
+      const def = await makeController({
+        endpoint: ENDPOINT,
+        gate: { provider: "app_check" },
+      }).controller.definition("f-1");
+      expect((def as { botGate?: unknown }).botGate).toEqual({
+        provider: "app_check",
+      });
+      expect(def).not.toHaveProperty("turnstileSiteKey");
     });
   });
 

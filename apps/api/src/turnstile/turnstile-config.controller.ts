@@ -45,6 +45,21 @@ export class TurnstileConfigController {
     return this.service.get(tenantId, envId);
   }
 
+  /**
+   * Which providers this INSTANCE can offer. Separate from GET because GET returns `null` until a
+   * config row exists — and "no row yet" is exactly when the settings UI must decide whether to show
+   * the App Check option at all. Availability is deployment state, not tenant state.
+   */
+  @ApiEndpoint({
+    summary: "Which bot-protection providers this instance supports",
+    description:
+      "`appCheckAvailable` is false when no Firebase service account is configured, in which case only Turnstile can be selected. Deployment-level, identical for every tenant.",
+  })
+  @Get("capabilities")
+  capabilities(): { appCheckAvailable: boolean } {
+    return { appCheckAvailable: this.service.appCheckAvailable };
+  }
+
   @ApiEndpoint({
     summary: "Set the Turnstile config (active environment)",
     description:

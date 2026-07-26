@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
 import { SecretStore } from "@naary/secrets";
+import { AppCheckVerifier } from "./app-check-verifier";
 
 /** Reserved SecretStore key (namespaced with `:` so it's excluded from the model-provider listing,
  *  like `conn:`/`secret:`) under which the Turnstile SECRET key is encrypted at rest. */
@@ -20,10 +21,63 @@ export const __turnstileDeps = {
 
 /** Public view of a tenant/env Turnstile config — NEVER carries the secret key (only whether one is
  *  set). The site key is public (rendered in the browser widget), so it IS returned. */
+/** Which bot gate guards a tenant/env's public pages (docs/design/TENANT-BOT-GATE-PROVIDERS.md).
+ *  `turnstile` = the tenant's own Cloudflare keys; `app_check` = the PLATFORM's Firebase App Check,
+ *  where the tenant supplies nothing. */
+export type BotGateProvider = "turnstile" | "app_check";
+
+export const BOT_GATE_PROVIDERS: readonly BotGateProvider[] = [
+  "turnstile",
+  "app_check",
+];
+
+/** Narrow an unknown provider input; anything unrecognized ⇒ null (the caller decides). */
+export function toBotGateProvider(v: unknown): BotGateProvider | null {
+  return typeof v === "string" &&
+    (BOT_GATE_PROVIDERS as readonly string[]).includes(v)
+    ? (v as BotGateProvider)
+    : null;
+}
+
+/**
+ * Pull the bot-gate token off an anonymous submission body.
+ *
+ * `botToken` is the provider-neutral name (an App Check attestation isn't a "turnstile token"), but
+ * `turnstileToken` stays accepted: an embedded iframe on a tenant's site can be running a CACHED
+ * older bundle that only sends the old name, and breaking those pages to rename a field would be a
+ * bad trade. Neither is a declared form field, so `validateSubmission` strips both before anything
+ * reaches the graph. Removed in the design's slice 4.
+ */
+export function botTokenFrom(
+  body: { botToken?: unknown; turnstileToken?: unknown } | null | undefined,
+): string | undefined {
+  // Each candidate is checked in turn rather than `a ?? b`: an EMPTY `botToken` (a page that
+  // initialised the new field but got no token) must fall through to the legacy one, not mask it.
+  for (const raw of [body?.botToken, body?.turnstileToken]) {
+    if (typeof raw === "string" && raw.length > 0) return raw;
+  }
+  return undefined;
+}
+
+/**
+ * What a PUBLIC (anonymous) page needs to render the gate. Replaces the old
+ * `publicSiteKey(): string | null` — App Check has no site key to hand out, so a bare string can't
+ * express both providers and both controllers used to branch on its truthiness.
+ * `null` ⇒ no active gate.
+ */
+export type PublicGate =
+  { provider: "turnstile"; siteKey: string } | { provider: "app_check" };
+
 export interface TurnstileConfigView {
   siteKey: string;
   enabled: boolean;
   hasSecret: boolean;
+  /** Which mechanism guards this env's public pages. Pre-existing rows read as `turnstile`. */
+  provider: BotGateProvider;
+  /** Whether the PLATFORM can verify App Check tokens at all (service account present). False ⇒ the
+   *  settings UI must not offer `app_check`, because enabling it would gate submissions we couldn't
+   *  verify. Derived, never stored. */
+  appCheckAvailable: boolean;
   /** The SHARED domain allowlist (#615 + #617): hostnames these public pages may be served/embedded
    *  from. Empty ⇒ unrestricted. Used by BOTH the Turnstile solved-hostname check and the public
    *  embed CORS layer. */
@@ -31,6 +85,8 @@ export interface TurnstileConfigView {
 }
 
 export interface TurnstileConfigInput {
+  /** `turnstile` | `app_check`. Omitted ⇒ keep the stored provider (default `turnstile`). */
+  provider?: unknown;
   siteKey?: unknown;
   /** Write-only: set/replaced, never read back. Omitted/empty on update ⇒ keep the existing secret. */
   secretKey?: unknown;
@@ -92,7 +148,12 @@ function normalizeHostnames(v: unknown): string[] | null {
 export class TurnstileConfigService {
   // Injected via the module's useFactory (so Nest doesn't try to DI SecretStore); tests pass a stub.
   // The default `new SecretStore()` reads ENCRYPTION_KEY at construction (fail-fast at boot).
-  constructor(private readonly secrets: SecretStore = new SecretStore()) {}
+  constructor(
+    private readonly secrets: SecretStore = new SecretStore(),
+    /** App Check verification (the second provider). Its own `enabled` decides whether `app_check`
+     *  may be offered/enforced at all. */
+    private readonly appCheck: AppCheckVerifier = new AppCheckVerifier(),
+  ) {}
 
   /** The config view for an env, or null if none is set. `hasSecret` reflects whether a secret key
    *  is stored (checked without exposing it). */
@@ -109,8 +170,41 @@ export class TurnstileConfigService {
       siteKey: row.siteKey,
       enabled: row.enabled,
       hasSecret: secret != null,
+      provider: toBotGateProvider(row.provider) ?? "turnstile",
+      appCheckAvailable: this.appCheck.enabled,
       allowedHostnames: row.allowedHostnames,
     };
+  }
+
+  /** Whether this deployment can verify App Check tokens — so the settings UI can offer (or hide)
+   *  that provider even when no config row exists yet. */
+  get appCheckAvailable(): boolean {
+    return this.appCheck.enabled;
+  }
+
+  /**
+   * Boot check: are there tenants relying on an App Check gate this deployment CANNOT verify?
+   *
+   * Enabling `app_check` requires a live round trip (design §5), so it can't be saved broken — but
+   * that proves nothing about later deploys. A release that drops the Firebase service account (or
+   * the web build's App Check site key) would leave those tenants' gates unenforceable, which
+   * otherwise shows up only as public forms quietly losing their protection. Logged loudly at boot
+   * instead. Never throws: a DB hiccup here must not block startup.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    if (this.appCheck.enabled) return;
+    try {
+      const count = await getPrisma().turnstileConfig.count({
+        where: { provider: "app_check", enabled: true },
+      });
+      if (count > 0) {
+        console.warn(
+          `[bot-gate] ${count} environment(s) have App Check bot protection enabled, but this instance has no Firebase service account — those gates CANNOT be enforced and their public pages are ungated. Configure FIREBASE_SERVICE_ACCOUNT_JSON (or GOOGLE_APPLICATION_CREDENTIALS), or switch those environments to Turnstile.`,
+        );
+      }
+    } catch {
+      // Deliberately silent: this is a diagnostic, not a gate.
+    }
   }
 
   /**
@@ -135,9 +229,33 @@ export class TurnstileConfigService {
       typeof input.siteKey === "string" ? input.siteKey.trim() : "";
     const siteKey = supplied || existing?.siteKey || "";
     const enabled = input.enabled === undefined ? true : Boolean(input.enabled);
-    if (enabled && !siteKey) {
+
+    // Provider: omitted ⇒ keep what's stored (pre-#782 rows read as turnstile). An unrecognized
+    // value is refused rather than silently coerced — a typo must not switch a tenant's gate.
+    let provider: BotGateProvider =
+      toBotGateProvider(existing?.provider) ?? "turnstile";
+    if (input.provider !== undefined) {
+      const wanted = toBotGateProvider(input.provider);
+      if (!wanted) {
+        throw new BadRequestException(
+          `Unknown bot-protection provider. Expected one of: ${BOT_GATE_PROVIDERS.join(", ")}.`,
+        );
+      }
+      provider = wanted;
+    }
+
+    // The "enabled ⇒ keys required" rule is PROVIDER-CONDITIONAL. Only Turnstile has tenant keys;
+    // requiring a site key for app_check would 400 every App Check enable (design §2).
+    if (enabled && provider === "turnstile" && !siteKey) {
       throw new BadRequestException(
         "A Turnstile site key is required to enable bot protection.",
+      );
+    }
+    // App Check is the platform's, so a tenant can only switch to it where the platform can actually
+    // verify tokens — otherwise the page would gate a submit we'd wave through.
+    if (enabled && provider === "app_check" && !this.appCheck.enabled) {
+      throw new BadRequestException(
+        "App Check bot protection isn't available on this instance (no Firebase service account configured). Use Turnstile, or ask an operator to configure App Check.",
       );
     }
     const hostnames = normalizeHostnames(input.allowedHostnames);
@@ -149,12 +267,14 @@ export class TurnstileConfigService {
         environmentId,
         siteKey,
         enabled,
+        provider,
         ...(hostnames ? { allowedHostnames: hostnames } : {}),
       },
       // Only overwrite the hostname list when the caller sent an array (else keep the stored one).
       update: {
         siteKey,
         enabled,
+        provider,
         ...(hostnames ? { allowedHostnames: hostnames } : {}),
       },
     });
@@ -187,12 +307,34 @@ export class TurnstileConfigService {
     tenantId: string,
     environmentId: string,
   ): Promise<string | null> {
+    const gate = await this.publicGate(tenantId, environmentId);
+    return gate?.provider === "turnstile" ? gate.siteKey : null;
+  }
+
+  /**
+   * What an anonymous page needs to render the active gate, or null when there isn't one.
+   *
+   * The "only advertise a gate we can actually verify" rule applies to BOTH providers — otherwise
+   * the page would gate a submit the server would wave through:
+   *   - turnstile ⇒ enabled AND a secret is stored
+   *   - app_check ⇒ enabled AND this deployment can verify App Check tokens
+   */
+  async publicGate(
+    tenantId: string,
+    environmentId: string,
+  ): Promise<PublicGate | null> {
     const row = await getPrisma().turnstileConfig.findUnique({
       where: { tenantId_environmentId: { tenantId, environmentId } },
     });
     if (!row || !row.enabled) return null;
+    const provider = toBotGateProvider(row.provider) ?? "turnstile";
+    if (provider === "app_check") {
+      return this.appCheck.enabled ? { provider: "app_check" } : null;
+    }
     const secret = await this.secrets.get(tenantId, environmentId, SECRET_KEY);
-    return secret ? row.siteKey : null;
+    return secret && row.siteKey
+      ? { provider: "turnstile", siteKey: row.siteKey }
+      : null;
   }
 
   /**
@@ -215,6 +357,19 @@ export class TurnstileConfigService {
       where: { tenantId_environmentId: { tenantId, environmentId } },
     });
     if (!row || !row.enabled) return true; // not enforced
+
+    // App Check: the platform's own gate, no tenant keys. Verdict mapping is deliberate —
+    // `unavailable` (not configured / network blip) ALLOWS, matching the siteverify posture below,
+    // while a replayed token is a definite negative and denies. `allowedHostnames` has NO analogue
+    // here: an App Check token carries no solved hostname, so that check is Turnstile-only (this is
+    // the capability a tenant gives up by choosing App Check — design §1).
+    if ((toBotGateProvider(row.provider) ?? "turnstile") === "app_check") {
+      if (!this.appCheck.enabled) return true; // can't enforce (UI prevents saving this)
+      if (!token) return false; // enforced, but the client sent no attestation
+      const verdict = await this.appCheck.verify(token);
+      return verdict !== "denied";
+    }
+
     const secret = await this.secrets.get(tenantId, environmentId, SECRET_KEY);
     if (!secret) return true; // enabled but unconfigured — can't enforce (UI prevents this)
     if (!token) return false; // enforced, but the client sent no challenge

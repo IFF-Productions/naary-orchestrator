@@ -26,6 +26,11 @@ function makeController(opts: {
   sessionResult?: { replied: boolean; reply?: unknown; citations?: unknown[] };
   /** Turnstile: site key on the definition (null = no gate) + verify() verdict (default allow). */
   siteKey?: string | null;
+  /** An arbitrary bot gate (#782), e.g. `{ provider: "app_check" }`. Overrides `siteKey`. */
+  gate?:
+    | { provider: "turnstile"; siteKey: string }
+    | { provider: "app_check" }
+    | null;
   verify?: boolean;
 }) {
   const chats = {
@@ -48,8 +53,17 @@ function makeController(opts: {
       .fn()
       .mockResolvedValue(opts.sessionResult ?? { replied: false }),
   };
+  // `publicGate` is the seam the controllers use (#782: App Check has no site key, so a bare string
+  // couldn't express both providers). `opts.siteKey` still drives the Turnstile case so existing
+  // cases read unchanged; `opts.gate` sets an arbitrary gate (e.g. `{ provider: "app_check" }`).
+  const gate =
+    opts.gate ??
+    (opts.siteKey ? { provider: "turnstile", siteKey: opts.siteKey } : null);
   const turnstile = {
-    publicSiteKey: vi.fn().mockResolvedValue(opts.siteKey ?? null),
+    publicGate: vi.fn().mockResolvedValue(gate),
+    publicSiteKey: vi
+      .fn()
+      .mockResolvedValue(gate?.provider === "turnstile" ? gate.siteKey : null),
     verify: vi.fn().mockResolvedValue(opts.verify ?? true),
   };
   const controller = new ChatController(
@@ -325,10 +339,44 @@ describe("ChatController (public)", () => {
     expect((withGate as { turnstileSiteKey?: string }).turnstileSiteKey).toBe(
       "0xSITEKEY",
     );
+    // Plus the provider-neutral shape (#782); the flat key stays for cached embedded bundles.
+    expect((withGate as { botGate?: unknown }).botGate).toEqual({
+      provider: "turnstile",
+      siteKey: "0xSITEKEY",
+    });
     const noGate = await makeController({
       endpoint: ENDPOINT,
     }).controller.definition("c-1");
     expect(noGate).not.toHaveProperty("turnstileSiteKey");
+    expect(noGate).not.toHaveProperty("botGate");
+  });
+
+  /** An App Check gate carries no site key — the widget choice comes from `botGate` alone. */
+  it("GET advertises an app_check gate with no site key", async () => {
+    const def = await makeController({
+      endpoint: ENDPOINT,
+      gate: { provider: "app_check" },
+    }).controller.definition("c-1");
+    expect((def as { botGate?: unknown }).botGate).toEqual({
+      provider: "app_check",
+    });
+    expect(def).not.toHaveProperty("turnstileSiteKey");
+  });
+
+  /** Either token field name reaches the gate — the legacy one keeps cached bundles working. */
+  it("POST accepts the provider-neutral botToken as well as turnstileToken", async () => {
+    for (const body of [
+      { message: "hi", botToken: "tok-new" },
+      { message: "hi", turnstileToken: "tok-old" },
+    ]) {
+      const { controller, turnstile } = makeController({ endpoint: ENDPOINT });
+      await controller.message("c-1", body);
+      expect(turnstile.verify).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        body.botToken ?? body.turnstileToken,
+      );
+    }
   });
 
   it("POST 403s (no run) when the Turnstile challenge fails — before the durable/per-message fork", async () => {

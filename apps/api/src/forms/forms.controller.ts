@@ -22,7 +22,10 @@ import {
 import { ContentTemplatesService } from "../content-templates/content-templates.service";
 import { ExecutionsService } from "../executions/executions.service";
 import { GraphsService } from "../graphs/graphs.service";
-import { TurnstileConfigService } from "../turnstile/turnstile-config.service";
+import {
+  TurnstileConfigService,
+  botTokenFrom,
+} from "../turnstile/turnstile-config.service";
 import {
   extractFormDefinition,
   formTemplateId,
@@ -125,23 +128,29 @@ export class FormsController {
   }
 
   /** Serve the public form definition (title/description/fields). 404 if the endpoint is unknown
-   *  or its current graph's entry node isn't a formTrigger. Includes `turnstileSiteKey` when the
-   *  tenant has an active Turnstile gate for this env (so the page renders the widget). */
+   *  or its current graph's entry node isn't a formTrigger. Includes `botGate` when this env has an
+   *  active gate, so the page knows WHICH mechanism to render (Turnstile widget vs an App Check
+   *  attestation). `turnstileSiteKey` is still emitted for the Turnstile case because an embedded
+   *  iframe on a tenant's site may be running a CACHED older bundle that only knows that field;
+   *  it goes away a release later (docs/design/TENANT-BOT-GATE-PROVIDERS.md §4). */
   @Get(":formId")
   @ApiOkResponse({
     type: FormDefinitionResponse,
     description:
       "The public form definition: title/description/fields, the tenant's page branding, and the " +
-      "Turnstile site key when this environment has an active bot gate. Carries no tenant or " +
-      "workflow identifiers.",
+      "active bot gate (`botGate`, plus the deprecated `turnstileSiteKey` for Turnstile). Carries " +
+      "no tenant or workflow identifiers.",
   })
   async definition(@Param("formId") formId: string) {
     const { endpoint, def } = await this.resolve(formId);
-    const turnstileSiteKey = await this.turnstile.publicSiteKey(
+    const botGate = await this.turnstile.publicGate(
       endpoint.tenantId,
       endpoint.environmentId,
     );
-    return turnstileSiteKey ? { ...def, turnstileSiteKey } : def;
+    if (!botGate) return def;
+    return botGate.provider === "turnstile"
+      ? { ...def, botGate, turnstileSiteKey: botGate.siteKey }
+      : { ...def, botGate };
   }
 
   /**
@@ -166,14 +175,17 @@ export class FormsController {
   })
   async schema(@Param("formId") formId: string) {
     const { endpoint, def } = await this.resolve(formId);
-    const siteKey = await this.turnstile.publicSiteKey(
+    // publicGate, NOT publicSiteKey: an App Check gate has no site key, so keying this off a site
+    // key would advertise "no bot protection" on a form whose submit route enforces one — a headless
+    // caller would follow the schema and get a 403 with no clue why.
+    const gate = await this.turnstile.publicGate(
       endpoint.tenantId,
       endpoint.environmentId,
     );
     return buildFormJsonSchema(formId, def.fields, {
       ...(def.title ? { title: def.title } : {}),
       ...(def.description ? { description: def.description } : {}),
-      botProtection: siteKey != null,
+      botProtection: gate != null,
     });
   }
 
@@ -185,14 +197,17 @@ export class FormsController {
   @HttpCode(202)
   async submit(
     @Param("formId") formId: string,
-    @Body() body: { turnstileToken?: unknown } & Record<string, unknown>,
+    @Body()
+    body: { botToken?: unknown; turnstileToken?: unknown } & Record<
+      string,
+      unknown
+    >,
   ) {
     const { endpoint, snapshot, def } = await this.resolve(formId);
     // Bot gate BEFORE validation/startForm — an unsolved challenge never spends the tenant's budget.
-    const token =
-      typeof body?.turnstileToken === "string"
-        ? body.turnstileToken
-        : undefined;
+    // Either token name (see botTokenFrom): `botToken` for the provider-neutral path, the legacy
+    // `turnstileToken` for cached embedded bundles.
+    const token = botTokenFrom(body);
     const allowed = await this.turnstile.verify(
       endpoint.tenantId,
       endpoint.environmentId,

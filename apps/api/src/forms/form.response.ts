@@ -111,11 +111,39 @@ export class FormDefinitionResponse {
   @ApiProperty({
     required: false,
     example: "0x4AAA…",
+    deprecated: true,
     description:
-      "Cloudflare Turnstile site key — present only when this environment has an active bot gate. " +
-      "The page renders the widget and sends the solved token back on submit.",
+      "DEPRECATED — use `botGate`. Cloudflare Turnstile site key, emitted only for a Turnstile gate. " +
+      "Kept for one release because an embedded iframe on a tenant's site may be running a cached " +
+      "bundle that only knows this field.",
   })
   turnstileSiteKey?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      "The active bot gate, absent when this environment has none. `turnstile` carries the tenant's " +
+      "public site key (render the widget, send the solved token back as `botToken`); `app_check` " +
+      "carries no key at all — the page mints a Firebase App Check token instead. See " +
+      "docs/design/TENANT-BOT-GATE-PROVIDERS.md.",
+    oneOf: [
+      {
+        type: "object",
+        required: ["provider", "siteKey"],
+        properties: {
+          provider: { type: "string", enum: ["turnstile"] },
+          siteKey: { type: "string", example: "0x4AAA…" },
+        },
+      },
+      {
+        type: "object",
+        required: ["provider"],
+        properties: { provider: { type: "string", enum: ["app_check"] } },
+      },
+    ],
+  })
+  botGate?:
+    { provider: "turnstile"; siteKey: string } | { provider: "app_check" };
 }
 
 /** How to submit the form the schema describes — the `x-naary-submit` annotation. JSON Schema
