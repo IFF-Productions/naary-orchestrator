@@ -59,6 +59,11 @@ beforeEach(() => {
   __agentDeps.releaseReservation = releaseReservation as never;
   sendNotification.mockReset().mockResolvedValue(undefined);
   __agentDeps.sendNotification = sendNotification as never;
+  // Agent guardrails (#576): runAgent now reads the workspace policy in-activity. Default to the
+  // EMPTY policy so these specs keep asserting the unguarded path (which must stay byte-identical).
+  // The guardrail behaviours themselves live in agent-guardrails.spec.ts.
+  __agentDeps.loadGuardrailPolicy = (() => Promise.resolve({})) as never;
+  __agentDeps.recordAuditEvent = (() => Promise.resolve()) as never;
 });
 
 afterEach(() => vi.clearAllMocks());

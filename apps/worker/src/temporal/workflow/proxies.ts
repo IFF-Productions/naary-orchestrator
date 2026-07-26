@@ -43,9 +43,20 @@ export const {
   // reference the workflow keeps is the LAST returned one), and each argument is bounded by
   // CAN_CTX_MAX_OFFLOADABLE_ENTRY_BYTES — comfortably inside the shared 1-minute timeout.
   offloadCtxEntry,
+  // Agent guardrails (#576): one indexed settings read + pure glob matching, returning a small
+  // `ref → verdict` projection. Idempotent, so the shared retry policy is right.
+  resolveToolPolicy,
 } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },
+});
+
+// Worker-side audit append (#576). BEST-EFFORT: the activity itself never throws (it swallows +
+// logs), so a couple of attempts cover a transient DB blip. It records a decision that has already
+// been enforced, so it must never be able to fail the run.
+export const { recordAuditEvent } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "30 seconds",
+  retry: { maximumAttempts: 2 },
 });
 
 // Agent TOOL-LOOP path (#449): a tooled agent makes several LLM steps + nested MCP

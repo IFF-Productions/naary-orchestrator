@@ -10,7 +10,13 @@ function makeService(status: string) {
     .fn()
     .mockResolvedValue({ status, currentNodeId: "n", ctx: {} });
   const signal = vi.fn().mockResolvedValue(undefined);
-  const service = new ExecutionsService({} as never, { defaultEnvId: async () => "env-test", resolveEnvId: async () => "env-test" } as never);
+  const service = new ExecutionsService(
+    {} as never,
+    {
+      defaultEnvId: async () => "env-test",
+      resolveEnvId: async () => "env-test",
+    } as never,
+  );
   (service as unknown as { client: unknown }).client = {
     workflow: { getHandle: () => ({ query, signal }) },
   };
@@ -27,6 +33,10 @@ describe("decideByToken (public signed-link decision) — awaiting guard", () =>
     expect(signal.mock.calls[0][1]).toEqual({
       approved: true,
       comment: "lgtm",
+      // #576: the signed-link path has no principal — the LINK is the authorization — so the
+      // decider is recorded honestly as "public-link" rather than leaving the audit row (written by
+      // the interpreter for a forced-approval tool gate) with an unknown actor.
+      actor: "public-link",
     });
   });
 

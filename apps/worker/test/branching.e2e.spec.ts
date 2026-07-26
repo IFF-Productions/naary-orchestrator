@@ -45,6 +45,11 @@ const mockActivities = {
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
   setExecutionStatus: async (): Promise<void> => undefined, // read-model push; no-op here
   loadVariables: async (): Promise<Record<string, string>> => ({}), // $vars seed; empty here
+  // Agent guardrails (#576): the interpreter resolves the workspace tool policy once per run for a
+  // graph containing an mcpTool/integration node. Empty projection = "everything allowed", which is
+  // what every scenario in this file assumes.
+  resolveToolPolicy: async (): Promise<activities.ToolPolicyProjection> => ({}),
+  recordAuditEvent: async (): Promise<void> => undefined,
 };
 
 let env: TestWorkflowEnvironment;

@@ -9,8 +9,16 @@
 // pre-split body is mechanical: former closure `let`s → `engine.state.*`, and shared
 // closures → the `engine` bag (pure aliasing + code motion, replay-identical).
 import * as wf from "@temporalio/workflow";
-import { APPROVAL_CTX_KEY, NODE_TIMES_CTX_KEY } from "@naary/contracts";
-import type { ExecutionStatus, NodeTimeEntry } from "@naary/contracts";
+import {
+  APPROVAL_CTX_KEY,
+  NODE_TIMES_CTX_KEY,
+  TOOL_POLICY_CTX_KEY,
+} from "@naary/contracts";
+import type {
+  ApprovalAwaitingRecord,
+  ExecutionStatus,
+  NodeTimeEntry,
+} from "@naary/contracts";
 import {
   getByPath,
   resolveTemplates,
@@ -19,16 +27,25 @@ import {
   resolveWebhookResponse,
   collectCitations,
   asNodeConfig,
+  integrationToolRef,
+  mcpToolRef,
   type UnresolvedRef,
 } from "@naary/dsl";
-import type { ApprovalNodeConfig, NodeDef, NodeOutputMap } from "@naary/dsl";
+import type {
+  ApprovalNodeConfig,
+  NodeDef,
+  NodeOutputMap,
+  ToolPolicyVerdict,
+} from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
 import type * as activities from "../../activities";
 // Pure fan-out policy (no side effects) — safe to import into workflow code.
 import { FOREACH_CONCURRENCY, perChildCap } from "../../foreach-cap";
 import {
   expandItems,
+  recordAuditEvent,
   resolveSubWorkflowGraph,
+  resolveToolPolicy,
   prepareApproval,
   sendNotification,
 } from "../proxies";
@@ -113,6 +130,179 @@ export async function execNode(
   }
 }
 
+/**
+ * The tool ref a node will call, or undefined for a node that calls no tool. PURE (a config read).
+ * `cfg` is the already-template-resolved config, so a `{{…}}`-built connection id / tool name yields
+ * the ref that will ACTUALLY be called — which is the ref the policy must be evaluated against (see
+ * the memo note in {@link toolApprovalGate}).
+ */
+function toolRefForNode(
+  node: NodeDef,
+  cfg: Record<string, unknown>,
+): string | undefined {
+  if (node.type === "mcpTool") {
+    return typeof cfg.connectionId === "string" && typeof cfg.tool === "string"
+      ? mcpToolRef(cfg.connectionId, cfg.tool)
+      : undefined;
+  }
+  if (node.type === "integration") {
+    return typeof cfg.provider === "string" && typeof cfg.action === "string"
+      ? integrationToolRef(cfg.provider, cfg.action)
+      : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * FORCED-APPROVAL TOOL GATE + runtime deny (#576) — the interpreter half of agent guardrails.
+ *
+ * THE ARCHITECTURAL CONSTRAINT THIS RESOLVES: an agent node's tool calls happen INSIDE a single
+ * activity, and Temporal cannot suspend an activity to await a Signal. So a durable, days-long
+ * "approve this tool call" pause is only possible where the INTERPRETER owns the call — a
+ * standalone `mcpTool` / `integration` node. That is what this function implements, reusing the
+ * existing humanApproval machinery verbatim (approvalSignal + wf.condition() + the `__approval`
+ * record the API's inbox/Slack/public-link paths already read). A forced-approval tool inside an
+ * agent's `tools[]` is instead REFUSED — at save time by validateGraphToolPolicy and at run time
+ * by the agent activity — rather than silently run unapproved or faked with an in-activity poll.
+ *
+ * Returns a TERMINAL status (rejected) to stop the run, or null to let the node proceed.
+ *
+ * DETERMINISM (Tier-1 rule 2): the ref derivation and the memo lookup are pure; the policy read is
+ * an activity; the pause is a Signal + condition(), never a sleep-loop; every new command sits
+ * behind `wf.patched("tool-approval-gate-v1")` at the call site so histories recorded before this
+ * code replay their original command sequence unchanged. The set of refs evaluated is a function of
+ * the (deterministic) ctx, so the activity call sequence replays identically.
+ */
+async function toolApprovalGate(
+  engine: Engine,
+  node: NodeDef,
+  cfg: Record<string, unknown>,
+): Promise<ExecutionStatus | null> {
+  const { ctx, state, runCtx, syncStatus } = engine;
+  const ref = toolRefForNode(node, cfg);
+  if (ref === undefined) return null;
+
+  // Evaluate the policy against the RESOLVED ref, memoized per distinct ref for the run segment.
+  //
+  // WHY NOT a projection precomputed from the graph's static refs: `cfg` here is the
+  // template-RESOLVED config, so `tool: "{{ trigger.body.t }}"` yields a ref that a scan of the
+  // saved graph never produced. Keying a projection on the static refs and treating a MISS as
+  // "allowed" meant such a node bypassed the policy entirely — including `deny: ["*"]`. The memo is
+  // therefore TOTAL (an "allow" verdict is stored explicitly) and a miss means "not yet evaluated",
+  // which triggers a real policy evaluation for exactly this ref. Cost: one activity call per
+  // DISTINCT resolved ref per run segment.
+  // A node's output lands at `ctx[node.id]`, so a graph is free to have a node id equal to this
+  // reserved key — in which case the slot holds that node's output (possibly a string or number)
+  // and `memo[ref] = …` would throw, wedging an otherwise valid run. Reset anything that isn't a
+  // plain record. Pure ctx read/write, no Temporal command, so replay-safe without a patch marker.
+  const existing = ctx[TOOL_POLICY_CTX_KEY];
+  if (
+    !existing ||
+    typeof existing !== "object" ||
+    Array.isArray(existing)
+  ) {
+    ctx[TOOL_POLICY_CTX_KEY] = {};
+  }
+  const memo = ctx[TOOL_POLICY_CTX_KEY] as Record<string, ToolPolicyVerdict>;
+  if (!Object.prototype.hasOwnProperty.call(memo, ref)) {
+    const resolved = await resolveToolPolicy({
+      tenantId: runCtx.tenantId,
+      refs: [ref],
+    });
+    // The activity is TOTAL over `refs`, so `resolved[ref]` is always present; `?? "allow"` only
+    // pins the memo so a (contract-violating) omission cannot make this re-call the activity on
+    // every visit to the node.
+    memo[ref] = resolved[ref] ?? "allow";
+  }
+  if (memo[ref] === "allow") return null; // the overwhelmingly common case
+
+  if (memo[ref] === "deny") {
+    // Runtime enforcement of the deny-list for a graph the save gate never saw (saved before the
+    // policy tightened, promoted in, seeded). Non-retryable: only an admin can change the policy.
+    void recordAuditEvent({
+      tenantId: runCtx.tenantId,
+      actor: "guardrail",
+      action: `Blocked denied tool ${ref}`,
+      path: `/executions/${wf.workflowInfo().workflowId}/nodes/${node.id}`,
+      statusCode: 403,
+      environmentId: runCtx.environmentId,
+    }).catch(() => undefined);
+    throw wf.ApplicationFailure.nonRetryable(
+      `Tool '${ref}' is blocked by this workspace's guardrail policy`,
+      "GUARDRAIL_TOOL_DENIED",
+    );
+  }
+
+  // ---- verdict === "approval": the durable pause -------------------------------------------
+  // Record-before-status, the same ATOMIC-AWAIT invariant the humanApproval gate documents: the
+  // API's stateQuery reads `__approval` whenever status is awaiting_approval, so the record must
+  // exist first or a query can observe a pause with no record.
+  const record: ApprovalAwaitingRecord = await prepareApproval({
+    tenantId: runCtx.tenantId,
+    nodeId: node.id,
+    // No routing/SLA config: a tool gate is policy-driven, not authored on a node. prepareApproval
+    // still supplies the pausedAt clock stamp (a side effect, hence the activity).
+    config: {},
+    // EMPTY on purpose. prepareApproval reads `ctx` only to resolve `config.contextFields`
+    // templates, and a tool gate has no config — so a ctx snapshot here would be copied into the
+    // activity input and the workflow history, then replayed on every workflow task, for a pause
+    // that can last days. Nothing would ever read it. (An authored humanApproval still sends its
+    // snapshot, because its contextFields need it.)
+    ctx: {},
+  });
+  // Pure ctx write of the ref so the inbox/Slack/public prompt can say WHAT is being approved.
+  record.toolRef = ref;
+  ctx[APPROVAL_CTX_KEY] = record;
+  state.status = "awaiting_approval";
+  await syncStatus();
+
+  // Best-effort page (a governance pause can last days). Swallowed + gated exactly like the
+  // humanApproval notification, so it can never affect the pause.
+  if (!runCtx.isErrorHandler) {
+    try {
+      await sendNotification({
+        tenantId: runCtx.tenantId,
+        environmentId: runCtx.environmentId,
+        kind: "approval_pending",
+        workflowId: wf.workflowInfo().workflowId,
+        workflowKey: runCtx.workflowKey,
+        title: `Approve tool call: ${ref}`,
+      });
+    } catch {
+      /* best-effort — never block the pause on a notification */
+    }
+  }
+
+  // Durable wait — forever. A tool gate has no authored timeout (unlike humanApproval's
+  // timeoutHours, which is node config): auto-approving on a timer would defeat the control, and
+  // auto-REJECTING would silently kill runs on a policy an admin may have added by accident. The
+  // run is visible as awaiting_approval and can be cancelled.
+  await wf.condition(() => state.approval !== undefined);
+  const decision = state.approval!;
+  state.status = "running";
+  delete ctx[APPROVAL_CTX_KEY];
+  state.approval = undefined; // consume so a later loop iteration can pause again
+
+  // #576 AC2: the AuditEvent naming ACTOR + TOOL + DECISION. Fire-and-forget — the decision has
+  // already been made and enforced; an audit-write blip must not change the run's outcome.
+  void recordAuditEvent({
+    tenantId: runCtx.tenantId,
+    actor: decision.actor ?? "unknown",
+    action: `${decision.approved ? "Approved" : "Rejected"} tool ${ref}`,
+    path: `/executions/${wf.workflowInfo().workflowId}/nodes/${node.id}`,
+    statusCode: decision.approved ? 200 : 403,
+    environmentId: runCtx.environmentId,
+  }).catch(() => undefined);
+
+  if (!decision.approved) {
+    // Terminal, exactly like a rejected humanApproval gate — the tool never runs. The node's
+    // output is deliberately left unset: it did not execute.
+    return "rejected";
+  }
+  await syncStatus(); // back to running in the Runs list before the tool actually fires
+  return null;
+}
+
 /** Run one node's side effect. Returns a TERMINAL status to stop the whole run
  *  (rejected), or null to continue. Mutates engine.ctx / engine.state via the bag. */
 async function execNodeInner(
@@ -147,6 +337,21 @@ async function execNodeInner(
   // `costUsd` delta; a `!== undefined` guard reproduces the original's unconditional
   // `ctx.__costUsd = costUsd` write (a void handler leaves it untouched, exactly as
   // the non-cost cases did). Control-flow cases fall through to the switch below.
+  // AGENT GUARDRAILS (#576) — forced-approval / deny gate, BEFORE the tool node runs. Placed here
+  // rather than inside handleMcpTool/handleIntegration because this site already has `state` and
+  // `syncStatus` (the pause needs both) and one site covers every tool-bearing node type.
+  //
+  // REPLAY INVARIANT, two layers, same pattern as the humanApproval Slice-1 fields:
+  //  (a) the node TYPE check keeps every non-tool node on its exact pre-#576 command sequence, and
+  //  (b) wf.patched() means a run whose history predates this code emits none of the new commands
+  //      (policy read / pause / notification / audit) and replays the legacy path unchanged.
+  if (
+    (node.type === "mcpTool" || node.type === "integration") &&
+    wf.patched("tool-approval-gate-v1")
+  ) {
+    const gated = await toolApprovalGate(engine, node, cfg);
+    if (gated !== null) return gated;
+  }
   const handler = NODE_HANDLERS[node.type];
   if (handler) {
     const r = await handler({ node, cfg, ctx, runCtx, metaFor });

@@ -83,6 +83,9 @@ beforeEach(() => {
   __agentDeps.getDefaultEnvId = (() => Promise.resolve("e1")) as never;
   __agentDeps.recordUsage = (() => Promise.resolve({ id: "evt_1" })) as never;
   __agentDeps.getBudget = (() => Promise.resolve(null)) as never; // no cap ⇒ no reservation
+  // #576: runAgent reads the workspace guardrail policy in-activity — empty ⇒ unguarded path.
+  __agentDeps.loadGuardrailPolicy = (() => Promise.resolve({})) as never;
+  __agentDeps.recordAuditEvent = (() => Promise.resolve()) as never;
   __initSentryForTest(sink);
 });
 

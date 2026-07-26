@@ -3754,6 +3754,316 @@
         ]
       }
     },
+    "/tenants/{id}/settings": {
+      "get": {
+        "operationId": "SettingsController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get tenant settings",
+        "tags": [
+          "Settings"
+        ]
+      },
+      "put": {
+        "operationId": "SettingsController_save",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveSettingsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update tenant settings",
+        "tags": [
+          "Settings"
+        ]
+      }
+    },
+    "/tenants/{id}/settings/guardrails": {
+      "get": {
+        "operationId": "SettingsController_getGuardrails",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailPolicyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the workspace agent guardrail policy (owner/admin only)",
+        "tags": [
+          "Settings"
+        ]
+      },
+      "put": {
+        "operationId": "SettingsController_saveGuardrails",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailPolicyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Replace the workspace agent guardrail policy (owner/admin only)",
+        "tags": [
+          "Settings"
+        ]
+      }
+    },
     "/graphs/{workflowKey}/nodes/{nodeId}/test": {
       "post": {
         "operationId": "PinsController_test",
@@ -5657,6 +5967,564 @@
         },
         "tags": [
           "ApprovalsPublic"
+        ]
+      }
+    },
+    "/graphs/{workflowKey}/evals/datasets": {
+      "get": {
+        "operationId": "EvalsController_listDatasets",
+        "parameters": [
+          {
+            "name": "workflowKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalDatasetListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the workflow's golden eval datasets",
+        "tags": [
+          "Evals"
+        ]
+      }
+    },
+    "/graphs/{workflowKey}/evals/datasets/{name}": {
+      "get": {
+        "operationId": "EvalsController_getDataset",
+        "parameters": [
+          {
+            "name": "workflowKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get one golden dataset's cases + assertions",
+        "tags": [
+          "Evals"
+        ]
+      },
+      "put": {
+        "operationId": "EvalsController_saveDataset",
+        "parameters": [
+          {
+            "name": "workflowKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create or replace a golden dataset",
+        "tags": [
+          "Evals"
+        ]
+      },
+      "delete": {
+        "operationId": "EvalsController_deleteDataset",
+        "parameters": [
+          {
+            "name": "workflowKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a golden dataset",
+        "tags": [
+          "Evals"
+        ]
+      }
+    },
+    "/graphs/{workflowKey}/evals/runs": {
+      "post": {
+        "operationId": "EvalsController_startRun",
+        "parameters": [
+          {
+            "name": "workflowKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Start a batch eval against a golden dataset",
+        "tags": [
+          "Evals"
+        ]
+      },
+      "get": {
+        "operationId": "EvalsController_listRuns",
+        "parameters": [
+          {
+            "name": "workflowKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Eval-run history (each row carries the graph version + content hash it measured)",
+        "tags": [
+          "Evals"
+        ]
+      }
+    },
+    "/evals/runs/{id}": {
+      "get": {
+        "operationId": "EvalRunsController_getRun",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalCaseResultsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "One eval run with its per-case verdicts",
+        "tags": [
+          "EvalRuns"
         ]
       }
     },
@@ -12070,166 +12938,6 @@
         ]
       }
     },
-    "/tenants/{id}/settings": {
-      "get": {
-        "operationId": "SettingsController_get",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SettingsResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get tenant settings",
-        "tags": [
-          "Settings"
-        ]
-      },
-      "put": {
-        "operationId": "SettingsController_save",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SaveSettingsDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SettingsResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Update tenant settings",
-        "tags": [
-          "Settings"
-        ]
-      }
-    },
     "/me/preferences": {
       "get": {
         "operationId": "PreferencesController_get",
@@ -16650,6 +17358,89 @@
           "status"
         ]
       },
+      "SettingsResponse": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "object",
+            "nullable": true,
+            "example": "Acme Inc.",
+            "description": "Tenant display name."
+          },
+          "defaultModel": {
+            "type": "object",
+            "nullable": true,
+            "example": "claude-sonnet-4",
+            "description": "Default model for new agent nodes."
+          }
+        },
+        "required": [
+          "displayName",
+          "defaultModel"
+        ]
+      },
+      "SaveSettingsDto": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "maxLength": 120,
+            "example": "Acme Inc.",
+            "description": "Tenant display name."
+          },
+          "defaultModel": {
+            "type": "string",
+            "maxLength": 120,
+            "example": "claude-sonnet-4",
+            "description": "Default model for new agent nodes."
+          }
+        }
+      },
+      "GuardrailPolicyResponse": {
+        "type": "object",
+        "properties": {
+          "policy": {
+            "type": "object",
+            "additionalProperties": true,
+            "example": {
+              "tools": {
+                "deny": [
+                  "delete_*"
+                ],
+                "requireApproval": [
+                  "github:create_issue"
+                ]
+              },
+              "input": [
+                {
+                  "label": "no-codenames",
+                  "kind": "keyword",
+                  "pattern": "Project Bluebird"
+                }
+              ],
+              "output": [
+                {
+                  "label": "no-swearing",
+                  "kind": "regex",
+                  "pattern": "damn",
+                  "action": "strip"
+                }
+              ],
+              "redact": {
+                "enabled": true,
+                "kinds": [
+                  "email",
+                  "phone"
+                ]
+              }
+            },
+            "description": "Tool allow/deny/forced-approval globs, input/output content rules, and PII redaction opt-in. `{}` = no guardrails."
+          }
+        },
+        "required": [
+          "policy"
+        ]
+      },
       "StartExecutionDto": {
         "type": "object",
         "properties": {
@@ -17274,6 +18065,181 @@
         },
         "required": [
           "status"
+        ]
+      },
+      "EvalDatasetListResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "b3f1…"
+          },
+          "name": {
+            "type": "string",
+            "example": "refund-triage-golden"
+          },
+          "caseCount": {
+            "type": "number",
+            "example": 20,
+            "description": "Number of golden cases."
+          },
+          "assertionCount": {
+            "type": "number",
+            "example": 2,
+            "description": "Dataset-level assertions applied to every case."
+          },
+          "updatedAt": {
+            "type": "string",
+            "example": "2026-07-25T12:00:00.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "caseCount",
+          "assertionCount",
+          "updatedAt"
+        ]
+      },
+      "EvalRunResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "datasetId": {
+            "type": "string"
+          },
+          "datasetName": {
+            "type": "string"
+          },
+          "workflowId": {
+            "type": "string",
+            "description": "The eval batch's Temporal workflowId (each case is a child run of it)."
+          },
+          "graphVersion": {
+            "type": "number",
+            "example": 7,
+            "description": "The GraphDefinition version this batch measured — pair with contentHash to compare versions on a promote screen."
+          },
+          "graphContentHash": {
+            "type": "string",
+            "description": "sha256 of the canonical graph this batch measured."
+          },
+          "status": {
+            "type": "string",
+            "example": "completed",
+            "description": "running | completed | failed"
+          },
+          "totalCases": {
+            "type": "number",
+            "example": 20
+          },
+          "passed": {
+            "type": "number",
+            "example": 18
+          },
+          "failed": {
+            "type": "number",
+            "example": 2
+          },
+          "errored": {
+            "type": "number",
+            "example": 0,
+            "description": "Cases that could not be judged (the run failed/timed out, or an assertion was unusable) — deliberately NOT counted as failures."
+          },
+          "costUsd": {
+            "type": "object",
+            "nullable": true,
+            "example": 0.42,
+            "description": "Summed case cost, including LLM-judge spend."
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "object",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "datasetId",
+          "datasetName",
+          "workflowId",
+          "graphVersion",
+          "graphContentHash",
+          "status",
+          "totalCases",
+          "passed",
+          "failed",
+          "errored",
+          "costUsd",
+          "startedAt",
+          "finishedAt"
+        ]
+      },
+      "EvalCaseResultsResponse": {
+        "type": "object",
+        "properties": {
+          "caseName": {
+            "type": "string"
+          },
+          "executionId": {
+            "type": "object",
+            "nullable": true,
+            "description": "The case's child-run workflowId, for drill-down into the normal run view."
+          },
+          "verdict": {
+            "type": "string",
+            "example": "pass",
+            "description": "pass | fail | error"
+          },
+          "score": {
+            "type": "object",
+            "nullable": true,
+            "example": 1,
+            "description": "Mean assertion score, 0–1."
+          },
+          "costUsd": {
+            "type": "object",
+            "nullable": true
+          },
+          "latencyMs": {
+            "type": "object",
+            "nullable": true
+          },
+          "assertions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "example": [
+              {
+                "label": "category",
+                "kind": "jsonPathEquals",
+                "passed": true,
+                "score": 1
+              },
+              {
+                "label": "tone",
+                "kind": "llmJudge",
+                "passed": false,
+                "score": 0.4
+              }
+            ],
+            "description": "AssertionOutcome[] — label, kind, passed, 0–1 score, and an optional short error CODE. Never actual/expected values, never the judge's reasoning."
+          }
+        },
+        "required": [
+          "caseName",
+          "executionId",
+          "verdict",
+          "score",
+          "costUsd",
+          "latencyMs",
+          "assertions"
         ]
       },
       "CredentialProviderResponse": {
@@ -19309,44 +20275,6 @@
         "required": [
           "name"
         ]
-      },
-      "SettingsResponse": {
-        "type": "object",
-        "properties": {
-          "displayName": {
-            "type": "object",
-            "nullable": true,
-            "example": "Acme Inc.",
-            "description": "Tenant display name."
-          },
-          "defaultModel": {
-            "type": "object",
-            "nullable": true,
-            "example": "claude-sonnet-4",
-            "description": "Default model for new agent nodes."
-          }
-        },
-        "required": [
-          "displayName",
-          "defaultModel"
-        ]
-      },
-      "SaveSettingsDto": {
-        "type": "object",
-        "properties": {
-          "displayName": {
-            "type": "string",
-            "maxLength": 120,
-            "example": "Acme Inc.",
-            "description": "Tenant display name."
-          },
-          "defaultModel": {
-            "type": "string",
-            "maxLength": 120,
-            "example": "claude-sonnet-4",
-            "description": "Default model for new agent nodes."
-          }
-        }
       },
       "PreferencesResponse": {
         "type": "object",

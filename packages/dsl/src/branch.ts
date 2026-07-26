@@ -23,7 +23,7 @@ import type { EdgeCondition, GraphDef, IntegrationNodeConfig } from "./types";
 const MAX_REGEX_PATTERN_LENGTH = 250;
 const MAX_REGEX_INPUT_LENGTH = 10_000;
 
-function hasNestedQuantifier(pattern: string): boolean {
+export function hasNestedQuantifier(pattern: string): boolean {
   // Neutralize escapes and character classes so their contents can't read as
   // quantifiers/groups ("\(" or "[+*]" are literals).
   const stripped = pattern.replace(/\\./g, "x").replace(/\[[^\]]*\]/g, "x");

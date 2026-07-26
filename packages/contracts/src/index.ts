@@ -24,6 +24,10 @@ export const RUN_GRAPH_WORKFLOW = "runGraph";
 /** Workflow type name for the durable per-session chat workflow (design §2.1b, option A). */
 export const CHAT_SESSION_WORKFLOW = "chatSession";
 
+/** Registered name of the eval-batch workflow (#575) — one execution per eval run, launching one
+ *  CHILD `runGraph` per golden case. Must match the export name in the worker's workflows.ts. */
+export const EVAL_RUN_WORKFLOW = "evalRun";
+
 export type ExecutionStatus =
   | "running"
   | "awaiting_approval"
@@ -53,6 +57,17 @@ export interface ApprovalInput {
   approved: boolean;
   /** Optional reviewer note recorded with the decision (approve or reject). */
   comment?: string;
+  /**
+   * DISPLAY identity of whoever decided (email, else OIDC subject, else "api-token"; the public
+   * signed-link path sends "public-link"). Added for #576: a forced-approval TOOL gate resolves
+   * inside the interpreter, which then writes the AuditEvent naming actor + tool + decision — the
+   * API's request-scoped AuditInterceptor cannot cover a decision the worker observes as a Signal
+   * (and never covered the public link at all, which has no `req.principal`).
+   *
+   * NOT a secret and NOT an authorization input: the API has already authenticated and authorized
+   * the decider before signalling. Optional, so an old API signalling a new worker is fine.
+   */
+  actor?: string;
 }
 
 /** ctx key under which the interpreter stores the {@link ApprovalAwaitingRecord} while a
@@ -84,7 +99,29 @@ export interface ApprovalAwaitingRecord {
   remindAfterHours?: number[];
   escalateAfterHours?: number;
   escalateTo?: string;
+  /**
+   * FORCED-APPROVAL TOOL GATE (#576). Present only when the pause is a guardrail tool gate rather
+   * than a `humanApproval` node: the `connectionId:tool` / `provider:action` ref the run is waiting
+   * to be allowed to call. Lets the approval inbox / Slack message say WHAT is being approved, and
+   * is what the interpreter names in the AuditEvent. A ref, never arguments.
+   */
+  toolRef?: string;
 }
+
+/**
+ * ctx key under which the interpreter MEMOIZES tool-policy verdicts (#576) — a
+ * `ref → "allow" | "deny" | "approval"` map filled lazily by the `resolveToolPolicy` activity, one
+ * entry per DISTINCT resolved tool ref the run actually reaches.
+ *
+ * TOTAL, including "allow": absence means "not yet evaluated", NEVER "allowed". Representing allow
+ * by absence would make an unregistered ref indistinguishable from a permitted one, which is exactly
+ * how a `{{ }}`-templated tool name could slip past a deny-list.
+ *
+ * Memoized rather than re-read per node for the same reason `$vars` are loaded once. A run that
+ * pauses for days therefore enforces the policy as it stood when that ref was first reached in the
+ * segment — the same "snapshot at start" contract the pinned graph version already has.
+ */
+export const TOOL_POLICY_CTX_KEY = "__toolPolicy";
 
 /** ctx key under which the interpreter records per-node execution times (Slice 2 —
  *  per-node timing + cost). `__`-prefixed = reserved/system, so it is stripped from

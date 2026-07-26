@@ -32,6 +32,9 @@ export const harnessState: {
   pauseAgentFailures: number;
   refreshBudgetResult: activities.BudgetSnapshot | null;
   httpResponse: activities.HttpRequestResult;
+  /** Agent guardrails (#576): the projection `resolveToolPolicy` returns. `{}` (the default) means
+   *  "everything allowed", which is what every pre-#576 interpreter spec expects. */
+  toolPolicy: activities.ToolPolicyProjection;
 } = {
   loadVariablesResult: { slackChannel: "#alerts" },
   loadTemplateResult: null,
@@ -45,6 +48,7 @@ export const harnessState: {
     body: { ok: true },
     costUsd: 0,
   },
+  toolPolicy: {},
 };
 
 // Temporal's own bundler (not vitest) processes this path, so it must be a real
@@ -366,6 +370,26 @@ const mockActivities = {
   ): Promise<void> => {
     notifyCalls.push(input);
   },
+  // Agent guardrails (#576). The gate in execNodeInner calls this once per run for any graph
+  // containing an mcpTool/integration node, so every pre-existing tool-node spec reaches it — the
+  // default `harnessState.toolPolicy = {}` keeps those on the "everything allowed" path.
+  resolveToolPolicy: async (
+    input: activities.ResolveToolPolicyInput,
+  ): Promise<activities.ToolPolicyProjection> => {
+    resolveToolPolicyCalls.push(input);
+    // Mirror the real activity: TOTAL over the refs asked about, with an explicit "allow" for
+    // anything `harnessState.toolPolicy` does not restrict. (Absence must never read as allowed.)
+    const out: activities.ToolPolicyProjection = {};
+    for (const ref of input.refs) {
+      out[ref] = harnessState.toolPolicy[ref] ?? "allow";
+    }
+    return out;
+  },
+  recordAuditEvent: async (
+    input: activities.AuditEventInput,
+  ): Promise<void> => {
+    auditEvents.push(input);
+  },
   // Slice 1 pause-side snapshot. Mirrors the real activity's shape: contextFields resolved
   // with the SAME resolveTemplates against the ctx snapshot the interpreter handed over
   // (proving eval happens in-activity on pause-time data), a fixed pausedAt, and group
@@ -498,6 +522,8 @@ const prepareApprovalCalls: {
   config: ApprovalNodeConfig;
   ctx: Record<string, unknown>;
 }[] = [];
+const resolveToolPolicyCalls: activities.ResolveToolPolicyInput[] = [];
+const auditEvents: activities.AuditEventInput[] = [];
 
 // pollTrigger(entry) → branch on poll.changed: changed → agent → end; else → end.
 const pollGraph: GraphDef = {
@@ -1197,6 +1223,8 @@ export {
   refreshBudgetCalls,
   notifyCalls,
   prepareApprovalCalls,
+  resolveToolPolicyCalls,
+  auditEvents,
   codeCalls,
   totpCalls,
   csvCalls,

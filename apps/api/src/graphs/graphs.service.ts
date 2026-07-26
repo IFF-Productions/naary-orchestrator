@@ -13,6 +13,7 @@ import {
   type GraphDiff,
   type NodeDef,
   validateGraph,
+  validateGraphToolPolicy,
 } from "@naary/dsl";
 import { TracedClass } from "@naary/observability";
 // Runtime config validation is imported from the registry module DIRECTLY (not via the package
@@ -27,6 +28,7 @@ import {
   PermissionsService,
   type WorkflowAction,
 } from "../permissions/permissions.service";
+import { GuardrailsService } from "../settings/guardrails.service";
 
 /** sha256 of the canonical (key-sorted) graph. Server-side — keeps `node:crypto`
  *  out of the DSL (which is bundled into the deterministic workflow). */
@@ -81,6 +83,10 @@ export class GraphsService {
   constructor(
     @Optional() private readonly permissions?: PermissionsService,
     @Optional() private readonly notifications?: NotificationsService,
+    /** @Optional for the same reason as the others (many `new GraphsService()` test/CLI
+     *  constructions). Unwired ⇒ the tool-policy save gate is skipped, which is safe: it is
+     *  DEFENSE IN DEPTH, and the worker enforces the same policy in-activity regardless. */
+    @Optional() private readonly guardrails?: GuardrailsService,
   ) {}
 
   /** In-service permission assert (RBAC-GROUPS.md §4): no actor = internal/trigger caller —
@@ -138,6 +144,21 @@ export class GraphsService {
         )
         .join(" | ");
       throw new BadRequestException(`Invalid node config — ${summary}`);
+    }
+    // Agent guardrails (#576 AC1, save half): reject a graph that calls a tool this workspace's
+    // policy denies, and reject a forced-approval tool placed INSIDE an agent's in-loop `tools[]`
+    // (a durable approval pause is impossible mid-activity — see validateGraphToolPolicy). This is
+    // one of THREE enforcement points; the worker independently enforces the same policy in the
+    // activity and the interpreter pauses on a forced-approval tool node.
+    if (this.guardrails) {
+      const policy = await this.guardrails.get(tenantId);
+      const toolErrors = validateGraphToolPolicy(graph, policy);
+      if (toolErrors.length > 0) {
+        const summary = toolErrors
+          .map((e) => `${e.nodeId} (${e.nodeType}): ${e.message}`)
+          .join(" | ");
+        throw new BadRequestException(`Guardrail policy — ${summary}`);
+      }
     }
     const contentHash = hashGraph(graph);
     // Version is per (tenant, ENVIRONMENT, workflowKey) — a save in sandbox and prod for the same

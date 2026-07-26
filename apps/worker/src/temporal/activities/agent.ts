@@ -12,10 +12,19 @@ import {
 } from "@naary/connections";
 import { MissingCredentialError } from "@naary/secrets";
 import {
+  type AgentGuardrailPolicy,
   type AgentHandoff,
+  applyContentRules,
+  applyContentRulesToValue,
+  type ContentViolation,
+  evaluateToolPolicy,
   HANDOFF_TARGET_FIELD,
   handoffOutputSchema,
   handoffTargetName,
+  isEmptyGuardrailPolicy,
+  mcpToolRef,
+  redactPii,
+  violationLabels,
 } from "@naary/dsl";
 import { withGenAiSpan, withGenAiToolSpan } from "@naary/observability";
 import {
@@ -50,6 +59,8 @@ import {
   runLog,
   toSanitizedRetryable,
 } from "./shared";
+import { GUARDRAIL_ACTOR, recordAuditEvent } from "./audit";
+import { loadGuardrailPolicy } from "./guardrails";
 import { sendNotification } from "./notifications";
 
 // Activities run in the worker PROCESS (a side-effect zone), so structured
@@ -126,6 +137,8 @@ export interface AgentResult {
    *  per-step TOKENS stat without a ledger read (Slice 2). Optional: results recorded
    *  before this field replay without it. */
   totalTokens?: number;
+  /** Guardrail summary (#576) — absent when no policy applied. Labels + counts, never content. */
+  guardrails?: AgentGuardrailReport;
 }
 
 // Structured output is fully node-config-driven (#450): an agent returns a structured object
@@ -228,7 +241,47 @@ export const __agentDeps = {
   /** Budget alert-threshold notification (Slice 3). Routed through the same channel
    *  fan-out as run notifications; swappable so specs can capture/fail the send. */
   sendNotification,
+  /** Agent guardrails (#576): the workspace policy read + the worker-side audit writer.
+   *  Swappable so the enforcement paths (denied tool, content rule, redaction) are unit-testable
+   *  with no DB — which is exactly how the AC3 "no raw PII escapes" test asserts its claim. */
+  loadGuardrailPolicy,
+  recordAuditEvent,
 };
+
+/** Labels + counts only — never matched text, never the redaction map (#576, Tier-1 rule 4). */
+export interface AgentGuardrailReport {
+  /** Distinct PII values replaced in the prompt before the model saw it. */
+  redacted?: number;
+  /** `"input:<label>"` / `"output:<label>"` for each rule that matched. */
+  violations?: string[];
+}
+
+/**
+ * Fire-and-forget guardrail audit row. Never awaited on the enforcement path and never allowed to
+ * throw: enforcement has ALREADY happened by the time this runs, so an audit-write problem must
+ * not turn a correctly-blocked call into a differently-failed one (nor a permitted call into a
+ * failure). Same posture as fireBudgetThresholdAlert.
+ */
+function fireGuardrailAudit(
+  meta: AgentMeta,
+  action: string,
+  statusCode: number,
+): void {
+  try {
+    void Promise.resolve(
+      __agentDeps.recordAuditEvent({
+        tenantId: meta.tenantId,
+        actor: GUARDRAIL_ACTOR,
+        action,
+        path: `/executions/${meta.executionId}/nodes/${meta.nodeId}`,
+        statusCode,
+        environmentId: meta.environmentId,
+      }),
+    ).catch(() => undefined);
+  } catch {
+    /* best-effort — an audit write must never affect the run */
+  }
+}
 
 /**
  * Fire the budgetThreshold alert FIRE-AND-FORGET (Slice 3). FAIL-SAFE by construction
@@ -305,6 +358,108 @@ export async function runAgent(
     const modelInput = containsClaimCheck(input)
       ? await resolveClaimChecks(input, getObjectStore())
       : input;
+
+    // ---- AGENT GUARDRAILS (#576), enforced IN-ACTIVITY -----------------------------------------
+    // Read the workspace policy FIRST — before the credential fetch, before the budget
+    // reservation, before any token is spent — so a denied tool or a blocked prompt costs nothing.
+    // This is the second of three enforcement points (save gate, here, interpreter pause); it is
+    // what makes a runtime bypass (a graph saved before the policy tightened, a direct workflow
+    // start, a hand-written graph) fail rather than execute (#576 AC1, runtime half).
+    const policy: AgentGuardrailPolicy = await __agentDeps.loadGuardrailPolicy(
+      meta.tenantId,
+    );
+    const guardrailsActive = !isEmptyGuardrailPolicy(policy);
+    // Report returned to the interpreter: labels + counts only.
+    const guardrailReport: AgentGuardrailReport = {};
+    const inputViolations: ContentViolation[] = [];
+
+    if (guardrailsActive) {
+      // (1) TOOL POLICY. A denied tool is refused before the toolset is even built, so the model
+      // is never offered it. A forced-approval tool is ALSO refused here rather than silently run:
+      // the pause it requires cannot happen mid-activity (Temporal can't suspend an activity to
+      // await a Signal), and running it unapproved would be the exact governance hole the policy
+      // exists to close. The save gate rejects this configuration up front with the same reason.
+      for (const t of cfg.tools ?? []) {
+        const ref = mcpToolRef(t.connectionId, t.tool);
+        const verdict = evaluateToolPolicy(ref, policy);
+        if (verdict === "deny") {
+          fireGuardrailAudit(meta, `Blocked denied agent tool ${ref}`, 403);
+          throw ApplicationFailure.nonRetryable(
+            `Agent tool '${ref}' is blocked by this workspace's guardrail policy`,
+            "GUARDRAIL_TOOL_DENIED",
+            { tenantId: meta.tenantId },
+          );
+        }
+        if (verdict === "approval") {
+          fireGuardrailAudit(
+            meta,
+            `Blocked forced-approval agent tool ${ref} (in-loop)`,
+            403,
+          );
+          throw ApplicationFailure.nonRetryable(
+            `Agent tool '${ref}' requires human approval, which cannot be awaited inside an agent's tool loop — move it to a standalone Tool/Integration node`,
+            "GUARDRAIL_TOOL_NEEDS_APPROVAL",
+            { tenantId: meta.tenantId },
+          );
+        }
+      }
+    }
+
+    // (2)+(3) INPUT CONTENT RULES, then PII REDACTION, over the assembled prompt. The system
+    // prompt and the serialized input are handled separately so a `strip` rewrite lands in the
+    // right slot. When no policy is configured both values are the ORIGINAL ones, so the
+    // no-guardrails path is byte-identical to pre-#576 (the generateText args below prove it).
+    let effSystemPrompt = cfg.systemPrompt;
+    let effPromptText = JSON.stringify(modelInput);
+    if (guardrailsActive && policy.input?.length) {
+      const sys = applyContentRules(effSystemPrompt ?? "", policy.input);
+      const usr = applyContentRules(effPromptText, policy.input);
+      inputViolations.push(...sys.violations, ...usr.violations);
+      if (sys.blocked || usr.blocked) {
+        const labels = violationLabels("input", inputViolations);
+        fireGuardrailAudit(
+          meta,
+          `Blocked agent input by content rule(s) ${labels.join(", ")}`,
+          403,
+        );
+        // NON-retryable: the same input violates the same rule every time, so a retry only burns
+        // Temporal attempts. The message names the LABELS, never the matched text.
+        throw ApplicationFailure.nonRetryable(
+          `Agent input blocked by guardrail content rule(s): ${labels.join(", ")}`,
+          "GUARDRAIL_CONTENT_BLOCKED",
+          { tenantId: meta.tenantId },
+        );
+      }
+      if (effSystemPrompt !== undefined) effSystemPrompt = sys.text;
+      effPromptText = usr.text;
+    }
+    if (guardrailsActive && policy.redact?.enabled) {
+      // The redaction MAPS are the sensitive artifact (placeholder → raw PII). They stay in this
+      // block scope, are never returned, never logged, never put on a span, never persisted
+      // (Tier-1 rule 4 posture). Only `count` — a number — escapes.
+      const sysRed = redactPii(effSystemPrompt ?? "", policy.redact.kinds);
+      const usrRed = redactPii(effPromptText, policy.redact.kinds);
+      if (effSystemPrompt !== undefined) effSystemPrompt = sysRed.text;
+      effPromptText = usrRed.text;
+      const redacted = sysRed.count + usrRed.count;
+      if (redacted > 0) guardrailReport.redacted = redacted;
+    }
+
+    // HANDOFF ROSTER (#580) — appended AFTER the guardrail pipeline above, deliberately:
+    //
+    //  · The roster is text WE generate from the graph's own declared targets, not author or
+    //    user content, so it is not what `policy.input`/redaction exist to police.
+    //  · More importantly, running it through them could REWRITE it. The target names in the
+    //    roster must match the enum `handoffOutputSchema` constrains generation to; a `strip`
+    //    rule or a PII placeholder landing on a name would break routing while looking fine.
+    //
+    // Filtered rather than interpolated because `systemPrompt` is optional (the save gate allows
+    // a handoff agent without one) — a template literal produced a prompt starting "undefined".
+    if (cfg.handoff) {
+      effSystemPrompt = [effSystemPrompt?.trim(), handoffRoster(cfg.handoff)]
+        .filter((part): part is string => Boolean(part))
+        .join("\n\n");
+    }
 
     // In memory only — never returned from the activity, never logged. Env-scoped creds (Slice 5):
     // use the run's env (5b, threaded via meta) so a sandbox run reads the sandbox key; a pre-5b run
@@ -420,7 +575,7 @@ export async function runAgent(
     const cachePrompt =
       cfg.cacheSystemPrompt === true &&
       provider === "anthropic" &&
-      !!cfg.systemPrompt;
+      !!effSystemPrompt;
 
     const { generateText, Output, jsonSchema, tool, stepCountIs } =
       await aiSdk();
@@ -520,19 +675,6 @@ export async function runAgent(
         }
       : {};
 
-    // A handoff supervisor is told WHO it can route to. Without the roster the model sees an
-    // enum of bare names and has to guess what each one handles; with it, the descriptions the
-    // author already wrote do the work. Appended (never replacing the author's prompt), and
-    // derived from the same `targets` the enum and the edges come from — one source of truth.
-    // `systemPrompt` is OPTIONAL (the save gate allows a handoff agent without one), so it is
-    // filtered rather than interpolated — a template literal turned the missing case into a
-    // prompt that literally began "undefined", which the model reads and the token estimate bills.
-    const systemPrompt = cfg.handoff
-      ? [cfg.systemPrompt?.trim(), handoffRoster(cfg.handoff)]
-          .filter((part): part is string => Boolean(part))
-          .join("\n\n")
-      : cfg.systemPrompt;
-
     // GenAI-convention span (#581). It wraps ONLY the model call + the PURE usage/cost derivation
     // whose numbers it reports — the credential fetch, budget reservation, and the recordUsage write
     // stay outside, so the span's duration keeps meaning "model latency". Attributes are model /
@@ -554,20 +696,25 @@ export async function runAgent(
                 messages: [
                   {
                     role: "system" as const,
-                    content: systemPrompt as string,
+                    // GUARDRAILS (#576): the content-rule-filtered, PII-redacted prompt, plus
+                    // the handoff roster (#580) — equal to `cfg.systemPrompt` when neither
+                    // applies.
+                    content: effSystemPrompt as string,
                     providerOptions: {
                       anthropic: { cacheControl: { type: "ephemeral" } },
                     },
                   },
                   {
                     role: "user" as const,
-                    content: JSON.stringify(modelInput),
+                    content: effPromptText,
                   },
                 ],
               }
             : {
-                system: systemPrompt,
-                prompt: JSON.stringify(modelInput),
+                system: effSystemPrompt,
+                // effPromptText IS JSON.stringify(modelInput) with the guardrail pipeline
+                // applied — identical to it when no policy is configured.
+                prompt: effPromptText,
               }),
           ...(tooled
             ? {
@@ -607,7 +754,10 @@ export async function runAgent(
         const estimated = !(real.inputTokens || real.outputTokens);
         const usage = estimated
           ? estimateTokens(
-              systemPrompt,
+              // What was ACTUALLY sent: guardrail-processed and roster-appended. Billing must
+              // fail safe (CLAUDE.md rule 6), and the author's raw prompt would under-count —
+              // the handoff roster adds real tokens the provider charged for.
+              effSystemPrompt ?? "",
               modelInput,
               // output text may be empty under structured output — fall back to the object
               result.text || JSON.stringify(result.output ?? ""),
@@ -642,16 +792,66 @@ export async function runAgent(
 
     // The node's output: the structured object when a schema drove the call, else the model's
     // final free-text answer as { text } (a stable shape downstream expressions can read).
-    const nodeOutput: Record<string, unknown> = wantStructured
+    let nodeOutput: Record<string, unknown> = wantStructured
       ? (result.output as Record<string, unknown>)
       : { text: result.text };
+
+    // (4) OUTPUT CONTENT RULES. Applied to every string LEAF of the output (never by
+    // stringify→rewrite→reparse, which a `strip` straddling a JSON delimiter would corrupt).
+    // NOTE ON COST: the model call already happened and is already billed — that spend is real and
+    // is recorded below whether the output is blocked or not (rule 6: never record zero for a call
+    // that happened). Blocking here prevents the content from reaching downstream nodes / Temporal
+    // history; it cannot un-spend the tokens.
+    const outputRules = guardrailsActive ? policy.output : undefined;
+    if (outputRules?.length) {
+      const checked = applyContentRulesToValue(nodeOutput, outputRules);
+      const labels = [
+        ...violationLabels("input", inputViolations),
+        ...violationLabels("output", checked.violations),
+      ];
+      if (labels.length > 0) guardrailReport.violations = labels;
+      if (checked.blocked) {
+        const outLabels = violationLabels("output", checked.violations);
+        fireGuardrailAudit(
+          meta,
+          `Blocked agent output by content rule(s) ${outLabels.join(", ")}`,
+          403,
+        );
+        // Record the spend BEFORE failing: the provider call happened, so a silently-free call
+        // would violate Tier-1 rule 6. Then fail non-retryably (a retry re-pays for an output the
+        // same rule blocks again).
+        await __agentDeps.recordUsage({
+          tenantId: meta.tenantId,
+          environmentId: meta.environmentId,
+          executionId: meta.executionId,
+          nodeId: meta.nodeId,
+          nodeType: meta.ledgerNodeType ?? "agent",
+          durationMs: Math.round(secondsSince(startedAt) * 1000),
+          provider,
+          model,
+          usage,
+        });
+        throw ApplicationFailure.nonRetryable(
+          `Agent output blocked by guardrail content rule(s): ${outLabels.join(", ")}`,
+          "GUARDRAIL_CONTENT_BLOCKED",
+          { tenantId: meta.tenantId },
+        );
+      }
+      nodeOutput = checked.value;
+    } else if (inputViolations.length > 0) {
+      // `strip`-only input violations still deserve a report (nothing was blocked, but the prompt
+      // was rewritten and the run detail should say so).
+      guardrailReport.violations = violationLabels("input", inputViolations);
+    }
 
     await __agentDeps.recordUsage({
       tenantId: meta.tenantId,
       environmentId: meta.environmentId, // per-env cost tag (Slice 6)
       executionId: meta.executionId,
       nodeId: meta.nodeId,
-      nodeType: "agent", // Slice 2: by-node-type rollups without a graph join
+      // Slice 2: by-node-type rollups without a graph join. `ledgerNodeType` lets the eval
+      // activity tag its LLM-JUDGE spend distinctly (#575) while reusing this whole path.
+      nodeType: meta.ledgerNodeType ?? "agent",
       durationMs: Math.round(secondsSince(startedAt) * 1000), // measured in-activity
       provider,
       model, // the model that actually ran (post-downgrade)
@@ -697,6 +897,12 @@ export async function runAgent(
       totalTokens:
         (usage as { totalTokens?: number }).totalTokens ??
         usage.inputTokens + usage.outputTokens,
+      // Guardrail summary (#576) — omitted entirely when nothing happened, so a run with no policy
+      // produces the exact pre-#576 result shape. LABELS + COUNTS ONLY: the redaction map and every
+      // matched string stay in this activity by construction (Tier-1 rule 4).
+      ...(Object.keys(guardrailReport).length > 0
+        ? { guardrails: guardrailReport }
+        : {}),
     };
   } catch (e) {
     activityRuns.inc({ activity: "runAgent", outcome: "error" });

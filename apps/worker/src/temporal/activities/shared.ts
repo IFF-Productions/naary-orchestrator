@@ -65,6 +65,16 @@ export interface AgentMeta {
    *  DEBUG-level child logger so this ONE run emits its `.debug()` lines while every other run stays
    *  at the process LOG_LEVEL. Non-secret flag, threaded through the run ctx → meta (Tier-1 §4). */
   debug?: boolean;
+  /**
+   * Overrides the `UsageEvent.nodeType` tag `runAgent` records (#575). Set ONLY by the eval
+   * activity's LLM-judge call, so judge spend is billed through the existing reservation/ledger path
+   * yet does not masquerade as an ordinary `agent` node in by-node-type rollups.
+   *
+   * The interpreter's `metaFor` never sets it, and no other activity reads it — every other
+   * `recordUsage` call site hardcodes its own nodeType — so it cannot bleed into a TTS / RAG /
+   * codeAgent ledger row.
+   */
+  ledgerNodeType?: string;
 }
 
 /**

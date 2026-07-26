@@ -21,6 +21,12 @@
  * bottom — a drift makes the guard resolve to `never` and fails `tsc -b`, naming the culprit.
  */
 import { z } from "zod";
+import { hasNestedQuantifier } from "./branch";
+import {
+  MAX_CONTENT_RULE_PATTERN_LENGTH,
+  PII_KIND_VALUES,
+  type AgentGuardrailPolicy,
+} from "./guardrails";
 import { hasForbiddenPathSegment } from "./mcp-args";
 import type {
   AggregateNodeConfig,
@@ -953,3 +959,108 @@ const _configParity: {
   stopAndError: true,
 };
 void _configParity;
+
+// ---------------------------------------------------------------------------------------------
+// Agent guardrail policy (#576) — the zod layer for the PER-WORKSPACE policy
+// ---------------------------------------------------------------------------------------------
+// The pure evaluator + types live in ./guardrails (zod-free, reachable from the deterministic
+// workflow bundle). This schema is the API's write gate for `TenantSettings.agentGuardrails`, and
+// lives HERE for the same reason every other schema does: registry.ts is the one module the
+// package index does NOT re-export, so zod never enters the workflow bundle.
+
+/** A tool glob. Bounded so a policy row can't become a pathological pattern list. */
+const toolGlob = z.string().min(1).max(200);
+const toolGlobList = z.array(toolGlob).max(200);
+
+const contentRuleSchema = z
+  .object({
+    label: z.string().min(1).max(80),
+    kind: z.enum(["keyword", "regex"]),
+    pattern: z.string().min(1).max(MAX_CONTENT_RULE_PATTERN_LENGTH),
+    action: z.enum(["fail", "strip"]).optional(),
+    ignoreCase: z.boolean().optional(),
+  })
+  // Reject an unsafe regex AT SAVE TIME rather than silently treating it as non-matching at run
+  // time (which would look like a guardrail that quietly does nothing). Same structural
+  // catastrophic-backtracking test the edge-condition `regex` operator uses (#598).
+  .refine(
+    (r) => r.kind !== "regex" || !hasNestedQuantifier(r.pattern),
+    "regex rule has a nested quantifier (catastrophic-backtracking risk) — rewrite it",
+  )
+  .refine((r) => {
+    if (r.kind !== "regex") return true;
+    try {
+      new RegExp(r.pattern);
+      return true;
+    } catch {
+      return false;
+    }
+  }, "regex rule is not a valid pattern");
+
+/** Runtime schema for {@link AgentGuardrailPolicy}. `strict()` so a typo'd key is a 400 rather
+ *  than a silently-ignored (and therefore unenforced) rule. */
+export const agentGuardrailPolicySchema = z
+  .object({
+    tools: z
+      .object({
+        allow: toolGlobList.optional(),
+        deny: toolGlobList.optional(),
+        requireApproval: toolGlobList.optional(),
+      })
+      .strict()
+      .optional(),
+    input: z.array(contentRuleSchema).max(100).optional(),
+    output: z.array(contentRuleSchema).max(100).optional(),
+    redact: z
+      .object({
+        enabled: z.boolean().optional(),
+        kinds: z.array(z.enum(PII_KIND_VALUES)).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+/** Compile-time proof that the zod shape and the hand-written interface agree (same guard the
+ *  node configs use — drift resolves to `never` and fails `tsc -b`). */
+type GuardrailPolicyParity = Exact<
+  z.infer<typeof agentGuardrailPolicySchema>,
+  AgentGuardrailPolicy
+>;
+const _guardrailParity: GuardrailPolicyParity = true;
+void _guardrailParity;
+
+/** A stored `TenantSettings.agentGuardrails` value that does not match the schema. */
+export class InvalidGuardrailPolicyError extends Error {
+  constructor(readonly issues: { path: string; message: string }[]) {
+    super(
+      `Invalid agent guardrail policy — ${issues
+        .map((i) => `${i.path || "policy"} ${i.message}`)
+        .join("; ")}`,
+    );
+    this.name = "InvalidGuardrailPolicyError";
+  }
+}
+
+/**
+ * Parse a stored/incoming policy. `null`/`undefined` ⇒ the empty policy (no guardrails).
+ *
+ * FAILS CLOSED, LOUDLY: a value that does not parse THROWS rather than degrading to "no
+ * guardrails". A governance control that silently stops enforcing because a row got malformed is
+ * the worst failure mode available; a visible error on the node/route is recoverable.
+ */
+export function parseAgentGuardrailPolicy(
+  value: unknown,
+): AgentGuardrailPolicy {
+  if (value === null || value === undefined) return {};
+  const res = agentGuardrailPolicySchema.safeParse(value);
+  if (!res.success) {
+    throw new InvalidGuardrailPolicyError(
+      res.error.issues.map((i) => ({
+        path: i.path.join("."),
+        message: i.message,
+      })),
+    );
+  }
+  return res.data;
+}
