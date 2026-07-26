@@ -130,10 +130,18 @@ type ActivePlan = Exclude<AppCheckPlan, { kind: "off" }>;
 /**
  * Ask for a token once so a broken configuration announces ITSELF.
  *
- * Nothing here changes behaviour: with `isTokenAutoRefreshEnabled` the SDK already
- * fetches at init and `getToken` joins that same in-flight request, so the happy path
- * costs one extra promise and no extra reCAPTCHA execution. The point is the failure
- * path — Firebase logs `appCheck/recaptcha-error` from inside firebase/auth with no
+ * This works because the PUBLIC `getToken` export rethrows
+ * (`if (result.error) throw result.error`, @firebase/app-check dist). Worth stating,
+ * because the SDK's INTERNAL token path deliberately does the opposite — it resolves with
+ * a dummy token that encodes the error, which is exactly how firebase/auth manages to log
+ * a failure and still carry on. Swap this to the internal accessor and the catch below
+ * goes dead while every test still passes.
+ *
+ * Nothing here changes behaviour: with `isTokenAutoRefreshEnabled` the SDK already fetches
+ * at init, and getToken's own contract is that a fresh-token request "attaches to the most
+ * recent in-flight request if one is present" — so the happy path costs one extra promise
+ * and no second reCAPTCHA assessment (which past the free tier is billable). The point is
+ * the failure path — Firebase logs `appCheck/recaptcha-error` from inside firebase/auth with no
  * mention of WHICH provider we picked or what to change, and the SPA keeps working
  * (until enforcement is switched on, at which point every sign-in fails). Without this,
  * the first real symptom is a total auth outage with an error that reads like a network
@@ -151,10 +159,15 @@ async function probeAppCheckToken(
   }
 }
 
-/** `appCheck/recaptcha-error`, case-insensitively and prefix-agnostically. */
-function errorCode(err: unknown): string {
+/**
+ * The error's `code`, as-written for display and lowercased for matching. Firebase prints
+ * `appCheck/recaptcha-error` with that exact casing, so echoing a lowercased copy would stop
+ * anyone correlating our line with theirs by searching the console for the same string.
+ */
+function errorCode(err: unknown): { shown: string; match: string } {
   const raw = (err as { code?: unknown })?.code;
-  return typeof raw === "string" ? raw.toLowerCase() : "";
+  const shown = typeof raw === "string" ? raw : "";
+  return { shown, match: shown.toLowerCase() };
 }
 
 /**
@@ -171,10 +184,10 @@ export function explainAppCheckFailure(
   err: unknown,
   isDev = false,
 ): string {
-  const code = errorCode(err);
+  const { shown, match: code } = errorCode(err);
   const other = plan.kind === "recaptcha-v3" ? "enterprise" : "v3";
   const lines = [
-    `[app-check] could not get an attestation token (${code || "unknown error"}).`,
+    `[app-check] could not get an attestation token (${shown || "unknown error"}).`,
     `  active provider: ${plan.kind}   site key: ${plan.siteKey}`,
     `  host: ${typeof location === "undefined" ? "?" : location.host}`,
   ];

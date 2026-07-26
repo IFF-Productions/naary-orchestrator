@@ -112,7 +112,16 @@ describe("explainAppCheckFailure", () => {
     // Site keys are public by design (inlined in the bundle), so echoing it is safe and
     // makes "which key is live?" answerable from a screenshot.
     expect(msg).toContain("6Lsite");
-    expect(msg).toContain("appCheck/recaptcha-error".toLowerCase());
+    // The code is echoed with Firebase's OWN casing: someone searching their console for
+    // the string firebase printed must find our line too.
+    expect(msg).toContain("appCheck/recaptcha-error");
+  });
+
+  /** Matching is case-insensitive even though display is verbatim. */
+  it("still classifies a code whose casing differs from Firebase's", () => {
+    expect(
+      explainAppCheckFailure(V3, { code: "APPCHECK/RECAPTCHA-ERROR" }),
+    ).toMatch(/DOES THE KEY RESOLVE/);
   });
 
   /** The swap is a SECRET change, not a code change — the cheapest fix, so it leads. */
