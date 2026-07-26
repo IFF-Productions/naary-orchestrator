@@ -21,6 +21,7 @@ import {
   signOut,
   updateProfile,
 } from "firebase/auth";
+import { initAppCheck } from "./app-check";
 import { getToken } from "./auth";
 
 const firebaseConfig = {
@@ -43,6 +44,15 @@ export const firebaseConfigured = Boolean(firebaseConfig.apiKey);
 export const firebaseApp: FirebaseApp | undefined = firebaseConfigured
   ? initializeApp(firebaseConfig)
   : undefined;
+
+// App Check BEFORE getAuth(): attestation tokens must be available to the first auth
+// request, and auth-state restoration can fire a token refresh as soon as `auth`
+// exists. No-op unless VITE_FIREBASE_APPCHECK_SITE_KEY was set at build time; never
+// throws (see ./app-check).
+export const appCheckPlan = firebaseApp
+  ? initAppCheck(firebaseApp)
+  : ({ kind: "off" } as const);
+
 export const auth: Auth | undefined = firebaseApp
   ? getAuth(firebaseApp)
   : undefined;
