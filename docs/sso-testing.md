@@ -16,18 +16,18 @@ test yet — see [What LDAP would take](#what-ldap-would-take) at the end.
 
 | | |
 | --- | --- |
-| **Protocol** | SAML 2.0, HTTP-POST binding, SP-initiated |
+| **Protocol** | SAML 2.0, HTTP-POST binding, **IdP-initiated** — we consume assertions, we never generate an `AuthnRequest` |
 | **Identity source** | A *second* one alongside Firebase — not a replacement |
 | **Session** | An `nrys_`-prefixed compact JWS (HS256 over `SSO_SESSION_SECRET`) the ACS hands the browser |
 | **Per-workspace** | Each workspace maps its own IdP; a connection is matched by the assertion's `Issuer` |
-| **Not supported** | Encrypted assertions (`encrypted_not_supported`), IdP-initiated login, SLO |
+| **Not supported** | Encrypted assertions (`encrypted_not_supported`), SLO, and `AuthnRequest` generation (so no `InResponseTo` to correlate) |
 
 Three public routes (`@Public()`, since an IdP POST carries no bearer):
 
 | Route | Purpose |
 | --- | --- |
 | `GET /sso/metadata` | The XML your IdP admin imports: entity id, ACS URL, NameID formats |
-| `GET /sso/:slug` | Starts login for a workspace's connection |
+| `GET /sso/:slug` | **Convenience redirect** to the IdP's SSO URL. It does NOT generate an `AuthnRequest` — it just sends the browser to the IdP, which then posts an unsolicited assertion to the ACS |
 | `POST /sso/saml/acs` | Assertion Consumer Service — where the IdP posts back |
 
 ## 1. Turn it on
@@ -99,7 +99,10 @@ allowed to assert.
 ## 4. Walk the flow
 
 1. `GET /api/sso/metadata` → hand the XML to the IdP admin (or import it into Keycloak).
-2. Visit `https://YOUR-HOST/api/sso/<slug>` → you should be redirected to the IdP.
+2. Visit `https://YOUR-HOST/api/sso/<slug>` → you should be redirected to the IdP. This is a plain
+   redirect, **not** an `AuthnRequest`, so configure the IdP for **IdP-initiated** SSO — in Keycloak
+   that means setting the client's *IDP Initiated SSO URL Name*; you can equally start from the IdP's
+   own application launcher and skip this URL entirely.
 3. Log in as your test user.
 4. The IdP POSTs to `/sso/saml/acs`.
 5. On success you land back in the SPA with an `nrys_` session and should see your workspace.
@@ -132,6 +135,7 @@ distinct rejection code (surfaced to the SPA as `sso_error`, with detail in the 
 | **Replay** a captured assertion a second time | rejected — assertion ids are consumed single-use, atomically |
 | Log in with a user whose email domain isn't in the allowlist | `email_domain_not_allowed` |
 | Let the assertion's time window expire before posting it | `expired` / `not_yet_valid` |
+| Post an assertion nobody asked for (there is no `AuthnRequest` to correlate) | **accepted** — that's the IdP-initiated model; replay protection is the assertion-id single-use check, not `InResponseTo` |
 | Enable assertion encryption at the IdP | `encrypted_not_supported` |
 
 The two worth doing carefully, because they're the ones a subtle bug would hide in:
