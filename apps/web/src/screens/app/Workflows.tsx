@@ -325,7 +325,20 @@ export function Workflows() {
               : "…"}
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {/* The outer header wraps, but this cluster did not: at 390px the 4-option
+            SegmentedToggle (~290px) + "New workflow" (137px) came to ~437px on ONE
+            line inside a 362px content box, so the primary CTA was pushed off-screen
+            and CLIPPED by global.css's root `overflow-x: hidden` — unreachable, with
+            no scrollbar to reveal it (#511). `flexWrap` is the wave's header idiom
+            (Runs.tsx's action cluster). */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
           <SegmentedToggle
             options={filterOptions}
             value={filter}
