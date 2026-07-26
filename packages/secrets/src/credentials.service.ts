@@ -1,5 +1,7 @@
 import { getPrisma } from "@naary/db";
 import { type KeyEncryptor } from "./crypto";
+import { DbSecretProvider, type SecretProvider } from "./secret-provider";
+import { createSecretProvider } from "./vault-secret-provider";
 import { TenantKeyService, getTenantKeyService } from "./tenant-keys";
 import {
   validateAnthropicKey,
@@ -59,8 +61,10 @@ export interface SaveCredentialResult {
  * caller of saveCredential, logged, or echoed in API responses.
  */
 export class CredentialsService {
-  private readonly keys: TenantKeyService;
   private readonly validate: ProviderValidator;
+  /** Where the key MATERIAL lives (#458). Default = the DB envelope provider, i.e.
+   *  byte-identical to the behaviour before the seam existed. */
+  private readonly secrets: SecretProvider;
 
   constructor(opts?: {
     /** Master (KEK) override — wrapped in a fresh TenantKeyService. Tests inject this. */
@@ -68,13 +72,23 @@ export class CredentialsService {
     /** Full envelope-service override; wins over `encryptor`. */
     tenantKeys?: TenantKeyService;
     validate?: ProviderValidator;
+    /** External secret store override (#458); wins over `encryptor`/`tenantKeys`. */
+    secretProvider?: SecretProvider;
   }) {
-    this.keys =
-      opts?.tenantKeys ??
-      (opts?.encryptor
-        ? new TenantKeyService({ master: opts.encryptor })
-        : getTenantKeyService());
     this.validate = opts?.validate ?? defaultValidator;
+    // Precedence: an explicit provider > a crypto override (which implies the DB
+    // provider — that's what the pre-#458 test seams mean) > the env-configured provider.
+    this.secrets =
+      opts?.secretProvider ??
+      (opts?.tenantKeys || opts?.encryptor
+        ? new DbSecretProvider({
+            tenantKeys:
+              opts.tenantKeys ??
+              (opts.encryptor
+                ? new TenantKeyService({ master: opts.encryptor })
+                : getTenantKeyService()),
+          })
+        : createSecretProvider());
   }
 
   /** Validate, encrypt, and upsert. Returns metadata only — never the key. Env-scoped (Slice 5):
@@ -86,13 +100,14 @@ export class CredentialsService {
     apiKey: string,
   ): Promise<SaveCredentialResult> {
     const isValid = await this.validate(provider, apiKey);
-    // AAD binds the ciphertext to this tenant+provider slot (Sec#7). It stays (tenant, provider) —
-    // NOT env-bound — so env is purely a row-lookup dimension and backfilled rows keep decrypting.
-    // Encrypted with the tenant's own DEK (envelope, keyVersion 3) — see tenant-keys.ts.
-    const enc = await this.keys.encrypt(
-      tenantId,
+    // The MATERIAL goes to the configured SecretProvider (#458) and returns only the
+    // columns the index row should carry. For the default DB provider that is AES-256-GCM
+    // under the tenant's own DEK with AAD `${tenantId}:${provider}` (envelope, keyVersion
+    // 3) — unchanged, so pre-existing rows keep decrypting. For an external provider it is
+    // the `keyVersion 0` sentinel with empty crypto columns.
+    const enc = await this.secrets.put(
+      { tenantId, environmentId, provider },
       apiKey,
-      `${tenantId}:${provider}`,
     );
 
     const row = await getPrisma().tenantCredential.upsert({
@@ -139,6 +154,9 @@ export class CredentialsService {
           { provider: { startsWith: "conn:" } },
           { provider: { startsWith: "secret:" } },
           { provider: { startsWith: "turnstile:" } },
+          // Single-use SAML assertion ids (#455) live in the same table under `saml:`; they are
+          // not credentials and must never show up as a "configured provider".
+          { provider: { startsWith: "saml:" } },
         ],
       },
       select: { provider: true, isValid: true },
@@ -162,16 +180,38 @@ export class CredentialsService {
     if (!row || !row.isValid) {
       throw new MissingCredentialError(tenantId, provider, environmentId);
     }
-    // Routed by keyVersion: v3 rows use the tenant DEK; legacy v1/v2 rows the master key.
-    return this.keys.decrypt(
-      tenantId,
+    // Resolved by the configured provider, ROUTED BY THIS ROW's keyVersion: v3 → tenant
+    // DEK, legacy v1/v2 → master key, 0 → the external store. Signature and call site
+    // (inside the activity) are unchanged — #458's "in-activity resolution unchanged".
+    return this.secrets.get(
+      { tenantId, environmentId, provider },
       {
         ciphertext: row.ciphertext,
         iv: row.iv,
         authTag: row.authTag,
         keyVersion: row.keyVersion,
       },
-      `${tenantId}:${provider}`,
     );
+  }
+
+  /**
+   * Remove a credential: the index row AND the material. The two-step matters for an
+   * external provider — dropping only the row would leave an orphaned live secret in
+   * Vault/ASM forever. There is no delete ROUTE today (the UI only overwrites), so this is
+   * the lifecycle hook such a route must call rather than deleting the row itself.
+   */
+  async deleteCredential(
+    tenantId: string,
+    environmentId: string,
+    provider: string,
+  ): Promise<void> {
+    // MATERIAL FIRST, then the index row. If the external delete fails we throw with the row
+    // still present, so the credential remains listed and a retry can finish the job. The other
+    // order would drop the row and orphan a LIVE secret in Vault — the exact outcome this
+    // method exists to prevent.
+    await this.secrets.remove({ tenantId, environmentId, provider });
+    await getPrisma().tenantCredential.deleteMany({
+      where: { tenantId, environmentId, provider },
+    });
   }
 }

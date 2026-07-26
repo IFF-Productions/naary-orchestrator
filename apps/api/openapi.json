@@ -5825,6 +5825,300 @@
         ]
       }
     },
+    "/sso/metadata": {
+      "get": {
+        "description": "The XML an IdP admin imports: our entity id, the ACS URL (HTTP-POST binding) and the supported NameID formats. Public and non-secret.",
+        "operationId": "SsoController_metadata",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "SP metadata XML."
+          }
+        },
+        "summary": "SAML SP metadata",
+        "tags": [
+          "Sso"
+        ]
+      }
+    },
+    "/sso/saml/acs": {
+      "post": {
+        "description": "The IdP POSTs a signed assertion here (form-urlencoded SAMLResponse). On success, redirects to the SPA with a short-lived session token in the URL FRAGMENT; on any failure, redirects with a coarse sso_error code.",
+        "operationId": "SsoController_acs",
+        "parameters": [],
+        "responses": {
+          "302": {
+            "description": "Redirect to the SPA."
+          }
+        },
+        "summary": "SAML assertion consumer service (ACS)",
+        "tags": [
+          "Sso"
+        ]
+      }
+    },
+    "/sso/{slug}": {
+      "get": {
+        "description": "Redirects to the IdP's SSO URL for this connection slug. Convenience only — the flow is IdP-initiated, so no AuthnRequest is generated.",
+        "operationId": "SsoController_start",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the IdP."
+          }
+        },
+        "summary": "IdP-initiated login entry point",
+        "tags": [
+          "Sso"
+        ]
+      }
+    },
+    "/tenants/{id}/sso": {
+      "get": {
+        "description": "Non-secret IdP metadata (entity id, SSO URL, public cert).",
+        "operationId": "SsoConnectionsController_list",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the workspace's SAML connections",
+        "tags": [
+          "SsoConnections"
+        ]
+      },
+      "put": {
+        "description": "Keyed by the IdP entity id, which is unique across the instance — an entity id already mapped to ANOTHER workspace is rejected (409-style), because that uniqueness is what makes an anonymous ACS POST unambiguous.",
+        "operationId": "SsoConnectionsController_upsert",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertSsoConnectionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The resource is in a state that conflicts with the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create or replace a SAML connection",
+        "tags": [
+          "SsoConnections"
+        ]
+      }
+    },
+    "/tenants/{id}/sso/{connectionId}": {
+      "delete": {
+        "description": "Federated users keep their Membership; they can no longer sign in via SSO.",
+        "operationId": "SsoConnectionsController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "connectionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a SAML connection",
+        "tags": [
+          "SsoConnections"
+        ]
+      }
+    },
     "/tenants/{id}/usage": {
       "get": {
         "description": "Aggregated + line-item spend from the usage ledger. Optional from/to (ISO date) window. Restricted members see only events of workflows they can view.",
@@ -17039,6 +17333,65 @@
           "id",
           "provider",
           "isValid"
+        ]
+      },
+      "UpsertSsoConnectionDto": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "example": "acme-okta",
+            "description": "URL-safe slug for /sso/:slug (IdP-initiated entry)."
+          },
+          "label": {
+            "type": "string",
+            "example": "Acme Okta",
+            "description": "Display label."
+          },
+          "idpEntityId": {
+            "type": "string",
+            "example": "http://www.okta.com/exk1a2b3c4",
+            "description": "The IdP's SAML entity id — the assertion <Issuer>. Unique across the instance: it is how an unauthenticated ACS POST maps to this workspace."
+          },
+          "idpSsoUrl": {
+            "type": "string",
+            "example": "https://acme.okta.com/app/acme_naary/exk1a2b3c4/sso/saml",
+            "description": "The IdP's SSO (login) URL."
+          },
+          "idpCertPem": {
+            "type": "string",
+            "description": "The IdP's SIGNING CERTIFICATE (PEM, or the bare base64 from its metadata <X509Certificate>). Public key material only."
+          },
+          "allowedEmailDomains": {
+            "example": [
+              "acme.com"
+            ],
+            "description": "Email domains this IdP may assert. REQUIRED and non-empty — an empty list would let this IdP assert any address, which is exactly the cross-tenant linking hole.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "defaultRole": {
+            "type": "string",
+            "example": "member",
+            "description": "Role granted when auto-provisioning. Never read from the assertion."
+          },
+          "autoProvision": {
+            "type": "boolean",
+            "description": "Create a Membership on first login (JIT). Default true."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Kill switch. Default true."
+          }
+        },
+        "required": [
+          "slug",
+          "idpEntityId",
+          "idpSsoUrl",
+          "idpCertPem",
+          "allowedEmailDomains"
         ]
       },
       "UsageByModelResponse": {

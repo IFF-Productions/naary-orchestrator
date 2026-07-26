@@ -56,6 +56,16 @@ vi.mock("@naary/db", () => ({
       },
     },
     tenantCredential: {
+      // Enforces the (tenantId, environmentId, provider) unique constraint, which is what
+      // `putIfAbsent` relies on to be atomic (#455 replay defence).
+      create: async ({ data }: any) => {
+        const k = `${data.tenantId}::${data.environmentId}::${data.provider}`;
+        if (creds.has(k)) {
+          throw Object.assign(new Error("unique constraint"), { code: "P2002" });
+        }
+        creds.set(k, data);
+        return data;
+      },
       upsert: async ({ where, create, update }: any) => {
         const w = where.tenantId_environmentId_provider;
         const k = `${w.tenantId}::${w.environmentId}::${w.provider}`;
@@ -218,5 +228,55 @@ describe("SecretStore — tenant-wide (global) secrets (#459)", () => {
     expect(
       await store.getWithGlobalFallback("t1", "e1", "secret:NOPE"),
     ).toBeNull();
+  });
+});
+
+describe("SecretStore.putIfAbsent — atomic single-use write (#455)", () => {
+  it("the FIRST write wins and the value round-trips", async () => {
+    const store = makeStore();
+    await expect(
+      store.putIfAbsent("t-1", "env-1", "saml:abc", "2026-07-25T00:00:00.000Z"),
+    ).resolves.toBe(true);
+    await expect(store.get("t-1", "env-1", "saml:abc")).resolves.toBe(
+      "2026-07-25T00:00:00.000Z",
+    );
+  });
+
+  it("a SECOND write for the same key returns false and does NOT overwrite", async () => {
+    const store = makeStore();
+    await store.putIfAbsent("t-1", "env-1", "saml:abc", "first");
+    await expect(
+      store.putIfAbsent("t-1", "env-1", "saml:abc", "second"),
+    ).resolves.toBe(false);
+    await expect(store.get("t-1", "env-1", "saml:abc")).resolves.toBe("first");
+  });
+
+  it("CONCURRENT writes: exactly one caller wins (the unique constraint decides)", async () => {
+    const store = makeStore();
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        store.putIfAbsent("t-1", "env-1", "saml:race", "x"),
+      ),
+    );
+    expect(results.filter(Boolean)).toHaveLength(1);
+  });
+
+  it("is per (tenant, env, key): the same key in another env/tenant still wins", async () => {
+    const store = makeStore();
+    await store.putIfAbsent("t-1", "env-1", "saml:abc", "a");
+    await expect(
+      store.putIfAbsent("t-1", "env-2", "saml:abc", "b"),
+    ).resolves.toBe(true);
+    await expect(
+      store.putIfAbsent("t-2", "env-1", "saml:abc", "c"),
+    ).resolves.toBe(true);
+  });
+
+  it("stores CIPHERTEXT, not the plaintext", async () => {
+    const store = makeStore();
+    await store.putIfAbsent("t-1", "env-1", "saml:abc", "PLAINTEXT-CANARY");
+    const row = creds.get("t-1::env-1::saml:abc");
+    expect(JSON.stringify(row)).not.toContain("PLAINTEXT-CANARY");
+    expect(row.keyVersion).toBe(3);
   });
 });
