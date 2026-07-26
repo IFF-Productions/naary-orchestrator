@@ -6,7 +6,7 @@ const findUnique = vi.fn();
 const update = vi.fn();
 const findMany = vi.fn();
 vi.mock("@naary/db", () => ({
-  getPrisma: () => ({ execution: { findUnique, update, findMany } }),
+  getPrisma: () => ({ graphDefinition: { findMany: async () => [] }, execution: { findUnique, update, findMany } }),
 }));
 
 import { ExecutionsService } from "../src/executions/executions.service";

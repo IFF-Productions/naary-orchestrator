@@ -162,7 +162,55 @@ export async function queryListPage(
   const nextCursor =
     rows.length > take ? encodeRunCursor(page[page.length - 1]) : null;
   const items = await Promise.all(page.map((r) => deps.toRunSummary(r)));
-  return { items, nextCursor };
+  const names = await workflowNames(tenantId, page);
+  return {
+    items: items.map((item, i) => ({
+      ...item,
+      workflowName: names.get(envKey(page[i])) ?? null,
+    })),
+    nextCursor,
+  };
+}
+
+/** Map key for a workflow name lookup. The SAME workflowKey exists independently per environment
+ *  (copy-on-promote), so the env has to be part of the key or a prod run can show a sandbox name. */
+function envKey(row: {
+  environmentId?: string | null;
+  workflowKey?: string | null;
+}): string {
+  return `${row.environmentId ?? ""}\u0000${row.workflowKey ?? ""}`;
+}
+
+/**
+ * Resolve the display name for each run's workflow, as ONE query for the whole page.
+ *
+ * Deliberately not inside `toRunSummary`: that runs per row (`Promise.all(page.map(…))`), so a lookup
+ * there would be a 50-query page — and the Runs screen now pages 50 at a time, repeatedly.
+ *
+ * Takes the LATEST version's name per (tenant, env, key): the name is editable, and a run should read
+ * as the workflow's current name rather than whichever it happened to have at some version. Rows with
+ * no `workflowKey` (pre-migration) are skipped entirely rather than queried for "".
+ */
+async function workflowNames(
+  tenantId: string,
+  rows: { environmentId?: string | null; workflowKey?: string | null }[],
+): Promise<Map<string, string>> {
+  const keys = [
+    ...new Set(rows.map((r) => r.workflowKey).filter((k): k is string => !!k)),
+  ];
+  if (keys.length === 0) return new Map();
+  const defs = await getPrisma().graphDefinition.findMany({
+    where: { tenantId, workflowKey: { in: keys } },
+    // Highest version first, so the first row seen per (env, key) is the current name.
+    orderBy: [{ workflowKey: "asc" }, { version: "desc" }],
+    select: { workflowKey: true, environmentId: true, name: true },
+  });
+  const out = new Map<string, string>();
+  for (const d of defs) {
+    const k = envKey(d);
+    if (!out.has(k)) out.set(k, d.name);
+  }
+  return out;
 }
 
 /**
@@ -321,6 +369,9 @@ export async function queryAwaiting(
       rows = rows.filter((_, i) => visible[i]);
     }
   }
+  // Batched, for the same reason as the runs list: the per-row map below already makes a Temporal
+  // query each, so a name lookup inside it would add a DB round-trip per awaiting run.
+  const names = await workflowNames(tenantId, rows);
   const items = await Promise.all(
     rows.map(async (r): Promise<AwaitingApproval | null> => {
       let currentNodeId = "";
@@ -346,6 +397,7 @@ export async function queryAwaiting(
       return {
         workflowId: r.workflowId,
         workflowKey: r.workflowKey,
+        workflowName: names.get(envKey(r)) ?? null,
         nodeId: currentNodeId,
         title: prompt.title,
         instructions: prompt.instructions,

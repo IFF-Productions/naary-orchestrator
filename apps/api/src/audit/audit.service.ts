@@ -3,7 +3,18 @@ import { getPrisma } from "@naary/db";
 
 export interface AuditEventView {
   id: string;
+  /** The STORED actor: a Firebase uid, an `sso:…` id, or "api-token". Stable and never rewritten. */
   actor: string;
+  /**
+   * The actor's email from their Membership in this workspace, or null when it can't be resolved (an
+   * API token, a member who left, or a Membership predating the email stamp — the column is nullable
+   * and documents itself as "email at join time").
+   *
+   * A SEPARATE field rather than rewriting `actor`, deliberately: an audit log's actor must stay
+   * stable and unambiguous, and emails get reassigned between people while ids don't. Callers render
+   * `actorEmail ?? actor` and keep the id available. Never a fabricated value — a miss is null.
+   */
+  actorEmail: string | null;
   action: string;
   method: string;
   path: string;
@@ -42,9 +53,14 @@ export class AuditService {
       orderBy: { createdAt: "desc" },
       take: Math.min(Math.max(limit, 1), 200),
     });
+    const emails = await this.actorEmails(
+      tenantId,
+      rows.map((r) => r.actor),
+    );
     return rows.map((r) => ({
       id: r.id,
       actor: r.actor,
+      actorEmail: emails.get(r.actor) ?? null,
       action: r.action,
       method: r.method,
       path: r.path,
@@ -52,6 +68,43 @@ export class AuditService {
       environmentId: r.environmentId ?? null,
       createdAt: r.createdAt.toISOString(),
     }));
+  }
+
+  /**
+   * Map stored actor ids → the email on their Membership in THIS workspace.
+   *
+   * Resolved on READ rather than stamped at write time, because that's what fixes the rows already in
+   * the log — a write-side change alone would leave the screen showing raw uids until new events
+   * accrued. The stored row stays byte-identical either way, so the log's integrity is untouched;
+   * only its presentation improves.
+   *
+   * ONE batched query, not one per row: the audit list serves up to 200 rows, and a per-row lookup
+   * would be a 200-query page.
+   *
+   * No "is this a uid?" discriminator is needed. `actor` is always `principal.subject` (a Firebase uid
+   * or an `sso:…` id — both of which ARE the `Membership.userId`) or the literal "api-token" for token
+   * principals, which simply misses. Guessing at the shape would be a branch that can only be wrong.
+   *
+   * Scoped by tenantId as well as userId: `Membership` is per-workspace and indexed on `userId` alone,
+   * so querying by id without the tenant would reach across workspaces.
+   */
+  private async actorEmails(
+    tenantId: string,
+    actors: string[],
+  ): Promise<Map<string, string>> {
+    const ids = [...new Set(actors)];
+    if (ids.length === 0) return new Map();
+    const members = await getPrisma().membership.findMany({
+      where: { tenantId, userId: { in: ids } },
+      select: { userId: true, email: true },
+    });
+    const out = new Map<string, string>();
+    for (const m of members) {
+      // `email` is nullable ("email at join time") — a member who predates the stamp has none, and
+      // that must surface as null rather than as an invented placeholder.
+      if (m.email) out.set(m.userId, m.email);
+    }
+    return out;
   }
 }
 

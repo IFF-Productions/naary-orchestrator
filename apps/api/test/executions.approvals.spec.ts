@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Mock the read-model. executions.service imports only getPrisma from @naary/db.
 const findMany = vi.fn();
 vi.mock("@naary/db", () => ({
-  getPrisma: () => ({ execution: { findMany } }),
+  getPrisma: () => ({ graphDefinition: { findMany: async () => [] }, execution: { findMany } }),
 }));
 
 import { ExecutionsService } from "../src/executions/executions.service";

@@ -4,10 +4,21 @@ import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 export class AuditEventResponse {
   @ApiProperty() id!: string;
   @ApiProperty({
-    example: "user@example.com",
-    description: "Who performed the action.",
+    example: "9xK2mQ…",
+    description:
+      "The STORED actor id: a Firebase uid, an `sso:…` id, or \"api-token\". Stable — never rewritten.",
   })
   actor!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: "user@example.com",
+    description:
+      "The actor's email from their Membership in this workspace, or null when unresolvable (an API " +
+      "token, a member who left, or a Membership predating the email stamp). Render `actorEmail ?? " +
+      "actor`; it is never a fabricated value.",
+  })
+  actorEmail!: string | null;
   @ApiProperty({
     example: "Saved a workflow",
     description: "Human-readable action label.",

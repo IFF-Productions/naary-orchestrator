@@ -655,8 +655,8 @@ export function Runs() {
                 onChange={toggleSelectAll}
               />
             </span>
-            <span>Run</span>
             <span>{simple ? "Automation" : "Workflow"}</span>
+            <span>Run</span>
             <span>Version</span>
             <span>Status</span>
             <span>Cost</span>
@@ -859,7 +859,11 @@ export function Runs() {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {r.workflowKey ?? "—"}
+                    {/* Name first: a slug is an implementation detail the operator didn't choose.
+                        The key stays on hover, since it's what the API/CLI and triggers reference. */}
+                    <span title={r.workflowKey ?? undefined}>
+                      {r.workflowName ?? r.workflowKey ?? "—"}
+                    </span>
                   </div>
                   <div
                     className="mono"
@@ -928,23 +932,35 @@ export function Runs() {
               <span style={{ display: "flex", alignItems: "center" }}>
                 {selectBox}
               </span>
+              {/* The WORKFLOW leads. It's what an operator scans for; the run id is a lookup
+                  handle they need occasionally (support, the API, logs) and can still read + copy
+                  from the next column. Not `mono` — a name is prose, and the monospace column was
+                  making it read like an identifier too. Slug on hover, since that's what triggers
+                  and the API reference. */}
               <span
-                className="mono"
                 style={{
                   fontSize: "var(--text-xs)",
-                  color: "var(--brand)",
+                  color: "var(--ink)",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
                 }}
+                title={r.workflowKey ?? undefined}
               >
-                {r.workflowId}
+                {r.workflowName ?? r.workflowKey ?? "—"}
               </span>
               <span
                 className="mono"
-                style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--ink-3)",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+                title={r.workflowId}
               >
-                {r.workflowKey ?? "—"}
+                {r.workflowId}
               </span>
               <span>
                 <VersionBadge version={r.graphVersion} />

@@ -113,7 +113,11 @@ export function QueueRow({
             whiteSpace: "nowrap",
           }}
         >
-          {item.workflowKey ?? "workflow"} · gate {item.nodeId}
+          {/* Name over slug, with the key on hover — same rule as the Runs list. */}
+          <span title={item.workflowKey ?? undefined}>
+            {item.workflowName ?? item.workflowKey ?? "workflow"}
+          </span>{" "}
+          · gate {item.nodeId}
         </span>
       </span>
 

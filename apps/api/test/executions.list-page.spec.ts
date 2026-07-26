@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // (createdAt, workflowId) keyset filter + tiebroken orderBy, probing take+1 rows.
 const findMany = vi.fn();
 vi.mock("@naary/db", () => ({
-  getPrisma: () => ({ execution: { findMany } }),
+  getPrisma: () => ({ graphDefinition: { findMany: async () => [] }, execution: { findMany } }),
 }));
 
 import { ExecutionsService } from "../src/executions/executions.service";

@@ -9,7 +9,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const findMany = vi.fn();
 const findUnique = vi.fn();
 vi.mock("@naary/db", () => ({
-  getPrisma: () => ({ execution: { findMany, findUnique } }),
+  getPrisma: () => ({
+    execution: { findMany, findUnique },
+    // Awaiting rows now carry the workflow NAME, resolved with one batched lookup per page —
+    // an empty list leaves workflowName null, which is what these view-filtering tests care about.
+    graphDefinition: { findMany: async () => [] },
+  }),
 }));
 
 import type { Principal } from "../src/auth/tenant.decorator";
