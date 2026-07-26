@@ -418,7 +418,8 @@ describe("the document is a usable JSON Schema", () => {
 
     // And the caller is TOLD their validator won't reproduce our answer.
     const notes = roundTripped["x-naary-submit"].notes.join(" ");
-    expect(notes).toMatch(/special-case/i);
+    expect(notes).toMatch(/RESERVED/);
+    expect(notes).toMatch(/cannot be submitted/i);
     expect(notes).toMatch(/__proto__/);
   });
 
@@ -441,16 +442,17 @@ describe("the document is a usable JSON Schema", () => {
     );
     // And `required` is not enforced either.
     expect(validate(JSON.parse("{}"))).toBe(true);
-    // Which is exactly the gap: the endpoint disagrees on the first one.
+    // Which is exactly the gap the disclosure exists for — and since #761 the endpoint refuses the
+    // submission outright rather than validating and then discarding the value.
     const fields: FormFieldDef[] = [
       { key: "__proto__", label: "Sneaky", type: "email", required: true },
     ];
-    expect(
-      validateSubmission(
-        fields,
-        JSON.parse(String.raw`{"__proto__":"not-an-email"}`),
-      ).ok,
-    ).toBe(false);
+    const result = validateSubmission(
+      fields,
+      JSON.parse(String.raw`{"__proto__":"a@b.c"}`),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toMatch(/reserved name/i);
   });
 
   it("handles a form with no fields at all", () => {

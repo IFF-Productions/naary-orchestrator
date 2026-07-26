@@ -27,7 +27,7 @@ import {
   PII_KIND_VALUES,
   type AgentGuardrailPolicy,
 } from "./guardrails";
-import { hasForbiddenPathSegment } from "./mcp-args";
+import { hasForbiddenPathSegment, isPollutingKey } from "./mcp-args";
 import type {
   AggregateNodeConfig,
   ApprovalNodeConfig,
@@ -99,6 +99,29 @@ const bindingKey = z.string().refine((k) => !hasForbiddenPathSegment(k), {
 });
 
 /**
+ * Save-gate for a LITERAL data key a node writes into a plain object — a form field's `key`, a
+ * `renameKeys` target (issue #761).
+ *
+ * These names can't work end to end, so accepting them means accepting silent data loss. Writing a
+ * string to `obj.__proto__` is a **no-op**: the value is simply discarded, with no error anywhere. A
+ * form field keyed `__proto__` therefore validated, passed the required check, started the run — and
+ * arrived at the workflow absent. Nor can any JSON Schema paper over it: ajv skips a `__proto__`
+ * property entirely, applying neither `pattern` nor `required`, so a headless client validating
+ * locally gets a different answer than the endpoint.
+ *
+ * Rejected at SAVE (not at submit) because it is an authoring mistake, and failing the visitor for the
+ * author's typo is the wrong end. Matches the stance the codebase already takes on binding keys above
+ * and on `POLLUTING_KEYS` in the n8n importer.
+ *
+ * `isPollutingKey`, not `hasForbiddenPathSegment`: these are literal names, and a flat key containing a
+ * dot (`user.email`) is perfectly legitimate — splitting it would refuse safe keys.
+ */
+const dataKey = z.string().refine((k) => !isPollutingKey(k), {
+  message:
+    "key must not be __proto__, constructor or prototype — a value written to one of those names is silently discarded and never reaches the workflow",
+});
+
+/**
  * The operator set as a LITERAL tuple, so `z.enum` infers the exact `ConditionOp` union (a plain
  * `ConditionOp[]` would widen `op` to `string` and break the parity guards below). The two
  * assertions keep it honest: `satisfies` rejects a bogus op; `_opsComplete` rejects an omission.
@@ -160,7 +183,8 @@ const CONFIG_SCHEMAS = {
     submitLabel: z.string().optional(),
     fields: z.array(
       z.object({
-        key: z.string(),
+        // #761: a `__proto__`/`constructor`/`prototype` key silently discards its submitted value.
+        key: dataKey,
         label: z.string(),
         type: z.enum(["text", "textarea", "number", "email", "select"]),
         required: z.boolean().optional(),
@@ -448,7 +472,10 @@ const CONFIG_SCHEMAS = {
   renameKeys: z.object({
     from: z.string(),
     path: z.string().optional(),
-    rename: z.record(z.string(), z.string()).optional(),
+    // The VALUE is the new key name this node writes, so it takes the same guard as a form field
+    // key (#761): renaming something to `__proto__` discards it silently. The source side stays a
+    // plain string — it only ever reads.
+    rename: z.record(z.string(), dataKey).optional(),
     drop: z.array(z.string()).optional(),
   }),
   text: z.object({

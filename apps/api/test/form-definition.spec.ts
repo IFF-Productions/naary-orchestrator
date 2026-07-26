@@ -496,3 +496,56 @@ describe("the logo is an asset id, projected by shape", () => {
     expect(withBranding({ logoAlt: "   " })?.logoAlt).toBeUndefined();
   });
 });
+
+/**
+ * Submit-side backstop for #761. The save gate now rejects a `__proto__`/`constructor`/`prototype`
+ * field key, so this only fires for a form saved BEFORE that gate existed.
+ *
+ * It REFUSES rather than continuing, because continuing is the bug: `data[key] = value` writes a string
+ * to `obj.__proto__`, which is a silent no-op, so the visitor would be told their submission succeeded
+ * while part of it was thrown away and the workflow saw the field as absent.
+ */
+describe("a reserved field key is refused, not silently discarded", () => {
+  it.each(["__proto__", "constructor", "prototype"])(
+    "rejects a submission for a field keyed %s",
+    (key) => {
+      const fields: FormFieldDef[] = [
+        { key, label: "Sneaky", type: "text", required: true },
+      ];
+      const result = validateSubmission(
+        fields,
+        JSON.parse(`{"${key}":"a value"}`),
+      );
+      expect(result.ok).toBe(false);
+      // Names the field, so the author knows which one to rename.
+      expect(result.ok === false && result.error).toContain(key);
+      expect(result.ok === false && result.error).toMatch(/reserved name/i);
+    },
+  );
+
+  /** The demonstration of WHY: the assignment the old code performed discarded the value. */
+  it("would have lost the value had it continued", () => {
+    const data: Record<string, unknown> = {};
+    data.__proto__ = "a value";
+    expect(JSON.stringify(data)).toBe("{}");
+  });
+
+  /** A reserved key in one field must not be waved through because other fields are fine. */
+  it("rejects the whole submission when any field is reserved", () => {
+    const fields: FormFieldDef[] = [
+      { key: "email", label: "Email", type: "email", required: true },
+      { key: "__proto__", label: "Sneaky", type: "text" },
+    ];
+    expect(
+      validateSubmission(fields, { email: "a@b.c" }).ok,
+    ).toBe(false);
+  });
+
+  it("leaves an ordinary key containing a dot working", () => {
+    const fields: FormFieldDef[] = [
+      { key: "user.email", label: "Email", type: "email" },
+    ];
+    const result = validateSubmission(fields, { "user.email": "a@b.c" });
+    expect(result.ok && result.data).toEqual({ "user.email": "a@b.c" });
+  });
+});

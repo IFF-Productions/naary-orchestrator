@@ -73,6 +73,18 @@ export function hasForbiddenPathSegment(path: string): boolean {
 }
 
 /**
+ * True if `key` IS a prototype-chain name, treating it as a literal key rather than a dotted path.
+ *
+ * Separate from `hasForbiddenPathSegment` because the two are asked different questions. A binding is
+ * a PATH (`user.__proto__.x` must be refused), whereas a form field key or a rename target is a single
+ * literal name that may legitimately contain a dot (`user.email` as one flat key). Splitting such a
+ * name on "." would refuse keys that are perfectly safe, so the distinction is kept explicit.
+ */
+export function isPollutingKey(key: string): boolean {
+  return FORBIDDEN_PATH_SEGMENTS.has(key);
+}
+
+/**
  * Read a dotted/bracketed path out of a value. `getByPath(obj)` (no path) returns obj.
  * Supports object keys (`a.b`), array indices (`a[0]`), and the array-projection wildcard
  * `a[*].b` (#478) — which maps `.b` over each element of the array `a`. Pure + total — a

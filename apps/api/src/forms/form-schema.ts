@@ -184,10 +184,12 @@ export function buildFormJsonSchema(
     );
   if (unenforceable.length > 0) {
     notes.push(
-      `The field(s) ${unenforceable.map((k) => `\`${k}\``).join(", ")} use names that JSON ` +
-        "Schema validators special-case: most (including ajv) ignore constraints on them entirely, " +
-        "so validating locally will not reproduce this endpoint's answer. Such a value is also " +
-        "dropped before it reaches the workflow. Rename the field on the canvas.",
+      `The field(s) ${unenforceable.map((k) => `\`${k}\``).join(", ")} use RESERVED names and this ` +
+        "form cannot be submitted at all — the endpoint rejects it with a 400 (#761). A value written " +
+        "to one of those names is silently discarded by JavaScript, so it would never reach the " +
+        "workflow; JSON Schema can't warn you either, since validators (ajv included) ignore " +
+        "constraints on such a property entirely. Rename the field on the canvas. Newly saved forms " +
+        "can no longer use these names.",
     );
   }
   if (opts.botProtection) {

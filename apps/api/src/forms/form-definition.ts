@@ -272,6 +272,27 @@ export function validateSubmission(
   const data: Record<string, unknown> = {};
 
   for (const field of fields) {
+    /**
+     * #761: a field keyed `__proto__`/`constructor`/`prototype` cannot work. `data[key] = value`
+     * writes a string to `obj.__proto__`, which is a silent NO-OP — the value is discarded and the
+     * workflow receives the field as absent, with no error anywhere.
+     *
+     * The save gate now rejects such keys, so this only fires for a form saved BEFORE that gate
+     * existed. It refuses the submission rather than continuing, because the alternative is exactly
+     * the failure being fixed: a visitor told their submission succeeded while part of it was thrown
+     * away. Naming the field points the author at the fix (rename it on the canvas).
+     */
+    if (
+      field.key === "__proto__" ||
+      field.key === "constructor" ||
+      field.key === "prototype"
+    ) {
+      return {
+        ok: false,
+        error: `Field ${field.key} uses a reserved name and cannot be submitted — rename it in the form's configuration.`,
+      };
+    }
+
     const raw = input[field.key];
     const present = raw !== undefined && raw !== null && raw !== "";
 
