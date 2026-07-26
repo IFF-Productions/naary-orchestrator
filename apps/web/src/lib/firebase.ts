@@ -21,7 +21,7 @@ import {
   signOut,
   updateProfile,
 } from "firebase/auth";
-import { initAppCheck } from "./app-check";
+import { initAppCheck, mintBotGateToken } from "./app-check";
 import { getToken } from "./auth";
 
 const firebaseConfig = {
@@ -56,6 +56,14 @@ export const appCheckPlan = firebaseApp
 export const auth: Auth | undefined = firebaseApp
   ? getAuth(firebaseApp)
   : undefined;
+
+/**
+ * Re-exported so the public form/chat pages have ONE import that both initializes App Check
+ * (that happens as a side effect of loading this module) and mints a submission token. Importing
+ * ./app-check directly would compile fine and always return null, because nothing would have
+ * called initAppCheck.
+ */
+export { mintBotGateToken };
 
 const googleProvider = new GoogleAuthProvider();
 

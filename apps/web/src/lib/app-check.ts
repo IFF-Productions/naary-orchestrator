@@ -20,8 +20,10 @@
  */
 import type { FirebaseApp } from "firebase/app";
 import {
+  type AppCheck,
   ReCaptchaEnterpriseProvider,
   ReCaptchaV3Provider,
+  getLimitedUseToken,
   getToken,
   initializeAppCheck,
 } from "firebase/app-check";
@@ -102,7 +104,7 @@ export function initAppCheck(
         self as unknown as { FIREBASE_APPCHECK_DEBUG_TOKEN?: boolean }
       ).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
     }
-    const appCheck = initializeAppCheck(app, {
+    const instance = initializeAppCheck(app, {
       provider:
         plan.kind === "recaptcha-v3"
           ? new ReCaptchaV3Provider(plan.siteKey)
@@ -111,9 +113,11 @@ export function initAppCheck(
       // sit-on-one-tab-all-day surface) so tokens don't expire mid-session.
       isTokenAutoRefreshEnabled: true,
     });
+    appCheck = instance;
+    activePlan = plan;
     // Fire-and-forget: turn the FIRST token fetch into a diagnostic. Deliberately not
     // awaited — initAppCheck runs at module load and must not delay it.
-    void probeAppCheckToken(appCheck, plan, isDev);
+    void probeAppCheckToken(instance, plan, isDev);
     return plan;
   } catch (err) {
     console.warn(
@@ -121,6 +125,45 @@ export function initAppCheck(
       err,
     );
     return { kind: "off" };
+  }
+}
+
+/**
+ * The live instance + plan, captured by `initAppCheck`. Module-level rather than passed
+ * around because the public form/chat pages mint tokens from a completely different part of
+ * the tree, and Firebase only permits ONE App Check per app anyway.
+ */
+let appCheck: AppCheck | undefined;
+let activePlan: ActivePlan | undefined;
+
+/**
+ * Mint a **limited-use** App Check token for one public form/chat submission — the tenant
+ * bot-gate `app_check` provider (docs/design/TENANT-BOT-GATE-PROVIDERS.md §3).
+ *
+ * `getLimitedUseToken`, not `getToken`: the API verifies with `consume: true`, which can only
+ * spend a token that was minted limited-use. A cached `getToken` token would be replayable no
+ * matter what the server asks for. It also means every submission needs a FRESH call — these
+ * are single-use by construction, so there is nothing to cache here.
+ *
+ * `null` means "this page cannot attest" — App Check off in this build, or a token fetch that
+ * failed. Callers must treat that as "let the server decide" rather than blocking the visitor:
+ * the server denies an absent token when it can enforce and fails open when it cannot, and it
+ * is the only side that knows which. Never throws, for the same reason.
+ */
+export async function mintBotGateToken(): Promise<string | null> {
+  if (!appCheck || !activePlan) {
+    console.warn(
+      "[app-check] a bot gate asked for an App Check token, but App Check is not initialized " +
+        "in this build (no VITE_FIREBASE_APPCHECK_SITE_KEY). Submissions will carry no token.",
+    );
+    return null;
+  }
+  try {
+    const { token } = await getLimitedUseToken(appCheck);
+    return token || null;
+  } catch (err) {
+    console.error(explainAppCheckFailure(activePlan, err));
+    return null;
   }
 }
 

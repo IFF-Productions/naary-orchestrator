@@ -337,6 +337,16 @@ export interface FormFieldView {
   options?: string[];
 }
 
+/**
+ * The active bot gate for a public form/chat page (docs/design/TENANT-BOT-GATE-PROVIDERS.md).
+ * Absent ⇒ no gate. A discriminated union rather than a flag because the two providers carry
+ * different data: Turnstile needs the tenant's public site key, App Check needs nothing at all
+ * (it attests OUR Firebase project, which is also why it is the weaker of the two).
+ */
+export type BotGate =
+  | { provider: "turnstile"; siteKey: string }
+  | { provider: "app_check" };
+
 /** Public form definition served to an anonymous browser — carries NO tenant/workflow ids. */
 export interface FormDefinition {
   formId: string;
@@ -352,9 +362,13 @@ export interface FormDefinition {
    *  key optional; absent ⇒ the stock page. Already validated at save time AND re-projected
    *  server-side, but the accent is re-checked at the point of use (see public/form-branding.ts). */
   branding?: FormBrandingConfig;
-  /** Cloudflare Turnstile site key — present only when the tenant has an active bot gate for this
-   *  env; the page renders the widget and sends the solved token on submit. */
+  /** @deprecated Use `botGate`. Cloudflare Turnstile site key, still emitted for a Turnstile
+   *  gate so a cached embedded bundle keeps working. Read it only as a fallback — an OLDER API
+   *  emits this and no `botGate`, which is the direction that actually needs handling here. */
   turnstileSiteKey?: string;
+  /** The active bot gate, absent when this env has none. Render via `<BotGate>`; send the
+   *  resulting token back as `botToken`. */
+  botGate?: BotGate;
 }
 
 /** A registered hosted-chat endpoint (no secret — the opaque id is the only capability). */
@@ -377,9 +391,11 @@ export interface ChatDefinition {
   description?: string;
   placeholder?: string;
   greeting?: string;
-  /** Cloudflare Turnstile site key — present only when the tenant has an active bot gate for this
-   *  env; the widget renders and each message sends a fresh solved token. */
+  /** @deprecated Use `botGate` — see FormDefinition. */
   turnstileSiteKey?: string;
+  /** The active bot gate, absent when this env has none. Each message needs a FRESH token
+   *  (both providers hand out single-use ones). */
+  botGate?: BotGate;
 }
 
 /** A RAG source ("citation") the hosted chat used to answer (issue #482) — a privacy-safe subset of

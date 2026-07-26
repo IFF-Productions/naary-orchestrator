@@ -11,7 +11,8 @@ import {
   PublicNotice,
 } from "./public/PublicShell";
 import { useEmbedResize } from "../lib/embed-resize";
-import { TurnstileWidget } from "./public/TurnstileWidget";
+import { BotGate } from "./public/BotGate";
+import { resolveBotGate } from "./public/bot-gate";
 
 /**
  * PUBLIC hosted chat (Chat Trigger program). Reached at `/c/:chatId`, OUTSIDE RequireAuth — an
@@ -121,9 +122,16 @@ export function ChatPage() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  // Turnstile: a solved (single-use) token, re-armed after every message.
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
-  const [turnstileReset, setTurnstileReset] = useState(0);
+  // Bot gate: a fresh single-use token, re-armed after every message, plus whether the gate
+  // turned out to be unavailable in this browser (script blocked, App Check absent) — in which
+  // case we stop gating and let the server decide, rather than a permanently dead send button.
+  const [botToken, setBotToken] = useState<string | null>(null);
+  const [botReset, setBotReset] = useState(0);
+  const [gateUnavailable, setGateUnavailable] = useState(false);
+  // Derived, never stored, so it cannot go stale against `def`; tolerates an older API that
+  // only sends `turnstileSiteKey`. Declared up here, above send(), so the closure it captures
+  // is obvious rather than something a reader has to trace past a hoisted function.
+  const gate = def ? resolveBotGate(def) : null;
   const sessionId = useRef<string>(
     typeof crypto !== "undefined" && crypto.randomUUID
       ? crypto.randomUUID()
@@ -154,8 +162,8 @@ export function ChatPage() {
   async function send() {
     const text = input.trim();
     if (!text || !chatId || sending) return;
-    // If bot-gated, require a solved challenge for THIS message (single-use token).
-    if (def?.turnstileSiteKey && !turnstileToken) return;
+    // If bot-gated, require a token for THIS message (single-use under both providers).
+    if (gate && !botToken && !gateUnavailable) return;
     setInput("");
     setTurns((t) => [...t, { role: "user", text }]);
     setSending(true);
@@ -164,7 +172,7 @@ export function ChatPage() {
         chatId,
         text,
         sessionId.current,
-        turnstileToken ?? undefined,
+        botToken ?? undefined,
       );
       // "started" = the workflow ran but didn't respond synchronously (no Respond node / timed out).
       // Show that explicitly rather than a permanent "…" that looks like it's still typing.
@@ -189,10 +197,10 @@ export function ChatPage() {
       ]);
     } finally {
       setSending(false);
-      // The token was single-use — consumed by this message. Re-arm the widget for the next one.
-      if (def?.turnstileSiteKey) {
-        setTurnstileToken(null);
-        setTurnstileReset((n) => n + 1);
+      // The token was single-use — consumed by this message. Re-arm for the next one.
+      if (gate) {
+        setBotToken(null);
+        setBotReset((n) => n + 1);
       }
     }
   }
@@ -200,7 +208,18 @@ export function ChatPage() {
   const canSend =
     input.trim().length > 0 &&
     !sending &&
-    (!def?.turnstileSiteKey || !!turnstileToken);
+    (!gate || !!botToken || gateUnavailable);
+  // Built once: App Check renders nothing, so it must NOT get Turnstile's centering wrapper —
+  // that would leave an empty flex row with a margin above the composer.
+  const gateEl = gate ? (
+    <BotGate
+      gate={gate}
+      onToken={setBotToken}
+      onReset={() => setBotToken(null)}
+      onUnavailable={() => setGateUnavailable(true)}
+      resetSignal={botReset}
+    />
+  ) : null;
 
   return (
     <PublicFrame embed={embed}>
@@ -421,7 +440,7 @@ export function ChatPage() {
               padding: "12px 16px",
             }}
           >
-            {def.turnstileSiteKey && (
+            {gate?.provider === "turnstile" ? (
               <div
                 style={{
                   display: "flex",
@@ -429,13 +448,10 @@ export function ChatPage() {
                   marginBottom: 4,
                 }}
               >
-                <TurnstileWidget
-                  siteKey={def.turnstileSiteKey}
-                  onToken={setTurnstileToken}
-                  onReset={() => setTurnstileToken(null)}
-                  resetSignal={turnstileReset}
-                />
+                {gateEl}
               </div>
+            ) : (
+              gateEl
             )}
             <div
               style={{

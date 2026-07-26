@@ -57,6 +57,7 @@ export function TurnstileWidget({
   siteKey,
   onToken,
   onReset,
+  onUnavailable,
   resetSignal = 0,
 }: {
   siteKey: string;
@@ -64,15 +65,18 @@ export function TurnstileWidget({
   onToken: (token: string) => void;
   /** Called when the token is cleared (expired/errored/reset) so the parent can disable submit. */
   onReset?: () => void;
+  /** Called when the widget can never produce a token here (script blocked/offline) so the
+   *  parent can stop gating submit — see below. */
+  onUnavailable?: () => void;
   /** Bump to re-arm the widget after the token was spent (e.g. a failed submit). */
   resetSignal?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const widgetId = useRef<string | null>(null);
   // Keep the latest callbacks without re-rendering the widget (which would reset it).
-  const cb = useRef({ onToken, onReset });
+  const cb = useRef({ onToken, onReset, onUnavailable });
   useEffect(() => {
-    cb.current = { onToken, onReset };
+    cb.current = { onToken, onReset, onUnavailable };
   });
 
   // Render once per site key.
@@ -91,7 +95,11 @@ export function TurnstileWidget({
         });
       })
       .catch(() => {
-        /* script blocked/offline — server fail-opens, so leave the page usable */
+        // Script blocked (ad/privacy extension) or offline. The header comment always claimed
+        // this leaves the page usable, but it did NOT: the parent kept submit disabled until a
+        // token arrived, so a blocked script meant a permanently dead button. Tell the parent
+        // explicitly, and let the server — which fail-opens on a Cloudflare outage — decide.
+        if (!cancelled) cb.current.onUnavailable?.();
       });
     return () => {
       cancelled = true;
