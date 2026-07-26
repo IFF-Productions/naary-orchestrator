@@ -524,8 +524,13 @@ export async function runAgent(
     // enum of bare names and has to guess what each one handles; with it, the descriptions the
     // author already wrote do the work. Appended (never replacing the author's prompt), and
     // derived from the same `targets` the enum and the edges come from — one source of truth.
+    // `systemPrompt` is OPTIONAL (the save gate allows a handoff agent without one), so it is
+    // filtered rather than interpolated — a template literal turned the missing case into a
+    // prompt that literally began "undefined", which the model reads and the token estimate bills.
     const systemPrompt = cfg.handoff
-      ? `${cfg.systemPrompt}\n\n${handoffRoster(cfg.handoff)}`
+      ? [cfg.systemPrompt?.trim(), handoffRoster(cfg.handoff)]
+          .filter((part): part is string => Boolean(part))
+          .join("\n\n")
       : cfg.systemPrompt;
 
     // GenAI-convention span (#581). It wraps ONLY the model call + the PURE usage/cost derivation

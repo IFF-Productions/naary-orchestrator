@@ -186,7 +186,23 @@ export function validateHandoffs(graph: {
     const path = handoffConditionPath(node.id);
     const outgoing = graph.edges.filter((e) => e.from === node.id);
 
-    for (const t of handoff.targets) {
+    for (const raw of handoff.targets) {
+      // SHAPE FIRST. `readHandoff` only proves `targets` is an array — the elements come
+      // straight from stored/imported JSON, so a `targets: [null]` or `{ name: 42 }` would
+      // otherwise reach handoffTargetName and THROW out of validateGraph. Callers
+      // (validateGraph → the save gate, and the web compile path) expect a returned message,
+      // not an exception: a throw here is a 500 where a 400 belongs.
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        return `agent '${node.id}' has a handoff target that is not an object`;
+      }
+      const t = raw as HandoffTarget;
+      if (typeof t.to !== "string" || t.to.trim() === "") {
+        return `agent '${node.id}' has a handoff target with no 'to' node id`;
+      }
+      if (t.name !== undefined && typeof t.name !== "string") {
+        return `agent '${node.id}' has a handoff target whose 'name' is not a string`;
+      }
+
       const name = handoffTargetName(t);
       if (seen.has(name)) {
         return `agent '${node.id}' has duplicate handoff target name '${name}'`;
@@ -196,10 +212,19 @@ export function validateHandoffs(graph: {
       if (!ids.has(t.to)) {
         return `agent '${node.id}' hands off to unknown node '${t.to}'`;
       }
-      const edge = outgoing.find((e) => e.to === t.to);
-      if (!edge) {
+      // EVERY edge to this target, not the first. `find` would accept a correctly-conditioned
+      // edge and never look at an accidental duplicate beside it — and `nextNodes` returns
+      // every passing edge, so an unconditional twin fans out to the specialist on every run.
+      // That is the exact failure this validator exists to prevent, so a second edge to the
+      // same target is refused outright rather than disambiguated.
+      const edges = outgoing.filter((e) => e.to === t.to);
+      if (edges.length === 0) {
         return `agent '${node.id}' hands off to '${t.to}' but has no edge to it`;
       }
+      if (edges.length > 1) {
+        return `agent '${node.id}' has ${edges.length} edges to '${t.to}' — a handoff needs exactly one, or the extras run on every handoff`;
+      }
+      const edge = edges[0];
       if (!edge.condition) {
         return `the edge '${node.id}' → '${t.to}' is unconditional, so it would run on every handoff — give it the condition ${path} eq '${name}'`;
       }
