@@ -9,19 +9,34 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "weekly"
-    # Two upgrades are held back because an upstream hasn't caught up — without these
-    # ignores the weekly group keeps re-proposing them and re-breaking the build:
-    #  - flagsmith-nodejs v8 has no compatible @openfeature/flagsmith-provider release
-    #    yet (0.1.2, the latest, requires flagsmith-nodejs@^6). Stay on v6 until a
-    #    provider that supports v8 ships.
-    #  - openapi-typescript v7 generates via the TS compiler `ts.factory` AST API,
-    #    which our typescript@7 (TS7-native) doesn't expose. Stay on v6 (string emitter)
-    #    until openapi-typescript supports the native compiler.
+    # Upgrades held back because an upstream hasn't caught up. Without these ignores the weekly
+    # group keeps re-proposing them and re-breaking the build:
+    #
+    #  - flagsmith-nodejs: @openfeature/flagsmith-provider@0.1.2 (the latest) declares
+    #    `flagsmith-nodejs: ^6.1.0`, so anything from v7 up is incompatible — NOT just v8.
+    #    This bound was `>=8`, which let Dependabot propose 7.0.3 (PR #763); pnpm then either
+    #    resolves two flagsmith copies or hits a peer conflict. Raise this only when a provider
+    #    release accepts the newer major.
+    #  - openapi-typescript v7 generates via the TS compiler `ts.factory` AST API, which our
+    #    typescript@7 (TS7-native) doesn't expose. Stay on v6 (string emitter) until
+    #    openapi-typescript supports the native compiler.
+    #  - @xmldom/xmldom must stay on 0.8.x, and this one is a SECURITY bound, not a
+    #    compatibility one. `xml-crypto@6.1.2` depends on `^0.8.10` and calls
+    #    `parseFromString(xml)` with NO mimeType in five places, which 0.9.x rejects with a
+    #    TypeError. Worse, `apps/api/src/sso/saml.ts` imports DOMParser DIRECTLY: bumping the
+    #    direct dep to 0.9 leaves saml.ts parsing with 0.9 while xml-crypto canonicalizes and
+    #    verifies with 0.8 — two DOM implementations on the same document, on the one code path
+    #    whose entire job is proving a signature covers what we read. That is a
+    #    signature-wrapping surface, so do NOT accept a 0.9 bump to silence an advisory.
+    #    0.8.13 already fixes all five HIGH serialization advisories (ranges are <0.8.13).
+    #    Revisit only when xml-crypto itself moves to 0.9 (or is replaced).
     ignore:
       - dependency-name: "flagsmith-nodejs"
-        versions: [">=8"]
+        versions: [">=7"]
       - dependency-name: "openapi-typescript"
         versions: [">=7"]
+      - dependency-name: "@xmldom/xmldom"
+        versions: [">=0.9"]
     # Collapse the weekly npm bumps into ONE PR instead of one-per-dependency.
     # Split by dependency-type so a risky prod bump and a routine dev bump stay in
     # separate PRs (a broken devDependency can't block a production security patch).
