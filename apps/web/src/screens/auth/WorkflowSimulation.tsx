@@ -12,6 +12,8 @@ import {
   type SimulationSignals,
   cardVisual,
   edgeVisual,
+  BOT_GATE_LABEL,
+  botGateStatus,
   nodeLabels,
   nodeStatuses,
   runIdChip,
@@ -171,6 +173,109 @@ function SimNode({
   );
 }
 
+/**
+ * The bot-protection gate: a SMALL card set beside the trigger with a DASHED spur, not another link
+ * in the chain. Both choices are deliberate — Turnstile gates ingress rather than being a step the
+ * request passes through, and the dashed connector is how this canvas can say "alongside" instead of
+ * "next". Narrower and shorter than a main node so it reads as subordinate at a glance.
+ */
+function SideGate({ status }: { status: NodeStatus }) {
+  const v = cardVisual(status);
+  return (
+    <>
+      {/* Spur from the trigger's right edge. Dashed, and it animates only while the gate runs. */}
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          left: NODE_POS[0].left + 226,
+          top: NODE_POS[0].top + 37,
+          width: 42,
+          height: 1,
+          backgroundImage: `linear-gradient(90deg, ${v.borderColor} 0 6px, transparent 6px 12px)`,
+          backgroundSize: "12px 1px",
+          animation:
+            status === "running" ? "authDash .7s linear infinite" : undefined,
+          transition: "background-image .4s",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          left: NODE_POS[0].left + 268,
+          top: NODE_POS[0].top + 12,
+          width: 150,
+          height: 50,
+          borderRadius: 11,
+          border: `1px dashed ${v.borderColor}`,
+          background: v.background,
+          color: v.color,
+          display: "flex",
+          alignItems: "center",
+          gap: 9,
+          padding: "0 11px",
+          transition: "border-color .4s, background .4s, color .4s",
+          boxShadow: v.boxShadow,
+        }}
+      >
+        <div
+          style={{
+            width: 26,
+            height: 26,
+            flex: "none",
+            borderRadius: 7,
+            border: "1px solid currentColor",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {/* Inline SVG like NODE_ICONS above — this comp is hardcoded dark and doesn't use the
+              shared Icon set (which has no shield glyph). */}
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M12 3l7 3v5c0 4.2-2.9 8-7 10-4.1-2-7-5.8-7-10V6z"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinejoin="round"
+            />
+            <path
+              d="M9 12l2 2 4-4"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {BOT_GATE_LABEL[0]}
+          </div>
+          <div
+            style={{
+              fontSize: 9,
+              opacity: 0.72,
+              fontFamily: "var(--font-mono)",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {STATE_WORD[status]} · side
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 export function WorkflowSimulation({
   signals,
   wide,
@@ -185,6 +290,7 @@ export function WorkflowSimulation({
   const statuses = nodeStatuses(signals);
   const labels = nodeLabels(signals.mode, signals.provider);
   const bar = statusBar(signals);
+  const gate = botGateStatus(signals);
   return (
     <div
       style={{
@@ -353,6 +459,8 @@ export function WorkflowSimulation({
                 sub={labels[i][1]}
               />
             ))}
+            {/* Bot protection, alongside the trigger rather than in the chain — see SideGate. */}
+            <SideGate status={gate} />
           </div>
         </div>
       </div>

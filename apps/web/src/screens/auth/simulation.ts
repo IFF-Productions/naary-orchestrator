@@ -89,6 +89,29 @@ export function nodeStatuses(
   return ["done", n2, n3, n4, n5];
 }
 
+/**
+ * The bot-protection gate, drawn as a SIDE process hanging off the trigger rather than a sixth node
+ * in the chain — which is what it actually is. Turnstile gates *ingress*: it runs alongside the flow
+ * and decides whether the request is admitted, it isn't a step the request passes through.
+ *
+ * Status follows the same real stage machine as the main nodes, so it can't claim more than the page
+ * knows:
+ *   - no stage yet ⇒ `idle` (nothing submitted, nothing checked)
+ *   - `verify` ⇒ `running` (the gate is what runs first on submit)
+ *   - anything after ⇒ `done` — including `failed`. A rejected credential does NOT mean the bot gate
+ *     rejected you, and drawing it as failed would blame the wrong node for the outcome.
+ */
+export function botGateStatus(s: Pick<SimulationSignals, "stage">): NodeStatus {
+  if (!s.stage) return "idle";
+  return s.stage === "verify" ? "running" : "done";
+}
+
+/** Label for the side gate. Sublabel names the mechanism, matching the other cards' `x · y` shape. */
+export const BOT_GATE_LABEL: readonly [string, string] = [
+  "Bot protection",
+  "turnstile · side gate",
+];
+
 /** Uppercase mono status word shown on each node card. */
 export const STATE_WORD: Record<NodeStatus, string> = {
   idle: "idle",
