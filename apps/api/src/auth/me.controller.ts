@@ -3,6 +3,7 @@ import { ApiBearerAuth } from "@nestjs/swagger";
 import { getAllFlags } from "@naary/flags";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { MeFlagsResponse, MeResponse } from "./me.response";
+import { isPlatformOperator } from "./platform-operators";
 import { CurrentPrincipal, type Principal } from "./tenant.decorator";
 import { UserScoped } from "./user-scoped.decorator";
 
@@ -21,8 +22,17 @@ export class MeController {
   me(@CurrentPrincipal() principal: Principal): {
     tenantId: string;
     subject?: string;
+    isOperator: boolean;
   } {
-    return { tenantId: principal.tenantId, subject: principal.subject };
+    return {
+      tenantId: principal.tenantId,
+      subject: principal.subject,
+      // Whether this caller operates the DEPLOYMENT (PLATFORM_OPERATORS allowlist) — distinct from
+      // owning a workspace. Sent so the SPA can hide operator-only surfaces (the Workers fleet view)
+      // instead of showing a link that 403s. Presentation only: every operator-gated endpoint
+      // re-checks server-side, so a client claiming otherwise gains nothing.
+      isOperator: isPlatformOperator(principal),
+    };
   }
 
   /**

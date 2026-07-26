@@ -14,6 +14,16 @@ export class MeResponse {
     description: "The authenticated subject (user id / email), if any.",
   })
   subject?: string;
+
+  @ApiProperty({
+    example: false,
+    description:
+      "True when this caller is a PLATFORM OPERATOR (the PLATFORM_OPERATORS email allowlist) — i.e. " +
+      "runs the deployment, as distinct from owning a workspace in it. False for everyone when that " +
+      "env is unset, and always false for API-token callers (they carry no email). Sent so the SPA can " +
+      "hide operator-only surfaces; every such endpoint re-checks server-side.",
+  })
+  isOperator!: boolean;
 }
 
 /** The feature flags resolved for the authenticated tenant (booleans only). */

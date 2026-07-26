@@ -13,8 +13,15 @@ import type {
 } from "./types";
 
 export const workspacesApi = {
-  // Who am I — the SPA's tenantId (for tenant-scoped routes) + OIDC subject.
-  getMe(): Promise<{ tenantId: string; subject?: string }> {
+  // Who am I — the SPA's tenantId (for tenant-scoped routes) + OIDC subject, plus whether this caller
+  // operates the DEPLOYMENT (PLATFORM_OPERATORS allowlist), which gates operator-only surfaces like the
+  // Workers fleet view. `isOperator` is optional here so an older API (or a cached response) without it
+  // reads as false — the safe direction, and the server re-checks regardless.
+  getMe(): Promise<{
+    tenantId: string;
+    subject?: string;
+    isOperator?: boolean;
+  }> {
     return http("/me");
   },
   // The caller's workspaces + role (powers the workspace switcher).

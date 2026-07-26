@@ -57,6 +57,9 @@ x-backend-env: &backend-env
   # Credentials are forwarded too — without them a bucket is configured but unreachable, which was
   # the state of this file before logo uploads existed. S3_ENDPOINT targets an S3-compatible
   # provider (R2/B2/MinIO) and switches the client to path-style addressing.
+  # Platform operators (comma-separated emails) — gates the Workers fleet view, which shows infra
+  # telemetry for EVERY tenant. Unset = nobody sees it (fail closed, by design).
+  PLATFORM_OPERATORS: ${PLATFORM_OPERATORS:-}
   STORAGE_PROVIDER: ${STORAGE_PROVIDER:-}
   S3_BUCKET: ${S3_BUCKET:-}
   AWS_REGION: ${AWS_REGION:-}
