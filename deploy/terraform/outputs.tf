@@ -42,7 +42,12 @@ output "server_env" {
 }
 
 # ── Object storage (s3.tf) ─────────────────────────────────────────────────────────────
-# These four feed the SERVER's .env. Copy them in after `apply`:
+# A NEWLY CREATED server gets these AUTOMATICALLY: hetzner.tf concatenates them into `server_env`,
+# which cloud-init writes to /opt/naary/.env on first boot. Nothing to copy.
+#
+# On an EXISTING server they must be added by hand — cloud-init runs first-boot only, and
+# hcloud_server.naary deliberately sets `ignore_changes = [user_data]` so a template edit can't replace
+# a live box, so an apply updates these outputs WITHOUT touching the server's .env:
 #
 #   STORAGE_PROVIDER=s3
 #   S3_BUCKET=$(terraform output -raw s3_bucket)
@@ -50,7 +55,8 @@ output "server_env" {
 #   AWS_ACCESS_KEY_ID=$(terraform output -raw s3_access_key_id)
 #   AWS_SECRET_ACCESS_KEY=$(terraform output -raw s3_secret_access_key)
 #
-# Without them, hosted-form logo uploads fail closed with a 503 (by design — see s3.tf).
+# …then `docker compose up -d api worker` on the box. Until object storage is configured, hosted-form
+# logo uploads fail closed with a 503 (by design — see s3.tf); nothing else is affected.
 
 output "s3_bucket" {
   value       = var.create_s3 ? aws_s3_bucket.naary[0].bucket : null

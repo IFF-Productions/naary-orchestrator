@@ -129,9 +129,18 @@ variable "aws_region" {
 }
 
 variable "s3_bucket_name" {
-  type        = string
-  default     = null
-  description = "Globally-unique bucket name, e.g. \"naary-prod-assets\". S3 bucket names are shared across ALL AWS accounts, so a generic name will collide."
+  type    = string
+  default = null
+  # REQUIRED when create_s3 is true (the default). Enforced by a precondition on the bucket in s3.tf
+  # rather than a `validation` block here: cross-variable validation needs Terraform 1.9 and this
+  # module supports >= 1.5.
+  description = "REQUIRED when create_s3 is true. Globally-unique bucket name, e.g. \"naary-prod-assets\" — S3 names are shared across ALL AWS accounts, so a generic one will collide."
+
+  validation {
+    # Shape only; "is it set at all" is the precondition's job (see above).
+    condition     = var.s3_bucket_name == null || can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.s3_bucket_name))
+    error_message = "s3_bucket_name must be a valid S3 bucket name: 3-63 chars, lowercase letters/digits/hyphens/dots, starting and ending alphanumeric."
+  }
 }
 
 variable "s3_iam_user_name" {
@@ -150,12 +159,24 @@ variable "s3_claim_check_retention_days" {
   type        = number
   default     = 30
   description = "Days to keep claim-check payloads (items/ ctx/ sql/ http/) — large activity outputs offloaded so Temporal payloads stay under the ~2MB cap. Only needs to cover how far back run detail is worth inspecting; a missing one degrades gracefully (the UI shows an 'offloaded' marker). Form assets are NEVER expired."
+
+  # S3 rejects a non-positive or fractional expiration at APPLY time, with an error naming the
+  # lifecycle rule rather than the variable. Catch it at plan time instead.
+  validation {
+    condition     = var.s3_claim_check_retention_days >= 1 && floor(var.s3_claim_check_retention_days) == var.s3_claim_check_retention_days
+    error_message = "s3_claim_check_retention_days must be a whole number of days >= 1."
+  }
 }
 
 variable "s3_noncurrent_version_retention_days" {
   type        = number
   default     = 30
   description = "Days to keep superseded versions of form assets before deletion."
+
+  validation {
+    condition     = var.s3_noncurrent_version_retention_days >= 1 && floor(var.s3_noncurrent_version_retention_days) == var.s3_noncurrent_version_retention_days
+    error_message = "s3_noncurrent_version_retention_days must be a whole number of days >= 1."
+  }
 }
 
 variable "s3_kms_key_arn" {

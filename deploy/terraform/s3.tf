@@ -38,6 +38,17 @@ resource "aws_s3_bucket" "naary" {
     Name    = "naary"
     Purpose = "form-assets + claim-check payloads"
   }
+
+  # `create_s3` defaults to true while `s3_bucket_name` has no default, so a first apply with an
+  # unedited tfvars would otherwise reach AWS with a null bucket name and fail on a provider error that
+  # never mentions the variable. A precondition (not a cross-variable `validation` block, which needs
+  # Terraform 1.9 while this module supports >= 1.5) fails at PLAN time with the fix in the message.
+  lifecycle {
+    precondition {
+      condition     = var.s3_bucket_name != null && var.s3_bucket_name != ""
+      error_message = "s3_bucket_name is required when create_s3 is true. Set it in terraform.tfvars (names are globally unique across all AWS accounts — e.g. naary-prod-assets), or set create_s3 = false to manage object storage yourself."
+    }
+  }
 }
 
 # Block every form of public access. Nothing is ever served to a browser DIRECTLY from S3: the API
