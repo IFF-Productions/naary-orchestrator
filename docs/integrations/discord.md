@@ -6,7 +6,7 @@ category: 'Communication'
 authType: custom-header
 serverUrlRequired: false
 actionCount: 5
-writeActionCount: 2
+writeActionCount: 3
 oneClickTestable: false
 liveVerified: false
 ---
@@ -57,11 +57,11 @@ Either way, the definitive check is **single-node Test** on the canvas: drop a *
 | Get channel | `GET` | `/channels/{channelId}` | `channelId` | — |
 | List messages | `GET` | `/channels/{channelId}/messages` | `channelId` | `limit`, `before`, `after` |
 | **Create DM** (write) | `POST` | `/users/@me/channels` | `recipient_id` | — |
-| Add reaction | `PUT` | `/channels/{channelId}/messages/{messageId}/reactions/{emoji}/@me` | `channelId`, `messageId`, `emoji` | — |
+| **Add reaction** (write) | `PUT` | `/channels/{channelId}/messages/{messageId}/reactions/{emoji}/@me` | `channelId`, `messageId`, `emoji` | — |
 
 Fields can be typed in statically or **bound** to an upstream step's output (`{ from: <nodeId>, path: <dotted.path> }`) — ids and generated text are usually bound.
 
-The 2 write actions run **at-most-once**: a transient failure fails the node instead of retrying, so a lost response cannot double-post. Re-run deliberately if you need to.
+The 3 write actions run **at-most-once**: a transient failure fails the node instead of retrying, so a lost response cannot double-post. Re-run deliberately if you need to.
 
 ## Output
 
