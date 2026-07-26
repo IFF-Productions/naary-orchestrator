@@ -24,7 +24,15 @@ import type { NodeType } from "./types/core";
 export type N8nMapStatus = "imported" | "approximated" | "unmapped" | "skipped";
 
 export interface N8nMapping {
-  /** Our node type, or null for `skipped` (annotations) / sub-nodes folded into a parent. */
+  /**
+   * Our node type, or null when this table has none to name. `null` does NOT mean "absent from
+   * the graph" — read it together with `status`:
+   *   · `skipped`  → genuinely not a graph node (annotations, sub-nodes folded into a parent);
+   *   · `unmapped` → still becomes a node, a `noOp` PLACEHOLDER the importer substitutes, with
+   *                  the original n8n config preserved under `config.__n8n` so it can be rebuilt.
+   * The split-and-loop constructs are the second kind, so treating `null` as "not represented"
+   * would under-count the nodes an import actually produces.
+   */
   nodeType: NodeType | null;
   status: N8nMapStatus;
   /** Fixed config merged under the translated parameters (e.g. `{ operation: "parse" }`). */

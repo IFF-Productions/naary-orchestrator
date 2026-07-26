@@ -186,6 +186,34 @@ export function convertN8nExpression(
   return { value, unconverted, converted };
 }
 
+/** Keys an imported JSON blob must never carry into an object we build. `JSON.parse` makes
+ *  `__proto__` an OWN property, so it survives a DB round-trip and pollutes the moment anything
+ *  `Object.assign`s the value (assign uses Set, which fires the setter). */
+const POLLUTING_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+/**
+ * Deep-clone an untrusted imported value, dropping ONLY the prototype-polluting keys and leaving
+ * every other value byte-identical — no expression conversion, no coercion.
+ *
+ * This is what `config.__n8n` needs: an unmapped placeholder keeps its original n8n parameters so
+ * the user can rebuild the node, and `convertN8nValueDeep`'s output is deliberately discarded
+ * there (converting would change the strings we promised to keep verbatim). Without this, the one
+ * path that stores raw imported parameters was also the one path with no pollution guard.
+ * `__proto__`/`constructor`/`prototype` are not legal n8n parameter names, so nothing real is lost.
+ */
+export function stripPollutingKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripPollutingKeys);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (POLLUTING_KEYS.has(k)) continue;
+      out[k] = stripPollutingKeys(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 /**
  * Walk an arbitrary n8n parameter value (string / array / object) converting every expression it
  * contains, collecting unconverted tokens with the parameter path they came from.
@@ -220,8 +248,7 @@ export function convertN8nValueDeep(
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       // Prototype-pollution guard: an imported JSON blob is untrusted input, and these keys must
       // never reach an object we build (mirrors the bindingKey guard in registry.ts).
-      if (k === "__proto__" || k === "constructor" || k === "prototype")
-        continue;
+      if (POLLUTING_KEYS.has(k)) continue;
       out[k] = convertN8nValueDeep(
         v,
         predecessorId,

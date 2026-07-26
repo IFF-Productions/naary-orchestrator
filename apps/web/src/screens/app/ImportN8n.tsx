@@ -21,13 +21,17 @@ import type { N8nImportResult, N8nNodeReport } from "../../lib/api";
  * draft, but NOT the same function — the fallback differs (a timestamped `imported-…` key, so an
  * unnamed export still gets a stable, non-colliding key). Don't assume they stay in step.
  */
-function slugifyName(name: string): string {
+function slugifyName(name: string, fallback: string): string {
   const s = name
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return s || `imported-${Date.now()}`;
+  // The fallback is passed in, never generated here: this function is called for BOTH the
+  // "Saves under the key …" hint and the actual save, and a `Date.now()` computed inline made
+  // those two disagree — the user was shown one key and the graph was written under another
+  // (risking an unintended overwrite of whichever existing key it happened to land on).
+  return s || fallback;
 }
 
 const STATUS_COLOR: Record<N8nNodeReport["status"], string> = {
@@ -63,6 +67,10 @@ export function ImportN8n() {
   /** Editable so the user can avoid overwriting an existing workflow whose key this would collide
    *  with — saving an existing key creates its NEXT VERSION, it does not make a new workflow. */
   const [name, setName] = useState("");
+  // Stable for the life of the screen, so the key shown in the hint is the key `save()` writes.
+  // (An unnamed export has no slug to derive, so it needs *some* unique key; it just has to be
+  // the SAME one both times.) useState's initializer runs once — useMemo may re-run.
+  const [unnamedKeyFallback] = useState(() => `imported-${Date.now()}`);
 
   const counts = result?.counts;
   const attention = useMemo(
@@ -111,7 +119,7 @@ export function ImportN8n() {
     setError(null);
     try {
       const finalName = name.trim() || result.name;
-      const key = slugifyName(finalName);
+      const key = slugifyName(finalName, unnamedKeyFallback);
       await api.saveGraph(key, finalName, result.graph);
       navigate(`/app/canvas?key=${encodeURIComponent(key)}`);
     } catch (e) {
@@ -122,7 +130,7 @@ export function ImportN8n() {
           : "Could not save the imported workflow.",
       );
     }
-  }, [name, navigate, result]);
+  }, [name, navigate, result, unnamedKeyFallback]);
 
   return (
     <div style={{ maxWidth: 860 }}>
@@ -410,7 +418,10 @@ export function ImportN8n() {
                   the same export, or one whose name slugs onto an existing workflow, overwrites it.
                   Never activated automatically either way. */}
               Saves under the key{" "}
-              <code>{slugifyName(name.trim() || result.name)}</code>. If a
+              <code>
+                {slugifyName(name.trim() || result.name, unnamedKeyFallback)}
+              </code>
+              . If a
               workflow already uses that key this becomes its next VERSION
               rather than a new workflow — change the name above if you want a
               separate one. Never activated automatically.
