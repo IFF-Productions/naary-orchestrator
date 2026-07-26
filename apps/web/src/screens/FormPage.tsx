@@ -13,7 +13,8 @@ import {
   redirectMode,
   spansFullRow,
 } from "./public/form-branding";
-import { TurnstileWidget } from "./public/TurnstileWidget";
+import { BotGate } from "./public/BotGate";
+import { resolveBotGate } from "./public/bot-gate";
 import {
   ButtonSpinner,
   EMBER_BUTTON,
@@ -52,9 +53,13 @@ export function FormPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Turnstile: a solved (single-use) token, and a counter to re-arm the widget after a failed submit.
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
-  const [turnstileReset, setTurnstileReset] = useState(0);
+  // Bot gate: a fresh single-use token, a counter to re-arm after a failed submit, and whether
+  // the gate turned out to be unavailable in this browser (script blocked, App Check absent) —
+  // in which case we stop gating and let the server, the only side that knows if it can
+  // enforce, decide.
+  const [botToken, setBotToken] = useState<string | null>(null);
+  const [botReset, setBotReset] = useState(0);
+  const [gateUnavailable, setGateUnavailable] = useState(false);
   // Below the phone breakpoint a 2-column form collapses to one — the desktop/mobile difference is
   // available width, so it's expressed as that rather than as two authored layouts.
   const phone = useMediaQuery(PHONE_QUERY);
@@ -62,6 +67,9 @@ export function FormPage() {
   // Tenant presentation (all optional). Absent ⇒ every derived style below returns {} and the page
   // renders exactly as it did before branding existed.
   const branding = def?.branding;
+  // One source of truth for "is there a gate, and which": derived, never stored, so it cannot
+  // go stale against `def`. Tolerates an older API that only sends `turnstileSiteKey`.
+  const gate = def ? resolveBotGate(def) : null;
   const accentStyle = accentVars(branding?.accentColor);
   const submitFace = accentButton(branding?.accentColor);
   const gridStyle = fieldGridStyle(branding?.desktopColumns, phone);
@@ -96,8 +104,9 @@ export function FormPage() {
       setError(`Please fill in "${missing.label}".`);
       return;
     }
-    // If the form is bot-gated, require a solved challenge before spending a round-trip.
-    if (def.turnstileSiteKey && !turnstileToken) {
+    // If the form is bot-gated, require a token before spending a round-trip — unless the gate
+    // could never produce one here, which must not become a dead submit button.
+    if (gate && !botToken && !gateUnavailable) {
       setError("Please complete the verification.");
       return;
     }
@@ -110,7 +119,7 @@ export function FormPage() {
         const raw = (values[f.key] ?? "").trim();
         if (raw !== "") data[f.key] = raw;
       }
-      await api.submitForm(formId, data, turnstileToken ?? undefined);
+      await api.submitForm(formId, data, botToken ?? undefined);
       setSubmitted(true);
       // Honour redirectUrl only for a TOP-LEVEL page. Embedded, we render the destination as a link
       // instead of navigating — see redirectMode for why auto-navigating inside a tenant's iframe is
@@ -121,11 +130,11 @@ export function FormPage() {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
-      // The Turnstile token is single-use — a failed submit consumed it, so re-arm the widget for a
-      // retry (the visitor re-solves; managed mode is usually silent).
-      if (def.turnstileSiteKey) {
-        setTurnstileToken(null);
-        setTurnstileReset((n) => n + 1);
+      // The token is single-use under BOTH providers — a failed submit consumed it, so re-arm
+      // for a retry (Turnstile re-solves, usually silently; App Check mints a fresh one).
+      if (gate) {
+        setBotToken(null);
+        setBotReset((n) => n + 1);
       }
       setError(
         /403/.test(msg)
@@ -335,12 +344,13 @@ export function FormPage() {
                     ))}
               </div>
 
-              {def.turnstileSiteKey && (
-                <TurnstileWidget
-                  siteKey={def.turnstileSiteKey}
-                  onToken={setTurnstileToken}
-                  onReset={() => setTurnstileToken(null)}
-                  resetSignal={turnstileReset}
+              {gate && (
+                <BotGate
+                  gate={gate}
+                  onToken={setBotToken}
+                  onReset={() => setBotToken(null)}
+                  onUnavailable={() => setGateUnavailable(true)}
+                  resetSignal={botReset}
                 />
               )}
 
@@ -359,7 +369,7 @@ export function FormPage() {
               <button
                 type="submit"
                 disabled={
-                  submitting || Boolean(def.turnstileSiteKey && !turnstileToken)
+                  submitting || Boolean(gate && !botToken && !gateUnavailable)
                 }
                 style={{
                   ...EMBER_BUTTON,
@@ -374,7 +384,7 @@ export function FormPage() {
                   fontFamily: "var(--font-sans)",
                   cursor: submitting ? "default" : "pointer",
                   opacity:
-                    def.turnstileSiteKey && !turnstileToken ? 0.6 : undefined,
+                    gate && !botToken && !gateUnavailable ? 0.6 : undefined,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",

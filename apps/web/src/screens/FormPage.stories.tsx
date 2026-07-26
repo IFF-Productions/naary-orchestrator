@@ -2,9 +2,14 @@ import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
 import { http, HttpResponse } from "msw";
 import { FormPage } from "./FormPage";
 
-// The public hosted form WITH a Cloudflare Turnstile bot gate (Slice 2). MSW returns a definition
-// carrying `turnstileSiteKey`; a stub for `window.turnstile` stands in for Cloudflare's script (which
-// can't load offline) — clicking it solves the challenge, which enables the otherwise-disabled submit.
+// The public hosted form WITH a Cloudflare Turnstile bot gate. MSW returns a definition carrying
+// `botGate` (and the deprecated `turnstileSiteKey` alongside it, exactly as the server does for one
+// release); a stub for `window.turnstile` stands in for Cloudflare's script (which can't load
+// offline) — clicking it solves the challenge, which enables the otherwise-disabled submit.
+//
+// The second story pins the OTHER shape: an older API that sends only `turnstileSiteKey`. That is
+// the compatibility direction that matters (a fresh bundle against a lagging API) and the one whose
+// failure is silent — no gate rendered, no token sent, every submission 403'd.
 const meta: Meta<typeof FormPage> = {
   title: "Public/FormPage (Turnstile)",
   component: FormPage,
@@ -46,6 +51,7 @@ const handlers = [
         { key: "email", label: "Email", type: "email", required: true },
         { key: "message", label: "Message", type: "textarea" },
       ],
+      botGate: { provider: "turnstile", siteKey: "0xTESTSITEKEY" },
       turnstileSiteKey: "0xTESTSITEKEY",
     }),
   ),
@@ -229,4 +235,31 @@ export const BrandedWithLogo: Story = {
     },
     router: { path: "/f/:formId", initialEntries: ["/f/demo"] },
   },
+};
+
+/**
+ * An OLDER API: only the deprecated `turnstileSiteKey`, no `botGate`. `resolveBotGate` must still
+ * produce a Turnstile gate — this renders and behaves identically to `Gated` above.
+ */
+export const LegacyApiWithoutBotGate: Story = {
+  parameters: {
+    msw: {
+      handlers: [
+        http.get("/api/forms/demo", () =>
+          HttpResponse.json({
+            formId: "demo",
+            title: "Contact us",
+            description: "We'll get back to you shortly.",
+            submitLabel: "Send request",
+            fields: [
+              { key: "email", label: "Email", type: "email", required: true },
+            ],
+            turnstileSiteKey: "0xTESTSITEKEY",
+          }),
+        ),
+      ],
+    },
+    router: { path: "/f/:formId", initialEntries: ["/f/demo"] },
+  },
+  decorators: [withTurnstileStub],
 };

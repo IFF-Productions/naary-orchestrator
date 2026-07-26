@@ -234,13 +234,15 @@ export const integrationsApi = {
   submitForm(
     formId: string,
     data: Record<string, unknown>,
-    turnstileToken?: string,
+    botToken?: string,
   ): Promise<{ status: string }> {
     return http(`/forms/${encodeURIComponent(formId)}`, {
       method: "POST",
-      // The token rides in the body as `turnstileToken`; the server verifies it, then
-      // validateSubmission strips it (it's not a declared field, so it never reaches the workflow).
-      body: JSON.stringify(turnstileToken ? { ...data, turnstileToken } : data),
+      // The token rides in the body as `botToken` — provider-neutral, since it may now be a
+      // Turnstile solution OR a Firebase App Check attestation. The server accepts the legacy
+      // `turnstileToken` too (for cached embedded bundles), then validateSubmission strips
+      // whichever arrived: neither is a declared field, so it never reaches the workflow.
+      body: JSON.stringify(botToken ? { ...data, botToken } : data),
     });
   },
   // --- Hosted chats (public chatTrigger endpoints) ---
@@ -270,16 +272,14 @@ export const integrationsApi = {
     chatId: string,
     message: string,
     sessionId: string,
-    turnstileToken?: string,
+    botToken?: string,
   ): Promise<ChatReply> {
     return http(`/chat/${encodeURIComponent(chatId)}`, {
       method: "POST",
-      // The server verifies turnstileToken then ignores it (validateMessage only reads message +
-      // sessionId). Each message needs a fresh single-use token.
+      // The server verifies `botToken` then ignores it (validateMessage only reads message +
+      // sessionId). Each message needs a fresh token — single-use under both providers.
       body: JSON.stringify(
-        turnstileToken
-          ? { message, sessionId, turnstileToken }
-          : { message, sessionId },
+        botToken ? { message, sessionId, botToken } : { message, sessionId },
       ),
     });
   },
