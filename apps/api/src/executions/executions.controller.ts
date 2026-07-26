@@ -36,6 +36,7 @@ import {
   RunEventResponse,
   RunGraphResponse,
   RunListItemResponse,
+  RunPageResponse,
   RunStateResponse,
   StartExecutionResponse,
 } from "./execution.response";
@@ -135,6 +136,71 @@ export class ExecutionsController {
       principal,
       q,
     );
+  }
+
+  /**
+   * Cursor-paged runs — what the Runs screen lists, so a tenant can reach past the newest page
+   * instead of being capped at the most recent 50.
+   *
+   * WHY A SIBLING ROUTE and not `limit`/`cursor` on `GET /executions`: nine other SPA surfaces
+   * (Overview, Workflows, charts, Billing, the notifications bell, …) call that endpoint purely for
+   * "recent runs" and want the plain array. Paginating in place would either change the response
+   * shape for all of them or make it polymorphic on a query param — an envelope-or-array union is
+   * miserable to type and generate clients from. Additive route, one caller, zero blast radius.
+   * Must be declared BEFORE `@Get(":id")` so "page" isn't captured as an :id (same as "awaiting").
+   *
+   * NOTE the status tabs are deliberately NOT a server-side filter here — see the Runs screen. A
+   * non-terminal row's status is reconciled against Temporal AFTER the query (a stored `running`
+   * whose workflow threw reports `failed`), so a SQL `status IN (…)` would return confidently wrong
+   * pages.
+   */
+  @ApiEndpoint({
+    summary: "List runs (cursor-paged)",
+    description:
+      "Runs for the tenant (newest first), keyset-paged on (createdAt, workflowId). Pass the " +
+      "previous page's `nextCursor` as `?cursor=` for the next page; `nextCursor` is null on the " +
+      "last page. `archived` and `q` behave as on GET /executions and compose with paging.",
+    ok: RunPageResponse,
+  })
+  @ApiQuery({ name: "archived", required: false, type: Boolean })
+  @ApiQuery({ name: "q", required: false, type: String })
+  @ApiQuery({
+    name: "cursor",
+    required: false,
+    type: String,
+    description: "The previous page's `nextCursor`. Omit for the first page.",
+  })
+  @ApiQuery({
+    name: "limit",
+    required: false,
+    type: Number,
+    description: "Page size, 1–100 (default 50). Clamped, never rejected.",
+  })
+  @Get("page")
+  async listRunsPage(
+    @TenantId() tenantId: string,
+    @Query("archived") archived?: string,
+    @Query("q") q?: string,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string,
+    @CurrentPrincipal() principal?: Principal,
+  ): Promise<RunPageResponse> {
+    // Clamped in queryListPage (1–100); a non-numeric `limit` parses to NaN, so fall back to the
+    // default rather than letting NaN reach `take` and blow up the query.
+    const parsed = Number(limit);
+    const page = await this.executions.listPage(
+      tenantId,
+      {
+        ...(Number.isFinite(parsed) && parsed > 0 ? { limit: parsed } : {}),
+        ...(cursor ? { cursor } : {}),
+        archived: archived === "true",
+        ...(q ? { q } : {}),
+      },
+      // G3 (§8.4): a restricted member/token sees only runs of workflows it may view. The view
+      // filter is applied IN the where clause, so pagination stays exact under restriction.
+      principal,
+    );
+    return { items: page.items, nextCursor: page.nextCursor };
   }
 
   /** The tenant's runs paused for approval, each with its prompt (the inbox). Must

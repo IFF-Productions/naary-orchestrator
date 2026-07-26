@@ -75,6 +75,10 @@ export function Runs() {
   );
   const [showArchived, setShowArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Pagination: the opaque keyset cursor for the NEXT page (null ⇒ we've reached the oldest run),
+  // plus an in-flight flag so "Load more" can't be double-fired into duplicate rows.
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   // Multi-select for bulk actions (archive/restore + approve/deny). `selected` holds
   // workflowIds; `bulkBusy` locks every control while a batch call is in flight.
   const [selected, setSelected] = useState<ReadonlySet<string>>(
@@ -90,9 +94,15 @@ export function Runs() {
   async function load(archived = showArchived, q = debouncedQuery) {
     const seq = ++loadSeq.current;
     try {
-      const rows = await api.listRuns(archived, q);
+      // First page only — `loadMore` appends the rest. Any (re)load resets pagination, since the
+      // cursor from a previous view/search doesn't address this result set.
+      const { items: rows, nextCursor: next } = await api.listRunsPage({
+        archived,
+        q,
+      });
       if (seq !== loadSeq.current) return; // superseded by a newer load
       setRuns(rows);
+      setNextCursor(next);
       setError(null);
       // Drop selections for runs that dropped off the list (archived elsewhere, aged out).
       const live = new Set(rows.map((r) => r.workflowId));
@@ -107,6 +117,48 @@ export function Runs() {
           ? "Not authenticated — sign in (or set an API token) to see runs."
           : "Could not reach the control plane (apps/api on :3000).",
       );
+    }
+  }
+
+  /**
+   * Append the next page. Keyset-paged on (createdAt, workflowId), so this stays exact even while
+   * new runs land at the top — an offset would re-show rows that shifted down.
+   *
+   * Appends rather than replaces so multi-select and the tab counts keep working across pages. The
+   * `loadSeq` guard is shared with `load()`: if the view/search changed while this was in flight,
+   * the response is dropped instead of appending rows from a stale result set. The append also
+   * dedupes on workflowId — belt-and-braces against a row that legitimately appears in two pages
+   * (its createdAt is fixed, but a concurrently-archived run can shift the boundary).
+   */
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    const seq = loadSeq.current;
+    setLoadingMore(true);
+    try {
+      const page = await api.listRunsPage({
+        archived: showArchived,
+        q: debouncedQuery,
+        cursor: nextCursor,
+      });
+      if (seq !== loadSeq.current) return; // view/search changed under us — discard
+      setRuns((prev) => {
+        const seen = new Set((prev ?? []).map((r) => r.workflowId));
+        return [
+          ...(prev ?? []),
+          ...page.items.filter((r) => !seen.has(r.workflowId)),
+        ];
+      });
+      setNextCursor(page.nextCursor);
+      setError(null);
+    } catch (e) {
+      if (seq !== loadSeq.current) return;
+      setError(
+        e instanceof UnauthorizedError
+          ? "Not authenticated — sign in (or set an API token) to see runs."
+          : "Could not load more runs — please retry.",
+      );
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -128,6 +180,7 @@ export function Runs() {
     const next = !showArchived;
     setShowArchived(next);
     setRuns(null);
+    setNextCursor(null); // the old view's cursor doesn't address this result set
     setSelected(new Set()); // selection is per-view
     setNotice(null);
     // The load effect (keyed on showArchived) does the refetch — no explicit load() here.
@@ -519,7 +572,9 @@ export function Runs() {
                 }}
               >
                 {f.label}
-                {runs ? ` ${count}` : ""}
+                {/* Counts are over LOADED rows, so a trailing "+" when more pages exist —
+                    "Failed 3" would read as a total when it's 3-so-far. */}
+                {runs ? ` ${count}${nextCursor ? "+" : ""}` : ""}
               </button>
             );
           })}
@@ -898,6 +953,61 @@ export function Runs() {
             </div>
           );
         })}
+
+        {/* Pagination footer. Only rendered once a first page has arrived, so it never shows
+            beside the loading skeleton or the empty state. */}
+        {runs && runs.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 12,
+              flexWrap: "wrap",
+              padding: "14px 18px",
+            }}
+          >
+            <span
+              style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
+              aria-live="polite"
+            >
+              {/* Deliberately "N loaded", not "N runs": the tenant almost certainly has more, and
+                  claiming a total we never queried would be a lie. `showing` reflects the active
+                  status tab, which filters the LOADED rows (see the note by `rows`). */}
+              {rows.length === runs.length
+                ? `${runs.length} loaded`
+                : `${rows.length} of ${runs.length} loaded`}
+              {nextCursor ? "" : " · all runs"}
+            </span>
+            {nextCursor && (
+              <Button
+                variant="secondary"
+                onClick={() => void loadMore()}
+                disabled={loadingMore || bulkBusy}
+                loading={loadingMore}
+                data-testid="runs-load-more"
+              >
+                {loadingMore ? "Loading…" : "Load more"}
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* A status tab can hide every LOADED row while older matches sit unfetched — without this
+            the screen looks like "no failed runs" when it means "none in the newest N". */}
+        {runs && runs.length > 0 && rows.length === 0 && nextCursor && (
+          <div
+            style={{
+              padding: "18px",
+              textAlign: "center",
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+            }}
+          >
+            No {filter.toLowerCase()} runs among the {runs.length} loaded — load
+            more to search further back.
+          </div>
+        )}
       </div>
     </div>
   );

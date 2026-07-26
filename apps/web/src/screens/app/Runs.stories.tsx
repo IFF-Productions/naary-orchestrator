@@ -96,7 +96,11 @@ const meta: Meta<typeof Runs> = {
   parameters: {
     layout: "fullscreen",
     msw: {
-      handlers: [http.get("*/api/executions", () => HttpResponse.json(RUNS))],
+      handlers: [
+        http.get("*/api/executions/page", () =>
+          HttpResponse.json({ items: RUNS, nextCursor: null }),
+        ),
+      ],
     },
   },
   decorators: [
@@ -115,11 +119,46 @@ type Story = StoryObj<typeof Runs>;
 /** The populated Runs list — a spread of statuses across the pills + cost column. */
 export const Populated: Story = {};
 
+/**
+ * More pages available — the "Load more" footer, and the honest counts that go with it: tab labels
+ * gain a trailing "+" (a count over LOADED rows isn't a total) and the footer says "N loaded"
+ * rather than claiming a total we never queried. Clicking through appends a second page and then
+ * settles on "all runs".
+ */
+export const Paginated: Story = {
+  parameters: {
+    msw: {
+      handlers: [
+        http.get("*/api/executions/page", ({ request }) => {
+          const cursor = new URL(request.url).searchParams.get("cursor");
+          // Page 2 (older runs) — no further cursor, so the footer switches to "all runs".
+          if (cursor) {
+            return HttpResponse.json({
+              items: RUNS.slice(0, 2).map((r, i) => ({
+                ...r,
+                workflowId: `wh-t1-older${i}`,
+                createdAt: new Date("2026-07-15T08:00:00Z").toISOString(),
+                startedAt: new Date("2026-07-15T08:00:00Z").toISOString(),
+              })),
+              nextCursor: null,
+            });
+          }
+          return HttpResponse.json({ items: RUNS, nextCursor: "CURSOR-page2" });
+        }),
+      ],
+    },
+  },
+};
+
 /** No runs yet — the empty state. */
 export const Empty: Story = {
   parameters: {
     msw: {
-      handlers: [http.get("*/api/executions", () => HttpResponse.json([]))],
+      handlers: [
+        http.get("*/api/executions/page", () =>
+          HttpResponse.json({ items: [], nextCursor: null }),
+        ),
+      ],
     },
   },
 };
@@ -129,9 +168,9 @@ export const Loading: Story = {
   parameters: {
     msw: {
       handlers: [
-        http.get("*/api/executions", async () => {
+        http.get("*/api/executions/page", async () => {
           await delay("infinite");
-          return HttpResponse.json([]);
+          return HttpResponse.json({ items: [], nextCursor: null });
         }),
       ],
     },
@@ -144,7 +183,7 @@ export const Unauthorized: Story = {
     msw: {
       handlers: [
         http.get(
-          "*/api/executions",
+          "*/api/executions/page",
           () => new HttpResponse(null, { status: 401 }),
         ),
       ],

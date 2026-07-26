@@ -23,6 +23,7 @@ import type { components } from "./schema";
  *  endpoints (replaces the hand-written interfaces these methods used from ./types). */
 type StartExecutionResponse = components["schemas"]["StartExecutionResponse"];
 type RunListItem = components["schemas"]["RunListItemResponse"];
+type RunPage = components["schemas"]["RunPageResponse"];
 type RunState = components["schemas"]["RunStateResponse"];
 type RunEventItem = components["schemas"]["RunEventResponse"];
 type AwaitingApprovalItem = components["schemas"]["AwaitingApprovalResponse"];
@@ -218,6 +219,30 @@ export const runsApi = {
     if (archived) query.archived = true;
     if (q.trim()) query.q = q.trim();
     return unwrap(await client.GET("/executions", { params: { query } }));
+  },
+  // One cursor-paged page of runs — what the Runs screen lists, so a tenant can reach past the
+  // newest page. `listRuns` above stays an array for the nine dashboard/chart callers that only
+  // want recent runs; this is the paged seam (see the controller's note on why it's a sibling
+  // route). Pass the previous page's `nextCursor` as `cursor`; a null `nextCursor` is the last page.
+  async listRunsPage(
+    opts: {
+      archived?: boolean;
+      q?: string;
+      cursor?: string;
+      limit?: number;
+    } = {},
+  ): Promise<RunPage> {
+    const query: {
+      archived?: boolean;
+      q?: string;
+      cursor?: string;
+      limit?: number;
+    } = {};
+    if (opts.archived) query.archived = true;
+    if (opts.q?.trim()) query.q = opts.q.trim();
+    if (opts.cursor) query.cursor = opts.cursor;
+    if (opts.limit) query.limit = opts.limit;
+    return unwrap(await client.GET("/executions/page", { params: { query } }));
   },
   // PUBLIC (anonymous — no auth): approve/reject a run via a signed link token.
   // Links minted from Slice 1 on carry an `exp` claim signed into the token — it must be
