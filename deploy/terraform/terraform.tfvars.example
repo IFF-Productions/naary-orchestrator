@@ -25,3 +25,25 @@ neon_api_key = "your-neon-api-key"                    # console → Account sett
 # temporal_address   = "eu-central-1.aws.api.temporal.io:7233"
 # temporal_namespace = "naary.abc12"
 # temporal_api_key   = "tmprl_..."
+
+# ── Object storage (S3) — needed for hosted-form logo uploads ─────────────────────────
+# Bucket names are globally unique across ALL AWS accounts, so pick something specific.
+# Region: keep it near the Hetzner box (eu-central-1 for Falkenstein/Nuremberg) — every
+# logo view and claim-check read crosses this link.
+# The `aws` provider uses YOUR OWN admin credentials (AWS_PROFILE/SSO) only to create the
+# bucket + IAM user; the app runs with the dedicated least-privilege key s3.tf mints.
+s3_bucket_name = "naary-prod-assets"
+aws_region     = "eu-central-1"
+
+# Set false to skip the AWS resources and manage a bucket yourself (then put
+# STORAGE_PROVIDER/S3_BUCKET/AWS_* in the server .env by hand). Logo uploads fail closed
+# with a 503 until object storage is configured somehow.
+# create_s3 = true
+
+# How long to keep claim-check payloads (large activity outputs offloaded from Temporal).
+# Form logos are NEVER expired — see s3.tf.
+# s3_claim_check_retention_days = 30
+
+# Optional CMK for SSE-KMS instead of the default SSE-S3. The IAM policy then also grants
+# kms:Decrypt/GenerateDataKey on it.
+# s3_kms_key_arn = "arn:aws:kms:eu-central-1:123456789012:key/…"

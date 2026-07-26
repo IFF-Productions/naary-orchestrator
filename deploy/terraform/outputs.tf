@@ -40,3 +40,37 @@ output "server_env" {
   sensitive   = true
   description = "The generated server .env — for backup or a manual (non-cloud-init) deploy."
 }
+
+# ── Object storage (s3.tf) ─────────────────────────────────────────────────────────────
+# These four feed the SERVER's .env. Copy them in after `apply`:
+#
+#   STORAGE_PROVIDER=s3
+#   S3_BUCKET=$(terraform output -raw s3_bucket)
+#   AWS_REGION=$(terraform output -raw s3_region)
+#   AWS_ACCESS_KEY_ID=$(terraform output -raw s3_access_key_id)
+#   AWS_SECRET_ACCESS_KEY=$(terraform output -raw s3_secret_access_key)
+#
+# Without them, hosted-form logo uploads fail closed with a 503 (by design — see s3.tf).
+
+output "s3_bucket" {
+  value       = var.create_s3 ? aws_s3_bucket.naary[0].bucket : null
+  description = "Bucket name → S3_BUCKET in the server .env."
+}
+
+output "s3_region" {
+  value       = var.create_s3 ? var.aws_region : null
+  description = "Bucket region → AWS_REGION in the server .env."
+}
+
+output "s3_access_key_id" {
+  value       = var.create_s3 ? aws_iam_access_key.naary[0].id : null
+  description = "Run: terraform output -raw s3_access_key_id  → AWS_ACCESS_KEY_ID in the server .env"
+}
+
+# SENSITIVE. Also present in terraform state, so keep state private (deploy/.gitignore excludes
+# *.tfstate). Rotate with: terraform taint aws_iam_access_key.naary[0] && terraform apply
+output "s3_secret_access_key" {
+  value       = var.create_s3 ? aws_iam_access_key.naary[0].secret : null
+  sensitive   = true
+  description = "Run: terraform output -raw s3_secret_access_key  → AWS_SECRET_ACCESS_KEY in the server .env"
+}

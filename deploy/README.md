@@ -186,6 +186,56 @@ migrations need a real session (advisory locks + DDL), not PgBouncer. The `ghcr`
 swaps every `build:` for `image: ghcr.io/…:${APP_VERSION}` (and `!reset`s the build
 config so nothing can rebuild on the box).
 
+### Object storage (S3) — required for form logos
+
+`terraform/s3.tf` provisions a private bucket plus a **dedicated least-privilege IAM user**, and the
+generated server `.env` picks up `STORAGE_PROVIDER`/`S3_BUCKET`/`AWS_REGION` and that user's key
+automatically. Set `s3_bucket_name` in `terraform.tfvars` (bucket names are globally unique across all
+AWS accounts, so pick something like `naary-prod-assets`) and `aws_region` near your box —
+`eu-central-1` for Falkenstein/Nuremberg, since every logo view crosses this link.
+
+The `aws` provider uses **your own** admin credentials (`AWS_PROFILE`, SSO, whatever you normally use)
+purely to create the resources. The app never runs with those.
+
+> **⚠️ On an EXISTING server, apply does not update `/opt/naary/.env`.** cloud-init runs on first boot
+> only, and `hcloud_server.naary` deliberately sets `ignore_changes = [user_data]` so template edits
+> can't replace a live box. Add the five lines by hand:
+> ```bash
+> terraform output -raw s3_secret_access_key   # and s3_access_key_id / s3_bucket / s3_region
+> ssh root@$(terraform output -raw server_ipv4)
+> # append STORAGE_PROVIDER / S3_BUCKET / AWS_REGION / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+> vi /opt/naary/.env && cd /opt/naary && docker compose up -d api worker
+> ```
+
+**One bucket, two lifetimes** — and the lifecycle rules reflect it:
+
+| Prefix | Written by | Retention |
+| --- | --- | --- |
+| `form-assets/` | api (logo uploads) | **never expires** — a saved workflow references it and a public page renders it |
+| `items/` `ctx/` `sql/` `http/` | worker (claim-checks: large activity outputs kept out of Temporal payloads) | `s3_claim_check_retention_days`, default 30 |
+
+Expiring a claim-check is safe (the API falls back to the raw ctx and the UI shows an "offloaded"
+marker); expiring a logo would silently break a customer-facing form, so `form-assets/` has no
+expiration rule at all — only superseded versions are cleaned up. Incomplete multipart uploads are
+aborted after 7 days, since those are billed but invisible in a listing.
+
+**Why an access key and not a role:** there's no instance profile on a Hetzner VPS. The policy
+compensates by granting exactly the two actions the code performs — `s3:GetObject` and `s3:PutObject`,
+which is all `S3ObjectStore` ever calls. A leaked key can't list the bucket, delete a tenant's logo, or
+touch encryption settings. Rotate with:
+
+```bash
+terraform taint aws_iam_access_key.naary[0] && terraform apply   # then update the server .env
+```
+
+**Not using AWS?** The store speaks to any S3-compatible service. Set `S3_ENDPOINT` in the server
+`.env` for Cloudflare R2, Backblaze B2 or MinIO — that also switches the client to path-style
+addressing, which those providers require. Set `create_s3 = false` to skip the AWS resources entirely
+and configure the bucket yourself.
+
+**Skipping it?** Everything else works; only hosted-form **logo uploads** fail, with a 503 naming the
+missing variables. That's deliberate — see `s3.tf`.
+
 ### Releases & CD (GitHub Actions)
 
 Deploys are **release-driven**, semver-tagged (`v0.0.1`):
