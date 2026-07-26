@@ -1,6 +1,6 @@
 // MCP & API tab — the MCP server surface (endpoint + exposed tools) and API tokens.
 import { useCallback, useEffect, useState } from "react";
-import { Button, Dialog, StatusPill } from "../../../components";
+import { Button, Dialog, StatusPill, useConfirm } from "../../../components";
 import {
   api,
   type ApiTokenRow,
@@ -65,6 +65,7 @@ export function McpApiTab({
   env: string | null;
   phone: boolean;
 }) {
+  const confirm = useConfirm();
   const [workflows, setWorkflows] = useState<GraphSummary[] | null>(null);
   const [tokens, setTokens] = useState<ApiTokenRow[] | null>(null);
   const [minted, setMinted] = useState<MintedToken | null>(null);
@@ -104,9 +105,14 @@ export function McpApiTab({
     }
   }
 
-  function revoke(t: ApiTokenRow) {
-    if (!window.confirm(`Revoke "${t.label}"? Clients using it stop working.`))
-      return;
+  async function revoke(t: ApiTokenRow) {
+    const ok = await confirm({
+      title: `Revoke "${t.label}"?`,
+      body: "Any client still using this token stops working immediately.",
+      confirmLabel: "Revoke token",
+      danger: true,
+    });
+    if (!ok) return;
     void api
       .revokeApiToken(t.id)
       .then(() => load())

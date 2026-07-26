@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import { RouterProvider } from "react-router-dom";
 import "./styles/global.css";
 import { AuthProvider } from "./auth/AuthProvider";
+import { ConfirmProvider } from "./components";
 import { reloadForFreshChunks } from "./lib/chunk-reload";
 import { ModeProvider, ModeSync } from "./mode";
 import { router } from "./router";
@@ -31,7 +32,12 @@ createRoot(document.getElementById("root")!, {
         <AuthProvider>
           {/* Reconciles the cross-device mode preference once authenticated; renders nothing. */}
           <ModeSync />
-          <RouterProvider router={router} />
+          {/* Hosts the one in-app confirm dialog (replacing window.confirm). Inside the theme
+              providers so it picks up the active theme, and above the router so every screen —
+              including the public pages — can call useConfirm(). */}
+          <ConfirmProvider>
+            <RouterProvider router={router} />
+          </ConfirmProvider>
         </AuthProvider>
       </ModeProvider>
     </ThemeProvider>

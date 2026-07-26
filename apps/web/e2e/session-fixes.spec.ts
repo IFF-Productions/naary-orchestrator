@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
+import { acceptConfirm } from "./confirm";
 import { expectWorkflowOffered, pickWorkflow } from "./workflow-picker";
 
 /**
@@ -152,9 +153,6 @@ test("workflows list: a workflow can be deleted", async ({ page }) => {
   });
   expect(res.ok()).toBeTruthy();
 
-  // The Delete button pops a window.confirm — auto-accept it.
-  page.on("dialog", (d) => d.accept());
-
   // Redesign: Delete lives on the DETAIL screen (row click opens it).
   await page.goto("/app/workflows");
   const row = page.locator(".run-row", { hasText: name });
@@ -162,6 +160,9 @@ test("workflows list: a workflow can be deleted", async ({ page }) => {
   await row.click();
   await expect(page).toHaveURL(new RegExp(`/app/workflows/${key}$`));
   await page.getByRole("button", { name: "Delete", exact: true }).click();
+  // Delete now asks in-app, not via window.confirm — accept, and pin the wording so the button
+  // keeps naming the action rather than regressing to a bare "OK".
+  await acceptConfirm(page, "Delete workflow");
 
   // Deleting navigates back to the list, where the row is gone (reload too).
   await expect(page).toHaveURL(/\/app\/workflows$/);
