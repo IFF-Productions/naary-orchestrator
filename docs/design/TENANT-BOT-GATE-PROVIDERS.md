@@ -73,6 +73,15 @@ trip, which lands in slice 3. Until then `provider: "app_check"` must not be sur
 the UI: setting it by hand while slice 2 is unbuilt means no token ever arrives and every
 submission to that environment 403s.
 
+**The platform's reCAPTCHA key must be score-based.** The `app_check` option rides on the
+*same* platform key our own sign-in uses, so it inherits that key's constraints — and a
+**challenge-based (checkbox)** key makes this provider structurally unusable, not merely
+degraded: App Check calls `execute()` with no widget to click, and `render=` rejects a
+checkbox key outright (400). That is not hypothetical — it is what #792 turned out to be,
+with the key registered for our own login. Until a score-based key is live and verified,
+§5's round trip cannot pass for *any* tenant, which is a second reason (alongside the one
+above) that `provider: "app_check"` must not reach the UI yet. See `docs/app-check.md`.
+
 No tenant secret is stored for `app_check` — there is nothing tenant-side to store. The
 `turnstile:secret` SecretStore entry is untouched (and deliberately *not* deleted when a
 tenant switches to App Check, so switching back doesn't lose their key).
