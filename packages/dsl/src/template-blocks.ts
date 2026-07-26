@@ -13,7 +13,7 @@
  * attribute-escape for `href`/`src`.
  */
 import { z } from "zod";
-import { getByPath } from "./mcp-args";
+import { getByPath, isPollutingKey } from "./mcp-args";
 import { isSecretRef } from "./template";
 
 /** One block in a template body. Content blocks render to email + form layout; `field` is FORM-only
@@ -63,7 +63,16 @@ export const templateBlockSchema = z.discriminatedUnion("type", [
   z.object({
     id: z.string(),
     type: z.literal("field"),
-    key: z.string(),
+    /**
+     * #761: same guard as a formTrigger's inline field key, and for the same reason — a form template's
+     * `field` blocks BECOME the submitted field set (`fieldsFromBlocks` in apps/api), so a key here
+     * reaches exactly the code path where writing to `__proto__` silently discards the value. Guarding
+     * only the inline `fields` would have left the template route open.
+     */
+    key: z.string().refine((k) => !isPollutingKey(k), {
+      message:
+        "key must not be __proto__, constructor or prototype — a value written to one of those names is silently discarded and never reaches the workflow",
+    }),
     label: z.string(),
     fieldType: z.enum(["text", "textarea", "number", "email", "select"]),
     required: z.boolean(),
