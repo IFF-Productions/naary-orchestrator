@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { planAppCheck } from "../src/lib/app-check";
+import { explainAppCheckFailure, planAppCheck } from "../src/lib/app-check";
 
 /**
  * #782 — Firebase App Check. `planAppCheck` is the whole decision surface (provider +
@@ -90,5 +90,128 @@ describe("planAppCheck", () => {
     expect(
       planAppCheck({ VITE_FIREBASE_APPCHECK_SITE_KEY: "  site-abc\n" }),
     ).toEqual({ kind: "recaptcha-enterprise", siteKey: "site-abc" });
+  });
+});
+
+/**
+ * The message IS the feature. Firebase reports `appCheck/recaptcha-error` from inside
+ * firebase/auth without naming the provider we chose or what to change, and the SPA
+ * keeps working until enforcement is flipped on — so the first real symptom is a total
+ * sign-in outage behind an error that reads like a network/CSP problem. These tests pin
+ * the parts that make it actionable, because the alternative is only ever reading this
+ * copy during an outage.
+ */
+describe("explainAppCheckFailure", () => {
+  const V3 = { kind: "recaptcha-v3", siteKey: "6Lsite" } as const;
+  const ENT = { kind: "recaptcha-enterprise", siteKey: "6Lsite" } as const;
+  const recaptchaErr = { code: "appCheck/recaptcha-error" };
+
+  it("names the ACTIVE provider and the key that is actually deployed", () => {
+    const msg = explainAppCheckFailure(V3, recaptchaErr);
+    expect(msg).toContain("recaptcha-v3");
+    // Site keys are public by design (inlined in the bundle), so echoing it is safe and
+    // makes "which key is live?" answerable from a screenshot.
+    expect(msg).toContain("6Lsite");
+    // The code is echoed with Firebase's OWN casing: someone searching their console for
+    // the string firebase printed must find our line too.
+    expect(msg).toContain("appCheck/recaptcha-error");
+  });
+
+  /** Matching is case-insensitive even though display is verbatim. */
+  it("still classifies a code whose casing differs from Firebase's", () => {
+    expect(
+      explainAppCheckFailure(V3, { code: "APPCHECK/RECAPTCHA-ERROR" }),
+    ).toMatch(/DOES THE KEY RESOLVE/);
+  });
+
+  /** The swap is a SECRET change, not a code change — the cheapest fix, so it leads. */
+  it("suggests the OPPOSITE provider, in the direction that fixes it", () => {
+    expect(explainAppCheckFailure(V3, recaptchaErr)).toContain(
+      "VITE_FIREBASE_APPCHECK_PROVIDER=enterprise",
+    );
+    expect(explainAppCheckFailure(ENT, recaptchaErr)).toContain(
+      "VITE_FIREBASE_APPCHECK_PROVIDER=v3",
+    );
+  });
+
+  /** Setting it in the server .env changes nothing — the trap that costs a whole cycle. */
+  it("says the provider is inlined at BUILD time", () => {
+    expect(explainAppCheckFailure(V3, recaptchaErr)).toMatch(/BUILD time/);
+  });
+
+  it("covers the domain-allowlist and wrong-project causes too", () => {
+    const msg = explainAppCheckFailure(ENT, recaptchaErr);
+    expect(msg).toMatch(/allowed domains/);
+    expect(msg).toMatch(/VITE_FIREBASE_PROJECT_ID/);
+  });
+
+  /**
+   * The one real occurrence (#792) was a key Google returned 400 for on BOTH endpoints —
+   * so provider type, domain allowlist and CSP were all red herrings. That check is also
+   * the cheapest available (two curls, no browser, no release), so it must come FIRST or
+   * the message sends people down the same wrong path we went down.
+   */
+  it("leads with the does-the-key-resolve check, ahead of the provider swap", () => {
+    const msg = explainAppCheckFailure(V3, recaptchaErr);
+    const resolve = msg.indexOf("DOES THE KEY RESOLVE");
+    const swap = msg.indexOf("WRONG KEY TYPE");
+    expect(resolve).toBeGreaterThan(-1);
+    expect(swap).toBeGreaterThan(resolve);
+    // Copy-pasteable, with the real key substituted in — both endpoints, since a 400 on
+    // both is what distinguishes "dead key" from "wrong provider".
+    expect(msg).toContain("recaptcha/api.js?render=6Lsite");
+    expect(msg).toContain("recaptcha/enterprise.js?render=6Lsite");
+  });
+
+  /**
+   * #792's actual root cause: the key existed, but as a CHALLENGE-BASED (checkbox) key.
+   * `render=` rejects those outright, and App Check — which calls execute() with no user
+   * interaction — can only use a score-based key. Key type is immutable, so "create a new
+   * one" is the fix and nothing about the provider setting helps. Named explicitly because
+   * the generic "check for a typo" advice sends you looking for a problem that isn't there.
+   */
+  it("names the checkbox-key cause for a 400 on both endpoints", () => {
+    const msg = explainAppCheckFailure(V3, recaptchaErr);
+    expect(msg).toMatch(/CHALLENGE-BASED \(checkbox\)/);
+    expect(msg).toMatch(/SCORE-BASED/);
+    expect(msg).toMatch(/immutable/);
+  });
+
+  /** A DIFFERENT failure: reCAPTCHA worked, the App Check exchange didn't. */
+  it("distinguishes a fetch-status error from a reCAPTCHA error", () => {
+    const msg = explainAppCheckFailure(V3, {
+      code: "appCheck/fetch-status-error",
+    });
+    expect(msg).toMatch(/not registered with this provider/);
+    // …and does NOT send the reader off to swap providers, which would not help here.
+    expect(msg).not.toContain("VITE_FIREBASE_APPCHECK_PROVIDER=");
+  });
+
+  it("explains the throttle instead of looking like a new error", () => {
+    expect(explainAppCheckFailure(V3, { code: "appCheck/throttled" })).toMatch(
+      /backoff clears on its own/,
+    );
+  });
+
+  /** Always present: it is the difference between "noisy console" and "nobody can log in". */
+  it("always states the enforcement blast radius and how to roll back", () => {
+    for (const err of [recaptchaErr, { code: "weird" }, new Error("nope")]) {
+      const msg = explainAppCheckFailure(ENT, err);
+      expect(msg).toMatch(/enforcement is ON/);
+      expect(msg).toMatch(/Firebase Authentication/);
+    }
+  });
+
+  it("adds the debug-token step only for a dev build", () => {
+    expect(explainAppCheckFailure(V3, recaptchaErr, true)).toMatch(
+      /Manage debug tokens/,
+    );
+    expect(explainAppCheckFailure(V3, recaptchaErr, false)).not.toMatch(
+      /Manage debug tokens/,
+    );
+  });
+
+  it("survives an error with no code at all", () => {
+    expect(explainAppCheckFailure(V3, undefined)).toContain("unknown error");
   });
 });

@@ -36,6 +36,12 @@ the GH-Actions path the value comes from a repo secret, not the server `.env`.
 1. Firebase console → **App Check** → **Apps** → register the web app. Pick a provider
    (reCAPTCHA **Enterprise** is the current default) and copy the **site key** — it is
    public and belongs in the bundle.
+
+   The key **must be score-based**, not challenge-based (checkbox). App Check calls
+   `execute()` with no user interaction, so a checkbox key cannot work and fails with a
+   400 from `render=` (see Troubleshooting — this cost a debug cycle in #792). In Google
+   Cloud → Security → reCAPTCHA → Create key, that is the *score-based* option, not
+   "challenge (checkbox)"; the type cannot be changed afterwards.
 2. Add repo secrets (Settings → Secrets and variables → Actions):
    - `VITE_FIREBASE_APPCHECK_SITE_KEY` — the site key
    - `VITE_FIREBASE_APPCHECK_PROVIDER` — `enterprise` (default) or `v3`, matching the
@@ -60,6 +66,113 @@ With a site key baked in, on the sign-in page:
 - Firebase console → App Check → the web app shows **verified** requests climbing.
 
 Then flip enforcement and confirm sign-in still works, in a fresh/incognito window.
+
+## Troubleshooting
+
+### `appCheck/recaptcha-error` — "Error while retrieving App Check token"
+
+reCAPTCHA rejected the site key. The SPA logs a ranked diagnosis itself (active provider,
+the deployed key, the host, and the fix — see `explainAppCheckFailure` in
+`apps/web/src/lib/app-check.ts`); this is the background.
+
+**First, if enforcement is already ON, turn it off** (App Check → APIs → Firebase
+Authentication). While it is on and no token can be minted, *every* sign-in is refused.
+With it off this error is console noise and auth keeps working, so you can debug calmly.
+
+**Then ask whether the key resolves at Google at all** — two curls, no browser, no rebuild.
+This is the step that actually resolved the one real occurrence (#792), *after* three more
+elaborate theories had been ruled out:
+
+```sh
+KEY=…your site key…
+curl -s -o /dev/null -w '%{http_code}\n' "https://www.google.com/recaptcha/api.js?render=$KEY"
+curl -s -o /dev/null -w '%{http_code}\n' "https://www.google.com/recaptcha/enterprise.js?render=$KEY"
+```
+
+- **200 on exactly one** ⇒ that is the key's real type. Set
+  `VITE_FIREBASE_APPCHECK_PROVIDER` to `v3` or `enterprise` to match, then **run a release**.
+- **400 on both** ⇒ `render=` does not accept this key, and no provider setting will fix it.
+  In order of likelihood:
+  1. **It is a challenge-based (checkbox) key.** This is what actually happened in #792. If
+     the console's integration snippet for your key looks like
+
+     ```html
+     <script src="https://www.google.com/recaptcha/enterprise.js" async defer></script>
+     <div class="g-recaptcha" data-sitekey="…" data-action="LOGIN"></div>
+     ```
+
+     — a `g-recaptcha` **div**, and a script tag with **no `render=`** — then it is a
+     checkbox key. App Check calls `execute()` with no user interaction, so it needs a
+     **score-based** key, whose snippet is `enterprise.js?render=KEY` plus
+     `grecaptcha.enterprise.execute(...)`. `render=` rejects a checkbox key outright, which
+     is the 400. **Key type is immutable**: create a new score-based key, you cannot convert.
+  2. A transposed/truncated paste (`-` vs `_` is a classic), or the wrong field copied (the
+     reCAPTCHA *secret*, the Firebase Web API key, an app id).
+  3. A deleted key, or one in a different project than `VITE_FIREBASE_PROJECT_ID`.
+
+  A 400 is also exactly what makes a `<script>` tag fire `onerror`, so this and "the reCAPTCHA
+  script won't load" are one symptom, not two.
+
+For reference: Google's own public test key has the same 40-char shape (`6L` + `AAAAA` + 27)
+and returns **200**, so "it looks like a valid key" proves nothing.
+
+Only once a script loads does the key *type* become the question. If you want to confirm the
+type interactively rather than by status code, run both providers in the browser console on
+the deployed page (`script-src` already allows `www.google.com`/`www.gstatic.com`):
+
+```js
+const KEY = "…your site key…";
+const load = (src) =>
+  new Promise((ok, no) => {
+    const s = document.createElement("script");
+    s.src = src; s.onload = ok; s.onerror = no; document.head.append(s);
+  });
+
+// A) reCAPTCHA v3
+await load(`https://www.google.com/recaptcha/api.js?render=${KEY}`);
+grecaptcha.ready(() =>
+  grecaptcha.execute(KEY, { action: "probe" }).then(
+    (t) => console.log("v3 OK", t.slice(0, 24)),
+    (e) => console.error("v3 FAIL", e),
+  ));
+
+// B) reCAPTCHA Enterprise (reload the page first — one key type per page)
+await load(`https://www.google.com/recaptcha/enterprise.js?render=${KEY}`);
+grecaptcha.enterprise.ready(() =>
+  grecaptcha.enterprise.execute(KEY, { action: "probe" }).then(
+    (t) => console.log("enterprise OK", t.slice(0, 24)),
+    (e) => console.error("enterprise FAIL", e),
+  ));
+```
+
+Whichever returns a token is the key's real type. If **neither** script even loads, you are
+back at the 400 above — that is a key problem, not a provider problem.
+
+Once a script does load but `execute()` still fails, the remaining causes are the reCAPTCHA
+key's **allowed domains** (must cover this host; a registered apex also covers its
+subdomains) and the key belonging to a different project than `VITE_FIREBASE_PROJECT_ID`.
+
+To read what is actually deployed rather than what you think is — Vite leaves the whole env
+object in the bundle:
+
+```sh
+BASE=https://app.naar-y.com
+F=$(curl -s "$BASE/" | grep -oE '/assets/firebase-[A-Za-z0-9_-]+\.js' | head -1)
+curl -s "$BASE$F" | grep -o 'VITE_FIREBASE_APPCHECK_[A-Z_]*:`[^`]*`'
+```
+
+This is the fastest way to confirm a release actually carried a changed secret — remember the
+value is inlined at **build** time, so the repo secret at build is the one that matters and
+the server's `.env` is irrelevant.
+
+### Unrelated console noise: Cloudflare
+
+On a Cloudflare-proxied deployment, two CSP violations are expected and harmless —
+`static.cloudflareinsights.com/beacon.min.js` and an inline snippet, both **injected by
+Cloudflare after our nginx serves the page**. They are Web Analytics, not App Check, and
+blocking them costs nothing. Silence them by turning Web Analytics off for the zone (a
+Cloudflare-side setting) — not by loosening `script-src`, and never with
+`'unsafe-inline'`, which would undo the CSP.
 
 ## Local development
 
