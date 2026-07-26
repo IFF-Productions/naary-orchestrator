@@ -61,6 +61,71 @@ With a site key baked in, on the sign-in page:
 
 Then flip enforcement and confirm sign-in still works, in a fresh/incognito window.
 
+## Troubleshooting
+
+### `appCheck/recaptcha-error` — "Error while retrieving App Check token"
+
+reCAPTCHA rejected the site key. The SPA logs a ranked diagnosis itself (active provider,
+the deployed key, the host, and the fix — see `explainAppCheckFailure` in
+`apps/web/src/lib/app-check.ts`); this is the background.
+
+**First, if enforcement is already ON, turn it off** (App Check → APIs → Firebase
+Authentication). While it is on and no token can be minted, *every* sign-in is refused.
+With it off this error is console noise and auth keeps working, so you can debug calmly.
+
+Then settle the key type — the usual cause, and the two types are **indistinguishable by
+inspection** (both look like `6L…`). Rather than burning a release per guess, test both
+providers in the browser console on the deployed page (`script-src` already allows
+`www.google.com`/`www.gstatic.com`, so this runs as-is):
+
+```js
+const KEY = "…your site key…";
+const load = (src) =>
+  new Promise((ok, no) => {
+    const s = document.createElement("script");
+    s.src = src; s.onload = ok; s.onerror = no; document.head.append(s);
+  });
+
+// A) reCAPTCHA v3
+await load(`https://www.google.com/recaptcha/api.js?render=${KEY}`);
+grecaptcha.ready(() =>
+  grecaptcha.execute(KEY, { action: "probe" }).then(
+    (t) => console.log("v3 OK", t.slice(0, 24)),
+    (e) => console.error("v3 FAIL", e),
+  ));
+
+// B) reCAPTCHA Enterprise (reload the page first — one key type per page)
+await load(`https://www.google.com/recaptcha/enterprise.js?render=${KEY}`);
+grecaptcha.enterprise.ready(() =>
+  grecaptcha.enterprise.execute(KEY, { action: "probe" }).then(
+    (t) => console.log("enterprise OK", t.slice(0, 24)),
+    (e) => console.error("enterprise FAIL", e),
+  ));
+```
+
+Whichever returns a token is the key's real type — set
+`VITE_FIREBASE_APPCHECK_PROVIDER` to `v3` or `enterprise` to match and **run a release**.
+Changing it in the server's `.env` does nothing: `VITE_*` is inlined when the web image is
+built, so the value that matters is the repo secret at build time. To read what is actually
+live, grep the deployed bundle — Vite leaves the whole env object in it:
+
+```sh
+curl -s https://app.naar-y.com/assets/firebase-*.js | grep -o 'VITE_FIREBASE_APPCHECK_[A-Z_]*:`[^`]*`'
+```
+
+If *both* probes fail, the key is not a key problem: check the reCAPTCHA key's **allowed
+domains** include this host, and that the key lives in the same project as
+`VITE_FIREBASE_PROJECT_ID`.
+
+### Unrelated console noise: Cloudflare
+
+On a Cloudflare-proxied deployment, two CSP violations are expected and harmless —
+`static.cloudflareinsights.com/beacon.min.js` and an inline snippet, both **injected by
+Cloudflare after our nginx serves the page**. They are Web Analytics, not App Check, and
+blocking them costs nothing. Silence them by turning Web Analytics off for the zone (a
+Cloudflare-side setting) — not by loosening `script-src`, and never with
+`'unsafe-inline'`, which would undo the CSP.
+
 ## Local development
 
 App Check stays **off** locally unless you set the site key, and that is the

@@ -22,6 +22,7 @@ import type { FirebaseApp } from "firebase/app";
 import {
   ReCaptchaEnterpriseProvider,
   ReCaptchaV3Provider,
+  getToken,
   initializeAppCheck,
 } from "firebase/app-check";
 
@@ -101,7 +102,7 @@ export function initAppCheck(
         self as unknown as { FIREBASE_APPCHECK_DEBUG_TOKEN?: boolean }
       ).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
     }
-    initializeAppCheck(app, {
+    const appCheck = initializeAppCheck(app, {
       provider:
         plan.kind === "recaptcha-v3"
           ? new ReCaptchaV3Provider(plan.siteKey)
@@ -110,6 +111,9 @@ export function initAppCheck(
       // sit-on-one-tab-all-day surface) so tokens don't expire mid-session.
       isTokenAutoRefreshEnabled: true,
     });
+    // Fire-and-forget: turn the FIRST token fetch into a diagnostic. Deliberately not
+    // awaited — initAppCheck runs at module load and must not delay it.
+    void probeAppCheckToken(appCheck, plan, isDev);
     return plan;
   } catch (err) {
     console.warn(
@@ -118,4 +122,100 @@ export function initAppCheck(
     );
     return { kind: "off" };
   }
+}
+
+/** An active plan — the shape `explainAppCheckFailure` reports on. */
+type ActivePlan = Exclude<AppCheckPlan, { kind: "off" }>;
+
+/**
+ * Ask for a token once so a broken configuration announces ITSELF.
+ *
+ * Nothing here changes behaviour: with `isTokenAutoRefreshEnabled` the SDK already
+ * fetches at init and `getToken` joins that same in-flight request, so the happy path
+ * costs one extra promise and no extra reCAPTCHA execution. The point is the failure
+ * path — Firebase logs `appCheck/recaptcha-error` from inside firebase/auth with no
+ * mention of WHICH provider we picked or what to change, and the SPA keeps working
+ * (until enforcement is switched on, at which point every sign-in fails). Without this,
+ * the first real symptom is a total auth outage with an error that reads like a network
+ * or CSP problem. Ours names the cause and the fix.
+ */
+async function probeAppCheckToken(
+  appCheck: Parameters<typeof getToken>[0],
+  plan: ActivePlan,
+  isDev: boolean,
+): Promise<void> {
+  try {
+    await getToken(appCheck);
+  } catch (err) {
+    console.error(explainAppCheckFailure(plan, err, isDev));
+  }
+}
+
+/** `appCheck/recaptcha-error`, case-insensitively and prefix-agnostically. */
+function errorCode(err: unknown): string {
+  const raw = (err as { code?: unknown })?.code;
+  return typeof raw === "string" ? raw.toLowerCase() : "";
+}
+
+/**
+ * The actionable message for a failed token fetch. Pure and exported so the wording —
+ * which is the entire value of this code — is covered by tests rather than only ever
+ * seen in a browser console during an outage.
+ *
+ * Site keys are PUBLIC by design (this one is inlined in the bundle any visitor can
+ * read), so echoing it is not a leak and makes "which key is actually deployed?"
+ * answerable from a screenshot.
+ */
+export function explainAppCheckFailure(
+  plan: ActivePlan,
+  err: unknown,
+  isDev = false,
+): string {
+  const code = errorCode(err);
+  const other = plan.kind === "recaptcha-v3" ? "enterprise" : "v3";
+  const lines = [
+    `[app-check] could not get an attestation token (${code || "unknown error"}).`,
+    `  active provider: ${plan.kind}   site key: ${plan.siteKey}`,
+    `  host: ${typeof location === "undefined" ? "?" : location.host}`,
+  ];
+
+  if (code.endsWith("/recaptcha-error")) {
+    // Ranked by what actually goes wrong first. The provider swap leads because it is a
+    // SECRET change (VITE_FIREBASE_APPCHECK_PROVIDER) rather than a code change, and
+    // because the two key types are indistinguishable by inspection.
+    lines.push(
+      "  reCAPTCHA itself rejected the key. In order of likelihood:",
+      `  1. WRONG KEY TYPE. reCAPTCHA Enterprise and v3 site keys are not interchangeable.`,
+      `     If the Firebase console registered ${other === "v3" ? "reCAPTCHA v3" : "reCAPTCHA Enterprise"} for this app,`,
+      `     set VITE_FIREBASE_APPCHECK_PROVIDER=${other} and rebuild the web image (VITE_* is`,
+      `     inlined at BUILD time, so changing it on the server has no effect).`,
+      "  2. DOMAIN NOT REGISTERED. Add this host to the key's allowed domains",
+      "     (reCAPTCHA admin for v3, Google Cloud → Security → reCAPTCHA for Enterprise).",
+      "  3. WRONG PROJECT. The key must belong to the same project as VITE_FIREBASE_PROJECT_ID.",
+    );
+  } else if (code.endsWith("/fetch-status-error")) {
+    lines.push(
+      "  reCAPTCHA succeeded but Google refused to exchange the result for an App Check",
+      "  token — usually this app is not registered with this provider in the Firebase",
+      "  console (App Check → Apps), or the key belongs to a different project.",
+    );
+  } else if (code.endsWith("/throttled")) {
+    lines.push(
+      "  Throttled after repeated failures — fix the underlying error above and reload;",
+      "  the backoff clears on its own.",
+    );
+  }
+
+  if (isDev) {
+    lines.push(
+      "  DEV build: a debug token was requested. Copy the token the SDK printed above into",
+      "  Firebase console → App Check → Apps → Manage debug tokens.",
+    );
+  }
+  lines.push(
+    "  Sign-in still works while App Check enforcement is OFF. If enforcement is ON, turn",
+    "  it off (Firebase console → App Check → APIs → Firebase Authentication) until this is",
+    "  fixed — otherwise every sign-in is refused. See docs/app-check.md.",
+  );
+  return lines.join("\n");
 }
