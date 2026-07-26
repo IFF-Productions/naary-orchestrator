@@ -5949,7 +5949,7 @@
         ]
       },
       "put": {
-        "description": "Keyed by the IdP entity id, which is unique across the instance — an entity id already mapped to ANOTHER workspace is rejected (409-style), because that uniqueness is what makes an anonymous ACS POST unambiguous.",
+        "description": "Keyed by the IdP entity id, which is unique across the instance — that uniqueness is what makes an anonymous ACS POST unambiguous. An entity id or slug already mapped to ANOTHER workspace is refused with 403 (a 409 would confirm it exists elsewhere); a slug already used by a different connection in THIS workspace is a 409.",
         "operationId": "SsoConnectionsController_upsert",
         "parameters": [
           {

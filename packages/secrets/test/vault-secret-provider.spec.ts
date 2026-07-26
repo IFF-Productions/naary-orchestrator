@@ -313,6 +313,50 @@ describe("createSecretProvider — env selection, fails closed", () => {
     ).toThrow(/VAULT_TOKEN/);
   });
 
+  /**
+   * A bad VAULT_TIMEOUT_MS used to survive as NaN: NaN is not nullish so it beat the `?? 5000`
+   * default, and AbortSignal.timeout(NaN) aborts immediately — every secret read failing
+   * instantly while the config looked correct. Fail at boot instead, naming the variable.
+   */
+  it.each(["30s", "abc", "0", "-1", "NaN"])(
+    "throws on a non-positive-numeric VAULT_TIMEOUT_MS (%s)",
+    (value) => {
+      expect(() =>
+        createSecretProvider({
+          SECRET_PROVIDER: "vault",
+          VAULT_ADDR: "https://vault.test",
+          VAULT_TOKEN: "s.tok",
+          VAULT_TIMEOUT_MS: value,
+        }),
+      ).toThrow(/VAULT_TIMEOUT_MS/);
+    },
+  );
+
+  it.each(["", "  ", undefined])(
+    "treats an absent/blank VAULT_TIMEOUT_MS as unset (uses the default)",
+    (value) => {
+      expect(
+        createSecretProvider({
+          SECRET_PROVIDER: "vault",
+          VAULT_ADDR: "https://vault.test",
+          VAULT_TOKEN: "s.tok",
+          VAULT_TIMEOUT_MS: value,
+        }).name,
+      ).toBe("vault");
+    },
+  );
+
+  it("accepts a valid VAULT_TIMEOUT_MS", () => {
+    expect(
+      createSecretProvider({
+        SECRET_PROVIDER: "vault",
+        VAULT_ADDR: "https://vault.test",
+        VAULT_TOKEN: "s.tok",
+        VAULT_TIMEOUT_MS: "1500",
+      }).name,
+    ).toBe("vault");
+  });
+
   it("throws on an unknown provider name", () => {
     expect(() => createSecretProvider({ SECRET_PROVIDER: "asm" })).toThrow(
       /Unsupported SECRET_PROVIDER/,

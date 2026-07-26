@@ -188,7 +188,11 @@ export class SsoService {
     await this.consumeAssertionId(conn.tenantId, verified.assertionId);
 
     // --- Link or provision, always scoped to conn.tenantId. --------------------------------
-    const { userId, outcome } = await this.resolveUser(conn, verified.email);
+    const { userId, outcome } = await this.resolveUser(
+      conn,
+      verified.email,
+      verified.nameId,
+    );
 
     const token = await this.sessions.mint({
       userId,
@@ -258,13 +262,21 @@ export class SsoService {
       autoProvision: boolean;
     },
     email: string,
+    nameId: string,
   ): Promise<{ userId: string; outcome: SsoLoginResult["outcome"] }> {
     const existing = await this.memberships.findByEmail(conn.tenantId, email);
     if (existing) return { userId: existing.userId, outcome: "linked" };
 
     // Deterministic synthetic id: stable across logins, impossible to collide with a Firebase
-    // uid, and it does not reveal the email/NameID.
-    const userId = `sso:${conn.id}:${createHash("sha256").update(email).digest("hex").slice(0, 32)}`;
+    // uid, and it does not reveal the NameID.
+    //
+    // Keyed on the NAME ID, not the email (SAML-SSO.md §"Auto-provision"): the NameID is the
+    // IdP's own subject identifier and survives an email change, whereas hashing the email
+    // would mint a NEW synthetic user the first time someone's address changes — silently
+    // orphaning their memberships and role. Our SP metadata advertises only the `persistent`
+    // and `emailAddress` NameID formats, so what we receive is a stable identifier rather
+    // than a per-session `transient` one.
+    const userId = `sso:${conn.id}:${createHash("sha256").update(nameId).digest("hex").slice(0, 32)}`;
 
     const invitation = await getPrisma().invitation.findFirst({
       where: { tenantId: conn.tenantId, email, acceptedAt: null },

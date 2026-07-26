@@ -148,6 +148,31 @@ describe("SsoConnectionsController — cross-workspace protection", () => {
     ).rejects.toMatchObject({ status: 403 });
   });
 
+  /**
+   * The upsert keys on `idpEntityId`, so reusing a slug that one of your OWN other connections
+   * already holds used to sail past the cross-tenant check and die on the unique constraint —
+   * a Prisma error surfacing as a 500. It's the caller's slug to change, so it must be a 4xx.
+   */
+  it("a slug already used by another connection in the SAME workspace is a 409, not a 500", async () => {
+    const c = controller(true);
+    await c.upsert("ws-a", body(), owner);
+    await expect(
+      c.upsert(
+        "ws-a",
+        body({ idpEntityId: "https://second-idp/entity", slug: "acme" }),
+        owner,
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("re-registering the SAME connection keeps its slug (an update, not a clash)", async () => {
+    const c = controller(true);
+    await c.upsert("ws-a", body(), owner);
+    const again = await c.upsert("ws-a", body({ label: "Acme renamed" }), owner);
+    expect(again.label).toBe("Acme renamed");
+    expect(again.slug).toBe("acme");
+  });
+
   it("delete is tenant-scoped: a foreign id is a no-op, never a cross-tenant delete", async () => {
     const c = controller(true);
     const row = await c.upsert("ws-a", body(), owner);

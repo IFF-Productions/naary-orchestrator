@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Delete,
   ForbiddenException,
@@ -82,7 +83,7 @@ export class SsoConnectionsController {
   @ApiEndpoint({
     summary: "Create or replace a SAML connection",
     description:
-      "Keyed by the IdP entity id, which is unique across the instance — an entity id already mapped to ANOTHER workspace is rejected (409-style), because that uniqueness is what makes an anonymous ACS POST unambiguous.",
+      "Keyed by the IdP entity id, which is unique across the instance — that uniqueness is what makes an anonymous ACS POST unambiguous. An entity id or slug already mapped to ANOTHER workspace is refused with 403 (a 409 would confirm it exists elsewhere); a slug already used by a different connection in THIS workspace is a 409.",
     conflict: true,
   })
   @Put()
@@ -111,19 +112,29 @@ export class SsoConnectionsController {
     }
 
     const prisma = getPrisma();
+    const byEntityId = await prisma.ssoConnection.findUnique({
+      where: { idpEntityId: body.idpEntityId },
+    });
+    const bySlug = await prisma.ssoConnection.findUnique({
+      where: { slug: body.slug },
+    });
     // An entity id (and a slug) already owned by a DIFFERENT workspace must not be stolen:
     // it would redirect that tenant's federated logins into this one.
-    for (const clash of [
-      await prisma.ssoConnection.findUnique({
-        where: { idpEntityId: body.idpEntityId },
-      }),
-      await prisma.ssoConnection.findUnique({ where: { slug: body.slug } }),
-    ]) {
+    for (const clash of [byEntityId, bySlug]) {
       if (clash && clash.tenantId !== tenantId) {
         throw new ForbiddenException(
           "That IdP entity id or slug is already registered by another workspace.",
         );
       }
+    }
+    // Same workspace, but the slug belongs to a DIFFERENT connection of theirs. The upsert
+    // below keys on `idpEntityId`, so it would try to write a slug that is already taken and
+    // die on the unique constraint — a Prisma error surfacing as a 500. Say what's wrong
+    // instead: the caller picked a slug, and only they can pick another.
+    if (bySlug && bySlug.idpEntityId !== body.idpEntityId) {
+      throw new ConflictException(
+        `The slug '${body.slug}' is already used by another SSO connection in this workspace.`,
+      );
     }
 
     const data = {

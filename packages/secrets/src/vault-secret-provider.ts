@@ -104,7 +104,15 @@ export class VaultSecretProvider implements SecretProvider {
     this.mount = opts.mount ?? "secret";
     this.prefix = opts.prefix ?? "naary";
     this.namespace = opts.namespace;
-    this.timeoutMs = opts.timeoutMs ?? 5_000;
+    // `?? 5_000` alone is not enough: NaN is not nullish, so a NaN here would survive and
+    // make AbortSignal.timeout abort instantly on every request. Env values are validated by
+    // parseTimeoutMs; this covers direct programmatic construction.
+    this.timeoutMs =
+      opts.timeoutMs !== undefined &&
+      Number.isFinite(opts.timeoutMs) &&
+      opts.timeoutMs > 0
+        ? opts.timeoutMs
+        : 5_000;
     const f =
       opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike | undefined);
     if (!f)
@@ -224,6 +232,24 @@ export class VaultSecretProvider implements SecretProvider {
  * rather than silently falling back to the DB (a silent fallback would write material
  * somewhere the operator believes it is not).
  */
+/**
+ * Parse VAULT_TIMEOUT_MS, or THROW. A bad value must not be silently tolerated: `Number("30s")`
+ * is NaN, NaN is not nullish so it defeated the `?? 5000` default, and `AbortSignal.timeout(NaN)`
+ * aborts immediately — turning every secret read into an instant failure while the config looks
+ * fine. This provider's whole contract is to fail closed AT BOOT (see assertSecretProviderConfig),
+ * so a typo becomes a startup error naming the variable, not a mystery outage.
+ */
+function parseTimeoutMs(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw.trim() === "") return undefined; // unset ⇒ the 5s default
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error(
+      `VAULT_TIMEOUT_MS must be a positive number of milliseconds (got '${raw}')`,
+    );
+  }
+  return n;
+}
+
 export function createSecretProvider(
   env: Record<string, string | undefined> = process.env,
 ): SecretProvider {
@@ -238,9 +264,7 @@ export function createSecretProvider(
       mount: env.VAULT_KV_MOUNT || undefined,
       prefix: env.VAULT_PATH_PREFIX || undefined,
       namespace: env.VAULT_NAMESPACE || undefined,
-      timeoutMs: env.VAULT_TIMEOUT_MS
-        ? Number(env.VAULT_TIMEOUT_MS)
-        : undefined,
+      timeoutMs: parseTimeoutMs(env.VAULT_TIMEOUT_MS),
     });
   }
   throw new Error(
