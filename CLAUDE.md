@@ -33,7 +33,8 @@ style nit.
 
 ## Stack
 
-- **TypeScript** (Node 20+), **NestJS** (control plane / HTTP).
+- **TypeScript** (Node 24 LTS — pinned in `/.nvmrc`, which CI and the Dockerfiles both read),
+  **NestJS** (control plane / HTTP).
 - **Temporal** (TS SDK) — durable execution. `@temporalio/{client,worker,workflow,activity,testing}`.
 - **Postgres** + **Prisma** — graph definitions, tenant credentials, usage ledger.
   (Temporal owns execution *state*; Postgres owns *definitions* and *records*.)

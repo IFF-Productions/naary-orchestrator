@@ -7,7 +7,12 @@
 # Build from the repo root:
 #   docker build -t naary-sandbox-runner -f deploy/sandbox/runner.Dockerfile .
 
-FROM node:22-bookworm-slim
+# Node major. Keep in lockstep with /.nvmrc and package.json `engines` — those are what CI and
+# local dev read. Overridable at build time (`--build-arg NODE_VERSION=24`) so a rollback is a
+# flag, not an edit. 24 is the ACTIVE LTS (Krypton); 26 is Current until Oct 2026.
+ARG NODE_VERSION=24
+
+FROM node:${NODE_VERSION}-bookworm-slim
 
 # docker CLI → launch sibling sandbox containers via the mounted host socket.
 # git       → capture the sandbox's edits as a diff (no network/token involved).

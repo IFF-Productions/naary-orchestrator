@@ -17,7 +17,12 @@
 # Production-grade images (distroless, non-root, pruned, dist-only) are a later
 # infra task — see PRODUCTION-READINESS.md §3.A.
 # Node 22 (LTS): pnpm 11 requires Node >= 22 (uses a builtin absent in Node 20).
-FROM node:22-bookworm-slim
+# Node major. Keep in lockstep with /.nvmrc and package.json `engines` — those are what CI and
+# local dev read. Overridable at build time (`--build-arg NODE_VERSION=24`) so a rollback is a
+# flag, not an edit. 24 is the ACTIVE LTS (Krypton); 26 is Current until Oct 2026.
+ARG NODE_VERSION=24
+
+FROM node:${NODE_VERSION}-bookworm-slim
 
 # Prisma's engine + TLS to Postgres need openssl; ca-certificates for HTTPS to
 # LLM/MCP providers from the worker. node:slim ships without openssl. curl is for

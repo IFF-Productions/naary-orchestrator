@@ -134,7 +134,7 @@ jobs:
       # store no longer persists between runs.
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .nvmrc # single source of truth (see /.nvmrc)
 
       - run: pnpm install --frozen-lockfile
 
