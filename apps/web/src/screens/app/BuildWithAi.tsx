@@ -27,6 +27,34 @@ import {
 } from "./build-ai/BuildWithAiView";
 import type { ChatMsg } from "./build-ai/ConversationPanel";
 import { asEdgeDef, asNodeDef, slugifyName } from "./build-ai/model";
+import {
+  type AiBuilderProvider,
+  providerOptions,
+  providerSetupHint,
+  resolveStoredProvider,
+} from "./build-ai/providers";
+import { useWorkspace } from "../../workspace/WorkspaceProvider";
+
+/** Remembered provider choice. localStorage can THROW (sandboxed iframe, private mode), and a
+ *  preference is never worth failing a screen over — both helpers swallow. */
+const PROVIDER_KEY = "naary-build-ai-provider";
+
+function readStoredProvider(): string | null {
+  try {
+    return localStorage.getItem(PROVIDER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredProvider(value: AiBuilderProvider | null): void {
+  try {
+    if (value) localStorage.setItem(PROVIDER_KEY, value);
+    else localStorage.removeItem(PROVIDER_KEY);
+  } catch {
+    /* preference only */
+  }
+}
 
 function turnsToMessages(s: BuilderSession): ChatMsg[] {
   return s.turns.map((t) => ({
@@ -54,6 +82,59 @@ export function BuildWithAi() {
   }, []);
   const patch = useCallback((p: Partial<BuildWithAiState>) => {
     if (aliveRef.current) setState((s) => ({ ...s, ...p }));
+  }, []);
+
+  /**
+   * Which model/agent to generate with. `null` = Auto, i.e. send no provider and let the server apply
+   * its own precedence (first VALID credential, API models before claude-code) — exactly what happened
+   * before this picker existed, so the default behaviour is unchanged.
+   *
+   * The choice is remembered across visits, but validated against what's currently configured on load:
+   * a stored provider whose credential was removed (or has since failed validation) would 400 on send,
+   * and a 400 on a preference the user didn't re-choose is the most confusing failure available.
+   */
+  const { activeId: tenantId } = useWorkspace();
+  const [credentials, setCredentials] = useState<
+    { provider: string; isValid: boolean }[] | null
+  >(null);
+  const [provider, setProvider] = useState<AiBuilderProvider | null>(null);
+  // `send` is a useCallback keyed on [patch], so it would capture a stale `provider`. Mirror it in a
+  // ref (like sessionRef/graphRef above) so the turn always uses the CURRENT selection.
+  const providerRef = useRef<AiBuilderProvider | null>(null);
+  providerRef.current = provider;
+  const options = providerOptions(credentials);
+
+  // Keyed on tenantId only: switching ENVIRONMENT remounts this screen (AppShell keys the Outlet by
+  // the active env), so the list refetches for the new env without an extra dependency. The endpoint
+  // is env-scoped through the same resolveEnvId the generator uses, so what's offered is exactly what
+  // will resolve.
+  useEffect(() => {
+    if (!tenantId) return;
+    let cancelled = false;
+    api
+      .listCredentials(tenantId)
+      .then((rows) => {
+        if (cancelled) return;
+        setCredentials(rows);
+        // Restore the remembered choice only if it's still usable.
+        setProvider(
+          resolveStoredProvider(
+            readStoredProvider(),
+            providerOptions(rows),
+          ),
+        );
+      })
+      // A failed credential list must not block generating: Auto still works, and the server returns
+      // its own actionable error if nothing is configured.
+      .catch(() => !cancelled && setCredentials([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId]);
+
+  const chooseProvider = useCallback((next: AiBuilderProvider | null) => {
+    setProvider(next);
+    writeStoredProvider(next);
   }, []);
 
   // The resume list — real open sessions in the active environment.
@@ -93,7 +174,7 @@ export function BuildWithAi() {
           first = false;
           return was;
         };
-        const result = await builderApi.sendBuilderTurn(sid, text, undefined, {
+        const result = await builderApi.sendBuilderTurn(sid, text, providerRef.current ?? undefined, {
           onMeta: (name) => patch({ name }),
           onNode: (raw) => {
             const n = asNodeDef(raw);
@@ -217,6 +298,10 @@ export function BuildWithAi() {
     <BuildWithAiView
       state={state}
       onSend={(t) => void send(t)}
+      providerOptions={options}
+      provider={provider}
+      onProvider={chooseProvider}
+      providerHint={providerSetupHint(options)}
       onResume={(id) => void resume(id)}
       onOpenInCanvas={() => void openInCanvas()}
       onReset={reset}

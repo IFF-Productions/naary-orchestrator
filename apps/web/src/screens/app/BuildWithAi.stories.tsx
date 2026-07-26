@@ -7,6 +7,7 @@ import {
   BuildWithAiView,
 } from "./build-ai/BuildWithAiView";
 import { BuildWithAi } from "./BuildWithAi";
+import { providerOptions } from "./build-ai/providers";
 
 /**
  * Two flavors:
@@ -113,11 +114,21 @@ const TYPING: BuildWithAiState = {
 };
 
 const noop = () => {};
+// A typical workspace: an Anthropic key plus a Claude Code credential. Shared by the view stories so
+// the "Generate with" picker under the composer renders in each of them.
+const PROVIDER_OPTIONS = providerOptions([
+  { provider: "anthropic", isValid: true },
+  { provider: "claude-code", isValid: true },
+]);
 const viewHandlers = {
   onSend: noop,
   onResume: noop,
   onOpenInCanvas: noop,
   onReset: noop,
+  providerOptions: PROVIDER_OPTIONS,
+  provider: null,
+  onProvider: noop,
+  providerHint: null,
 };
 
 const meta: Meta = {
@@ -162,4 +173,60 @@ export const Building: Story = {
  *  real metered turn cost), Open in canvas CTA. */
 export const DraftReady: Story = {
   render: () => <BuildWithAiView state={READY} {...viewHandlers} />,
+};
+
+/**
+ * The "Generate with" picker under the composer. It was always possible to choose — the builder-turn
+ * DTO, the controller and `sendBuilderTurn` all accepted a provider — but the UI passed `undefined`,
+ * so every generation silently used whatever the server auto-picked.
+ *
+ * Auto stays the default and sends no provider, leaving the server's precedence (first VALID
+ * credential, API models before claude-code) untouched.
+ */
+export const ProviderAuto: Story = {
+  render: () => (
+    <BuildWithAiView state={READY} {...viewHandlers} provider={null} />
+  ),
+};
+
+/** An explicit choice — the hint names the model that will actually run. */
+export const ProviderClaudeCode: Story = {
+  render: () => (
+    <BuildWithAiView
+      state={READY}
+      {...viewHandlers}
+      provider="claude-code"
+    />
+  ),
+};
+
+/**
+ * A configured key that FAILED validation stays visible and disabled, rather than vanishing from the
+ * list — "why isn't my OpenAI key here?" deserves an answer the user can act on.
+ */
+export const ProviderInvalidKey: Story = {
+  render: () => (
+    <BuildWithAiView
+      state={READY}
+      {...viewHandlers}
+      providerOptions={providerOptions([
+        { provider: "anthropic", isValid: true },
+        { provider: "openai", isValid: false },
+      ])}
+      provider={null}
+    />
+  ),
+};
+
+/** Nothing configured at all: the picker is disabled and says where to go, BEFORE a prompt is typed. */
+export const ProviderNoneConfigured: Story = {
+  render: () => (
+    <BuildWithAiView
+      state={READY}
+      {...viewHandlers}
+      providerOptions={[]}
+      provider={null}
+      providerHint="Add an AI provider key (Anthropic, OpenAI or Google) or a Claude Code credential in Integrations to generate workflows."
+    />
+  ),
 };

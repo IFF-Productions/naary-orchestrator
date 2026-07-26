@@ -12,6 +12,8 @@ import {
   SAVE_OPTION,
 } from "../../../lib/api/builder";
 import type { PlanLine } from "./model";
+import { ProviderPicker } from "./ProviderPicker";
+import type { AiBuilderProvider, ProviderOption } from "./providers";
 
 export interface ChatMsg {
   id: string;
@@ -74,6 +76,10 @@ export function ConversationPanel({
   resumables,
   opening,
   onSend,
+  providerOptions,
+  provider,
+  onProvider,
+  providerHint,
   onResume,
   onOpenInCanvas,
   compact,
@@ -89,6 +95,11 @@ export function ConversationPanel({
   /** "Open in canvas" in flight (saving the draft). */
   opening: boolean;
   onSend: (text: string) => void;
+  /** Which model/agent to generate with — see ./providers. */
+  providerOptions: ProviderOption[];
+  provider: AiBuilderProvider | null;
+  onProvider: (next: AiBuilderProvider | null) => void;
+  providerHint: string | null;
   onResume: (id: string) => void;
   onOpenInCanvas: () => void;
   compact?: boolean;
@@ -715,6 +726,15 @@ export function ConversationPanel({
             <Icon name="arrow-right" size={16} strokeWidth={2} />
           </button>
         </div>
+        {/* Directly under the composer, not in a settings panel: it's a per-turn choice, and which
+            model will run should be visible at the moment you press Send. */}
+        <ProviderPicker
+          options={providerOptions}
+          value={provider}
+          onChange={onProvider}
+          disabled={streaming}
+          hint={providerHint}
+        />
         <div
           style={{
             fontSize: "var(--text-2xs)",
