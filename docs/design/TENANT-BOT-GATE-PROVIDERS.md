@@ -66,6 +66,13 @@ enabled && provider === "app_check"  ⇒  no tenant keys at all; requires the
 
 Getting this wrong 400s every App Check enable, so it is called out explicitly.
 
+**Slice 1 ships only half of that second rule.** It checks that a Firebase *service
+account* exists — which says nothing about App Check being registered for the project,
+and nothing about whether the web bundle can mint tokens. The real guard is the §5 round
+trip, which lands in slice 3. Until then `provider: "app_check"` must not be surfaced in
+the UI: setting it by hand while slice 2 is unbuilt means no token ever arrives and every
+submission to that environment 403s.
+
 No tenant secret is stored for `app_check` — there is nothing tenant-side to store. The
 `turnstile:secret` SecretStore entry is untouched (and deliberately *not* deleted when a
 tenant switches to App Check, so switching back doesn't lose their key).
@@ -108,7 +115,7 @@ getAppCheck().verifyToken(token, { consume: true })
 - admin SDK not configured ⇒ allow (can't enforce), consistent with the existing
   "enabled but no secret" branch. Made visible by the boot log in §5.
 
-**Unverified, must be checked against the live project (see the tracking issue):**
+**Unverified, must be checked against the live project (#790):**
 `consume: true` only has teeth if the client used `getLimitedUseToken()` **and** replay
 protection is enabled for the app in the Firebase console. Neither is visible from our
 code. If `verifyToken` reports `alreadyConsumed: false` unconditionally when replay
@@ -207,4 +214,4 @@ The enable button runs the §5 round trip and reports the actual result.
    `botGate`; `botToken` on submit.
 3. **Settings** — provider picker, the verify-before-enable round trip, the §6 copy.
 4. **Cleanup** — drop `turnstileSiteKey`/`turnstileToken`, telemetry per provider,
-   and record the §3 replay-protection finding once verified live.
+   and record the §3 replay-protection finding once #790 answers it.

@@ -66,8 +66,9 @@ export class AppCheckVerifier {
     this.config =
       config === null ? undefined : (config ?? AppCheckVerifier.fromEnv());
     this.verifyFn = verifyFn;
-    // An injected verify fn implies enabled, so tests can exercise the verdicts without env.
-    if (verifyFn && !this.config) this.config = {};
+    // An injected verify fn implies enabled, so tests can exercise the verdicts without env — but
+    // an EXPLICIT `null` stays disabled (that's the contract the disabled-path tests rely on).
+    if (verifyFn && config === undefined && !this.config) this.config = {};
   }
 
   static fromEnv(): AppCheckConfig | undefined {
