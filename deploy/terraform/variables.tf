@@ -113,3 +113,80 @@ variable "neon_region" {
   default     = "aws-eu-central-1"
   description = "Neon region id (aws-eu-central-1 = Frankfurt — pairs with Hetzner nbg1/fsn1)."
 }
+
+# ── Object storage (s3.tf) ─────────────────────────────────────────────────────────────
+
+variable "create_s3" {
+  type        = bool
+  default     = true
+  description = "Create the S3 bucket + IAM user for object storage. Set false if you already manage a bucket elsewhere (then set STORAGE_PROVIDER/S3_BUCKET/credentials in the server .env by hand). Required for hosted-form LOGO uploads: without object storage those fail closed with a 503, deliberately, since a logo held in one API process's memory would vanish on the next rolling deploy."
+}
+
+variable "aws_region" {
+  type        = string
+  default     = "eu-central-1"
+  description = "AWS region for the bucket. Pick one near the Hetzner box (eu-central-1 for Falkenstein/Nuremberg) — every logo view and claim-check read crosses this link."
+}
+
+variable "s3_bucket_name" {
+  type    = string
+  default = null
+  # REQUIRED when create_s3 is true (the default). Enforced by a precondition on the bucket in s3.tf
+  # rather than a `validation` block here: cross-variable validation needs Terraform 1.9 and this
+  # module supports >= 1.5.
+  description = "REQUIRED when create_s3 is true. Globally-unique bucket name, e.g. \"naary-prod-assets\" — S3 names are shared across ALL AWS accounts, so a generic one will collide."
+
+  validation {
+    # Shape only; "is it set at all" is the precondition's job (see above).
+    condition     = var.s3_bucket_name == null || can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.s3_bucket_name))
+    error_message = "s3_bucket_name must be a valid S3 bucket name: 3-63 chars, lowercase letters/digits/hyphens/dots, starting and ending alphanumeric."
+  }
+}
+
+variable "s3_iam_user_name" {
+  type        = string
+  default     = "naary-object-storage"
+  description = "Name of the dedicated IAM user whose access key the API + worker use. No instance role exists on a Hetzner VPS, so a long-lived key is the only option — hence the two-action least-privilege policy in s3.tf."
+}
+
+variable "s3_versioning" {
+  type        = bool
+  default     = true
+  description = "Keep noncurrent object versions (expired after s3_noncurrent_version_retention_days). A safety net for form logos, which a saved workflow references and a public page renders."
+}
+
+variable "s3_claim_check_retention_days" {
+  type        = number
+  default     = 30
+  description = "Days to keep claim-check payloads (items/ ctx/ sql/ http/) — large activity outputs offloaded so Temporal payloads stay under the ~2MB cap. Only needs to cover how far back run detail is worth inspecting; a missing one degrades gracefully (the UI shows an 'offloaded' marker). Form assets are NEVER expired."
+
+  # S3 rejects a non-positive or fractional expiration at APPLY time, with an error naming the
+  # lifecycle rule rather than the variable. Catch it at plan time instead.
+  validation {
+    condition     = var.s3_claim_check_retention_days >= 1 && floor(var.s3_claim_check_retention_days) == var.s3_claim_check_retention_days
+    error_message = "s3_claim_check_retention_days must be a whole number of days >= 1."
+  }
+}
+
+variable "s3_noncurrent_version_retention_days" {
+  type        = number
+  default     = 30
+  description = "Days to keep superseded versions of form assets before deletion."
+
+  validation {
+    condition     = var.s3_noncurrent_version_retention_days >= 1 && floor(var.s3_noncurrent_version_retention_days) == var.s3_noncurrent_version_retention_days
+    error_message = "s3_noncurrent_version_retention_days must be a whole number of days >= 1."
+  }
+}
+
+variable "s3_kms_key_arn" {
+  type        = string
+  default     = null
+  description = "Optional CMK ARN for SSE-KMS instead of the default SSE-S3 (AES256). Set this only if you need an audit trail on key use or a key you rotate yourself; the IAM policy then also grants kms:Decrypt/GenerateDataKey on it."
+}
+
+variable "s3_scope_to_prefixes" {
+  type        = bool
+  default     = false
+  description = "Narrow the IAM policy to the specific key prefixes the app uses instead of all objects in the bucket. Only worth it if you SHARE this bucket with another workload — otherwise the bucket is the trust boundary, and a per-prefix policy breaks with a confusing AccessDenied the first time a new claim-check prefix is added in the worker."
+}

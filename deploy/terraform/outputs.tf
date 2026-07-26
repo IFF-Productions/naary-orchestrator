@@ -40,3 +40,43 @@ output "server_env" {
   sensitive   = true
   description = "The generated server .env — for backup or a manual (non-cloud-init) deploy."
 }
+
+# ── Object storage (s3.tf) ─────────────────────────────────────────────────────────────
+# A NEWLY CREATED server gets these AUTOMATICALLY: hetzner.tf concatenates them into `server_env`,
+# which cloud-init writes to /opt/naary/.env on first boot. Nothing to copy.
+#
+# On an EXISTING server they must be added by hand — cloud-init runs first-boot only, and
+# hcloud_server.naary deliberately sets `ignore_changes = [user_data]` so a template edit can't replace
+# a live box, so an apply updates these outputs WITHOUT touching the server's .env:
+#
+#   STORAGE_PROVIDER=s3
+#   S3_BUCKET=$(terraform output -raw s3_bucket)
+#   AWS_REGION=$(terraform output -raw s3_region)
+#   AWS_ACCESS_KEY_ID=$(terraform output -raw s3_access_key_id)
+#   AWS_SECRET_ACCESS_KEY=$(terraform output -raw s3_secret_access_key)
+#
+# …then `docker compose up -d api worker` on the box. Until object storage is configured, hosted-form
+# logo uploads fail closed with a 503 (by design — see s3.tf); nothing else is affected.
+
+output "s3_bucket" {
+  value       = var.create_s3 ? aws_s3_bucket.naary[0].bucket : null
+  description = "Bucket name → S3_BUCKET in the server .env."
+}
+
+output "s3_region" {
+  value       = var.create_s3 ? var.aws_region : null
+  description = "Bucket region → AWS_REGION in the server .env."
+}
+
+output "s3_access_key_id" {
+  value       = var.create_s3 ? aws_iam_access_key.naary[0].id : null
+  description = "Run: terraform output -raw s3_access_key_id  → AWS_ACCESS_KEY_ID in the server .env"
+}
+
+# SENSITIVE. Also present in terraform state, so keep state private (deploy/.gitignore excludes
+# *.tfstate). Rotate with: terraform taint aws_iam_access_key.naary[0] && terraform apply
+output "s3_secret_access_key" {
+  value       = var.create_s3 ? aws_iam_access_key.naary[0].secret : null
+  sensitive   = true
+  description = "Run: terraform output -raw s3_secret_access_key  → AWS_SECRET_ACCESS_KEY in the server .env"
+}
