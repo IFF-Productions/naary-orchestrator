@@ -92,8 +92,13 @@ export async function rotateMasterKey(opts?: {
   }
 
   // Pass 2: converge legacy master-encrypted credential/secret rows to v3 (tenant DEK).
+  // `gt: 0` skips EXTERNAL rows (#458): keyVersion 0 means the material lives in Vault/ASM and
+  // the crypto columns are empty, so it is neither legacy nor rewrappable. Without this the
+  // sweep would try to master-decrypt empty ciphertext, record every Vault-backed row as a
+  // failure, and the rotation runbook could never be certified complete (it tells the operator
+  // to keep OLD_ENCRYPTION_KEY set while failures remain).
   const legacyCreds = await prisma.tenantCredential.findMany({
-    where: { keyVersion: { lt: TENANT_KEY_VERSION } },
+    where: { keyVersion: { lt: TENANT_KEY_VERSION, gt: 0 } },
   });
   for (const row of legacyCreds) {
     try {

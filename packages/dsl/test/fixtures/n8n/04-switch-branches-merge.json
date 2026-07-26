@@ -1,0 +1,265 @@
+{
+  "name": "Ticket router",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "tickets",
+        "options": {}
+      },
+      "id": "s0000000-0000-4000-8000-000000000000",
+      "name": "Ticket created",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-400, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.priority }}",
+                    "rightValue": "urgent",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "urgent"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.priority }}",
+                    "rightValue": "normal",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "normal"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "s1111111-1111-4111-8111-111111111111",
+      "name": "Route by priority",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [-160, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://pager.example.com/api/page",
+        "options": {}
+      },
+      "id": "s2222222-2222-4222-8222-222222222222",
+      "name": "Page on-call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [80, 140]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "queue",
+              "value": "standard",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "s3333333-3333-4333-8333-333333333333",
+      "name": "Queue normally",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [80, 300]
+    },
+    {
+      "parameters": {},
+      "id": "s4444444-4444-4444-8444-444444444444",
+      "name": "Ignore",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [80, 460]
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "id": "s5555555-5555-4555-8555-555555555555",
+      "name": "Merge outcomes",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [320, 300]
+    },
+    {
+      "parameters": {
+        "content": "## Routing\nUrgent pages on-call, everything else is queued.",
+        "height": 160,
+        "width": 320
+      },
+      "id": "s6666666-6666-4666-8666-666666666666",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-420, 40]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://audit.example.com/api/events",
+        "options": {}
+      },
+      "id": "s7777777-7777-4777-8777-777777777777",
+      "name": "Audit (disabled)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [560, 300],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "mode": "markdownToHtml",
+        "markdown": "={{ $json.queue }}",
+        "options": {}
+      },
+      "id": "s8888888-8888-4888-8888-888888888888",
+      "name": "Render summary",
+      "type": "n8n-nodes-base.markdown",
+      "typeVersion": 1,
+      "position": [800, 300]
+    }
+  ],
+  "connections": {
+    "Ticket created": {
+      "main": [
+        [
+          {
+            "node": "Route by priority",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by priority": {
+      "main": [
+        [
+          {
+            "node": "Page on-call",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge outcomes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue normally",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ignore",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Page on-call": {
+      "main": [
+        [
+          {
+            "node": "Merge outcomes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue normally": {
+      "main": [
+        [
+          {
+            "node": "Merge outcomes",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Ignore": {
+      "main": [
+        [
+          {
+            "node": "Merge outcomes",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge outcomes": {
+      "main": [
+        [
+          {
+            "node": "Audit (disabled)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit (disabled)": {
+      "main": [
+        [
+          {
+            "node": "Render summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "active": false,
+  "versionId": "abcdef01-2345-4678-89ab-cdef01234567",
+  "meta": {
+    "instanceId": "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd"
+  },
+  "tags": []
+}

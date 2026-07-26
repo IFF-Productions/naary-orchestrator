@@ -732,3 +732,97 @@ describe("runAgent — in-loop tools (#449)", () => {
     expect(opts.output).toBeDefined();
   });
 });
+
+/**
+ * Multi-agent handoff (#580 Phase 1). The activity's whole job here is to turn the
+ * declared targets into a constrained structured-output call — the routing itself is
+ * ordinary edge evaluation in the interpreter (proved in interpreter-handoff.e2e.spec.ts).
+ */
+describe("runAgent — handoff", () => {
+  const HANDOFF_CFG = {
+    provider: "anthropic",
+    model: "claude-opus-4-8",
+    systemPrompt: "Route this request.",
+    handoff: {
+      targets: [
+        { to: "billing", name: "billing_specialist", description: "money" },
+        { to: "tech", name: "technical_specialist", description: "errors" },
+      ],
+    },
+  };
+
+  it("DERIVES the output schema from the targets (an enum the model can't escape)", async () => {
+    generateText.mockResolvedValue({
+      output: {
+        target: "technical_specialist",
+        reason: "an error trace",
+        payload: {},
+      },
+      text: "",
+      totalUsage: { inputTokens: 40, outputTokens: 12, totalTokens: 52 },
+    });
+
+    const res = await runAgent(HANDOFF_CFG, { msg: "500 on checkout" }, META);
+
+    // The node declares NO outputSchema — the schema below exists only because the
+    // handoff derived it. Structured output must therefore be ON.
+    const opts = generateText.mock.calls[0][0] as {
+      output?: { responseFormat?: unknown };
+      system?: string;
+    };
+    expect(opts.output).toBeDefined();
+    // The roster reaches the model, so the enum values aren't bare unexplained names.
+    expect(opts.system).toContain("Route this request.");
+    expect(opts.system).toContain("billing_specialist: money");
+    expect(opts.system).toContain("technical_specialist: errors");
+    // The chosen target rides out on `output`, which is what the edge condition reads.
+    expect(res.output.target).toBe("technical_specialist");
+  });
+
+  it("bills each agent in the run SEPARATELY, keyed by nodeId", async () => {
+    // #580 AC: per-agent cost attribution. The ledger's unique key is
+    // (executionId, nodeId), so a supervisor and its specialist — two nodes in ONE
+    // execution — produce two rows. This is what makes a multi-agent run auditable
+    // per agent instead of one opaque crew-level bill.
+    generateText.mockResolvedValue({
+      output: { target: "technical_specialist", reason: "r", payload: {} },
+      text: "",
+      totalUsage: { inputTokens: 30, outputTokens: 10, totalTokens: 40 },
+    });
+    await runAgent(
+      HANDOFF_CFG,
+      { msg: "x" },
+      { ...META, nodeId: "supervisor" },
+    );
+
+    generateText.mockResolvedValue({
+      output: { text: "here's the fix" },
+      text: "here's the fix",
+      totalUsage: { inputTokens: 60, outputTokens: 25, totalTokens: 85 },
+    });
+    await runAgent(
+      {
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        systemPrompt: "fix it",
+      },
+      { msg: "x" },
+      { ...META, nodeId: "technical" },
+    );
+
+    expect(recordUsage).toHaveBeenCalledTimes(2);
+    const rows = recordUsage.mock.calls.map((c) => c[0]);
+    expect(rows.map((r) => r.nodeId)).toEqual(["supervisor", "technical"]);
+    // Same execution, distinct nodes, distinct models — so spend is attributable per agent.
+    expect(new Set(rows.map((r) => r.executionId)).size).toBe(1);
+    expect(rows.map((r) => r.model)).toEqual([
+      "claude-opus-4-8",
+      "claude-sonnet-4-6",
+    ]);
+    expect(rows.every((r) => r.nodeType === "agent")).toBe(true);
+    // Rule 6: each row carries a real metered spend, never a silent zero.
+    expect(
+      rows.every((r) => r.usage.inputTokens > 0 && r.usage.outputTokens > 0),
+    ).toBe(true);
+  });
+});

@@ -77,7 +77,40 @@ channel's real transport (Slack/Teams webhook, or SMTP for email channels). **Wr
 `POST /api/executions/code-agent-test` — proves the coding-CLI path (subprocess or sandbox
 container) end to end.
 
-### 1.5 The live suite — `pnpm test:live`
+### 1.5 Test connection — one-click credential proof (#701)
+
+`POST /api/tenants/:id/connections/:connectionId/test` → `{ok, status, httpStatus, checkedAction,
+connectionStatus, message}`; **Test** button on each connection row in the Integrations screen and
+in the connect form right after save.
+
+```bash
+curl -sS -X POST "$BASE/api/tenants/$TENANT_ID/connections/$CONNECTION_ID/test" \
+  -H "Authorization: Bearer $NAARY_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"provider":"calendly"}'
+```
+
+Calls the provider's cheapest **non-write, zero-required-field** catalog read with the connection's
+credential and writes the answer back to `Connection.status`. What makes it real proof rather than a
+second implementation: it composes the request through `planIntegrationCall` (`@naary/dsl`) — the
+*same* function the `integration` node's activity uses for the auth-header scheme, base URL and
+header merge order — so a pass proves the header scheme, base URL and token the node will actually
+use. `apps/worker/test/integration-request.drift.spec.ts` pins the activity's emitted request to that
+function across all 38 providers × `{api_token, oauth}`, so the two cannot drift.
+
+- **`provider` is required.** A `Connection` row has no provider column (`type: "custom"` is
+  provider-agnostic; the provider is chosen at the `integration` node), so the caller must say which
+  API the token is for.
+- **It cannot write.** The action is derived from the catalog's own `write` flag; there is no
+  caller-supplied action or field override and no hand-maintained probe table.
+- **`status: "unknown"`** = we declined to probe, which is *not* a verdict on the token; the
+  connection's status is left untouched. See §2.4 for exactly which providers this covers.
+- Env: the secret is read from the connection row's **own** `environmentId`, so no
+  `x-environment-id` header is needed (or honored).
+- RBAC: tenant scoping only, like the sibling create/list/delete routes — the matrix's verbs are
+  per-workflow and none applies to a connection.
+
+### 1.6 The live suite — `pnpm test:live`
 
 Eight `*.live.spec.ts` files that run **real graphs through the real Temporal interpreter
 against real external services**, each `describe.skipIf(!creds)` so a plain checkout runs
@@ -107,7 +140,7 @@ catalog's own `write` flag and `fields[].required`). `Needs` = the fields you mu
 | cloudflare | `list_zones` | — | 2/4 | — |
 | deepl | `get_usage` | — | 3/3 | — |
 | digitalocean | `list_droplets` | — | 2/4 | — |
-| discord | `get_channel` | channelId | 3/5 | — |
+| discord | `get_channel` | channelId | 2/5 | — |
 | dropbox | `list_folder` | path (`""` = root) | 2/4 | — |
 | front | `list_conversations` | — | 3/4 | — |
 | github | `get_issue` | owner, repo, issueNumber | 2/5 | **yes** — `github-agent.live.spec.ts` |
@@ -180,6 +213,38 @@ reached with a PAT — verify the mode you actually use.
 
 ---
 
+### 2.4 Which providers "Test connection" can actually prove — 14 of 38
+
+This is the honest ceiling of §1.5, machine-derived from the catalog (a non-write action all of whose
+required fields are absent or catalog-`const`). It is smaller than §2's "safest read" column, because
+that column allows an action that needs an id and this one does not.
+
+**Testable with one click (14):** `calendly` · `cloudflare` · `deepl` · `digitalocean` · `front` ·
+`netlify` · `pagerduty` · `pipedrive` · `sendgrid` · `shopify` · `stripe` · `todoist` · `vercel` ·
+`zendesk`
+
+Worth noting how much of the risky surface that covers: of the **9 non-Bearer providers** (§2.2) — the
+ones where a wrong header scheme fails 100% of that provider's calls and no unit test would notice —
+**4 are one-click testable**: `deepl` and `pagerduty` (custom-header form) and `zendesk` (HTTP Basic)
+and `shopify` (`X-Shopify-Access-Token`). So both non-Bearer code paths get real coverage, even
+though `jira`/`twilio`/`discord`/`clickup`/`monday` individually do not. And 3 of the 6
+baseUrl-less providers (§2.3) are testable: `deepl`, `shopify`, `zendesk`.
+
+**Reports `unknown` (24)** — use single-node Test (§1.1), where you can supply the id the read needs:
+
+| Reason | Providers |
+| --- | --- |
+| Every catalog action writes | `slack` |
+| Cheapest read still needs an id | `airtable` `asana` `box` `clickup` `discord` `dropbox` `github` `gitlab` `googlesheets` `hubspot` `intercom` `jira` `linear` `mailchimp` `mattermost` `monday` `msgraph` `notion` `posthog` `sentry` `twilio` `webflow` `zoom` |
+
+A provider moves between these lists the moment its catalog entry gains a zero-argument read — no
+code change needed. `apps/api/test/connection-test.service.spec.ts` asserts the 14/24 split, so this
+table cannot silently rot.
+
+**Ordering note:** for `mattermost`, `mailchimp` and `jira` the `unknown` answer comes *before* the
+missing-Server-URL check — telling someone to fill in a Server URL for a provider we can't probe at
+all would send them to fix the wrong thing.
+
 ## 3. Non-catalog product integrations
 
 | Integration | Surface | Credential / config | Real-environment check | Writes? | Live proof |
@@ -205,7 +270,7 @@ reached with a PAT — verify the mode you actually use.
 | GitHub App | connection (`github-app/install/start` → `/api/github-app/callback`) | App ID + private key + installation | complete the install flow, then a `github` integration read | install itself does | **yes** — `github-app.live.spec.ts` |
 | Atlassian 3LO | connection (`.../atlassian/oauth/start` → `/api/atlassian/oauth/callback`) | OAuth client | complete the flow; connection `status` must be `connected`; then a `jira` read | no | — |
 | Generic OAuth2 connection | `.../oauth/start` → `/api/oauth/callback` | OAuth client | same: `status` → `connected`, then a provider read | no | — |
-| PAT / custom connection | `POST /api/tenants/:id/connections` | token + server URL | there is **no** per-connection test route — use single-node Test (see §7) | no | — |
+| PAT / custom connection | `POST /api/tenants/:id/connections` | token + server URL | §1.5 Test connection (14 of 38 providers — §2.4); otherwise single-node Test | no | — |
 | Webhook ingress | `POST /api/hooks/:endpointId` | endpoint secret | `curl` a real payload; a run should appear | starts a run | covered by e2e |
 | Hosted forms | `GET/POST /api/forms/:formId`, page at `/f/:id` | none (optional Turnstile) | load `/f/:id` in a browser and submit | starts a run | **yes** — `form-email.live.spec.ts` |
 | Hosted chat | `GET/POST /api/chat/:chatId`, page at `/c/:id` | none (optional Turnstile) | load `/c/:id` and send a message | starts a run | covered by e2e |
@@ -290,11 +355,10 @@ and in-process HTTP/GraphQL servers — no internet, no cost) and `pnpm test` (d
 
 Stated as facts, not as a plan.
 
-1. **No per-connection "Test connection" route.** Saving a `custom`/PAT connection does not
-   call the provider — unlike a model key (§1.2), which is validated on save. The only way to
-   verify a connection is to put an `integration` node on a canvas and use single-node Test.
-   The catalog already knows each provider's cheapest read-only action (§2), so the data
-   needed for a one-click test exists; the endpoint does not.
+1. ~~**No per-connection "Test connection" route.**~~ **Closed by #701** — see §1.5. The
+   remaining gap is narrower and stated in §2.4: only **14 of 38** providers have a non-write,
+   zero-required-field read, so one-click proof is available for 14; the other 24 still need
+   single-node Test with a supplied id (and Slack has no read-only action at all).
 2. **37 of 38 catalog providers have no real-environment proof.** Only GitHub is exercised
    live (plus Slack's webhook notification path, which is not the `integration` node). The
    other 36 are typed, unit-tested, and unproven against the real API.

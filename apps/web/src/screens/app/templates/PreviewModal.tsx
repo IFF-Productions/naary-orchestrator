@@ -1,13 +1,23 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Button, Icon } from "../../../components";
 import { ConnectionNeedsLine } from "./ConnectionChecklist";
 import type { CheckedRequirement, TemplateView } from "./model";
 
 /**
- * Template preview: identity header, description, "The flow" (the graph's real
- * nodes in order, each with its type accent + kind label), the derived "What
- * you'll learn" checklist, the connections it needs (checked against the
- * workspace, when they could be loaded), and the install CTA.
+ * The read-only graph render (#574). LAZY on purpose: it pulls the @xyflow/react chunk,
+ * which the Templates gallery is deliberately built to avoid loading (model.ts even
+ * duplicates `slugifyName` rather than import the canvas module). Loading it only when a
+ * preview actually opens keeps the gallery's first paint free of the canvas bundle.
+ */
+const TemplateDiagram = lazy(() =>
+  import("./TemplateDiagram").then((m) => ({ default: m.TemplateDiagram })),
+);
+
+/**
+ * Template preview: identity header, description, the graph rendered read-only, "The flow"
+ * (the graph's real nodes in order, each with its type accent + kind label), the derived
+ * "What you'll learn" checklist, the connections it needs (checked against the workspace,
+ * when they could be loaded), and the install CTA.
  *
  * The CTA reads "Install template" (not the design's "Install with sample
  * data") — installing saves the template's graph as a workflow in the active
@@ -59,7 +69,10 @@ export function PreviewModal({
         onClick={(e) => e.stopPropagation()}
         style={{
           animation: "naaryPopIn 0.22s ease",
-          width: 560,
+          // Widened from 560 for the read-only graph: a linear 6-node template auto-laid
+          // out left→right cannot be read at 560px, and the graph is the thing this modal
+          // now leads with. Still clamped to the viewport, so phones are unaffected.
+          width: 820,
           maxWidth: "100%",
           maxHeight: "100%",
           overflowY: "auto",
@@ -136,9 +149,42 @@ export function PreviewModal({
             {view.description}
           </div>
 
-          {/* the flow — real graph nodes */}
+          {/* the graph, read-only — the same auto-layout the canvas will show after install */}
           <div className="section-label" style={{ marginBottom: 11 }}>
-            The flow
+            The graph
+          </div>
+          <div
+            style={{
+              border: "1px solid var(--line-mid)",
+              background: "var(--card)",
+              borderRadius: "var(--radius-lg)",
+              overflow: "hidden",
+              marginBottom: 20,
+            }}
+          >
+            <Suspense
+              fallback={
+                <div
+                  style={{
+                    height: 260,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "var(--text-sm)",
+                    color: "var(--ink-3)",
+                  }}
+                >
+                  Loading graph…
+                </div>
+              }
+            >
+              <TemplateDiagram graph={view.graph} />
+            </Suspense>
+          </div>
+
+          {/* the flow — real graph nodes, in order */}
+          <div className="section-label" style={{ marginBottom: 11 }}>
+            Step by step
           </div>
           <div
             style={{

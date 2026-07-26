@@ -1093,3 +1093,42 @@ model BuilderTurn {
 
   @@index([sessionId, createdAt])
 }
+
+// ---- SAML SSO (design SAML-SSO.md, #455) ----
+// One enterprise IdP mapped to ONE workspace. The ACS POST is unauthenticated (an IdP
+// posts it straight from the browser), so the mapping key has to travel inside the
+// assertion: `idpEntityId` is the assertion's <Issuer> and is UNIQUE INSTANCE-WIDE, so a
+// validly-signed assertion can never be ambiguous about which tenant it speaks for.
+//
+// `allowedEmailDomains` is the cross-tenant-linking defence and is REQUIRED non-empty:
+// tenant A's IdP must not be able to assert alice@tenant-b.com and link into tenant B.
+// Every ACS lookup/provision is scoped to `tenantId` (see SAML-SSO.md "THE SECURITY
+// INVARIANT"). `defaultRole` is the CONNECTION's — never an assertion attribute — so the
+// IdP is an identity source, not an authorization source.
+model SsoConnection {
+  id                  String   @id @default(uuid())
+  tenantId            String
+  /// URL-safe id for /sso/:slug (IdP-initiated entry) and per-connection metadata.
+  slug                String   @unique
+  /// Human label shown on the Settings screen.
+  label               String?
+  /// The IdP's SAML entity id = the assertion <Issuer>. The tenant mapping key.
+  idpEntityId         String   @unique
+  /// Where to send the user to start an IdP-initiated login.
+  idpSsoUrl           String
+  /// The IdP's signing certificate, as published in its metadata (PEM or bare base64),
+  /// or a bare public key. PUBLIC key material only — nothing secret lives in this table.
+  idpCertPem          String
+  /// Non-empty allowlist of email domains this IdP may assert (lowercased, no '@').
+  allowedEmailDomains String[]
+  /// Role granted when auto-provisioning a Membership. 'owner' | 'admin' | 'member'.
+  defaultRole         String   @default("member")
+  /// Create a Membership on first login (JIT). Off ⇒ only pre-invited/existing members.
+  autoProvision       Boolean  @default(true)
+  /// Kill switch: a disabled connection rejects every assertion.
+  enabled             Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @default(now()) @updatedAt
+
+  @@index([tenantId])
+}

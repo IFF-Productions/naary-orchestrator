@@ -13,10 +13,14 @@ import {
 import { MissingCredentialError } from "@naary/secrets";
 import {
   type AgentGuardrailPolicy,
+  type AgentHandoff,
   applyContentRules,
   applyContentRulesToValue,
   type ContentViolation,
   evaluateToolPolicy,
+  HANDOFF_TARGET_FIELD,
+  handoffOutputSchema,
+  handoffTargetName,
   isEmptyGuardrailPolicy,
   mcpToolRef,
   redactPii,
@@ -106,6 +110,13 @@ export interface AgentConfig {
   tools?: AgentToolConfig[];
   /** Max reasoning+tool steps before the loop must produce a final answer (default 8). */
   maxToolSteps?: number;
+  /** Multi-agent handoff (#580 Phase 1). When set, the output schema is DERIVED from the
+   *  declared targets (`handoffOutputSchema`) so the model must pick one of their names —
+   *  an invalid route is unrepresentable — and the roster is appended to the system prompt
+   *  so it knows what each specialist handles. `validateGraph` guarantees each target has a
+   *  matching conditional edge, so routing is plain edge evaluation: the interpreter is
+   *  untouched and the choice is made HERE, in an activity, keeping replay deterministic. */
+  handoff?: AgentHandoff;
 }
 
 export interface AgentOutput {
@@ -171,6 +182,25 @@ function mapMcpToolError(
     );
   }
   return undefined;
+}
+
+/**
+ * The routing roster appended to a handoff supervisor's system prompt (#580). Prompt COPY,
+ * so it lives here rather than in the DSL — but the names come from `handoffTargetName`,
+ * the same function the derived enum and the edge conditions use, so the roster can never
+ * name a target the model isn't allowed to pick.
+ */
+function handoffRoster(handoff: AgentHandoff): string {
+  const lines = handoff.targets.map((t) => {
+    const name = handoffTargetName(t);
+    return t.description ? `- ${name}: ${t.description}` : `- ${name}`;
+  });
+  return [
+    "You are routing this work to exactly ONE of the following specialists:",
+    ...lines,
+    "",
+    `Set "${HANDOFF_TARGET_FIELD}" to the name of the single best specialist, and put everything that specialist needs to do its job into "payload" — the graph hands your payload to it as its brief.`,
+  ].join("\n");
 }
 
 async function buildModel(provider: string, model: string, apiKey: string) {
@@ -415,6 +445,22 @@ export async function runAgent(
       if (redacted > 0) guardrailReport.redacted = redacted;
     }
 
+    // HANDOFF ROSTER (#580) — appended AFTER the guardrail pipeline above, deliberately:
+    //
+    //  · The roster is text WE generate from the graph's own declared targets, not author or
+    //    user content, so it is not what `policy.input`/redaction exist to police.
+    //  · More importantly, running it through them could REWRITE it. The target names in the
+    //    roster must match the enum `handoffOutputSchema` constrains generation to; a `strip`
+    //    rule or a PII placeholder landing on a name would break routing while looking fine.
+    //
+    // Filtered rather than interpolated because `systemPrompt` is optional (the save gate allows
+    // a handoff agent without one) — a template literal produced a prompt starting "undefined".
+    if (cfg.handoff) {
+      effSystemPrompt = [effSystemPrompt?.trim(), handoffRoster(cfg.handoff)]
+        .filter((part): part is string => Boolean(part))
+        .join("\n\n");
+    }
+
     // In memory only — never returned from the activity, never logged. Env-scoped creds (Slice 5):
     // use the run's env (5b, threaded via meta) so a sandbox run reads the sandbox key; a pre-5b run
     // has no meta.environmentId → fall back to the tenant default (byte-identical to pre-Slice-5).
@@ -608,12 +654,22 @@ export async function runAgent(
     // Structured output is applied ONLY when the node configures an `outputSchema` (#450) — for
     // both plain and tooled agents alike. No schema ⇒ free text `{ text }`, the well-trodden
     // AI-SDK path; there is no hardcoded fallback shape.
-    const wantStructured = cfg.outputSchema !== undefined;
+    //
+    // A `handoff` (#580) DERIVES that schema from its declared targets rather than the author
+    // hand-writing one: `target` is an enum of the target names, so the provider constrains
+    // generation and the run can never route to an edge that doesn't exist. The save-gate
+    // rejects handoff + outputSchema together, so there is exactly one schema either way.
+    const effectiveOutputSchema = cfg.handoff
+      ? handoffOutputSchema(cfg.handoff)
+      : cfg.outputSchema;
+    const wantStructured = effectiveOutputSchema !== undefined;
     const outputOpt = wantStructured
       ? {
           output: Output.object({
             schema: jsonSchema<Record<string, unknown>>(
-              cfg.outputSchema as unknown as Parameters<typeof jsonSchema>[0],
+              effectiveOutputSchema as unknown as Parameters<
+                typeof jsonSchema
+              >[0],
             ),
           }),
         }
@@ -640,8 +696,9 @@ export async function runAgent(
                 messages: [
                   {
                     role: "system" as const,
-                    // GUARDRAILS (#576): the content-rule-filtered, PII-redacted prompt — equal to
-                    // `cfg.systemPrompt` when no policy is configured.
+                    // GUARDRAILS (#576): the content-rule-filtered, PII-redacted prompt, plus
+                    // the handoff roster (#580) — equal to `cfg.systemPrompt` when neither
+                    // applies.
                     content: effSystemPrompt as string,
                     providerOptions: {
                       anthropic: { cacheControl: { type: "ephemeral" } },
@@ -655,6 +712,8 @@ export async function runAgent(
               }
             : {
                 system: effSystemPrompt,
+                // effPromptText IS JSON.stringify(modelInput) with the guardrail pipeline
+                // applied — identical to it when no policy is configured.
                 prompt: effPromptText,
               }),
           ...(tooled
@@ -695,7 +754,10 @@ export async function runAgent(
         const estimated = !(real.inputTokens || real.outputTokens);
         const usage = estimated
           ? estimateTokens(
-              cfg.systemPrompt,
+              // What was ACTUALLY sent: guardrail-processed and roster-appended. Billing must
+              // fail safe (CLAUDE.md rule 6), and the author's raw prompt would under-count —
+              // the handoff roster adds real tokens the provider charged for.
+              effSystemPrompt ?? "",
               modelInput,
               // output text may be empty under structured output — fall back to the object
               result.text || JSON.stringify(result.output ?? ""),
