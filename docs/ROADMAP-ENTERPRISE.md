@@ -40,7 +40,7 @@ commercial ops, not engineering.
 ## E. Enterprise security
 | Feature | Size | Notes |
 |---|---|---|
-| SSO SAML & LDAP | XL | Enterprise auth beyond Firebase — SAML IdP + LDAP directory sync. Large; composes with the workspace/company membership model + RBAC. Design-first. |
+| SSO SAML & LDAP | XL | Enterprise auth beyond Firebase — SAML IdP + LDAP directory sync. **SAML is SHIPPED** (`apps/api/src/sso/`, see [sso-testing.md](./sso-testing.md)); **LDAP is not started**. Composes with the workspace/company membership model + RBAC. |
 | External secret store integration | L | Back the secret store with Vault / AWS Secrets Manager / etc. instead of (or alongside) the local AES-GCM store. A `SecretProvider` interface behind `CredentialsService`/`SecretStore`. Design-first; composes with Environment/Global Secrets. |
 | Enforce 2FA across the instance | M | Require MFA for all users (Firebase MFA enrollment gate). Instance-level policy + enrollment flow. |
 
