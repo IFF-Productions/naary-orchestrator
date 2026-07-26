@@ -12,7 +12,10 @@ import { Throttle } from "@nestjs/throttler";
 import { Public } from "../auth/public.decorator";
 import { ExecutionsService } from "../executions/executions.service";
 import { GraphsService } from "../graphs/graphs.service";
-import { TurnstileConfigService } from "../turnstile/turnstile-config.service";
+import {
+  TurnstileConfigService,
+  botTokenFrom,
+} from "../turnstile/turnstile-config.service";
 import {
   extractChatDefinition,
   isDurableSession,
@@ -38,34 +41,39 @@ export class ChatController {
   ) {}
 
   /** Serve the public chat definition (title/greeting/…). 404 if unknown or the graph's entry
-   *  node isn't a chatTrigger. Includes `turnstileSiteKey` when the tenant has an active bot gate
-   *  for this env (so the widget renders). */
+   *  node isn't a chatTrigger. Includes `botGate` when this env has an active gate, so the page
+   *  knows which mechanism to render; `turnstileSiteKey` rides along for the Turnstile case to keep
+   *  cached embedded bundles working (design §4). */
   @Get(":chatId")
   async definition(@Param("chatId") chatId: string) {
     const { endpoint, def } = await this.resolve(chatId);
-    const turnstileSiteKey = await this.turnstile.publicSiteKey(
+    const botGate = await this.turnstile.publicGate(
       endpoint.tenantId,
       endpoint.environmentId,
     );
-    return turnstileSiteKey ? { ...def, turnstileSiteKey } : def;
+    if (!botGate) return def;
+    return botGate.provider === "turnstile"
+      ? { ...def, botGate, turnstileSiteKey: botGate.siteKey }
+      : { ...def, botGate };
   }
 
-  /** Accept a message: verify the Turnstile challenge (if the tenant enabled it), validate, run the
-   *  chat graph, and return the graph's reply (synchronously, via the respondToWebhook mechanism).
-   *  200 with `{ status, reply? }`. */
+  /** Accept a message: verify the bot gate (Turnstile or App Check, if the tenant enabled one),
+   *  validate, run the chat graph, and return the graph's reply (synchronously, via the
+   *  respondToWebhook mechanism). 200 with `{ status, reply? }`. */
   @Throttle({ default: { limit: 20, ttl: 60_000 } }) // 20 msgs / min / IP (per-IP; budget cap is the real backstop)
   @Post(":chatId")
   async message(
     @Param("chatId") chatId: string,
-    @Body() body: { turnstileToken?: unknown } & Record<string, unknown>,
+    @Body()
+    body: { botToken?: unknown; turnstileToken?: unknown } & Record<
+      string,
+      unknown
+    >,
   ) {
     const { endpoint, snapshot } = await this.resolve(chatId);
     // Bot gate ABOVE the durable/per-message fork — both paths spend budget, so gate once. Every
-    // message needs its own solved (single-use) token. validateMessage ignores turnstileToken.
-    const token =
-      typeof body?.turnstileToken === "string"
-        ? body.turnstileToken
-        : undefined;
+    // message needs its own token. validateMessage ignores both token field names.
+    const token = botTokenFrom(body);
     const allowed = await this.turnstile.verify(
       endpoint.tenantId,
       endpoint.environmentId,

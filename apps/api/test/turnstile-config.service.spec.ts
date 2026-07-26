@@ -9,18 +9,32 @@ const turnstileConfig = {
 vi.mock("@naary/db", () => ({ getPrisma: () => ({ turnstileConfig }) }));
 
 import type { SecretStore } from "@naary/secrets";
+import type { AppCheckVerifier } from "../src/turnstile/app-check-verifier";
 import {
   __turnstileDeps,
   TurnstileConfigService,
+  botTokenFrom,
 } from "../src/turnstile/turnstile-config.service";
 
-function makeService() {
+function makeService(appCheck?: {
+  enabled: boolean;
+  verify?: (t: string) => Promise<"ok" | "denied" | "unavailable">;
+}) {
   const secrets = {
     get: vi.fn().mockResolvedValue(null),
     put: vi.fn().mockResolvedValue(undefined),
     remove: vi.fn().mockResolvedValue(undefined),
   };
-  const service = new TurnstileConfigService(secrets as unknown as SecretStore);
+  // Default: NO App Check verifier available (`null` config = explicitly disabled), so these tests
+  // never depend on whether a Firebase service account happens to be in the ambient env.
+  const gate = appCheck ?? { enabled: false };
+  const service = new TurnstileConfigService(
+    secrets as unknown as SecretStore,
+    {
+      enabled: gate.enabled,
+      verify: gate.verify ?? (async () => "ok" as const),
+    } as unknown as AppCheckVerifier,
+  );
   return { service, secrets };
 }
 
@@ -53,6 +67,10 @@ describe("TurnstileConfigService", () => {
       siteKey: "site",
       enabled: true,
       hasSecret: true,
+      // A row written before #782 has no provider ⇒ reads as turnstile, its existing behaviour.
+      provider: "turnstile",
+      // No App Check verifier injected here, so the platform can't offer it.
+      appCheckAvailable: false,
       allowedHostnames: ["example.com"],
     });
     // the plaintext secret must not appear anywhere in the returned view
@@ -342,5 +360,222 @@ describe("TurnstileConfigService.verify", () => {
     enforced(secrets, []);
     siteverifyReturns({ success: true, hostname: "anywhere.test" });
     expect(await service.verify(T, E, "x")).toBe(true);
+  });
+});
+
+/**
+ * #782 slice 1 — the SECOND provider (App Check). docs/design/TENANT-BOT-GATE-PROVIDERS.md.
+ *
+ * The through-line: App Check is the PLATFORM's gate, so the tenant supplies nothing, `allowedHostnames`
+ * has no bot-check analogue, and everything hinges on whether this deployment can verify at all.
+ */
+describe("bot-gate provider: app_check", () => {
+  const appCheckRow = (over: Record<string, unknown> = {}) => ({
+    siteKey: "",
+    enabled: true,
+    provider: "app_check",
+    allowedHostnames: [],
+    ...over,
+  });
+
+  describe("save validation is provider-CONDITIONAL", () => {
+    /** The regression the design called out: requiring a site key for app_check would 400 every enable. */
+    it("enables app_check with NO tenant keys at all", async () => {
+      const { service } = makeService({ enabled: true });
+      turnstileConfig.findUnique
+        .mockResolvedValueOnce(null) // pre-read in save()
+        .mockResolvedValueOnce(appCheckRow()); // the get() after upsert
+      const view = await service.save(T, E, {
+        provider: "app_check",
+        enabled: true,
+      });
+      expect(view.provider).toBe("app_check");
+      expect(turnstileConfig.upsert).toHaveBeenCalledOnce();
+      expect(turnstileConfig.upsert.mock.calls[0][0].create).toMatchObject({
+        provider: "app_check",
+        enabled: true,
+        siteKey: "",
+      });
+    });
+
+    it("still requires a site key to enable TURNSTILE", async () => {
+      const { service } = makeService();
+      turnstileConfig.findUnique.mockResolvedValue(null);
+      await expect(
+        service.save(T, E, { provider: "turnstile", enabled: true }),
+      ).rejects.toThrow(/site key/i);
+    });
+
+    /** Can't enable a gate we couldn't enforce — the page would gate a submit we'd wave through. */
+    it("refuses app_check when the platform can't verify it", async () => {
+      const { service } = makeService({ enabled: false });
+      turnstileConfig.findUnique.mockResolvedValue(null);
+      await expect(
+        service.save(T, E, { provider: "app_check", enabled: true }),
+      ).rejects.toThrow(/isn't available on this instance/i);
+    });
+
+    /** A DISABLED app_check row is fine even unavailable: #617 rows exist just to hold embed domains. */
+    it("allows saving a disabled app_check row on an instance without App Check", async () => {
+      const { service } = makeService({ enabled: false });
+      turnstileConfig.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(appCheckRow({ enabled: false }));
+      await expect(
+        service.save(T, E, { provider: "app_check", enabled: false }),
+      ).resolves.toMatchObject({ provider: "app_check", enabled: false });
+    });
+
+    it("refuses an unknown provider instead of coercing it", async () => {
+      const { service } = makeService({ enabled: true });
+      turnstileConfig.findUnique.mockResolvedValue(null);
+      await expect(
+        service.save(T, E, { provider: "recaptcha", enabled: true }),
+      ).rejects.toThrow(/Unknown bot-protection provider/i);
+    });
+
+    it("keeps the stored provider when the caller omits it", async () => {
+      const { service } = makeService({ enabled: true });
+      turnstileConfig.findUnique
+        .mockResolvedValueOnce(appCheckRow()) // existing row is app_check
+        .mockResolvedValueOnce(appCheckRow({ allowedHostnames: ["a.test"] }));
+      await service.save(T, E, { allowedHostnames: ["a.test"] });
+      // No site key was supplied and none is needed — the provider survived a domains-only edit.
+      expect(turnstileConfig.upsert.mock.calls[0][0].update).toMatchObject({
+        provider: "app_check",
+      });
+    });
+  });
+
+  describe("publicGate", () => {
+    it("advertises app_check without a site key", async () => {
+      const { service } = makeService({ enabled: true });
+      turnstileConfig.findUnique.mockResolvedValue(appCheckRow());
+      expect(await service.publicGate(T, E)).toEqual({ provider: "app_check" });
+    });
+
+    /** Same "only advertise what we can verify" rule Turnstile has for a missing secret. */
+    it("advertises NOTHING when app_check is unverifiable here", async () => {
+      const { service } = makeService({ enabled: false });
+      turnstileConfig.findUnique.mockResolvedValue(appCheckRow());
+      expect(await service.publicGate(T, E)).toBeNull();
+    });
+
+    it("returns the site key for turnstile, and publicSiteKey still works", async () => {
+      const { service, secrets } = makeService();
+      turnstileConfig.findUnique.mockResolvedValue({
+        siteKey: "site",
+        enabled: true,
+        provider: "turnstile",
+        allowedHostnames: [],
+      });
+      secrets.get.mockResolvedValue("sec");
+      expect(await service.publicGate(T, E)).toEqual({
+        provider: "turnstile",
+        siteKey: "site",
+      });
+      expect(await service.publicSiteKey(T, E)).toBe("site");
+    });
+
+    /** The legacy accessor must not hand an App Check gate's absence of a key back as a key. */
+    it("publicSiteKey is null for an app_check gate", async () => {
+      const { service } = makeService({ enabled: true });
+      turnstileConfig.findUnique.mockResolvedValue(appCheckRow());
+      expect(await service.publicSiteKey(T, E)).toBeNull();
+    });
+  });
+
+  describe("verify dispatch", () => {
+    it("denies when no token is sent", async () => {
+      const { service } = makeService({ enabled: true });
+      turnstileConfig.findUnique.mockResolvedValue(appCheckRow());
+      expect(await service.verify(T, E, undefined)).toBe(false);
+    });
+
+    it("allows on ok, denies on denied, ALLOWS on unavailable (fail-open)", async () => {
+      for (const [verdict, expected] of [
+        ["ok", true],
+        ["denied", false],
+        ["unavailable", true],
+      ] as const) {
+        const { service } = makeService({
+          enabled: true,
+          verify: async () => verdict,
+        });
+        turnstileConfig.findUnique.mockResolvedValue(appCheckRow());
+        expect(await service.verify(T, E, "tok")).toBe(expected);
+      }
+    });
+
+    /** Never calls Cloudflare for an app_check row — that would be the wrong provider entirely. */
+    it("does not touch siteverify", async () => {
+      const { service } = makeService({ enabled: true });
+      turnstileConfig.findUnique.mockResolvedValue(appCheckRow());
+      const fetchSpy = vi.fn();
+      const prev = __turnstileDeps.fetch;
+      __turnstileDeps.fetch = fetchSpy as unknown as typeof prev;
+      try {
+        await service.verify(T, E, "tok");
+      } finally {
+        __turnstileDeps.fetch = prev;
+      }
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    /**
+     * `allowedHostnames` is NOT enforced as a bot check for app_check — an App Check token carries no
+     * solved hostname. This is the capability a tenant gives up by choosing it (design §1), so it is
+     * pinned rather than left to be discovered as a surprise.
+     */
+    it("ignores allowedHostnames (no solved hostname exists to check)", async () => {
+      const { service } = makeService({
+        enabled: true,
+        verify: async () => "ok",
+      });
+      turnstileConfig.findUnique.mockResolvedValue(
+        appCheckRow({ allowedHostnames: ["only-this-host.test"] }),
+      );
+      expect(await service.verify(T, E, "tok")).toBe(true);
+    });
+
+    it("is not enforced at all while the row is disabled", async () => {
+      const { service } = makeService({
+        enabled: true,
+        verify: async () => "denied",
+      });
+      turnstileConfig.findUnique.mockResolvedValue(
+        appCheckRow({ enabled: false }),
+      );
+      expect(await service.verify(T, E, undefined)).toBe(true);
+    });
+  });
+});
+
+/** Both token field names reach the gate — `botToken` is the provider-neutral one, `turnstileToken`
+ *  stays accepted so a CACHED embedded bundle on a tenant's site keeps working (design §4). */
+describe("botTokenFrom", () => {
+  it("prefers botToken, falls back to turnstileToken", () => {
+    expect(botTokenFrom({ botToken: "a", turnstileToken: "b" })).toBe("a");
+    expect(botTokenFrom({ turnstileToken: "b" })).toBe("b");
+    expect(botTokenFrom({ botToken: "a" })).toBe("a");
+  });
+
+  it("yields undefined for anything that isn't a non-empty string", () => {
+    for (const body of [
+      {},
+      null,
+      undefined,
+      { botToken: "" },
+      { botToken: 42 },
+      { botToken: {} },
+      { turnstileToken: [] },
+    ]) {
+      expect(botTokenFrom(body as never)).toBeUndefined();
+    }
+  });
+
+  /** An empty botToken must FALL THROUGH to the legacy field rather than mask it. */
+  it("falls through an empty botToken to turnstileToken", () => {
+    expect(botTokenFrom({ botToken: "", turnstileToken: "b" })).toBe("b");
   });
 });

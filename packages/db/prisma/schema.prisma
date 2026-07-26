@@ -803,6 +803,16 @@ model TurnstileConfig {
   environmentId String
   siteKey       String
   enabled       Boolean  @default(true)
+  // WHICH bot gate guards this env's public pages: "turnstile" (the tenant's own Cloudflare keys) or
+  // "app_check" (the platform's Firebase App Check — no tenant keys at all). See
+  // docs/design/TENANT-BOT-GATE-PROVIDERS.md; the table keeps its Turnstile name because renaming it
+  // would cost a migration on a hot table for no functional gain.
+  //
+  // ORTHOGONAL to `enabled`: a row may exist with enabled:false purely to hold `allowedHostnames`
+  // for embed CORS (#617). And `allowedHostnames` is only enforced as a BOT-GATE check for
+  // "turnstile" — App Check has no solved hostname to compare against (its embed-CORS use is
+  // unaffected). App Check is deliberately the weaker option; see §1 of the design doc.
+  provider      String   @default("turnstile")
   // The SHARED "allowed domains" list for this tenant/env's public pages — deliberately ONE list,
   // not two (#617):
   //  1. #615 Turnstile: when non-empty, a submission's solved Turnstile hostname (from siteverify,
