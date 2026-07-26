@@ -144,6 +144,7 @@ export function WorkflowPicker({
       <div style={{ position: "relative" }}>
         <input
           role="combobox"
+          data-testid="workflow-picker"
           aria-expanded={open}
           aria-controls={listId}
           aria-autocomplete="list"
@@ -222,6 +223,9 @@ export function WorkflowPicker({
                 type="button"
                 role="option"
                 aria-selected={w.workflowKey === value}
+                // Stable hook for e2e: the visible label is the NAME, but a test knows the KEY.
+                // (Before this was a combobox it was a <select> and specs used option[value].)
+                data-workflow-key={w.workflowKey}
                 onMouseEnter={() => setActive(i)}
                 onClick={() => choose(w)}
                 style={{

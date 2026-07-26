@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { pickWorkflow } from "./workflow-picker";
 
 /**
  * Form Trigger mini-program, slice 3 — the hosted public form, end-to-end through the real UI:
@@ -15,7 +16,9 @@ test("hosted form: register in Integrations, then submit the public page anonymo
   // ---- register the form (AUTHENTICATED app) ----
   await page.goto("/app/integrations?tab=webhooks");
   await page.getByRole("button", { name: "New form" }).click();
-  await page.getByPlaceholder("contact-form").fill("e2e-form");
+  // Only workflows whose ENTRY node is a formTrigger are offered, so this also proves the
+  // seeded `e2e-form` graph is recognised as form-capable.
+  await pickWorkflow(page, "e2e-form");
   await page.getByRole("button", { name: "Register", exact: true }).click();
 
   // The minted public URL appears (…/f/<formId>). Pull the path out of it.

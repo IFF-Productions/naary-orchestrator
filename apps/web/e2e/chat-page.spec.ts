@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { pickWorkflow } from "./workflow-picker";
 
 /**
  * Chat Trigger program — the hosted public chat, end-to-end through the real UI:
@@ -15,7 +16,8 @@ test("hosted chat: register in Integrations, then message the public page anonym
   // ---- register the chat (AUTHENTICATED app) ----
   await page.goto("/app/integrations?tab=webhooks");
   await page.getByRole("button", { name: "New chat" }).click();
-  await page.getByPlaceholder("support-chat").fill("e2e-chat");
+  // Only chatTrigger-entry workflows are offered — this proves `e2e-chat` is chat-capable.
+  await pickWorkflow(page, "e2e-chat");
   await page.getByRole("button", { name: "Register", exact: true }).click();
 
   const urlSpan = page.locator("span.mono", { hasText: "/c/" }).first();
