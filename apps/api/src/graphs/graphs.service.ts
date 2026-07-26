@@ -28,6 +28,7 @@ import {
   PermissionsService,
   type WorkflowAction,
 } from "../permissions/permissions.service";
+import { FormAssetService } from "../forms/form-asset.service";
 import { GuardrailsService } from "../settings/guardrails.service";
 
 /** sha256 of the canonical (key-sorted) graph. Server-side — keeps `node:crypto`
@@ -101,6 +102,28 @@ export interface McpExposedWorkflowInfo {
  * for a (tenantId, workflowKey). Execution start snapshots one version so a later
  * edit can't corrupt an in-flight run.
  */
+/**
+ * Every `logoAssetId` referenced by a formTrigger in this graph (deduped).
+ *
+ * A list rather than a single value because nothing forbids more than one formTrigger node in a saved
+ * graph — only one can be the ENTRY, but a draft can carry others, and a check that only looked at the
+ * entry would let a foreign id ride along in a node that later becomes the entry.
+ */
+function formLogoAssetIds(graph: unknown): string[] {
+  const nodes = (graph as { nodes?: unknown }).nodes;
+  if (!Array.isArray(nodes)) return [];
+  const ids = new Set<string>();
+  for (const node of nodes) {
+    if (!node || typeof node !== "object") continue;
+    const n = node as { type?: unknown; config?: unknown };
+    if (n.type !== "formTrigger") continue;
+    const branding = (n.config as { branding?: unknown } | undefined)?.branding;
+    const id = (branding as { logoAssetId?: unknown } | undefined)?.logoAssetId;
+    if (typeof id === "string" && id) ids.add(id);
+  }
+  return [...ids];
+}
+
 @Injectable()
 @TracedClass()
 export class GraphsService {
@@ -115,6 +138,11 @@ export class GraphsService {
      *  constructions). Unwired ⇒ the tool-policy save gate is skipped, which is safe: it is
      *  DEFENSE IN DEPTH, and the worker enforces the same policy in-activity regardless. */
     @Optional() private readonly guardrails?: GuardrailsService,
+    /** @Optional for the same reason as the others (many `new GraphsService()` test/CLI
+     *  constructions), but the logo check FAILS CLOSED when it's unwired and a graph actually carries
+     *  a logo — see the upsert() gate. It cannot be skipped: the asset route is deliberately not
+     *  tenant-scoped, so an unverified foreign id is served successfully, not 404'd. */
+    @Optional() private readonly formAssets?: FormAssetService,
   ) {}
 
   /** In-service permission assert (RBAC-GROUPS.md §4): no actor = internal/trigger caller —
@@ -186,6 +214,40 @@ export class GraphsService {
           .map((e) => `${e.nodeId} (${e.nodeType}): ${e.message}`)
           .join(" | ");
         throw new BadRequestException(`Guardrail policy — ${summary}`);
+      }
+    }
+    // A formTrigger logo is an asset id WE issued, and it must belong to THIS tenant+environment.
+    // Without this check a tenant could paste an id learned from another workspace's public form and
+    // serve it as their own — cross-tenant hotlinking of an image we host and pay to serve. The zod
+    // schema only checks the id's shape; ownership needs a lookup, so it lives here. Rejected at save
+    // rather than dropped on read, because an author pasting the wrong id deserves to be told.
+    //
+    // FAILS CLOSED, and that matters: `GET /forms/assets/:id` is deliberately NOT tenant-scoped (the
+    // anonymous browser rendering a hosted form has no tenant context), so an unverified foreign id is
+    // served SUCCESSFULLY — it does not 404. Treating an unwired verifier as "skip" would therefore
+    // leave cross-tenant hotlinking wide open on every DI-less save path (scripts, seeds, the CLI).
+    // Note the gate only trips when a graph actually CARRIES a logo, so the many bare
+    // `new GraphsService()` constructions keep working untouched.
+    const logoIds = formLogoAssetIds(graph);
+    if (logoIds.length > 0) {
+      if (!this.formAssets) {
+        throw new Error(
+          "Cannot verify a form logo's ownership: FormAssetService is not wired into GraphsService. " +
+            "Refusing to save rather than accept an unverified asset id (the asset route is not " +
+            "tenant-scoped, so a foreign id would be served, not rejected).",
+        );
+      }
+      for (const assetId of logoIds) {
+        const owned = await this.formAssets.ownedBy(
+          assetId,
+          tenantId,
+          environmentId,
+        );
+        if (!owned) {
+          throw new BadRequestException(
+            `Logo asset ${assetId} does not belong to this workspace environment — re-upload it here.`,
+          );
+        }
       }
     }
     const contentHash = hashGraph(graph);

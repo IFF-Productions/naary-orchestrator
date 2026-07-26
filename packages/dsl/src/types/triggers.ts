@@ -72,6 +72,20 @@ export interface FormBrandingConfig {
   desktopColumns?: 1 | 2;
   /** Card width on desktop: `narrow` is the 460px default, `wide` (640px) suits 2-column forms. */
   width?: "narrow" | "wide";
+  /**
+   * An uploaded logo, replacing the Naary mark in the page header. This is an OPAQUE ASSET ID, not a
+   * URL: the image is uploaded to us (`POST /tenants/:id/forms/assets`) and served from our own origin
+   * at `/forms/assets/:id`.
+   *
+   * Deliberately not an arbitrary external URL. A URL would mean the browser fetching a
+   * tenant-controlled address from our page on every view — an SSRF-adjacent egress we don't control,
+   * a tracking pixel we'd be laundering, and a logo that silently breaks whenever their host does. An
+   * id we issued is verified to belong to this tenant+environment at save time, so it can't point at
+   * another workspace's asset either.
+   */
+  logoAssetId?: string;
+  /** Alt text for the logo. Plain text; falls back to the form title when unset. */
+  logoAlt?: string;
 }
 
 export interface FormTriggerNodeConfig {

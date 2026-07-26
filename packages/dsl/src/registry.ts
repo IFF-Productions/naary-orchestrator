@@ -211,6 +211,19 @@ const CONFIG_SCHEMAS = {
         theme: z.enum(["light", "dark", "auto"]).optional(),
         desktopColumns: z.union([z.literal(1), z.literal(2)]).optional(),
         width: z.enum(["narrow", "wide"]).optional(),
+        // An asset id WE issued, not a URL — see FormBrandingConfig.logoAssetId for why a
+        // tenant-supplied URL is refused. This is a SHAPE check (a uuid) only; ownership is verified
+        // separately by the graphs service, which REJECTS the save when the id belongs to another
+        // tenant/environment. An id that is ours but whose object has since gone renders a broken
+        // image (the asset route 404s) — it does not silently fall back to no logo.
+        logoAssetId: z
+          .string()
+          .regex(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+            "Logo must be an uploaded asset id.",
+          )
+          .optional(),
+        logoAlt: z.string().max(120).optional(),
       })
       .optional(),
   }),

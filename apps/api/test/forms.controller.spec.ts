@@ -55,14 +55,25 @@ function makeController(opts: {
     publicSiteKey: vi.fn().mockResolvedValue(opts.siteKey ?? null),
     verify: vi.fn().mockResolvedValue(opts.verify ?? true),
   };
+  // FormAssetService — only the public asset-serving route uses it.
+  const assets = { get: vi.fn().mockResolvedValue(null) };
   const controller = new FormsController(
     forms as never,
     graphs as never,
     executions as never,
     templates as never,
     turnstile as never,
+    assets as never,
   );
-  return { controller, forms, graphs, executions, templates, turnstile };
+  return {
+    controller,
+    forms,
+    graphs,
+    executions,
+    templates,
+    turnstile,
+    assets,
+  };
 }
 
 const ENDPOINT = {

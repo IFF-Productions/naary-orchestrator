@@ -596,6 +596,7 @@ model Environment {
   variables           Variable[]
   templates            Template[]
   turnstileConfigs     TurnstileConfig[]
+  formAssets           FormAsset[]
   notificationChannels NotificationChannel[]
   pinnedData           PinnedData[]
   evalDatasets         EvalDataset[]
@@ -822,6 +823,45 @@ model TurnstileConfig {
 
   @@id([tenantId, environmentId])
   @@index([tenantId, environmentId])
+}
+
+/**
+ * METADATA for an uploaded image on a public page — today only a hosted-form logo. The bytes
+ * themselves live in object storage (`@naary/storage`, S3); this row holds everything we must be able
+ * to answer WITHOUT a round-trip to the bucket:
+ *
+ *  - which tenant+env owns it, so a `logoAssetId` can't reference another workspace's asset;
+ *  - the content type, sniffed from magic bytes at upload (never the request header);
+ *  - the sha256, which is both the dedupe key and the object key.
+ *
+ * Keeping the index in Postgres is what makes the ownership check one indexed lookup instead of a
+ * bucket listing, and it means a `logoAssetId` in a graph resolves without S3 being reachable.
+ *
+ * Content-addressed: re-uploading identical bytes reuses the row and the object, so a given id's image
+ * can never change — which is what makes the serve route safe to cache immutably.
+ */
+model FormAsset {
+  id            String   @id @default(uuid())
+  tenantId      String
+  environmentId String
+  /** Asset role. Only "logo" today; present so a favicon/hero doesn't need a new table. */
+  kind          String
+  /** Verified from MAGIC BYTES, never from the request's Content-Type header. */
+  contentType   String
+  /** Opaque ObjectStore reference (e.g. `s3://bucket/key`) — resolved via ObjectStore.get. */
+  objectRef     String
+  byteSize      Int
+  /** Hex sha256 of the bytes — the dedupe key, the object key, and the cache validator. */
+  sha256        String
+  createdAt     DateTime @default(now())
+
+  // Restrict, like TurnstileConfig: an env can't be deleted out from under an asset a live form
+  // still references.
+  environment Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, environmentId])
+  // Serves the dedupe lookup on upload.
+  @@unique([tenantId, environmentId, kind, sha256])
 }
 
 // Per-tenant settings (Settings screen). One row per tenant.

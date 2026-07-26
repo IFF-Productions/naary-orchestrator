@@ -49,6 +49,10 @@ export interface FormDefinition {
  *  through the save gate (a direct DB write, or a row predating the constraint). */
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
+/** Asset-id shape (uuid). Mirrors the save gate; a logo is always an id WE issued, never a URL. */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Re-project the author's branding to the known keys and DISCARD anything that fails the same checks
  * the save gate applies. Drop-on-read, never repair: a rejected `accentColor` falls back to the
@@ -90,6 +94,15 @@ function projectBranding(raw: unknown): FormBrandingConfig | undefined {
     out.desktopColumns = b.desktopColumns;
   }
   if (b.width === "narrow" || b.width === "wide") out.width = b.width;
+  // An asset id we issued (uuid shape). Never a URL — see FormBrandingConfig.logoAssetId. Ownership
+  // was verified at save time; a shape check is all that's needed here, and a stale id resolves to a
+  // 404 image rather than anything harmful.
+  if (typeof b.logoAssetId === "string" && UUID_RE.test(b.logoAssetId)) {
+    out.logoAssetId = b.logoAssetId;
+  }
+  if (typeof b.logoAlt === "string" && b.logoAlt.trim()) {
+    out.logoAlt = b.logoAlt.slice(0, 120);
+  }
 
   return Object.keys(out).length > 0 ? out : undefined;
 }

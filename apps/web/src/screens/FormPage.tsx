@@ -256,8 +256,15 @@ export function FormPage() {
                 borderBottom: "1px solid var(--line)",
               }}
             >
-              {/* The public definition carries no workspace/tenant name — brand tile only. */}
-              <BrandRow />
+              {/* The public definition carries no workspace/tenant name — logo (or brand tile) only.
+                  The logo is an asset id we issued, resolved to a URL on OUR origin: a hosted form
+                  never fetches an image from a tenant-controlled address. */}
+              <BrandRow
+                {...(branding?.logoAssetId
+                  ? { logoUrl: api.formAssetUrl(branding.logoAssetId) }
+                  : {})}
+                {...(branding?.logoAlt ? { logoAlt: branding.logoAlt } : {})}
+              />
               <div
                 style={{
                   fontSize: 20,

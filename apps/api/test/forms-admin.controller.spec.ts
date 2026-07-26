@@ -10,11 +10,14 @@ function makeController(resolved: string) {
       .mockResolvedValue({ formId: "f-1", formPath: "/forms/f-1" }),
   };
   const environments = { resolveEnvId: vi.fn().mockResolvedValue(resolved) };
+  // FormAssetService — only the logo-upload route uses it.
+  const assets = { store: vi.fn() };
   const controller = new FormsAdminController(
     forms as never,
     environments as never,
+    assets as never,
   );
-  return { controller, forms, environments };
+  return { controller, forms, environments, assets };
 }
 
 describe("FormsAdminController.register (env binding)", () => {

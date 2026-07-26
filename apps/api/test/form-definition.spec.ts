@@ -459,3 +459,40 @@ describe("branding is re-validated on read, not trusted", () => {
     ).toBeUndefined();
   });
 });
+
+describe("the logo is an asset id, projected by shape", () => {
+  const withBranding = (branding: unknown) =>
+    extractFormDefinition(formGraph({ fields: FIELDS, branding }), "f1")
+      ?.branding;
+
+  it("serves a uuid asset id through to the page", () => {
+    const id = "9f3a1c2e-4b5d-4e6f-8a9b-0c1d2e3f4a5b";
+    expect(withBranding({ logoAssetId: id })?.logoAssetId).toBe(id);
+  });
+
+  /**
+   * A URL must never survive to the page: the hosted form resolves the id against OUR origin, so a
+   * URL sneaking through would become a third-party fetch from a page we serve. Ownership of the id is
+   * enforced at save time; this is the shape gate on the read path.
+   */
+  it.each([
+    "https://evil.example/logo.png",
+    "//evil.example/logo.png",
+    "data:image/png;base64,iVBORw0KGgo=",
+    "javascript:alert(1)",
+    "../../etc/passwd",
+    "not-a-uuid",
+    42,
+    null,
+  ])("drops logoAssetId %s", (logoAssetId) => {
+    expect(withBranding({ logoAssetId })?.logoAssetId).toBeUndefined();
+  });
+
+  it("keeps alt text, capped", () => {
+    expect(withBranding({ logoAlt: "Acme" })?.logoAlt).toBe("Acme");
+    expect(withBranding({ logoAlt: "A".repeat(300) })?.logoAlt).toHaveLength(
+      120,
+    );
+    expect(withBranding({ logoAlt: "   " })?.logoAlt).toBeUndefined();
+  });
+});

@@ -68,8 +68,19 @@ let singleton: ObjectStore | undefined;
 
 /**
  * Build the configured object store from env (cached). `STORAGE_PROVIDER`:
- * `s3` → AWS S3 (`S3_BUCKET`, `AWS_REGION`); anything else (default) → in-memory.
+ * `s3` → S3 or any S3-compatible service (`S3_BUCKET`, `AWS_REGION`, optional `S3_ENDPOINT`);
+ * anything else (default) → in-memory.
  * To add GCP: a `gcs` branch returning a `GcsObjectStore` — callers are unchanged.
+ *
+ * `S3_ENDPOINT` targets an S3-compatible provider (Cloudflare R2, Backblaze B2, MinIO). It was
+ * documented in deploy/.env.prod.example long before it was read here, so a deployment following
+ * those instructions for R2 silently talked to AWS instead and failed to resolve the bucket. Setting
+ * an endpoint also forces PATH-style addressing: virtual-host style (`bucket.host`) is an AWS-ism that
+ * R2/MinIO don't serve, so a custom endpoint without it 404s on every object.
+ *
+ * Credentials come from the standard AWS chain (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, or an
+ * instance role) — the SDK reads them itself, so they are never named here. Region resolution is left
+ * to the SDK too; see the inline note on why an unset `AWS_REGION` is not treated as an error.
  */
 export function getObjectStore(): ObjectStore {
   if (singleton) return singleton;
@@ -77,7 +88,21 @@ export function getObjectStore(): ObjectStore {
     const bucket = process.env.S3_BUCKET;
     if (!bucket)
       throw new Error("S3_BUCKET is required when STORAGE_PROVIDER=s3");
-    const client = new S3Client({ region: process.env.AWS_REGION });
+    const endpoint = process.env.S3_ENDPOINT?.trim();
+    // Region is NOT validated here on purpose. Passing `undefined` lets the AWS SDK run its own
+    // resolution chain (AWS_REGION → AWS_DEFAULT_REGION → ~/.aws/config → an instance profile), so
+    // hard-failing on an unset AWS_REGION would reject deployments that legitimately configure it
+    // another way. The SDK's own "Region is missing" error names the problem clearly enough.
+    //
+    // The one case worth helping: an S3-COMPATIBLE endpoint (R2/B2/MinIO) has no meaningful region
+    // but the SDK still demands one, and those providers document "auto". Defaulting it there turns a
+    // confusing SDK failure into a working client.
+    const region =
+      process.env.AWS_REGION?.trim() || (endpoint ? "auto" : undefined);
+    const client = new S3Client({
+      ...(region ? { region } : {}),
+      ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
+    });
     singleton = new S3ObjectStore(client, bucket);
   } else {
     singleton = new MemoryObjectStore();

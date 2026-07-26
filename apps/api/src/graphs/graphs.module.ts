@@ -2,6 +2,7 @@ import { Global, Module } from "@nestjs/common";
 import { ConnectionService } from "@naary/connections";
 import { CredentialsService } from "@naary/secrets";
 import { EnvironmentsModule } from "../environments/environments.module";
+import { FormAssetModule } from "../forms/form-asset.module";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { SchedulesModule } from "../schedules/schedules.module";
 import { SettingsModule } from "../settings/settings.module";
@@ -17,11 +18,15 @@ import { WorkflowLifecycleService } from "./workflow-lifecycle.service";
   // NotificationsModule: promote announces to the target env's channels (Slice 4).
   // SettingsModule: GuardrailsService reads the workspace agent-guardrail policy for the save
   // gate (#576). Import (not a re-provide) so there is ONE reader of that policy row.
+  // FormAssetModule: the save gate verifies a formTrigger's logoAssetId belongs to this
+  // tenant+environment (cross-tenant hotlinking of an asset we host). Its own module rather than
+  // FormsModule, which would be a cycle — see FormAssetModule.
   imports: [
     EnvironmentsModule,
     SchedulesModule,
     NotificationsModule,
     SettingsModule,
+    FormAssetModule,
   ],
   controllers: [GraphsController],
   providers: [

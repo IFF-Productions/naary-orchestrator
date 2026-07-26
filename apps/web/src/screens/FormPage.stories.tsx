@@ -196,3 +196,37 @@ export const BrandedEmbeddedRedirect: Story = {
     router: { path: "/f/:formId", initialEntries: ["/f/demo?embed=1"] },
   },
 };
+
+/**
+ * A tenant logo replacing the Naary mark in the header. The `src` points at OUR origin
+ * (`/api/forms/assets/:id`) — the branding carries an opaque ASSET ID, never a tenant-supplied URL, so
+ * a hosted form never fetches an image from an address we don't control. MSW answers with a tiny
+ * inline PNG here; in the app the bytes come from S3 via the asset route.
+ */
+export const BrandedWithLogo: Story = {
+  parameters: {
+    msw: {
+      handlers: [
+        ...brandedHandlers({
+          accentColor: "#12a594",
+          logoAssetId: "9f3a1c2e-4b5d-4e6f-8a9b-0c1d2e3f4a5b",
+          logoAlt: "Acme",
+          successTitle: "Thanks!",
+        }),
+        // A 1x1 teal PNG, so the story is self-contained (no network, no fixture file).
+        http.get("*/api/forms/assets/*", () => {
+          const png = Uint8Array.from(
+            atob(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+            ),
+            (c) => c.charCodeAt(0),
+          );
+          return new HttpResponse(png, {
+            headers: { "content-type": "image/png" },
+          });
+        }),
+      ],
+    },
+    router: { path: "/f/:formId", initialEntries: ["/f/demo"] },
+  },
+};
