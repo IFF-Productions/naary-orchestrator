@@ -154,7 +154,12 @@ export type TestNodeResult =
       durationMs?: number | null;
       costUsd?: number | null;
     }
-  | { pure: false; message: string };
+  /**
+   * Not a pure-node result. `failed` distinguishes the two cases the canvas must render
+   * differently: absent = this node type isn't testable in isolation (informational); true = the
+   * test ran and FAILED, and the reason belongs on the node.
+   */
+  | { pure: false; message: string; failed?: boolean };
 
 /**
  * DRY RUN (#832) — the result of checking a flow WITHOUT executing it.

@@ -43,6 +43,7 @@ import {
   UnauthorizedError,
   type WebhookRow,
 } from "../lib/api";
+import { nodeTestState } from "../lib/node-test-state";
 import { isTerminal } from "../lib/run-status";
 import {
   RETURN_PARAM,
@@ -398,21 +399,12 @@ export function CanvasPage() {
         const clientMs = Math.round(performance.now() - t0);
         setNodeRuns((r) => {
           const next = { ...r };
-          if (res.pure) {
-            next[nodeId] = {
-              status: "done",
-              output: res.output,
-              ms:
-                typeof res.durationMs === "number" ? res.durationMs : clientMs,
-              ...(typeof res.costUsd === "number"
-                ? { costUsd: res.costUsd }
-                : {}),
-            };
-          } else {
-            // Not actually executed (activity/control node) — back to idle; the
-            // message shows in the config panel, a green "done" would be a lie.
-            delete next[nodeId];
-          }
+          // The rule lives in `nodeTestState` so it is testable as the real decision — notably
+          // that a FAILED test is an error on the node, not the same "back to idle" as a node
+          // type that simply can't be tested here.
+          const state = nodeTestState(res, clientMs);
+          if (state) next[nodeId] = state;
+          else delete next[nodeId];
           return next;
         });
         if (!res.pure) setStatus(res.message);
