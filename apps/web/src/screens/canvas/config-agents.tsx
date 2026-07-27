@@ -21,6 +21,75 @@ import {
 } from "./fields";
 import { RowHead } from "./PinSection";
 
+/**
+ * How this provider authenticates, shown under the Connection picker (#815).
+ *
+ * Filed from a real question — *"I'm confused, how can I add PagerDuty integration configuration
+ * in the app?"* — where the answer already existed in the catalog as `provider.auth` and was
+ * rendered in exactly one place the user would never be standing: the Node Catalog's detail
+ * drawer. Nothing here is new knowledge; it is the same string, moved to where it's needed.
+ *
+ * Emphasised when there is NO connection selected yet (that's the moment of the question) and
+ * quiet once one is, so it stops being noise on every subsequent visit to the node.
+ */
+function ProviderAuthHint({
+  provider,
+  auth,
+  baseUrl,
+  fromConnection,
+  needsConnection,
+}: {
+  provider: string;
+  auth: string;
+  baseUrl?: string;
+  /** This provider's API host comes from the CONNECTION's Server URL, not the catalog. */
+  fromConnection: boolean;
+  needsConnection: boolean;
+}) {
+  return (
+    <div
+      style={{
+        marginTop: 6,
+        padding: "7px 9px",
+        border: `1px solid ${needsConnection ? "var(--line-2)" : "var(--line)"}`,
+        borderRadius: "var(--radius-sm)",
+        background: needsConnection ? "var(--card)" : "transparent",
+        fontSize: "var(--text-xs)",
+        color: needsConnection ? "var(--ink-2)" : "var(--ink-3)",
+        lineHeight: 1.5,
+      }}
+    >
+      {needsConnection && (
+        <div style={{ marginBottom: 4 }}>
+          <strong>Connecting {provider}:</strong> Integrations → Apps &amp;
+          agents → Connect, Type <strong>Custom</strong>, Server URL{" "}
+          {fromConnection ? (
+            // These providers are per-tenant hosts (a Jira site, a Shopify store): the request's
+            // base URL IS this field, so telling the user it's cosmetic would break them.
+            <em>your own {provider} host</em>
+          ) : baseUrl ? (
+            <code className="mono">{baseUrl}</code>
+          ) : (
+            <em>any https URL (a label only)</em>
+          )}
+          .{" "}
+          <a href="/app/integrations" target="_blank" rel="noreferrer">
+            Open Integrations
+          </a>
+        </div>
+      )}
+      {auth}
+      {needsConnection && (
+        // The trap that produces a 401 with no form error: the code adds the scheme prefix
+        // itself, so a pasted "Token token=…" is wrong in a way nothing tells you.
+        <div style={{ marginTop: 4, color: "var(--ink-3)" }}>
+          Paste the token raw — the prefix is added for you.
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** One in-loop MCP tool the agent may call (#449). All fields optional in the editor so a
  *  half-filled row doesn't break saving; the activity treats a missing connection/tool as a no-op. */
 interface AgentToolRow {
@@ -274,9 +343,9 @@ export function renderAgentSections(c: ConfigSectionCtx) {
             >
               Runs your instruction through the Claude Code CLI (read-only plan
               mode, no repo). The system prompt below is the task; the upstream
-              input is appended. Without a structured-output schema the result is
-              plain text at <span className="mono">output.text</span>; with one,
-              the CLI is constrained to your schema and the fields land on{" "}
+              input is appended. Without a structured-output schema the result
+              is plain text at <span className="mono">output.text</span>; with
+              one, the CLI is constrained to your schema and the fields land on{" "}
               <span className="mono">output.&lt;field&gt;</span> — same as any
               other provider.
             </div>
@@ -900,6 +969,19 @@ export function renderAgentSections(c: ConfigSectionCtx) {
                   value={str("connectionId")}
                   onChange={(id) => onChange({ connectionId: id })}
                 />
+                {/* #815 — the catalog already knows exactly how this provider authenticates, and
+                    that string was rendered in exactly one place nobody stands: the Node Catalog
+                    drawer. This is the moment the question gets asked ("how do I add PagerDuty?"),
+                    so it is the moment to answer it. Read-only catalog data, no new concepts. */}
+                {provider?.auth && (
+                  <ProviderAuthHint
+                    provider={provider.label}
+                    auth={provider.auth}
+                    baseUrl={provider.baseUrl}
+                    fromConnection={!!provider.baseUrlFromConnection}
+                    needsConnection={!str("connectionId")}
+                  />
+                )}
               </Labeled>
               <Labeled label="Action">
                 <select
