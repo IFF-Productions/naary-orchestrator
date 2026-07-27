@@ -556,6 +556,10 @@ export function NotificationsSection({
                   <div
                     className="naary-set-row"
                     role="button"
+                    // The row IS the disclosure control, and #847 removed the chevron on phone —
+                    // so without this the only signal of open/closed state was visual, and then
+                    // wasn't. Screen readers now get the state they were never told.
+                    aria-expanded={open}
                     tabIndex={0}
                     onClick={() => setExpanded((x) => ({ ...x, [key]: !open }))}
                     onKeyDown={(e) => {

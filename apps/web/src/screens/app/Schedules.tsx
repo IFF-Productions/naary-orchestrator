@@ -496,11 +496,15 @@ export function Schedules() {
                     key={i}
                     style={{
                       display: "grid",
-                      gridTemplateColumns: COLS,
-                      gap: 10,
-                      padding: "13px 18px",
+                      // The skeleton has to match the layout it is standing in for. It kept the
+                      // 6-column grid after the loaded rows started stacking on phone, so the
+                      // loading state showed unlabelled columns under a header that is no longer
+                      // rendered — a shape the screen never actually resolves into.
+                      gridTemplateColumns: phone ? "1fr" : COLS,
+                      gap: phone ? 8 : 10,
+                      padding: phone ? "13px 16px" : "13px 18px",
                       borderBottom: "1px solid var(--line)",
-                      alignItems: "center",
+                      alignItems: phone ? "stretch" : "center",
                     }}
                   >
                     <div
@@ -509,9 +513,11 @@ export function Schedules() {
                       <Skeleton width={34} height={34} radius={9} />
                       <Skeleton width="60%" />
                     </div>
-                    <Skeleton width="70%" />
-                    <Skeleton width="55%" />
-                    <Skeleton width="65%" />
+                    {/* Phone: three stacked bars, matching the labelled cells that replace the
+                        columns — not four column-width bars pretending to be a table. */}
+                    <Skeleton width={phone ? "45%" : "70%"} />
+                    <Skeleton width={phone ? "35%" : "55%"} />
+                    <Skeleton width={phone ? "40%" : "65%"} />
                     <Skeleton width={52} height={18} radius={10} />
                     <span />
                   </div>
