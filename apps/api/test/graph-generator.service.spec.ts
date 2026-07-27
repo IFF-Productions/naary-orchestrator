@@ -421,10 +421,13 @@ describe("GraphGeneratorService (claude-code source)", () => {
     expect(binary).toBe("claude");
     expect(args).toContain("--output-format");
     expect(args).toContain("plan");
-    // Turn budget > 1: with tools allowed, a single turn spent on a Read/Grep would end as
-    // error_max_turns with an EMPTY result (the prod empty-head incident).
+    // The turn budget must leave room for a REALISTIC multi-node request. At 4, "incident → agent
+    // → GitHub issue → ack → trigger another workflow" failed with error_max_turns: the granted
+    // Read/Grep/Glob tools each cost a turn before any JSON is emitted. The real bound is the 55s
+    // timeout, enforced by the spawn wrapper regardless, so a low cap only fails requests that were
+    // still making progress.
     const turnIdx = (args as string[]).indexOf("--max-turns");
-    expect(Number((args as string[])[turnIdx + 1])).toBeGreaterThan(1);
+    expect(Number((args as string[])[turnIdx + 1])).toBeGreaterThanOrEqual(12);
   });
 
   it("maps a turn-capped run (error_max_turns, empty result) to a retryable 503 with a clear message", async () => {
@@ -437,9 +440,15 @@ describe("GraphGeneratorService (claude-code source)", () => {
       }),
       exitCode: 1,
     });
+    // The message must NOT tell the user to shorten a perfectly reasonable description — that was
+    // the old copy, and it blamed the user for a model-side hiccup. It now says "transient, retry"
+    // and points at the streaming providers, which have no turn budget at all.
     await expect(makeService().generate("t-1", "e-1", "flow")).rejects.toThrow(
-      /ran out of turns/,
+      /usually transient/,
     );
+    await expect(
+      makeService().generate("t-1", "e-1", "flow"),
+    ).rejects.not.toThrow(/shorter description/);
   });
 
   it("includes the envelope subtype in the unknown-failure log path (empty result + stderr)", async () => {

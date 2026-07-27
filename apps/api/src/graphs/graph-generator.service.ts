@@ -747,12 +747,15 @@ export class GraphGeneratorService {
       "plan",
       "--allowedTools",
       "Read,Grep,Glob",
-      // 4, not 1: with tools allowed, the model sometimes spends a turn on a Read/Grep before
-      // answering — at max-turns 1 that ends as an `error_max_turns` envelope with an EMPTY
-      // result (exit 1, nothing on stderr), which we shipped as an unexplainable generic 503.
-      // A small budget lets a tool digression complete while still bounding runaway loops.
+      // The turn budget is NOT the real bound — `timeoutMs` (55s) is, and it is enforced by the
+      // spawn wrapper regardless. This only stops a pathological loop, so it should be generous:
+      // at 4 a realistic multi-node request ("incident → agent → GitHub issue → ack → trigger
+      // another workflow") hit `error_max_turns` and failed outright, because tool digressions
+      // (Read/Grep/Glob are granted below) each cost a turn before any JSON is emitted. Raising it
+      // cannot make a request slower than the timeout already allows — it only stops us failing a
+      // request the model was still making progress on.
       "--max-turns",
-      "4",
+      "12",
       "--append-system-prompt",
       SYSTEM_PROMPT,
     ];
@@ -841,7 +844,7 @@ export class GraphGeneratorService {
           `graph generate (claude-code): turn-capped without a result (exit=${exitCode})`,
         );
         throw new ServiceUnavailableException(
-          "Claude Code ran out of turns before producing the workflow. Try again — or rephrase with a shorter description.",
+          "Claude Code kept working without producing the workflow. This is usually transient — try again. If it repeats on the same description, switch the provider (Claude/GPT/Gemini stream the graph directly and have no turn budget).",
         );
       }
       // Unknown/unexpected failure — surface as an ERROR (a real problem worth an alert, not just a
