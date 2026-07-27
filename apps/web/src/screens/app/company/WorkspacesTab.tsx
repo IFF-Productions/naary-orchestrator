@@ -37,6 +37,90 @@ export function WorkspacesTab({
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
   const phone = useMediaQuery(PHONE_QUERY);
 
+  /**
+   * The pieces both layouts render, defined ONCE.
+   *
+   * Review on the first version was right: the phone branch had its own copy of the actions
+   * cluster and the spend/tokens/calls cells, so a change to either would have been easy to apply
+   * to one layout and forget in the other. Same reasoning as `Workflows.tsx`/`MembersTable.tsx`.
+   */
+  const labelOf = (w: WorkspaceRow) =>
+    workspaceLabel(w.tenantId, w.displayName ?? undefined);
+
+  const archivedChip = (w: WorkspaceRow) =>
+    w.archived ? (
+      <span
+        style={{
+          fontSize: 10.5,
+          padding: "1px 7px",
+          borderRadius: 99,
+          border: "1px solid var(--line)",
+          color: "var(--ink-3)",
+          flex: "none",
+        }}
+      >
+        Archived
+      </span>
+    ) : null;
+
+  /** Rename / Archive / Open. Identical in both layouts, including the busy row. */
+  const actions = (w: WorkspaceRow) => (
+    <>
+      <Button size="sm" variant="ghost" onClick={() => onRename(w)}>
+        Rename
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        loading={rowBusy === w.tenantId}
+        onClick={() => onArchive(w)}
+      >
+        {w.archived ? "Unarchive" : "Archive"}
+      </Button>
+      {memberTenantIds.has(w.tenantId) && (
+        <Button size="sm" variant="secondary" onClick={() => onOpen(w)}>
+          Open
+        </Button>
+      )}
+    </>
+  );
+
+  /** The read-only drill-in. 44px on phone (a touch target), 32px for a pointer. */
+  const drillIn = (w: WorkspaceRow, size: number) => (
+    <button
+      type="button"
+      aria-label={`Open ${labelOf(w)} (read-only)`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onDrill(w);
+      }}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minWidth: size,
+        minHeight: size,
+        padding: 0,
+        border: "none",
+        background: "transparent",
+        cursor: "pointer",
+        color: "var(--ink-3)",
+        borderRadius: "var(--radius-sm)",
+        flex: "none",
+      }}
+    >
+      <Icon name="chevron-right" size={16} />
+    </button>
+  );
+
+  /** Share of company spend — NOT an of-budget gauge; there is no per-workspace budget. */
+  const spendBar = (w: WorkspaceRow) => (
+    <ProgressBar
+      value={total > 0 ? (w.costUsd / total) * 100 : 0}
+      color="var(--brand)"
+    />
+  );
+
   // PHONE (#708): the table isn't clipped — it sits in the accepted `overflowX: auto` wrapper —
   // but measured at 390px it hid 320px, 47% of every row, behind a scroller with no visual
   // affordance. Spend, Tokens, Calls and every action were off-canvas, so the screen looked like
@@ -44,128 +128,69 @@ export function WorkspacesTab({
   if (phone) {
     return (
       <Card pad={false} style={{ overflow: "hidden" }}>
-        {usage.byWorkspace.map((w) => {
-          const label = workspaceLabel(w.tenantId, w.displayName ?? undefined);
-          return (
-            <div
-              key={w.tenantId}
-              className="run-row"
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 10,
-                padding: "13px 16px",
-                borderBottom: "1px solid var(--line)",
-              }}
-            >
-              {/* Identity + the drill-in, which were previously off-canvas together. */}
-              <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                <Avatar initials={initialsOf(label)} size={26} />
-                <span
-                  style={{
-                    color: "var(--ink)",
-                    flex: 1,
-                    minWidth: 0,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {label}
-                </span>
-                {w.archived && (
-                  <span
-                    style={{
-                      fontSize: 10.5,
-                      padding: "1px 7px",
-                      borderRadius: 99,
-                      border: "1px solid var(--line)",
-                      color: "var(--ink-3)",
-                      flex: "none",
-                    }}
-                  >
-                    Archived
-                  </span>
-                )}
-                <button
-                  type="button"
-                  aria-label={`Open ${label} (read-only)`}
-                  onClick={() => onDrill(w)}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    // 44px on phone: a touch target, not a 32px pointer target.
-                    minWidth: 44,
-                    minHeight: 44,
-                    padding: 0,
-                    border: "none",
-                    background: "transparent",
-                    cursor: "pointer",
-                    color: "var(--ink-3)",
-                    flex: "none",
-                  }}
-                >
-                  <Icon name="chevron-right" size={16} />
-                </button>
-              </div>
-
-              {/* The hidden columns, now self-labelling — the header row is gone on phone. */}
-              <div
+        {usage.byWorkspace.map((w) => (
+          <div
+            key={w.tenantId}
+            className="run-row"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+              padding: "13px 16px",
+              borderBottom: "1px solid var(--line)",
+            }}
+          >
+            {/* Identity + the drill-in, which were previously off-canvas together. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+              <Avatar initials={initialsOf(labelOf(w))} size={26} />
+              <span
                 style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: "6px 18px",
-                  fontSize: "var(--text-xs)",
-                  color: "var(--ink-3)",
+                  color: "var(--ink)",
+                  flex: 1,
+                  minWidth: 0,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
                 }}
               >
-                <span>
-                  Spend{" "}
-                  <span style={{ color: "var(--ink)" }}>{usd(w.costUsd)}</span>
-                </span>
-                <span>
-                  Tokens{" "}
-                  <span style={{ color: "var(--ink)" }}>
-                    {w.totalTokens.toLocaleString()}
-                  </span>
-                </span>
-                <span>
-                  Calls <span style={{ color: "var(--ink)" }}>{w.calls}</span>
-                </span>
-                <EnvDots envs={w.byEnvironment} />
-              </div>
-              {/* Share of company spend — the same bar the table shows, not an of-budget gauge. */}
-              <ProgressBar
-                value={total > 0 ? (w.costUsd / total) * 100 : 0}
-                color="var(--brand)"
-              />
-
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                <Button size="sm" variant="ghost" onClick={() => onRename(w)}>
-                  Rename
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  loading={rowBusy === w.tenantId}
-                  onClick={() => onArchive(w)}
-                >
-                  {w.archived ? "Unarchive" : "Archive"}
-                </Button>
-                {memberTenantIds.has(w.tenantId) && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => onOpen(w)}
-                  >
-                    Open
-                  </Button>
-                )}
-              </div>
+                {labelOf(w)}
+              </span>
+              {archivedChip(w)}
+              {drillIn(w, 44)}
             </div>
-          );
-        })}
+
+            {/* The hidden columns, now self-labelling — the header row is gone on phone. */}
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "6px 18px",
+                fontSize: "var(--text-xs)",
+                color: "var(--ink-3)",
+              }}
+            >
+              <span>
+                Spend{" "}
+                <span style={{ color: "var(--ink)" }}>{usd(w.costUsd)}</span>
+              </span>
+              <span>
+                Tokens{" "}
+                <span style={{ color: "var(--ink)" }}>
+                  {w.totalTokens.toLocaleString()}
+                </span>
+              </span>
+              <span>
+                Calls <span style={{ color: "var(--ink)" }}>{w.calls}</span>
+              </span>
+              <EnvDots envs={w.byEnvironment} />
+            </div>
+            {spendBar(w)}
+
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {actions(w)}
+            </div>
+          </div>
+        ))}
       </Card>
     );
   }
@@ -187,28 +212,9 @@ export function WorkspacesTab({
                       gap: 9,
                     }}
                   >
-                    <Avatar
-                      initials={initialsOf(
-                        workspaceLabel(w.tenantId, w.displayName ?? undefined),
-                      )}
-                      size={26}
-                    />
-                    <span style={{ color: "var(--ink)" }}>
-                      {workspaceLabel(w.tenantId, w.displayName ?? undefined)}
-                    </span>
-                    {w.archived && (
-                      <span
-                        style={{
-                          fontSize: 10.5,
-                          padding: "1px 7px",
-                          borderRadius: 99,
-                          border: "1px solid var(--line)",
-                          color: "var(--ink-3)",
-                        }}
-                      >
-                        Archived
-                      </span>
-                    )}
+                    <Avatar initials={initialsOf(labelOf(w))} size={26} />
+                    <span style={{ color: "var(--ink)" }}>{labelOf(w)}</span>
+                    {archivedChip(w)}
                   </span>
                 ),
               },
@@ -225,13 +231,7 @@ export function WorkspacesTab({
                     <div style={{ color: "var(--ink)", marginBottom: 4 }}>
                       {usd(w.costUsd)}
                     </div>
-                    {/* No per-workspace budget exists in the company API — this bar shows the
-                        workspace's SHARE of company spend (not an of-budget gauge), so no
-                        red/warn thresholds. Budget thresholds live at the company level. */}
-                    <ProgressBar
-                      value={total > 0 ? (w.costUsd / total) * 100 : 0}
-                      color="var(--brand)"
-                    />
+                    {spendBar(w)}
                   </div>
                 ),
               },
@@ -263,60 +263,12 @@ export function WorkspacesTab({
                       onClick={stop}
                       style={{ display: "flex", gap: 6, alignItems: "center" }}
                     >
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => onRename(w)}
-                      >
-                        Rename
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        loading={rowBusy === w.tenantId}
-                        onClick={() => onArchive(w)}
-                      >
-                        {w.archived ? "Unarchive" : "Archive"}
-                      </Button>
-                      {memberTenantIds.has(w.tenantId) && (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => onOpen(w)}
-                        >
-                          Open
-                        </Button>
-                      )}
+                      {actions(w)}
                     </div>
                     {/* Drill-in chevron — a real focusable button so keyboard users can open
-                        the READ-ONLY workspace observer (the row's onRowClick handles the
-                        mouse path; stopPropagation avoids a double-invoke via the row). */}
-                    <button
-                      type="button"
-                      aria-label={`Open ${workspaceLabel(
-                        w.tenantId,
-                        w.displayName ?? undefined,
-                      )} (read-only)`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDrill(w);
-                      }}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        minWidth: 32,
-                        minHeight: 32,
-                        padding: 0,
-                        border: "none",
-                        background: "transparent",
-                        cursor: "pointer",
-                        color: "var(--ink-3)",
-                        borderRadius: "var(--radius-sm)",
-                      }}
-                    >
-                      <Icon name="chevron-right" size={16} />
-                    </button>
+                        the READ-ONLY workspace observer (the row's onRowClick handles the mouse
+                        path; stopPropagation inside drillIn avoids a double-invoke via the row). */}
+                    {drillIn(w, 32)}
                   </div>
                 ),
               },
