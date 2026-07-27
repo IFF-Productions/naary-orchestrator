@@ -286,7 +286,7 @@ export function VersionBadge({ version }: { version: number | null }) {
         gap: 3,
         fontSize: "var(--text-xs)",
         color: "var(--ink-2)",
-        background: "var(--surface-2, var(--brand-soft))",
+        background: "var(--brand-soft)",
         border: "1px solid var(--line)",
         borderRadius: 6,
         padding: "1px 6px",

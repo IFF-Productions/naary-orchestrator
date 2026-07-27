@@ -108,7 +108,7 @@ export function McpRegistryBrowser({
         <div
           style={{
             fontSize: "var(--text-sm)",
-            color: "var(--danger, var(--ink-2))",
+            color: "var(--state-error)",
             marginBottom: 10,
           }}
         >

@@ -87,10 +87,10 @@ export function ConnectionTestControl({
     result === null
       ? "var(--ink-2)"
       : result.ok
-        ? "var(--ok, var(--brand))"
+        ? "var(--state-done)"
         : result.status === "unknown"
           ? "var(--ink-2)"
-          : "var(--danger, #c0392b)";
+          : "var(--state-error)";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
