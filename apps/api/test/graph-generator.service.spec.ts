@@ -786,3 +786,76 @@ describe("claude-code generation: stdin close (integration, fake CLI)", () => {
     ).rejects.toBeTruthy();
   }, 8000);
 });
+
+/**
+ * INVENTED CONNECTION IDS. Reported as "build with AI … auto populated bogus connections".
+ *
+ * The resource block tells the model to use one of the tenant's EXACT ids and never to invent one.
+ * Nothing checked. `validate()` covers structure and node types only, so an invented id sailed
+ * through: the node LOOKS configured, passes the save gate, and fails at RUN time with "unknown
+ * connection" — long after the author stopped looking at it.
+ */
+describe("generate — invented connectionIds are blanked", () => {
+  const graphWith = (connectionId: string) => ({
+    name: "Flow",
+    startNodeId: "start",
+    nodes: [
+      { id: "start", type: "start" },
+      {
+        id: "gh",
+        type: "integration",
+        config: { provider: "github", action: "create_issue", connectionId },
+      },
+      { id: "end", type: "end" },
+    ],
+    edges: [
+      { from: "start", to: "gh" },
+      { from: "gh", to: "end" },
+    ],
+  });
+
+  it("blanks an id the tenant does not have", async () => {
+    listConnections.mockResolvedValue([
+      { id: "conn_real", type: "github", label: "GitHub", serverUrl: "https://api.github.com" },
+    ]);
+    generateText.mockResolvedValue({
+      text: JSON.stringify(graphWith("conn_invented_by_the_model")),
+    });
+
+    const res = await makeService().generate("t-1", "e-1", "file an issue");
+
+    const node = res.graph.nodes.find((n) => n.id === "gh");
+    // Blanked, NOT dropped: empty is the state the canvas lints, the save gate reports, and the
+    // config panel shows as an empty picker — so the author is asked to choose.
+    expect((node?.config as { connectionId?: string }).connectionId).toBe("");
+    // The rest of the node survives — only the bogus id is removed.
+    expect((node?.config as { provider?: string }).provider).toBe("github");
+  });
+
+  it("leaves a REAL id alone", async () => {
+    listConnections.mockResolvedValue([
+      { id: "conn_real", type: "github", label: "GitHub", serverUrl: "https://api.github.com" },
+    ]);
+    generateText.mockResolvedValue({ text: JSON.stringify(graphWith("conn_real")) });
+
+    const res = await makeService().generate("t-1", "e-1", "file an issue");
+
+    expect(
+      (res.graph.nodes.find((n) => n.id === "gh")?.config as { connectionId?: string })
+        .connectionId,
+    ).toBe("conn_real");
+  });
+
+  /** With no connections configured at all, EVERY id is invented by definition. */
+  it("blanks everything when the tenant has no connections", async () => {
+    listConnections.mockResolvedValue([]);
+    generateText.mockResolvedValue({ text: JSON.stringify(graphWith("conn_anything")) });
+
+    const res = await makeService().generate("t-1", "e-1", "file an issue");
+
+    expect(
+      (res.graph.nodes.find((n) => n.id === "gh")?.config as { connectionId?: string })
+        .connectionId,
+    ).toBe("");
+  });
+});

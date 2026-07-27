@@ -120,7 +120,7 @@ export class GraphGeneratorService {
   private async buildResourceContext(
     tenantId: string,
     environmentId: string,
-  ): Promise<string> {
+  ): Promise<{ text: string; connectionIds: Set<string> }> {
     const conns = await this.connections
       .list(tenantId, environmentId)
       .catch(() => []);
@@ -155,7 +155,43 @@ export class GraphGeneratorService {
         );
       }
     }
-    return lines.join("\n") + "\n\n";
+    // The ids are returned as well as described: the prompt SAYS "never invent a connectionId",
+    // and a prompt is not an enforcement mechanism (see scrubInventedConnections).
+    return {
+      text: lines.join("\n") + "\n\n",
+      connectionIds: new Set(conns.map((c) => c.id)),
+    };
+  }
+
+  /**
+   * Blank every `connectionId` the model invented.
+   *
+   * Reported as "build with AI … auto populated bogus connections". The resource block tells the
+   * model to use one of the tenant's EXACT ids and never to invent one — but nothing checked, and
+   * `validate()` only covers structure and node types. An invented id is the worst possible
+   * outcome: the node LOOKS configured, passes the save gate, and fails at run time with "unknown
+   * connection" — long after the author stopped looking.
+   *
+   * Blanked rather than dropped, because empty is the state the rest of the product already
+   * understands: the canvas lints it, the save gate reports it, and the config panel shows an empty
+   * picker. The author is told to choose, which is exactly what the model couldn't do for them.
+   *
+   * Returns the ids it removed so the caller can log them (never the graph, never config values).
+   */
+  private scrubInventedConnections(
+    graph: GraphDef,
+    real: Set<string>,
+  ): string[] {
+    const removed: string[] = [];
+    for (const node of graph.nodes) {
+      const cfg = node.config as { connectionId?: unknown } | undefined;
+      const id = cfg?.connectionId;
+      if (typeof id !== "string" || id === "") continue;
+      if (real.has(id)) continue;
+      removed.push(`${node.type}:${id}`);
+      (cfg as { connectionId?: string }).connectionId = "";
+    }
+    return removed;
   }
 
   /**
@@ -251,7 +287,8 @@ export class GraphGeneratorService {
       environmentId,
       provider,
     );
-    const resources = await this.buildResourceContext(tenantId, environmentId);
+    const { text: resources, connectionIds } =
+      await this.buildResourceContext(tenantId, environmentId);
     // The instruction block: an EDIT framing when there's a draft to change, else a plain create.
     const userPrompt = edit.previous
       ? `You are EDITING an existing workflow. Here is the current graph (JSON):\n${JSON.stringify(edit.previous)}\n\nApply this change and return the COMPLETE updated workflow graph (the full graph, not a diff or a partial):\n${instruction}`
@@ -305,6 +342,15 @@ export class GraphGeneratorService {
       }
     }
 
+    // Same enforcement as the create path: a conversational EDIT can invent a connectionId just as
+    // easily, and the turn is applied to the draft the user then saves.
+    const inventedEdit = this.scrubInventedConnections(graph, connectionIds);
+    if (inventedEdit.length > 0) {
+      this.logger.warn(
+        `builder turn: blanked ${inventedEdit.length} invented connectionId(s) — ${inventedEdit.join(", ")}`,
+      );
+    }
+
     // Always a real PRICED pair (claude-code → anthropic/opus) so an estimate can still cost it.
     const pricedProvider: GenProvider =
       chosen === CLAUDE_CODE ? "anthropic" : chosen;
@@ -352,7 +398,8 @@ export class GraphGeneratorService {
     );
 
     // Ground the model in this env's real connections + the integration action catalog.
-    const resources = await this.buildResourceContext(tenantId, environmentId);
+    const { text: resources, connectionIds } =
+      await this.buildResourceContext(tenantId, environmentId);
 
     // First attempt (streamed when hooks are present AND the provider is an API model).
     let out = await this.firstDraft(
@@ -388,6 +435,16 @@ export class GraphGeneratorService {
           `Couldn't generate a valid workflow (${check.error}). Try rephrasing the description.`,
         );
       }
+    }
+
+    // The model is TOLD to use only real connection ids and not to invent any; this is where that
+    // is enforced (see scrubInventedConnections). Runs after the repair loop so a repaired draft is
+    // scrubbed too, and logs the ids only — never the graph, never config values.
+    const invented = this.scrubInventedConnections(graph, connectionIds);
+    if (invented.length > 0) {
+      this.logger.warn(
+        `graph generate: blanked ${invented.length} invented connectionId(s) — ${invented.join(", ")}`,
+      );
     }
 
     return { name: out.name?.trim() || "Generated workflow", graph };
