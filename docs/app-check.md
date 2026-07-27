@@ -89,8 +89,11 @@ curl -s -o /dev/null -w '%{http_code}\n' "https://www.google.com/recaptcha/api.j
 curl -s -o /dev/null -w '%{http_code}\n' "https://www.google.com/recaptcha/enterprise.js?render=$KEY"
 ```
 
-- **200 on exactly one** ⇒ that is the key's real type. Set
-  `VITE_FIREBASE_APPCHECK_PROVIDER` to `v3` or `enterprise` to match, then **run a release**.
+- **200** ⇒ the key loads. Note this does **not** identify which provider to use: a score-based
+  key is commonly served by *both* endpoints (measured — 200/200 on a freshly created score-based
+  key). The provider is decided by what **Firebase console → App Check → Apps** registered for
+  this web app: *reCAPTCHA Enterprise* ⇒ `enterprise`, *reCAPTCHA v3* ⇒ `v3`. Set
+  `VITE_FIREBASE_APPCHECK_PROVIDER` to match that, then **run a release**.
 - **400 on both** ⇒ `render=` does not accept this key, and no provider setting will fix it.
   In order of likelihood:
   1. **It is a challenge-based (checkbox) key.** This is what actually happened in #792. If
@@ -145,8 +148,22 @@ grecaptcha.enterprise.ready(() =>
   ));
 ```
 
-Whichever returns a token is the key's real type. If **neither** script even loads, you are
-back at the 400 above — that is a key problem, not a provider problem.
+If **neither** script even loads, you are back at the 400 above — a key problem, not a provider
+problem. If both work, that is normal for a score-based key and still doesn't pick the provider
+for you: the Firebase App Check registration does.
+
+**The fastest tell is the Network tab**, and it is what settled #792's second round. reCAPTCHA's
+assessment call differs per provider — classic v3 posts to `/recaptcha/api2/clr`, Enterprise to
+`/recaptcha/enterprise/*`. A **400 from the path matching your current setting** means the key
+belongs to the *other* provider:
+
+```
+POST https://www.google.com/recaptcha/api2/clr?k=6Lfk62Yt…  400 (Bad Request)
+   with VITE_FIREBASE_APPCHECK_PROVIDER=v3  ⇒  the key is an Enterprise key ⇒ set `enterprise`
+```
+
+Note the script itself had returned **200** in that case. Loading proves the key exists; only the
+assessment call proves the provider matches.
 
 Once a script does load but `execute()` still fails, the remaining causes are the reCAPTCHA
 key's **allowed domains** (must cover this host; a registered apex also covers its
