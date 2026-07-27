@@ -170,9 +170,12 @@ export default function ExpressionEditor({
       // you don't yet know what to type. Reported as "unwrapping fields are not autocompleted (or
       // show options after typing {{)". Fires on the closing brace of the pair only, and defers a
       // tick so the completion source reads the document AFTER this input is applied.
-      EditorView.inputHandler.of((view, _from, to, text) => {
+      EditorView.inputHandler.of((view, from, _to, text) => {
         if (text !== "{") return false;
-        const before = view.state.sliceDoc(Math.max(0, to - 1), to);
+        // Read before FROM, not before TO: they differ when the input REPLACES a selection, and
+        // `to` is the end of the replaced range — so with text selected, `to - 1` reads the last
+        // character being deleted rather than the one preceding the insertion (raised in review).
+        const before = view.state.sliceDoc(Math.max(0, from - 1), from);
         if (before !== "{") return false;
         setTimeout(() => startCompletion(view), 0);
         return false; // let CodeMirror insert the character normally
