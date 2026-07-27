@@ -83,6 +83,8 @@ export function CanvasTopBar({
   graphError,
   issuesCount,
   issuesSevere,
+  hasVerdict,
+  verdictOk,
   showIssues,
   onToggleIssues,
   env,
@@ -102,6 +104,8 @@ export function CanvasTopBar({
   onOpenWorkflow,
   onNewWorkflow,
   onSave,
+  onCheck,
+  checking,
   onRun,
 }: {
   name: string;
@@ -118,6 +122,11 @@ export function CanvasTopBar({
   graphError?: string | null;
   issuesCount: number;
   issuesSevere: boolean;
+  /** A dry-run verdict exists — the panel has something to show even at zero issues (#832). */
+  hasVerdict: boolean;
+  /** …and whether that verdict was a PASS. Zero issues is not the same as a clean check: a check
+   *  that failed to run also has zero issues, and must not render as success. */
+  verdictOk?: boolean;
   showIssues: boolean;
   onToggleIssues: () => void;
   /** The active environment (real, from the env store); omit to hide the chip. */
@@ -139,6 +148,9 @@ export function CanvasTopBar({
   onOpenWorkflow: (key: string) => void;
   onNewWorkflow: () => void;
   onSave: () => void;
+  /** Dry run (#832): save, then check config/request/credentials WITHOUT executing a node. */
+  onCheck: () => void;
+  checking: boolean;
   onRun: () => void;
 }) {
   const navigate = useNavigate();
@@ -335,15 +347,36 @@ export function CanvasTopBar({
           }
         />
       )}
-      {!phone && !generating && issuesCount > 0 && (
+      {/* `hasVerdict` is why this isn't just `issuesCount > 0`: a CLEAN dry run has no issues but
+          does have something to say (what it verified, and what it couldn't — #835). Gating on the
+          count alone let the user collapse that panel and left them no control to reopen it. */}
+      {!phone && !generating && (issuesCount > 0 || hasVerdict) && (
         <button
           type="button"
           onClick={onToggleIssues}
-          title="Show details of every issue"
-          className={`pill ${issuesSevere ? "pill-error" : "pill-paused"}`}
+          title={
+            issuesCount > 0
+              ? "Show details of every issue"
+              : verdictOk
+                ? "Show what the last check covered"
+                : "The check could not be completed — open for the reason"
+          }
+          className={`pill ${
+            issuesCount > 0
+              ? issuesSevere
+                ? "pill-error"
+                : "pill-paused"
+              : verdictOk
+                ? "pill-done"
+                : "pill-error"
+          }`}
           style={{ border: "none", cursor: "pointer", flex: "none" }}
         >
-          ⚠ {issuesCount} issue{issuesCount > 1 ? "s" : ""}{" "}
+          {issuesCount > 0
+            ? `⚠ ${issuesCount} issue${issuesCount > 1 ? "s" : ""} `
+            : verdictOk
+              ? "✓ checked "
+              : "✗ check failed "}
           {showIssues ? "▲" : "▼"}
         </button>
       )}
@@ -635,9 +668,23 @@ export function CanvasTopBar({
         >
           Save
         </Button>
+        {/* Sits before "Save & run" because it is the cheap answer to the same question, and it
+            is the one to reach for FIRST on a flow with real side effects. */}
+        <Button
+          variant="secondary"
+          disabled={busy || checking || !graphValid || !maySave}
+          title={
+            maySave
+              ? "Saves, then checks every integration node's config, request and connection — without running anything"
+              : saveDeniedTitle
+          }
+          onClick={onCheck}
+        >
+          {checking ? "Checking…" : "Check flow"}
+        </Button>
         <Button
           variant="primary"
-          disabled={busy || !graphValid || !maySave}
+          disabled={busy || checking || !graphValid || !maySave}
           title={maySave ? undefined : saveDeniedTitle}
           onClick={onRun}
         >

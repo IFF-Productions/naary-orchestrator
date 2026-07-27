@@ -1,22 +1,45 @@
 // Canvas issues panel: the collapsible list of lint warnings + missing resources shown
 // under the top bar; click a row to jump to its node (extracted verbatim from CanvasPage).
 
-/** One flat, displayable canvas issue — an unknown-source reference or a missing resource. */
+/**
+ * One flat, displayable canvas issue — an unknown-source reference, a missing resource, or (#832)
+ * a failed dry-run check.
+ */
 export interface CanvasIssue {
   nodeId: string;
   field: string | undefined;
   ref: string | undefined;
   message: string;
-  kind: "reference" | "resource";
+  kind: "reference" | "resource" | "check";
 }
 
 export function CanvasIssuesPanel({
   issues,
+  note,
   onSelectNode,
 }: {
   issues: CanvasIssue[];
+  /** Dry-run summary — notably what could NOT be checked. Shown even when there are no issues. */
+  note?: string | null;
   onSelectNode: (id: string) => void;
 }) {
+  const legend = (
+    <div
+      style={{
+        fontSize: "var(--text-xs)",
+        color: "var(--ink-3)",
+        marginBottom: 8,
+      }}
+    >
+      {issues.length} issue{issues.length > 1 ? "s" : ""} — click one to jump to
+      its node. References point at a source that doesn't exist; resources are
+      unmatched connections/config
+      {issues.some((i) => i.kind === "check") &&
+        "; checks are what a dry run found without running the flow"}
+      .
+    </div>
+  );
+
   return (
     <div
       style={{
@@ -27,17 +50,27 @@ export function CanvasIssuesPanel({
         overflowY: "auto",
       }}
     >
-      <div
-        style={{
-          fontSize: "var(--text-xs)",
-          color: "var(--ink-3)",
-          marginBottom: 8,
-        }}
-      >
-        {issues.length} issue{issues.length > 1 ? "s" : ""} — click one to jump
-        to its node. References point at a source that doesn't exist; resources
-        are unmatched connections/config.
-      </div>
+      {/* Only when there ARE rows: on a clean dry run this line rendered as "0 issue — click one
+          to jump to its node", explaining reference and resource kinds that aren't present. The
+          note below is the whole message in that case. */}
+      {issues.length > 0 && legend}
+      {note && (
+        // The dry-run summary, and the only place the user learns what was NOT verified. Kept
+        // visible alongside the rows so "2 issues" is never read as "and everything else is fine".
+        <div
+          style={{
+            fontSize: "var(--text-xs)",
+            color: "var(--ink-2)",
+            marginBottom: 8,
+            padding: "6px 8px",
+            border: "1px solid var(--line)",
+            borderRadius: "var(--radius-sm)",
+            background: "var(--card)",
+          }}
+        >
+          {note}
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         {issues.map((it, i) => (
           <button
@@ -67,10 +100,12 @@ export function CanvasIssuesPanel({
                 borderRadius: "50%",
                 flex: "none",
                 alignSelf: "center",
+                // A failed dry-run check is a hard error like a missing resource: it is a thing
+                // the provider or the catalog already rejected, not a heuristic warning.
                 background:
-                  it.kind === "resource"
-                    ? "var(--state-error)"
-                    : "var(--state-paused)",
+                  it.kind === "reference"
+                    ? "var(--state-paused)"
+                    : "var(--state-error)",
               }}
             />
             <span

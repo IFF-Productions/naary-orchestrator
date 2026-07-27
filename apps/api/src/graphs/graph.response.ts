@@ -237,7 +237,9 @@ export class DryRunCheckResponse {
       "False means this check found a problem. A skipped check is never false.",
   })
   ok!: boolean;
-  @ApiProperty({
+  // Optional in the type, so optional in the spec: @ApiProperty would document both of these as
+  // required and every generated client would treat a passing check as malformed.
+  @ApiPropertyOptional({
     type: String,
     nullable: true,
     example:
@@ -246,7 +248,7 @@ export class DryRunCheckResponse {
       "Why it failed, or why it was skipped. Never contains a credential.",
   })
   message?: string | null;
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: false,
     description:
       "The check couldn't run — e.g. the provider has no zero-argument read to probe. NOT a failure.",

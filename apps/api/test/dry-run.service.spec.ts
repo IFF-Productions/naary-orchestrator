@@ -93,7 +93,7 @@ describe("DryRunService", () => {
     expect(cred?.message).toContain("401");
   });
 
-  it("catches a missing required field before any call is made", async () => {
+  it("catches a missing required field without building or sending that request", async () => {
     const test = testFn(OK_PROBE);
     const res = await svc(test).check(
       "t-1",
@@ -107,6 +107,35 @@ describe("DryRunService", () => {
     // The request check is SKIPPED when config already failed — restating it adds nothing.
     expect(res.nodes[0].checks.some((c) => c.kind === "request")).toBe(false);
     expect(res.ok).toBe(false);
+  });
+
+  /**
+   * The credential probe is NOT short-circuited by a config failure, and that is on purpose:
+   * "is this token alive?" is a different question from "are the fields filled in", and its
+   * answer is just as true on a node that has both problems. Reporting one problem per check is
+   * the fix-run-repeat loop the dry run exists to end (#830).
+   */
+  it("still reports a dead token on a node whose config is ALSO wrong", async () => {
+    const test = testFn({
+      ...OK_PROBE,
+      ok: false,
+      status: "failed",
+      httpStatus: 401,
+      message: "PagerDuty answered 401 — the token was rejected.",
+    });
+
+    const res = await svc(test).check(
+      "t-1",
+      graph(node({ action: "create_incident", fields: {} })),
+    );
+
+    const checks = res.nodes[0].checks;
+    expect(checks.find((c) => c.kind === "config")?.ok).toBe(false);
+    // Both problems in ONE result, so both get fixed before the next check.
+    expect(checks.find((c) => c.kind === "credential")?.message).toContain(
+      "401",
+    );
+    expect(test).toHaveBeenCalledTimes(1);
   });
 
   /**

@@ -31,7 +31,7 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { type NodeType } from "@naary/dsl";
+import { type GraphDef, type NodeType, renameNode } from "@naary/dsl";
 import {
   api,
   type BudgetView,
@@ -40,6 +40,7 @@ import {
   type ExecutionState,
   type GraphSummary,
   type TestNodeResult,
+  UnauthorizedError,
   type WebhookRow,
 } from "../lib/api";
 import { isTerminal } from "../lib/run-status";
@@ -93,6 +94,7 @@ import { useAiBuilder } from "./canvas/useAiBuilder";
 import { useCanvasDerivations } from "./canvas/useCanvasDerivations";
 import { useCanvasToasts } from "./canvas/useCanvasToasts";
 import { useDockDerivations } from "./canvas/useDockDerivations";
+import { useDryRun } from "./canvas/useDryRun";
 import { useWorkflowActions } from "./canvas/useWorkflowActions";
 
 export function CanvasPage() {
@@ -275,6 +277,96 @@ export function CanvasPage() {
       });
     },
     [workflowKey],
+  );
+
+  /**
+   * RENAME A NODE'S ID (#833) — "can we have the ability to actually rename the node slug".
+   *
+   * The rewrite itself lives in `@naary/dsl`'s pure `renameNode`, which is tested against every
+   * reference kind (expressions, bindings, edge conditions, handoff targets…). This function is
+   * only the canvas's half: feed it a GraphDef-shaped view of canvas state, then map the result
+   * back onto the React Flow nodes that carry the positions.
+   *
+   * Mapping back BY INDEX is safe because `renameNode` maps over `nodes`/`edges` and so preserves
+   * order — a contract the DSL side documents. Recompiling and decompiling instead would round-trip
+   * away every node's position.
+   *
+   * Returns an error string to show inline, or null on success.
+   */
+  const renameNodeId = useCallback(
+    (oldId: string, newId: string): string | null => {
+      const result = renameNode(
+        {
+          startNodeId: "",
+          nodes: nodes.map((n) => ({
+            id: n.id,
+            type: n.data.kind,
+            config: n.data.config,
+          })),
+          edges: edges.map((e) => ({
+            from: e.source,
+            to: e.target,
+            ...(e.data?.condition?.path ? { condition: e.data.condition } : {}),
+          })),
+        } as GraphDef,
+        oldId,
+        newId,
+      );
+      if (!result.ok) return result.error;
+      if (result.rewritten === 0) return null;
+
+      const renamed = result.graph;
+      setNodes((ns) =>
+        ns.map((n, i) => ({
+          ...n,
+          id: renamed.nodes[i].id,
+          // Keep the rename selected: it is the node the user is working on, and losing the
+          // selection would close the dock they just typed in.
+          selected: n.id === oldId ? true : n.selected,
+          data: { ...n.data, config: renamed.nodes[i].config },
+        })),
+      );
+      setEdges((es) =>
+        es.map((e, i) => ({
+          ...e,
+          source: renamed.edges[i].from,
+          target: renamed.edges[i].to,
+          ...(e.data?.condition
+            ? {
+                data: {
+                  ...e.data,
+                  condition: renamed.edges[i].condition as EdgeConditionDraft,
+                },
+              }
+            : {}),
+        })),
+      );
+
+      // Canvas-local state keyed by node id follows, or the node loses its pin and its last test
+      // result the moment it is renamed.
+      const remap = <T,>(m: Record<string, T>): Record<string, T> =>
+        oldId in m
+          ? Object.fromEntries(
+              Object.entries(m).map(([k, v]) => [k === oldId ? newId : k, v]),
+            )
+          : m;
+      setPins(remap);
+      setNodeRuns(remap);
+
+      // The SERVER's pin is keyed by node id too. Move it, best-effort: a failure here leaves an
+      // orphaned pin, which is recoverable, and must not undo a rename the canvas already applied.
+      const pinned = pins[oldId];
+      if (workflowKey && pinned !== undefined) {
+        void api
+          .pinNode(workflowKey, newId, pinned)
+          .then(() => api.unpinNode(workflowKey, oldId))
+          .catch(() => {
+            /* the local remap already stands; the stale pin is cleaned up on next save */
+          });
+      }
+      return null;
+    },
+    [nodes, edges, pins, workflowKey],
   );
 
   // Single-node test runner — the ONE path the dock's "Test step", the config panel's
@@ -646,12 +738,15 @@ export function CanvasPage() {
           // nextNodePosition's `entry` option (node-placement.ts). Uses compile-graph's
           // isEntryType — the same list the compiler uses to pick startNodeId, so the canvas and
           // the compiler can't disagree about what a trigger is.
-          position: nextNodePosition(ns.map((n) => n.position), {
-            entry: isEntryType(kind),
-            entries: ns
-              .filter((n) => isEntryType(n.data.kind))
-              .map((n) => n.position),
-          }),
+          position: nextNodePosition(
+            ns.map((n) => n.position),
+            {
+              entry: isEntryType(kind),
+              entries: ns
+                .filter((n) => isEntryType(n.data.kind))
+                .map((n) => n.position),
+            },
+          ),
           data: { kind, config },
           // Appear animation: scale(.85)+translateY(6px)→1 + a brief ember glow
           // (canvas.css). Mount-once — React Flow keys nodes by id.
@@ -786,27 +881,78 @@ export function CanvasPage() {
 
   // Workflow persistence + file IO (export / import / save / run / save-only). Plain
   // handlers closing over the state above — no hooks, so call position is free.
-  const { exportGraph, importFromFile, run, saveOnly } = useWorkflowActions({
-    graph,
-    error,
-    name,
-    activeKey,
-    showInput,
-    runInput,
-    keyParam,
-    templateParam,
-    returnTo,
-    setNodes,
-    setEdges,
-    setName,
-    setWorkflowKey,
-    setVersion,
-    setStatus,
-    setBusy,
-    setWorkflows,
-    setSearchParams,
-    navigate,
+  const { exportGraph, importFromFile, run, save, saveOnly } =
+    useWorkflowActions({
+      graph,
+      error,
+      name,
+      activeKey,
+      showInput,
+      runInput,
+      keyParam,
+      templateParam,
+      returnTo,
+      setNodes,
+      setEdges,
+      setName,
+      setWorkflowKey,
+      setVersion,
+      setStatus,
+      setBusy,
+      setWorkflows,
+      setSearchParams,
+      navigate,
+    });
+
+  // DRY RUN (#832) — "Check flow": save, then answer "will this run?" without running it.
+  // Saving first is the point: the endpoint checks the SAVED graph, so a check on unsaved edits
+  // would describe a version that isn't the one on screen.
+  const {
+    checking,
+    summary: dryRun,
+    check: checkFlow,
+    clear: clearDryRun,
+  } = useDryRun({
+    save: async () => {
+      setBusy(true);
+      setStatus(null);
+      try {
+        return await save();
+      } catch (e) {
+        if (e instanceof UnauthorizedError) {
+          navigate("/auth");
+          return null;
+        }
+        setStatus(e instanceof Error ? e.message : "Save failed.");
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    onOpenIssues: () => setShowIssues(true),
   });
+
+  // A verdict describes the graph it was computed on. Once the graph changes it is no longer an
+  // answer about what's on screen, so it is dropped rather than left to look current.
+  //
+  // Keyed on the COMPILED graph's content, not on `graph`'s identity: selecting a node rebuilds
+  // that object without changing the flow, and discarding a good verdict because someone clicked
+  // a node would be its own small annoyance.
+  const graphSignature = useMemo(
+    () => (graph ? JSON.stringify(graph) : ""),
+    [graph],
+  );
+  useEffect(() => {
+    clearDryRun();
+  }, [graphSignature, clearDryRun]);
+
+  // Dry-run failures join the lint/resource rows in ONE list. They are the same kind of thing to
+  // the user — "something here is wrong, click to go fix it" — and a second panel would make them
+  // hunt in two places.
+  const panelIssues = useMemo(
+    () => (dryRun ? [...allIssues, ...dryRun.issues] : allIssues),
+    [allIssues, dryRun],
+  );
 
   /* ---------------- dock derivations ---------------- */
 
@@ -853,6 +999,7 @@ export function CanvasPage() {
       runNodeTest={runNodeTest}
       updateConfig={updateConfig}
       deleteNode={deleteNode}
+      renameNodeId={renameNodeId}
       updateEdgeCondition={updateEdgeCondition}
       clearEdgeCondition={clearEdgeCondition}
       deleteEdge={deleteEdge}
@@ -902,8 +1049,12 @@ export function CanvasPage() {
         generating={generating}
         graphValid={!!graph}
         graphError={error}
-        issuesCount={generating ? 0 : allIssues.length}
-        issuesSevere={resourceWarnings.length > 0}
+        issuesCount={generating ? 0 : panelIssues.length}
+        issuesSevere={
+          resourceWarnings.length > 0 || (dryRun?.issues.length ?? 0) > 0
+        }
+        hasVerdict={!!dryRun}
+        verdictOk={dryRun?.ok}
         showIssues={showIssues}
         onToggleIssues={() => setShowIssues((s) => !s)}
         env={envChip}
@@ -923,6 +1074,8 @@ export function CanvasPage() {
         onOpenWorkflow={openWorkflow}
         onNewWorkflow={newWorkflow}
         onSave={() => void saveOnly()}
+        onCheck={() => void checkFlow()}
+        checking={checking}
         onRun={() => void run()}
       />
 
@@ -935,8 +1088,14 @@ export function CanvasPage() {
         onChange={importFromFile}
       />
 
-      {showIssues && allIssues.length > 0 && (
-        <CanvasIssuesPanel issues={allIssues} onSelectNode={selectNode} />
+      {/* Rendered when there is EITHER a row or a dry-run summary: a clean check still owes the
+          user an answer, and "nothing appeared" is the failure mode #831 already fixed once. */}
+      {showIssues && (panelIssues.length > 0 || dryRun) && (
+        <CanvasIssuesPanel
+          issues={panelIssues}
+          note={dryRun?.message}
+          onSelectNode={selectNode}
+        />
       )}
 
       {showAi && (
