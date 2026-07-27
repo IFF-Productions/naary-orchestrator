@@ -17,12 +17,14 @@ export class TenantBudgetConfigResponse {
   })
   onBudgetExceeded!: string;
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "claude-3-5-haiku",
     description: "Model to downgrade to when onBudgetExceeded='downgrade'.",
   })
   fallbackModel!: string | null;
   @ApiProperty({
+    type: Number,
     nullable: true,
     example: 80,
     description:

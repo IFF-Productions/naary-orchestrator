@@ -3,6 +3,7 @@ import { ApiProperty } from "@nestjs/swagger";
 /** Per-tenant settings (null fields = unset). */
 export class SettingsResponse {
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "Acme Inc.",
     description: "Tenant display name.",
@@ -10,6 +11,7 @@ export class SettingsResponse {
   displayName!: string | null;
 
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "claude-sonnet-4",
     description: "Default model for new agent nodes.",

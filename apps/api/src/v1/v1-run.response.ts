@@ -49,6 +49,7 @@ export class RunListResponse {
   @ApiProperty({ type: [RunListItemResponse] })
   items!: RunListItemResponse[];
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "eyJ0IjoiMjAyNi0wNy0wNFQxMjowMDowMC4wMDBaIiwiaWQiOiJydW4tMSJ9",
     description:
@@ -88,7 +89,7 @@ export class RunActionResponse {
 export class AwaitingRunResponse {
   @ApiProperty({ example: "run-8f3a1c2e" })
   runId!: string;
-  @ApiProperty({ nullable: true, example: "support-triage" })
+  @ApiProperty({ type: String, nullable: true, example: "support-triage" })
   workflowKey!: string | null;
   @ApiProperty({
     example: "node-approve-1",
@@ -102,6 +103,7 @@ export class AwaitingRunResponse {
   })
   title!: string;
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "Confirm the refund of $42 to the customer.",
     description: "The approval prompt's instructions, if any.",
@@ -128,6 +130,7 @@ export class RunHistoryEventResponse {
   @ApiProperty({ example: "callHttpRequest" })
   label!: string;
   @ApiProperty({
+    type: String,
     nullable: true,
     format: "date-time",
     example: "2026-07-04T12:00:01.000Z",

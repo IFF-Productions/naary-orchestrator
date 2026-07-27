@@ -17159,7 +17159,7 @@
             "example": "production"
           },
           "color": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "#6366f1"
           }
@@ -17501,7 +17501,7 @@
         "type": "object",
         "properties": {
           "errorWorkflowKey": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "on-failure-alert"
           }
@@ -17773,7 +17773,7 @@
             "description": "Channel type — determines the delivery format (Slack blocks / Teams card / SMTP email)."
           },
           "label": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "#alerts",
             "description": "User-facing name distinguishing same-type channels. Null = unnamed."
@@ -17784,7 +17784,7 @@
             "description": "Whether this channel sends. Off = skipped even with a URL set."
           },
           "webhookUrl": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "https://hooks.slack.com/services/T000/B000/xxxx",
             "description": "Outbound webhook URL for this channel. Null = none set."
@@ -17991,13 +17991,13 @@
         "type": "object",
         "properties": {
           "displayName": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "Acme Inc.",
             "description": "Tenant display name."
           },
           "defaultModel": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "claude-sonnet-4",
             "description": "Default model for new agent nodes."
@@ -18872,7 +18872,7 @@
             "description": "Cases that could not be judged (the run failed/timed out, or an assertion was unusable) — deliberately NOT counted as failures."
           },
           "costUsd": {
-            "type": "object",
+            "type": "number",
             "nullable": true,
             "example": 0.42,
             "description": "Summed case cost, including LLM-judge spend."
@@ -18919,13 +18919,13 @@
             "description": "pass | fail | error"
           },
           "score": {
-            "type": "object",
+            "type": "number",
             "nullable": true,
             "example": 1,
             "description": "Mean assertion score, 0–1."
           },
           "costUsd": {
-            "type": "object",
+            "type": "number",
             "nullable": true
           },
           "latencyMs": {
@@ -19205,13 +19205,13 @@
         "type": "object",
         "properties": {
           "from": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "format": "date-time",
             "example": "2026-07-01"
           },
           "to": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "format": "date-time",
             "example": "2026-07-31"
@@ -19291,7 +19291,7 @@
             "description": "Number of billed calls."
           },
           "environmentId": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "env-prod",
             "description": "Environment id; null for spend recorded before env tagging."
@@ -19321,7 +19321,7 @@
             "description": "Number of billed calls."
           },
           "workflowKey": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "support-triage",
             "description": "Workflow key; null for runs with no key (pre-migration)."
@@ -19384,7 +19384,7 @@
             "description": "Number of billed calls."
           },
           "nodeType": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "agent",
             "description": "Node type that spent this (stamped on the ledger row); null for pre-feature rows."
@@ -19440,7 +19440,7 @@
         "type": "object",
         "properties": {
           "workflowKey": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "support-triage",
             "description": "Workflow key; null for runs with no key (pre-migration)."
@@ -19556,13 +19556,13 @@
             "description": "Action when the monthly cap is exceeded: reject (stop), downgrade (fallback model), or pause (park runs as awaiting_budget until the cap is raised or the month rolls over)."
           },
           "fallbackModel": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "claude-3-5-haiku",
             "description": "Model to downgrade to when onBudgetExceeded='downgrade'."
           },
           "alertThresholdPct": {
-            "type": "object",
+            "type": "number",
             "nullable": true,
             "example": 80,
             "description": "Alert threshold as % of the monthly cap; crossing it emits a budgetThreshold notification (once per calendar month). Null = no alert configured."
@@ -19619,7 +19619,7 @@
             "description": "Action when the monthly cap is exceeded: reject (stop), downgrade (fallback model), or pause (park runs as awaiting_budget; they resume on cap raise or month rollover)."
           },
           "alertThresholdPct": {
-            "type": "object",
+            "type": "number",
             "nullable": true,
             "example": 80,
             "minimum": 1,
@@ -19627,7 +19627,7 @@
             "description": "Alert threshold as % of the monthly cap (1–100). Crossing it emits a budgetThreshold notification (at most once per calendar month). Omit/null = no alert."
           },
           "fallbackModel": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "claude-3-5-haiku",
             "description": "Model to downgrade to when onBudgetExceeded='downgrade'."
@@ -19671,13 +19671,13 @@
             "description": "Action when the monthly cap is exceeded: reject (stop), downgrade (fallback model), or pause (park runs as awaiting_budget until the cap is raised or the month rolls over)."
           },
           "fallbackModel": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "claude-3-5-haiku",
             "description": "Model to downgrade to when onBudgetExceeded='downgrade'."
           },
           "alertThresholdPct": {
-            "type": "object",
+            "type": "number",
             "nullable": true,
             "example": 80,
             "description": "Alert threshold as % of the monthly cap; crossing it emits a budgetThreshold notification (once per calendar month). Null = no alert configured."
@@ -20817,13 +20817,13 @@
         "type": "object",
         "properties": {
           "from": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "2026-07-01",
             "description": "The requested window's lower bound, echoed back (ISO 8601 date or date-time); null = unbounded."
           },
           "to": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "2026-07-31",
             "description": "The requested window's upper bound, echoed back (ISO 8601 date or date-time); null = unbounded."
@@ -20874,7 +20874,7 @@
             "description": "Number of metered calls."
           },
           "environmentId": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "env-prod",
             "description": "Environment id; null for spend recorded before env tagging."
@@ -20908,7 +20908,7 @@
             "example": "t-acme"
           },
           "displayName": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "Acme Production",
             "description": "The workspace's display name; null if it has none."
@@ -21076,7 +21076,7 @@
             "description": "Company-wide month-to-date spend, USD."
           },
           "remainingUsd": {
-            "type": "object",
+            "type": "number",
             "nullable": true,
             "example": 457.5,
             "description": "monthlyCapUsd − mtdSpendUsd (may be negative); null when no budget is configured."
@@ -21117,7 +21117,7 @@
             "example": "firebase-uid-1"
           },
           "email": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "admin@acme.com",
             "description": "Best-known email for this user (from their workspace memberships); null if unknown."
@@ -21375,7 +21375,7 @@
             "example": "production"
           },
           "color": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "#6366f1"
           },
@@ -21437,7 +21437,7 @@
             "example": "production"
           },
           "color": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "#6366f1"
           }
@@ -21623,7 +21623,7 @@
             }
           },
           "nextCursor": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "eyJ0IjoiMjAyNi0wNy0wNFQxMjowMDowMC4wMDBaIiwiaWQiOiJydW4tMSJ9",
             "description": "Opaque cursor for the next page — pass it back as ?cursor=. null when there are no more runs."
@@ -21642,7 +21642,7 @@
             "example": "run-8f3a1c2e"
           },
           "workflowKey": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "support-triage"
           },
@@ -21657,7 +21657,7 @@
             "description": "The approval prompt's title (resolved from the stored graph)."
           },
           "instructions": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "Confirm the refund of $42 to the customer.",
             "description": "The approval prompt's instructions, if any."
@@ -21724,7 +21724,7 @@
             "example": "callHttpRequest"
           },
           "at": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "format": "date-time",
             "example": "2026-07-04T12:00:01.000Z"
