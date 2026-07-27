@@ -17,6 +17,7 @@ import {
   UnauthorizedError,
 } from "../../../lib/api";
 import { useActiveEnvironment } from "../../../lib/useActiveEnvironment";
+import { PHONE_QUERY, useMediaQuery } from "../../../lib/useMediaQuery";
 import {
   ChannelGlyph,
   EnvChip,
@@ -211,6 +212,20 @@ export function NotificationsSection({
   tenantId: string | null;
   envs: Environment[];
 }) {
+  /**
+   * PHONE (#708). At 390px this matrix hid 260px — 42% of every row — behind a scroller with no
+   * affordance: the channel column alone asks for 220px, leaving nothing for four toggle columns,
+   * so every event checkbox was off-canvas and the screen showed a list of channel names with no
+   * way to see or change what any of them routes.
+   *
+   * #708 fenced this table off as its own slice because its `EventTile` cells are 22px
+   * inline-styled toggles that the `.btn-icon` rule can't reach, and because a phone bump would
+   * change the matrix's row height and column budget. Cards dissolve that objection rather than
+   * working around it: stacked, there IS no column budget, and each toggle sits on its own line
+   * with the event name beside it — so it can take a real touch target without crowding a
+   * neighbour, unlike the grant matrix whose checkboxes are 37px apart.
+   */
+  const phone = useMediaQuery(PHONE_QUERY);
   const activeEnvSel = useActiveEnvironment();
   const activeEnv =
     envs.find((e) => e.slug === activeEnvSel || e.id === activeEnvSel) ??
@@ -421,8 +436,12 @@ export function NotificationsSection({
         }
       />
       <SectionIntro>
-        Per-event channels — each row is a channel (Slack, Teams or email), each
-        column a real event; a checked cell means that channel gets that event.
+        {/* The wording has to match the layout: on phone there are no columns any more, and
+            telling someone to read a column that isn't there is its own small lie. */}
+        Per-event channels — each row is a channel (Slack, Teams or email),
+        {phone
+          ? " with a switch per event; a checked switch means that channel gets that event."
+          : " each column a real event; a checked cell means that channel gets that event."}{" "}
         Approval messages carry{" "}
         <strong style={{ color: "var(--ink-soft)" }}>decide-in-place</strong>{" "}
         Approve / Reject actions — buttons in Slack and Teams, the same signed
@@ -442,9 +461,11 @@ export function NotificationsSection({
       {error && <ErrorLine>{error}</ErrorLine>}
 
       <div style={panelStyle}>
-        <div style={{ overflowX: "auto" }}>
-          <div style={{ minWidth: 620 }}>
-            {/* Matrix header — mono uppercase, per the comp. */}
+        <div style={{ overflowX: phone ? undefined : "auto" }}>
+          <div style={{ minWidth: phone ? undefined : 620 }}>
+            {/* Matrix header — mono uppercase, per the comp. Desktop/tablet only: on phone each
+                toggle is labelled in place, so a column header would name nothing. */}
+            {!phone && (
             <div
               className="mono"
               style={{
@@ -487,6 +508,7 @@ export function NotificationsSection({
               ))}
               <span />
             </div>
+            )}
 
             {!loaded && !error && (
               <div
@@ -544,10 +566,11 @@ export function NotificationsSection({
                     }}
                     style={{
                       display: "grid",
-                      gridTemplateColumns: GRID_COLUMNS,
+                      // Phone: one column, so the identity line and each labelled toggle stack.
+                      gridTemplateColumns: phone ? "1fr" : GRID_COLUMNS,
                       alignItems: "center",
-                      gap: 8,
-                      padding: "13px 18px",
+                      gap: phone ? 10 : 8,
+                      padding: phone ? "13px 16px" : "13px 18px",
                       cursor: "pointer",
                       opacity: ch.enabled ? 1 : 0.6,
                     }}
@@ -644,11 +667,8 @@ export function NotificationsSection({
                         </div>
                       </div>
                     </div>
-                    {EVENT_COLUMNS.map((col) => (
-                      <div
-                        key={col.key}
-                        style={{ display: "flex", justifyContent: "center" }}
-                      >
+                    {EVENT_COLUMNS.map((col) => {
+                      const tile = (
                         <EventTile
                           on={ch[col.key]}
                           label={`${col.title} — ${
@@ -656,17 +676,68 @@ export function NotificationsSection({
                           } (${ch[col.key] ? "on" : "off"})`}
                           onToggle={() => void toggleFlag(key, col.key)}
                         />
-                      </div>
-                    ))}
-                    <Icon
-                      name={open ? "chevron-down" : "chevron-right"}
-                      size={14}
-                      style={{
-                        color: "var(--ink-3)",
-                        flex: "none",
-                        justifySelf: "end",
-                      }}
-                    />
+                      );
+                      if (!phone)
+                        return (
+                          <div
+                            key={col.key}
+                            style={{
+                              display: "flex",
+                              justifyContent: "center",
+                            }}
+                          >
+                            {tile}
+                          </div>
+                        );
+                      // Phone: the event NAME travels with its toggle. The column header is gone,
+                      // and an unlabelled checkbox would be a switch for something unnamed —
+                      // worse than a hidden column, since you could enable the wrong alert.
+                      return (
+                        <div
+                          key={col.key}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            paddingLeft: 40,
+                          }}
+                        >
+                          {tile}
+                          <span
+                            style={{
+                              fontSize: "var(--text-xs)",
+                              color: "var(--ink-2)",
+                            }}
+                          >
+                            {col.title}
+                            {col.decide && (
+                              <span
+                                style={{
+                                  color: "var(--node-approval)",
+                                  marginLeft: 6,
+                                }}
+                              >
+                                decide-in-place
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {/* Desktop: the trailing 28px column. On phone it would land alone on its own
+                        line reading as a stray glyph, and the whole row is already the expand
+                        control (role="button"), so the affordance is not lost. */}
+                    {!phone && (
+                      <Icon
+                        name={open ? "chevron-down" : "chevron-right"}
+                        size={14}
+                        style={{
+                          color: "var(--ink-3)",
+                          flex: "none",
+                          justifySelf: "end",
+                        }}
+                      />
+                    )}
                   </div>
 
                   {open && (
