@@ -222,3 +222,32 @@ describe("nextNodePosition — entry (trigger) nodes", () => {
     });
   });
 });
+
+/**
+ * The entry-column fallbacks must stay collision-checked. An unchecked fallback returning a fixed
+ * slot is the exact overlap bug this module exists to prevent — flagged in review on the first
+ * version, which returned `{ x: columnX - COL_PITCH, y: lowest }` without looking.
+ */
+describe("nextNodePosition — entry fallbacks never return an occupied slot", () => {
+  it("skips past a full trigger column without landing on a card", () => {
+    const base: XY = { x: 1000, y: 100 };
+    // A full column of triggers, plus a card sitting exactly where the old fallback pointed.
+    const triggers: XY[] = Array.from({ length: 40 }, (_, i) => ({
+      x: base.x - COL_PITCH,
+      y: base.y + i * ROW_PITCH,
+    }));
+    const blocker: XY = {
+      x: base.x - 2 * COL_PITCH,
+      y: base.y + 39 * ROW_PITCH,
+    };
+    const existing = [base, ...triggers, blocker];
+
+    const got = nextNodePosition(existing, { entry: true, entries: triggers });
+
+    for (const n of existing) {
+      const clear =
+        Math.abs(got.x - n.x) >= CARD_W || Math.abs(got.y - n.y) >= CARD_H;
+      expect(clear, `overlaps ${JSON.stringify(n)}`).toBe(true);
+    }
+  });
+});

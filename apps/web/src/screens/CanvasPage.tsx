@@ -614,8 +614,9 @@ export function CanvasPage() {
           // a node straight onto an existing card. Position now depends on where cards ARE, not how
           // many there are.
           // A TRIGGER is placed upstream of the flow rather than in its first gap — see
-          // node-placement.entryPosition. Uses compile-graph's ENTRY_TYPES, the same list the
-          // compiler uses to pick startNodeId, so the two can't disagree about what a trigger is.
+          // nextNodePosition's `entry` option (node-placement.ts). Uses compile-graph's ENTRY_TYPES,
+          // the same list the compiler uses to pick startNodeId, so the canvas and the compiler
+          // can't disagree about what a trigger is.
           position: nextNodePosition(ns.map((n) => n.position), {
             entry: ENTRY_TYPES.has(kind),
             entries: ns

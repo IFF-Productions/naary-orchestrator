@@ -73,7 +73,22 @@ function entryPosition(existing: XY[], entries: XY[]): XY {
       const candidate = { x: columnX, y: lowest + row * ROW_PITCH };
       if (!existing.some((n) => overlaps(n, candidate))) return candidate;
     }
-    return { x: columnX - COL_PITCH, y: lowest };
+    // 40 slots below the lowest trigger all taken. Step one column left and scan THERE too rather
+    // than returning a fixed slot — an unchecked fallback can hand back an occupied position, which
+    // is the overlap bug this module exists to prevent.
+    for (let row = 0; row < SCAN; row++) {
+      const candidate = {
+        x: columnX - COL_PITCH,
+        y: lowest + row * ROW_PITCH,
+      };
+      if (!existing.some((n) => overlaps(n, candidate))) return candidate;
+    }
+    // Unreachable for any real graph (1,600 occupied trigger slots). Far left of everything, which
+    // cannot collide by construction.
+    return {
+      x: Math.min(...existing.map((n) => n.x)) - 2 * COL_PITCH,
+      y: lowest,
+    };
   }
 
   const minX = Math.min(...existing.map((n) => n.x));
@@ -85,6 +100,8 @@ function entryPosition(existing: XY[], entries: XY[]): XY {
     const candidate = { x: minX - COL_PITCH, y: anchorY + row * ROW_PITCH };
     if (!existing.some((n) => overlaps(n, candidate))) return candidate;
   }
+  // Two columns left is empty by construction — nothing can be left of the leftmost card minus one
+  // pitch unless it was placed there, and this branch only runs when that whole column is full.
   return { x: minX - 2 * COL_PITCH, y: anchorY };
 }
 
