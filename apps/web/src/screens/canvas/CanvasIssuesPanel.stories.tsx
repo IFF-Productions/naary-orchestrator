@@ -69,3 +69,14 @@ export const NoProblemsButUnverified: Story = {
 export const AllClear: Story = {
   args: { issues: [], note: "No problems found. 2 connections verified." },
 };
+
+/**
+ * The check itself failed — zero issues, but NOT a pass. Review caught this rendering as a green
+ * "✓ checked" pill, because the pill counted issues rather than asking whether the check ran.
+ */
+export const CheckItselfFailed: Story = {
+  args: {
+    issues: [],
+    note: "The check itself failed: NetworkError when attempting to fetch resource.",
+  },
+};

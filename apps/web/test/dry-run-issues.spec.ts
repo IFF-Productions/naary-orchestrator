@@ -82,6 +82,35 @@ describe("summarizeDryRun", () => {
     expect(s.message).toMatch(/unverified/);
   });
 
+  /** Zero issues is not the same as a clean check — the pill's colour depends on this flag. */
+  it("reports ok only when the check ran AND found nothing", () => {
+    expect(summarizeDryRun(result()).ok).toBe(true);
+    expect(
+      summarizeDryRun(
+        result({
+          ok: false,
+          nodes: [
+            {
+              nodeId: "a",
+              type: "integration",
+              checks: [{ kind: "config", ok: false, message: "x" }],
+            },
+          ],
+        }),
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("reads correctly for more than one unverified connection", () => {
+    const one = summarizeDryRun(result({ unprobeable: 1 })).message;
+    const many = summarizeDryRun(result({ unprobeable: 3 })).message;
+
+    expect(one).toContain("1 connection could not be checked");
+    expect(one).toMatch(/this provider has .*its credentials/);
+    expect(many).toContain("3 connections could not be checked");
+    expect(many).toMatch(/those providers have .*their credentials/);
+  });
+
   it("does not mention unverified connections when there are none", () => {
     const s = summarizeDryRun(result({ probed: 2 }));
 

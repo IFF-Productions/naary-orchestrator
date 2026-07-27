@@ -40,6 +40,9 @@ export function useDryRun({
       onOpenIssues();
     } catch (e) {
       setSummary({
+        // NOT ok: the check did not run. Without this the pill reads "✓ checked" on a failed
+        // check, because there are zero issues to count — a green tick for an answer we never got.
+        ok: false,
         issues: [],
         probed: 0,
         unprobeable: 0,

@@ -84,6 +84,7 @@ export function CanvasTopBar({
   issuesCount,
   issuesSevere,
   hasVerdict,
+  verdictOk,
   showIssues,
   onToggleIssues,
   env,
@@ -123,6 +124,9 @@ export function CanvasTopBar({
   issuesSevere: boolean;
   /** A dry-run verdict exists — the panel has something to show even at zero issues (#832). */
   hasVerdict: boolean;
+  /** …and whether that verdict was a PASS. Zero issues is not the same as a clean check: a check
+   *  that failed to run also has zero issues, and must not render as success. */
+  verdictOk?: boolean;
   showIssues: boolean;
   onToggleIssues: () => void;
   /** The active environment (real, from the env store); omit to hide the chip. */
@@ -353,20 +357,26 @@ export function CanvasTopBar({
           title={
             issuesCount > 0
               ? "Show details of every issue"
-              : "Show what the last check covered"
+              : verdictOk
+                ? "Show what the last check covered"
+                : "The check could not be completed — open for the reason"
           }
           className={`pill ${
-            issuesCount === 0
-              ? "pill-done"
-              : issuesSevere
+            issuesCount > 0
+              ? issuesSevere
                 ? "pill-error"
                 : "pill-paused"
+              : verdictOk
+                ? "pill-done"
+                : "pill-error"
           }`}
           style={{ border: "none", cursor: "pointer", flex: "none" }}
         >
           {issuesCount > 0
             ? `⚠ ${issuesCount} issue${issuesCount > 1 ? "s" : ""} `
-            : "✓ checked "}
+            : verdictOk
+              ? "✓ checked "
+              : "✗ check failed "}
           {showIssues ? "▲" : "▼"}
         </button>
       )}

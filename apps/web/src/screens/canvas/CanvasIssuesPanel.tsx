@@ -33,7 +33,10 @@ export function CanvasIssuesPanel({
     >
       {issues.length} issue{issues.length > 1 ? "s" : ""} — click one to jump to
       its node. References point at a source that doesn't exist; resources are
-      unmatched connections/config.
+      unmatched connections/config
+      {issues.some((i) => i.kind === "check") &&
+        "; checks are what a dry run found without running the flow"}
+      .
     </div>
   );
 

@@ -167,7 +167,8 @@ export type TestNodeResult =
 export interface DryRunCheck {
   kind: "config" | "request" | "credential";
   ok: boolean;
-  message?: string;
+  /** Nullable, matching the API's DryRunCheckResponse — not just absent. */
+  message?: string | null;
   /** The check couldn't run. NOT a failure — and not a pass either. */
   skipped?: boolean;
 }

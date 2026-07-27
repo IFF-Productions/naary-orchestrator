@@ -16,6 +16,12 @@ import type { CanvasIssue } from "../screens/canvas/CanvasIssuesPanel";
 
 /** What the check found, in the words the summary line uses. */
 export interface DryRunSummary {
+  /**
+   * Did the check RUN and come back clean? False when it found problems — and false when the
+   * check itself failed, which is the case that matters: zero issues must never be allowed to
+   * render as a pass just because nothing was collected.
+   */
+  ok: boolean;
   /** Failed checks — the rows shown in the panel. */
   issues: CanvasIssue[];
   /** Connections actually called. */
@@ -49,11 +55,12 @@ export function summarizeDryRun(result: DryRunResult): DryRunSummary {
     }
   }
 
+  const many = result.unprobeable > 1;
   const unverified =
     result.unprobeable > 0
-      ? ` ${result.unprobeable} connection${result.unprobeable > 1 ? "s" : ""} could not be ` +
-        `checked — this provider has no read that is safe to call blind, so its credentials are ` +
-        `still unverified.`
+      ? ` ${result.unprobeable} connection${many ? "s" : ""} could not be checked — ` +
+        `${many ? "those providers have" : "this provider has"} no read that is safe to call ` +
+        `blind, so ${many ? "their" : "its"} credentials are still unverified.`
       : "";
 
   const message = issues.length
@@ -61,6 +68,7 @@ export function summarizeDryRun(result: DryRunResult): DryRunSummary {
     : `No problems found. ${result.probed} connection${result.probed === 1 ? "" : "s"} verified.${unverified}`;
 
   return {
+    ok: issues.length === 0,
     issues,
     probed: result.probed,
     unprobeable: result.unprobeable,
