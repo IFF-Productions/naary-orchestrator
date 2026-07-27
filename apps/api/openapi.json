@@ -18149,7 +18149,7 @@
             "type": "string",
             "nullable": true,
             "format": "date-time",
-            "description": "When the run reached a terminal status (worker-stamped); null for in-flight runs and runs predating the stamp."
+            "description": "When the run reached a terminal status — stamped by the worker on a normal finish, by the API on cancel, else read from Temporal's close time (#807); null for in-flight runs and runs predating the stamp."
           },
           "durationMs": {
             "type": "number",
@@ -19453,7 +19453,7 @@
             "type": "number",
             "nullable": true,
             "example": 12840,
-            "description": "Average run duration in ms over runs with a worker-stamped finishedAt; null when none have one."
+            "description": "Average run duration in ms over runs with a recorded finishedAt — stamped by the worker on a normal finish, or by the API when a run is canceled (#807); null when none have one."
           }
         },
         "required": [
