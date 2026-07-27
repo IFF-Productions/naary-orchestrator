@@ -109,12 +109,16 @@ describe("oneShot", () => {
     expect(await take()).toBe(null);
   });
 
-  it("does not run the outcome twice or reject", async () => {
-    let reads = 0;
-    const take = oneShot(Promise.resolve(null).then(() => (reads++, null)));
-    await take();
-    await take();
-    expect(reads).toBe(1);
+  /**
+   * StrictMode's dev double-invoke calls this twice on one mount, so the SECOND caller getting
+   * null is the normal path, not an edge case — the first call's resolution is the only copy, and
+   * AuthPage must not discard it (see the no-is-mounted-guard note there).
+   */
+  it("resolves for a later reader instead of hanging or throwing", async () => {
+    const take = oneShot(Promise.resolve("boom"));
+    const [first, second] = await Promise.all([take(), take()]);
+    expect(first).toBe("boom");
+    expect(second).toBe(null);
   });
 });
 

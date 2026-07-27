@@ -34,14 +34,16 @@ export function AuthPage() {
   // A redirect that FAILED (App Check refusal, an iframe that couldn't hand the credential back)
   // is otherwise perfectly silent — the SDK swallows it and returns the visitor here with no
   // session and no explanation. Surface it on the screen they land on.
+  //
+  // NO is-mounted GUARD, on purpose. The message is one-shot, and under StrictMode dev double-
+  // invoke the sequence is: effect #1 takes it (burning the shot) → cleanup #1 → effect #2 gets
+  // null. A `live` flag would then make effect #1's resolution discard the only copy, so the
+  // diagnostic would never appear in development — the one place we most need to see it. Setting
+  // state after unmount is a no-op in React 18+, not the leak the old warning implied.
   useEffect(() => {
-    let live = true;
     void takeRedirectSignInError().then((msg) => {
-      if (live && msg) setRedirectError(msg);
+      if (msg) setRedirectError(msg);
     });
-    return () => {
-      live = false;
-    };
   }, []);
 
   // Already signed in — including the moment `onAuthStateChanged` restores the session after a
