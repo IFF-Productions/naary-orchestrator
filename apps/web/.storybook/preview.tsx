@@ -1,4 +1,6 @@
 import type { Decorator, Preview } from "@storybook/react-vite";
+import { ConfirmProvider } from "../src/components";
+import { WorkspaceProvider } from "../src/workspace/WorkspaceProvider";
 import { type ReactNode, useEffect } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { setupWorker } from "msw/browser";
@@ -59,6 +61,27 @@ function ThemeStage({
   return <>{children}</>;
 }
 
+/**
+ * App-level React contexts every screen assumes, supplied globally because a screen that calls
+ * `useConfirm` or `useWorkspace` THROWS without them — Storybook catches it and renders its error
+ * panel, so the story silently shows nothing.
+ *
+ * Measured before adding these: **23 of 210 stories** rendered no UI at all (22 × `useConfirm
+ * requires <ConfirmProvider>`, 1 × `useWorkspace must be used within <WorkspaceProvider>`),
+ * including Groups, Integrations, RunDetail, Workflow detail and the full app Shell. A story that
+ * renders an error panel is worse than a missing one: it still appears in the catalog, and any
+ * visual guard built on it (the #708 scroller probe, screenshot review) measures the error panel
+ * instead of the screen — which is exactly how a 71%-hidden reading came out of a table that
+ * wasn't even on screen.
+ */
+const withProviders: Decorator = (Story) => (
+  <WorkspaceProvider>
+    <ConfirmProvider>
+      <Story />
+    </ConfirmProvider>
+  </WorkspaceProvider>
+);
+
 const withTheme: Decorator = (Story, ctx) => (
   <ThemeStage theme={(ctx.globals.theme as string) ?? "dark"}>
     <Story />
@@ -84,7 +107,9 @@ const preview: Preview = {
       },
     },
   },
-  decorators: [withTheme, withRouter],
+  // Order matters: providers are INSIDE the router (WorkspaceProvider navigates) and inside the
+  // theme (so anything they render paints against real tokens).
+  decorators: [withTheme, withRouter, withProviders],
   loaders: [mswLoader(mswSetup)],
 };
 
