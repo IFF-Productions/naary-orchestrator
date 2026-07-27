@@ -19,9 +19,10 @@ import type { GraphDef } from "@naary/dsl";
 import { getBudget } from "@naary/usage";
 import { type GraphSnapshot, GraphsService } from "../graphs/graphs.service";
 import { connectTemporal } from "../temporal/client";
-
-/** Circuit-breaker default when a tenant has no budget configured (matches start). */
-const DEFAULT_MAX_STEPS_PER_RUN = 50;
+// Circuit-breaker default when a tenant has no budget configured. Imported, not re-declared: the
+// same cap applies whether a schedule starts the run or the API does, so two copies could disagree
+// about a safety net (#805).
+import { DEFAULT_MAX_STEPS_PER_RUN } from "../executions/executions.types";
 
 export interface ScheduleView {
   id: string;

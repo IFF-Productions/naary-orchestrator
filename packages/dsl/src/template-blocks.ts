@@ -14,7 +14,7 @@
  */
 import { z } from "zod";
 import { getByPath, isPollutingKey } from "./mcp-args";
-import { isSecretRef } from "./template";
+import { embedRe, isSecretRef } from "./template";
 
 /** One block in a template body. Content blocks render to email + form layout; `field` is FORM-only
  *  (skipped when rendering an email). Every block carries a stable `id` for editor keys/reorder —
@@ -83,9 +83,9 @@ export const templateBlockSchema = z.discriminatedUnion("type", [
 /** `Template.blocks` — an ordered array of validated blocks. */
 export const templateBlocksSchema = z.array(templateBlockSchema);
 
-/** `{{ path }}` token OR an escaped literal `\{{` — the SAME shape the runtime resolves with, so a
- *  template can't render differently than it authors. Fresh instance per use (owns its lastIndex). */
-const EMBED_RE = /\\\{\{|\{\{\s*([^{}]+?)\s*\}\}/g;
+// The `{{ … }}` matcher now comes from ./template — literally the same pattern the runtime
+// resolves with, so a template can't render differently than it authors. It was a byte-identical
+// copy here, which is the same guarantee by coincidence rather than by construction (#805).
 
 /** HTML-escape text and double-quoted attribute values. */
 export function escapeHtml(value: string): string {
@@ -125,7 +125,7 @@ function interpolate(
   escapeValue: (v: string) => string,
 ): string {
   if (!s.includes("{{")) return s;
-  return s.replace(new RegExp(EMBED_RE.source, "g"), (match, path?: string) => {
+  return s.replace(embedRe(), (match, path?: string) => {
     if (match === "\\{{") return "{{";
     const ref = (path ?? "").trim();
     if (isSecretRef(ref)) return match; // resolved in-activity, never here

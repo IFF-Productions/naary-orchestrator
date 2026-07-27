@@ -30,7 +30,10 @@ import {
   githubAppSlug,
 } from "./config";
 
-const GITHUB_API = "https://api.github.com";
+/** GitHub's REST host. A FIXED public host, never tenant-configurable — the egress guard and the
+ *  App-token flow both depend on it being exactly this. Exported because the worker's code-agent
+ *  write path calls the same API and had its own copy (#805). */
+export const GITHUB_API = "https://api.github.com";
 /** Serve a cached installation token until this margin before its real expiry (GitHub ~1h). */
 const SKEW_MS = 60_000;
 

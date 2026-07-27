@@ -9,6 +9,7 @@ import { createLogger } from "@naary/logging";
 import { getObjectStore, maybeOffload } from "@naary/storage";
 import { getBudget } from "@naary/usage";
 import { resumeSnapshotsEnabled, storageProvider } from "../../config";
+import { RETURNED_TERMINAL_STATUSES } from "@naary/contracts";
 
 const log = createLogger({ component: "worker" });
 
@@ -82,16 +83,6 @@ export async function loadTemplate(
   return { subject: row.subject, blocks: row.blocks as TemplateBlock[] };
 }
 
-/** Statuses that end a run — the terminal push also stamps `finishedAt` (Slice 2). */
-const TERMINAL_STATUSES = new Set([
-  "completed",
-  "rejected",
-  "budget_exceeded",
-  "circuit_open",
-  "invalid_graph",
-  "failed",
-]);
-
 /** Failure classification derivable from the terminal STATUS itself (returned-status
  *  terminals). Thrown failures carry an explicit `failureKind` classified in the
  *  workflow from the recorded error instead. circuit_open/invalid_graph get none —
@@ -121,7 +112,7 @@ export async function setExecutionStatus(meta: {
    *  threw — so the UI marks them done even though the failed run's ctx isn't queryable. */
   executedNodeIds?: string[];
 }): Promise<void> {
-  const terminal = TERMINAL_STATUSES.has(meta.status);
+  const terminal = RETURNED_TERMINAL_STATUSES.has(meta.status);
   const failureKind =
     meta.failureKind ??
     (terminal ? STATUS_FAILURE_KIND[meta.status] : undefined);

@@ -8,6 +8,7 @@
 // workflow args/history; wf.patched() call sites are load-bearing for replay.
 import * as wf from "@temporalio/workflow";
 import {
+  RETURNED_FAILURE_STATUSES,
   approvalSignal,
   budgetResumeSignal,
   resumeSignal,
@@ -313,12 +314,10 @@ export async function runGraph(
   // (a handler run never fires its own handler) and patched so in-flight runs that
   // predate this don't diverge on replay. A missing handler / start failure must
   // never mask the original error.
+  // Same statuses as before, from the shared set (#805) — a Set lookup over identical literals,
+  // so replay of an existing history reaches the identical decision and no patched() gate applies.
   const isFailure =
-    threw !== undefined ||
-    state.status === "rejected" ||
-    state.status === "budget_exceeded" ||
-    state.status === "circuit_open" ||
-    state.status === "invalid_graph";
+    threw !== undefined || RETURNED_FAILURE_STATUSES.has(state.status);
   // Notify the tenant (best-effort) that a run failed — same swallow + patch gate as
   // the approval notification. Skipped for error-handler runs (they ARE the response).
   if (isFailure && !runCtx.isErrorHandler && wf.patched("notify-v1")) {

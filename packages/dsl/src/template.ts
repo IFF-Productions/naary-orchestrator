@@ -10,8 +10,19 @@ import type { GraphDef } from "./types";
 
 // The whole string is exactly one token → return the TYPED value (object/number/…), not a string.
 const WHOLE_RE = /^\{\{\s*([^{}]+?)\s*\}\}$/;
-// An escaped literal `\{{` OR a `{{ path }}` token (path has no braces).
+// An escaped literal `\{{` OR a `{{ path }}` token (path has no braces). THE definition — see
+// embedRe() below; template-blocks.ts had a byte-identical copy whose comment claimed it was "the
+// SAME shape the runtime resolves with", which was a hope rather than a guarantee (#805).
 const EMBED_RE = /\\\{\{|\{\{\s*([^{}]+?)\s*\}\}/g;
+
+/**
+ * A FRESH `{{ … }}` matcher. A factory, not the shared instance, deliberately: the pattern is `/g`,
+ * so `exec`/`test` carry `lastIndex` between calls and two modules sharing one instance would
+ * interleave into each other's scan position. (`String.replace` is safe — it resets — which is why
+ * the local uses below keep using EMBED_RE directly.)
+ */
+export const embedRe = (): RegExp =>
+  new RegExp(EMBED_RE.source, EMBED_RE.flags);
 
 /** A `{{ $secrets.NAME }}` reference. Secret VALUES must never enter the graph/ctx/Temporal history
  *  (CLAUDE.md Tier-1 §4), so — unlike every other token — the workflow does NOT resolve these. They
@@ -72,7 +83,7 @@ export interface TemplateToken {
  */
 export function templateTokens(s: string): TemplateToken[] {
   const out: TemplateToken[] = [];
-  const re = new RegExp(EMBED_RE.source, "g"); // own lastIndex; don't mutate the shared regex
+  const re = embedRe(); // own lastIndex; don't mutate the shared instance
   let m: RegExpExecArray | null;
   // biome-ignore lint/suspicious/noAssignInExpressions: standard regex.exec loop
   while ((m = re.exec(s)) !== null) {

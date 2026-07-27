@@ -20,6 +20,7 @@ import {
 } from "@naary/notifications";
 import { activityRuns } from "../../metrics";
 import { appBaseUrlCandidates, encryptionKey } from "../../config";
+import { APPROVAL_LINK_TTL_SECONDS } from "@naary/contracts";
 
 // The formatting shape (kind/workflowId/workflowKey/title/detail) is owned by @naary/notifications
 // — extend it with the worker-only `tenantId` rather than re-declaring the fields, so the two can't
@@ -239,9 +240,9 @@ function resolveAppBaseUrl(): string | undefined {
   return undefined;
 }
 
-/** How long a newly minted approval link stays valid (Slice 1 expiry claim). Generous — a
- *  HITL pause can last days; the claim exists so a leaked link isn't a forever-credential. */
-export const APPROVAL_LINK_TTL_SECONDS = 7 * 24 * 3600;
+/** How long a newly minted approval link stays valid. Shared with the API that VERIFIES these
+ *  links (#805) — see @naary/contracts for why the two copies had to become one. */
+export { APPROVAL_LINK_TTL_SECONDS };
 
 function approvalUrl(workflowId: string): string | undefined {
   const key = encryptionKey();
