@@ -1,6 +1,6 @@
 {
   "name": "@naary/metrics",
-  "version": "0.0.37",
+  "version": "0.0.38",
   "private": true,
   "description": "Prometheus metrics registry shared by api + worker (prom-client). Exposes a single registry + metric factories + renderMetrics() for the /metrics endpoint.",
   "main": "dist/index.js",
