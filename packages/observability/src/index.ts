@@ -109,47 +109,41 @@ function buildIntegrations(profilesSampleRate: number): SentryIntegration[] {
   return integrations;
 }
 
-/** The applications that report to Sentry. Each may have its OWN Sentry project. */
-export type SentryComponent = "api" | "worker" | "sandbox-runner";
+/** Re-exported from ./config, which owns every env read in this package. The names are public
+ *  API (the deploy/compose wiring and its tests name the same variable the code reads). */
+export {
+  componentDsnVar,
+  type SentryComponent,
+} from "./config";
+import {
+  type SentryComponent,
+  sentryDsn,
+  sentryEnvironment,
+  sentryProfilesSampleRate,
+  sentryRelease,
+  sentryTracesSampleRate,
+} from "./config";
 
-/**
- * The env var carrying a component's OWN dsn: `api` → `SENTRY_DSN_API`,
- * `sandbox-runner` → `SENTRY_DSN_SANDBOX_RUNNER`. Exported so the deploy/compose wiring and
- * its tests name the same variable the code reads.
- */
-export function componentDsnVar(component: SentryComponent): string {
-  return `SENTRY_DSN_${component.toUpperCase().replace(/-/g, "_")}`;
-}
-
-/**
- * Resolve which DSN this component reports to: its own if configured, else the shared
- * `SENTRY_DSN`. Values are TRIMMED and empty-checked because docker-compose passes an unset
- * variable through as the empty string (`${SENTRY_DSN_WORKER:-}`) — treating "" as configured
- * would hand Sentry.init an invalid DSN and disable reporting for that component entirely.
- */
+/** Resolve which DSN this component reports to: its own if configured, else the shared
+ *  `SENTRY_DSN`. See ./config for why empty strings are treated as unset. */
 export function sentryDsnFor(component: SentryComponent): string | undefined {
-  const own = process.env[componentDsnVar(component)]?.trim();
-  if (own) return own;
-  return process.env.SENTRY_DSN?.trim() || undefined;
+  return sentryDsn(component);
 }
 
 export function initSentry(opts: { component: SentryComponent }): void {
   const dsn = sentryDsnFor(opts.component);
   if (!dsn) return; // disabled — no DSN configured
   // Opt-in CPU profiling; 0 (off) unless explicitly configured. Requires tracing on.
-  const profilesSampleRate = Number(
-    process.env.SENTRY_PROFILES_SAMPLE_RATE ?? "0",
-  );
+  const profilesSampleRate = sentryProfilesSampleRate();
   Sentry.init({
     dsn,
     // Prefer an explicit SENTRY_ENVIRONMENT (the deploy sets it to "production"); fall back to
     // NODE_ENV, then "development". Without this, prod containers (which don't set NODE_ENV=production)
     // reported every event under "development".
-    environment:
-      process.env.SENTRY_ENVIRONMENT ?? process.env.NODE_ENV ?? "development",
-    release: process.env.SENTRY_RELEASE,
+    environment: sentryEnvironment(),
+    release: sentryRelease(),
     // Opt-in performance tracing; 0 (off) unless explicitly configured.
-    tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? "0"),
+    tracesSampleRate: sentryTracesSampleRate(),
     // Sentry Logs: forward our structured pino logs to Sentry's Logs product so they're
     // searchable next to traces + errors (auto-correlated to the active trace). Both the
     // flag and the integration are required; pinoIntegration auto-instruments every pino

@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { encryptionKey, oldEncryptionKeys } from "./config";
 
 /** Ciphertext + the per-message nonce and GCM auth tag, all base64.
  *  `keyVersion` tags the at-rest format (Sec#7): absent/1 = legacy (no AAD),
@@ -124,18 +125,12 @@ export class FallbackKeyEncryptor implements KeyEncryptor {
  * fallbacks for the master-rotation window — see FallbackKeyEncryptor.
  */
 export function createKeyEncryptor(): KeyEncryptor {
-  const masterKey = process.env.ENCRYPTION_KEY;
+  const masterKey = encryptionKey();
   if (!masterKey) {
     throw new Error("ENCRYPTION_KEY is required");
   }
   const primary = new AesGcmKeyEncryptor(masterKey);
-  const old = process.env.OLD_ENCRYPTION_KEY?.trim();
-  if (!old) return primary;
-  const retired = old
-    .split(",")
-    .map((k) => k.trim())
-    .filter((k) => k.length > 0)
-    .map((k) => new AesGcmKeyEncryptor(k));
+  const retired = oldEncryptionKeys().map((k) => new AesGcmKeyEncryptor(k));
   return retired.length > 0
     ? new FallbackKeyEncryptor(primary, retired)
     : primary;

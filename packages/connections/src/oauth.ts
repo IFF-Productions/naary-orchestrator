@@ -5,6 +5,7 @@ import { ConnectionService, connectionSecretKey } from "./connection.service";
 import { assertEgressAllowed } from "./egress";
 import { safeFetch } from "./safe-fetch";
 import { ConnectCallbackError, NeedsReauthError } from "./errors";
+import { hasDatabase } from "./config";
 
 const b64url = (b: Buffer) => b.toString("base64url");
 
@@ -236,7 +237,7 @@ const refreshWithDistributedLock: RefreshLock = async (
   connectionId,
   critical,
 ) => {
-  if (!process.env.DATABASE_URL) return critical(); // no DB (dev/test) → in-process only
+  if (!hasDatabase()) return critical(); // no DB (dev/test) → in-process only
   let acquired = false;
   try {
     return await getPrisma().$transaction(

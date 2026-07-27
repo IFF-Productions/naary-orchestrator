@@ -25,6 +25,11 @@ import { assertEgressAllowed } from "./egress";
 import { AuthConfigError } from "./errors";
 import type { OAuthConfig } from "./oauth";
 import { safeFetch } from "./safe-fetch";
+import {
+  atlassianClientId,
+  atlassianClientSecret,
+  atlassianScopes,
+} from "./config";
 
 // Fixed Atlassian 3LO endpoints (developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps).
 const AUTHORIZE_URL = "https://auth.atlassian.com/authorize";
@@ -48,15 +53,11 @@ export interface AtlassianOAuthConfig {
 }
 
 export function atlassianOAuthConfig(): AtlassianOAuthConfig | null {
-  const clientId = process.env.ATLASSIAN_OAUTH_CLIENT_ID;
-  const clientSecret = process.env.ATLASSIAN_OAUTH_CLIENT_SECRET;
+  const clientId = atlassianClientId();
+  const clientSecret = atlassianClientSecret();
   if (!clientId || !clientSecret) return null;
-  // Optional override; accept comma- or space-separated. offline_access is force-added at
-  // authorize time regardless, so a misconfigured scope list can't silently kill refresh.
-  const rawScopes = process.env.ATLASSIAN_OAUTH_SCOPES?.trim();
-  const scopes = rawScopes
-    ? rawScopes.split(/[,\s]+/).filter(Boolean)
-    : DEFAULT_SCOPES;
+  const configured = atlassianScopes();
+  const scopes = configured.length > 0 ? configured : DEFAULT_SCOPES;
   return { clientId, clientSecret, scopes };
 }
 
