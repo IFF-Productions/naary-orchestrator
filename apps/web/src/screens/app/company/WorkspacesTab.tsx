@@ -7,6 +7,7 @@ import {
   Table,
 } from "../../../components";
 import type { CompanyUsage } from "../../../lib/api";
+import { PHONE_QUERY, useMediaQuery } from "../../../lib/useMediaQuery";
 import { workspaceLabel } from "../../../workspace/WorkspaceSwitcher";
 import { usd } from "../insights.logic";
 import { initialsOf } from "./helpers";
@@ -34,6 +35,140 @@ export function WorkspacesTab({
   // Secondary company-management actions live in their own cell; stop row-click propagation so
   // interacting with them never triggers the drill-in (the row's read-only observe action).
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+  const phone = useMediaQuery(PHONE_QUERY);
+
+  // PHONE (#708): the table isn't clipped — it sits in the accepted `overflowX: auto` wrapper —
+  // but measured at 390px it hid 320px, 47% of every row, behind a scroller with no visual
+  // affordance. Spend, Tokens, Calls and every action were off-canvas, so the screen looked like
+  // a list of names. Cards put the same cells on screen; same treatment as Runs/Workflows/Members.
+  if (phone) {
+    return (
+      <Card pad={false} style={{ overflow: "hidden" }}>
+        {usage.byWorkspace.map((w) => {
+          const label = workspaceLabel(w.tenantId, w.displayName ?? undefined);
+          return (
+            <div
+              key={w.tenantId}
+              className="run-row"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                padding: "13px 16px",
+                borderBottom: "1px solid var(--line)",
+              }}
+            >
+              {/* Identity + the drill-in, which were previously off-canvas together. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                <Avatar initials={initialsOf(label)} size={26} />
+                <span
+                  style={{
+                    color: "var(--ink)",
+                    flex: 1,
+                    minWidth: 0,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {label}
+                </span>
+                {w.archived && (
+                  <span
+                    style={{
+                      fontSize: 10.5,
+                      padding: "1px 7px",
+                      borderRadius: 99,
+                      border: "1px solid var(--line)",
+                      color: "var(--ink-3)",
+                      flex: "none",
+                    }}
+                  >
+                    Archived
+                  </span>
+                )}
+                <button
+                  type="button"
+                  aria-label={`Open ${label} (read-only)`}
+                  onClick={() => onDrill(w)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    // 44px on phone: a touch target, not a 32px pointer target.
+                    minWidth: 44,
+                    minHeight: 44,
+                    padding: 0,
+                    border: "none",
+                    background: "transparent",
+                    cursor: "pointer",
+                    color: "var(--ink-3)",
+                    flex: "none",
+                  }}
+                >
+                  <Icon name="chevron-right" size={16} />
+                </button>
+              </div>
+
+              {/* The hidden columns, now self-labelling — the header row is gone on phone. */}
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "6px 18px",
+                  fontSize: "var(--text-xs)",
+                  color: "var(--ink-3)",
+                }}
+              >
+                <span>
+                  Spend{" "}
+                  <span style={{ color: "var(--ink)" }}>{usd(w.costUsd)}</span>
+                </span>
+                <span>
+                  Tokens{" "}
+                  <span style={{ color: "var(--ink)" }}>
+                    {w.totalTokens.toLocaleString()}
+                  </span>
+                </span>
+                <span>
+                  Calls <span style={{ color: "var(--ink)" }}>{w.calls}</span>
+                </span>
+                <EnvDots envs={w.byEnvironment} />
+              </div>
+              {/* Share of company spend — the same bar the table shows, not an of-budget gauge. */}
+              <ProgressBar
+                value={total > 0 ? (w.costUsd / total) * 100 : 0}
+                color="var(--brand)"
+              />
+
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <Button size="sm" variant="ghost" onClick={() => onRename(w)}>
+                  Rename
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  loading={rowBusy === w.tenantId}
+                  onClick={() => onArchive(w)}
+                >
+                  {w.archived ? "Unarchive" : "Archive"}
+                </Button>
+                {memberTenantIds.has(w.tenantId) && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => onOpen(w)}
+                  >
+                    Open
+                  </Button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </Card>
+    );
+  }
 
   return (
     <Card pad={false} style={{ overflow: "hidden" }}>
