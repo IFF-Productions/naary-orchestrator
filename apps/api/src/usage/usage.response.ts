@@ -141,9 +141,25 @@ export class InsightsFailureKindResponse {
 }
 
 export class InsightsRangeResponse {
-  @ApiProperty({ type: String, nullable: true, format: "date-time", example: "2026-07-01" })
+  // No `format`, matching v1-config.response.ts's InsightsRangeResponse and for the reason recorded
+  // there: these ECHO the caller's ?from/?to verbatim, which may be an ISO date ("2026-07-01") or a
+  // full date-time, so pinning either would misdocument the other. It said `date-time` against a
+  // plain-date example until #819's sweep touched these lines and review caught the mismatch.
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: "2026-07-01",
+    description:
+      "The requested window's lower bound, echoed back (ISO 8601 date or date-time); null = unbounded.",
+  })
   from!: string | null;
-  @ApiProperty({ type: String, nullable: true, format: "date-time", example: "2026-07-31" })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: "2026-07-31",
+    description:
+      "The requested window's upper bound, echoed back (ISO 8601 date or date-time); null = unbounded.",
+  })
   to!: string | null;
 }
 

@@ -50,11 +50,21 @@ const BIND_RACE_RE =
 
 /**
  * The server launched but wasn't reachable inside the bridge's fixed 5s window (#709). Retrying
- * genuinely helps here: it's contention, not misconfiguration. Matched broadly on purpose — the
- * bridge wraps the underlying cause, so the refused/os-error wording varies by platform.
+ * genuinely helps here: it's contention, not misconfiguration. Matched on the CONNECT symptom, and
+ * deliberately NOT on the wrapper's generic "Failed to start ephemeral server:" prefix — that
+ * prefix is shared by every startup failure, including a missing CLI or a bad flag, and retrying
+ * one of those three times only delays an unavoidable red. #709's own message carries both, so the
+ * narrower match still catches it:
+ *
+ *   Failed to start ephemeral server: Failed connecting to test server after 5 seconds,
+ *     last error: … Os { code: 111, kind: ConnectionRefused }
+ *                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ matched here, not on the prefix
+ *
+ * Still several alternatives, because the bridge wraps the underlying cause and the refused/os-error
+ * wording varies by platform.
  */
 const STARTUP_TIMEOUT_RE =
-  /failed to start ephemeral server|failed connecting to test server|connection ?refused|os error 111|timed? ?out/i;
+  /failed connecting to test server|connection ?refused|os error 111|timed? ?out/i;
 
 /**
  * Is this failure one of the two known infrastructure flakes — i.e. worth another attempt?
