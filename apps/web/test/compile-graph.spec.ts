@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compileGraph } from "../src/lib/compile-graph";
+import { compileGraph, isEntryType } from "../src/lib/compile-graph";
 import type { CanvasEdge, CanvasNode } from "../src/lib/graph-model";
 
 const at = (x: number) => ({ x, y: 0 });
@@ -314,5 +314,32 @@ describe("compileGraph", () => {
       expect(h?.retry).toBeUndefined();
       expect(h?.config).toEqual({ url: "https://x.test" });
     });
+  });
+});
+
+/**
+ * `isEntryType` is a FUNCTION, not the Set, because `ReadonlySet` is a compile-time type only —
+ * exporting the collection would let any consumer `.add()` to it at runtime and silently change what
+ * the compiler treats as a graph's entry point. The canvas needs the answer, not the collection.
+ */
+describe("isEntryType", () => {
+  it("recognises every trigger the compiler can start a graph from", () => {
+    for (const t of [
+      "start",
+      "webhookTrigger",
+      "scheduleTrigger",
+      "formTrigger",
+      "chatTrigger",
+      "pollTrigger",
+      "errorTrigger",
+    ] as const) {
+      expect(isEntryType(t), t).toBe(true);
+    }
+  });
+
+  it("does not treat an ordinary step as an entry", () => {
+    for (const t of ["agent", "httpRequest", "integration", "end"] as const) {
+      expect(isEntryType(t), t).toBe(false);
+    }
   });
 });

@@ -83,8 +83,9 @@ function entryPosition(existing: XY[], entries: XY[]): XY {
       };
       if (!existing.some((n) => overlaps(n, candidate))) return candidate;
     }
-    // Unreachable for any real graph (1,600 occupied trigger slots). Far left of everything, which
-    // cannot collide by construction.
+    // Unreachable for any real graph: it takes ~79 occupied slots (SCAN-1 below the lowest trigger,
+    // then SCAN in the column left of it) to get here. Far left of everything, which cannot collide
+    // by construction.
     return {
       x: Math.min(...existing.map((n) => n.x)) - 2 * COL_PITCH,
       y: lowest,

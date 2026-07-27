@@ -49,7 +49,7 @@ import {
   safeReturnTo,
   withReturn,
 } from "../lib/canvas-return";
-import { ENTRY_TYPES } from "../lib/compile-graph";
+import { isEntryType } from "../lib/compile-graph";
 import { decompileGraph } from "../lib/decompile-graph";
 import { canSaveWorkflow } from "../lib/permissions-logic";
 import {
@@ -614,13 +614,13 @@ export function CanvasPage() {
           // a node straight onto an existing card. Position now depends on where cards ARE, not how
           // many there are.
           // A TRIGGER is placed upstream of the flow rather than in its first gap — see
-          // nextNodePosition's `entry` option (node-placement.ts). Uses compile-graph's ENTRY_TYPES,
-          // the same list the compiler uses to pick startNodeId, so the canvas and the compiler
-          // can't disagree about what a trigger is.
+          // nextNodePosition's `entry` option (node-placement.ts). Uses compile-graph's
+          // isEntryType — the same list the compiler uses to pick startNodeId, so the canvas and
+          // the compiler can't disagree about what a trigger is.
           position: nextNodePosition(ns.map((n) => n.position), {
-            entry: ENTRY_TYPES.has(kind),
+            entry: isEntryType(kind),
             entries: ns
-              .filter((n) => ENTRY_TYPES.has(n.data.kind))
+              .filter((n) => isEntryType(n.data.kind))
               .map((n) => n.position),
           }),
           data: { kind, config },

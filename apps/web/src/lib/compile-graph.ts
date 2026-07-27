@@ -27,9 +27,7 @@ export interface CompileResult {
 
 // Every node type that can START a graph (be its `startNodeId`). All are handled as entry
 // nodes by the interpreter. Keep in sync with the trigger node types.
-// Exported because the canvas places a trigger differently from a step (node-placement.ts) and must
-// not keep a second copy of this list to decide which is which.
-export const ENTRY_TYPES: ReadonlySet<NodeType> = new Set<NodeType>([
+const ENTRY_TYPES: ReadonlySet<NodeType> = new Set<NodeType>([
   "start",
   "webhookTrigger",
   "scheduleTrigger",
@@ -38,6 +36,19 @@ export const ENTRY_TYPES: ReadonlySet<NodeType> = new Set<NodeType>([
   "pollTrigger",
   "errorTrigger",
 ]);
+
+/**
+ * Is this an ENTRY (trigger) node type — one that can be a graph's `startNodeId`?
+ *
+ * A function rather than the Set itself: `ReadonlySet` is a compile-time type only, so exporting the
+ * Set would hand every consumer something they can `.add()` to at runtime and silently change what
+ * this module treats as a trigger (raised in review). The canvas needs the ANSWER, not the
+ * collection — it places a trigger differently from a step (node-placement.ts) and must not keep a
+ * second copy of this list to decide which is which.
+ */
+export function isEntryType(type: NodeType): boolean {
+  return ENTRY_TYPES.has(type);
+}
 
 export function compileGraph(
   nodes: CanvasNode[],
