@@ -30,7 +30,7 @@ function slotColor(active: number, max: number): string {
   if (max <= 0) return "var(--ink-3)";
   const r = active / max;
   if (r >= 1) return "var(--brand)";
-  if (r >= 0.75) return "var(--state-warn, #d98a2b)";
+  if (r >= 0.75) return "var(--state-paused)";
   return "var(--state-done)";
 }
 

@@ -626,10 +626,10 @@ export function Groups() {
                       fontSize: "var(--text-sm)",
                       lineHeight: "var(--leading-snug)",
                       background: hasAnyGrant
-                        ? "var(--warning-soft, rgba(217,119,6,.12))"
+                        ? "var(--paused-soft)"
                         : "var(--info-soft)",
                       color: hasAnyGrant
-                        ? "var(--state-warning, #b45309)"
+                        ? "var(--state-paused)"
                         : "var(--ink-2)",
                     }}
                   >

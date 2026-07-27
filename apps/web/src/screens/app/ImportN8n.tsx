@@ -35,9 +35,9 @@ function slugifyName(name: string, fallback: string): string {
 }
 
 const STATUS_COLOR: Record<N8nNodeReport["status"], string> = {
-  imported: "var(--ok, var(--brand))",
-  approximated: "var(--warn, #b8860b)",
-  unmapped: "var(--danger, #c0392b)",
+  imported: "var(--state-done)",
+  approximated: "var(--state-paused)",
+  unmapped: "var(--state-error)",
   skipped: "var(--ink-3)",
 };
 
@@ -203,7 +203,7 @@ export function ImportN8n() {
             <span
               style={{
                 fontSize: "var(--text-sm)",
-                color: "var(--danger, #c0392b)",
+                color: "var(--state-error)",
               }}
             >
               {error}
@@ -315,7 +315,7 @@ export function ImportN8n() {
                   style={{
                     paddingTop: 10,
                     marginTop: 10,
-                    borderTop: "1px solid var(--line-soft, var(--line-mid))",
+                    borderTop: "1px solid var(--line-mid)",
                   }}
                 >
                   <div

@@ -138,7 +138,7 @@ export function CurlImportButton({
             margin: "6px 0 0",
             paddingLeft: 16,
             fontSize: "var(--text-xs)",
-            color: "var(--state-warn, var(--ink-3))",
+            color: "var(--state-paused)",
           }}
         >
           {warnings.map((w, i) => (

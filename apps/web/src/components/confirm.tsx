@@ -227,7 +227,7 @@ function ConfirmDialog({
                 borderRadius: 8,
                 display: "grid",
                 placeItems: "center",
-                background: "var(--state-error-soft, rgba(220,70,70,.12))",
+                background: "var(--error-soft)",
                 color: "var(--state-error)",
               }}
             >

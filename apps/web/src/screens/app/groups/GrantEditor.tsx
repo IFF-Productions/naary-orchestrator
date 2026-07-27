@@ -399,8 +399,8 @@ export function GrantEditorDialog({
                 marginTop: 10,
                 padding: "8px 10px",
                 borderRadius: "var(--radius-sm)",
-                background: "var(--warning-soft, rgba(217,119,6,.12))",
-                color: "var(--state-warning, #b45309)",
+                background: "var(--paused-soft)",
+                color: "var(--state-paused)",
                 fontSize: "var(--text-sm)",
                 lineHeight: "var(--leading-snug)",
               }}

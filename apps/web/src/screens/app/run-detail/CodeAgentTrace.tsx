@@ -57,7 +57,7 @@ const KIND_LABEL: Record<TraceStep["kind"], string> = {
 
 const KIND_COLOR: Record<TraceStep["kind"], string> = {
   assistant: "var(--ink-3)",
-  tool: "var(--accent, var(--ink-soft))",
+  tool: "var(--ink-soft)",
   result: "var(--state-done, var(--ink-soft))",
   truncated: "var(--state-paused, var(--ink-3))",
 };
