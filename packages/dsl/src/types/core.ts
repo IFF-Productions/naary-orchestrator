@@ -84,14 +84,14 @@ export interface NodeDef {
    * but backed by Temporal — so UNBOUNDED, exponential, and crash-surviving, vs n8n's hard
    * 5-tries / 5s cap). Overrides the node's default Temporal RetryPolicy.
    *
-   * Honored for the idempotent-ish activity nodes ONLY — the exact set, which must stay in step
-   * with `retryOverride()`'s call sites in the worker and with the canvas's `RETRYABLE_KINDS`:
-   * agent (incl. tooled), textToSpeech, mcpTool, httpRequest, graphQL, sqlQuery, rssRead.
+   * Honored for the idempotent-ish activity nodes ONLY — see `RETRYABLE_NODE_KINDS` below, which
+   * is the single source of truth (the canvas derives its controls from it, and a worker drift
+   * test asserts the handlers match).
    *
-   * Ignored for pure nodes and for the at-most-once nodes (sqlExec/sendEmail/code/codeAgent/
-   * callIntegration-write/mapNode), whose retry would risk a double-effect. A non-retryable
-   * provider error (e.g. 401/429) still won't retry — see the ApplicationFailure.nonRetryable
-   * mapping in the activities.
+   * Ignored for pure nodes and for the at-most-once node kinds — `sqlExec`, `sendEmail`, `code`,
+   * `codeAgent`, `integration` — whose retry would risk a double-effect. A non-retryable provider
+   * error (e.g. 401/429) still won't retry either, whatever this is set to: see the
+   * ApplicationFailure.nonRetryable mapping in the activities.
    */
   retry?: NodeRetryPolicy;
 }
@@ -119,8 +119,9 @@ export interface NodeRetryPolicy {
  * asserts every kind listed here really does route through `retryOverride`.
  *
  * Membership rule: the activity must be idempotent-ish, i.e. re-running it cannot double-act.
- * That excludes sqlExec/sendEmail/code/codeAgent/callIntegration-write/mapNode. Adding a kind
- * here without an idempotent activity turns a retry into duplicate side effects.
+ * That excludes the at-most-once kinds `sqlExec`, `sendEmail`, `code`, `codeAgent` and
+ * `integration` (its write side is what governs — the read side isn't split out as its own kind).
+ * Adding a kind here without an idempotent activity turns one retry into duplicate side effects.
  */
 export const RETRYABLE_NODE_KINDS = [
   "agent",
