@@ -3,6 +3,7 @@ import { ConfirmProvider } from "../src/components";
 import { WorkspaceProvider } from "../src/workspace/WorkspaceProvider";
 import { type ReactNode, useEffect } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { http, HttpResponse } from "msw";
 import { setupWorker } from "msw/browser";
 import { mswLoader } from "msw-storybook-addon/csf3";
 // The real design tokens (--ink / --brand / --surface …) + resets the app renders with. Without
@@ -15,8 +16,22 @@ import "../src/components/components.css";
 // msw-storybook-addon v3 removed the top-level `initialize()`; the worker options fold into
 // `mswLoader`'s setup fn (a factory now). mswLoader memoizes this so the worker starts once.
 // See MIGRATION.md (2.x → 3.x) — this is the codemod's canonical CSF-3 output.
+/**
+ * Default handlers so a story that declares none stays OFFLINE and deterministic.
+ *
+ * `WorkspaceProvider` (added as a global decorator below) fetches `/api/me/workspaces` on mount,
+ * which without this would fire a real request from EVERY story — including pure component ones
+ * like `confirm.stories.tsx` that have no business talking to an API. A story's own
+ * `parameters.msw.handlers` still override these.
+ */
+const defaultHandlers = [
+  http.get("/api/me/workspaces", () =>
+    HttpResponse.json([{ id: "t-demo", displayName: "Acme", role: "owner" }]),
+  ),
+];
+
 const mswSetup = async () => {
-  const worker = setupWorker();
+  const worker = setupWorker(...defaultHandlers);
   await worker.start({ onUnhandledRequest: "bypass" });
   return worker;
 };
@@ -107,8 +122,10 @@ const preview: Preview = {
       },
     },
   },
-  // Order matters: providers are INSIDE the router (WorkspaceProvider navigates) and inside the
-  // theme (so anything they render paints against real tokens).
+  // Providers are innermost: inside the theme so anything they render paints against real tokens,
+  // and inside the router so a story's own `parameters.router` still applies. (Neither provider
+  // needs the router itself — an earlier version of this comment claimed WorkspaceProvider
+  // navigates, and it does not.)
   decorators: [withTheme, withRouter, withProviders],
   loaders: [mswLoader(mswSetup)],
 };
