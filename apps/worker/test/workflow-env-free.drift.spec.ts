@@ -47,7 +47,10 @@ describe("workflow code reads no configuration", () => {
       // value, pass it in as a workflow argument or read it in an activity — both are recorded in
       // history, so a replay sees what the original run saw.
       expect(src).not.toMatch(/process\s*\.\s*env/);
-      expect(src).not.toMatch(/from\s+["'][^"']*\/config["']/);
+      // Any string literal naming a config module, not just `... from "…/config"` — a
+      // side-effect `import "../config"`, a `require("../config")` and a dynamic
+      // `import("../config")` all reach the same module and all name it the same way.
+      expect(src).not.toMatch(/["'][^"']*\/config(\.[jt]s)?["']/);
     },
   );
 });
