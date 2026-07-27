@@ -29,11 +29,18 @@ export function HScroll({
   scrollerStyle,
   /** Re-measure when this changes — content can widen without any box resizing. */
   deps,
+  /**
+   * The colour the fade resolves TO — it must match whatever sits behind the scroller, or the
+   * gradient reads as a grey smear rather than content receding. Defaults to `--panel`, which is
+   * right inside a panel; a chip strip on `--surface` has to say so.
+   */
+  fade = "var(--panel)",
 }: {
   children: ReactNode;
   style?: CSSProperties;
   scrollerStyle?: CSSProperties;
   deps?: unknown;
+  fade?: string;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ left: false, right: false });
@@ -78,7 +85,7 @@ export function HScroll({
               zIndex: 1,
               background: `linear-gradient(to ${
                 side === "left" ? "right" : "left"
-              }, var(--panel), transparent)`,
+              }, ${fade}, transparent)`,
             }}
           />
         ) : null,

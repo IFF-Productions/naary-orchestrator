@@ -13,6 +13,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { HScroll } from "../../components";
 import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import type { CatalogEntry, CategoryId } from "./catalog/catalog-data";
 import {
@@ -72,6 +73,7 @@ export function NodeCatalog() {
   const navigate = useNavigate();
   const phone = useMediaQuery(PHONE_QUERY);
 
+
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<CategoryId | "all">("all");
   const [sel, setSel] = useState<string | null>(null);
@@ -86,7 +88,7 @@ export function NodeCatalog() {
   }, [recents]);
   useEffect(() => {
     const pending = timers.current;
-    return () => pending.forEach(clearTimeout);
+  return () => pending.forEach(clearTimeout);
   }, []);
 
   const query = q.trim().toLowerCase();
@@ -189,6 +191,83 @@ export function NodeCatalog() {
     },
     ...CATEGORIES.map((c) => ({ ...c, count: categoryCount(c.id) })),
   ];
+
+    /**
+   * The category rows, defined ONCE and rendered by both the desktop rail and the phone chip
+   * strip — the two differ only in their container, so duplicating the rows would be two places
+   * to update a count or a label.
+   */
+  const catRail = (
+    <>
+{catRows.map((c) => {
+              const active = !query && cat === c.id;
+              return (
+                <div
+                  key={c.id}
+                  className="nccat-row"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    setCat(c.id);
+                    setQ("");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setCat(c.id);
+                      setQ("");
+                    }
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "8px 10px",
+                    borderRadius: "var(--radius-md)",
+                    cursor: "pointer",
+                    marginBottom: phone ? 0 : 2,
+                    flex: "none",
+                    background: active ? "var(--brand-soft)" : "transparent",
+                    color: active ? "var(--ink)" : "var(--ink-2)",
+                    border: `1px solid ${
+                      active
+                        ? "color-mix(in srgb, var(--brand) 30%, transparent)"
+                        : "transparent"
+                    }`,
+                  }}
+                >
+                  <GlyphTile
+                    path={c.ipath}
+                    color={c.color}
+                    tile={26}
+                    glyph={14}
+                    radius={7}
+                    strokeWidth={1.8}
+                  />
+                  <span
+                    style={{
+                      flex: phone ? "none" : 1,
+                      fontSize: "var(--text-body)",
+                      fontWeight: "var(--weight-medium)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {c.name}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "var(--text-xs)",
+                      fontFamily: "var(--font-mono)",
+                      color: "var(--ink-3)",
+                    }}
+                  >
+                    {c.count}
+                  </span>
+                </div>
+              );
+            })}
+    </>
+  );
 
   return (
     <div style={{ padding: phone ? "14px 12px 24px" : "18px 24px 24px" }}>
@@ -340,95 +419,34 @@ export function NodeCatalog() {
             position: "relative",
           }}
         >
-          {/* category rail (horizontal chip strip on phone) */}
-          <div
-            style={
-              phone
-                ? {
-                    flex: "none",
-                    display: "flex",
-                    gap: 4,
-                    overflowX: "auto",
-                    padding: "10px 12px",
-                    borderBottom: "1px solid var(--line)",
-                  }
-                : {
-                    width: 224,
-                    flex: "none",
-                    borderRight: "1px solid var(--line)",
-                    padding: 12,
-                    overflowY: "auto",
-                  }
-            }
-          >
-            {catRows.map((c) => {
-              const active = !query && cat === c.id;
-              return (
-                <div
-                  key={c.id}
-                  className="nccat-row"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => {
-                    setCat(c.id);
-                    setQ("");
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      setCat(c.id);
-                      setQ("");
-                    }
-                  }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    padding: "8px 10px",
-                    borderRadius: "var(--radius-md)",
-                    cursor: "pointer",
-                    marginBottom: phone ? 0 : 2,
-                    flex: "none",
-                    background: active ? "var(--brand-soft)" : "transparent",
-                    color: active ? "var(--ink)" : "var(--ink-2)",
-                    border: `1px solid ${
-                      active
-                        ? "color-mix(in srgb, var(--brand) 30%, transparent)"
-                        : "transparent"
-                    }`,
-                  }}
-                >
-                  <GlyphTile
-                    path={c.ipath}
-                    color={c.color}
-                    tile={26}
-                    glyph={14}
-                    radius={7}
-                    strokeWidth={1.8}
-                  />
-                  <span
-                    style={{
-                      flex: phone ? "none" : 1,
-                      fontSize: "var(--text-body)",
-                      fontWeight: "var(--weight-medium)",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {c.name}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: "var(--text-xs)",
-                      fontFamily: "var(--font-mono)",
-                      color: "var(--ink-3)",
-                    }}
-                  >
-                    {c.count}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+          {/* Category rail: a vertical rail on desktop, a horizontal CHIP STRIP on phone — that
+              split is deliberate. What was missing is any sign the strip scrolls: #848 measured
+              766px hidden at 390px (68% of it), so two thirds of the categories were unreachable
+              as far as the eye could tell. `HScroll` adds the edge fade and leaves the layout
+              decision alone. */
+          }
+          {phone ? (
+            <HScroll
+              style={{ flex: "none", borderBottom: "1px solid var(--line)" }}
+              scrollerStyle={{ display: "flex", gap: 4, padding: "10px 12px" }}
+              fade="var(--panel)"
+              deps={cat}
+            >
+              {catRail}
+            </HScroll>
+          ) : (
+            <div
+              style={{
+                width: 224,
+                flex: "none",
+                borderRight: "1px solid var(--line)",
+                padding: 12,
+                overflowY: "auto",
+              }}
+            >
+              {catRail}
+            </div>
+          )}
 
           {/* grid */}
           <div

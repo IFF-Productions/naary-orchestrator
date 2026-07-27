@@ -5,7 +5,7 @@ import {
   useState,
 } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Icon, Skeleton, StatusPill } from "../../components";
+import { Button, HScroll, Icon, Skeleton, StatusPill } from "../../components";
 import { api, type RunSummary, UnauthorizedError } from "../../lib/api";
 import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import {
@@ -560,17 +560,20 @@ export function Runs() {
           marginBottom: 14,
         }}
       >
-        <div
+        {/* Tabs can outrun a narrow screen — the existing decision here is to SCROLL rather than
+            clip or wrap, and #848 measured 99–142px hidden at 390px with nothing to indicate it.
+            `HScroll` keeps the decision and adds the missing affordance: an edge fade on whichever
+            side actually has more tabs. Fades to --surface, the strip's own background. */}
+        <HScroll
           style={{
-            display: "flex",
             background: "var(--surface)",
             border: "1px solid var(--line)",
             borderRadius: "var(--radius-sm)",
-            padding: 3,
-            gap: 2,
-            // Tabs can outrun a narrow screen — let them scroll rather than clip/wrap.
-            overflowX: "auto",
+            overflow: "hidden",
           }}
+          scrollerStyle={{ display: "flex", padding: 3, gap: 2 }}
+          fade="var(--surface)"
+          deps={filter}
         >
           {FILTERS.map((f) => {
             const active = f.label === filter;
@@ -603,7 +606,7 @@ export function Runs() {
               </button>
             );
           })}
-        </div>
+        </HScroll>
         <div
           className="input-wrap"
           style={{
