@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import * as path from "node:path";
 import {
   BadRequestException,
+  Logger,
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from "@nestjs/common";
@@ -421,25 +422,55 @@ describe("GraphGeneratorService (claude-code source)", () => {
     expect(binary).toBe("claude");
     expect(args).toContain("--output-format");
     expect(args).toContain("plan");
-    // Turn budget > 1: with tools allowed, a single turn spent on a Read/Grep would end as
-    // error_max_turns with an EMPTY result (the prod empty-head incident).
+    // The turn budget must leave room for a REALISTIC multi-node request. At 4, "incident → agent
+    // → GitHub issue → ack → trigger another workflow" failed with error_max_turns: the granted
+    // Read/Grep/Glob tools each cost a turn before any JSON is emitted. The real bound is the 55s
+    // timeout, enforced by the spawn wrapper regardless, so a low cap only fails requests that were
+    // still making progress.
     const turnIdx = (args as string[]).indexOf("--max-turns");
-    expect(Number((args as string[])[turnIdx + 1])).toBeGreaterThan(1);
+    expect(Number((args as string[])[turnIdx + 1])).toBeGreaterThanOrEqual(12);
   });
 
   it("maps a turn-capped run (error_max_turns, empty result) to a retryable 503 with a clear message", async () => {
+    const warn = vi
+      .spyOn(Logger.prototype, "warn")
+      .mockImplementation(() => undefined);
     execMock.mockResolvedValue({
       stdout: JSON.stringify({
         type: "result",
         subtype: "error_max_turns",
         is_error: true,
         result: "",
+        // The fields that distinguish the failure modes which look identical from outside. A
+        // turn-capped run could NOT be reproduced locally, so prod has to name its own cause.
+        num_turns: 4,
+        stop_reason: "max_turns",
+        api_error_status: 429,
+        permission_denials: [{ tool_name: "Read" }, { tool_name: "Glob" }],
+        duration_ms: 12345,
+        modelUsage: { "claude-opus-4-8": {} },
       }),
       exitCode: 1,
     });
+    // The message must NOT tell the user to shorten a perfectly reasonable description — that was
+    // the old copy, and it blamed the user for a model-side hiccup. It now says "transient, retry"
+    // and points at the streaming providers, which have no turn budget at all.
     await expect(makeService().generate("t-1", "e-1", "flow")).rejects.toThrow(
-      /ran out of turns/,
+      /usually transient/,
     );
+    await expect(
+      makeService().generate("t-1", "e-1", "flow"),
+    ).rejects.not.toThrow(/shorter description/);
+
+    // The log must carry the diagnostics, or the next occurrence is as unexplainable as this one.
+    const line = warn.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(line).toContain("turns=4");
+    expect(line).toContain("denials=2");
+    expect(line).toContain("apiError=429");
+    expect(line).toContain("claude-opus-4-8");
+    // …and must NOT carry the user's instruction (Tier-1 §4 / the generator's privacy note).
+    expect(line).not.toContain("flow");
+    warn.mockRestore();
   });
 
   it("includes the envelope subtype in the unknown-failure log path (empty result + stderr)", async () => {

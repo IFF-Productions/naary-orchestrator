@@ -747,12 +747,15 @@ export class GraphGeneratorService {
       "plan",
       "--allowedTools",
       "Read,Grep,Glob",
-      // 4, not 1: with tools allowed, the model sometimes spends a turn on a Read/Grep before
-      // answering — at max-turns 1 that ends as an `error_max_turns` envelope with an EMPTY
-      // result (exit 1, nothing on stderr), which we shipped as an unexplainable generic 503.
-      // A small budget lets a tool digression complete while still bounding runaway loops.
+      // The turn budget is NOT the real bound — `timeoutMs` (55s) is, and it is enforced by the
+      // spawn wrapper regardless. This only stops a pathological loop, so it should be generous:
+      // at 4 a realistic multi-node request ("incident → agent → GitHub issue → ack → trigger
+      // another workflow") hit `error_max_turns` and failed outright, because tool digressions
+      // (Read/Grep/Glob are granted below) each cost a turn before any JSON is emitted. Raising it
+      // cannot make a request slower than the timeout already allows — it only stops us failing a
+      // request the model was still making progress on.
       "--max-turns",
-      "4",
+      "12",
       "--append-system-prompt",
       SYSTEM_PROMPT,
     ];
@@ -792,6 +795,8 @@ export class GraphGeneratorService {
     let result = "";
     let subtype: string | undefined;
     let isError = exitCode !== 0;
+    /** Non-secret envelope fields, logged on any failure so prod names its own cause. */
+    let diagnostics = "turns=? (no envelope)";
     try {
       const envlp = JSON.parse(stdout.trim()) as {
         result?: string;
@@ -799,10 +804,41 @@ export class GraphGeneratorService {
         /** The CLI's failure reason (e.g. "error_max_turns") — often the ONLY clue when
          *  result and stderr are both empty. */
         subtype?: string;
+        /** Turns actually consumed, why it stopped, whether the API errored, and which tool calls
+         *  were REFUSED. All non-secret, and together they distinguish the failure modes that look
+         *  identical from outside — see `diagnostics` below. */
+        num_turns?: number;
+        stop_reason?: string;
+        terminal_reason?: string;
+        api_error_status?: unknown;
+        permission_denials?: unknown[];
+        duration_ms?: number;
+        modelUsage?: Record<string, unknown>;
       };
       subtype = typeof envlp.subtype === "string" ? envlp.subtype : undefined;
       result = typeof envlp.result === "string" ? envlp.result : "";
       isError = isError || envlp.is_error === true;
+      /**
+       * Why these are logged (#build-ai): a turn-capped generate could NOT be reproduced locally —
+       * five live variants of the exact shipped invocation (with/without the tool grant, turn
+       * budget 4 and 12, empty and project cwd) all produced the 6-node graph in ONE turn. So the
+       * cause is environmental, and the two candidates are invisible today:
+       *   - `permission_denials` — a tool call refused under `--permission-mode plan` can loop:
+       *     attempt, denial, attempt … each one a turn, ending capped with an EMPTY result, which is
+       *     exactly the shape this branch handles.
+       *   - `api_error_status` — a provider overload/limit makes the model stall rather than answer.
+       * `num_turns` alone settles whether the budget was even reached. Names of models and tools are
+       * not secrets; the user's instruction is never included.
+       */
+      diagnostics = [
+        `turns=${envlp.num_turns ?? "?"}`,
+        `stop=${envlp.stop_reason ?? "?"}`,
+        `terminal=${envlp.terminal_reason ?? "?"}`,
+        `apiError=${envlp.api_error_status === undefined ? "none" : JSON.stringify(envlp.api_error_status).slice(0, 80)}`,
+        `denials=${Array.isArray(envlp.permission_denials) ? envlp.permission_denials.length : 0}`,
+        `durationMs=${envlp.duration_ms ?? "?"}`,
+        `models=${Object.keys(envlp.modelUsage ?? {}).join(",") || "?"}`,
+      ].join(" ");
     } catch {
       isError = true;
     }
@@ -838,17 +874,17 @@ export class GraphGeneratorService {
       // it's a model-behavior hiccup, not an outage.
       if (subtype === "error_max_turns") {
         this.logger.warn(
-          `graph generate (claude-code): turn-capped without a result (exit=${exitCode})`,
+          `graph generate (claude-code): turn-capped without a result (exit=${exitCode}) ${diagnostics}`,
         );
         throw new ServiceUnavailableException(
-          "Claude Code ran out of turns before producing the workflow. Try again — or rephrase with a shorter description.",
+          "Claude Code kept working without producing the workflow. This is usually transient — try again. If it repeats on the same description, switch the provider (Claude/GPT/Gemini stream the graph directly and have no turn budget).",
         );
       }
       // Unknown/unexpected failure — surface as an ERROR (a real problem worth an alert, not just a
       // warn), with the stderr head AND the envelope subtype (often the only clue when both
       // streams are empty).
       this.logger.error(
-        `graph generate (claude-code): CLI reported failure (exit=${exitCode}, subtype=${subtype ?? "none"}, head: ${head})`,
+        `graph generate (claude-code): CLI reported failure (exit=${exitCode}, subtype=${subtype ?? "none"}, ${diagnostics}, head: ${head})`,
       );
       throw new ServiceUnavailableException(
         "Claude Code couldn't generate a workflow right now. Try again.",
