@@ -103,7 +103,12 @@ export class PinsController {
          *  node meters no cost (pure nodes). */
         costUsd: number | null;
       }
-    | { pure: false; message: string }
+    /**
+     * Not a pure-node result. TWO different situations, and the canvas must tell them apart:
+     * `failed` absent = this node type can't be tested in isolation (informational); `failed:true`
+     * = the test RAN and failed, which belongs on the node as an error, not in a status line.
+     */
+    | { pure: false; message: string; failed?: boolean }
   > {
     // ACTIVE env throughout (Slice 6b): the graph read, the pins, and the creds/connections the
     // activity fetches all live in the env the caller selected (absent header = tenant default).
@@ -193,7 +198,10 @@ export class PinsController {
       this.logger.warn(
         `node test failed: ${workflowKey}/${node.id} (tenant=${tenantId}, env=${envId}) — ${failureChain(e).join(" ⇐ ")}`,
       );
-      return { pure: false, message: `Test run failed: ${reason}` };
+      // `failed: true` — see the return type. Without it the canvas cleared the node's state and
+      // showed this in a transient status line, so the reason #825 worked to recover was thrown
+      // away one layer later: "not being surfaced to logs or to the user to see why its failing".
+      return { pure: false, failed: true, message: `Test run failed: ${reason}` };
     }
   }
 
