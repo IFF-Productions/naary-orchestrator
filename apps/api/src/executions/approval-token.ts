@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { encryptionKey } from "../config";
+import { APPROVAL_LINK_TTL_SECONDS } from "@naary/contracts";
 
 /**
  * Signed approve/reject links for a paused humanApproval run (design: the notification-links gap).
@@ -23,8 +24,9 @@ function signingKey(): string {
   return k;
 }
 
-/** How long a newly minted approval link stays valid (matches the worker's constant). */
-export const APPROVAL_LINK_TTL_SECONDS = 7 * 24 * 3600;
+/** How long a newly minted approval link stays valid. Shared with the worker that MINTS the
+ *  links (#805) — when these were two constants, drift meant a link Slack shows and we reject. */
+export { APPROVAL_LINK_TTL_SECONDS };
 
 /** Unforgeable per-run token = HMAC-SHA256(ENCRYPTION_KEY, "approval:"+workflowId[+":"+exp]),
  *  hex. The token authorizes DECIDING the run (approve OR reject); the chosen decision travels

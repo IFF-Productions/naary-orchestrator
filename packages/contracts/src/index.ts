@@ -154,6 +154,82 @@ export interface NodeTimeEntry {
 export type FailureKind =
   "timeout" | "upstream_5xx" | "rate_limit" | "budget" | "rejected" | "error";
 
+/**
+ * WHICH STATUSES ARE "TERMINAL" — three different questions that were being answered by five
+ * separate lists, one of which disagreed with the others (#805).
+ *
+ * They are genuinely different sets, so they get genuinely different names. The old shared name
+ * `TERMINAL_STATUSES` across two of these concepts was the actual hazard: it made the narrower
+ * list look like a copy that had drifted, which invites "fixing" it by widening — and that would
+ * silently change what the worker classifies and when it stamps `finishedAt`.
+ */
+
+/**
+ * EVERY status a finished run can be reported under: the terminals a workflow returns PLUS the
+ * Temporal close reasons the API maps (`failed`/`timed_out`/`terminated`/`canceled`), which no
+ * workflow ever assigns itself.
+ *
+ * The question "is this run over?" — asked by the API, the CLI's `watch`, and the SPA. The CLI and
+ * the SPA keep their own copies on purpose (see the drift test in test/): `@naary/cli` is
+ * deliberately dependency-free ("Node built-ins only; imports NO server code" — its package.json),
+ * and this module calls `defineSignal` at load, so importing it into the browser bundle would drag
+ * in the Temporal SDK. Those copies are CHECKED rather than shared.
+ */
+export const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
+  "completed",
+  "rejected",
+  "budget_exceeded",
+  "circuit_open",
+  "invalid_graph",
+  "failed",
+  "timed_out",
+  "terminated",
+  "canceled",
+]);
+
+/**
+ * The terminals a `runGraph` workflow itself reports — i.e. everything `setExecutionStatus` can
+ * actually receive. NARROWER than the above by design, and it must stay that way: it gates
+ * `finishedAt` and the status-derived `failureKind`.
+ *
+ * Verified when this was extracted: `timed_out`/`terminated`/`canceled` appear nowhere in the
+ * worker or the API outside the Temporal close-status map, so none of them ever reaches that
+ * activity. (A canceled run's row therefore never gets a `finishedAt` at all — a real gap, filed
+ * separately rather than papered over by widening this set.)
+ */
+export const RETURNED_TERMINAL_STATUSES: ReadonlySet<string> = new Set([
+  "completed",
+  "rejected",
+  "budget_exceeded",
+  "circuit_open",
+  "invalid_graph",
+  "failed",
+]);
+
+/**
+ * The returned terminals that mean the run did NOT succeed — what decides whether the tenant's
+ * error-handler graph starts and whether a failure notification goes out.
+ *
+ * Excludes `failed`, which is the status the failure path WRITES after already knowing it threw;
+ * the workflow tests `threw !== undefined` separately for that.
+ */
+export const RETURNED_FAILURE_STATUSES: ReadonlySet<string> = new Set([
+  "rejected",
+  "budget_exceeded",
+  "circuit_open",
+  "invalid_graph",
+]);
+
+/**
+ * How long a newly minted approval link stays valid. Generous — a human-in-the-loop pause can last
+ * days; the expiry claim exists so a leaked link isn't a forever-credential.
+ *
+ * Shared because BOTH sides must agree: the worker mints these links in its notification activity
+ * and the API verifies them. They were two identical constants in two files, each with a comment
+ * saying it had to match the other — so drift here means a link Slack shows and the API rejects.
+ */
+export const APPROVAL_LINK_TTL_SECONDS = 7 * 24 * 3600;
+
 /** Human approval: delivered as a Signal, awaited via condition() in the workflow. */
 export const approvalSignal = defineSignal<[ApprovalInput]>("approval");
 

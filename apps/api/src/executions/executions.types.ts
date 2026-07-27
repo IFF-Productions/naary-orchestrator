@@ -182,15 +182,7 @@ export interface RawHistoryEvent {
   workflowExecutionContinuedAsNewEventAttributes?: unknown;
 }
 
-/** Run statuses that won't change again — the read-model is authoritative for these. */
-export const TERMINAL_STATUSES = new Set([
-  "completed",
-  "rejected",
-  "budget_exceeded",
-  "circuit_open",
-  "invalid_graph",
-  "failed",
-  "timed_out",
-  "terminated",
-  "canceled",
-]);
+/** Run statuses that won't change again — the read-model is authoritative for these. Defined in
+ *  @naary/contracts (#805) because the worker answers narrower versions of the same question and
+ *  the three lists must not drift; re-exported here so existing importers are unaffected. */
+export { TERMINAL_STATUSES } from "@naary/contracts";
