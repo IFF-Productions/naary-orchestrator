@@ -137,6 +137,10 @@ describe("DryRunService", () => {
     const cred = res.nodes[0].checks.find((c) => c.kind === "credential");
     expect(cred?.skipped).toBe(true);
     expect(res.ok).toBe(true); // a skipped check must not fail the flow
+    // …and it is NOT counted as a probe: no request was made, so counting it would overstate both
+    // the cost and how much the run actually verified.
+    expect(res.probed).toBe(0);
+    expect(res.unprobeable).toBe(1);
   });
 
   /** An unreachable provider is a RESULT, not an exception that loses the other nodes' verdicts. */

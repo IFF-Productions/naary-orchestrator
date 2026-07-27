@@ -4,7 +4,8 @@ import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 export class GraphTagResponse {
   @ApiProperty({ example: "9a8b7c6d-…" }) id!: string;
   @ApiProperty({ example: "production" }) name!: string;
-  @ApiProperty({ type: String, nullable: true, example: "#6366f1" }) color!: string | null;
+  @ApiProperty({ type: String, nullable: true, example: "#6366f1" }) color!:
+    string | null;
 }
 
 /** One row in the workflows list (latest version per key). */
@@ -232,7 +233,8 @@ export class DryRunCheckResponse {
   kind!: string;
   @ApiProperty({
     example: false,
-    description: "False means this check found a problem. A skipped check is never false.",
+    description:
+      "False means this check found a problem. A skipped check is never false.",
   })
   ok!: boolean;
   @ApiProperty({
@@ -240,7 +242,8 @@ export class DryRunCheckResponse {
     nullable: true,
     example:
       "PagerDuty answered 401 to pagerduty.list_incidents — the token was rejected",
-    description: "Why it failed, or why it was skipped. Never contains a credential.",
+    description:
+      "Why it failed, or why it was skipped. Never contains a credential.",
   })
   message?: string | null;
   @ApiProperty({
@@ -266,7 +269,8 @@ export class DryRunNodeResponse {
 export class DryRunResponse {
   @ApiProperty({
     example: false,
-    description: "True when every check passed. A skipped check does not fail the run.",
+    description:
+      "True when every check passed. A skipped check does not fail the run.",
   })
   ok!: boolean;
   @ApiProperty({
@@ -276,6 +280,13 @@ export class DryRunResponse {
       "is about the credential, so a flow with six GitHub steps costs one probe.",
   })
   probed!: number;
+  @ApiProperty({
+    example: 1,
+    description:
+      "Connections we declined to probe because the provider has no read taking zero required " +
+      "fields (GitHub, Slack, Jira and others). Their credentials were NOT verified.",
+  })
+  unprobeable!: number;
   @ApiProperty({ type: [DryRunNodeResponse] })
   nodes!: DryRunNodeResponse[];
 }

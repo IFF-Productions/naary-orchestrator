@@ -17633,6 +17633,11 @@
             "example": 2,
             "description": "How many connections were probed. One per DISTINCT connection, not per node — the verdict is about the credential, so a flow with six GitHub steps costs one probe."
           },
+          "unprobeable": {
+            "type": "number",
+            "example": 1,
+            "description": "Connections we declined to probe because the provider has no read taking zero required fields (GitHub, Slack, Jira and others). Their credentials were NOT verified."
+          },
           "nodes": {
             "type": "array",
             "items": {
@@ -17643,6 +17648,7 @@
         "required": [
           "ok",
           "probed",
+          "unprobeable",
           "nodes"
         ]
       },

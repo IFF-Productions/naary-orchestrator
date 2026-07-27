@@ -191,6 +191,67 @@ describe("GraphsController", () => {
   });
 });
 
+/**
+ * DRY RUN route wiring (#832). The service's own behaviour is covered in dry-run.service.spec.ts;
+ * what matters HERE is the seam: the route resolves the environment, authorizes as a graph read,
+ * and hands the SAVED graph to the service — never the request body.
+ */
+describe("GraphsController POST /graphs/:key/dry-run", () => {
+  const dryStub = (result: unknown) => ({
+    check: vi.fn().mockResolvedValue(result),
+  });
+
+  it("resolves the env, reads the saved graph, and delegates to DryRunService", async () => {
+    const result = { ok: true, probed: 1, unprobeable: 0, nodes: [] };
+    const getLatestNamed = vi
+      .fn()
+      .mockResolvedValue({
+        workflowKey: "canvas",
+        version: 2,
+        graph: validGraph,
+      });
+    const dry = dryStub(result);
+    const controller = new GraphsController(
+      { getLatestNamed } as unknown as GraphsService,
+      {} as unknown as GraphGeneratorService,
+      lifecycleStub,
+      envStub,
+      dry as unknown as DryRunService,
+    );
+
+    expect(await controller.dryRun("t-1", "canvas")).toBe(result);
+    // Authorization rides on this read: `principal` must reach it, or `view` is never asserted.
+    expect(getLatestNamed).toHaveBeenCalledWith(
+      "t-1",
+      "e1",
+      "canvas",
+      undefined,
+    );
+    // The graph checked is the SAVED one, not anything the caller supplied.
+    expect(dry.check).toHaveBeenCalledWith("t-1", validGraph);
+  });
+
+  it("404s — and probes nothing — when the workflowKey is unknown", async () => {
+    const dry = dryStub({ ok: true, probed: 0, unprobeable: 0, nodes: [] });
+    const controller = new GraphsController(
+      {
+        getLatestNamed: vi.fn().mockResolvedValue(null),
+      } as unknown as GraphsService,
+      {} as unknown as GraphGeneratorService,
+      lifecycleStub,
+      envStub,
+      dry as unknown as DryRunService,
+    );
+
+    await expect(controller.dryRun("t-1", "nope")).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    // The 404 must come BEFORE any provider call — otherwise an unauthorized caller could probe
+    // connections by guessing keys.
+    expect(dry.check).not.toHaveBeenCalled();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // SSE generation route: heartbeats keep the proxy alive while the model runs;
 // the stream always ends in a `result` or `error` frame (never a thrown 500 —

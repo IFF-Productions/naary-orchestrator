@@ -1,5 +1,4 @@
 import { Global, Module } from "@nestjs/common";
-import { ConnectionService } from "@naary/connections";
 import { CredentialsService } from "@naary/secrets";
 import { ConnectionsModule } from "../connections/connections.module";
 import { EnvironmentsModule } from "../environments/environments.module";
@@ -42,8 +41,10 @@ import { WorkflowLifecycleService } from "./workflow-lifecycle.service";
     // Plain class from @naary/secrets (reads ENCRYPTION_KEY at construction); the
     // generator decrypts the tenant's provider key in-request for the model call.
     { provide: CredentialsService, useFactory: () => new CredentialsService() },
-    // The generator lists the tenant's connections so it uses real connectionIds.
-    { provide: ConnectionService, useFactory: () => new ConnectionService() },
+    // ConnectionService is NOT re-provided here: it comes from ConnectionsModule's exports (see
+    // imports). Providing it locally too would give the app two instances — one behind
+    // ConnectionTestService, one behind the generator — which is a latent split-brain the moment
+    // that service holds any state.
   ],
   exports: [
     GraphsService,

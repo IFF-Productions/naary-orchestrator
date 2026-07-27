@@ -55,8 +55,14 @@ export interface DryRunNodeResult {
 export interface DryRunResult {
   /** False when ANY check failed. A skipped check never fails the run. */
   ok: boolean;
-  /** How many connections were actually probed — the only part that costs a network call. */
+  /**
+   * How many connections we actually called out to — the only part that costs anything. A
+   * connection we declined to probe (no zero-argument read exists) is NOT counted: it made no
+   * request, so counting it would overstate both the cost and the strength of the verdict.
+   */
   probed: number;
+  /** Connections skipped for want of a probe — the gap between `probed` and full coverage (#835). */
+  unprobeable: number;
   nodes: DryRunNodeResult[];
 }
 
@@ -122,13 +128,16 @@ export class DryRunService {
       nodes.push({ nodeId: node.id, type: node.type, checks });
     }
 
+    const verdicts = [...probes.values()];
     const result: DryRunResult = {
       ok: nodes.every((n) => n.checks.every((c) => c.ok || c.skipped)),
-      probed: probes.size,
+      probed: verdicts.filter((v) => !v.skipped).length,
+      unprobeable: verdicts.filter((v) => v.skipped).length,
       nodes,
     };
     this.logger.log(
-      `dry run: ${nodes.length} node(s), ${result.probed} credential probe(s), ok=${result.ok}`,
+      `dry run: ${nodes.length} node(s), ${result.probed} credential probe(s), ` +
+        `${result.unprobeable} unprobeable, ok=${result.ok}`,
     );
     return result;
   }

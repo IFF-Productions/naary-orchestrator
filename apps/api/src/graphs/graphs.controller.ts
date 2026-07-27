@@ -297,10 +297,16 @@ export class GraphsController {
    * restricts to `write: false` actions. No node is executed, so this is safe to press on a flow
    * with real side effects. Each connection is probed once even when several nodes share it.
    *
-   * Authorized as a READ of the graph (`getLatestNamed` asserts `view`): a dry run starts nothing
-   * and changes nothing. It does spend one provider call per distinct connection, which is why the
-   * probe is capped at one per connection and why it lives behind an explicit button rather than
-   * running continuously.
+   * WHAT IT DOES CHANGE — the docstring here used to say "changes nothing", which was wrong:
+   * `ConnectionTestService` records the outcome on the connection row (`setStatus` →
+   * `connected` / `needs_reauth` / `error`), exactly as the Integrations "Test" button does. So a
+   * dry run refreshes the connection health you see in Integrations. Nothing at the PROVIDER is
+   * touched (the probe is a `write: false` read) and no node or workflow runs.
+   *
+   * Authorized as a READ of the graph (`getLatestNamed` asserts `view`): a dry run starts no
+   * execution, and its only write is that status refresh on the tenant's own connection rows. It
+   * spends one provider call per distinct connection, which is why the probe is capped at one per
+   * connection and why it lives behind an explicit button rather than running continuously.
    */
   @ApiEndpoint({
     summary: "Dry-run a workflow (no execution)",
@@ -320,7 +326,7 @@ export class GraphsController {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
     // Authorization rides on the graph read — `getLatestNamed` asserts `view` for the actor, the
     // same gate every other read on this controller uses. (A dry run reads and probes; it starts
-    // nothing.)
+    // no execution. See the note above on the one thing it does write.)
     const found = await this.graphs.getLatestNamed(
       tenantId,
       envId,
