@@ -1,5 +1,5 @@
-import { readFileSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { isRetryableStartupFailure } from "./local-test-env";
 
@@ -42,6 +42,20 @@ describe("startup-failure classification", () => {
    * The other direction matters just as much: retrying a misconfiguration three times only delays
    * an unavoidable red, and would make a genuine break look like flakiness.
    */
+  /**
+   * The wrapper prefix "Failed to start ephemeral server:" is shared by EVERY startup failure, so
+   * matching it would retry a missing binary or a bad flag three times before reporting an
+   * unavoidable red. Only the CONNECT symptom is retryable — #709's message carries both, which is
+   * why the narrower match still catches it (above).
+   */
+  it("does NOT retry on the generic wrapper prefix alone", () => {
+    expect(
+      isRetryableStartupFailure(
+        "Error: Failed to start ephemeral server: unknown flag: --nope",
+      ),
+    ).toBe(false);
+  });
+
   it.each([
     ["a missing CLI", "Error: spawn temporal ENOENT"],
     ["a bad executable", "Error: unknown flag: --nope"],
@@ -52,13 +66,29 @@ describe("startup-failure classification", () => {
   });
 });
 
-describe("every spec gets its Temporal from the retrying helper", () => {
-  const specs = readdirSync(TEST_DIR).filter((f) => f.endsWith(".spec.ts"));
+/** RECURSIVE: a spec moved into a subdirectory must still be checked. A flat readdir would have
+ *  silently stopped covering it — the drift guard would keep passing while the file it was meant to
+ *  watch drifted. */
+function specFiles(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) return specFiles(p);
+    return name.endsWith(".spec.ts") ? [p] : [];
+  });
+}
 
-  /** Guards the guard: an empty or mis-resolved directory must fail, not pass vacuously. */
+describe("every spec gets its Temporal from the retrying helper", () => {
+  const specs = specFiles(TEST_DIR).map((p) => relative(TEST_DIR, p));
+
+  /**
+   * Guards the guard: a mis-resolved directory must fail rather than pass vacuously. Anchored on a
+   * FILE that must exist rather than a count — a count is a hostage to legitimate refactors
+   * (renames, consolidation), and the walk is recursive now so moving specs around can't shrink it.
+   */
   it("is looking at the real spec directory", () => {
-    expect(specs.length).toBeGreaterThan(20);
     expect(specs).toContain("chaos-durability.e2e.spec.ts");
+    expect(specs).toContain("temporal-env-usage.drift.spec.ts");
+    expect(specs.length).toBeGreaterThan(5);
   });
 
   /**

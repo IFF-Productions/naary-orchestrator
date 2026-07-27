@@ -432,9 +432,12 @@ describe("GraphGeneratorService (claude-code source)", () => {
   });
 
   it("maps a turn-capped run (error_max_turns, empty result) to a retryable 503 with a clear message", async () => {
+    // Restored in a finally below — an assertion throwing mid-test would otherwise leave the spy
+    // installed and swallow every later warn in this file (vitest isn't configured to auto-restore).
     const warn = vi
       .spyOn(Logger.prototype, "warn")
       .mockImplementation(() => undefined);
+    try {
     execMock.mockResolvedValue({
       stdout: JSON.stringify({
         type: "result",
@@ -455,22 +458,33 @@ describe("GraphGeneratorService (claude-code source)", () => {
     // The message must NOT tell the user to shorten a perfectly reasonable description — that was
     // the old copy, and it blamed the user for a model-side hiccup. It now says "transient, retry"
     // and points at the streaming providers, which have no turn budget at all.
-    await expect(makeService().generate("t-1", "e-1", "flow")).rejects.toThrow(
-      /usually transient/,
-    );
-    await expect(
-      makeService().generate("t-1", "e-1", "flow"),
-    ).rejects.not.toThrow(/shorter description/);
+      // ONE call, both assertions off the same rejection — a second generate() would spend
+      // another round of mocks and logging to re-check the same string.
+      // `rejects` would need two calls to make two assertions; catching once gives both the type
+      // and the message from a single run.
+      const err = await makeService()
+        .generate("t-1", "e-1", "flow")
+        .then(
+          () => null,
+          (e: unknown) => e as Error,
+        );
+      expect(err).toBeInstanceOf(ServiceUnavailableException);
+      expect(err?.message).toMatch(/usually transient/);
+      // The old copy told the user to shorten a perfectly reasonable description — it blamed them
+      // for a model-side hiccup. It must not come back.
+      expect(err?.message).not.toMatch(/shorter description/);
 
-    // The log must carry the diagnostics, or the next occurrence is as unexplainable as this one.
-    const line = warn.mock.calls.map((c) => String(c[0])).join("\n");
-    expect(line).toContain("turns=4");
-    expect(line).toContain("denials=2");
-    expect(line).toContain("apiError=429");
-    expect(line).toContain("claude-opus-4-8");
-    // …and must NOT carry the user's instruction (Tier-1 §4 / the generator's privacy note).
-    expect(line).not.toContain("flow");
-    warn.mockRestore();
+      // The log must carry the diagnostics, or the next occurrence is as unexplainable as this one.
+      const line = warn.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(line).toContain("turns=4");
+      expect(line).toContain("denials=2");
+      expect(line).toContain("apiError=429");
+      expect(line).toContain("claude-opus-4-8");
+      // …and must NOT carry the user's instruction (Tier-1 §4 / the generator's privacy note).
+      expect(line).not.toContain("flow");
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("includes the envelope subtype in the unknown-failure log path (empty result + stderr)", async () => {

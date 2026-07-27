@@ -751,7 +751,7 @@ export class GraphGeneratorService {
       // spawn wrapper regardless. This only stops a pathological loop, so it should be generous:
       // at 4 a realistic multi-node request ("incident → agent → GitHub issue → ack → trigger
       // another workflow") hit `error_max_turns` and failed outright, because tool digressions
-      // (Read/Grep/Glob are granted below) each cost a turn before any JSON is emitted. Raising it
+      // (the Read/Grep/Glob grant above) each cost a turn before any JSON is emitted. Raising it
       // cannot make a request slower than the timeout already allows — it only stops us failing a
       // request the model was still making progress on.
       "--max-turns",
@@ -877,7 +877,7 @@ export class GraphGeneratorService {
           `graph generate (claude-code): turn-capped without a result (exit=${exitCode}) ${diagnostics}`,
         );
         throw new ServiceUnavailableException(
-          "Claude Code kept working without producing the workflow. This is usually transient — try again. If it repeats on the same description, switch the provider (Claude/GPT/Gemini stream the graph directly and have no turn budget).",
+          "Claude Code hit its internal step limit before producing the workflow. This is usually transient — try again. If it repeats on the same description, switch the provider: Claude, GPT and Gemini stream the graph directly and have no step limit.",
         );
       }
       // Unknown/unexpected failure — surface as an ERROR (a real problem worth an alert, not just a
