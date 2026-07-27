@@ -933,6 +933,7 @@ export function CanvasPage() {
         issuesSevere={
           resourceWarnings.length > 0 || (dryRun?.issues.length ?? 0) > 0
         }
+        hasVerdict={!!dryRun}
         showIssues={showIssues}
         onToggleIssues={() => setShowIssues((s) => !s)}
         env={envChip}

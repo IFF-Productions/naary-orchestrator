@@ -83,6 +83,7 @@ export function CanvasTopBar({
   graphError,
   issuesCount,
   issuesSevere,
+  hasVerdict,
   showIssues,
   onToggleIssues,
   env,
@@ -120,6 +121,8 @@ export function CanvasTopBar({
   graphError?: string | null;
   issuesCount: number;
   issuesSevere: boolean;
+  /** A dry-run verdict exists — the panel has something to show even at zero issues (#832). */
+  hasVerdict: boolean;
   showIssues: boolean;
   onToggleIssues: () => void;
   /** The active environment (real, from the env store); omit to hide the chip. */
@@ -340,15 +343,30 @@ export function CanvasTopBar({
           }
         />
       )}
-      {!phone && !generating && issuesCount > 0 && (
+      {/* `hasVerdict` is why this isn't just `issuesCount > 0`: a CLEAN dry run has no issues but
+          does have something to say (what it verified, and what it couldn't — #835). Gating on the
+          count alone let the user collapse that panel and left them no control to reopen it. */}
+      {!phone && !generating && (issuesCount > 0 || hasVerdict) && (
         <button
           type="button"
           onClick={onToggleIssues}
-          title="Show details of every issue"
-          className={`pill ${issuesSevere ? "pill-error" : "pill-paused"}`}
+          title={
+            issuesCount > 0
+              ? "Show details of every issue"
+              : "Show what the last check covered"
+          }
+          className={`pill ${
+            issuesCount === 0
+              ? "pill-done"
+              : issuesSevere
+                ? "pill-error"
+                : "pill-paused"
+          }`}
           style={{ border: "none", cursor: "pointer", flex: "none" }}
         >
-          ⚠ {issuesCount} issue{issuesCount > 1 ? "s" : ""}{" "}
+          {issuesCount > 0
+            ? `⚠ ${issuesCount} issue${issuesCount > 1 ? "s" : ""} `
+            : "✓ checked "}
           {showIssues ? "▲" : "▼"}
         </button>
       )}
