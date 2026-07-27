@@ -22,6 +22,7 @@ import {
 import { Logo } from "../../components";
 import "./auth.css";
 import { WorkflowSimulation } from "./WorkflowSimulation";
+import { authErrorMessage } from "../../lib/auth-errors";
 import {
   type AuthMode,
   type FocusField,
@@ -175,7 +176,9 @@ export function AuthScreen({
   function fail(e: unknown): void {
     clearTimers();
     setStage("failed");
-    setError(e instanceof Error ? e.message : "Authentication failed.");
+    // Never the raw `e.message`: Firebase's is `Firebase: Error (auth/popup-blocked).`, which
+    // reads like a crash and says nothing actionable. See ./auth-errors.
+    setError(authErrorMessage(e));
   }
 
   function submit(): void {
