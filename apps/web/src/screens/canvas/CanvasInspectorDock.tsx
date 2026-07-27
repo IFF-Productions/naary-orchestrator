@@ -39,6 +39,7 @@ export function CanvasInspectorDock({
   runNodeTest,
   updateConfig,
   deleteNode,
+  renameNodeId,
   updateEdgeCondition,
   clearEdgeCondition,
   deleteEdge,
@@ -69,6 +70,8 @@ export function CanvasInspectorDock({
   runNodeTest: (nodeId: string, autofill?: boolean) => Promise<TestNodeResult>;
   updateConfig: (nodeId: string, patch: Record<string, unknown>) => void;
   deleteNode: (id: string) => void;
+  /** Rename a node's id (#833) — returns an error to show inline, or null on success. */
+  renameNodeId: (oldId: string, newId: string) => string | null;
   updateEdgeCondition: (
     edgeId: string,
     patch: Partial<EdgeConditionDraft>,
@@ -105,6 +108,7 @@ export function CanvasInspectorDock({
     <InspectorDock
       key={selected?.id ?? "empty"}
       nodeId={selected?.id}
+      onRenameNode={renameNodeId}
       kind={selected?.data.kind}
       title={
         selected

@@ -99,6 +99,113 @@ function Elapsed({ since }: { since: number }) {
   return <>{((now - since) / 1000).toFixed(2)}s</>;
 }
 
+/**
+ * The node id, editable in place (#833).
+ *
+ * The id — not the display `name` — is what every `{{ … }}` expression references, so it is the
+ * string authors actually read and type. Renaming it rewrites every reference (see the DSL's
+ * `renameNode`); this control is only the affordance.
+ *
+ * Commits on Enter or blur, reverts on Escape. A rejected name (duplicate, or characters the
+ * expression grammar can't parse) keeps the editor open with the reason under it, because
+ * silently reverting what someone typed reads like the app ate their input.
+ */
+function NodeIdEditor({
+  nodeId,
+  onRename,
+}: {
+  nodeId: string;
+  onRename: (next: string) => string | null;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(nodeId);
+  const [error, setError] = useState<string | null>(null);
+
+  const commit = () => {
+    const next = draft.trim();
+    if (next === nodeId) {
+      setEditing(false);
+      setError(null);
+      return;
+    }
+    const failure = onRename(next);
+    if (failure) {
+      setError(failure);
+      return; // stay open, keep what they typed
+    }
+    setEditing(false);
+    setError(null);
+  };
+
+  if (!editing)
+    return (
+      <button
+        type="button"
+        title="Rename this node — every expression that references it is rewritten"
+        onClick={() => {
+          setDraft(nodeId);
+          setError(null);
+          setEditing(true);
+        }}
+        style={{
+          font: "inherit",
+          color: "inherit",
+          background: "none",
+          border: "none",
+          borderBottom: "1px dashed var(--line-2)",
+          padding: 0,
+          cursor: "text",
+        }}
+      >
+        {nodeId}
+      </button>
+    );
+
+  return (
+    <>
+      <input
+        // biome-ignore lint/a11y/noAutofocus: the field only exists because the user clicked it
+        autoFocus
+        value={draft}
+        aria-label="Node id"
+        onChange={(e) => {
+          setDraft(e.target.value);
+          setError(null);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") {
+            setEditing(false);
+            setError(null);
+          }
+        }}
+        onBlur={commit}
+        style={{
+          font: "inherit",
+          color: "var(--ink)",
+          background: "var(--card)",
+          border: `1px solid ${error ? "var(--state-error)" : "var(--line-2)"}`,
+          borderRadius: "var(--radius-sm)",
+          padding: "1px 5px",
+          width: `${Math.max(8, draft.length + 1)}ch`,
+        }}
+      />
+      {error && (
+        <div
+          role="alert"
+          style={{
+            color: "var(--state-error)",
+            marginTop: 3,
+            whiteSpace: "normal",
+          }}
+        >
+          {error}
+        </div>
+      )}
+    </>
+  );
+}
+
 export function InspectorDock({
   nodeId,
   kind,
@@ -118,6 +225,7 @@ export function InspectorDock({
   onPin,
   onUnpin,
   onDelete,
+  onRenameNode,
   overlay,
   floating,
   stacked,
@@ -125,6 +233,11 @@ export function InspectorDock({
 }: {
   /** Selected node (all absent → empty state). */
   nodeId?: string;
+  /**
+   * Rename this node's ID (#833). Returns an error to show inline, or null on success. Omitted
+   * where a rename isn't offered (read-only views), in which case the id renders as plain text.
+   */
+  onRenameNode?: (oldId: string, newId: string) => string | null;
   kind?: NodeType;
   title?: string;
   state?: NodeRunState;
@@ -282,7 +395,15 @@ export function InspectorDock({
                     textOverflow: "ellipsis",
                   }}
                 >
-                  {kind} · {nodeId}
+                  {kind} ·{" "}
+                  {onRenameNode && nodeId ? (
+                    <NodeIdEditor
+                      nodeId={nodeId}
+                      onRename={(next) => onRenameNode(nodeId, next)}
+                    />
+                  ) : (
+                    nodeId
+                  )}
                 </div>
               </div>
               <span
