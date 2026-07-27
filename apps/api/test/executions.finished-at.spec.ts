@@ -61,6 +61,21 @@ describe("cancel closes the read-model row", () => {
     expect(arg.data.finishedAt).toBeInstanceOf(Date);
   });
 
+  /**
+   * `budgetPausedAt` means "currently paused since" — setExecutionStatus clears it on every
+   * non-budget status for that reason. Cancelling a run that was parked on `awaiting_budget` must
+   * do the same, or the row claims to be both terminated and currently paused. (The month-rollover
+   * reconcile also filters on `status: "awaiting_budget"`, so a stale value can't wake anything
+   * today — but the invariant belongs to the column, not to that one query.)
+   */
+  it("clears budgetPausedAt, so a canceled run isn't left 'currently paused'", async () => {
+    const service = makeService(vi.fn().mockResolvedValue(undefined));
+
+    await service.cancel("wf-1", "t-1");
+
+    expect(update.mock.calls[0][0].data.budgetPausedAt).toBe(null);
+  });
+
   it("does NOT touch the row when the run was already finished", async () => {
     const service = makeService(
       vi.fn().mockRejectedValue(new WorkflowNotFoundError("gone", "wf", "")),

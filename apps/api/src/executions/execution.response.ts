@@ -50,7 +50,7 @@ export class RunListItemResponse {
     nullable: true,
     format: "date-time",
     description:
-      "When the run reached a terminal status (worker-stamped); null for in-flight runs and runs predating the stamp.",
+      "When the run reached a terminal status — stamped by the worker on a normal finish, by the API on cancel, else read from Temporal's close time (#807); null for in-flight runs and runs predating the stamp.",
   })
   finishedAt!: string | null;
   @ApiProperty({

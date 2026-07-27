@@ -865,7 +865,15 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     try {
       await getPrisma().execution.update({
         where: { workflowId: id },
-        data: { status: "terminated", finishedAt: new Date() },
+        data: {
+          status: "terminated",
+          finishedAt: new Date(),
+          // Mirror setExecutionStatus, which clears this on every non-budget status: the column
+          // means "currently paused since", and a terminated run is not paused. Today the
+          // month-rollover reconcile also filters on status: "awaiting_budget" so a stale value
+          // couldn't wake anything — but the invariant is the column's, not that query's.
+          budgetPausedAt: null,
+        },
       });
     } catch {
       /* read-model lag only — the cancel itself succeeded */
