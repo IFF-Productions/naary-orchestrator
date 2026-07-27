@@ -23,6 +23,7 @@ import {
   useNavigationType,
 } from "react-router-dom";
 import { useEffect } from "react";
+import { nameEventRejection } from "./lib/sentry-rejections";
 import { redactSecrets } from "./lib/sentry-scrub";
 
 const dsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
@@ -121,7 +122,11 @@ if (dsn) {
     tracePropagationTargets: [/^\/(api)\//, /naar-y\.com/],
     // Security-critical: scrub secret-shaped data from every event + breadcrumb + log.
     // safeScrub never throws (console can capture circular/huge objects) — drops on failure.
-    beforeSend: (event) => safeScrub(event),
+    // Enrich BEFORE scrubbing, so the scrubber also covers anything nameEventRejection adds.
+    // A DOM-Event rejection reaches Sentry with no message, stack or target (#793) — the target is
+    // only still reachable here, via hint.originalException.
+    beforeSend: (event, hint) =>
+      safeScrub(nameEventRejection(event, hint?.originalException)),
     beforeSendLog: (log) => safeScrub(log),
     beforeBreadcrumb: (crumb) => safeScrub(crumb),
   });
