@@ -104,6 +104,7 @@ export type {
   RunStateView,
   RunSummary,
 } from "./executions.types";
+import { resumeSnapshotsEnabled, storageProvider } from "../config";
 
 /**
  * Wraps the Temporal client: start an execution, signal approval, query state (client
@@ -1171,10 +1172,10 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
 
   /** Why a snapshot might be absent — surfaced verbatim so "can't resume" is never unexplained. */
   private snapshotDetail(): string {
-    if ((process.env.RESUME_SNAPSHOTS ?? "on").toLowerCase() === "off") {
+    if (!resumeSnapshotsEnabled()) {
       return "Resume snapshots are turned off for this deployment (RESUME_SNAPSHOTS=off).";
     }
-    if (process.env.STORAGE_PROVIDER !== "s3") {
+    if (storageProvider() !== "s3") {
       return "Resume needs object storage (STORAGE_PROVIDER=s3); without it a run's state isn't saved anywhere the API can read.";
     }
     return "No saved state was found for this run — it may have failed before snapshots were enabled, or the snapshot has since expired.";

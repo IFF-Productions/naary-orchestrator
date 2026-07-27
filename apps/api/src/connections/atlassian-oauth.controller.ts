@@ -19,6 +19,7 @@ import { Public } from "../auth/public.decorator";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { connectReturnUrl } from "./connect-return";
 import { OAuthStartResponse } from "./connection.response";
+import { atlassianOauthRedirectUri } from "../config";
 
 /**
  * Atlassian OAuth 2.0 3LO connect flow (docs/design/APP-AUTH.md §3b). Parallel to
@@ -51,9 +52,7 @@ export class AtlassianOAuthController {
     // The callback is @Public and can't send X-Environment-Id, so consent stores the refresh
     // token in the connection's OWN env — the env rides in the (encoded) state. The redirect
     // URI MUST match the one registered on the Atlassian app (…/atlassian/oauth/callback).
-    const redirectUri =
-      process.env.ATLASSIAN_OAUTH_REDIRECT_URI ??
-      `http://localhost:${process.env.PORT ?? 3000}/atlassian/oauth/callback`;
+    const redirectUri = atlassianOauthRedirectUri();
     return startAtlassianConsent({
       tenantId,
       environmentId: conn.environmentId,

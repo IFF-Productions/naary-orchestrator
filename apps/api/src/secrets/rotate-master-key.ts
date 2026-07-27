@@ -1,5 +1,6 @@
 import "../env"; // load DATABASE_URL before @naary/db evaluates
 import { rotateMasterKey } from "@naary/secrets";
+import { encryptionKey } from "../config";
 
 /**
  * Ops CLI: rotate the master ENCRYPTION_KEY (envelope rewrap). Zero-downtime runbook:
@@ -19,7 +20,7 @@ import { rotateMasterKey } from "@naary/secrets";
  * Exits non-zero if any row failed, so a wrapper/runbook can catch a partial sweep.
  */
 async function main(): Promise<void> {
-  if (!process.env.ENCRYPTION_KEY) {
+  if (!encryptionKey()) {
     console.error("ENCRYPTION_KEY (the NEW master) is required.");
     process.exit(1);
   }

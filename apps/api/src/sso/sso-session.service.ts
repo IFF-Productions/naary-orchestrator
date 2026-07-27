@@ -4,6 +4,7 @@ import {
   type FirebaseUser,
   secondFactorFromClaims,
 } from "../auth/firebase-verifier";
+import { ssoSessionSecret, ssoSessionTtlSeconds } from "../config";
 
 /**
  * The SSO session token (design SAML-SSO.md, #455).
@@ -59,8 +60,7 @@ export class SsoSessionService {
     @Inject(SSO_ENV)
     envOverride?: Record<string, string | undefined>,
   ) {
-    const env = envOverride ?? process.env;
-    const raw = (env.SSO_SESSION_SECRET ?? "").trim();
+    const raw = ssoSessionSecret(envOverride);
     // 32+ chars: this key signs sessions, so a short/guessable value would let anyone mint
     // a principal. Refuse quietly-but-loudly (log + stay disabled) rather than accept it.
     if (raw.length > 0 && raw.length < 32) {
@@ -71,7 +71,7 @@ export class SsoSessionService {
     } else if (raw.length >= 32) {
       this.secret = new TextEncoder().encode(raw);
     }
-    const ttl = Number(env.SSO_SESSION_TTL_SECONDS ?? "");
+    const ttl = ssoSessionTtlSeconds(envOverride);
     this.ttlSeconds =
       Number.isFinite(ttl) && ttl > 0 ? Math.floor(ttl) : DEFAULT_TTL_SECONDS;
     this.logger.log(

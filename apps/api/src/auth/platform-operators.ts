@@ -1,3 +1,4 @@
+import { platformOperators } from "../config";
 import type { Principal } from "./tenant.decorator";
 
 /**
@@ -28,13 +29,8 @@ import type { Principal } from "./tenant.decorator";
 export function platformOperatorEmails(
   env: NodeJS.ProcessEnv = process.env,
 ): string[] {
-  return (
-    (env.PLATFORM_OPERATORS ?? "")
-      .split(",")
-      // Emails are compared case-insensitively — an operator typing Sam@Acme.io must still match.
-      .map((e) => e.trim().toLowerCase())
-      .filter(Boolean)
-  );
+  // Lowercased by the accessor — an operator typing Sam@Acme.io must still match.
+  return platformOperators(env);
 }
 
 /**

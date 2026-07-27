@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { createLogger } from "@naary/logging";
 import nodemailer from "nodemailer";
+import { mailFrom, smtpUrl } from "../config";
 
 const log = createLogger({ component: "api" });
 
@@ -29,11 +30,10 @@ export class MailerService {
     nodemailer.createTransport(uri);
 
   private uri(): string | undefined {
-    const u = process.env.SMTP_URL?.trim();
-    return u || undefined;
+    return smtpUrl();
   }
   private from(): string {
-    return process.env.MAIL_FROM?.trim() || "Naary <no-reply@naary.local>";
+    return mailFrom();
   }
 
   /** Whether a platform SMTP is configured (else send() is a no-op). */

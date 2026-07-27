@@ -5,6 +5,11 @@ import {
   initializeApp,
 } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
+import {
+  firebaseProjectId,
+  firebaseServiceAccountJson,
+  googleApplicationCredentials,
+} from "../config";
 
 /**
  * Provisioning CLI: assign a tenant to a Firebase user by setting the `tenant`
@@ -27,8 +32,8 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const json = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-  if (!json && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  const json = firebaseServiceAccountJson();
+  if (!json && !googleApplicationCredentials()) {
     console.error(
       "Set FIREBASE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS first.",
     );
@@ -38,9 +43,7 @@ async function main(): Promise<void> {
   if (getApps().length === 0) {
     initializeApp({
       credential: json ? cert(JSON.parse(json)) : applicationDefault(),
-      ...(process.env.FIREBASE_PROJECT_ID
-        ? { projectId: process.env.FIREBASE_PROJECT_ID }
-        : {}),
+      ...(firebaseProjectId() ? { projectId: firebaseProjectId() } : {}),
     });
   }
 

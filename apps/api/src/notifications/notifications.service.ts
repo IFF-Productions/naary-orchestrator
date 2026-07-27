@@ -19,6 +19,7 @@ import {
 } from "@naary/notifications";
 import nodemailer from "nodemailer";
 import { approvalPath } from "../executions/approval-token";
+import { appBaseUrlCandidates, encryptionKey } from "../config";
 
 /** Channel types the product ships today. A tenant may have ANY NUMBER of channels per
  *  type (N Slack webhooks + N email lists, each its own row). */
@@ -456,7 +457,7 @@ export class NotificationsService {
     const base = resolveAppBaseUrl();
     const links: NotificationLinks = {
       approvalUrl:
-        base && process.env.ENCRYPTION_KEY
+        base && encryptionKey()
           ? `${base}${approvalPath(info.workflowId)}`
           : undefined,
       runUrl: base
@@ -638,10 +639,7 @@ function normalizeBaseUrl(raw: string): string | undefined {
 /** The SPA's public base URL (APP_BASE_URL, else the first http(s) CORS origin) — the same
  *  resolution the worker's notification activity uses for deep links. */
 function resolveAppBaseUrl(): string | undefined {
-  const candidates = [
-    process.env.APP_BASE_URL ?? "",
-    ...(process.env.CORS_ORIGINS ?? "").split(","),
-  ];
+  const candidates = appBaseUrlCandidates();
   for (const c of candidates) {
     const base = normalizeBaseUrl(c);
     if (base) return base;

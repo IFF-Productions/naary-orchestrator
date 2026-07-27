@@ -15,6 +15,7 @@ import { FirebaseVerifier, type FirebaseUser } from "./firebase-verifier";
 import { IS_PUBLIC_KEY } from "./public.decorator";
 import type { Principal, RequestWithPrincipal } from "./tenant.decorator";
 import { IS_USER_SCOPED_KEY } from "./user-scoped.decorator";
+import { accessAllowedEmails, requireMfa } from "../config";
 
 interface GuardRequest extends RequestWithPrincipal {
   headers: Record<string, string | undefined>;
@@ -40,11 +41,7 @@ const ENVIRONMENT_HEADER = "x-environment-id";
 export function parseAllowedEmails(
   raw: string | undefined,
 ): Set<string> | null {
-  const list = (raw ?? "")
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-  return list.length > 0 ? new Set(list) : null;
+  return accessAllowedEmails({ ACCESS_ALLOWED_EMAILS: raw });
 }
 
 /** Response body for a blocked user — the SPA keys its NotAvailable screen on `code`. */
@@ -67,7 +64,7 @@ const ACCESS_NOT_ALLOWED = {
  * human out of the instance, so it must be an explicit, deliberate operator action.
  */
 export function parseRequireMfa(raw: string | undefined): boolean {
-  return ["1", "true", "yes", "on"].includes((raw ?? "").trim().toLowerCase());
+  return requireMfa({ REQUIRE_MFA: raw });
 }
 
 /**
@@ -117,11 +114,9 @@ const MFA_REQUIRED = {
 export class AuthGuard implements CanActivate {
   private readonly logger = new Logger(AuthGuard.name);
   /** Early-access allowlist (see parseAllowedEmails). null = open. Computed once at boot. */
-  private readonly allowedEmails = parseAllowedEmails(
-    process.env.ACCESS_ALLOWED_EMAILS,
-  );
+  private readonly allowedEmails = accessAllowedEmails();
   /** Instance-wide MFA enforcement (#457). false = off (default). Read once at boot. */
-  private readonly requireMfa = parseRequireMfa(process.env.REQUIRE_MFA);
+  private readonly requireMfa = requireMfa();
 
   constructor(
     private readonly tokens: ApiTokenService,

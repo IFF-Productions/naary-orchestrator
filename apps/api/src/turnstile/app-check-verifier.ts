@@ -7,6 +7,11 @@ import {
   initializeApp,
 } from "firebase-admin/app";
 import { getAppCheck } from "firebase-admin/app-check";
+import {
+  firebaseProjectId,
+  firebaseServiceAccountJson,
+  googleApplicationCredentials,
+} from "../config";
 
 /**
  * Server-side Firebase App Check verification — the second bot-gate provider a tenant may pick for
@@ -72,11 +77,11 @@ export class AppCheckVerifier {
   }
 
   static fromEnv(): AppCheckConfig | undefined {
-    const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-    const hasAdc = Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+    const serviceAccountJson = firebaseServiceAccountJson();
+    const hasAdc = Boolean(googleApplicationCredentials());
     if (!serviceAccountJson && !hasAdc) return undefined;
     return {
-      projectId: process.env.FIREBASE_PROJECT_ID || undefined,
+      projectId: firebaseProjectId(),
       serviceAccountJson: serviceAccountJson || undefined,
     };
   }

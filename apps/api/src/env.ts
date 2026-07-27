@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { config } from "dotenv";
+import { databaseUrl, encryptionKey } from "./config";
 
 // Load the repo-root .env (DATABASE_URL, ENCRYPTION_KEY) before any @naary/*
 // module evaluates. Import this FIRST in the process entrypoint.
@@ -13,14 +14,14 @@ config({ path: resolve(__dirname, "../../../.env") });
 function requireEnv(): void {
   const errors: string[] = [];
 
-  const key = process.env.ENCRYPTION_KEY;
+  const key = encryptionKey();
   if (!key) {
     errors.push("ENCRYPTION_KEY is required");
   } else if (!/^[0-9a-fA-F]{64}$/.test(key)) {
     errors.push("ENCRYPTION_KEY must be 64 hex chars (32 bytes)");
   }
 
-  if (!process.env.DATABASE_URL) {
+  if (!databaseUrl()) {
     errors.push("DATABASE_URL is required");
   }
 

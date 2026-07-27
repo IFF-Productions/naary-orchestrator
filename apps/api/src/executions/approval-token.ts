@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { encryptionKey } from "../config";
 
 /**
  * Signed approve/reject links for a paused humanApproval run (design: the notification-links gap).
@@ -17,7 +18,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  * link) and surface `expiresAt: null`.
  */
 function signingKey(): string {
-  const k = process.env.ENCRYPTION_KEY;
+  const k = encryptionKey();
   if (!k) throw new Error("ENCRYPTION_KEY is required to sign approval URLs");
   return k;
 }
