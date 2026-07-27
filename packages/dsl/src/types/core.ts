@@ -82,10 +82,16 @@ export interface NodeDef {
   /**
    * Per-node retry policy for the activity nodes that support it (n8n's "Retry On Fail",
    * but backed by Temporal — so UNBOUNDED, exponential, and crash-surviving, vs n8n's hard
-   * 5-tries / 5s cap). Overrides the node's default Temporal RetryPolicy. Only honored for
-   * idempotent-ish activity nodes (agent/mcpTool/httpRequest/sqlQuery/rssRead); ignored for
-   * pure nodes and the at-most-once nodes (sqlExec/sendEmail/code), whose retry would risk
-   * a double-effect. A non-retryable provider error (e.g. 401/429) still won't retry.
+   * 5-tries / 5s cap). Overrides the node's default Temporal RetryPolicy.
+   *
+   * Honored for the idempotent-ish activity nodes ONLY — see `RETRYABLE_NODE_KINDS` below, which
+   * is the single source of truth (the canvas derives its controls from it, and a worker drift
+   * test asserts the handlers match).
+   *
+   * Ignored for pure nodes and for the at-most-once node kinds — `sqlExec`, `sendEmail`, `code`,
+   * `codeAgent`, `integration` — whose retry would risk a double-effect. A non-retryable provider
+   * error (e.g. 401/429) still won't retry either, whatever this is set to: see the
+   * ApplicationFailure.nonRetryable mapping in the activities.
    */
   retry?: NodeRetryPolicy;
 }
@@ -101,6 +107,31 @@ export interface NodeRetryPolicy {
   /** Cap on the per-attempt wait, in seconds (optional). */
   maxIntervalSeconds?: number;
 }
+
+/**
+ * The node kinds whose `retry` policy is actually honored — the SINGLE source of truth.
+ *
+ * This existed in three places that had already drifted apart: the doc comment above listed 5
+ * kinds, the worker's `retryOverride()` call sites honored 7, and the canvas's `RETRYABLE_KINDS`
+ * offered 6. `graphQL` was honored by the interpreter but had no checkbox, so a capability the
+ * engine supported was unreachable from the UI. Exporting it from here — where the node registry
+ * already lives — makes the canvas a consumer instead of a second copy, and a worker drift test
+ * asserts every kind listed here really does route through `retryOverride`.
+ *
+ * Membership rule: the activity must be idempotent-ish, i.e. re-running it cannot double-act.
+ * That excludes the at-most-once kinds `sqlExec`, `sendEmail`, `code`, `codeAgent` and
+ * `integration` (its write side is what governs — the read side isn't split out as its own kind).
+ * Adding a kind here without an idempotent activity turns one retry into duplicate side effects.
+ */
+export const RETRYABLE_NODE_KINDS = [
+  "agent",
+  "textToSpeech",
+  "mcpTool",
+  "httpRequest",
+  "graphQL",
+  "sqlQuery",
+  "rssRead",
+] as const satisfies readonly NodeType[];
 
 /**
  * Slice #4 — bind one MCP tool argument to an upstream node's output.

@@ -1,6 +1,6 @@
 // Shared inspector building blocks: field components, connection picker, style constants (extracted from CanvasPage).
 import { useState } from "react";
-import type { NodeType } from "@naary/dsl";
+import { type NodeType, RETRYABLE_NODE_KINDS } from "@naary/dsl";
 import type { ConnectionRow } from "../../lib/api";
 import {
   CONDITION_OPS,
@@ -140,17 +140,15 @@ export const ERRORABLE_KINDS = new Set<NodeType>([
   "pollTrigger",
 ]);
 
-/** Node kinds whose activity is idempotent-ish enough to safely retry (per-node retry).
- *  Excludes the at-most-once nodes (sqlExec/sendEmail/code) where a retry could double-act. */
-export const RETRYABLE_KINDS = new Set<NodeType>([
-  "agent",
-  // Synthesis has no external side effect — a retry just re-renders the same audio.
-  "textToSpeech",
-  "mcpTool",
-  "httpRequest",
-  "sqlQuery",
-  "rssRead",
-]);
+/**
+ * Node kinds that offer the per-node retry controls. NOT a local list any more — the set is owned
+ * by @naary/dsl (`RETRYABLE_NODE_KINDS`) because the same truth also lives in the worker's
+ * `retryOverride()` call sites, and the three copies had drifted: `graphQL` was honored by the
+ * interpreter but had no checkbox here, so a working capability was unreachable from the canvas.
+ */
+export const RETRYABLE_KINDS: ReadonlySet<NodeType> = new Set<NodeType>(
+  RETRYABLE_NODE_KINDS,
+);
 
 /** Editor for a structured predicate (path/op/value) stored as a DSL EdgeCondition
  *  on the filter node's config. Coerces the value on change (like the edge editor). */
