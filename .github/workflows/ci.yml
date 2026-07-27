@@ -61,6 +61,12 @@ jobs:
       - name: Typecheck (tsc -b + per-package)
         run: pnpm typecheck
 
+      # A raw control byte makes grep treat the whole file as BINARY, so it vanishes from every
+      # text search — review, grep-based CI steps, audits. Cheap to check, invisible to catch by
+      # eye. See scripts/check-control-bytes.mjs.
+      - name: Check for raw control bytes in source
+        run: pnpm check:control-bytes
+
       # Regenerate the OpenAPI spec from the API's controllers/DTOs and fail if the
       # committed apps/api/openapi.json drifts. The web's typed client
       # (apps/web/src/lib/api/schema.d.ts) is a deterministic function of that spec

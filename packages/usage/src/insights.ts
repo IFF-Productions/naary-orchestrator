@@ -260,12 +260,12 @@ export function aggregateInsights(
     bump(day, utcDay(e.createdAt), () => ({ date: utcDay(e.createdAt) }), e);
     bump(
       env,
-      e.environmentId ?? " null",
+      e.environmentId ?? "\0null",
       () => ({ environmentId: e.environmentId ?? null }),
       e,
     );
     const key = workflowKeyByExec.get(e.executionId) ?? null;
-    bump(wf, key ?? " null", () => ({ workflowKey: key }), e);
+    bump(wf, key ?? "\0null", () => ({ workflowKey: key }), e);
     bump(
       model,
       `${e.provider}/${e.model}`,
