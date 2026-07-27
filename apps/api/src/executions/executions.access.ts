@@ -199,6 +199,15 @@ export async function accessApprovalPrompt(
   };
 }
 
+/** Elapsed run time, or null when there is no finish time to measure to. Clamped at 0: the two
+ *  timestamps come from different clocks (worker activity vs Temporal server vs PG default), so a
+ *  few ms of skew must not surface as a negative duration. */
+function finishedFrom(finishedAt: Date | null, createdAt: Date): number | null {
+  return finishedAt
+    ? Math.max(0, finishedAt.getTime() - createdAt.getTime())
+    : null;
+}
+
 /** Map one Execution read-model row to a RunSummary (with the non-terminal
  *  Temporal-failure reconcile described on {@link ExecutionsService.list}). */
 export async function accessToRunSummary(
@@ -225,12 +234,11 @@ export async function accessToRunSummary(
     // real Temporal start time can diverge without silently moving createdAt.
     startedAt: createdAt,
     createdAt,
-    // Slice 2: worker-stamped terminal time → durationMs. Both null for runs that
-    // predate the stamp / closed only at the Temporal level — the UI keeps "—".
+    // Slice 2: worker-stamped terminal time → durationMs. Null for runs that predate the stamp;
+    // a run closed only at the TEMPORAL level (terminated/timed out — no workflow code runs, so
+    // nothing stamps the row) is backfilled from describe().closeTime below (#807).
     finishedAt: r.finishedAt ? r.finishedAt.toISOString() : null,
-    durationMs: r.finishedAt
-      ? Math.max(0, r.finishedAt.getTime() - r.createdAt.getTime())
-      : null,
+    durationMs: finishedFrom(r.finishedAt, r.createdAt),
     failureKind: r.failureKind,
     archived: r.archivedAt !== null,
     graphVersion: r.graphVersion,
@@ -243,8 +251,19 @@ export async function accessToRunSummary(
   try {
     const desc = await deps.client.workflow.getHandle(r.workflowId).describe();
     const failed = TEMPORAL_FAILED_STATUS[desc.status.name];
+    // Take the finish time from the SAME describe (#807) — no extra call. A run terminated or
+    // timed out at the Temporal level never reaches setExecutionStatus, so PG has no finishedAt
+    // and the UI showed "—" for its duration permanently. Only fills a GAP: a stamped row always
+    // wins, since the worker's time is the one the cost/step accounting lines up with.
+    const closed = r.finishedAt ?? (failed ? desc.closeTime : undefined);
     return {
       ...base,
+      ...(closed
+        ? {
+            finishedAt: closed.toISOString(),
+            durationMs: finishedFrom(closed, r.createdAt),
+          }
+        : {}),
       status: failed ?? (r.status as RunSummary["status"]),
     };
   } catch {

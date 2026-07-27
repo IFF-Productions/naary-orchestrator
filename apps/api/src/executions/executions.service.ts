@@ -848,6 +848,28 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       }
       throw e;
     }
+    // Close out the read-model ourselves (#807). Nothing else will: `finishedAt` is only ever
+    // stamped by the worker's setExecutionStatus activity, and a terminate runs NO workflow code —
+    // run-graph deliberately rethrows a cancellation before its failure path. So the row kept its
+    // last synced status ("running") with finishedAt null, which showed a canceled run with no
+    // duration forever, and left it matching a "running" status filter.
+    //
+    // "terminated", not "canceled": we call terminate(), so this is exactly what a live
+    // describe() reports for this run — writing anything else would make the read-model and the
+    // reconcile path disagree about the same run.
+    //
+    // BEST-EFFORT. The run is already terminated by the time we get here, so a failed write must
+    // not turn a successful cancel into a 500 — the caller's retry would then hit the 409 above
+    // and they'd have no way to succeed. A missed write degrades to the old behaviour: the list's
+    // reconcile still reports "terminated", now with closeTime for the duration.
+    try {
+      await getPrisma().execution.update({
+        where: { workflowId: id },
+        data: { status: "terminated", finishedAt: new Date() },
+      });
+    } catch {
+      /* read-model lag only — the cancel itself succeeded */
+    }
   }
 
   /**
