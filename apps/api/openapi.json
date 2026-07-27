@@ -2222,6 +2222,93 @@
         ]
       }
     },
+    "/graphs/{workflowKey}/dry-run": {
+      "post": {
+        "description": "Validates every integration node's config and request shape, and probes each connection with the provider's cheapest READ-ONLY action. Executes nothing.",
+        "operationId": "GraphsController_dryRun",
+        "parameters": [
+          {
+            "name": "workflowKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DryRunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Dry-run a workflow (no execution)",
+        "tags": [
+          "Graphs"
+        ]
+      }
+    },
     "/graphs/{workflowKey}/diff": {
       "get": {
         "description": "What changed between ?from=<v>&to=<v>: nodes added/removed/reconfigured + edges rewired.",
@@ -2790,6 +2877,750 @@
         "summary": "List a workflow's promotions",
         "tags": [
           "Graphs"
+        ]
+      }
+    },
+    "/tenants/{id}/connections": {
+      "post": {
+        "description": "Stores a connection for the tenant; secret token (PAT/DSN) is encrypted, never returned.",
+        "operationId": "ConnectionsController_create",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConnectionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a connection",
+        "tags": [
+          "Connections"
+        ]
+      },
+      "get": {
+        "operationId": "ConnectionsController_list",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ConnectionResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List connections",
+        "tags": [
+          "Connections"
+        ]
+      }
+    },
+    "/tenants/{id}/connections/{connectionId}/test": {
+      "post": {
+        "description": "Calls the provider's cheapest read-only, zero-argument catalog action with this connection's credential and reports whether it was accepted, updating the connection's status. Never performs a write; providers with no such action report `unknown`.",
+        "operationId": "ConnectionsController_test",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "connectionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestConnectionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Test a connection against its provider",
+        "tags": [
+          "Connections"
+        ]
+      }
+    },
+    "/tenants/{id}/connections/{connectionId}": {
+      "delete": {
+        "description": "Removes the connection and its stored secret (204 No Content).",
+        "operationId": "ConnectionsController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "connectionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a connection",
+        "tags": [
+          "Connections"
+        ]
+      }
+    },
+    "/tenants/{id}/connections/{connectionId}/oauth/start": {
+      "post": {
+        "description": "Returns the provider authorize URL for the browser to begin interactive consent.",
+        "operationId": "OAuthController_start",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "connectionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthStartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Start OAuth consent",
+        "tags": [
+          "OAuth"
+        ]
+      }
+    },
+    "/oauth/callback": {
+      "get": {
+        "description": "Public: the provider redirects the BROWSER here with a single-use `state` and `code`; exchanges the code, persists the encrypted refresh token, then 302-redirects back to the SPA integrations page (`?connected=1` on success, `?connect_error=…` otherwise).",
+        "operationId": "OAuthController_callback",
+        "parameters": [
+          {
+            "name": "state",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "iss",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the SPA integrations page."
+          }
+        },
+        "summary": "OAuth callback (provider redirect target)",
+        "tags": [
+          "OAuth"
+        ]
+      }
+    },
+    "/tenants/{id}/connections/github-app/install/start": {
+      "post": {
+        "description": "Returns the github.com install URL for the browser; the user picks repos, then GitHub redirects to the callback.",
+        "operationId": "GithubAppController_start",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GithubAppInstallStartDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubAppInstallStartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Start GitHub App install",
+        "tags": [
+          "GithubApp"
+        ]
+      }
+    },
+    "/github-app/callback": {
+      "get": {
+        "description": "Public: GitHub redirects the BROWSER here with `installation_id`, `setup_action`, and the single-use `state`; creates the github_app connection, then 302-redirects back to the SPA integrations page (`?connected=1` on success, `?connect_error=…` otherwise).",
+        "operationId": "GithubAppController_callback",
+        "parameters": [
+          {
+            "name": "installation_id",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "setup_action",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the SPA integrations page."
+          }
+        },
+        "summary": "GitHub App install callback (provider redirect target)",
+        "tags": [
+          "GithubApp"
+        ]
+      }
+    },
+    "/tenants/{id}/connections/{connectionId}/atlassian/oauth/start": {
+      "post": {
+        "description": "Returns the auth.atlassian.com authorize URL for the browser to begin interactive consent.",
+        "operationId": "AtlassianOAuthController_start",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "connectionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthStartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Start Atlassian (Jira/Confluence) OAuth 3LO consent",
+        "tags": [
+          "AtlassianOAuth"
+        ]
+      }
+    },
+    "/atlassian/oauth/callback": {
+      "get": {
+        "description": "Public: Atlassian redirects the BROWSER here with a single-use `state` and `code`; exchanges the code, persists the encrypted refresh token, resolves the site cloudId, then 302-redirects back to the SPA integrations page (`?connected=1` on success, `?connect_error=…` otherwise).",
+        "operationId": "AtlassianOAuthController_callback",
+        "parameters": [
+          {
+            "name": "state",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the SPA integrations page."
+          }
+        },
+        "summary": "Atlassian OAuth callback (provider redirect target)",
+        "tags": [
+          "AtlassianOAuth"
         ]
       }
     },
@@ -9517,750 +10348,6 @@
         "summary": "Delete a chat endpoint",
         "tags": [
           "ChatAdmin"
-        ]
-      }
-    },
-    "/tenants/{id}/connections": {
-      "post": {
-        "description": "Stores a connection for the tenant; secret token (PAT/DSN) is encrypted, never returned.",
-        "operationId": "ConnectionsController_create",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateConnectionDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConnectionResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Create a connection",
-        "tags": [
-          "Connections"
-        ]
-      },
-      "get": {
-        "operationId": "ConnectionsController_list",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ConnectionResponse"
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List connections",
-        "tags": [
-          "Connections"
-        ]
-      }
-    },
-    "/tenants/{id}/connections/{connectionId}/test": {
-      "post": {
-        "description": "Calls the provider's cheapest read-only, zero-argument catalog action with this connection's credential and reports whether it was accepted, updating the connection's status. Never performs a write; providers with no such action report `unknown`.",
-        "operationId": "ConnectionsController_test",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "connectionId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TestConnectionDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConnectionTestResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Test a connection against its provider",
-        "tags": [
-          "Connections"
-        ]
-      }
-    },
-    "/tenants/{id}/connections/{connectionId}": {
-      "delete": {
-        "description": "Removes the connection and its stored secret (204 No Content).",
-        "operationId": "ConnectionsController_remove",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "connectionId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Delete a connection",
-        "tags": [
-          "Connections"
-        ]
-      }
-    },
-    "/tenants/{id}/connections/{connectionId}/oauth/start": {
-      "post": {
-        "description": "Returns the provider authorize URL for the browser to begin interactive consent.",
-        "operationId": "OAuthController_start",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "connectionId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OAuthStartResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Start OAuth consent",
-        "tags": [
-          "OAuth"
-        ]
-      }
-    },
-    "/oauth/callback": {
-      "get": {
-        "description": "Public: the provider redirects the BROWSER here with a single-use `state` and `code`; exchanges the code, persists the encrypted refresh token, then 302-redirects back to the SPA integrations page (`?connected=1` on success, `?connect_error=…` otherwise).",
-        "operationId": "OAuthController_callback",
-        "parameters": [
-          {
-            "name": "state",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "code",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "iss",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "302": {
-            "description": "Redirect to the SPA integrations page."
-          }
-        },
-        "summary": "OAuth callback (provider redirect target)",
-        "tags": [
-          "OAuth"
-        ]
-      }
-    },
-    "/tenants/{id}/connections/github-app/install/start": {
-      "post": {
-        "description": "Returns the github.com install URL for the browser; the user picks repos, then GitHub redirects to the callback.",
-        "operationId": "GithubAppController_start",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GithubAppInstallStartDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GithubAppInstallStartResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Start GitHub App install",
-        "tags": [
-          "GithubApp"
-        ]
-      }
-    },
-    "/github-app/callback": {
-      "get": {
-        "description": "Public: GitHub redirects the BROWSER here with `installation_id`, `setup_action`, and the single-use `state`; creates the github_app connection, then 302-redirects back to the SPA integrations page (`?connected=1` on success, `?connect_error=…` otherwise).",
-        "operationId": "GithubAppController_callback",
-        "parameters": [
-          {
-            "name": "installation_id",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "state",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "setup_action",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "302": {
-            "description": "Redirect to the SPA integrations page."
-          }
-        },
-        "summary": "GitHub App install callback (provider redirect target)",
-        "tags": [
-          "GithubApp"
-        ]
-      }
-    },
-    "/tenants/{id}/connections/{connectionId}/atlassian/oauth/start": {
-      "post": {
-        "description": "Returns the auth.atlassian.com authorize URL for the browser to begin interactive consent.",
-        "operationId": "AtlassianOAuthController_start",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "connectionId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OAuthStartResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Start Atlassian (Jira/Confluence) OAuth 3LO consent",
-        "tags": [
-          "AtlassianOAuth"
-        ]
-      }
-    },
-    "/atlassian/oauth/callback": {
-      "get": {
-        "description": "Public: Atlassian redirects the BROWSER here with a single-use `state` and `code`; exchanges the code, persists the encrypted refresh token, resolves the site cloudId, then 302-redirects back to the SPA integrations page (`?connected=1` on success, `?connect_error=…` otherwise).",
-        "operationId": "AtlassianOAuthController_callback",
-        "parameters": [
-          {
-            "name": "state",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "code",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "error",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "302": {
-            "description": "Redirect to the SPA integrations page."
-          }
-        },
-        "summary": "Atlassian OAuth callback (provider redirect target)",
-        "tags": [
-          "AtlassianOAuth"
         ]
       }
     },
@@ -17472,6 +17559,99 @@
           "createdAt"
         ]
       },
+      "DryRunCheckResponse": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "config",
+              "request",
+              "credential"
+            ],
+            "example": "credential",
+            "description": "config = catalog validation (pure); request = the built HTTP request (pure); credential = a READ-ONLY probe of the connection — the only one that calls the provider."
+          },
+          "ok": {
+            "type": "boolean",
+            "example": false,
+            "description": "False means this check found a problem. A skipped check is never false."
+          },
+          "message": {
+            "type": "string",
+            "nullable": true,
+            "example": "PagerDuty answered 401 to pagerduty.list_incidents — the token was rejected",
+            "description": "Why it failed, or why it was skipped. Never contains a credential."
+          },
+          "skipped": {
+            "type": "boolean",
+            "example": false,
+            "description": "The check couldn't run — e.g. the provider has no zero-argument read to probe. NOT a failure."
+          }
+        },
+        "required": [
+          "kind",
+          "ok",
+          "message",
+          "skipped"
+        ]
+      },
+      "DryRunNodeResponse": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string",
+            "example": "ack"
+          },
+          "type": {
+            "type": "string",
+            "example": "integration"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DryRunCheckResponse"
+            }
+          }
+        },
+        "required": [
+          "nodeId",
+          "type",
+          "checks"
+        ]
+      },
+      "DryRunResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "example": false,
+            "description": "True when every check passed. A skipped check does not fail the run."
+          },
+          "probed": {
+            "type": "number",
+            "example": 2,
+            "description": "How many connections were probed. One per DISTINCT connection, not per node — the verdict is about the credential, so a flow with six GitHub steps costs one probe."
+          },
+          "unprobeable": {
+            "type": "number",
+            "example": 1,
+            "description": "Connections we declined to probe because the provider has no read taking zero required fields (GitHub, Slack, Jira and others). Their credentials were NOT verified."
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DryRunNodeResponse"
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "probed",
+          "unprobeable",
+          "nodes"
+        ]
+      },
       "GraphDetailResponse": {
         "type": "object",
         "properties": {
@@ -17636,6 +17816,310 @@
           "toVersion",
           "actor",
           "createdAt"
+        ]
+      },
+      "CreateConnectionDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "atlassian",
+              "github",
+              "custom",
+              "postgres",
+              "mssql",
+              "signing",
+              "smtp"
+            ],
+            "example": "github",
+            "description": "Connection kind."
+          },
+          "label": {
+            "type": "string",
+            "example": "Prod GitHub",
+            "description": "Display label for the connection."
+          },
+          "serverUrl": {
+            "type": "string",
+            "example": "https://api.github.com",
+            "description": "https URL for MCP/HTTP connections, or a non-secret display host for DB connections (the DSN rides in `token`)."
+          },
+          "authMode": {
+            "type": "string",
+            "enum": [
+              "api_token",
+              "pat",
+              "oauth",
+              "connection_string"
+            ],
+            "example": "pat",
+            "description": "How the connection authenticates."
+          },
+          "scopes": {
+            "example": [
+              "repo",
+              "read:org"
+            ],
+            "description": "Requested OAuth/token scopes.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "token": {
+            "type": "string",
+            "example": "ghp_xxx",
+            "description": "Secret credential (PAT / api_token / connection string). Stored encrypted, never returned."
+          }
+        },
+        "required": [
+          "type",
+          "label",
+          "serverUrl",
+          "authMode"
+        ]
+      },
+      "ConnectionResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "conn_9f3ab2"
+          },
+          "tenantId": {
+            "type": "string",
+            "example": "tenant_123"
+          },
+          "type": {
+            "type": "string",
+            "example": "github",
+            "enum": [
+              "github",
+              "atlassian",
+              "custom",
+              "postgres",
+              "mssql",
+              "mysql",
+              "signing",
+              "smtp"
+            ],
+            "description": "Connection kind."
+          },
+          "label": {
+            "type": "string",
+            "example": "Prod GitHub",
+            "description": "Display label."
+          },
+          "serverUrl": {
+            "type": "string",
+            "example": "https://api.github.com",
+            "description": "https URL for MCP/HTTP connections, or a non-secret display host for DB connections."
+          },
+          "authMode": {
+            "type": "string",
+            "example": "pat",
+            "enum": [
+              "api_token",
+              "pat",
+              "oauth",
+              "github_app",
+              "connection_string"
+            ]
+          },
+          "scopes": {
+            "example": [
+              "repo",
+              "read:org"
+            ],
+            "description": "Requested OAuth/token scopes.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "example": "connected",
+            "enum": [
+              "connected",
+              "needs_reauth",
+              "error"
+            ]
+          },
+          "usedByNodeCount": {
+            "type": "number",
+            "example": 3,
+            "description": "How many nodes across the tenant's latest graphs in this env reference this connection (#471). 0 = unreferenced (safe to delete)."
+          },
+          "credentialLast4": {
+            "type": "string",
+            "nullable": true,
+            "example": "xyz1",
+            "description": "Last 4 characters of the stored raw bearer token (#471, pat/api_token modes) — a 'which key is this?' hint, like a card's last-4; NEVER the full token. null for connection-string (DB/SMTP) secrets, oauth/github_app (which store a JSON grant, not a token), connections with no stored token yet, or secrets shorter than 4 chars."
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenantId",
+          "type",
+          "label",
+          "serverUrl",
+          "authMode",
+          "scopes",
+          "status",
+          "usedByNodeCount",
+          "credentialLast4",
+          "createdAt"
+        ]
+      },
+      "TestConnectionDto": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "mattermost",
+              "pagerduty",
+              "googlesheets",
+              "deepl",
+              "stripe",
+              "shopify",
+              "twilio",
+              "mailchimp",
+              "discord",
+              "linear",
+              "clickup",
+              "monday",
+              "pipedrive",
+              "zendesk",
+              "github",
+              "jira",
+              "slack",
+              "notion",
+              "gitlab",
+              "hubspot",
+              "sendgrid",
+              "airtable",
+              "asana",
+              "todoist",
+              "calendly",
+              "intercom",
+              "webflow",
+              "zoom",
+              "front",
+              "sentry",
+              "vercel",
+              "netlify",
+              "digitalocean",
+              "cloudflare",
+              "posthog",
+              "dropbox",
+              "msgraph",
+              "box"
+            ],
+            "example": "calendly",
+            "description": "Catalog provider to test this connection against (the same `provider` an `integration` node would use)."
+          }
+        },
+        "required": [
+          "provider"
+        ]
+      },
+      "ConnectionTestResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "example": true,
+            "description": "True only when the provider answered 2xx. `unknown` is not ok."
+          },
+          "status": {
+            "type": "string",
+            "example": "ok",
+            "enum": [
+              "ok",
+              "failed",
+              "unknown"
+            ],
+            "description": "`ok` = the provider accepted the credential. `failed` = it was rejected or unreachable. `unknown` = no safe read-only call exists for this provider, so nothing was called."
+          },
+          "httpStatus": {
+            "type": "number",
+            "nullable": true,
+            "example": 200,
+            "description": "The provider's HTTP status, or null when no call was made."
+          },
+          "checkedAction": {
+            "type": "string",
+            "nullable": true,
+            "example": "calendly.get_me",
+            "description": "The `provider.action` that was called — always a catalog action with `write: false` and no required fields. Null when nothing safe existed."
+          },
+          "connectionStatus": {
+            "type": "string",
+            "nullable": true,
+            "example": "connected",
+            "enum": [
+              "connected",
+              "needs_reauth",
+              "error"
+            ],
+            "description": "The connection's status after the test. Null when the test learned nothing about the token (`unknown`) and therefore left the status untouched."
+          },
+          "message": {
+            "type": "string",
+            "example": "Calendly answered 200 to calendly.get_me — this connection works.",
+            "description": "Human-readable explanation. Never contains the credential."
+          }
+        },
+        "required": [
+          "ok",
+          "status",
+          "httpStatus",
+          "checkedAction",
+          "connectionStatus",
+          "message"
+        ]
+      },
+      "OAuthStartResponse": {
+        "type": "object",
+        "properties": {
+          "authorizeUrl": {
+            "type": "string",
+            "example": "https://provider.example.com/oauth/authorize?...",
+            "description": "Redirect the browser here to grant consent."
+          }
+        },
+        "required": [
+          "authorizeUrl"
+        ]
+      },
+      "GithubAppInstallStartDto": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "example": "Prod GitHub",
+            "description": "Display label for the connection the callback will create. Defaults to 'GitHub'."
+          }
+        }
+      },
+      "GithubAppInstallStartResponse": {
+        "type": "object",
+        "properties": {
+          "installUrl": {
+            "type": "string",
+            "example": "https://github.com/apps/naary/installations/new?state=...",
+            "description": "Redirect the browser here to install the app + pick repos."
+          }
+        },
+        "required": [
+          "installUrl"
         ]
       },
       "ScheduleResponse": {
@@ -20364,310 +20848,6 @@
         },
         "required": [
           "deleted"
-        ]
-      },
-      "CreateConnectionDto": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "enum": [
-              "atlassian",
-              "github",
-              "custom",
-              "postgres",
-              "mssql",
-              "signing",
-              "smtp"
-            ],
-            "example": "github",
-            "description": "Connection kind."
-          },
-          "label": {
-            "type": "string",
-            "example": "Prod GitHub",
-            "description": "Display label for the connection."
-          },
-          "serverUrl": {
-            "type": "string",
-            "example": "https://api.github.com",
-            "description": "https URL for MCP/HTTP connections, or a non-secret display host for DB connections (the DSN rides in `token`)."
-          },
-          "authMode": {
-            "type": "string",
-            "enum": [
-              "api_token",
-              "pat",
-              "oauth",
-              "connection_string"
-            ],
-            "example": "pat",
-            "description": "How the connection authenticates."
-          },
-          "scopes": {
-            "example": [
-              "repo",
-              "read:org"
-            ],
-            "description": "Requested OAuth/token scopes.",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "token": {
-            "type": "string",
-            "example": "ghp_xxx",
-            "description": "Secret credential (PAT / api_token / connection string). Stored encrypted, never returned."
-          }
-        },
-        "required": [
-          "type",
-          "label",
-          "serverUrl",
-          "authMode"
-        ]
-      },
-      "ConnectionResponse": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "example": "conn_9f3ab2"
-          },
-          "tenantId": {
-            "type": "string",
-            "example": "tenant_123"
-          },
-          "type": {
-            "type": "string",
-            "example": "github",
-            "enum": [
-              "github",
-              "atlassian",
-              "custom",
-              "postgres",
-              "mssql",
-              "mysql",
-              "signing",
-              "smtp"
-            ],
-            "description": "Connection kind."
-          },
-          "label": {
-            "type": "string",
-            "example": "Prod GitHub",
-            "description": "Display label."
-          },
-          "serverUrl": {
-            "type": "string",
-            "example": "https://api.github.com",
-            "description": "https URL for MCP/HTTP connections, or a non-secret display host for DB connections."
-          },
-          "authMode": {
-            "type": "string",
-            "example": "pat",
-            "enum": [
-              "api_token",
-              "pat",
-              "oauth",
-              "github_app",
-              "connection_string"
-            ]
-          },
-          "scopes": {
-            "example": [
-              "repo",
-              "read:org"
-            ],
-            "description": "Requested OAuth/token scopes.",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "status": {
-            "type": "string",
-            "example": "connected",
-            "enum": [
-              "connected",
-              "needs_reauth",
-              "error"
-            ]
-          },
-          "usedByNodeCount": {
-            "type": "number",
-            "example": 3,
-            "description": "How many nodes across the tenant's latest graphs in this env reference this connection (#471). 0 = unreferenced (safe to delete)."
-          },
-          "credentialLast4": {
-            "type": "string",
-            "nullable": true,
-            "example": "xyz1",
-            "description": "Last 4 characters of the stored raw bearer token (#471, pat/api_token modes) — a 'which key is this?' hint, like a card's last-4; NEVER the full token. null for connection-string (DB/SMTP) secrets, oauth/github_app (which store a JSON grant, not a token), connections with no stored token yet, or secrets shorter than 4 chars."
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "tenantId",
-          "type",
-          "label",
-          "serverUrl",
-          "authMode",
-          "scopes",
-          "status",
-          "usedByNodeCount",
-          "credentialLast4",
-          "createdAt"
-        ]
-      },
-      "TestConnectionDto": {
-        "type": "object",
-        "properties": {
-          "provider": {
-            "type": "string",
-            "enum": [
-              "mattermost",
-              "pagerduty",
-              "googlesheets",
-              "deepl",
-              "stripe",
-              "shopify",
-              "twilio",
-              "mailchimp",
-              "discord",
-              "linear",
-              "clickup",
-              "monday",
-              "pipedrive",
-              "zendesk",
-              "github",
-              "jira",
-              "slack",
-              "notion",
-              "gitlab",
-              "hubspot",
-              "sendgrid",
-              "airtable",
-              "asana",
-              "todoist",
-              "calendly",
-              "intercom",
-              "webflow",
-              "zoom",
-              "front",
-              "sentry",
-              "vercel",
-              "netlify",
-              "digitalocean",
-              "cloudflare",
-              "posthog",
-              "dropbox",
-              "msgraph",
-              "box"
-            ],
-            "example": "calendly",
-            "description": "Catalog provider to test this connection against (the same `provider` an `integration` node would use)."
-          }
-        },
-        "required": [
-          "provider"
-        ]
-      },
-      "ConnectionTestResponse": {
-        "type": "object",
-        "properties": {
-          "ok": {
-            "type": "boolean",
-            "example": true,
-            "description": "True only when the provider answered 2xx. `unknown` is not ok."
-          },
-          "status": {
-            "type": "string",
-            "example": "ok",
-            "enum": [
-              "ok",
-              "failed",
-              "unknown"
-            ],
-            "description": "`ok` = the provider accepted the credential. `failed` = it was rejected or unreachable. `unknown` = no safe read-only call exists for this provider, so nothing was called."
-          },
-          "httpStatus": {
-            "type": "number",
-            "nullable": true,
-            "example": 200,
-            "description": "The provider's HTTP status, or null when no call was made."
-          },
-          "checkedAction": {
-            "type": "string",
-            "nullable": true,
-            "example": "calendly.get_me",
-            "description": "The `provider.action` that was called — always a catalog action with `write: false` and no required fields. Null when nothing safe existed."
-          },
-          "connectionStatus": {
-            "type": "string",
-            "nullable": true,
-            "example": "connected",
-            "enum": [
-              "connected",
-              "needs_reauth",
-              "error"
-            ],
-            "description": "The connection's status after the test. Null when the test learned nothing about the token (`unknown`) and therefore left the status untouched."
-          },
-          "message": {
-            "type": "string",
-            "example": "Calendly answered 200 to calendly.get_me — this connection works.",
-            "description": "Human-readable explanation. Never contains the credential."
-          }
-        },
-        "required": [
-          "ok",
-          "status",
-          "httpStatus",
-          "checkedAction",
-          "connectionStatus",
-          "message"
-        ]
-      },
-      "OAuthStartResponse": {
-        "type": "object",
-        "properties": {
-          "authorizeUrl": {
-            "type": "string",
-            "example": "https://provider.example.com/oauth/authorize?...",
-            "description": "Redirect the browser here to grant consent."
-          }
-        },
-        "required": [
-          "authorizeUrl"
-        ]
-      },
-      "GithubAppInstallStartDto": {
-        "type": "object",
-        "properties": {
-          "label": {
-            "type": "string",
-            "example": "Prod GitHub",
-            "description": "Display label for the connection the callback will create. Defaults to 'GitHub'."
-          }
-        }
-      },
-      "GithubAppInstallStartResponse": {
-        "type": "object",
-        "properties": {
-          "installUrl": {
-            "type": "string",
-            "example": "https://github.com/apps/naary/installations/new?state=...",
-            "description": "Redirect the browser here to install the app + pick repos."
-          }
-        },
-        "required": [
-          "installUrl"
         ]
       },
       "MemberResponse": {

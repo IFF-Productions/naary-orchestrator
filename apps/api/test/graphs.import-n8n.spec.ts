@@ -26,6 +26,9 @@ const controller = new GraphsController(
   forbidden,
   forbidden,
   forbidden,
+  // The dry-run service is `forbidden` too: this route must reach NO service, and that is the
+  // property this stub exists to prove.
+  forbidden,
 );
 
 const WORKFLOW = {
