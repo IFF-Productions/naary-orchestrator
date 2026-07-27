@@ -4586,6 +4586,22 @@ export function buildIntegrationRequest(
   }
 
   const qs = queryParts.join("&");
+  // A form-encoded action can't express nesting (#707). Reject it HERE, at build time, for the
+  // same reason the header-CRLF check above is here: this is a data/config fault a retry can never
+  // fix, and the activity's build-time catch already maps it to a non-retryable
+  // INTEGRATION_INVALID_CONFIG. Raised in the planner too as a backstop, but by then auth has been
+  // resolved and the failure would fall through to "transient" — losing this message.
+  if (act.bodyEncoding === "form" && body !== undefined) {
+    for (const [key, value] of Object.entries(body)) {
+      if (Array.isArray(value)) continue; // a list is fine — it becomes repeated keys
+      if (value !== null && typeof value === "object") {
+        throw new Error(
+          `Integration ${provider}/${action}: form-encoded actions can't send a nested value for '${key}' — flatten it in the catalog (e.g. Stripe's metadata[key] as its own field).`,
+        );
+      }
+    }
+  }
+
   return {
     method: act.method,
     path: qs ? `${path}?${qs}` : path,

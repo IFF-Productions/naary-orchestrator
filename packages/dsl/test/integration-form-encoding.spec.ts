@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { INTEGRATION_PROVIDERS, getIntegrationAction } from "../src";
+import {
+  INTEGRATION_PROVIDERS,
+  buildIntegrationRequest,
+  getIntegrationAction,
+} from "../src";
 import { planIntegrationCall } from "../src/integration-request";
 
 /**
@@ -128,27 +132,49 @@ describe("a nested value is refused, not mangled", () => {
    * can't diagnose from the UI, which is the failure this whole change exists to remove.
    */
   it("throws naming the field, and never echoes its value", () => {
-    expect(() =>
-      planIntegrationCall({
-        provider: "twilio",
-        action: "send_sms",
-        fields: { accountSid: "AC1", To: "+1", From: "+2", Body: "x" },
-        baseUrl: "https://api.example",
-        authHeaders: {},
-        // A nested body can only arrive via a catalog bodyPath; simulate one by hand.
-      }),
-    ).not.toThrow();
-
-    // Directly exercise the guard with a nested body the builder would produce from a bodyPath.
     const nested = () =>
-      planIntegrationCall({
-        provider: "stripe",
-        action: "create_customer",
-        fields: { email: { deep: "value-should-not-appear" } as never },
-        baseUrl: "https://api.example",
-        authHeaders: {},
+      buildIntegrationRequest("stripe", "create_customer", {
+        email: { deep: "value-should-not-appear" },
       });
     expect(nested).toThrow(/nested value for 'email'/);
     expect(nested).not.toThrow(/value-should-not-appear/);
+  });
+
+  /**
+   * REJECTED AT BUILD TIME, not just in the encoder, and that placement is the point: the activity
+   * wraps `buildIntegrationRequest` in a catch that maps to a NON-RETRYABLE
+   * INTEGRATION_INVALID_CONFIG, exactly as it does for a CR/LF in a header field. Thrown later —
+   * from the planner, after auth resolution — it would instead hit the activity's transient
+   * fallthrough and be retried as if it were a network blip, with this message sanitized away.
+   */
+  it("is rejected by the builder, so the activity classifies it as a config fault", () => {
+    expect(() =>
+      buildIntegrationRequest("twilio", "send_sms", {
+        accountSid: "AC1",
+        To: "+15550001111",
+        From: "+15552223333",
+        Body: { nope: true },
+      }),
+    ).toThrow(/form-encoded actions can't send a nested value for 'Body'/);
+  });
+
+  /** An ARRAY is not nesting — it's a repeated key, which both APIs accept. */
+  it("allows a list", () => {
+    expect(() =>
+      buildIntegrationRequest("stripe", "create_customer", {
+        name: ["a", "b"],
+      }),
+    ).not.toThrow();
+  });
+
+  /** A JSON action is untouched by any of this — nesting is its whole point. */
+  it("still allows a nested body for a JSON action", () => {
+    expect(() =>
+      buildIntegrationRequest("pagerduty", "create_incident", {
+        title: "x",
+        serviceId: "P1",
+        from: "a@b.c",
+      }),
+    ).not.toThrow();
   });
 });
