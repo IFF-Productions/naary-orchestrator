@@ -27,7 +27,9 @@ export interface CompileResult {
 
 // Every node type that can START a graph (be its `startNodeId`). All are handled as entry
 // nodes by the interpreter. Keep in sync with the trigger node types.
-const ENTRY_TYPES: ReadonlySet<NodeType> = new Set<NodeType>([
+// Exported because the canvas places a trigger differently from a step (node-placement.ts) and must
+// not keep a second copy of this list to decide which is which.
+export const ENTRY_TYPES: ReadonlySet<NodeType> = new Set<NodeType>([
   "start",
   "webhookTrigger",
   "scheduleTrigger",

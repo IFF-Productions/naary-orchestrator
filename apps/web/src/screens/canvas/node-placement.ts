@@ -49,6 +49,46 @@ function overlaps(a: XY, b: XY): boolean {
 }
 
 /**
+ * Where a TRIGGER (entry) node goes: to the LEFT of the graph, level with the node it will feed.
+ *
+ * Reported as "added new start workflow node, and canvas throwing it in the middle with odd
+ * connection location". The general free-slot scan below put it at the first gap — for a
+ * left-to-right row of four, that is directly UNDER the first card, mid-flow. An entry node there is
+ * wrong twice over: it reads as a step rather than a start, and any edge drawn from it has to sweep
+ * BACKWARDS into the node it triggers, which is the odd connection.
+ *
+ * A trigger has no inbound edge by definition, so the only sensible place is upstream of everything:
+ * one column left, at the leftmost card's own y, so the edge it will carry runs straight and
+ * left-to-right like the rest of the flow. Once a trigger IS there it owns that column and further
+ * triggers stack beneath it — parallel entry points, rather than a staircase marching left.
+ */
+function entryPosition(existing: XY[], entries: XY[]): XY {
+  // A trigger already on the canvas OWNS the entry column — stack under the lowest one rather than
+  // stepping further left, so two entry points read as a parallel column instead of a staircase
+  // that drags the whole graph leftward with every trigger added.
+  if (entries.length > 0) {
+    const columnX = Math.min(...entries.map((n) => n.x));
+    const lowest = Math.max(...entries.map((n) => n.y));
+    for (let row = 1; row < SCAN; row++) {
+      const candidate = { x: columnX, y: lowest + row * ROW_PITCH };
+      if (!existing.some((n) => overlaps(n, candidate))) return candidate;
+    }
+    return { x: columnX - COL_PITCH, y: lowest };
+  }
+
+  const minX = Math.min(...existing.map((n) => n.x));
+  // Level with the TOPMOST card in the leftmost column — the one a new trigger would feed.
+  const anchorY = Math.min(
+    ...existing.filter((n) => n.x === minX).map((n) => n.y),
+  );
+  for (let row = 0; row < SCAN; row++) {
+    const candidate = { x: minX - COL_PITCH, y: anchorY + row * ROW_PITCH };
+    if (!existing.some((n) => overlaps(n, candidate))) return candidate;
+  }
+  return { x: minX - 2 * COL_PITCH, y: anchorY };
+}
+
+/**
  * The next free slot for a node, given everything already placed.
  *
  * Scans COLUMN-FIRST (down, then across) because this canvas reads top-to-bottom — a trigger at the
@@ -60,8 +100,18 @@ function overlaps(a: XY, b: XY): boolean {
  * COUNT. The old bug came from deriving position from `nodes.length`, which changes when anything is
  * deleted; a free-slot search depends only on where cards actually are.
  */
-export function nextNodePosition(existing: XY[]): XY {
+export function nextNodePosition(
+  existing: XY[],
+  opts?: {
+    /** Placing a TRIGGER: goes upstream of the flow, not into its first gap. */
+    entry?: boolean;
+    /** Positions of the TRIGGERS already on the canvas. The caller knows each node's kind; this
+     *  module deliberately doesn't, so it is told rather than guessing from geometry. */
+    entries?: XY[];
+  },
+): XY {
   if (existing.length === 0) return { ...FIRST_NODE };
+  if (opts?.entry) return entryPosition(existing, opts.entries ?? []);
 
   const baseX = Math.min(...existing.map((n) => n.x));
   const baseY = Math.min(...existing.map((n) => n.y));
