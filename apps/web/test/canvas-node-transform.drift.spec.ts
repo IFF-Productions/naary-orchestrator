@@ -74,15 +74,63 @@ describe("canvas.css does not fight React Flow's node positioning", () => {
     expect(frames.get("naaryNodeEnter")).toMatch(/transform/);
   });
 
+  /** The matcher itself, on the shapes that would otherwise slip past an "ends with" check. */
+  it("recognises the wrapper through pseudo-classes, attributes and extra classes", () => {
+    const targets = (selector: string): boolean =>
+      selector
+        .split(",")
+        .map((part) => {
+          const compound = part.trim().split(/[\s>+~]+/).pop() ?? "";
+          return compound
+            .replace(/\[[^\]]*\]/g, "")
+            .replace(/::?[\w-]+(\([^)]*\))?/g, "");
+        })
+        .some((compound) => /(^|\.)react-flow__node(\.|$)/.test(compound));
+
+    for (const s of [
+      ".react-flow__node",
+      ".react-flow__node.naary-node-enter",
+      ".react-flow__node:hover",
+      ".react-flow__node.foo:not(.bar)",
+      ".react-flow__node[data-id]",
+      ".react-flow__pane .react-flow__node",
+      "div > .react-flow__node",
+      ".other, .react-flow__node",
+    ]) {
+      expect(targets(s), s).toBe(true);
+    }
+    // Descendants of the wrapper are the CORRECT pattern and must not be flagged.
+    for (const s of [
+      ".react-flow__node .naary-node-card",
+      ".react-flow__node.naary-node-enter .naary-node-card",
+      ".react-flow__node > .naary-node-card:hover",
+      ".naary-node-card",
+    ]) {
+      expect(targets(s), s).toBe(false);
+    }
+  });
+
   it("no rule animates transform on the positioned node wrapper", () => {
     const offenders: string[] = [];
     for (const [selector, body] of all) {
-      // Only the WRAPPER itself. A descendant selector (`.react-flow__node … .naary-node-card`) is
-      // the correct pattern and must keep working.
+      // Only the WRAPPER itself. A DESCENDANT selector (`.react-flow__node … .naary-node-card`) is
+      // the correct pattern and must keep working — so the test is "the last compound selector is
+      // the wrapper", not "the string ends with the class".
+      //
+      // The compound is taken after the final combinator (space, >, +, ~) and then stripped of
+      // pseudo-classes/elements and attribute selectors. Without that, `.react-flow__node:hover`,
+      // `.react-flow__node.foo:not(.bar)` and `.react-flow__node[data-x]` would all slip past a
+      // simple "ends with" check while still targeting the positioned element (raised in review).
       const targetsWrapper = selector
         .split(",")
-        .map((s) => s.trim())
-        .some((s) => /\.react-flow__node[\w.-]*$/.test(s));
+        .map((part) => {
+          const compound = part.trim().split(/[\s>+~]+/).pop() ?? "";
+          // Drop `:pseudo(...)`, `::element` and `[attr=…]` so only the classes/tag remain.
+          return compound
+            .replace(/\[[^\]]*\]/g, "")
+            .replace(/::?[\w-]+(\([^)]*\))?/g, "");
+        })
+        .some((compound) => /(^|\.)react-flow__node(\.|$)/.test(compound));
       if (!targetsWrapper) continue;
 
       if (/(^|[\s;])transform\s*:/.test(body)) {
