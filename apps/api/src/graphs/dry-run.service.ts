@@ -115,6 +115,14 @@ export class DryRunService {
       }
 
       // 3. CREDENTIAL — the only network call, and only against a `write: false` probe.
+      //
+      // DELIBERATELY still probed when the config check failed, unlike the request check. The
+      // request check would only restate the config error; the credential check answers a
+      // DIFFERENT question — "is this token alive?" — and its answer is just as true on a node
+      // whose config is also wrong. Short-circuiting here would hand the user one problem, then
+      // the next one on the following check, which is precisely the fix-run-repeat loop this
+      // feature exists to end (#830). The cost is bounded: one call per distinct connection,
+      // and a broken node usually shares its connection with a working one anyway.
       if (connectionId && provider) {
         const key = `${connectionId}:${provider}`;
         let verdict = probes.get(key);

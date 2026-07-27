@@ -17591,9 +17591,7 @@
         },
         "required": [
           "kind",
-          "ok",
-          "message",
-          "skipped"
+          "ok"
         ]
       },
       "DryRunNodeResponse": {
