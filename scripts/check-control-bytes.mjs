@@ -45,7 +45,10 @@ const ALLOWED = new Set([0x09, 0x0a, 0x0d]);
 /** git ls-files rather than a directory walk: it already excludes gitignored output (dist,
  *  node_modules, coverage) and can't drift from what is actually committed. */
 const tracked = execFileSync("git", ["ls-files", "-z"], {
-  encoding: "latin1",
+  // utf8, NOT latin1: git emits raw filename bytes, so a latin1 decode turns a non-ASCII path into
+  // mojibake that readFileSync then can't open. The skip below would drop it with no output —
+  // silence indistinguishable from a pass, which is the exact failure this check exists to prevent.
+  encoding: "utf8",
   maxBuffer: 64 * 1024 * 1024,
 })
   .split("\0")
@@ -53,12 +56,16 @@ const tracked = execFileSync("git", ["ls-files", "-z"], {
   .filter((f) => EXTENSIONS.some((ext) => f.endsWith(ext)));
 
 const offenders = [];
+const unreadable = [];
 for (const file of tracked) {
   let buf;
   try {
     buf = readFileSync(file);
-  } catch {
-    continue; // deleted-but-tracked in a dirty tree
+  } catch (err) {
+    // Tracked but not on disk is normal in a dirty tree (a staged deletion). Anything else means
+    // this check did NOT look at a file it was supposed to — reported, never silently skipped.
+    if (err?.code !== "ENOENT") unreadable.push(`${file} (${err?.code ?? err})`);
+    continue;
   }
   let line = 1;
   for (const byte of buf) {
@@ -67,6 +74,12 @@ for (const file of tracked) {
       offenders.push({ file, line, byte });
     }
   }
+}
+
+if (unreadable.length > 0) {
+  console.error(`Could not read ${unreadable.length} tracked file(s):`);
+  for (const u of unreadable) console.error(`  ${u}`);
+  process.exit(1);
 }
 
 if (offenders.length > 0) {
