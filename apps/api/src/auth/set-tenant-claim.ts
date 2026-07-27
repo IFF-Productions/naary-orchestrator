@@ -41,9 +41,10 @@ async function main(): Promise<void> {
   }
 
   if (getApps().length === 0) {
+    const projectId = firebaseProjectId();
     initializeApp({
       credential: json ? cert(JSON.parse(json)) : applicationDefault(),
-      ...(firebaseProjectId() ? { projectId: firebaseProjectId() } : {}),
+      ...(projectId ? { projectId } : {}),
     });
   }
 
