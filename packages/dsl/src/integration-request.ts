@@ -100,6 +100,47 @@ export interface IntegrationCallPlan {
  *   5. the resolved auth headers — spread LAST so nothing can clobber the credential
  * `Content-Type: application/json` is then set for a request that carries a body.
  */
+
+/**
+ * Serialize a body as `application/x-www-form-urlencoded` (#707).
+ *
+ * Needed because Twilio and Stripe accept ONLY this — a JSON body is rejected outright, so their
+ * write actions could never succeed while the catalog had no way to say so.
+ *
+ * An ARRAY becomes repeated keys (`MediaUrl=a&MediaUrl=b`), which is how both APIs express a list.
+ *
+ * A NESTED object THROWS rather than being flattened or JSON-stringified into a value. A form body
+ * has no nesting, so any mapping we invented would be a guess: Stripe wants `metadata[key]=v`,
+ * others want `a.b=v`, and a silently wrong encoding produces a 400 from the provider that the
+ * author cannot diagnose from the UI — the exact failure mode this change exists to remove. The
+ * error names the field and never echoes its value (a body field can carry run data).
+ */
+function formEncodeBody(
+  provider: string,
+  action: string,
+  body: Record<string, unknown>,
+): string {
+  // Hand-rolled rather than URLSearchParams: this package is platform-agnostic and also evaluated
+  // inside the Temporal workflow sandbox, where a host global is not something to rely on.
+  // `encodeURIComponent` + `%20`→`+` matches what URLSearchParams emits for these values.
+  const enc = (v: string): string =>
+    encodeURIComponent(v).replace(/%20/g, "+");
+  const parts: string[] = [];
+  const append = (key: string, value: unknown): void => {
+    if (value !== null && typeof value === "object") {
+      throw new Error(
+        `Integration ${provider}/${action}: form-encoded actions can't send a nested value for '${key}' — flatten it in the catalog (e.g. Stripe's metadata[key] as its own field).`,
+      );
+    }
+    parts.push(`${enc(key)}=${enc(String(value))}`);
+  };
+  for (const [key, value] of Object.entries(body)) {
+    if (Array.isArray(value)) for (const v of value) append(key, v);
+    else append(key, value);
+  }
+  return parts.join("&");
+}
+
 export function planIntegrationCall(
   input: IntegrationCallPlanInput,
 ): IntegrationCallPlan {
@@ -155,8 +196,13 @@ export function planIntegrationCall(
 
   let body: string | undefined;
   if (req.method !== "GET" && req.body !== undefined) {
-    body = JSON.stringify(req.body);
-    headers["Content-Type"] = "application/json";
+    if (action.bodyEncoding === "form") {
+      body = formEncodeBody(providerKey, actionKey, req.body);
+      headers["Content-Type"] = "application/x-www-form-urlencoded";
+    } else {
+      body = JSON.stringify(req.body);
+      headers["Content-Type"] = "application/json";
+    }
   }
 
   return {

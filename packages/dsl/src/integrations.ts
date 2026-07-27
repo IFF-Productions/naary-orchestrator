@@ -60,6 +60,19 @@ export interface IntegrationAction {
    *  duplicate the create/update (design §4). Reads are retryable. */
   write: boolean;
   fields: IntegrationField[];
+  /**
+   * How the body is serialized. Default `"json"`, which is what every provider added before #707
+   * assumed — so an existing entry without this field is unchanged.
+   *
+   * `"form"` sends `application/x-www-form-urlencoded`. Required, not cosmetic, for APIs that
+   * accept ONLY that: Twilio and Stripe both reject a JSON body outright, so their write actions
+   * failed 100% of the time until this existed (#707). The catalog previously had no way to say
+   * this, which is why they shipped broken.
+   *
+   * A form body is FLAT by nature. `bodyPath` nesting can't be expressed, so the planner throws
+   * rather than guessing — see formEncodeBody.
+   */
+  bodyEncoding?: "json" | "form";
   /** Per-action request headers (non-secret), merged OVER the provider's static headers —
    *  e.g. GitHub's `Accept: application/vnd.github.diff` to fetch a PR as a unified diff
    *  instead of JSON. Never carries auth (that's resolved in-activity). */
@@ -2279,6 +2292,8 @@ const STRIPE: IntegrationProvider = {
       description: "Create a new customer.",
       method: "POST",
       pathTemplate: "/customers",
+      // Rejects JSON outright — form-encoded only (#707).
+      bodyEncoding: "form",
       write: true,
       fields: [
         { key: "email", label: "Email", in: "body", required: false },
@@ -2314,6 +2329,8 @@ const STRIPE: IntegrationProvider = {
       description: "Create a payment intent to collect a payment.",
       method: "POST",
       pathTemplate: "/payment_intents",
+      // Rejects JSON outright — form-encoded only (#707).
+      bodyEncoding: "form",
       write: true,
       fields: [
         {
@@ -2377,6 +2394,8 @@ const STRIPE: IntegrationProvider = {
       description: "Refund a charge, fully or partially.",
       method: "POST",
       pathTemplate: "/refunds",
+      // Rejects JSON outright — form-encoded only (#707).
+      bodyEncoding: "form",
       write: true,
       fields: [
         {
@@ -2567,6 +2586,8 @@ const TWILIO: IntegrationProvider = {
       description: "Send an SMS message.",
       method: "POST",
       pathTemplate: "/Accounts/{accountSid}/Messages.json",
+      // Rejects JSON outright — form-encoded only (#707).
+      bodyEncoding: "form",
       write: true,
       fields: [
         {
@@ -2647,6 +2668,8 @@ const TWILIO: IntegrationProvider = {
       description: "Place an outbound phone call.",
       method: "POST",
       pathTemplate: "/Accounts/{accountSid}/Calls.json",
+      // Rejects JSON outright — form-encoded only (#707).
+      bodyEncoding: "form",
       write: true,
       fields: [
         {
