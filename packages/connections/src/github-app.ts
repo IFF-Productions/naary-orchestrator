@@ -24,6 +24,11 @@ import {
   NeedsReauthError,
 } from "./errors";
 import { safeFetch } from "./safe-fetch";
+import {
+  githubAppId,
+  githubAppPrivateKey,
+  githubAppSlug,
+} from "./config";
 
 const GITHUB_API = "https://api.github.com";
 /** Serve a cached installation token until this margin before its real expiry (GitHub ~1h). */
@@ -38,13 +43,11 @@ export interface GithubAppConfig {
 }
 
 export function githubAppConfig(): GithubAppConfig | null {
-  const appId = process.env.GITHUB_APP_ID;
-  const raw = process.env.GITHUB_APP_PRIVATE_KEY;
-  if (!appId || !raw) return null;
-  // A single-line env var carries the PEM's newlines as literal `\n` — un-escape them so
-  // createPrivateKey gets a real PEM. (A key pasted with real newlines passes through.)
-  const privateKey = raw.includes("\\n") ? raw.replace(/\\n/g, "\n") : raw;
-  return { appId, privateKey, slug: process.env.GITHUB_APP_SLUG || undefined };
+  const appId = githubAppId();
+  // The accessor un-escapes a single-line PEM's literal `\n` — createPrivateKey needs a real one.
+  const privateKey = githubAppPrivateKey();
+  if (!appId || !privateKey) return null;
+  return { appId, privateKey, slug: githubAppSlug() };
 }
 
 /** The grant stored under conn:<id> for a github_app connection (NOT a token — an install id). */

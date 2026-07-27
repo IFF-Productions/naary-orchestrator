@@ -1,5 +1,6 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
+import { databaseUrl } from "./config";
 
 // Re-export the generated client types/values so consumers import from
 // @naary/db, never @prisma/client directly. (workflows.ts must NEVER import
@@ -16,7 +17,7 @@ let client: PrismaClient | undefined;
  */
 export function getPrisma(): PrismaClient {
   if (!client) {
-    const connectionString = process.env.DATABASE_URL;
+    const connectionString = databaseUrl();
     if (!connectionString) {
       throw new Error("DATABASE_URL is required");
     }

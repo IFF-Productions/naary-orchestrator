@@ -17,6 +17,7 @@ import { FlagsmithOpenFeatureProvider } from "@openfeature/flagsmith-provider";
 import { type EvaluationContext, OpenFeature } from "@openfeature/server-sdk";
 import { Flagsmith } from "flagsmith-nodejs";
 import { ALL_FLAG_SPECS, type FlagKey } from "./catalog";
+import { flagsmithApiUrl, flagsmithEnvironmentKey } from "./config";
 
 /** Platform-level Flagsmith config, from env. Null when flags aren't configured. */
 export interface FlagsConfig {
@@ -27,9 +28,9 @@ export interface FlagsConfig {
 }
 
 export function flagsConfig(): FlagsConfig | null {
-  const environmentKey = process.env.FLAGSMITH_ENVIRONMENT_KEY;
+  const environmentKey = flagsmithEnvironmentKey();
   if (!environmentKey) return null;
-  return { environmentKey, apiUrl: process.env.FLAGSMITH_API_URL || undefined };
+  return { environmentKey, apiUrl: flagsmithApiUrl() };
 }
 
 /** Test seam so unit tests can drive init/config without real env or network. */

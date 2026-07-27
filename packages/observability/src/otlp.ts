@@ -32,6 +32,7 @@ import {
 } from "@opentelemetry/sdk-metrics";
 import type { MetricAttributes } from "./metrics";
 import { deepScrub } from "./scrub";
+import { otlpConfigured } from "./config";
 
 let provider: MeterProviderType | undefined;
 let meter: ReturnType<typeof otelMetrics.getMeter> | undefined;
@@ -66,7 +67,7 @@ function scrubAttrs(
  * rather than taking the process down (observability must never break the product).
  */
 export function initOtlp(opts: { component: "api" | "worker" }): void {
-  if (!process.env.OTEL_EXPORTER_OTLP_ENDPOINT) return; // disabled — not configured
+  if (!otlpConfigured()) return; // disabled — not configured
   try {
     const exporter = new OTLPMetricExporter();
     const reader = new PeriodicExportingMetricReader({ exporter });

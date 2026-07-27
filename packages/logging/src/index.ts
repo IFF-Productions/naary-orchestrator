@@ -16,6 +16,7 @@
 import { randomUUID } from "node:crypto";
 import { deepScrub, getTraceContext, redactString } from "@naary/observability";
 import pino, { type DestinationStream, type Logger } from "pino";
+import { logLevel } from "./config";
 
 export type { Logger } from "pino";
 
@@ -34,7 +35,7 @@ export function createLogger(
 ): Logger {
   const options = {
     // Quiet by default; raise with LOG_LEVEL=debug for local debugging.
-    level: process.env.LOG_LEVEL ?? "info",
+    level: logLevel(),
     base: { component: opts.component },
     // ISO timestamps over pino's default epoch-ms — readable in a log search UI.
     timestamp: pino.stdTimeFunctions.isoTime,

@@ -3,6 +3,12 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import {
+  s3Bucket,
+  s3Endpoint,
+  s3Region,
+  storageProvider,
+} from "./config";
 
 /**
  * Provider-agnostic object storage. This interface is the **cloud-portability
@@ -84,11 +90,11 @@ let singleton: ObjectStore | undefined;
  */
 export function getObjectStore(): ObjectStore {
   if (singleton) return singleton;
-  if (process.env.STORAGE_PROVIDER === "s3") {
-    const bucket = process.env.S3_BUCKET;
+  if (storageProvider() === "s3") {
+    const bucket = s3Bucket();
     if (!bucket)
       throw new Error("S3_BUCKET is required when STORAGE_PROVIDER=s3");
-    const endpoint = process.env.S3_ENDPOINT?.trim();
+    const endpoint = s3Endpoint();
     // Region is NOT validated here on purpose. Passing `undefined` lets the AWS SDK run its own
     // resolution chain (AWS_REGION → AWS_DEFAULT_REGION → ~/.aws/config → an instance profile), so
     // hard-failing on an unset AWS_REGION would reject deployments that legitimately configure it
@@ -97,8 +103,7 @@ export function getObjectStore(): ObjectStore {
     // The one case worth helping: an S3-COMPATIBLE endpoint (R2/B2/MinIO) has no meaningful region
     // but the SDK still demands one, and those providers document "auto". Defaulting it there turns a
     // confusing SDK failure into a working client.
-    const region =
-      process.env.AWS_REGION?.trim() || (endpoint ? "auto" : undefined);
+    const region = s3Region(Boolean(endpoint));
     const client = new S3Client({
       ...(region ? { region } : {}),
       ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
