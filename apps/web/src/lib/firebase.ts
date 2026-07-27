@@ -18,9 +18,11 @@ import {
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   updateProfile,
 } from "firebase/auth";
+import { shouldRetryWithRedirect } from "./auth-errors";
 import { initAppCheck, mintBotGateToken } from "./app-check";
 import { getToken } from "./auth";
 
@@ -70,8 +72,25 @@ const googleProvider = new GoogleAuthProvider();
 const notConfigured = (): Promise<never> =>
   Promise.reject(new Error("Firebase login isn’t configured for this build."));
 
+/**
+ * Google sign-in, popup first with a full-page redirect as the fallback.
+ *
+ * A popup blocker is the visitor's browser config, not an error we can fix or ask them to fix
+ * mid-flow, and until now it dead-ended sign-in with a raw `auth/popup-blocked`. The redirect
+ * flow needs no popup at all, so it recovers instead of failing.
+ *
+ * Only for `popup-blocked` (see shouldRetryWithRedirect) — a popup the visitor CLOSED must not
+ * navigate the page out from under them. Note the returned promise never settles on the redirect
+ * path: the page unloads. Nothing downstream needs it to, because AuthProvider's
+ * `onAuthStateChanged` is what observes the completed sign-in when we come back.
+ */
 export function loginWithGoogle(): Promise<unknown> {
-  return auth ? signInWithPopup(auth, googleProvider) : notConfigured();
+  if (!auth) return notConfigured();
+  const a = auth;
+  return signInWithPopup(a, googleProvider).catch((err) => {
+    if (!shouldRetryWithRedirect(err)) throw err;
+    return signInWithRedirect(a, googleProvider);
+  });
 }
 
 export function loginWithEmail(
