@@ -69,6 +69,27 @@ interface ToastItem {
 export function Schedules() {
   const activeEnv = useActiveEnvironment();
   const phone = useMediaQuery(PHONE_QUERY);
+  /**
+   * The column name, carried INTO the cell on phone (#848). Stacked without it, "Every day at
+   * 06:00" / "in 4h" / "Completed" / "prod" are four unlabelled values in a column — you could
+   * read the last-run status as the next fire.
+   */
+  const cellLabel = (text: string) =>
+    phone ? (
+      <span
+        className="mono"
+        style={{
+          display: "block",
+          fontSize: "var(--text-2xs)",
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "var(--ink-faint)",
+          marginBottom: 2,
+        }}
+      >
+        {text}
+      </span>
+    ) : null;
   const [tenant, setTenant] = useState<string | null>(null);
   const [rows, setRows] = useState<ScheduleRow[] | null>(null);
   const [graphs, setGraphs] = useState<GraphSummary[]>([]);
@@ -437,8 +458,11 @@ export function Schedules() {
             }
           />
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <div style={{ minWidth: TABLE_MIN_WIDTH }}>
+          <div style={{ overflowX: phone ? undefined : "auto" }}>
+            <div style={{ minWidth: phone ? undefined : TABLE_MIN_WIDTH }}>
+              {/* Column header — desktop/tablet only. On phone each cell is labelled in place
+                  (#848), so a 6-column header would name things that are no longer columns. */}
+              {!phone && (
               <div
                 className="mono"
                 style={{
@@ -462,6 +486,7 @@ export function Schedules() {
                 <span>Env</span>
                 <span />
               </div>
+              )}
 
               {rows === null &&
                 !error &&
@@ -505,11 +530,15 @@ export function Schedules() {
                     className="run-row"
                     style={{
                       display: "grid",
-                      gridTemplateColumns: COLS,
-                      gap: 10,
-                      padding: "13px 18px",
+                      // PHONE (#848): at 390px this 820px-wide grid hid 464px — 57% of the row —
+                      // behind a scroller with no affordance, so Cadence, Next fire, Last run, Env
+                      // and every action were off-canvas. #708 converted five tables of this exact
+                      // class and simply didn't list this one.
+                      gridTemplateColumns: phone ? "1fr" : COLS,
+                      gap: phone ? 8 : 10,
+                      padding: phone ? "13px 16px" : "13px 18px",
                       borderBottom: "1px solid var(--line)",
-                      alignItems: "center",
+                      alignItems: phone ? "stretch" : "center",
                       opacity: r.paused ? 0.62 : 1,
                       transition: "opacity 150ms ease",
                     }}
@@ -571,6 +600,7 @@ export function Schedules() {
                         color: "var(--ink-soft)",
                       }}
                     >
+                      {cellLabel("Cadence")}
                       {cadence === "Custom" ? "Custom cadence" : cadence}
                       <div
                         style={{
@@ -585,6 +615,7 @@ export function Schedules() {
 
                     {/* next fire: countdown + absolute, or "— paused" */}
                     <div style={{ fontSize: "var(--text-xs)" }}>
+                      {cellLabel("Next fire")}
                       {r.paused ? (
                         <span style={{ color: "var(--ink-3)" }}>— paused</span>
                       ) : at ? (
@@ -613,9 +644,11 @@ export function Schedules() {
                     </div>
 
                     {/* last run: glow dot + status + age (from the Runs list) */}
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: 8 }}
-                    >
+                    <div>
+                      {cellLabel("Last run")}
+                      <div
+                        style={{ display: "flex", alignItems: "center", gap: 8 }}
+                      >
                       {last && lastUi && dot ? (
                         <>
                           <span
@@ -657,10 +690,12 @@ export function Schedules() {
                           —
                         </span>
                       )}
+                      </div>
                     </div>
 
                     {/* env chip — the whole list is scoped to the shell's active env */}
                     <div>
+                      {cellLabel("Env")}
                       {envObj ? (
                         <span
                           className="mono"
