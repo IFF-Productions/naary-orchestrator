@@ -262,7 +262,7 @@ export class PinsController {
         // it is now LOGGED: an autofill that silently produced no pin was as undiagnosable as the
         // generic test-run message, for the same reason (the reason was discarded, not reported).
         this.logger.warn(
-          `autofill skipped ${workflowKey}/${predId} (tenant=${tenantId}) — ${describeWorkflowFailure(e)}`,
+          `autofill skipped ${workflowKey}/${predId} (tenant=${tenantId}, env=${environmentId}) — ${describeWorkflowFailure(e)}`,
         );
       }
     }

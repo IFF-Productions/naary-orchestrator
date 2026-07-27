@@ -122,6 +122,19 @@ describe("failureChain", () => {
     ]);
   });
 
+  /** The chain is logged in FULL, so an unbounded entry is its own incident: an activity failure
+   *  can quote a multi-KB provider body or a stack. */
+  it("caps each layer so a log line can't run away", () => {
+    const chain = failureChain({
+      message: "outer",
+      cause: { message: "y".repeat(9000), cause: { message: "inner" } },
+    });
+    expect(chain).toHaveLength(3);
+    for (const entry of chain) expect(entry.length).toBeLessThanOrEqual(520);
+    // The deepest layer still survives — capping must not truncate the CHAIN, only its entries.
+    expect(chain[2]).toBe("inner");
+  });
+
   it("is empty for a non-object", () => {
     expect(failureChain("nope")).toEqual([]);
     expect(failureChain(undefined)).toEqual([]);

@@ -2,7 +2,7 @@
  * Turn a Temporal client failure into something a human can act on.
  *
  * `client.workflow.execute()` rejects with a `WorkflowFailedError` whose own message is always the
- * same seven words — **"Workflow execution failed"** — and whose `cause` chain carries the actual
+ * same three words — **"Workflow execution failed"** — and whose `cause` chain carries the actual
  * reason: the `ApplicationFailure` the activity threw, with its message and `type`.
  *
  * Reported against the single-node test run, which showed exactly that:
@@ -21,6 +21,12 @@ import { redactString } from "@naary/observability";
 /** How much of the innermost message to keep. Long enough for a provider's error body excerpt,
  *  short enough not to dump a stack into a toast. */
 const MAX_MESSAGE = 300;
+
+/** Per-LAYER cap for the chain. The chain is logged in FULL, and an activity failure can quote a
+ *  multi-KB provider body or a stack — a log line built from an unbounded chain is its own
+ *  incident (raised in review). Roomier than MAX_MESSAGE because the log is where you go to
+ *  diagnose, but still bounded. */
+const MAX_CHAIN_ENTRY = 500;
 
 /** The generic wrappers that carry no information — skipped when a deeper cause exists. */
 const UNINFORMATIVE = [
@@ -52,7 +58,10 @@ export function failureChain(error: unknown): string[] {
     seen.add(node);
     const message = typeof node.message === "string" ? node.message.trim() : "";
     const type = typeof node.type === "string" ? node.type : "";
-    if (message) out.push(type ? `${message} [${type}]` : message);
+    if (message) {
+      const capped = message.slice(0, MAX_CHAIN_ENTRY);
+      out.push(type ? `${capped} [${type}]` : capped);
+    }
     node = asFailure(node.cause);
   }
   return out;
