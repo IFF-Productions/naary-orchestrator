@@ -61,9 +61,17 @@ export interface CodeAgentResult {
   output: {
     result: string;
     tool: string;
-    /** The schema-constrained answer, PARSED — present only when the node set `outputSchema`.
-     *  Bound as `<nodeId>.output.structured.<field>`. `result` still carries the same value as
-     *  text, so an existing binding to `.result` keeps working. */
+    /**
+     * The schema-constrained answer, PARSED — present only when the node set `outputSchema`.
+     * Bound as `<nodeId>.output.structured.<field>`. `result` still carries the same value as
+     * text, so an existing binding to `.result` keeps working.
+     *
+     * INLINE, unlike `diff` and `trace` which claim-check offload when large — and deliberately so:
+     * those are display artifacts the API resolves, while this is DATA THE GRAPH READS. A
+     * claim-check reference can't be dereferenced inside a workflow, so offloading it would make
+     * the feature unusable downstream. Same treatment as the agent node's structured output, which
+     * has always been inline for the same reason (raised in review on #823).
+     */
     structured?: Record<string, unknown>;
     sessionId?: string;
     diff?: string | ClaimCheck;
