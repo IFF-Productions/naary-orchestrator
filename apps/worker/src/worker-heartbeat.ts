@@ -12,8 +12,8 @@
 import { getPrisma } from "@naary/db";
 import type { Logger } from "@naary/logging";
 import { activeActivities } from "./temporal/activity-gauge";
-import { WORKER_VERSION, workerIdentity } from "./worker-tuning";
-import { heartbeatEnabled } from "./config";
+import { workerIdentity } from "./worker-tuning";
+import { heartbeatEnabled, workerVersion } from "./config";
 
 export const HEARTBEAT_INTERVAL_MS = 15_000;
 
@@ -29,7 +29,7 @@ export function heartbeatRow(info: HeartbeatInfo, now: Date) {
   return {
     identity: workerIdentity(),
     taskQueue: info.taskQueue,
-    version: WORKER_VERSION(),
+    version: workerVersion(),
     host: info.host,
     activeActivities: activeActivities(),
     maxActivities: info.maxActivities,

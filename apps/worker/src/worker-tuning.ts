@@ -35,14 +35,10 @@ function parseDuration(v: string | undefined): Duration | undefined {
     : undefined;
 }
 
-/** The deployed version — the tag the deploy stamps (SENTRY_RELEASE), else a dev marker.
- *  A getter, not a const: an import-time read would freeze before dotenv (env.ts) has run. */
-export const WORKER_VERSION = (): string => workerVersion();
-
 /** A stable, human-readable identity for THIS worker replica, surfaced on every Temporal poller
  *  (and reused by the fleet registry): `<host>/<pid>/<version>`. Lets the fleet be told apart. */
 export const workerIdentity = (): string =>
-  `${hostname()}/${process.pid}/${WORKER_VERSION}`;
+  `${hostname()}/${process.pid}/${workerVersion()}`;
 
 /** A positive integer from env, or undefined (→ the SDK default, so today's behavior is unchanged
  *  unless an operator explicitly sets a knob). */

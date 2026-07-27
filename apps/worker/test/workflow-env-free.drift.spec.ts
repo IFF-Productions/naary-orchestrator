@@ -30,12 +30,19 @@ describe("workflow code reads no configuration", () => {
     expect(files.some((f) => f.endsWith("run-graph.ts"))).toBe(true);
   });
 
+  /**
+   * Matched against the RAW source — no comment stripping. A stripper is the tempting move here
+   * and it's the wrong one: `\/\/[^\n]*` also eats everything after the `//` in a URL string, so
+   * `const u = "https://x"; const e = process.env.FOO;` would be silently truncated to nothing and
+   * sail past the assertion. A guard that can be fooled by an ordinary string literal isn't one.
+   *
+   * The cost is that even a COMMENT mentioning the pattern fails. That's fine, and no workflow
+   * source does today — write it as "process env" in prose if you need to discuss it.
+   */
   it.each(files.map((f) => [f.slice(WORKFLOW_DIR.length + 1), f]))(
     "%s touches neither process.env nor the config module",
     (_name, file) => {
-      const src = readFileSync(file, "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/\/\/[^\n]*/g, "");
+      const src = readFileSync(file, "utf8");
       // Config belongs to boot (worker.ts) and to activities. If a workflow needs a configured
       // value, pass it in as a workflow argument or read it in an activity — both are recorded in
       // history, so a replay sees what the original run saw.

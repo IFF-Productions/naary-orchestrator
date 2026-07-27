@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TASK_QUEUE, TASK_QUEUE_HEAVY } from "@naary/contracts";
+import { workerVersion } from "../src/config";
 import {
   envInt,
   resolveTaskQueue,
@@ -29,6 +30,18 @@ describe("workerIdentity", () => {
     expect(id).toMatch(/^.+\/\d+\/.+$/); // <host>/<pid>/<version>
     expect(id).toBe(workerIdentity());
     expect(id.split("/")[1]).toBe(String(process.pid));
+  });
+
+  /**
+   * The version segment must be the VERSION, not a stringified accessor. When the version stopped
+   * being a module-level const (an import-time env read races dotenv) the interpolation kept
+   * compiling and the shape assertion above kept passing — `() => workerVersion()` contains no
+   * slash — while every Temporal poller and every fleet row got a function body as its identity.
+   */
+  it("interpolates the version value, never the accessor itself", () => {
+    const version = workerIdentity().split("/").slice(2).join("/");
+    expect(version).toBe(workerVersion());
+    expect(version).not.toMatch(/=>|function/);
   });
 });
 
