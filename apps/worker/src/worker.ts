@@ -39,6 +39,7 @@ import {
   workerIdentity,
   workerTuning,
 } from "./worker-tuning";
+import { metricsPort } from "./config";
 
 // Structured logger for worker BOOT code only. NOT imported by workflows.ts —
 // logging is I/O and would break deterministic replay (CLAUDE.md Tier-1 rule 2).
@@ -47,7 +48,7 @@ const log = createLogger({ component: "worker" });
 /** The worker has no HTTP server, so expose /metrics on its own small server for
  *  Prometheus to scrape. Off if METRICS_PORT=0. */
 function startMetricsServer(): { close: () => void } | undefined {
-  const port = Number(process.env.METRICS_PORT ?? 9091);
+  const port = metricsPort();
   if (!port) return undefined;
   const server = createServer((req, res) => {
     if (req.url === "/metrics") {

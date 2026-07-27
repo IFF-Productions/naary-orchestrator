@@ -8,6 +8,7 @@ import { Prisma, getDefaultEnvironmentId, getPrisma } from "@naary/db";
 import { createLogger } from "@naary/logging";
 import { getObjectStore, maybeOffload } from "@naary/storage";
 import { getBudget } from "@naary/usage";
+import { resumeSnapshotsEnabled, storageProvider } from "../../config";
 
 const log = createLogger({ component: "worker" });
 
@@ -335,10 +336,10 @@ export async function persistResumeSnapshot(meta: {
   mergeArrivals?: Record<string, number>;
 }): Promise<void> {
   try {
-    if ((process.env.RESUME_SNAPSHOTS ?? "on").toLowerCase() === "off") return;
+    if (!resumeSnapshotsEnabled()) return;
     // Durability check, not a capability check: MemoryObjectStore satisfies the interface but lives
     // in THIS process, so the API would never resolve the reference.
-    if (process.env.STORAGE_PROVIDER !== "s3") return;
+    if (storageProvider() !== "s3") return;
 
     const ref = await maybeOffload(meta.ctx, getObjectStore(), {
       keyPrefix: `resume/${meta.tenantId}`,

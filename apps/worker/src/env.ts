@@ -1,5 +1,10 @@
 import { resolve } from "node:path";
 import { config } from "dotenv";
+import {
+  appBaseUrlCandidates,
+  databaseUrl,
+  encryptionKey,
+} from "./config";
 
 // Load the repo-root .env (DATABASE_URL, ENCRYPTION_KEY) before any @naary/*
 // module evaluates. Import this FIRST in the worker entrypoint.
@@ -10,11 +15,11 @@ config({ path: resolve(__dirname, "../../../.env") });
 // surface on the first agent run.
 function requireEnv(): void {
   const errors: string[] = [];
-  const key = process.env.ENCRYPTION_KEY;
+  const key = encryptionKey();
   if (!key) errors.push("ENCRYPTION_KEY is required");
   else if (!/^[0-9a-fA-F]{64}$/.test(key))
     errors.push("ENCRYPTION_KEY must be 64 hex chars (32 bytes)");
-  if (!process.env.DATABASE_URL) errors.push("DATABASE_URL is required");
+  if (!databaseUrl()) errors.push("DATABASE_URL is required");
   if (errors.length > 0) {
     throw new Error(`Invalid environment:\n  - ${errors.join("\n  - ")}`);
   }
@@ -34,10 +39,7 @@ function warnIfNoAppBaseUrl(): void {
       return false;
     }
   };
-  const hasBase = [
-    process.env.APP_BASE_URL ?? "",
-    ...(process.env.CORS_ORIGINS ?? "").split(","),
-  ].some(isHttpUrl);
+  const hasBase = appBaseUrlCandidates().some(isHttpUrl);
   if (!hasBase) {
     console.warn(
       "[worker] No valid absolute base URL (APP_BASE_URL, or an http(s) origin in CORS_ORIGINS) — Slack/Teams notifications will show a bare run id with no clickable link or Approve/Reject buttons. Set APP_BASE_URL to your SPA URL to enable them.",

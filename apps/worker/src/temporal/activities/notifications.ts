@@ -19,6 +19,7 @@ import {
   notificationPayload,
 } from "@naary/notifications";
 import { activityRuns } from "../../metrics";
+import { appBaseUrlCandidates, encryptionKey } from "../../config";
 
 // The formatting shape (kind/workflowId/workflowKey/title/detail) is owned by @naary/notifications
 // — extend it with the worker-only `tenantId` rather than re-declaring the fields, so the two can't
@@ -230,10 +231,7 @@ export function normalizeBaseUrl(raw: string): string | undefined {
  * localhost is still fine).
  */
 function resolveAppBaseUrl(): string | undefined {
-  const candidates = [
-    process.env.APP_BASE_URL ?? "",
-    ...(process.env.CORS_ORIGINS ?? "").split(","),
-  ];
+  const candidates = appBaseUrlCandidates();
   for (const c of candidates) {
     const base = normalizeBaseUrl(c);
     if (base) return base;
@@ -246,7 +244,7 @@ function resolveAppBaseUrl(): string | undefined {
 export const APPROVAL_LINK_TTL_SECONDS = 7 * 24 * 3600;
 
 function approvalUrl(workflowId: string): string | undefined {
-  const key = process.env.ENCRYPTION_KEY;
+  const key = encryptionKey();
   const base = resolveAppBaseUrl();
   // Both are required for an absolute, clickable link. Without a base the URL would be
   // relative (`/approve/…`) — useless as a Slack url-button — so omit it (like runUrl).
