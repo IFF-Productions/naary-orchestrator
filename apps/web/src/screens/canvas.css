@@ -163,15 +163,30 @@ body.naary-dragging
     box-shadow: var(--shadow-node);
   }
 }
-.react-flow__node.naary-node-enter {
-  animation: naaryNodeEnter 0.32s cubic-bezier(0.22, 0.61, 0.36, 1) both;
-}
-/* The glow rides the card itself (the wrapper has no border-radius). */
+/*
+  BOTH animations ride the CARD, never `.react-flow__node`.
+  
+  React Flow positions every node with an inline `transform: translate(x, y)` on
+  `.react-flow__node`. A CSS animation on that same element that animates `transform` WINS over the
+  inline style (animations outrank inline declarations in the cascade), and with `fill-mode: both`
+  the final keyframe keeps applying forever after the animation ends. So the wrapper's translate was
+  permanently replaced by `scale(1) translateY(0)` — the node parked at the viewport origin while its
+  edges still drew to its real position, and dragging silently did nothing because React Flow's
+  updated inline transform stayed overridden.
+  
+  Reported as "added new start workflow node, and canvas throwing it in the middle with odd
+  connection location" and then, decisively, "I can move every node except the one I just added" —
+  only an ADDED node carries this class (CanvasPage.addNode), which is why saved nodes were fine.
+  
+  The glow was already on the card (the wrapper has no border-radius). The enter animation now joins
+  it, so nothing this stylesheet does can touch the element React Flow positions.
+*/
 .react-flow__node.naary-node-enter .naary-node-card {
-  animation: naaryNodeGlow 0.9s ease-out both;
+  animation:
+    naaryNodeEnter 0.32s cubic-bezier(0.22, 0.61, 0.36, 1) both,
+    naaryNodeGlow 0.9s ease-out both;
 }
 @media (prefers-reduced-motion: reduce) {
-  .react-flow__node.naary-node-enter,
   .react-flow__node.naary-node-enter .naary-node-card {
     animation: none;
   }
