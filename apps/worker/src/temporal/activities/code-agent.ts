@@ -38,6 +38,9 @@ export interface CodeAgentActivityConfig {
   maxBudgetUsd?: number;
   timeoutMs?: number;
   costUsd?: number;
+  /** JSON Schema constraining the final answer (registry `codeAgent.outputSchema`). Only the
+   *  `claude` driver can enforce it; the activity refuses it on any other tool. */
+  outputSchema?: Record<string, unknown>;
   /** "write" clones `repo` and edits it in the sandbox (Slice 2c); default/"read" runs in-worker. */
   mode?: "read" | "write";
   repo?: string;
@@ -58,6 +61,10 @@ export interface CodeAgentResult {
   output: {
     result: string;
     tool: string;
+    /** The schema-constrained answer, PARSED — present only when the node set `outputSchema`.
+     *  Bound as `<nodeId>.output.structured.<field>`. `result` still carries the same value as
+     *  text, so an existing binding to `.result` keeps working. */
+    structured?: Record<string, unknown>;
     sessionId?: string;
     diff?: string | ClaimCheck;
     /** Compact step-by-step execution trace (what the agent read/grepped, its reasoning) from
@@ -158,6 +165,16 @@ export async function callCodeAgent(
     // just read-only argv + no PR. OFF by default → read stays in-worker (legacy). Read env once.
     const sandboxEnv = codeAgentWriteEnv();
     const sandboxRead = !write && sandboxEnv.sandboxReadEnabled;
+    // STRUCTURED OUTPUT: refuse rather than approximate. A schema the driver cannot enforce would
+    // hand back unvalidated prose in a field the graph reads as typed data — a run that LOOKS
+    // successful and is wrong, which is worse than failing. Non-retryable: no retry fixes a
+    // capability. (Same reasoning as the form-encoded-body refusal in @naary/dsl.)
+    if (cfg.outputSchema && !driver.capabilities.structuredOutput) {
+      throw ApplicationFailure.nonRetryable(
+        `codeAgent: the '${driver.tool}' CLI cannot enforce an output schema — remove the schema, or switch this node's tool to 'claude'.`,
+        "CODE_AGENT_NO_STRUCTURED_OUTPUT",
+      );
+    }
     const args = driver.buildArgs({
       prompt: cfg.prompt,
       systemPrompt: cfg.systemPrompt,
@@ -165,6 +182,7 @@ export async function callCodeAgent(
       maxTurns: cfg.maxTurns,
       maxBudgetUsd: cfg.maxBudgetUsd,
       write,
+      ...(cfg.outputSchema ? { outputSchema: cfg.outputSchema } : {}),
     });
 
     let stdout: string;
@@ -344,6 +362,7 @@ export async function callCodeAgent(
       output: {
         result: envlp.result,
         tool: driver.tool,
+        ...(envlp.structured ? { structured: envlp.structured } : {}),
         sessionId: envlp.sessionId,
         ...(diffOut !== undefined ? { diff: diffOut } : {}),
         ...(traceOut !== undefined ? { trace: traceOut } : {}),

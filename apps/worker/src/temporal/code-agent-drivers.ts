@@ -23,6 +23,9 @@ export interface CodeAgentRunOpts {
   /** Write mode (Slice 2c): the CLI may EDIT files in the sandbox (acceptEdits + Edit/Write),
    *  vs the read-only default (plan mode, Read/Grep/Glob). Still no Bash in either mode. */
   write?: boolean;
+  /** JSON Schema constraining the final answer. Only meaningful for a driver whose
+   *  `capabilities.structuredOutput` is true — the caller checks before passing it. */
+  outputSchema?: Record<string, unknown>;
 }
 
 /**
@@ -61,6 +64,9 @@ function truncateField(s: string): string {
 export interface CodeAgentEnvelope {
   /** The model's final text (a plan/summary in read-only mode). */
   result: string;
+  /** The schema-constrained answer, PARSED, when the run supplied an outputSchema and the driver
+   *  supports it. `result` still carries the same value as text. */
+  structured?: Record<string, unknown>;
   /** Structured "needs input" questions (Q&A loop; unused until a later slice). */
   questions?: string[];
   /** CLI session id for `--resume` (Q&A loop; if the CLI supports it). */
@@ -94,6 +100,10 @@ export interface CliAgentDriver {
     headless: boolean;
     resume: boolean;
     structuredQuestions: boolean;
+    /** The CLI can CONSTRAIN its final answer to a caller-supplied JSON Schema (Claude Code's
+     *  `--json-schema`), returning the parsed object. Not the same as `structuredQuestions`, which
+     *  is the Q&A pause. False ⇒ the activity refuses an outputSchema rather than approximating. */
+    structuredOutput: boolean;
   };
   /** Build the argv for a headless, read-only run (Slice 1). */
   buildArgs(opts: CodeAgentRunOpts): string[];
@@ -117,7 +127,12 @@ const claudeDriver: CliAgentDriver = {
       : "ANTHROPIC_API_KEY";
     return { [varName]: k };
   },
-  capabilities: { headless: true, resume: true, structuredQuestions: true },
+  capabilities: {
+    headless: true,
+    resume: true,
+    structuredQuestions: true,
+    structuredOutput: true,
+  },
   buildArgs(opts) {
     const args = [
       "-p",
@@ -141,6 +156,11 @@ const claudeDriver: CliAgentDriver = {
     if (opts.maxTurns) args.push("--max-turns", String(opts.maxTurns));
     if (opts.maxBudgetUsd)
       args.push("--max-budget-usd", String(opts.maxBudgetUsd));
+    // Structured output: the CLI constrains the model to this schema and puts the PARSED object on
+    // the final result message as `structured_output` (verified live against the pinned CLI, in
+    // this exact stream-json mode — `--output-format json` behaves the same but is not what we run).
+    if (opts.outputSchema)
+      args.push("--json-schema", JSON.stringify(opts.outputSchema));
     return args;
   },
   parse(stdout, exitCode) {
@@ -161,6 +181,9 @@ const claudeDriver: CliAgentDriver = {
       // stream-json names this `usage`; the older `json` mode used `total_usage` — accept either.
       usage?: { input_tokens?: number; output_tokens?: number };
       total_usage?: { input_tokens?: number; output_tokens?: number };
+      /** Present only when the run passed `--json-schema`: the schema-constrained answer, already
+       *  parsed by the CLI (`result` carries the same value as a JSON string). */
+      structured_output?: unknown;
     }
     /** Set once the `type:"result"` line is seen; null if the process died first. */
     let final: ResultMsg | null = null;
@@ -247,10 +270,20 @@ const claudeDriver: CliAgentDriver = {
       });
     }
     const usage = final.usage ?? final.total_usage;
+    // `--json-schema` puts the PARSED answer here (verified live against the pinned CLI in this
+    // stream-json mode). Guarded: only a plain object is passed through, so a CLI change that made
+    // it a string or an array can't silently reach ctx as the wrong shape.
+    const structured =
+      final.structured_output !== null &&
+      typeof final.structured_output === "object" &&
+      !Array.isArray(final.structured_output)
+        ? (final.structured_output as Record<string, unknown>)
+        : undefined;
     return {
       result: resultText,
       sessionId: final.session_id,
       isError,
+      ...(structured ? { structured } : {}),
       // The CLI's own reason on failure (Claude sets `subtype`); fall back to a nonzero-exit
       // marker so a failure is never reasonless (#551 — feeds the Sentry fingerprint).
       failureSubtype: isError
@@ -340,7 +373,12 @@ const cursorDriver: CliAgentDriver = {
   authEnv(key) {
     return { CURSOR_API_KEY: key.trim() };
   },
-  capabilities: { headless: true, resume: false, structuredQuestions: false },
+  capabilities: {
+    headless: true,
+    resume: false,
+    structuredQuestions: false,
+    structuredOutput: false,
+  },
   buildArgs(opts) {
     // Cursor has no system-prompt flag — fold it into the prompt.
     const prompt = opts.systemPrompt
@@ -387,7 +425,12 @@ const copilotDriver: CliAgentDriver = {
   authEnv(key) {
     return { COPILOT_GITHUB_TOKEN: key.trim() };
   },
-  capabilities: { headless: true, resume: false, structuredQuestions: false },
+  capabilities: {
+    headless: true,
+    resume: false,
+    structuredQuestions: false,
+    structuredOutput: false,
+  },
   buildArgs(opts) {
     const prompt = opts.systemPrompt
       ? `${opts.systemPrompt}\n\n${opts.prompt}`

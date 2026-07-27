@@ -395,9 +395,21 @@ interface CliAgentDriver {
 
 | Driver | Headless | Resume (Q&A loop) | Structured output | Auth | Notes |
 |---|---|---|---|---|---|
-| **claude** (Claude Code) | ✅ `claude -p` | ✅ `--resume <id>` | ✅ `--output-format json` (`is_error`, `total_usage`) | Anthropic BYOK key (or `CLAUDE_CODE_OAUTH_TOKEN`) | Reference driver — full ask→pause→resume + fail-safe usage. Driver #1. |
-| **cursor** (Cursor CLI / `cursor-agent`) | ✅ headless/print mode | ⚠️ session model differs — verify at build | partial (text/JSON varies) | Cursor account/key | Close to Claude Code; confirm resume + question emission before wiring the Q&A loop. |
-| **copilot** (GitHub Copilot CLI) | ⚠️ evolving toward agentic | ⚠️ limited/none today | limited | GitHub / `gh` auth | Most limited for the edit→PR→resume loop; may land as a plan/suggest-only driver first. |
+| **claude** (Claude Code) | ✅ `claude -p` | ✅ `--resume <id>` | ✅ **schema-enforced** — `--json-schema <schema>`, parsed answer on `structured_output` | Anthropic BYOK key (or `CLAUDE_CODE_OAUTH_TOKEN`) | Reference driver — full ask→pause→resume + fail-safe usage. Driver #1. |
+| **cursor** (Cursor CLI / `cursor-agent`) | ✅ headless/print mode | ⚠️ session model differs — verify at build | ❌ none — an `outputSchema` is REFUSED | Cursor account/key | Close to Claude Code; confirm resume + question emission before wiring the Q&A loop. |
+| **copilot** (GitHub Copilot CLI) | ⚠️ evolving toward agentic | ⚠️ limited/none today | ❌ none — an `outputSchema` is REFUSED | GitHub / `gh` auth | Most limited for the edit→PR→resume loop; may land as a plan/suggest-only driver first. |
+
+**Structured output (`outputSchema`)** — the column above was written when the only JSON on offer
+was the CLI's *envelope* (`is_error`, `total_usage`) with a free-text `result`. Claude Code has
+since gained `--json-schema`, which CONSTRAINS the model and returns the parsed object as
+`structured_output` on the final result message. Verified live against the version the Dockerfile
+pins, in the `stream-json` mode this driver actually runs — the `--output-format json` behaviour
+could not be assumed to carry over.
+
+A driver whose `capabilities.structuredOutput` is false REFUSES a schema (non-retryable) rather
+than degrading to text. This is the one capability that must NOT "degrade gracefully": handing back
+unvalidated prose in a field the graph reads as typed data produces a run that looks successful and
+is wrong, which is worse than failing.
 
 Drivers **advertise capabilities**; the workflow degrades gracefully — a driver without
 `resume`/`structuredQuestions` simply doesn't offer the Q&A pause (it runs once and returns

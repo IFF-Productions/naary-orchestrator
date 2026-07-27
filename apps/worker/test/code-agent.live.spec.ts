@@ -130,4 +130,77 @@ describe.skipIf(!LIVE)("LIVE codeAgent — real `claude -p` (read-only)", () => 
       expect(out.costUsd).toBeGreaterThan(0);
     });
   });
+
+  /**
+   * STRUCTURED OUTPUT end-to-end. The CLI-level behaviour was verified directly against the pinned
+   * version (both `--output-format json` and the `stream-json` mode this driver runs), but that
+   * proves the FLAG, not this path: config → interpreter → activity → driver argv → envelope →
+   * `output.structured`. This case closes that gap on a real run.
+   *
+   * `severity` is an ENUM, so a model answering in prose instead of the schema fails the assertion
+   * — the test would pass on a free-text answer only if the string happened to be exactly "high".
+   */
+  it("constrains the CLI to an outputSchema and returns the parsed object", async () => {
+    const graph: GraphDef = {
+      startNodeId: "start",
+      nodes: [
+        { id: "start", type: "start" },
+        {
+          id: "code",
+          type: "codeAgent",
+          config: {
+            tool: "claude",
+            mode: "read",
+            prompt:
+              "The disk on web-01 is at 94% and climbing. Classify the severity and summarize it. Do not use any tools.",
+            outputSchema: {
+              type: "object",
+              properties: {
+                severity: { type: "string", enum: ["low", "high"] },
+                summary: { type: "string" },
+              },
+              required: ["severity", "summary"],
+              additionalProperties: false,
+            },
+            timeoutMs: 120_000,
+          },
+        },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "start", to: "code" },
+        { from: "code", to: "end" },
+      ],
+    };
+
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        // Same single-worker harness contract as the case above: test:true keeps the activity on
+        // the default queue instead of the heavy one, which nothing here polls.
+        args: [
+          graph,
+          { incident: "disk" },
+          { tenantId: "t-live-cc", test: true },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "live-code-agent-structured",
+      });
+      expect((await handle.result()).status).toBe("completed");
+
+      const final = await handle.query(stateQuery);
+      const out = final.ctx.code as {
+        output: { result: string; structured?: Record<string, unknown> };
+        costUsd: number;
+      };
+
+      // The parsed object — not a JSON string, and not absent.
+      expect(out.output.structured).toBeDefined();
+      expect(["low", "high"]).toContain(out.output.structured?.severity);
+      expect(typeof out.output.structured?.summary).toBe("string");
+      // `result` still carries the same answer as text, so an existing `.result` binding survives.
+      expect(JSON.parse(out.output.result)).toEqual(out.output.structured);
+      expect(out.costUsd).toBeGreaterThan(0);
+    });
+  });
 });
