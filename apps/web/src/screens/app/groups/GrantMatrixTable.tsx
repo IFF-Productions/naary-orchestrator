@@ -4,7 +4,7 @@
  * the first-grant cliff live in the parent; this renders rows and reports intents (toggle,
  * edit, delete) via callbacks.
  */
-import { Icon, Spinner } from "../../../components";
+import { HScroll, Icon, Spinner } from "../../../components";
 import type { GroupGrant } from "../../../lib/api";
 import {
   MATRIX_VERBS,
@@ -40,7 +40,11 @@ export function GrantMatrixTable({
   iconBtn: React.CSSProperties;
 }) {
   return (
-    <div style={{ overflowX: "auto", marginBottom: 10 }}>
+    /* At 390px this matrix hides 296px — 47% of every row. It must NOT become cards (a
+       permission grid isn't list-shaped) and must not take a blanket touch-target bump (its
+       checkboxes are ~37px apart, so bigger hit areas would overlap into mis-taps), so the fix
+       is to make the scroll VISIBLE — exactly what #708 asks for on this table. */
+    <HScroll style={{ marginBottom: 10 }} deps={grants}>
       <table
         style={{
           minWidth: 560,
@@ -124,7 +128,7 @@ export function GrantMatrixTable({
           ))}
         </tbody>
       </table>
-    </div>
+    </HScroll>
   );
 }
 
