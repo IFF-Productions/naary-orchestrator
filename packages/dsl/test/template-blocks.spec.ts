@@ -78,7 +78,7 @@ describe("renderEmailHtml", () => {
     const payloads = [
       "java\nscript:alert(1)",
       "java\tscript:alert(1)",
-      "javascript:alert(1)",
+      "\x01javascript:alert(1)",
       "  javascript:alert(1)",
       "JavaScript:alert(1)",
     ];

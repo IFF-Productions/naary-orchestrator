@@ -20,6 +20,7 @@
     "worker": "pnpm --filter @naary/worker start",
     "gen:api": "pnpm --filter @naary/api gen:openapi && pnpm --filter @naary/web gen:api-types",
     "check:api-types": "pnpm gen:api && git diff --exit-code -- apps/api/openapi.json",
+    "check:control-bytes": "node scripts/check-control-bytes.mjs",
     "gen:integration-docs": "npx tsc -b packages/dsl && node packages/dsl/scripts/gen-integration-docs.mjs",
     "check:integration-docs": "pnpm gen:integration-docs && git diff --exit-code -- docs/integrations",
     "start": "pnpm --filter @naary/api start",
