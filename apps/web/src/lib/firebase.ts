@@ -15,6 +15,7 @@ import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
   getAuth,
+  getRedirectResult,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
@@ -22,7 +23,7 @@ import {
   signOut,
   updateProfile,
 } from "firebase/auth";
-import { shouldRetryWithRedirect } from "./auth-errors";
+import { captureRedirectFailure, shouldRetryWithRedirect } from "./auth-errors";
 import { initAppCheck, mintBotGateToken } from "./app-check";
 import { getToken } from "./auth";
 
@@ -67,6 +68,22 @@ export const auth: Auth | undefined = firebaseApp
  */
 export { mintBotGateToken };
 
+/**
+ * The outcome of a `signInWithRedirect` return leg: a message when it FAILED, null otherwise.
+ *
+ * Started here at module load, deliberately, because the SDK's own completion happens during auth
+ * init and throws its error away (see captureRedirectFailure). `getRedirectResult` awaits
+ * `_initializationPromise` first, so this always reads the outcome init already computed — it
+ * never races it or consumes the pending-redirect flag out from under it.
+ *
+ * A promise rather than a callback because the return leg is a fresh page load: whoever renders
+ * the sign-in screen must be able to ask "did we just come back from a failed redirect?" whenever
+ * they mount, not be told once at a moment nothing is listening.
+ */
+export const redirectSignInError: Promise<string | null> = auth
+  ? captureRedirectFailure(getRedirectResult(auth))
+  : Promise.resolve(null);
+
 const googleProvider = new GoogleAuthProvider();
 
 const notConfigured = (): Promise<never> =>
@@ -75,14 +92,24 @@ const notConfigured = (): Promise<never> =>
 /**
  * Google sign-in, popup first with a full-page redirect as the fallback.
  *
- * A popup blocker is the visitor's browser config, not an error we can fix or ask them to fix
- * mid-flow, and until now it dead-ended sign-in with a raw `auth/popup-blocked`. The redirect
- * flow needs no popup at all, so it recovers instead of failing.
+ * A blocked popup is NOT simply the visitor's browser config. Our handler is clean — AuthScreen
+ * calls this synchronously inside the button's onClick — but the SDK puts two network round trips
+ * between the click and `window.open`:
+ *   1. `AbstractPopupRedirectOperation.execute()` awaits `resolver._initialize(auth)`, loading the
+ *      `<authDomain>/__/auth/iframe` helper. Memoized per auth, so it costs once per page load.
+ *   2. `_openPopup()` awaits `_getRedirectUrl()`, which awaits `auth._getAppCheckToken()` to hang
+ *      the token off the handler URL as `#fac=…`.
+ * Only after both does `_open()` reach `window.open`. (2) is what hurts us today: with App Check
+ * mis-provisioned (#792) that is a reCAPTCHA round trip that FAILS on every attempt —
+ * `_getAppCheckToken` logs "Error while retrieving App Check token" and returns undefined instead
+ * of throwing, so the flow limps on having already spent the browser's gesture window. Hence the
+ * intermittency, and hence fixing App Check should take most of this away on its own.
  *
- * Only for `popup-blocked` (see shouldRetryWithRedirect) — a popup the visitor CLOSED must not
- * navigate the page out from under them. Note the returned promise never settles on the redirect
- * path: the page unloads. Nothing downstream needs it to, because AuthProvider's
- * `onAuthStateChanged` is what observes the completed sign-in when we come back.
+ * The redirect fallback fires only for `popup-blocked` (see shouldRetryWithRedirect) — a popup the
+ * visitor CLOSED must not navigate the page out from under them. The returned promise never
+ * settles on that path: the page unloads. Coming back is a FRESH PAGE LOAD, so nothing resolves
+ * and no `onAuthed` callback runs — AuthPage has to notice `authenticated` and navigate itself,
+ * and `redirectSignInError` above carries the failure the SDK would otherwise swallow.
  */
 export function loginWithGoogle(): Promise<unknown> {
   if (!auth) return notConfigured();

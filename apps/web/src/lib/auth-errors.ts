@@ -63,6 +63,27 @@ export function authErrorMessage(err: unknown): string {
 }
 
 /**
+ * Turn the `signInWithRedirect` return leg into a message to show, or null when it succeeded
+ * (or never ran). NEVER rejects — this wraps a promise created at module load, and an unhandled
+ * rejection there would be an unattributed console error on every visit to the sign-in screen.
+ *
+ * WHY THIS EXISTS: the SDK swallows a failed redirect completion. `initializeCurrentUser` calls
+ * `tryRedirectSignIn`, whose catch is literally `// Swallow any errors here; the code can retrieve
+ * them in getRedirectResult()` — it clears the redirect user and returns null. So a redirect that
+ * fails (App Check refusal, a partitioned-storage iframe that can't hand the credential back)
+ * signs nobody in and says nothing at all: the visitor is simply returned to the sign-in screen.
+ * Asking for the outcome explicitly is the only way that error is ever seen.
+ */
+export function captureRedirectFailure(
+  settled: Promise<unknown>,
+): Promise<string | null> {
+  return settled.then(
+    () => null,
+    (err) => authErrorMessage(err),
+  );
+}
+
+/**
  * Whether a popup failure is worth retrying as a full-page redirect.
  *
  * ONLY `popup-blocked` (and an environment that can't do popups at all). A popup the visitor

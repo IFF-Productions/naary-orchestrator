@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   authErrorMessage,
+  captureRedirectFailure,
   shouldRetryWithRedirect,
 } from "../src/lib/auth-errors";
 
@@ -56,6 +57,44 @@ describe("authErrorMessage", () => {
     );
     expect(authErrorMessage(undefined)).toBe("Authentication failed.");
     expect(authErrorMessage({})).toBe("Authentication failed.");
+  });
+});
+
+/**
+ * The redirect return leg is the one auth failure nobody ever saw: the SDK completes it during
+ * init and its catch is `// Swallow any errors here`, so a refused redirect just puts the visitor
+ * back on the sign-in form. This is the seam that gets the error back out.
+ */
+describe("captureRedirectFailure", () => {
+  it("is null when the redirect succeeded — or when there was no redirect at all", async () => {
+    expect(await captureRedirectFailure(Promise.resolve({ user: {} }))).toBe(
+      null,
+    );
+    // getRedirectResult resolves null on an ordinary page load; that is not a failure.
+    expect(await captureRedirectFailure(Promise.resolve(null))).toBe(null);
+  });
+
+  it("maps a failed redirect to the same human message as any other auth failure", async () => {
+    const msg = await captureRedirectFailure(
+      Promise.reject({ code: "auth/firebase-app-check-token-is-invalid" }),
+    );
+    expect(msg).toBe(
+      authErrorMessage({ code: "auth/firebase-app-check-token-is-invalid" }),
+    );
+    expect(msg).toMatch(/App Check/);
+  });
+
+  /**
+   * This wraps a promise created at MODULE LOAD. If it ever rejected, every visit to the sign-in
+   * screen after a failed redirect would log an unhandled rejection attributable to nothing.
+   */
+  it("never rejects, whatever it is handed", async () => {
+    await expect(
+      captureRedirectFailure(Promise.reject(new Error("boom"))),
+    ).resolves.toBe("boom");
+    await expect(
+      captureRedirectFailure(Promise.reject(undefined)),
+    ).resolves.toBe("Authentication failed.");
   });
 });
 
