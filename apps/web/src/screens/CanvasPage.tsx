@@ -575,9 +575,11 @@ export function CanvasPage() {
     if (!finished || allIssues.length === 0) return;
     setShowIssues(true);
     const nodeCount = new Set(allIssues.map((i) => i.nodeId)).size;
+    // "Issue" is what the panel this opens calls them — matching copy so the toast and the panel
+    // read as one thing rather than two different warnings (raised in review).
     pushToast(
-      `${allIssues.length} thing${allIssues.length === 1 ? "" : "s"} need${allIssues.length === 1 ? "s" : ""} you`,
-      `across ${nodeCount} node${nodeCount === 1 ? "" : "s"} — fix these before running`,
+      `${allIssues.length} issue${allIssues.length === 1 ? "" : "s"} to fix`,
+      `in ${nodeCount} node${nodeCount === 1 ? "" : "s"} — resolve these before running`,
     );
   }, [generating, allIssues, pushToast]);
 
