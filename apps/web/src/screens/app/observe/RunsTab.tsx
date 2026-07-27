@@ -7,6 +7,7 @@
  * view).
  */
 import type { RunSummary } from "../../../lib/api";
+import { PHONE_QUERY, useMediaQuery } from "../../../lib/useMediaQuery";
 import { runStatusUi } from "../../../lib/run-status";
 import { fmtDurMs } from "../run-detail/run-view-model";
 import { fmtCost, relTime } from "./observe-model";
@@ -34,12 +35,16 @@ export function RunsTab({
   now: number;
   onOpen: (workflowId: string) => void;
 }) {
+  const phone = useMediaQuery(PHONE_QUERY);
+
   return (
     <div style={{ animation: "naaryFadeUp .25s ease" }}>
       <div style={{ ...panelCard, overflow: "hidden" }}>
-        <div style={{ overflowX: "auto" }}>
-          <div style={{ minWidth: TABLE_MIN_WIDTH }}>
-            {/* header */}
+        <div style={{ overflowX: phone ? undefined : "auto" }}>
+          <div style={{ minWidth: phone ? undefined : TABLE_MIN_WIDTH }}>
+            {/* Header — tablet/desktop only. On phone the cards are self-labelling, and a
+                6-column header over 1-column cards would label the wrong things (#708). */}
+            {!phone && (
             <div
               className="mono"
               style={{
@@ -61,6 +66,7 @@ export function RunsTab({
               <span>Duration</span>
               <span style={{ textAlign: "right" }}>When</span>
             </div>
+            )}
 
             {runs === null && <CardEmpty height={120}>Loading runs…</CardEmpty>}
             {runs?.length === 0 && (
@@ -72,6 +78,112 @@ export function RunsTab({
             {(runs ?? []).map((r, i, arr) => {
               const ui = runStatusUi(r.status);
               const color = STATE_COLOR[ui.state] ?? "var(--ink-3)";
+              const border =
+                i < arr.length - 1 ? "1px solid var(--line)" : undefined;
+              const open = () => onOpen(r.workflowId);
+
+              // PHONE (#708): at 390px the 640px-wide grid hid 284px — 44% of every row —
+              // behind a scroller with no affordance, so Status, Cost, Duration and When were
+              // all off-canvas and the screen read as a list of run ids. Stacked card instead:
+              // the identity on top, the four hidden columns self-labelling below.
+              if (phone) {
+                return (
+                  <div
+                    key={r.workflowId}
+                    className="run-row"
+                    role="link"
+                    tabIndex={0}
+                    onClick={open}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") open();
+                    }}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 7,
+                      padding: "13px 16px",
+                      borderBottom: border,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: "50%",
+                          flex: "none",
+                          background: color,
+                          boxShadow: `0 0 7px ${color}`,
+                        }}
+                      />
+                      <span
+                        style={{
+                          fontSize: 13,
+                          color: "var(--ink)",
+                          flex: 1,
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {r.workflowKey ?? "—"}
+                      </span>
+                      <span
+                        className="mono"
+                        title={new Date(r.createdAt).toLocaleString()}
+                        style={{
+                          fontSize: 11.5,
+                          color: "var(--ink-3)",
+                          flex: "none",
+                        }}
+                      >
+                        {relTime(r.createdAt, now)}
+                      </span>
+                    </div>
+                    <div
+                      className="mono"
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: "4px 14px",
+                        fontSize: 11.5,
+                        color: "var(--ink-3)",
+                      }}
+                    >
+                      <span style={{ color, fontWeight: "var(--weight-medium)" }}>
+                        {ui.label}
+                      </span>
+                      <span>{fmtCost(r.costUsd)}</span>
+                      {/* "—" for an in-flight or pre-feature run: never a faked duration. */}
+                      <span>
+                        {r.durationMs === null ? "—" : fmtDurMs(r.durationMs)}
+                      </span>
+                      <span
+                        title={r.workflowId}
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          color: "var(--ink-faint)",
+                        }}
+                      >
+                        {r.workflowId}
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
+
               return (
                 <div
                   key={r.workflowId}
