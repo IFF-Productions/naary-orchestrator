@@ -1,9 +1,22 @@
 // Connection/credential create forms (MCP, GitHub App, database, SMTP, signing) for the Integrations screen.
 import { useState } from "react";
+import { INTEGRATION_PROVIDERS } from "@naary/dsl";
 import { Button } from "../../../components";
 import { api } from "../../../lib/api";
 import { ConnectionTestControl } from "./ConnectionTestControl";
 import { fieldLabel, fieldStyle, introStyle } from "./shared";
+
+/**
+ * Providers whose API host is the CONNECTION's Server URL rather than the catalog's `baseUrl`
+ * (a Jira site, a Shopify store). DERIVED from the catalog rather than typed out: a hand-written
+ * list goes stale the first time a provider is added, and this sentence is the only thing between
+ * a user and a connection that 404s every call.
+ */
+export const PER_TENANT_HOSTS = INTEGRATION_PROVIDERS.filter(
+  (p) => p.baseUrlFromConnection,
+)
+  .map((p) => p.label)
+  .join(", ");
 
 /** Connect a SQL database (postgres/mssql) for the SQL Query node. The connection
  *  string (DSN) is the secret → stored encrypted as the connection token; the host
@@ -539,6 +552,30 @@ export function ConnectForm({
             onChange={(e) => setToken(e.target.value)}
             placeholder="ghp_… / api token"
           />
+          {/* #815 — two traps that produce a runtime 401 with no form error. Both are facts about
+              how the code behaves, stated where the mistake is made rather than discovered on a
+              run: the auth scheme's prefix is applied by `buildIntegrationRequest`, and a catalog
+              provider ignores this Server URL in favour of the catalog's own baseUrl. */}
+          {type === "custom" && (
+            <div
+              style={{
+                marginTop: 5,
+                fontSize: "var(--text-xs)",
+                color: "var(--ink-3)",
+                lineHeight: 1.5,
+              }}
+            >
+              Paste the token <strong>raw</strong> — any scheme prefix (
+              <code className="mono">Bearer</code>,{" "}
+              <code className="mono">Token token=</code>) is added for you, and
+              including it yourself causes a 401. A <em>custom</em> connection
+              is also what the catalog providers (PagerDuty, Stripe, …) use.
+              Most take their API host from the catalog, so the Server URL above
+              is only a label — but for per-tenant hosts ({PER_TENANT_HOSTS}) it{" "}
+              <strong>is</strong> the host that gets called, so put your real
+              one there.
+            </div>
+          )}
         </div>
       )}
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
