@@ -344,6 +344,16 @@ const CONFIG_SCHEMAS = {
   codeAgent: z.object({
     tool: z.enum(["claude", "cursor", "copilot"]).optional(),
     prompt: z.string(),
+    /**
+     * JSON Schema for STRUCTURED output — same shape as the agent node's `outputSchema`. When set,
+     * the run returns a validated object on `output.structured` alongside the usual text.
+     *
+     * Enforced by the CLI (`claude --json-schema`), NOT by prompting: the model is constrained, and
+     * the envelope carries the parsed object. Only the `claude` driver supports it today — the
+     * activity REFUSES a schema on a driver that doesn't, rather than silently handing back
+     * unvalidated text, which would be a successful-looking wrong run.
+     */
+    outputSchema: z.record(z.string(), z.unknown()).optional(),
     systemPrompt: z.string().optional(),
     model: z.string().optional(),
     maxTurns: z.number().int().positive().optional(),

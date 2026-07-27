@@ -593,3 +593,113 @@ describe("callCodeAgent activity", () => {
     expect(JSON.stringify(out.output)).not.toContain(big);
   });
 });
+
+/**
+ * STRUCTURED OUTPUT — the codeAgent node's `outputSchema` (parity with the agent node's).
+ *
+ * Enforced by the CLI, not by prompting: `claude --json-schema <schema>` constrains the model and
+ * puts the PARSED answer on the final result message as `structured_output`. Verified live against
+ * the version the image pins, in the `stream-json` mode this driver actually runs — the earlier
+ * `--output-format json` probe could not be assumed to carry over.
+ */
+describe("callCodeAgent — structured output", () => {
+  const SCHEMA = {
+    type: "object",
+    properties: { severity: { type: "string" } },
+    required: ["severity"],
+  };
+
+  it("passes the schema to the CLI and returns the parsed object", async () => {
+    exec.mockResolvedValue({
+      stdout: envelope({
+        result: '{"severity":"high"}',
+        structured_output: { severity: "high" },
+      }),
+      exitCode: 0,
+    });
+
+    const res = await callCodeAgent(
+      { ...CFG, outputSchema: SCHEMA },
+      undefined,
+      META,
+    );
+
+    const args = exec.mock.calls[0][1] as string[];
+    const i = args.indexOf("--json-schema");
+    expect(i).toBeGreaterThan(-1);
+    expect(JSON.parse(args[i + 1])).toEqual(SCHEMA);
+    expect(res.output.structured).toEqual({ severity: "high" });
+    // The text result is UNCHANGED, so an existing `.result` binding keeps working.
+    expect(res.output.result).toBe('{"severity":"high"}');
+  });
+
+  it("sends no --json-schema when the node declares none", async () => {
+    exec.mockResolvedValue({ stdout: envelope({ result: "a plan" }), exitCode: 0 });
+
+    const res = await callCodeAgent(CFG, undefined, META);
+
+    expect(exec.mock.calls[0][1]).not.toContain("--json-schema");
+    expect(res.output.structured).toBeUndefined();
+  });
+
+  /**
+   * REFUSES rather than approximating. A driver that can't constrain the model would hand back
+   * prose in a field the graph reads as typed data — a run that looks successful and is wrong.
+   * Non-retryable: no retry fixes a capability.
+   */
+  /** The refusal must come BEFORE any I/O, so a tenant with no credential still gets the real,
+   *  actionable cause instead of "missing credential" (raised in review). */
+  it("refuses before touching the credential store", async () => {
+    getDecryptedKey.mockRejectedValue(new Error("should not be reached"));
+
+    await expect(
+      callCodeAgent(
+        { tool: "cursor", prompt: "classify", outputSchema: SCHEMA },
+        undefined,
+        META,
+      ),
+    ).rejects.toMatchObject({ type: "CODE_AGENT_NO_STRUCTURED_OUTPUT" });
+    expect(getDecryptedKey).not.toHaveBeenCalled();
+  });
+
+  it("refuses a schema on a driver that cannot enforce one", async () => {
+    await expect(
+      callCodeAgent(
+        { tool: "cursor", prompt: "classify", outputSchema: SCHEMA },
+        undefined,
+        META,
+      ),
+    ).rejects.toMatchObject({ nonRetryable: true });
+    // Never spawned — the refusal is BEFORE the CLI runs, so no tokens are spent.
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("names the fix in the refusal", async () => {
+    const err = await callCodeAgent(
+      { tool: "copilot", prompt: "classify", outputSchema: SCHEMA },
+      undefined,
+      META,
+    ).then(
+      () => null,
+      (e: unknown) => e as Error,
+    );
+    expect(err?.message).toMatch(/cannot enforce an output schema/);
+    expect(err?.message).toMatch(/switch this node's tool to 'claude'/);
+  });
+
+  /** A CLI that returned the wrong SHAPE must not reach ctx as structured data. */
+  it("ignores a non-object structured_output", async () => {
+    for (const bad of ["a string", 42, ["a"], null]) {
+      exec.mockResolvedValue({
+        stdout: envelope({ result: "x", structured_output: bad }),
+        exitCode: 0,
+      });
+      const res = await callCodeAgent(
+        { ...CFG, outputSchema: SCHEMA },
+        undefined,
+        META,
+      );
+      expect(res.output.structured, JSON.stringify(bad)).toBeUndefined();
+    }
+  });
+});

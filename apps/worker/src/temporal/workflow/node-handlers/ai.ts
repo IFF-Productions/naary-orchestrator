@@ -61,15 +61,31 @@ export const handleAgent: NodeHandler = async ({
         ? callCodeAgentHeavy
         : callCodeAgent;
     const caResult = await callCa(
-      { tool: "claude", prompt, model: agentCfg.model },
+      {
+        tool: "claude",
+        prompt,
+        model: agentCfg.model,
+        // The agent's own outputSchema works on this path too: the CLI enforces it
+        // (`--json-schema`) exactly as the provider does on the raw-LLM path.
+        //
+        // Behind its OWN patch gate, not folded into agent-claude-code-v1. An agent node could
+        // already carry `outputSchema` (the field predates this) while this path silently ignored
+        // it — so an IN-FLIGHT run can exist whose graph has a schema. Without this gate, replaying
+        // it would schedule the activity with different input than the history recorded. Cheap
+        // insurance, and the house pattern (CLAUDE.md: version interpreter changes with patched()).
+        ...(agentCfg.outputSchema && wf.patched("agent-claude-code-schema-v1")
+          ? { outputSchema: agentCfg.outputSchema }
+          : {}),
+      },
       ctx.__input,
       metaFor(node.id),
     );
     // Normalize to the AGENT output shape so downstream `agent.output.*` expressions keep working:
-    // the Claude Code result text becomes `output.text` (like a schema-less agent's free text).
+    // a schema'd run yields the structured object AS the output (identical to the raw-LLM path);
+    // otherwise the Claude Code result text becomes `output.text` (a schema-less agent's free text).
     ctx[node.id] = {
       status: "ok",
-      output: { text: caResult.output.result },
+      output: caResult.output.structured ?? { text: caResult.output.result },
       model: agentCfg.model ?? "claude-code",
       costUsd: caResult.costUsd,
     } satisfies NodeOutputMap["agent"];
@@ -122,6 +138,11 @@ export const handleCodeAgent: NodeHandler = async ({
       maxBudgetUsd: caCfg.maxBudgetUsd,
       timeoutMs: caCfg.timeoutMs,
       costUsd: caCfg.costUsd,
+      // Structured output: the CLI is constrained to this JSON Schema and the parsed object comes
+      // back on `output.structured`. Passed straight through — the ACTIVITY decides whether the
+      // chosen driver can enforce it (and refuses if not), because that is a runtime capability,
+      // not something this deterministic handler should judge.
+      outputSchema: caCfg.outputSchema,
       // Write mode (Slice 2c): the activity clones `repo` (via the App `connectionId`) and
       // dispatches to the sandbox-runner; default/read runs in-worker with no repo.
       mode: caCfg.mode,

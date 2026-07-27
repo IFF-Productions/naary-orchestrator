@@ -274,8 +274,11 @@ export function renderAgentSections(c: ConfigSectionCtx) {
             >
               Runs your instruction through the Claude Code CLI (read-only plan
               mode, no repo). The system prompt below is the task; the upstream
-              input is appended. Output is plain text at{" "}
-              <span className="mono">output.text</span>.
+              input is appended. Without a structured-output schema the result is
+              plain text at <span className="mono">output.text</span>; with one,
+              the CLI is constrained to your schema and the fields land on{" "}
+              <span className="mono">output.&lt;field&gt;</span> — same as any
+              other provider.
             </div>
           )}
 
@@ -315,16 +318,19 @@ export function renderAgentSections(c: ConfigSectionCtx) {
             })}
           </div>
 
+          {/* Structured output works on EVERY provider now, Claude Code included: the CLI enforces
+              the schema with `--json-schema` (verified against the pinned version) exactly as the
+              model APIs do. It used to be hidden here because the CLI could only return text. */}
+          <div>
+            <RowHead label="Structured output" value="fields" />
+            <SchemaEditor
+              schema={obj("outputSchema") as JsonSchemaObject | undefined}
+              onChange={(v) => onChange({ outputSchema: v })}
+            />
+          </div>
+
           {!isClaudeCode && (
             <>
-              <div>
-                <RowHead label="Structured output" value="fields" />
-                <SchemaEditor
-                  schema={obj("outputSchema") as JsonSchemaObject | undefined}
-                  onChange={(v) => onChange({ outputSchema: v })}
-                />
-              </div>
-
               <Labeled label="Max output tokens">
                 <input
                   type="number"
@@ -499,6 +505,32 @@ export function renderAgentSections(c: ConfigSectionCtx) {
               placeholder="default (tenant's Anthropic default)"
             />
           </Labeled>
+
+          {/* Structured output — only the `claude` tool can enforce a schema (`--json-schema`); the
+              activity REFUSES one on cursor/copilot rather than returning unvalidated prose in a
+              field the graph reads as typed data. Shown for every tool so the choice is visible,
+              with the constraint stated rather than the control silently missing. */}
+          <div>
+            <RowHead label="Structured output" value="fields" />
+            <SchemaEditor
+              schema={obj("outputSchema") as JsonSchemaObject | undefined}
+              onChange={(v) => onChange({ outputSchema: v })}
+            />
+            {obj("outputSchema") !== undefined &&
+              (str("tool") || "claude") !== "claude" && (
+                <div
+                  style={{
+                    fontSize: "var(--text-xs)",
+                    color: "var(--state-error)",
+                    lineHeight: "var(--leading-snug)",
+                    marginTop: 6,
+                  }}
+                >
+                  The {str("tool")} CLI can't enforce a schema — this run will
+                  fail. Switch the tool to Claude, or clear the schema.
+                </div>
+              )}
+          </div>
 
           <div style={{ display: "flex", gap: 10 }}>
             <Labeled label="Max turns">
