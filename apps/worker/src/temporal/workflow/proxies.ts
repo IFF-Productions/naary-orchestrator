@@ -17,6 +17,7 @@ export const {
   loadVariables,
   loadTemplate,
   setExecutionStatus,
+  persistResumeSnapshot,
   computeDateTime,
   resolveSubWorkflowGraph,
   callHmac,

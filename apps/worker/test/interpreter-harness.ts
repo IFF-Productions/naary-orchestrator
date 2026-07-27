@@ -32,6 +32,9 @@ export const harnessState: {
   pauseAgentFailures: number;
   refreshBudgetResult: activities.BudgetSnapshot | null;
   httpResponse: activities.HttpRequestResult;
+  /** Make callHttpRequest THROW this many times (non-retryable, so it fails fast) before returning
+   *  `httpResponse`. Mirrors `pauseAgentFailures`; used by the resume spec to fail a node mid-flow. */
+  httpFailures: number;
   /** Agent guardrails (#576): the projection `resolveToolPolicy` returns. `{}` (the default) means
    *  "everything allowed", which is what every pre-#576 interpreter spec expects. */
   toolPolicy: activities.ToolPolicyProjection;
@@ -41,6 +44,7 @@ export const harnessState: {
   pollChanged: true,
   pauseAgentFailures: 0,
   refreshBudgetResult: null,
+  httpFailures: 0,
   httpResponse: {
     status: "ok",
     httpStatus: 200,
@@ -166,12 +170,30 @@ const mockActivities = {
         }
       : { status: "ok", httpStatus: 201, ok: true, body: { id: 1 } };
   },
+  // Resume-from-failed-node: the interpreter calls this on the failure path. Must be present here
+  // even as a no-op — an unregistered activity fails the CALL, and that error would replace the
+  // failure the spec is asserting on (which is how it was found).
+  persistResumeSnapshot: async (meta: {
+    workflowId: string;
+    stepCount: number;
+  }): Promise<void> => {
+    resumeSnapshots.push(meta);
+  },
   callHttpRequest: async (
     cfg: activities.HttpRequestConfig,
     _input: unknown,
     _meta: activities.AgentMeta,
   ): Promise<activities.HttpRequestResult> => {
     httpCalls.push(cfg);
+    if (harnessState.httpFailures > 0) {
+      harnessState.httpFailures -= 1;
+      // Non-retryable so the run fails FAST — the resume spec wants a terminal failure, not three
+      // attempts' worth of backoff.
+      throw ApplicationFailure.nonRetryable(
+        "simulated network failure",
+        "HTTP_TRANSPORT",
+      );
+    }
     return harnessState.httpResponse;
   },
   callGraphQL: async (
@@ -590,6 +612,8 @@ const integrationCalls: {
   fields: Record<string, unknown>;
 }[] = [];
 const httpCalls: activities.HttpRequestConfig[] = [];
+/** Resume snapshots the interpreter asked to persist (failure path). */
+const resumeSnapshots: { workflowId: string; stepCount: number }[] = [];
 const graphqlCalls: activities.ResolvedGraphQL[] = [];
 const sqlCalls: activities.SqlQueryConfig[] = [];
 const sqlExecCalls: activities.SqlExecConfig[] = [];
@@ -1242,6 +1266,7 @@ export {
   mcpCalls,
   integrationCalls,
   httpCalls,
+  resumeSnapshots,
   graphqlCalls,
   sqlCalls,
   sqlExecCalls,

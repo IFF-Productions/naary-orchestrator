@@ -58,6 +58,18 @@ export class RerunDto {
   graphVersion?: number;
 }
 
+/** Body for POST :id/resume — resume a failed run at the node that failed. */
+export class ResumeRunDto {
+  @ApiPropertyOptional({
+    example: true,
+    description:
+      "Required only when the failing node is one that may already have taken effect (sqlExec, sendEmail, code, codeAgent, integration). It FAILED, but failing is not the same as having had no effect — a write can succeed and then the response time out. Resuming re-runs that node, so the caller has to say they accept a possible duplicate. Omitted for such a node ⇒ 400.",
+  })
+  @IsOptional()
+  @IsBoolean()
+  acknowledgeSideEffects?: boolean;
+}
+
 export class ApproveDto {
   @ApiProperty({
     example: true,

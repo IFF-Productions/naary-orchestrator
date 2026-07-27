@@ -24,7 +24,12 @@ import {
 } from "../executions/executions.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { ApiTokenThrottlerGuard } from "./api-token-throttler.guard";
-import { ApproveRunDto, RerunRunDto, StartRunDto } from "./v1-run.dto";
+import {
+  ApproveRunDto,
+  RerunRunDto,
+  ResumeRunV1Dto,
+  StartRunDto,
+} from "./v1-run.dto";
 import {
   AwaitingRunResponse,
   RunActionResponse,
@@ -249,6 +254,29 @@ export class V1RunsController {
       id,
       tenantId,
       body?.graphVersion,
+      principal,
+    );
+    return { runId: workflowId };
+  }
+
+  @ApiEndpoint({
+    summary: "Resume a failed run at the node that failed",
+    description:
+      "Starts a NEW run seeded with the failed run's saved state, beginning AT the failed node — so nothing upstream runs again and side effects an earlier node already had are not repeated (which a plain re-run does). 409 with the reason when the run isn't resumable (e.g. the failure was inside a per-item region, at a loop node, after a parallel fan-out, or no state snapshot is available). 400 when the failing node may already have taken effect and `acknowledgeSideEffects` wasn't set.",
+    created: RunRefResponse,
+    notFound: true,
+  })
+  @Post(":id/resume")
+  async resume(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+    @Body() body: ResumeRunV1Dto = {},
+    @CurrentPrincipal() principal?: Principal,
+  ): Promise<RunRefResponse> {
+    const { workflowId } = await this.executions.resume(
+      id,
+      tenantId,
+      { acknowledgeSideEffects: body?.acknowledgeSideEffects },
       principal,
     );
     return { runId: workflowId };

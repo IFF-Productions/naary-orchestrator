@@ -5553,6 +5553,190 @@
         ]
       }
     },
+    "/executions/{id}/resume-eligibility": {
+      "get": {
+        "description": "Read BEFORE offering a resume, so the UI can disable the action and explain why. `resumable:false` carries a `reason` (and a human-readable `detail`): a resume is refused whenever restarting at one node would misrepresent the run's remaining work — inside a per-item region, at a loop/child node, after a real parallel fan-out, with no recorded failing node, or with no retrievable state snapshot. `warnings` is non-empty when the failing node may already have taken effect.",
+        "operationId": "ExecutionsController_resumeEligibility",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeEligibilityResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Can this failed run be resumed at its failed node?",
+        "tags": [
+          "Executions"
+        ]
+      }
+    },
+    "/executions/{id}/resume": {
+      "post": {
+        "description": "Starts a NEW run seeded with the failed run's saved state, beginning AT the failed node — so nothing upstream executes again and side effects an earlier node already had are not repeated (which is what a plain re-run does). 409 with the reason when the run isn't resumable; 400 when the failing node may already have taken effect and `acknowledgeSideEffects` wasn't set.",
+        "operationId": "ExecutionsController_resume",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeRunDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartExecutionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Resume a failed run at the node that failed",
+        "tags": [
+          "Executions"
+        ]
+      }
+    },
     "/executions/{id}/resume-url": {
       "get": {
         "operationId": "ExecutionsController_resumeUrl",
@@ -14576,6 +14760,103 @@
         ]
       }
     },
+    "/v1/runs/{id}/resume": {
+      "post": {
+        "description": "Starts a NEW run seeded with the failed run's saved state, beginning AT the failed node — so nothing upstream runs again and side effects an earlier node already had are not repeated (which a plain re-run does). 409 with the reason when the run isn't resumable (e.g. the failure was inside a per-item region, at a loop node, after a parallel fan-out, or no state snapshot is available). 400 when the failing node may already have taken effect and `acknowledgeSideEffects` wasn't set.",
+        "operationId": "V1RunsController_resume",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeRunV1Dto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunRefResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Resume a failed run at the node that failed",
+        "tags": [
+          "v1"
+        ]
+      }
+    },
     "/v1/runs/{id}/approve": {
       "post": {
         "description": "Decides a run paused on a human-approval node. `approved:false` rejects it. 409 if the run is no longer awaiting approval.",
@@ -18211,6 +18492,67 @@
           }
         }
       },
+      "ResumeEligibilityResponse": {
+        "type": "object",
+        "properties": {
+          "resumable": {
+            "type": "boolean",
+            "example": false
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "not_a_failure",
+              "graph_unavailable",
+              "no_failed_node",
+              "unknown_node",
+              "snapshot_missing",
+              "inside_item_region",
+              "loop_or_child_node",
+              "parallel_fanout"
+            ],
+            "description": "Machine-readable refusal. Absent when `resumable` is true."
+          },
+          "detail": {
+            "type": "string",
+            "example": "The failure happened inside a per-item region. Only the last item's data survives, so resuming would re-run the node against the wrong item.",
+            "description": "Human-readable expansion of `reason`, safe to show a user — never run content."
+          },
+          "warnings": {
+            "type": "array",
+            "description": "Non-blocking cautions. `at_most_once_node` ⇒ the failing node may already have taken effect, so the POST requires `acknowledgeSideEffects`.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "at_most_once_node"
+              ]
+            }
+          },
+          "failedNodeId": {
+            "type": "string",
+            "example": "http-1",
+            "description": "The node a resume would restart at."
+          },
+          "warningText": {
+            "type": "string",
+            "description": "Ready-to-display text for the `at_most_once_node` warning."
+          }
+        },
+        "required": [
+          "resumable",
+          "warnings"
+        ]
+      },
+      "ResumeRunDto": {
+        "type": "object",
+        "properties": {
+          "acknowledgeSideEffects": {
+            "type": "boolean",
+            "example": true,
+            "description": "Required only when the failing node is one that may already have taken effect (sqlExec, sendEmail, code, codeAgent, integration). It FAILED, but failing is not the same as having had no effect — a write can succeed and then the response time out. Resuming re-runs that node, so the caller has to say they accept a possible duplicate. Omitted for such a node ⇒ 400."
+          }
+        }
+      },
       "ResumeUrlResponse": {
         "type": "object",
         "properties": {
@@ -21420,6 +21762,16 @@
             "example": 3,
             "minimum": 1,
             "description": "Saved graph version to re-run at (newer or older). Omit to use the current graph."
+          }
+        }
+      },
+      "ResumeRunV1Dto": {
+        "type": "object",
+        "properties": {
+          "acknowledgeSideEffects": {
+            "type": "boolean",
+            "example": true,
+            "description": "Required only when the failing node is one that may already have taken effect (sqlExec, sendEmail, code, codeAgent, integration): failing is not the same as having had no effect, and resuming re-runs that node. Omitted for such a node ⇒ 400."
           }
         }
       },

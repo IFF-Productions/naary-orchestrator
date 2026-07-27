@@ -97,6 +97,14 @@ export {
   resolveSqlExec,
   type ResolvedSqlExec,
 } from "./sql-query";
+export {
+  evaluateResume,
+  resumeWarningText,
+  type ResumeEligibility,
+  type ResumeEligibilityInput,
+  type ResumeRefusal,
+  type ResumeWarning,
+} from "./resume-eligibility";
 export { resolveIf } from "./if-node";
 export { resolveJson } from "./json-node";
 export { resolveNumber } from "./number-node";

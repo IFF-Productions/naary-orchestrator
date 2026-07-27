@@ -33,6 +33,7 @@ import {
 import { usePermissions } from "../../lib/usePermissions";
 import { envAccent } from "../../workspace/EnvironmentSwitcher";
 import { RerunMenu, VersionBadge } from "./RerunMenu";
+import { ResumeButton } from "./run-detail/ResumeButton";
 import { buildDebugEvents } from "./run-detail/DebugLogSection";
 import { NodeOutputBody } from "./run-detail/NodeOutputBody";
 import { RegionTraceSection } from "./run-detail/RegionTraceSection";
@@ -730,6 +731,16 @@ function RunView({ id }: { id: string }) {
               >
                 Cancel run
               </Button>
+            )}
+            {/* Resume is only meaningful for a FAILED run — it restarts at the node that died
+                instead of replaying the trigger (which would repeat earlier side effects). It
+                self-disables with a reason when the run isn't resumable. */}
+            {status === "failed" && mayRerun && (
+              <ResumeButton
+                runId={id}
+                onResumed={(newId) => navigate(`/app/runs/${newId}`)}
+                onError={setError}
+              />
             )}
             {status && isTerminal(status) && mayRerun && (
               <RerunMenu

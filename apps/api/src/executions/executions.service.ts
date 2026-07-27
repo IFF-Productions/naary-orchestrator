@@ -25,7 +25,12 @@ import {
 } from "@naary/contracts";
 import type { GraphDef, NodeDef } from "@naary/dsl";
 import { getPrisma } from "@naary/db";
-import { getObjectStore } from "@naary/storage";
+import {
+  evaluateResume,
+  resumeWarningText,
+  type ResumeEligibility,
+} from "@naary/dsl";
+import { getObjectStore, resolveClaimChecks } from "@naary/storage";
 import { TracedClass } from "@naary/observability";
 import { getBudget } from "@naary/usage";
 import type { Principal } from "../auth/tenant.decorator";
@@ -578,6 +583,23 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     workflowKey: string,
     /** Per-run verbose logging — only the manual `start()` path forwards true; triggers omit it. */
     debug = false,
+    /**
+     * Resume-from-failed-node (docs/design/RESUME-FROM-FAILED-NODE.md §4). Present ONLY for that
+     * path: it becomes the interpreter's 4th arg (`ResumeState`), so the walk starts at the failed
+     * node with the snapshotted ctx instead of at the graph's start node with an empty one.
+     * `resumedFromId` records lineage on the read-model row.
+     */
+    resumeOpts?: {
+      resume: {
+        ctx: Record<string, unknown>;
+        startNodeId: string;
+        costUsd: number;
+        stepCount: number;
+        mergeArrivals?: Record<string, number>;
+        reseedVars: true;
+      };
+      resumedFromId: string;
+    },
   ): Promise<{ workflowId: string }> {
     const workflowId = `${prefix}-${randomUUID()}`;
     const budget = await getBudget(tenantId);
@@ -624,6 +646,9 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           // byte-identical. Threaded to each activity's meta → DEBUG-level logs for THIS run only.
           ...(debug ? { debug: true } : {}),
         },
+        // Arg 4 (ResumeState) is OMITTED on every ordinary start, so a normal run's args stay
+        // byte-identical to before this feature existed.
+        ...(resumeOpts ? [resumeOpts.resume] : []),
       ],
       taskQueue: TASK_QUEUE,
       workflowId,
@@ -645,6 +670,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         workflowKey,
         graphVersion: snapshot.version,
         searchText: projectSearchText(input) ?? null,
+        ...(resumeOpts ? { resumedFromId: resumeOpts.resumedFromId } : {}),
       },
     });
     executionsStarted.inc({ workflowKey });
@@ -1090,6 +1116,167 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     workflowKey: string | null;
   }> {
     return queryRunGraph(this.deps(), id, tenantId, actor);
+  }
+
+  /**
+   * Can this failed run be resumed at the node that died?
+   * (docs/design/RESUME-FROM-FAILED-NODE.md §3, §6)
+   *
+   * A separate read from `resume()` on purpose: the UI has to be able to DISABLE the button and say
+   * why. A button that only fails on click is the same class of gap as a retry checkbox that isn't
+   * wired — it looks supported and isn't.
+   *
+   * All the graph reasoning is `evaluateResume` in @naary/dsl (pure, unit-tested); this method's job
+   * is to gather the three inputs it needs — the run's terminal state, the EXACT graph it walked, and
+   * whether a ctx snapshot is retrievable.
+   */
+  async resumeEligibility(
+    id: string,
+    tenantId: string,
+    actor?: Principal,
+  ): Promise<ResumeEligibility & { warningText?: string }> {
+    await this.assertOwner(id, tenantId);
+    const row = await getPrisma().execution.findUnique({
+      where: { workflowId: id },
+    });
+    if (!row) throw new NotFoundException("Run not found");
+    if (row.workflowKey) {
+      const envId =
+        row.environmentId ?? (await this.environments.defaultEnvId(tenantId));
+      await this.assertRun(actor, row.workflowKey, envId);
+    }
+
+    // The exact snapshot the run WALKED — never the latest saved version, which may have renamed or
+    // removed the very node we would resume at. Unrecoverable ⇒ evaluateResume refuses.
+    const graph = await this.runGraph(id, tenantId, actor).then(
+      (g) => g.graph as unknown as GraphDef,
+      () => null,
+    );
+
+    const verdict = evaluateResume({
+      status: row.status,
+      failedNodeId: row.failedNodeId,
+      graph,
+      executedNodeIds: row.executedNodeIds,
+      hasSnapshot: row.resumeSnapshot !== null,
+      snapshotDetail: this.snapshotDetail(),
+    });
+    if (verdict.warnings.includes("at_most_once_node") && graph) {
+      const type =
+        graph.nodes.find((n) => n.id === verdict.failedNodeId)?.type ?? "";
+      return { ...verdict, warningText: resumeWarningText("at_most_once_node", type) };
+    }
+    return verdict;
+  }
+
+  /** Why a snapshot might be absent — surfaced verbatim so "can't resume" is never unexplained. */
+  private snapshotDetail(): string {
+    if ((process.env.RESUME_SNAPSHOTS ?? "on").toLowerCase() === "off") {
+      return "Resume snapshots are turned off for this deployment (RESUME_SNAPSHOTS=off).";
+    }
+    if (process.env.STORAGE_PROVIDER !== "s3") {
+      return "Resume needs object storage (STORAGE_PROVIDER=s3); without it a run's state isn't saved anywhere the API can read.";
+    }
+    return "No saved state was found for this run — it may have failed before snapshots were enabled, or the snapshot has since expired.";
+  }
+
+  /**
+   * Resume a failed run AT the node that failed, keeping everything earlier as-is.
+   *
+   * The point of the feature: a rerun repeats side effects an earlier node already had (the email is
+   * sent twice). This starts a NEW Temporal workflow — a failed one is closed and cannot be
+   * restarted — but seeds it with the failed run's ctx and points the walk at the failed node, so
+   * nothing upstream executes again.
+   *
+   * Ineligible ⇒ 409 with the reason, never a best-effort attempt: every refusal in `evaluateResume`
+   * is a case that would otherwise produce a plausible-looking WRONG run.
+   */
+  async resume(
+    id: string,
+    tenantId: string,
+    opts: { acknowledgeSideEffects?: boolean } = {},
+    actor?: Principal,
+  ): Promise<{ workflowId: string }> {
+    const verdict = await this.resumeEligibility(id, tenantId, actor);
+    if (!verdict.resumable) {
+      throw new ConflictException(
+        verdict.detail ?? `This run can't be resumed (${verdict.reason}).`,
+      );
+    }
+    // The failed node may have taken effect before reporting failure (a 500 after the write), and
+    // only the caller knows. Refuse to guess on their behalf.
+    if (
+      verdict.warnings.includes("at_most_once_node") &&
+      !opts.acknowledgeSideEffects
+    ) {
+      throw new BadRequestException(
+        `${verdict.warningText ?? "The failing node may already have taken effect."} Pass acknowledgeSideEffects to resume anyway.`,
+      );
+    }
+
+    const row = await getPrisma().execution.findUnique({
+      where: { workflowId: id },
+    });
+    if (!row?.workflowKey) {
+      throw new BadRequestException(
+        "This run predates workflow-key tracking and can't be resumed.",
+      );
+    }
+    const envId =
+      row.environmentId ?? (await this.environments.defaultEnvId(tenantId));
+    const recovered = await this.runGraph(id, tenantId, actor);
+    const graph = recovered.graph as unknown as GraphDef;
+
+    // Rehydrate the ctx from object storage. A non-null reference can still 404 — the bucket
+    // lifecycle expires it — so this is the one refusal that can only be discovered here.
+    let ctx: Record<string, unknown>;
+    try {
+      const resolved = await resolveClaimChecks(
+        row.resumeSnapshot,
+        getObjectStore(),
+      );
+      if (!resolved || typeof resolved !== "object" || Array.isArray(resolved)) {
+        throw new Error("snapshot did not resolve to an object");
+      }
+      ctx = resolved as Record<string, unknown>;
+    } catch {
+      throw new ConflictException(
+        "This run's saved state is no longer available (snapshots expire), so it can't be resumed. Re-running it will start from the beginning.",
+      );
+    }
+
+    return this.startGraph(
+      "resume",
+      // The snapshot the ORIGINAL run walked. `version` is echoed for the read model; a null
+      // version (pre-tracking run) still resumes — the graph bytes are what matter.
+      { graph, contentHash: "", version: recovered.version ?? 0 },
+      await this.originalTriggerInput(id),
+      tenantId,
+      envId,
+      row.workflowKey,
+      false,
+      {
+        resume: {
+          ctx,
+          startNodeId: verdict.failedNodeId as string,
+          // Carried so a resumed run continues against the SAME spend, rather than getting a fresh
+          // allowance — resuming must not be a way around a per-run budget cap.
+          costUsd: Number(row.costUsd ?? 0),
+          // Verbatim from the snapshot: it seeds child-workflow ids, so recomputing it would
+          // silently re-run children that already succeeded.
+          stepCount: row.resumeStepCount ?? 0,
+          ...(row.resumeMergeArrivals
+            ? {
+                mergeArrivals: row.resumeMergeArrivals as Record<string, number>,
+              }
+            : {}),
+          // The snapshot's ctx may predate the failure, so $vars must be re-read — the interpreter
+          // otherwise skips them for any resume (correct for continueAsNew only).
+          reseedVars: true,
+        },
+        resumedFromId: id,
+      },
+    );
   }
 
   /**

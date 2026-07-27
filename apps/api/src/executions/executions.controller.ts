@@ -24,6 +24,7 @@ import {
   ArchiveBatchDto,
   CancelBatchDto,
   RerunDto,
+  ResumeRunDto,
   StartExecutionDto,
 } from "./execution.dto";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -38,6 +39,7 @@ import {
   RunListItemResponse,
   RunPageResponse,
   RunStateResponse,
+  ResumeEligibilityResponse,
   StartExecutionResponse,
 } from "./execution.response";
 import {
@@ -404,6 +406,39 @@ export class ExecutionsController {
     @CurrentPrincipal() principal?: Principal,
   ): Promise<{ workflowId: string }> {
     return this.executions.rerun(id, tenantId, body?.graphVersion, principal);
+  }
+
+  @ApiEndpoint({
+    summary: "Can this failed run be resumed at its failed node?",
+    description:
+      "Read BEFORE offering a resume, so the UI can disable the action and explain why. `resumable:false` carries a `reason` (and a human-readable `detail`): a resume is refused whenever restarting at one node would misrepresent the run's remaining work — inside a per-item region, at a loop/child node, after a real parallel fan-out, with no recorded failing node, or with no retrievable state snapshot. `warnings` is non-empty when the failing node may already have taken effect.",
+    ok: ResumeEligibilityResponse,
+    notFound: true,
+  })
+  @Get(":id/resume-eligibility")
+  resumeEligibility(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+    @CurrentPrincipal() principal?: Principal,
+  ): Promise<unknown> {
+    return this.executions.resumeEligibility(id, tenantId, principal);
+  }
+
+  @ApiEndpoint({
+    summary: "Resume a failed run at the node that failed",
+    description:
+      "Starts a NEW run seeded with the failed run's saved state, beginning AT the failed node — so nothing upstream executes again and side effects an earlier node already had are not repeated (which is what a plain re-run does). 409 with the reason when the run isn't resumable; 400 when the failing node may already have taken effect and `acknowledgeSideEffects` wasn't set.",
+    created: StartExecutionResponse,
+    notFound: true,
+  })
+  @Post(":id/resume")
+  resume(
+    @TenantId() tenantId: string,
+    @Param("id") id: string,
+    @Body() body: ResumeRunDto = {},
+    @CurrentPrincipal() principal?: Principal,
+  ): Promise<{ workflowId: string }> {
+    return this.executions.resume(id, tenantId, body ?? {}, principal);
   }
 
   /** The signed resume URL for a run paused on a wait(webhook) node (owner-scoped). Declared
