@@ -181,15 +181,25 @@ describe("DryRunService", () => {
  */
 describe("dry run can never reach a write action", () => {
   it("every provider's probe action is write:false", () => {
+    let checked = 0;
     for (const provider of INTEGRATION_PROVIDERS) {
       const probe = pickConnectionTestAction(provider.key);
-      if (probe.kind !== "action") continue;
+      // `unknown` = we declined to probe this provider at all, which is safe by definition.
+      if (probe.kind !== "read") continue;
       const action = provider.actions.find((a) => a.key === probe.action);
-      expect(action, `${provider.key}.${probe.action}`).toBeDefined();
+      expect(
+        action,
+        `${provider.key}.${probe.action} is not in the catalog`,
+      ).toBeDefined();
       expect(
         action?.write,
         `${provider.key}.${probe.action} must be a read`,
       ).toBe(false);
+      checked += 1;
     }
+    // Without this the test passes vacuously if the probe union is ever renamed — which is
+    // precisely what happened when this was written against a `kind` value that never existed.
+    // 14 of 38 providers are probeable today; the floor only has to rule out "zero" (#835).
+    expect(checked, "no provider was actually checked").toBeGreaterThan(10);
   });
 });
