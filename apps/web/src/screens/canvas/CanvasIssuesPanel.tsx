@@ -23,6 +23,20 @@ export function CanvasIssuesPanel({
   note?: string | null;
   onSelectNode: (id: string) => void;
 }) {
+  const legend = (
+    <div
+      style={{
+        fontSize: "var(--text-xs)",
+        color: "var(--ink-3)",
+        marginBottom: 8,
+      }}
+    >
+      {issues.length} issue{issues.length > 1 ? "s" : ""} — click one to jump to
+      its node. References point at a source that doesn't exist; resources are
+      unmatched connections/config.
+    </div>
+  );
+
   return (
     <div
       style={{
@@ -33,17 +47,10 @@ export function CanvasIssuesPanel({
         overflowY: "auto",
       }}
     >
-      <div
-        style={{
-          fontSize: "var(--text-xs)",
-          color: "var(--ink-3)",
-          marginBottom: 8,
-        }}
-      >
-        {issues.length} issue{issues.length > 1 ? "s" : ""} — click one to jump
-        to its node. References point at a source that doesn't exist; resources
-        are unmatched connections/config.
-      </div>
+      {/* Only when there ARE rows: on a clean dry run this line rendered as "0 issue — click one
+          to jump to its node", explaining reference and resource kinds that aren't present. The
+          note below is the whole message in that case. */}
+      {issues.length > 0 && legend}
       {note && (
         // The dry-run summary, and the only place the user learns what was NOT verified. Kept
         // visible alongside the rows so "2 issues" is never read as "and everything else is fine".
