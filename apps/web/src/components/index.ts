@@ -1,6 +1,8 @@
 import "./components.css";
 
 export { Icon, type IconName } from "./Icon";
+// A horizontal scroller that shows edge fades when there IS more content (#708).
+export { HScroll } from "./HScroll";
 export {
   Button,
   TextInput,
