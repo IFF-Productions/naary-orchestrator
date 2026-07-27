@@ -41,7 +41,9 @@ import {
   SaveGraphDto,
 } from "./graph.dto";
 import { GraphGeneratorService } from "./graph-generator.service";
+import { type DryRunResult, DryRunService } from "./dry-run.service";
 import {
+  DryRunResponse,
   ErrorHandlerResponse,
   GenerateGraphResponse,
   GraphDetailResponse,
@@ -100,6 +102,7 @@ export class GraphsController {
     private readonly generator: GraphGeneratorService,
     private readonly lifecycle: WorkflowLifecycleService,
     private readonly environments: EnvironmentsService,
+    private readonly dry: DryRunService,
   ) {}
 
   /** List the workflows in the ACTIVE environment (one row per workflowKey, latest version). */
@@ -284,6 +287,50 @@ export class GraphsController {
   ): Promise<{ version: number; contentHash: string; createdAt: string }[]> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
     return this.graphs.listVersions(tenantId, envId, workflowKey, principal);
+  }
+
+  /**
+   * DRY RUN (#832) — "will this flow run?", answered without executing anything.
+   *
+   * Three layers: pure catalog validation, a pure request build, and — the only network call — the
+   * SAME non-destructive credential probe the Integrations "Test" button uses, which the catalog
+   * restricts to `write: false` actions. No node is executed, so this is safe to press on a flow
+   * with real side effects. Each connection is probed once even when several nodes share it.
+   *
+   * Authorized as a READ of the graph (`getLatestNamed` asserts `view`): a dry run starts nothing
+   * and changes nothing. It does spend one provider call per distinct connection, which is why the
+   * probe is capped at one per connection and why it lives behind an explicit button rather than
+   * running continuously.
+   */
+  @ApiEndpoint({
+    summary: "Dry-run a workflow (no execution)",
+    description:
+      "Validates every integration node's config and request shape, and probes each connection " +
+      "with the provider's cheapest READ-ONLY action. Executes nothing.",
+    ok: DryRunResponse,
+    notFound: true,
+  })
+  @Post(":workflowKey/dry-run")
+  async dryRun(
+    @TenantId() tenantId: string,
+    @Param("workflowKey") workflowKey: string,
+    @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
+  ): Promise<DryRunResult> {
+    const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    // Authorization rides on the graph read — `getLatestNamed` asserts `view` for the actor, the
+    // same gate every other read on this controller uses. (A dry run reads and probes; it starts
+    // nothing.)
+    const found = await this.graphs.getLatestNamed(
+      tenantId,
+      envId,
+      workflowKey,
+      principal,
+    );
+    if (!found) {
+      throw new NotFoundException(`No graph saved for '${workflowKey}'`);
+    }
+    return this.dry.check(tenantId, found.graph);
   }
 
   /** Structural diff between two versions of a workflow — review what changed before promoting. */

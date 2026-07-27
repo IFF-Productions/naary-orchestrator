@@ -219,3 +219,63 @@ export class PromotionResponse {
   actor!: string;
   @ApiProperty({ format: "date-time" }) createdAt!: string;
 }
+
+/** One check a dry run performed against one node (#832). */
+export class DryRunCheckResponse {
+  @ApiProperty({
+    enum: ["config", "request", "credential"],
+    example: "credential",
+    description:
+      "config = catalog validation (pure); request = the built HTTP request (pure); " +
+      "credential = a READ-ONLY probe of the connection — the only one that calls the provider.",
+  })
+  kind!: string;
+  @ApiProperty({
+    example: false,
+    description: "False means this check found a problem. A skipped check is never false.",
+  })
+  ok!: boolean;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example:
+      "PagerDuty answered 401 to pagerduty.list_incidents — the token was rejected",
+    description: "Why it failed, or why it was skipped. Never contains a credential.",
+  })
+  message?: string | null;
+  @ApiProperty({
+    example: false,
+    description:
+      "The check couldn't run — e.g. the provider has no zero-argument read to probe. NOT a failure.",
+  })
+  skipped?: boolean;
+}
+
+/** Every check performed against one node. */
+export class DryRunNodeResponse {
+  @ApiProperty({ example: "ack" }) nodeId!: string;
+  @ApiProperty({ example: "integration" }) type!: string;
+  @ApiProperty({ type: [DryRunCheckResponse] })
+  checks!: DryRunCheckResponse[];
+}
+
+/**
+ * The result of dry-running a workflow: does it look runnable, WITHOUT running it (#832).
+ * Nothing here executes a node — the only provider traffic is the read-only credential probe.
+ */
+export class DryRunResponse {
+  @ApiProperty({
+    example: false,
+    description: "True when every check passed. A skipped check does not fail the run.",
+  })
+  ok!: boolean;
+  @ApiProperty({
+    example: 2,
+    description:
+      "How many connections were probed. One per DISTINCT connection, not per node — the verdict " +
+      "is about the credential, so a flow with six GitHub steps costs one probe.",
+  })
+  probed!: number;
+  @ApiProperty({ type: [DryRunNodeResponse] })
+  nodes!: DryRunNodeResponse[];
+}

@@ -3,6 +3,7 @@ import { BadRequestException, NotFoundException } from "@nestjs/common";
 import type { GraphDef } from "@naary/dsl";
 import { describe, expect, it, vi } from "vitest";
 import { SaveGraphDto } from "../src/graphs/graph.dto";
+import { DryRunService } from "../src/graphs/dry-run.service";
 import { GraphsController } from "../src/graphs/graphs.controller";
 import type { GraphGeneratorService } from "../src/graphs/graph-generator.service";
 import type { GraphsService } from "../src/graphs/graphs.service";
@@ -52,6 +53,8 @@ describe("GraphsController", () => {
       {} as unknown as GraphGeneratorService,
       { saveWorkflow } as unknown as WorkflowLifecycleService,
       envStub,
+      // DryRunService — these routes don't use it.
+      {} as unknown as DryRunService,
     );
 
     const res = await controller.save("t-1", dto(validGraph));
@@ -81,6 +84,8 @@ describe("GraphsController", () => {
       {} as unknown as GraphGeneratorService,
       { saveWorkflow } as unknown as WorkflowLifecycleService,
       envStub,
+      // DryRunService — these routes don't use it.
+      {} as unknown as DryRunService,
     );
 
     await expect(
@@ -96,6 +101,8 @@ describe("GraphsController", () => {
       {} as unknown as GraphGeneratorService,
       { deleteWorkflow } as unknown as WorkflowLifecycleService,
       envStub,
+      // DryRunService — these routes don't use it.
+      {} as unknown as DryRunService,
     );
 
     expect(await controller.remove("t-1", "canvas")).toEqual({ deleted: true });
@@ -129,6 +136,8 @@ describe("GraphsController", () => {
       {} as unknown as GraphGeneratorService,
       lifecycleStub,
       envStub,
+      // DryRunService — these routes don't use it.
+      {} as unknown as DryRunService,
     );
 
     expect(await controller.list("t-1")).toBe(summaries);
@@ -150,6 +159,8 @@ describe("GraphsController", () => {
       {} as unknown as GraphGeneratorService,
       lifecycleStub,
       envStub,
+      // DryRunService — these routes don't use it.
+      {} as unknown as DryRunService,
     );
 
     expect(await controller.get("t-1", "canvas")).toBe(named);
@@ -170,6 +181,8 @@ describe("GraphsController", () => {
       {} as unknown as GraphGeneratorService,
       lifecycleStub,
       envStub,
+      // DryRunService — these routes don't use it.
+      {} as unknown as DryRunService,
     );
 
     await expect(controller.get("t-1", "nope")).rejects.toBeInstanceOf(
@@ -230,6 +243,7 @@ function streamController(generateStream: (...args: unknown[]) => unknown) {
     { generateStream } as unknown as GraphGeneratorService,
     lifecycleStub,
     envStub,
+    {} as unknown as DryRunService,
   );
 }
 
@@ -435,6 +449,8 @@ describe("GraphsController error-handler env scoping", () => {
       {} as unknown as GraphGeneratorService,
       lifecycleStub,
       envStub,
+      // DryRunService — these routes don't use it.
+      {} as unknown as DryRunService,
     );
     return { controller, graphs };
   }

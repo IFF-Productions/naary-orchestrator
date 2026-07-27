@@ -20,6 +20,9 @@ import { OAuthController } from "./oauth.controller";
     { provide: ConnectionService, useFactory: () => new ConnectionService() },
     ConnectionTestService,
   ],
-  exports: [ConnectionService],
+  // ConnectionTestService is exported for the DRY RUN (#832): checking a flow's credentials is the
+  // same non-destructive probe as the Integrations "Test" button, and must not become a second
+  // implementation that could drift into calling a write action.
+  exports: [ConnectionService, ConnectionTestService],
 })
 export class ConnectionsModule {}
