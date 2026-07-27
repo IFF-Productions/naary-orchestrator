@@ -36,8 +36,9 @@ export interface RunSummary {
   startedAt: string;
   /** DB record time, ISO (kept for time-bucketed charts). */
   createdAt: string;
-  /** When the run reached a terminal status (worker-stamped, Slice 2); null for
-   *  in-flight runs AND runs predating the stamp — consumers render "—". */
+  /** When the run reached a terminal status — the worker on a normal finish, the API on cancel,
+   *  else Temporal's close time (Slice 2 + #807). Null for in-flight runs AND runs predating the
+   *  stamp — consumers render "—". */
   finishedAt: string | null;
   /** finishedAt − createdAt in ms; null whenever finishedAt is null (never derived
    *  from "now" — an in-flight age is not a duration). */

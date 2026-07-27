@@ -121,7 +121,7 @@ export class InsightsRunsByWorkflowResponse {
     nullable: true,
     example: 12840,
     description:
-      "Average run duration in ms over runs with a worker-stamped finishedAt; null when none have one.",
+      "Average run duration in ms over runs with a recorded finishedAt — stamped by the worker on a normal finish, or by the API when a run is canceled (#807); null when none have one.",
   })
   avgDurationMs!: number | null;
 }
