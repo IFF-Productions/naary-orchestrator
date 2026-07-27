@@ -73,3 +73,15 @@ export class RerunRunDto {
   @Min(1)
   graphVersion?: number;
 }
+
+/** Body for POST /v1/runs/:id/resume — the v1-owned DTO seam (never the internal one). */
+export class ResumeRunV1Dto {
+  @ApiPropertyOptional({
+    example: true,
+    description:
+      "Required only when the failing node is one that may already have taken effect (sqlExec, sendEmail, code, codeAgent, integration): failing is not the same as having had no effect, and resuming re-runs that node. Omitted for such a node ⇒ 400.",
+  })
+  @IsOptional()
+  @IsBoolean()
+  acknowledgeSideEffects?: boolean;
+}

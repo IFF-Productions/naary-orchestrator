@@ -49,6 +49,7 @@ export {
   loadVariables,
   loadTemplate,
   setExecutionStatus,
+  persistResumeSnapshot,
   refreshBudget,
   loadChatHistory,
   appendChatTurn,

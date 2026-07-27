@@ -15,6 +15,7 @@
  * state (see ./http + ./client), so this coexistence is transparent.
  */
 import type { GraphDef } from "@naary/dsl";
+import type { ResumeEligibility } from "../../screens/app/run-detail/resume-state";
 import { markApprovalsDecided } from "./approvals-count";
 import { client, unwrap } from "./client";
 import type { components } from "./schema";
@@ -136,6 +137,36 @@ export const runsApi = {
       await client.POST("/executions/{id}/rerun", {
         params: { path: { id } },
         body: graphVersion !== undefined ? { graphVersion } : {},
+      }),
+    );
+  },
+  /**
+   * Can this failed run be resumed at its failed node?
+   * (docs/design/RESUME-FROM-FAILED-NODE.md). Read BEFORE offering the action so the button can be
+   * disabled with the reason shown, rather than failing on click.
+   */
+  async resumeEligibility(id: string): Promise<ResumeEligibility> {
+    return unwrap(
+      await client.GET("/executions/{id}/resume-eligibility", {
+        params: { path: { id } },
+      }),
+    ) as ResumeEligibility;
+  },
+  /**
+   * Resume a failed run AT the failed node, keeping everything earlier as-is — unlike `rerun`,
+   * which repeats side effects an earlier node already had. `acknowledgeSideEffects` is required
+   * when the failing node itself may already have taken effect.
+   */
+  async resume(
+    id: string,
+    opts: { acknowledgeSideEffects?: boolean } = {},
+  ): Promise<StartExecutionResponse> {
+    return unwrap(
+      await client.POST("/executions/{id}/resume", {
+        params: { path: { id } },
+        body: opts.acknowledgeSideEffects
+          ? { acknowledgeSideEffects: true }
+          : {},
       }),
     );
   },

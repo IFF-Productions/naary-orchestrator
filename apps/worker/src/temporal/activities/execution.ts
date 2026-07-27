@@ -4,8 +4,12 @@ import { createHash } from "node:crypto";
 import { ApplicationFailure } from "@temporalio/activity";
 import { canonicalize } from "@naary/dsl";
 import type { GraphDef, TemplateBlock } from "@naary/dsl";
-import { getDefaultEnvironmentId, getPrisma } from "@naary/db";
+import { Prisma, getDefaultEnvironmentId, getPrisma } from "@naary/db";
+import { createLogger } from "@naary/logging";
+import { getObjectStore, maybeOffload } from "@naary/storage";
 import { getBudget } from "@naary/usage";
+
+const log = createLogger({ component: "worker" });
 
 /**
  * Record run ownership (tenant + workflowKey) so EVERY run — manual, webhook, or
@@ -301,4 +305,74 @@ export async function resolveSubWorkflowGraph(meta: {
     .update(canonicalize(graph))
     .digest("hex");
   return { graph, contentHash, version: row.version };
+}
+
+/**
+ * Snapshot a FAILED run's ctx so it can be resumed at the node that died
+ * (docs/design/RESUME-FROM-FAILED-NODE.md §2).
+ *
+ * The ctx goes to OBJECT STORAGE and only a claim-check reference reaches Postgres, so the
+ * "node IDs only, never ctx output content" rule on the Execution table still holds. Same bucket and
+ * lifecycle as the continueAsNew offload — this is the same data for the same reason, just written on
+ * a different trigger.
+ *
+ * Three ways this legitimately does nothing, each of which makes resume refuse with a reason rather
+ * than run against a hollow ctx:
+ *   - `RESUME_SNAPSHOTS=off` — the kill switch.
+ *   - no S3-backed store — `getObjectStore()` falls back to an in-process MemoryObjectStore that the
+ *     API cannot read, so a "snapshot" there would resolve to nothing at resume time. Better to have
+ *     written none at all than a reference that dead-ends.
+ *   - any failure while writing it.
+ *
+ * NEVER throws: it runs on the failure path, and masking the original failure with a bookkeeping
+ * error would be strictly worse than not offering a resume.
+ */
+export async function persistResumeSnapshot(meta: {
+  workflowId: string;
+  tenantId: string;
+  ctx: Record<string, unknown>;
+  stepCount: number;
+  mergeArrivals?: Record<string, number>;
+}): Promise<void> {
+  try {
+    if ((process.env.RESUME_SNAPSHOTS ?? "on").toLowerCase() === "off") return;
+    // Durability check, not a capability check: MemoryObjectStore satisfies the interface but lives
+    // in THIS process, so the API would never resolve the reference.
+    if (process.env.STORAGE_PROVIDER !== "s3") return;
+
+    const ref = await maybeOffload(meta.ctx, getObjectStore(), {
+      keyPrefix: `resume/${meta.tenantId}`,
+      thresholdBytes: 0, // always offload — the point is to get it OUT of Postgres
+    });
+    await getPrisma().execution.update({
+      where: { workflowId: meta.workflowId },
+      data: {
+        resumeSnapshot: ref as Prisma.InputJsonValue,
+        resumeStepCount: meta.stepCount,
+        ...(meta.mergeArrivals
+          ? { resumeMergeArrivals: meta.mergeArrivals as Prisma.InputJsonValue }
+          : {}),
+      },
+    });
+    // Size + ids only — never the ctx (privacy checklist: no run content in logs).
+    log.info(
+      {
+        activity: "persistResumeSnapshot",
+        workflowId: meta.workflowId,
+        tenantId: meta.tenantId,
+        stepCount: meta.stepCount,
+        bytes: Buffer.byteLength(JSON.stringify(meta.ctx ?? null), "utf8"),
+      },
+      "stored a resume snapshot for a failed run",
+    );
+  } catch (err) {
+    log.warn(
+      {
+        activity: "persistResumeSnapshot",
+        workflowId: meta.workflowId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      "could not store a resume snapshot; the run stays unresumable",
+    );
+  }
 }

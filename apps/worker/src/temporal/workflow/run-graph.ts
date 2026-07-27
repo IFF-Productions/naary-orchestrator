@@ -24,6 +24,7 @@ import {
   recordExecution,
   loadVariables,
   setExecutionStatus,
+  persistResumeSnapshot,
   resolveSubWorkflowGraph,
   refreshBudget,
   sendNotification,
@@ -191,7 +192,9 @@ export async function runGraph(
   // stay replay-safe (CLAUDE.md: version interpreter changes with patched()). Only on first start —
   // a continueAsNew/resume already carries $vars inside its ctx snapshot, so re-loading would be both
   // redundant and a nondeterminism risk (the DB may have changed mid-run). NOT secrets (Tier-1 #4).
-  if (!resume && wf.patched("load-variables-v1")) {
+  // `!resume` is the continueAsNew case (its ctx already carries $vars). `resume.reseedVars` is the
+  // API resume-from-failed-node case, whose snapshot may not — see ResumeState.reseedVars.
+  if ((!resume || resume.reseedVars) && wf.patched("load-variables-v1")) {
     ctx.$vars = await loadVariables({
       tenantId: runCtx.tenantId,
       environmentId: runCtx.environmentId,
@@ -411,6 +414,37 @@ export async function runGraph(
         });
       } catch {
         /* best-effort — never mask the original failure */
+      }
+      // Resume-from-failed-node (docs/design/RESUME-FROM-FAILED-NODE.md): stash the ctx so the run
+      // can be restarted AT the node that died instead of from the trigger, which would repeat any
+      // side effect an earlier node already had. The ctx goes to OBJECT STORAGE and only a
+      // claim-check reference reaches Postgres, so the node-ids-only rule above still holds.
+      //
+      // Separately patched from `exec-fail-v1`: this is a second new command on the failure path, and
+      // gating it on the older marker would change the history of runs that replay through that
+      // block. `test` runs are excluded for the same reason as the stamp — a single-node test is not
+      // a run anyone resumes.
+      //
+      // try/catch is LOAD-BEARING even though the activity swallows its own errors. Its internal
+      // catch cannot cover the ways Temporal itself fails the CALL — an unregistered activity, a
+      // timeout, retries exhausted — and any of those would surface as "Activity task failed" and
+      // REPLACE the real failure the run should report. The e2e suite caught exactly that: three
+      // specs asserting on a run's failure message/type started seeing the bookkeeping error
+      // instead. Losing a resume is a small cost; losing the cause of the failure is not.
+      if (wf.patched("resume-snapshot-v1")) {
+        try {
+          await persistResumeSnapshot({
+            workflowId: wf.workflowInfo().workflowId,
+            tenantId: runCtx.tenantId,
+            ctx,
+            // Carried VERBATIM, never recomputed: stepCount seeds child-workflow ids, so a wrong
+            // value would silently re-run children that already succeeded.
+            stepCount: state.stepCount,
+            mergeArrivals: state.mergeArrivals,
+          });
+        } catch {
+          /* best-effort — never mask the original failure */
+        }
       }
     }
     throw threw; // preserve FAILED semantics

@@ -95,6 +95,16 @@ export interface ResumeState {
    *  continueAsNews mid-join resumes its counts. Plain object (CAN-safe). */
   mergeArrivals?: Record<string, number>;
   /**
+   * Load `$vars` even though this is a resume (docs/design/RESUME-FROM-FAILED-NODE.md §4).
+   *
+   * `run-graph` skips loadVariables whenever `resume` is set, which is right for continueAsNew — the
+   * carried ctx already holds `$vars`, and re-reading mid-run would be a nondeterminism risk. An API
+   * resume-from-failed-node is the other kind of caller: its ctx comes from a snapshot that may
+   * predate the failure, so without this every `{{ $vars.KEY }}` downstream would silently resolve to
+   * nothing. Set ONLY by that path; continueAsNew leaves it undefined and behaves exactly as before.
+   */
+  reseedVars?: boolean;
+  /**
    * SIGNAL DURABILITY ACROSS THE BOUNDARY (#681). A decision/resume Signal can land at ANY moment —
    * including while the walk sits between two nodes, before the gate that consumes it has been
    * reached. Such a signal lives only in `EngineState`, so a continueAsNew that did not carry it

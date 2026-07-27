@@ -330,3 +330,56 @@ export class RunEventResponse {
   @ApiProperty({ required: false, example: "Provider returned 429" })
   detail?: string;
 }
+
+/**
+ * Whether a failed run can be resumed at the node that failed
+ * (docs/design/RESUME-FROM-FAILED-NODE.md §6).
+ *
+ * A separate GET from the POST so the UI can disable the action and say WHY. Every `reason` is a
+ * case where restarting at one node id would misrepresent the run's remaining work, so the honest
+ * answer is a refusal with an explanation rather than an attempt.
+ */
+export class ResumeEligibilityResponse {
+  @ApiProperty({ example: false }) resumable!: boolean;
+  @ApiProperty({
+    required: false,
+    enum: [
+      "not_a_failure",
+      "graph_unavailable",
+      "no_failed_node",
+      "unknown_node",
+      "snapshot_missing",
+      "inside_item_region",
+      "loop_or_child_node",
+      "parallel_fanout",
+    ],
+    description: "Machine-readable refusal. Absent when `resumable` is true.",
+  })
+  reason?: string;
+  @ApiProperty({
+    required: false,
+    example:
+      "The failure happened inside a per-item region. Only the last item's data survives, so resuming would re-run the node against the wrong item.",
+    description:
+      "Human-readable expansion of `reason`, safe to show a user — never run content.",
+  })
+  detail?: string;
+  @ApiProperty({
+    type: [String],
+    enum: ["at_most_once_node"],
+    description:
+      "Non-blocking cautions. `at_most_once_node` ⇒ the failing node may already have taken effect, so the POST requires `acknowledgeSideEffects`.",
+  })
+  warnings!: string[];
+  @ApiProperty({
+    required: false,
+    example: "http-1",
+    description: "The node a resume would restart at.",
+  })
+  failedNodeId?: string;
+  @ApiProperty({
+    required: false,
+    description: "Ready-to-display text for the `at_most_once_node` warning.",
+  })
+  warningText?: string;
+}

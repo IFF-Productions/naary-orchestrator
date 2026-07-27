@@ -27,7 +27,12 @@ locals {
   s3_count = var.create_s3 ? 1 : 0
   # Prefixes whose objects are transient. Kept as a local (not a variable) because they're determined
   # by the worker's claim-check call sites, not by an operator's preference — see items.ts/sql.ts/http.ts.
-  claim_check_prefixes = ["items/", "ctx/", "sql/", "http/"]
+  # `resume/` holds a FAILED run's whole ctx so the run can be resumed at the node that died
+  # (docs/design/RESUME-FROM-FAILED-NODE.md). Same class as the other prefixes — transient run
+  # content, referenced from Postgres by claim-check only — so it inherits the same expiry. NB the
+  # consequence is real and documented: once it expires, that run can no longer be resumed (the API
+  # returns a 409 saying so), which is why the retention window is the one knob that matters here.
+  claim_check_prefixes = ["items/", "ctx/", "sql/", "http/", "resume/"]
 }
 
 resource "aws_s3_bucket" "naary" {

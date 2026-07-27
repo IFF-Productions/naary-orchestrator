@@ -90,6 +90,22 @@ model Execution {
   // run threw; executedNodeIds empty for non-thrown/pre-feature runs (the UI falls back to ctx).
   failedNodeId    String?
   executedNodeIds String[]
+  // Resume-from-failed-node (docs/design/RESUME-FROM-FAILED-NODE.md). A claim-check REFERENCE to the
+  // run's ctx in object storage — never the ctx itself, so the privacy rule above still holds: no run
+  // output content in Postgres. Written only on terminal failure, only when RESUME_SNAPSHOTS is on and
+  // an object store is configured; NULL otherwise (and resume then refuses with a reason rather than
+  // running against a hollow ctx). The object expires with the bucket lifecycle, so a NON-null ref can
+  // still 404 later — the resume path treats that as `snapshot_expired`.
+  resumeSnapshot     Json?
+  // Carried verbatim into the resumed run's ResumeState. `stepCount` seeds child-workflow ids
+  // (`-foreach-<node>-<stepCount>-<i>`), so a wrong value silently re-runs children that already
+  // succeeded — it is snapshotted, never recomputed. `mergeArrivals` keeps fan-in counts so a join
+  // doesn't mis-fire. Counters and node ids only: no output content.
+  resumeStepCount    Int?
+  resumeMergeArrivals Json?
+  // Lineage: the run this one resumed FROM. Lets the UI show the chain and keeps cost attributable
+  // instead of double-counted as two unrelated runs. No FK — a historical parent must be deletable.
+  resumedFromId      String?
 
   // Runs list = `where {tenantId, archivedAt IS [NOT] NULL} orderBy createdAt desc`.
   // For the DEFAULT view (archivedAt IS NULL — an equality), (tenantId, archivedAt, createdAt)
