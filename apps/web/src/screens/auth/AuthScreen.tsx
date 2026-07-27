@@ -49,6 +49,12 @@ export interface AuthScreenProps {
   /** The pasted `nry_` token path: store it and enter directly. */
   onApiToken: (token: string) => void;
   initialMode?: AuthMode;
+  /**
+   * An error to show on arrival, for a failure that happened while this screen wasn't mounted —
+   * today that means a `signInWithRedirect` return leg that failed (AuthPage). Applied when it
+   * appears, not just at mount, because it resolves from a promise a tick or two after first paint.
+   */
+  initialError?: string | null;
 }
 
 const COPY: Record<
@@ -120,6 +126,7 @@ export function AuthScreen({
   onAuthed,
   onApiToken,
   initialMode = "login",
+  initialError = null,
 }: AuthScreenProps) {
   const [mode, setMode] = useState<AuthMode>(initialMode);
   const [fullName, setFullName] = useState("");
@@ -144,6 +151,16 @@ export function AuthScreen({
   // Gate for the email path: "done" needs BOTH the staged animation to finish
   // AND the real auth promise to resolve — the sim never fakes success.
   const gate = useRef({ seqDone: false, authOk: false, finished: false });
+
+  // Arrives asynchronously (a promise resolved after first paint), so this can't be seeded into
+  // useState. Only ever SETS: a live attempt's own failure must not be clobbered by a stale one,
+  // and submit() already clears `error` before each attempt.
+  useEffect(() => {
+    // Functional update: never clobber an error already on screen. This resolves from a promise a
+    // tick or two after first paint, and a visitor who has already started a new attempt in that
+    // window must see THAT attempt's failure, not the previous page load's.
+    if (initialError) setError((current) => current ?? initialError);
+  }, [initialError]);
 
   useEffect(() => {
     const onResize = () => setViewport([window.innerWidth, window.innerHeight]);

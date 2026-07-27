@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   authErrorMessage,
+  captureRedirectFailure,
+  oneShot,
   shouldRetryWithRedirect,
 } from "../src/lib/auth-errors";
 
@@ -56,6 +58,67 @@ describe("authErrorMessage", () => {
     );
     expect(authErrorMessage(undefined)).toBe("Authentication failed.");
     expect(authErrorMessage({})).toBe("Authentication failed.");
+  });
+});
+
+/**
+ * The redirect return leg is the one auth failure nobody ever saw: the SDK completes it during
+ * init and its catch is `// Swallow any errors here`, so a refused redirect just puts the visitor
+ * back on the sign-in form. This is the seam that gets the error back out.
+ */
+describe("captureRedirectFailure", () => {
+  it("is null when the redirect succeeded — or when there was no redirect at all", async () => {
+    expect(await captureRedirectFailure(Promise.resolve({ user: {} }))).toBe(
+      null,
+    );
+    // getRedirectResult resolves null on an ordinary page load; that is not a failure.
+    expect(await captureRedirectFailure(Promise.resolve(null))).toBe(null);
+  });
+
+  it("maps a failed redirect to the same human message as any other auth failure", async () => {
+    const msg = await captureRedirectFailure(
+      Promise.reject({ code: "auth/firebase-app-check-token-is-invalid" }),
+    );
+    expect(msg).toBe(
+      authErrorMessage({ code: "auth/firebase-app-check-token-is-invalid" }),
+    );
+    expect(msg).toMatch(/App Check/);
+  });
+
+  /**
+   * This wraps a promise created at MODULE LOAD. If it ever rejected, every visit to the sign-in
+   * screen after a failed redirect would log an unhandled rejection attributable to nothing.
+   */
+  it("never rejects, whatever it is handed", async () => {
+    await expect(
+      captureRedirectFailure(Promise.reject(new Error("boom"))),
+    ).resolves.toBe("boom");
+    await expect(
+      captureRedirectFailure(Promise.reject(undefined)),
+    ).resolves.toBe("Authentication failed.");
+  });
+});
+
+describe("oneShot", () => {
+  it("delivers the outcome to the first reader and nothing to the rest", async () => {
+    const take = oneShot(Promise.resolve("App Check refused the sign-in."));
+    expect(await take()).toBe("App Check refused the sign-in.");
+    // A visitor who signs in another way, signs out, and returns to /auth must not meet the
+    // failure from a page load two sessions ago.
+    expect(await take()).toBe(null);
+    expect(await take()).toBe(null);
+  });
+
+  /**
+   * StrictMode's dev double-invoke calls this twice on one mount, so the SECOND caller getting
+   * null is the normal path, not an edge case — the first call's resolution is the only copy, and
+   * AuthPage must not discard it (see the no-is-mounted-guard note there).
+   */
+  it("resolves for a later reader instead of hanging or throwing", async () => {
+    const take = oneShot(Promise.resolve("boom"));
+    const [first, second] = await Promise.all([take(), take()]);
+    expect(first).toBe("boom");
+    expect(second).toBe(null);
   });
 });
 
