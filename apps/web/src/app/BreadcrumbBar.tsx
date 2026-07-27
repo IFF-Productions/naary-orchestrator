@@ -78,6 +78,17 @@ export function BreadcrumbBar({
               whiteSpace: "nowrap",
               overflow: "hidden",
               textOverflow: "ellipsis",
+              // `textOverflow: ellipsis` on a flex child does NOTHING without minWidth: 0 — the
+              // item refuses to shrink below its content width, so a long screen name pushes its
+              // siblings out instead of truncating.
+              //
+              // NOT fixing a measured defect: the phone shell measures clean today, with the env
+              // chip ending 16px short of a 390px viewport. This is the margin being thin, plus an
+              // ellipsis that could never have worked. (#848's "91px hidden" on the shell turned
+              // out to be a DESKTOP-only story measured at phone width — my sweep's error, not the
+              // shell's.)
+              minWidth: 0,
+              flexShrink: 1,
             }}
           >
             {crumb.item.label}
@@ -91,6 +102,9 @@ export function BreadcrumbBar({
           className="mono"
           style={{
             marginLeft: "auto",
+            // Never the thing that gets squeezed out: the whole point of this chip is that "every
+            // screen restates the scope it's showing", and a chip you cannot see restates nothing.
+            flex: "none",
             display: "flex",
             alignItems: "center",
             gap: 6,
