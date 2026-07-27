@@ -38,7 +38,10 @@ import {
   resolveClaimChecks,
 } from "@naary/storage";
 import { runGraph } from "../src/temporal/workflows";
-import { createLocalTestEnv } from "./local-test-env";
+import {
+  createLocalTestEnv,
+  createTimeSkippingTestEnv,
+} from "./local-test-env";
 import {
   TASK_QUEUE,
   WORKFLOWS_PATH,
@@ -625,7 +628,7 @@ describe("chaos: a 30-day durable wait (time-skipped)", () => {
   let skipEnv: TestWorkflowEnvironment;
 
   beforeAll(async () => {
-    skipEnv = await TestWorkflowEnvironment.createTimeSkipping();
+    skipEnv = await createTimeSkippingTestEnv();
   }, 120_000);
 
   afterAll(async () => {
