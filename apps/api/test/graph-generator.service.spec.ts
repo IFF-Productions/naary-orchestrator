@@ -458,8 +458,9 @@ describe("GraphGeneratorService (claude-code source)", () => {
     // The message must NOT tell the user to shorten a perfectly reasonable description — that was
     // the old copy, and it blamed the user for a model-side hiccup. It now says "transient, retry"
     // and points at the streaming providers, which have no turn budget at all.
-      // ONE call, both assertions off the same rejection — a second generate() would spend
-      // another round of mocks and logging to re-check the same string.
+      // ONE call. `await expect(p).rejects…` twice against the same SETTLED promise would also
+      // work — my earlier comment claimed otherwise and was wrong — but catching once lets the
+      // exception TYPE and the message be asserted together without re-running the mocks.
       // `rejects` would need two calls to make two assertions; catching once gives both the type
       // and the message from a single run.
       const err = await makeService()

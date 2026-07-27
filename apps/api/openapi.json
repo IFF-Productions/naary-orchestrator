@@ -19207,14 +19207,14 @@
           "from": {
             "type": "string",
             "nullable": true,
-            "format": "date-time",
-            "example": "2026-07-01"
+            "example": "2026-07-01",
+            "description": "The requested window's lower bound, echoed back (ISO 8601 date or date-time); null = unbounded."
           },
           "to": {
             "type": "string",
             "nullable": true,
-            "format": "date-time",
-            "example": "2026-07-31"
+            "example": "2026-07-31",
+            "description": "The requested window's upper bound, echoed back (ISO 8601 date or date-time); null = unbounded."
           }
         },
         "required": [

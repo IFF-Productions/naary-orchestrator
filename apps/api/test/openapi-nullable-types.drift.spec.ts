@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
  *
  * and every generated client models a nullable string as an OBJECT. Nothing fails — the API keeps
  * returning a string, the spec keeps validating, and only a consumer's types are wrong. It reached
- * 27 properties before anyone noticed: webhook URLs, insights date ranges, the run cursor, emails,
+ * 33 properties before anyone noticed: webhook URLs, insights date ranges, the run cursor, emails,
  * tag colours.
  *
  * The fix is always `type: String` (or Number/Boolean) alongside `nullable: true`.
