@@ -76,6 +76,11 @@ export { mintBotGateToken };
  * `_initializationPromise` first, so this always reads the outcome init already computed — it
  * never races it or consumes the pending-redirect flag out from under it.
  *
+ * THAT DEPENDS ON `getAuth()` ABOVE, which registers `browserPopupRedirectResolver`. Swap it for
+ * an `initializeAuth()` without a popupRedirectResolver and init skips `tryRedirectSignIn`
+ * entirely — this line then becomes the FIRST caller, consuming the pending-redirect flag and
+ * discarding a real credential. Keep the resolver, or delete this.
+ *
  * A promise rather than a callback because the return leg is a fresh page load: whoever renders
  * the sign-in screen must be able to ask "did we just come back from a failed redirect?" whenever
  * they mount, not be told once at a moment nothing is listening.

@@ -58,6 +58,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [tenant, setTenant] = useState<string | undefined>(undefined);
+  /**
+   * Sign-out is in flight. `signOut()` is fire-and-forget at every call site, which then navigates
+   * to /auth in the same tick — so without this, `authenticated` is still true when AuthPage
+   * mounts, and its "already signed in" guard would bounce the user straight back into /app until
+   * onAuthStateChanged caught up: a visible flicker plus API calls made as a user who just left.
+   * Held here rather than fixed at the call sites so a future one can't reintroduce it.
+   */
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     // No Firebase config (build without VITE_FIREBASE_*) ⇒ no session to restore;
@@ -72,6 +80,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       auth,
       async (u) => {
         setUser(u);
+        // Any real auth-state emission supersedes an in-flight sign-out (including a failed one,
+        // so the flag can never stick and lock a signed-in user out of their own session).
+        setSigningOut(false);
         if (u) {
           try {
             const res = await u.getIdTokenResult();
@@ -91,7 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value: AuthState = {
     ready,
-    authenticated: Boolean(user),
+    authenticated: Boolean(user) && !signingOut,
     subject: user?.uid,
     tenant,
     email: user?.email ?? undefined,
@@ -110,6 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await sendPasswordReset(email);
     },
     logout: () => {
+      setSigningOut(true);
       void fbLogout();
     },
   };
