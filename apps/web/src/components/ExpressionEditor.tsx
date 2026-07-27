@@ -8,10 +8,11 @@
  */
 import {
   acceptCompletion,
-  type CompletionContext,
-  type CompletionResult,
   autocompletion,
   completionKeymap,
+  startCompletion,
+  type CompletionContext,
+  type CompletionResult,
 } from "@codemirror/autocomplete";
 import { RangeSetBuilder } from "@codemirror/state";
 import {
@@ -67,6 +68,22 @@ const exprTheme = EditorView.theme({
     caretColor: "var(--ink)",
   },
   ".cm-line": { padding: "0" },
+  /*
+    THE CARET. `basicSetup` leaves drawSelection ON, which HIDES the native caret and draws
+    `.cm-cursor` instead — a `border-left` whose colour comes from the theme. This theme set
+    `caretColor` on `.cm-content` (which only affects the native caret drawSelection just hid), so
+    the cursor fell back to CodeMirror's default BLACK — invisible on every dark surface in this app.
+    Reported twice: "text areas still not showing carets".
+  */
+  ".cm-cursor, .cm-dropCursor": {
+    borderLeftColor: "var(--ink)",
+    borderLeftWidth: "2px",
+  },
+  /* Selection also needs a theme colour once drawSelection owns it, or it renders as the browser
+     default over a dark background. */
+  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
+    background: "color-mix(in srgb, var(--brand) 26%, transparent)",
+  },
   ".cm-expr-token": { color: "var(--brand)", fontWeight: "600" },
   ".cm-tooltip-autocomplete": {
     background: "var(--card)",
@@ -76,8 +93,10 @@ const exprTheme = EditorView.theme({
   },
 });
 
-/** Autocomplete inside an open `{{ … }}`: node ids before the first dot, keys after. */
-function exprCompletionSource(refs: ExpressionRefs) {
+/** Autocomplete inside an open `{{ … }}`: node ids before the first dot, keys after.
+ *  Exported for test: the interesting cases are boundary conditions (an EMPTY `{{`, an escaped
+ *  `\{{`, an already-closed token) that are far cheaper to pin here than through the editor. */
+export function exprCompletionSource(refs: ExpressionRefs) {
   return (ctx: CompletionContext): CompletionResult | null => {
     const before = ctx.state.sliceDoc(0, ctx.pos);
     const open = before.lastIndexOf("{{");
@@ -146,6 +165,21 @@ export default function ExpressionEditor({
       }),
       // Tab (what the user asked for) AND Enter accept the highlighted completion.
       keymap.of([{ key: "Tab", run: acceptCompletion }, ...completionKeymap]),
+      // OPEN THE LIST ON `{{`. `activateOnTyping` only fires for WORD characters, and `{` isn't
+      // one — so typing `{{` showed nothing until you also typed a letter, which is exactly when
+      // you don't yet know what to type. Reported as "unwrapping fields are not autocompleted (or
+      // show options after typing {{)". Fires on the closing brace of the pair only, and defers a
+      // tick so the completion source reads the document AFTER this input is applied.
+      EditorView.inputHandler.of((view, from, _to, text) => {
+        if (text !== "{") return false;
+        // Read before FROM, not before TO: they differ when the input REPLACES a selection, and
+        // `to` is the end of the replaced range — so with text selected, `to - 1` reads the last
+        // character being deleted rather than the one preceding the insertion (raised in review).
+        const before = view.state.sliceDoc(Math.max(0, from - 1), from);
+        if (before !== "{") return false;
+        setTimeout(() => startCompletion(view), 0);
+        return false; // let CodeMirror insert the character normally
+      }),
       ...(multiline ? [EditorView.lineWrapping] : []),
     ],
     [refs, multiline],
