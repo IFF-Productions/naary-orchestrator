@@ -23,8 +23,14 @@ export interface CodeAgentRunOpts {
   /** Write mode (Slice 2c): the CLI may EDIT files in the sandbox (acceptEdits + Edit/Write),
    *  vs the read-only default (plan mode, Read/Grep/Glob). Still no Bash in either mode. */
   write?: boolean;
-  /** JSON Schema constraining the final answer. Only meaningful for a driver whose
-   *  `capabilities.structuredOutput` is true — the caller checks before passing it. */
+  /**
+   * JSON Schema constraining the final answer. Only meaningful for a driver whose
+   * `capabilities.structuredOutput` is true.
+   *
+   * A driver that can't enforce it simply ignores this field — the REFUSAL lives in the
+   * `callCodeAgent` activity, which checks the capability before spawning anything. Stated here
+   * because "the caller checks" would send a future driver author looking in the wrong file.
+   */
   outputSchema?: Record<string, unknown>;
 }
 

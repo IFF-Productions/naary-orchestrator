@@ -556,6 +556,35 @@ export function CanvasPage() {
   const selectedFreshOutput =
     selectedRun?.status === "done" && selectedRun.output !== undefined;
 
+  /**
+   * When a GENERATE finishes, surface what still needs the author — don't make them find it by
+   * test-running.
+   *
+   * Reported as: "I have to test the flow like 100 times to debug what's going on … I don't think
+   * I created a working flow from the first try." The canvas ALREADY knows: `allIssues` carries
+   * missing/unknown connections, invalid integration config (unknown action, missing required
+   * fields) and `{{ … }}` references nothing produces — the exact things that make a generated
+   * flow fail at run time. It just sat behind a toolbar toggle that starts CLOSED, so a freshly
+   * generated graph looked finished.
+   *
+   * Opens on the transition out of `generating` only, so it never re-opens a panel the author
+   * deliberately closed while editing.
+   */
+  const wasGenerating = useRef(false);
+  useEffect(() => {
+    const finished = wasGenerating.current && !generating;
+    wasGenerating.current = generating;
+    if (!finished || allIssues.length === 0) return;
+    setShowIssues(true);
+    const nodeCount = new Set(allIssues.map((i) => i.nodeId)).size;
+    // "Issue" is what the panel this opens calls them — matching copy so the toast and the panel
+    // read as one thing rather than two different warnings (raised in review).
+    pushToast(
+      `${allIssues.length} issue${allIssues.length === 1 ? "" : "s"} to fix`,
+      `in ${nodeCount} node${nodeCount === 1 ? "" : "s"} — resolve these before running`,
+    );
+  }, [generating, allIssues, pushToast]);
+
   // Jump to a node from the issues panel: select it (opens the dock) and clear other selection.
   function selectNode(id: string): void {
     setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === id })));

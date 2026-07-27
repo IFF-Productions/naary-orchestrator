@@ -4,12 +4,17 @@ import {
   Controller,
   Delete,
   Get,
+  Logger,
   NotFoundException,
   Param,
   Post,
   Put,
 } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
+import {
+  describeWorkflowFailure,
+  failureChain,
+} from "../executions/workflow-failure";
 import type { GraphDef, NodeDef } from "@naary/dsl";
 import { isPureNode, runPureNode } from "@naary/dsl";
 import {
@@ -51,6 +56,8 @@ const UNTESTABLE_NODE_TYPES = new Set<string>([
 @ApiBearerAuth("bearer")
 @Controller("graphs/:workflowKey")
 export class PinsController {
+  private readonly logger = new Logger(PinsController.name);
+
   constructor(
     private readonly pins: PinsService,
     private readonly graphs: GraphsService,
@@ -178,10 +185,15 @@ export class PinsController {
         costUsd: res.costUsd,
       };
     } catch (e) {
-      return {
-        pure: false,
-        message: `Test run failed: ${e instanceof Error ? e.message : "the node errored"}`,
-      };
+      // `client.workflow.execute` rejects with a WorkflowFailedError whose own message is always
+      // "Workflow execution failed" — the REAL reason is in its `cause` chain. Reading `e.message`
+      // returned that generic string to the user and logged nothing at all, so a failing test run
+      // was undiagnosable from either end.
+      const reason = describeWorkflowFailure(e);
+      this.logger.warn(
+        `node test failed: ${workflowKey}/${node.id} (tenant=${tenantId}, env=${envId}) — ${failureChain(e).join(" ⇐ ")}`,
+      );
+      return { pure: false, message: `Test run failed: ${reason}` };
     }
   }
 
@@ -245,8 +257,13 @@ export class PinsController {
         );
         ctx[predId] = out;
         await this.pins.set(tenantId, environmentId, workflowKey, predId, out);
-      } catch {
-        /* a failing ancestor stays absent — don't abort the whole fill */
+      } catch (e) {
+        // A failing ancestor stays absent — don't abort the whole fill. Behaviour unchanged, but
+        // it is now LOGGED: an autofill that silently produced no pin was as undiagnosable as the
+        // generic test-run message, for the same reason (the reason was discarded, not reported).
+        this.logger.warn(
+          `autofill skipped ${workflowKey}/${predId} (tenant=${tenantId}, env=${environmentId}) — ${describeWorkflowFailure(e)}`,
+        );
       }
     }
   }

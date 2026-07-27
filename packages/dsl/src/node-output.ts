@@ -52,6 +52,10 @@ export interface NodeOutputMap {
     output: {
       result: string;
       tool: string;
+      /** Schema-constrained answer, PARSED — present only when the node set `outputSchema` and the
+       *  driver can enforce it (`claude --json-schema`). Bound as
+       *  `<nodeId>.output.structured.<field>`; `result` carries the same value as text. */
+      structured?: Record<string, unknown>;
       sessionId?: string;
       /** Write-mode diff (Slice 2c): the inline unified-diff string, or a claim-check reference
        *  `{ __claimCheck, bytes }` when large (shape mirrors @naary/storage's ClaimCheck; inlined

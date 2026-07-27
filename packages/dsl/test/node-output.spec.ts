@@ -43,3 +43,38 @@ describe("getNodeOutput", () => {
     expect(out).toEqual({ anything: 1 });
   });
 });
+
+/**
+ * The structured-output binding path. The map is only useful if it matches what the interpreter
+ * WRITES — a field missing from it makes `{{ node.output.structured.x }}` invisible to typed
+ * accessors while working fine at runtime, which is the drift this file exists to prevent (raised
+ * in review on #823).
+ *
+ * Like the rest of this file, the real assertion is that it COMPILES: `structured?.severity` on a
+ * `Record<string, unknown>` is legal, and a typo'd `out?.structured` (missing `.output.`) is not.
+ */
+describe("getNodeOutput — codeAgent structured output", () => {
+  it("exposes the parsed object under output.structured", () => {
+    const ctx: Record<string, unknown> = {
+      ack: {
+        status: "ok",
+        output: {
+          result: '{"severity":"high"}',
+          tool: "claude",
+          structured: { severity: "high" },
+        },
+        costUsd: 0.02,
+      },
+    };
+    const out = getNodeOutput(ctx, "ack", "codeAgent");
+    expect(out?.output.structured).toEqual({ severity: "high" });
+    expect(out?.output.structured?.severity).toBe("high");
+    // Absent when the node declared no schema — optional, not always-present.
+    const plain = getNodeOutput(
+      { n: { status: "ok", output: { result: "a plan", tool: "claude" }, costUsd: 0 } },
+      "n",
+      "codeAgent",
+    );
+    expect(plain?.output.structured).toBeUndefined();
+  });
+});
