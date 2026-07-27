@@ -647,6 +647,21 @@ describe("callCodeAgent — structured output", () => {
    * prose in a field the graph reads as typed data — a run that looks successful and is wrong.
    * Non-retryable: no retry fixes a capability.
    */
+  /** The refusal must come BEFORE any I/O, so a tenant with no credential still gets the real,
+   *  actionable cause instead of "missing credential" (raised in review). */
+  it("refuses before touching the credential store", async () => {
+    getDecryptedKey.mockRejectedValue(new Error("should not be reached"));
+
+    await expect(
+      callCodeAgent(
+        { tool: "cursor", prompt: "classify", outputSchema: SCHEMA },
+        undefined,
+        META,
+      ),
+    ).rejects.toMatchObject({ type: "CODE_AGENT_NO_STRUCTURED_OUTPUT" });
+    expect(getDecryptedKey).not.toHaveBeenCalled();
+  });
+
   it("refuses a schema on a driver that cannot enforce one", async () => {
     await expect(
       callCodeAgent(

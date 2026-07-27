@@ -66,10 +66,14 @@ export const handleAgent: NodeHandler = async ({
         prompt,
         model: agentCfg.model,
         // The agent's own outputSchema works on this path too: the CLI enforces it
-        // (`--json-schema`) exactly as the provider does on the raw-LLM path. Adding a FIELD to an
-        // activity's input doesn't change the workflow's command sequence, and an existing history
-        // can't have carried a schema (it was never passed), so replay is unaffected.
-        ...(agentCfg.outputSchema
+        // (`--json-schema`) exactly as the provider does on the raw-LLM path.
+        //
+        // Behind its OWN patch gate, not folded into agent-claude-code-v1. An agent node could
+        // already carry `outputSchema` (the field predates this) while this path silently ignored
+        // it — so an IN-FLIGHT run can exist whose graph has a schema. Without this gate, replaying
+        // it would schedule the activity with different input than the history recorded. Cheap
+        // insurance, and the house pattern (CLAUDE.md: version interpreter changes with patched()).
+        ...(agentCfg.outputSchema && wf.patched("agent-claude-code-schema-v1")
           ? { outputSchema: agentCfg.outputSchema }
           : {}),
       },

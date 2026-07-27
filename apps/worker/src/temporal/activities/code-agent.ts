@@ -151,6 +151,20 @@ export async function callCodeAgent(
   const startedAt = process.hrtime.bigint();
   try {
     const driver = resolveDriver(cfg.tool);
+    // STRUCTURED OUTPUT: refuse rather than approximate — and refuse FIRST, before any I/O. A
+    // schema the driver cannot enforce would hand back unvalidated prose in a field the graph reads
+    // as typed data: a run that LOOKS successful and is wrong, which is worse than failing.
+    // Non-retryable, because no retry fixes a capability. (Same reasoning as the form-encoded-body
+    // refusal in @naary/dsl.)
+    //
+    // Checked BEFORE the credential read (raised in review): otherwise a node with this config bug
+    // on a tenant with no key fails with "missing credential", hiding the real, actionable cause.
+    if (cfg.outputSchema && !driver.capabilities.structuredOutput) {
+      throw ApplicationFailure.nonRetryable(
+        `codeAgent: the '${driver.tool}' CLI cannot enforce an output schema — remove the schema, or switch this node's tool to 'claude'.`,
+        "CODE_AGENT_NO_STRUCTURED_OUTPUT",
+      );
+    }
     // In memory only — injected as the subprocess env var, never returned/logged. Env-scoped creds:
     // the run's env (5b) selects the key; a pre-5b run falls back to the tenant default. See runAgent.
     const envId =
@@ -165,16 +179,6 @@ export async function callCodeAgent(
     // just read-only argv + no PR. OFF by default → read stays in-worker (legacy). Read env once.
     const sandboxEnv = codeAgentWriteEnv();
     const sandboxRead = !write && sandboxEnv.sandboxReadEnabled;
-    // STRUCTURED OUTPUT: refuse rather than approximate. A schema the driver cannot enforce would
-    // hand back unvalidated prose in a field the graph reads as typed data — a run that LOOKS
-    // successful and is wrong, which is worse than failing. Non-retryable: no retry fixes a
-    // capability. (Same reasoning as the form-encoded-body refusal in @naary/dsl.)
-    if (cfg.outputSchema && !driver.capabilities.structuredOutput) {
-      throw ApplicationFailure.nonRetryable(
-        `codeAgent: the '${driver.tool}' CLI cannot enforce an output schema — remove the schema, or switch this node's tool to 'claude'.`,
-        "CODE_AGENT_NO_STRUCTURED_OUTPUT",
-      );
-    }
     const args = driver.buildArgs({
       prompt: cfg.prompt,
       systemPrompt: cfg.systemPrompt,
