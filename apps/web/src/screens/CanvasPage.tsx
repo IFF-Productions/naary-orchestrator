@@ -49,6 +49,7 @@ import {
   safeReturnTo,
   withReturn,
 } from "../lib/canvas-return";
+import { isEntryType } from "../lib/compile-graph";
 import { decompileGraph } from "../lib/decompile-graph";
 import { canSaveWorkflow } from "../lib/permissions-logic";
 import {
@@ -612,7 +613,16 @@ export function CanvasPage() {
           // overlapped the last, the 16th landed exactly on the 1st, and deleting-then-adding dropped
           // a node straight onto an existing card. Position now depends on where cards ARE, not how
           // many there are.
-          position: nextNodePosition(ns.map((n) => n.position)),
+          // A TRIGGER is placed upstream of the flow rather than in its first gap — see
+          // nextNodePosition's `entry` option (node-placement.ts). Uses compile-graph's
+          // isEntryType — the same list the compiler uses to pick startNodeId, so the canvas and
+          // the compiler can't disagree about what a trigger is.
+          position: nextNodePosition(ns.map((n) => n.position), {
+            entry: isEntryType(kind),
+            entries: ns
+              .filter((n) => isEntryType(n.data.kind))
+              .map((n) => n.position),
+          }),
           data: { kind, config },
           // Appear animation: scale(.85)+translateY(6px)→1 + a brief ember glow
           // (canvas.css). Mount-once — React Flow keys nodes by id.
