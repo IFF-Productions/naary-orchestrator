@@ -859,3 +859,178 @@ describe("generate — invented connectionIds are blanked", () => {
     ).toBe("");
   });
 });
+
+/**
+ * The SAME enforcement on the conversational path. An edit turn can invent a connectionId exactly
+ * as a create can, and that draft is what the user then saves — so a test that only covered
+ * `generate()` would have left half the surface unguarded (raised in review).
+ */
+describe("editStream — invented connectionIds are blanked too", () => {
+  it("blanks an invented id on an edit turn", async () => {
+    listConnections.mockResolvedValue([
+      { id: "conn_real", type: "github", label: "GitHub", serverUrl: "https://api.github.com" },
+    ]);
+    generateText.mockResolvedValue({
+      text: JSON.stringify({
+        name: "Edited",
+        startNodeId: "start",
+        nodes: [
+          { id: "start", type: "start" },
+          {
+            id: "gh",
+            type: "integration",
+            config: {
+              provider: "github",
+              action: "create_issue",
+              connectionId: "conn_hallucinated",
+            },
+          },
+          { id: "end", type: "end" },
+        ],
+        edges: [
+          { from: "start", to: "gh" },
+          { from: "gh", to: "end" },
+        ],
+      }),
+    });
+
+    const res = await makeService().editStream("t-1", "e-1", {
+      instruction: "add a github issue step",
+    });
+
+    expect(
+      (res.graph.nodes.find((n) => n.id === "gh")?.config as {
+        connectionId?: string;
+      }).connectionId,
+    ).toBe("");
+  });
+});
+
+/**
+ * SELF-VERIFY + SELF-REPAIR. "maybe we should ask build with agent to verify and fix that for us
+ * that way the flow is ready?"
+ *
+ * The GAP this fills, precisely: `validateGraph` already rejects an unknown provider/action (and the
+ * existing repair loop fixes those), but it does NOT check whether an action's REQUIRED FIELDS were
+ * supplied. So the classic generator miss — a real action with an empty `owner`/`repo`/`title` —
+ * reached the canvas looking configured and failed on the first run. The generator knew how to check
+ * this (validateIntegrationConfig); it just never checked its own output.
+ */
+describe("generate — self-repairs its own catalog mistakes", () => {
+  const conns = [
+    {
+      id: "conn_real",
+      type: "github",
+      label: "GitHub",
+      serverUrl: "https://api.github.com",
+    },
+  ];
+  /** A REAL action, so validateGraph passes — the required fields are what's missing. */
+  const graphWithFields = (fields: Record<string, unknown>) => ({
+    name: "Flow",
+    startNodeId: "start",
+    nodes: [
+      { id: "start", type: "start" },
+      {
+        id: "gh",
+        type: "integration",
+        config: {
+          provider: "github",
+          action: "create_issue",
+          connectionId: "conn_real",
+          fields,
+        },
+      },
+      { id: "end", type: "end" },
+    ],
+    edges: [
+      { from: "start", to: "gh" },
+      { from: "gh", to: "end" },
+    ],
+  });
+  const COMPLETE = { owner: "acme", repo: "api", title: "It broke" };
+
+  it("asks the model to fill a missing required field, and keeps the fix", async () => {
+    listConnections.mockResolvedValue(conns);
+    generateText
+      .mockResolvedValueOnce({ text: JSON.stringify(graphWithFields({})) })
+      .mockResolvedValueOnce({ text: JSON.stringify(graphWithFields(COMPLETE)) });
+
+    const res = await makeService().generate("t-1", "e-1", "file an issue");
+
+    expect(generateText).toHaveBeenCalledTimes(2);
+    // The repair prompt names the NODE and the missing field — not a vague "invalid graph".
+    const repairPrompt = generateText.mock.calls[1][0].prompt as string;
+    expect(repairPrompt).toContain('node "gh"');
+    expect(repairPrompt).toContain("missing required field");
+    expect(repairPrompt).toContain("Fix ONLY these");
+    // The corrected draft is what the user gets.
+    const cfg = res.graph.nodes.find((n) => n.id === "gh")?.config as {
+      fields?: Record<string, unknown>;
+    };
+    expect(cfg.fields).toMatchObject(COMPLETE);
+  });
+
+  /** A repair can REGRESS — a model handed an error list may rewrite more than it was asked to. */
+  it("keeps the ORIGINAL when the repair doesn't improve matters", async () => {
+    listConnections.mockResolvedValue(conns);
+    generateText
+      .mockResolvedValueOnce({ text: JSON.stringify(graphWithFields({ owner: "acme" })) })
+      // Still incomplete — and now it lost the one field it had.
+      .mockResolvedValueOnce({ text: JSON.stringify(graphWithFields({})) });
+
+    const res = await makeService().generate("t-1", "e-1", "file an issue");
+
+    const cfg = res.graph.nodes.find((n) => n.id === "gh")?.config as {
+      fields?: Record<string, unknown>;
+    };
+    expect(cfg.fields).toEqual({ owner: "acme" });
+  });
+
+  /** A MISSING CONNECTION is the author's to resolve — no prompt can conjure one, so it must not
+   *  burn a repair turn. */
+  it("does not self-repair a missing connection", async () => {
+    listConnections.mockResolvedValue([]);
+    generateText.mockResolvedValue({
+      text: JSON.stringify({
+        name: "Flow",
+        startNodeId: "start",
+        nodes: [
+          { id: "start", type: "start" },
+          {
+            id: "gh",
+            type: "integration",
+            config: {
+              provider: "github",
+              action: "create_issue",
+              connectionId: "",
+              fields: COMPLETE,
+            },
+          },
+          { id: "end", type: "end" },
+        ],
+        edges: [
+          { from: "start", to: "gh" },
+          { from: "gh", to: "end" },
+        ],
+      }),
+    });
+
+    await makeService().generate("t-1", "e-1", "file an issue");
+
+    // ONE call: no repair attempt for something the model cannot fix.
+    expect(generateText).toHaveBeenCalledTimes(1);
+  });
+
+  /** A clean draft costs nothing extra. */
+  it("makes no second call when the draft is already valid", async () => {
+    listConnections.mockResolvedValue(conns);
+    generateText.mockResolvedValue({
+      text: JSON.stringify(graphWithFields(COMPLETE)),
+    });
+
+    await makeService().generate("t-1", "e-1", "file an issue");
+
+    expect(generateText).toHaveBeenCalledTimes(1);
+  });
+});

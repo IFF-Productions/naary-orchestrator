@@ -15,7 +15,12 @@ import {
   UnprocessableEntityException,
 } from "@nestjs/common";
 import type { GraphDef } from "@naary/dsl";
-import { INTEGRATION_PROVIDERS, NODE_TYPES, validateGraph } from "@naary/dsl";
+import {
+  INTEGRATION_PROVIDERS,
+  NODE_TYPES,
+  validateGraph,
+  validateIntegrationConfig,
+} from "@naary/dsl";
 import { ConnectionService } from "@naary/connections";
 import { redactString } from "@naary/observability";
 import { CredentialsService, MissingCredentialError } from "@naary/secrets";
@@ -188,7 +193,9 @@ export class GraphGeneratorService {
       const id = cfg?.connectionId;
       if (typeof id !== "string" || id === "") continue;
       if (real.has(id)) continue;
-      removed.push(`${node.type}:${id}`);
+      // The NODE ID, not the node type: the id is what the author sees on the canvas and what the
+      // issues panel names, so a log line points at the thing they can actually click.
+      removed.push(`${node.id}:${id}`);
       (cfg as { connectionId?: string }).connectionId = "";
     }
     return removed;
@@ -342,6 +349,28 @@ export class GraphGeneratorService {
       }
     }
 
+    // Same self-verify/self-repair as the create path — an edit turn can introduce an unknown
+    // action or drop a required field just as easily as a create.
+    const editConfigErrors = this.modelFixableConfigErrors(graph);
+    if (editConfigErrors.length > 0) {
+      graph = await this.selfRepairConfig(
+        graph,
+        editConfigErrors,
+        async (text) => {
+          const fixed = await this.callModel(
+            chosen,
+            apiKey,
+            userPrompt,
+            { previous: JSON.stringify(out), error: text },
+            resources,
+            timeoutMs,
+          );
+          this.logDraftShape("edit-config-repair", fixed);
+          return toGraphDef(fixed);
+        },
+      );
+    }
+
     // Same enforcement as the create path: a conversational EDIT can invent a connectionId just as
     // easily, and the turn is applied to the draft the user then saves.
     const inventedEdit = this.scrubInventedConnections(graph, connectionIds);
@@ -437,6 +466,26 @@ export class GraphGeneratorService {
       }
     }
 
+    // SELF-VERIFY, then SELF-REPAIR: check the draft against the integration catalog and, if it got
+    // something wrong that a model CAN fix (unknown action, missing required field), hand it back
+    // for one corrective pass. Runs before the connection scrub so anything the repair introduces
+    // is scrubbed too.
+    const configErrors = this.modelFixableConfigErrors(graph);
+    if (configErrors.length > 0) {
+      graph = await this.selfRepairConfig(graph, configErrors, async (text) => {
+        const fixed = await this.callModel(
+          chosen,
+          apiKey,
+          description,
+          { previous: JSON.stringify(out), error: text },
+          resources,
+          timeoutMs,
+        );
+        this.logDraftShape("config-repair", fixed);
+        return toGraphDef(fixed);
+      });
+    }
+
     // The model is TOLD to use only real connection ids and not to invent any; this is where that
     // is enforced (see scrubInventedConnections). Runs after the repair loop so a repaired draft is
     // scrubbed too, and logs the ids only — never the graph, never config values.
@@ -476,6 +525,74 @@ export class GraphGeneratorService {
       resources,
       timeoutMs,
     );
+  }
+
+
+  /**
+   * Catalog problems the MODEL can fix on a second pass — an unknown provider/action, or a missing
+   * REQUIRED field. Returned as prompt-ready lines naming the node.
+   *
+   * DELIBERATELY EXCLUDES the missing-connectionId case. No prompt can conjure a connection the
+   * tenant hasn't created, so feeding that back would burn a repair turn and still fail; it belongs
+   * to the author, and the canvas issues panel asks for it (#831).
+   *
+   * WHAT THIS ADDS over the structural pass, precisely: `validateGraph` already rejects an unknown
+   * provider/action, and the existing repair loop fixes those. It does NOT check whether an
+   * action's REQUIRED FIELDS were supplied — so the classic generator miss, a real action with an
+   * empty `owner`/`repo`/`title`, reached the canvas looking configured and failed on the first
+   * run. The generator knew how to check this; it just never checked its own output.
+   */
+  private modelFixableConfigErrors(graph: GraphDef): string[] {
+    const out: string[] = [];
+    for (const node of graph.nodes) {
+      if (node.type !== "integration") continue;
+      const err = validateIntegrationConfig(
+        (node.config ?? {}) as unknown as Parameters<
+          typeof validateIntegrationConfig
+        >[0],
+      );
+      // The connection error is the author's to resolve — see above.
+      if (!err || /needs a connectionId/.test(err)) continue;
+      out.push(`node "${node.id}": ${err}`);
+    }
+    return out;
+  }
+
+  /**
+   * Ask the model to fix its own catalog mistakes, and keep the result ONLY if it is actually
+   * better. A repair can regress — a model handed an error list can rewrite more than it was asked
+   * to — so the new draft has to be structurally valid AND carry strictly fewer config errors, or
+   * the original stands. Never fatal: a flow with a remaining config gap is still worth handing to
+   * the author (the issues panel names it) and is far better than refusing to generate.
+   */
+  private async selfRepairConfig(
+    graph: GraphDef,
+    errors: string[],
+    repair: (errorText: string) => Promise<GraphDef | null>,
+  ): Promise<GraphDef> {
+    this.logger.log(
+      `graph generate: self-repairing ${errors.length} catalog issue(s)`,
+    );
+    let repaired: GraphDef | null = null;
+    try {
+      repaired = await repair(
+        `The workflow uses the integration catalog incorrectly. Fix ONLY these, keeping everything else identical:\n${errors.join("\n")}`,
+      );
+    } catch {
+      return graph; // a failed repair must never fail the generation
+    }
+    if (!repaired || !this.validate(repaired).valid) return graph;
+    const after = this.modelFixableConfigErrors(repaired);
+    if (after.length >= errors.length) {
+      this.logger.warn(
+        `graph generate: self-repair did not improve (${errors.length} → ${after.length}) — keeping the original draft`,
+      );
+      return graph;
+    }
+    this.logger.log(
+      `graph generate: self-repair fixed ${errors.length - after.length} of ${errors.length}`,
+    );
+    return repaired;
   }
 
   /** Structural validation + node-type check. Plain-text generation lost the schema's
