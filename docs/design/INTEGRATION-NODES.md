@@ -182,15 +182,23 @@ just a catalog entry once the pattern is in:
   (one endpoint, a query + variables), which the REST `pathTemplate`/method model can't express.
   A `graphql` action kind (query template + variable mapping) is the next design step for it.
 
-**Catalog capabilities so far:** flat/nested JSON bodies (`bodyPath`), path/query/body/**header**
+**Catalog capabilities so far:** flat/nested JSON bodies (`bodyPath`), **form-encoded bodies**
+(`bodyEncoding: "form"` — Twilio and Stripe accept nothing else, see #707),
+path/query/body/**header**
 fields, typed fields incl. **`json`** (raw value, bindable) for schema-driven payloads, catalog-fixed
 **`const`** fields (API type discriminators, e.g. PagerDuty's `incident.type`), per-provider
 `authScheme` (bearer / basic / a custom `{ header, prefix }` — Shopify, Discord, ClickUp, Monday,
 PagerDuty's `Token token=`, DeepL's `DeepL-Auth-Key`). **Still needs extension for:** GraphQL
 providers (Linear/Monday are modelled as a single POST + a `query` field), and non-header auth —
-a credential in the URL path (Telegram's `/bot<token>/…`), in a query param (OpenWeatherMap's
-`appid`), or a form-encoded body. A provider needing one of those must NOT be added with a
-"close enough" `authScheme`: it would silently fail to authenticate (see #655).
+a credential in the URL path (Telegram's `/bot<token>/…`) or in a query param (OpenWeatherMap's
+`appid`). A provider needing one of those must NOT be added with a "close enough" `authScheme`: it
+would silently fail to authenticate (see #655).
+
+**A body encoding is the same kind of hazard as an auth scheme, and #707 is why this is written
+down:** Twilio's and Stripe's write actions shipped with a JSON body against APIs that accept only
+`application/x-www-form-urlencoded`, so five actions failed 100% of the time and nothing in the
+catalog could express the difference. A new provider whose API is form-only MUST carry
+`bodyEncoding: "form"`; a form body is flat, so `bodyPath` nesting is refused rather than guessed.
 
 **Tier 2 — broad demand:**
 - **Google Sheets** (append row / read range) · **Airtable** (create/update record) ·
