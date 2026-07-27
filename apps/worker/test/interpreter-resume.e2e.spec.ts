@@ -19,11 +19,12 @@ import {
   loadVariablesCalls,
   makeWorker,
 } from "./interpreter-harness";
+import { createLocalTestEnv } from "./local-test-env";
 
 let env: TestWorkflowEnvironment;
 
 beforeAll(async () => {
-  env = await TestWorkflowEnvironment.createLocal();
+  env = await createLocalTestEnv();
 }, 60_000);
 
 afterAll(async () => {
