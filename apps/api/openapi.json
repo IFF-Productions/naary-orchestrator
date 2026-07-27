@@ -19768,7 +19768,7 @@
             "example": "support-triage"
           },
           "label": {
-            "type": "object",
+            "type": "string",
             "nullable": true,
             "example": "GitHub · acme/api",
             "description": "Optional human name; null when unset (consumers fall back to provider·workflow)."

@@ -23,6 +23,11 @@ export class WebhookEndpointResponse {
   provider!: string;
   @ApiProperty({ example: "support-triage" }) workflowId!: string;
   @ApiProperty({
+    // `type: String` is REQUIRED, not decoration: Nest's reflection can't recover a type from
+    // `string | null`, so without it the generated spec says `type: "object"` and every codegen
+    // client models a nullable string as an object. Same shape as the other nullable strings
+    // (execution.response.ts).
+    type: String,
     nullable: true,
     example: "GitHub · acme/api",
     description:
