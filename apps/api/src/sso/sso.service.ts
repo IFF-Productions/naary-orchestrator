@@ -12,6 +12,12 @@ import {
   verifySamlResponse,
 } from "./saml";
 import { SsoSessionService } from "./sso-session.service";
+import {
+  accessAllowedEmails,
+  requireMfa,
+  ssoAcsUrl,
+  ssoSpEntityId,
+} from "../config";
 
 /**
  * SAML ACS orchestration (design SAML-SSO.md, #455): match the tenant, verify the assertion,
@@ -62,8 +68,8 @@ export interface SsoConfig {
 export function ssoConfig(
   env: Record<string, string | undefined> = process.env,
 ): SsoConfig | null {
-  const spEntityId = (env.SSO_SP_ENTITY_ID ?? "").trim();
-  const acsUrl = (env.SSO_ACS_URL ?? "").trim();
+  const spEntityId = ssoSpEntityId(env);
+  const acsUrl = ssoAcsUrl(env);
   if (!spEntityId || !acsUrl) return null;
   return { spEntityId, acsUrl };
 }
@@ -85,10 +91,8 @@ export interface SsoLoginResult {
 @Injectable()
 export class SsoService {
   private readonly logger = new Logger(SsoService.name);
-  private readonly allowedEmails = parseAllowedEmails(
-    process.env.ACCESS_ALLOWED_EMAILS,
-  );
-  private readonly requireMfa = parseRequireMfa(process.env.REQUIRE_MFA);
+  private readonly allowedEmails = accessAllowedEmails();
+  private readonly requireMfa = requireMfa();
 
   /** Built LAZILY (see the getter): a `SecretStore` reads ENCRYPTION_KEY when constructed, and
    *  merely compiling this module — e.g. in the AuthGuard DI boot test — must not require it. */

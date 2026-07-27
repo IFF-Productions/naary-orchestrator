@@ -20,6 +20,7 @@ import { ApiEndpoint } from "../swagger/api-decorators";
 import { reportConnectCallbackFailure } from "./connect-callback-error";
 import { connectReturnUrl } from "./connect-return";
 import { OAuthStartResponse } from "./connection.response";
+import { oauthRedirectUri } from "../config";
 
 /**
  * Interactive OAuth consent (B3) — runs once in the web app. `start` returns the
@@ -47,9 +48,7 @@ export class OAuthController {
   ): Promise<{ authorizeUrl: string }> {
     const conn = await this.connections.getById(tenantId, connectionId);
     if (!conn) throw new NotFoundException("Unknown connection");
-    const redirectUri =
-      process.env.OAUTH_REDIRECT_URI ??
-      `http://localhost:${process.env.PORT ?? 3000}/oauth/callback`;
+    const redirectUri = oauthRedirectUri();
     // Consent stores the refresh token in the connection's OWN env (Slice 5) — the callback is
     // @Public and can't send X-Environment-Id, so the env rides in the (encoded) state.
     return startConsent({

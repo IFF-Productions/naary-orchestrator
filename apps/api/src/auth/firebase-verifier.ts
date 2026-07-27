@@ -8,6 +8,12 @@ import {
   initializeApp,
 } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
+import {
+  firebaseProjectId,
+  firebaseServiceAccountJson,
+  firebaseTenantClaim,
+  googleApplicationCredentials,
+} from "../config";
 
 export interface FirebaseConfig {
   /** Firebase project id (also derivable from the service account). */
@@ -147,15 +153,15 @@ export class FirebaseVerifier {
   }
 
   static fromEnv(): FirebaseConfig | undefined {
-    const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-    const hasAdc = Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+    const serviceAccountJson = firebaseServiceAccountJson();
+    const hasAdc = Boolean(googleApplicationCredentials());
     // verifyIdToken requires a service-account credential (Firebase docs) — so
     // Firebase auth is only enabled when one is supplied.
     if (!serviceAccountJson && !hasAdc) return undefined;
     return {
-      projectId: process.env.FIREBASE_PROJECT_ID || undefined,
+      projectId: firebaseProjectId(),
       serviceAccountJson: serviceAccountJson || undefined,
-      tenantClaim: process.env.FIREBASE_TENANT_CLAIM ?? "tenant",
+      tenantClaim: firebaseTenantClaim(),
     };
   }
 

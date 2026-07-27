@@ -21,6 +21,7 @@ import {
   matchesQuery,
   sanitizeRegistryResponse,
 } from "./registry-sanitize";
+import { mcpRegistryUrl } from "../config";
 
 const log = createLogger({ component: "api" });
 
@@ -65,8 +66,7 @@ export class McpRegistryService {
   private failure: { at: number; reason: string } | null = null;
 
   private registryUrl(): string {
-    const configured = process.env.MCP_REGISTRY_URL?.trim();
-    return configured || DEFAULT_REGISTRY_URL;
+    return mcpRegistryUrl() || DEFAULT_REGISTRY_URL;
   }
 
   /** Browse/search connectable MCP servers. Never throws for an upstream problem. */

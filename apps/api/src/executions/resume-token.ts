@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { encryptionKey } from "../config";
 
 /**
  * Resume URLs for wait(webhook) nodes. The URL embeds an HMAC token over the run's workflowId, so
@@ -10,7 +11,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 /** HMAC secret = the boot-required ENCRYPTION_KEY. The signed message is domain-separated with a
  *  "resume:" prefix so a token can never be replayed for another purpose that signs a bare id. */
 function signingKey(): string {
-  const k = process.env.ENCRYPTION_KEY;
+  const k = encryptionKey();
   if (!k) throw new Error("ENCRYPTION_KEY is required to sign resume URLs");
   return k;
 }

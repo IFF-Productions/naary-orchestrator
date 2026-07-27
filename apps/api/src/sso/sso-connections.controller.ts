@@ -14,6 +14,7 @@ import { getPrisma } from "@naary/db";
 import { CurrentPrincipal, type Principal } from "../auth/tenant.decorator";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { UpsertSsoConnectionDto } from "./sso-connection.dto";
+import { ssoSelfService } from "../config";
 
 /**
  * The tenant → IdP mapping (design SAML-SSO.md, #455 AC "tenant maps IdP"). Owner/admin only —
@@ -39,16 +40,14 @@ import { UpsertSsoConnectionDto } from "./sso-connection.dto";
  * Reads and deletes stay owner/admin: neither can widen who may sign in.
  */
 export function parseSsoSelfService(raw: string | undefined): boolean {
-  return ["1", "true", "yes", "on"].includes((raw ?? "").trim().toLowerCase());
+  return ssoSelfService({ SSO_SELF_SERVICE: raw });
 }
 
 @ApiBearerAuth("bearer")
 @Controller("tenants/:id/sso")
 export class SsoConnectionsController {
   /** Read once at boot, same shape as REQUIRE_MFA / ACCESS_ALLOWED_EMAILS. */
-  private readonly selfService = parseSsoSelfService(
-    process.env.SSO_SELF_SERVICE,
-  );
+  private readonly selfService = ssoSelfService();
 
   /** Same bar as API-token management (tokens.controller.ts): owner or admin. */
   private assertAdmin(principal: Principal | undefined): void {

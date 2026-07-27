@@ -41,6 +41,7 @@ import {
   toGraphDef,
   type GraphDraft,
 } from "./graph-generator.parse";
+import { subprocessBaseEnv } from "../config";
 
 // Re-export the metering types so existing importers (builder/turn-metering) keep working.
 export type { GenMeter, GenTokens } from "./graph-generator.prompt";
@@ -763,8 +764,7 @@ export class GraphGeneratorService {
         // Minimal env: PATH/HOME + exactly one auth var. Never the API process env
         // (DB URLs, ENCRYPTION_KEY must not reach the subprocess).
         env: {
-          PATH: process.env.PATH,
-          HOME: process.env.HOME,
+          ...subprocessBaseEnv(),
           ...claudeCodeAuthEnv(apiKey),
         },
         timeoutMs,

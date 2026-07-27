@@ -26,15 +26,7 @@ import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/all-exceptions.filter";
 import { AppLogger } from "./common/app-logger";
 import { buildOpenApiConfig } from "./swagger/openapi-config";
-
-/** Browser origins allowed to call the API (the web app). Comma-separated env,
- *  defaults to the Vite dev server. */
-function corsOrigins(): string[] {
-  return (process.env.CORS_ORIGINS ?? "http://localhost:5173")
-    .split(",")
-    .map((o) => o.trim())
-    .filter(Boolean);
-}
+import { browserCorsOrigins, port as configuredPort, swaggerDisabled } from "./config";
 
 async function bootstrap(): Promise<void> {
   // rawBody: true exposes req.rawBody (Buffer) for webhook HMAC verification,
@@ -65,7 +57,7 @@ async function bootstrap(): Promise<void> {
   // Explicit CORS allowlist (Sec#5): the web app calls the API cross-origin in a
   // deployed env; bearer auth means we allow the Authorization header.
   app.enableCors({
-    origin: corsOrigins(),
+    origin: browserCorsOrigins(),
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["content-type", "authorization"],
   });
@@ -88,7 +80,7 @@ async function bootstrap(): Promise<void> {
   // schema at /docs-json. Every endpoint authenticates with a Bearer token (an `nry_` API
   // token or a Firebase ID token), so we register one bearer scheme and mark it required for
   // all operations. Set SWAGGER_DISABLED=1 to omit it in a hardened deployment.
-  if (process.env.SWAGGER_DISABLED !== "1") {
+  if (!swaggerDisabled()) {
     // Shared with the standalone spec emitter (emit-openapi.ts) so /docs-json and the
     // generated web types can't drift on doc metadata.
     const config = buildOpenApiConfig();
@@ -103,7 +95,7 @@ async function bootstrap(): Promise<void> {
 
   // Lets onModuleDestroy run (closes the Temporal connection + pg pool) on SIGINT/SIGTERM.
   app.enableShutdownHooks();
-  const port = Number(process.env.PORT ?? 3000);
+  const port = configuredPort();
   await app.listen(port);
   appLogger.pino.info({ port }, "api listening");
 }
