@@ -280,6 +280,7 @@ export function WebhookForm({
 }) {
   const [workflowId, setWorkflowId] = useState("");
   const [provider, setProvider] = useState("github");
+  const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
   const [registered, setRegistered] = useState<RegisteredWebhook | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -296,9 +297,12 @@ export function WebhookForm({
       const res = await api.createWebhook(tenant, {
         workflowId: workflowId.trim(),
         provider,
+        // Omitted when blank rather than sent as "" — the endpoint treats absent as "no name".
+        ...(label.trim() ? { label: label.trim() } : {}),
       });
       setRegistered(res);
       setWorkflowId("");
+      setLabel("");
       await onChanged();
     } catch {
       setMsg("Could not register the webhook.");
@@ -309,6 +313,18 @@ export function WebhookForm({
 
   return (
     <>
+      {/* Name FIRST: registering a second webhook on the same workflow (one per repo, or a
+          partner's callback) is the common case, and the list can't tell them apart otherwise. */}
+      <div style={{ marginBottom: 10 }}>
+        <span style={fieldLabel}>Name (optional)</span>
+        <input
+          style={fieldStyle}
+          value={label}
+          maxLength={80}
+          placeholder="e.g. GitHub · acme/api"
+          onChange={(e) => setLabel(e.target.value)}
+        />
+      </div>
       <div style={{ marginBottom: 10 }}>
         <span style={fieldLabel}>Workflow to trigger</span>
         <WorkflowPicker

@@ -19710,6 +19710,12 @@
             ],
             "example": "github",
             "description": "Provider whose delivery signature format to verify."
+          },
+          "label": {
+            "type": "string",
+            "example": "GitHub · acme/api",
+            "maxLength": 80,
+            "description": "Optional human name. Display only — two webhooks on the same workflow are otherwise indistinguishable in the list. Never part of the ingress capability (that is the opaque id)."
           }
         },
         "required": [
@@ -19761,6 +19767,12 @@
             "type": "string",
             "example": "support-triage"
           },
+          "label": {
+            "type": "string",
+            "nullable": true,
+            "example": "GitHub · acme/api",
+            "description": "Optional human name; null when unset (consumers fall back to provider·workflow)."
+          },
           "deliveries7d": {
             "type": "number",
             "example": 42,
@@ -19776,6 +19788,7 @@
           "id",
           "provider",
           "workflowId",
+          "label",
           "deliveries7d",
           "createdAt"
         ]
@@ -19797,6 +19810,12 @@
             ],
             "example": "generic",
             "description": "Change the provider whose signature/delivery scheme is verified."
+          },
+          "label": {
+            "type": "string",
+            "example": "GitHub · acme/api",
+            "maxLength": 80,
+            "description": "Rename the webhook. Send an EMPTY string to clear it — omitting the field leaves it unchanged."
           }
         }
       },

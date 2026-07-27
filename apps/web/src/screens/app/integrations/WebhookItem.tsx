@@ -31,6 +31,7 @@ export function WebhookItem({
   const [editing, setEditing] = useState(false);
   const [wf, setWf] = useState(w.workflowId);
   const [provider, setProvider] = useState(w.provider);
+  const [label, setLabel] = useState(w.label ?? "");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [rotating, setRotating] = useState(false);
@@ -53,6 +54,7 @@ export function WebhookItem({
   function startEdit() {
     setWf(w.workflowId);
     setProvider(w.provider);
+    setLabel(w.label ?? "");
     setNewSecret(null);
     setEditing(true);
   }
@@ -61,7 +63,8 @@ export function WebhookItem({
     if (!tenant) return;
     setSaving(true);
     try {
-      await api.updateWebhook(tenant, w.id, { workflowId: wf, provider });
+      // `label` is always sent: an emptied box must CLEAR the name, and the API maps "" → null.
+      await api.updateWebhook(tenant, w.id, { workflowId: wf, provider, label });
       setEditing(false);
       await onChanged();
     } catch {
@@ -133,8 +136,11 @@ export function WebhookItem({
           <Icon name="bolt" size={17} />
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
+          {/* A NAMED webhook leads with its name — the whole point of the label is that two
+              endpoints on the same workflow are otherwise indistinguishable. Unnamed rows keep
+              exactly their previous appearance (the URL as the heading). */}
           <div
-            className="mono"
+            className={w.label ? undefined : "mono"}
             style={{
               fontSize: "var(--text-sm)",
               fontWeight: "var(--weight-semibold)",
@@ -143,10 +149,25 @@ export function WebhookItem({
               overflow: "hidden",
               textOverflow: "ellipsis",
             }}
-            title={webhookUrl(w.id)}
+            title={w.label ? `${w.label} — ${webhookUrl(w.id)}` : webhookUrl(w.id)}
           >
-            {webhookUrl(w.id)}
+            {w.label || webhookUrl(w.id)}
           </div>
+          {w.label && (
+            <div
+              className="mono"
+              style={{
+                fontSize: "var(--text-xs)",
+                color: "var(--ink-3)",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+              title={webhookUrl(w.id)}
+            >
+              {webhookUrl(w.id)}
+            </div>
+          )}
           <div
             style={{
               display: "flex",
@@ -222,6 +243,16 @@ export function WebhookItem({
             alignItems: "flex-end",
           }}
         >
+          <div style={{ flex: "1 1 200px", minWidth: 160 }}>
+            <span style={fieldLabel}>Name (optional)</span>
+            <input
+              style={fieldStyle}
+              value={label}
+              maxLength={80}
+              placeholder="e.g. GitHub · acme/api"
+              onChange={(e) => setLabel(e.target.value)}
+            />
+          </div>
           <div style={{ flex: "1 1 220px", minWidth: 180 }}>
             <span style={fieldLabel}>Workflow to trigger</span>
             <select

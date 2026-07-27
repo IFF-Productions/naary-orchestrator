@@ -41,10 +41,27 @@ export interface WebhookEndpointView {
   id: string;
   provider: string;
   workflowId: string;
+  /** Optional human name. Null when unset — callers fall back to provider·workflow. */
+  label: string | null;
   createdAt: Date;
   /** Deliveries received in the last 7 days (#471). Count only — WebhookDelivery has no
    *  status column, so a success RATE isn't derivable and isn't shown. */
   deliveries7d: number;
+}
+
+/**
+ * Trim a user-supplied label to what the column should hold: a non-empty string, or NULL.
+ *
+ * Blank-or-whitespace becomes NULL rather than "" so "no label" has ONE representation — every
+ * consumer would otherwise have to test for both, and the empty string is also how a user CLEARS a
+ * label they'd previously set. Capped so a pasted paragraph can't push a list row off the screen;
+ * the cap is enforced in the DTO too, this is the belt-and-braces for any other caller.
+ */
+export const WEBHOOK_LABEL_MAX = 80;
+
+export function normalizeLabel(raw?: string | null): string | null {
+  const trimmed = (raw ?? "").trim();
+  return trimmed === "" ? null : trimmed.slice(0, WEBHOOK_LABEL_MAX);
 }
 
 @Injectable()
@@ -76,6 +93,7 @@ export class WebhookService {
     environmentId: string,
     workflowId: string,
     provider: WebhookProvider,
+    label?: string,
   ): Promise<RegisteredWebhook> {
     const signingSecret = randomBytes(32).toString("hex");
     const row = await getPrisma().webhookEndpoint.create({
@@ -84,6 +102,7 @@ export class WebhookService {
         environmentId,
         workflowId,
         provider,
+        label: normalizeLabel(label),
         // store the encrypted payload as a JSON blob in the existing column;
         // tenant-DEK encrypted, AAD-bound to the tenant (Sec#7)
         signingSecret: JSON.stringify(
@@ -107,7 +126,13 @@ export class WebhookService {
     const endpoints = await getPrisma().webhookEndpoint.findMany({
       where: { tenantId },
       orderBy: { createdAt: "desc" },
-      select: { id: true, provider: true, workflowId: true, createdAt: true },
+      select: {
+        id: true,
+        provider: true,
+        workflowId: true,
+        label: true,
+        createdAt: true,
+      },
     });
     if (endpoints.length === 0) return [];
     // Deliveries in the last 7 days per endpoint (#471) — ONE grouped count over the
@@ -138,11 +163,22 @@ export class WebhookService {
   async updateEndpoint(
     tenantId: string,
     endpointId: string,
-    patch: { workflowId?: string; provider?: WebhookProvider },
+    patch: {
+      workflowId?: string;
+      provider?: WebhookProvider;
+      label?: string;
+    },
   ): Promise<WebhookEndpointView | null> {
-    const data: { workflowId?: string; provider?: string } = {};
+    const data: {
+      workflowId?: string;
+      provider?: string;
+      label?: string | null;
+    } = {};
     if (patch.workflowId !== undefined) data.workflowId = patch.workflowId;
     if (patch.provider !== undefined) data.provider = patch.provider;
+    // An explicit EMPTY string CLEARS the label — otherwise a user who typed one could never
+    // remove it, and storing "" would make every consumer test for two kinds of absent.
+    if (patch.label !== undefined) data.label = normalizeLabel(patch.label);
     if (Object.keys(data).length > 0) {
       const res = await getPrisma().webhookEndpoint.updateMany({
         where: { id: endpointId, tenantId },
@@ -153,7 +189,13 @@ export class WebhookService {
     // Re-read tenant-scoped (also serves an empty patch as "fetch current, 404 if not owned").
     const row = await getPrisma().webhookEndpoint.findFirst({
       where: { id: endpointId, tenantId },
-      select: { id: true, provider: true, workflowId: true, createdAt: true },
+      select: {
+        id: true,
+        provider: true,
+        workflowId: true,
+        label: true,
+        createdAt: true,
+      },
     });
     if (!row) return null;
     // Keep the 7d count accurate on the returned row (a config change doesn't reset deliveries).

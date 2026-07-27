@@ -151,18 +151,19 @@ export const integrationsApi = {
   // it is stored encrypted and never returned again, so surface it immediately.
   createWebhook(
     tenantId: string,
-    input: { workflowId: string; provider: string },
+    input: { workflowId: string; provider: string; label?: string },
   ): Promise<RegisteredWebhook> {
     return http(`/tenants/${encodeURIComponent(tenantId)}/webhooks`, {
       method: "POST",
       body: JSON.stringify(input),
     });
   },
-  // Update a webhook endpoint's config (workflow/provider) IN PLACE — same id/URL/secret.
+  // Update a webhook endpoint's config (name/workflow/provider) IN PLACE — same id/URL/secret.
+  // An EMPTY `label` clears the name; omitting it leaves the name unchanged.
   updateWebhook(
     tenantId: string,
     endpointId: string,
-    patch: { workflowId?: string; provider?: string },
+    patch: { workflowId?: string; provider?: string; label?: string },
   ): Promise<WebhookRow> {
     return http(
       `/tenants/${encodeURIComponent(tenantId)}/webhooks/${encodeURIComponent(endpointId)}`,

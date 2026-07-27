@@ -1,0 +1,11 @@
+-- A human name for a webhook endpoint. Today a row is identified only by its opaque id plus
+-- "POST · provider · workflow", so two webhooks pointing at the same workflow (e.g. one per
+-- GitHub repo, or staging vs a partner's callback) are indistinguishable in the UI.
+--
+-- EXPAND/CONTRACT SAFE: additive and NULLABLE, so every existing row keeps working with no
+-- backfill (the UI falls back to the provider·workflow line it already shows), and an older API
+-- image simply never reads or writes the column. Nothing to contract later.
+--
+-- Deliberately NOT unique and NOT required: it is a display label, not an identifier — the
+-- capability is still the opaque endpoint id in the ingress URL.
+ALTER TABLE "WebhookEndpoint" ADD COLUMN "label" TEXT;

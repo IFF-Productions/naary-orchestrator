@@ -38,6 +38,7 @@ describe("WebhooksController.register (env binding)", () => {
       "env-uat",
       "wk",
       "github",
+      undefined, // no label supplied
     );
   });
 
@@ -56,6 +57,7 @@ describe("WebhooksController.register (env binding)", () => {
       "env-default",
       "wk",
       "github",
+      undefined, // no label supplied
     );
   });
 });
