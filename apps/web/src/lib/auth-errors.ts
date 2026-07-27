@@ -84,6 +84,25 @@ export function captureRedirectFailure(
 }
 
 /**
+ * Wrap a ONE-SHOT outcome so exactly one reader receives it; every later read gets null.
+ *
+ * A redirect outcome describes a single page load, but the promise carrying it is created at
+ * module load and lives as long as the SPA. Without this, a visitor who hit a failed redirect,
+ * signed in another way, later signed out and came back to /auth would be shown that first
+ * failure again — long after it stopped being true.
+ */
+export function oneShot(
+  outcome: Promise<string | null>,
+): () => Promise<string | null> {
+  let taken = false;
+  return () => {
+    if (taken) return Promise.resolve(null);
+    taken = true;
+    return outcome;
+  };
+}
+
+/**
  * Whether a popup failure is worth retrying as a full-page redirect.
  *
  * ONLY `popup-blocked` (and an environment that can't do popups at all). A popup the visitor

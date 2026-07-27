@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   authErrorMessage,
   captureRedirectFailure,
+  oneShot,
   shouldRetryWithRedirect,
 } from "../src/lib/auth-errors";
 
@@ -95,6 +96,25 @@ describe("captureRedirectFailure", () => {
     await expect(
       captureRedirectFailure(Promise.reject(undefined)),
     ).resolves.toBe("Authentication failed.");
+  });
+});
+
+describe("oneShot", () => {
+  it("delivers the outcome to the first reader and nothing to the rest", async () => {
+    const take = oneShot(Promise.resolve("App Check refused the sign-in."));
+    expect(await take()).toBe("App Check refused the sign-in.");
+    // A visitor who signs in another way, signs out, and returns to /auth must not meet the
+    // failure from a page load two sessions ago.
+    expect(await take()).toBe(null);
+    expect(await take()).toBe(null);
+  });
+
+  it("does not run the outcome twice or reject", async () => {
+    let reads = 0;
+    const take = oneShot(Promise.resolve(null).then(() => (reads++, null)));
+    await take();
+    await take();
+    expect(reads).toBe(1);
   });
 });
 

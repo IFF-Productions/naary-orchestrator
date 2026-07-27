@@ -122,7 +122,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     logout: () => {
       setSigningOut(true);
-      void fbLogout();
+      // Clear the flag only if sign-out FAILS. On success the auth-state emission clears it (and
+      // clearing it here could land before that emission, briefly re-admitting the leaving user).
+      // Without this branch a rejected signOut — which need not emit anything — leaves the flag
+      // stuck on, hiding a session that is in fact still live.
+      void fbLogout().catch(() => setSigningOut(false));
     },
   };
 

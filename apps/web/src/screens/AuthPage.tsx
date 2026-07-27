@@ -16,7 +16,7 @@ import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { setToken } from "../lib/auth";
-import { redirectSignInError } from "../lib/firebase";
+import { takeRedirectSignInError } from "../lib/firebase";
 import { AuthScreen } from "./auth/AuthScreen";
 
 export function AuthPage() {
@@ -36,7 +36,7 @@ export function AuthPage() {
   // session and no explanation. Surface it on the screen they land on.
   useEffect(() => {
     let live = true;
-    void redirectSignInError.then((msg) => {
+    void takeRedirectSignInError().then((msg) => {
       if (live && msg) setRedirectError(msg);
     });
     return () => {

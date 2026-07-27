@@ -156,7 +156,10 @@ export function AuthScreen({
   // useState. Only ever SETS: a live attempt's own failure must not be clobbered by a stale one,
   // and submit() already clears `error` before each attempt.
   useEffect(() => {
-    if (initialError) setError(initialError);
+    // Functional update: never clobber an error already on screen. This resolves from a promise a
+    // tick or two after first paint, and a visitor who has already started a new attempt in that
+    // window must see THAT attempt's failure, not the previous page load's.
+    if (initialError) setError((current) => current ?? initialError);
   }, [initialError]);
 
   useEffect(() => {

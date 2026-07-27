@@ -23,7 +23,11 @@ import {
   signOut,
   updateProfile,
 } from "firebase/auth";
-import { captureRedirectFailure, shouldRetryWithRedirect } from "./auth-errors";
+import {
+  captureRedirectFailure,
+  oneShot,
+  shouldRetryWithRedirect,
+} from "./auth-errors";
 import { initAppCheck, mintBotGateToken } from "./app-check";
 import { getToken } from "./auth";
 
@@ -85,9 +89,16 @@ export { mintBotGateToken };
  * the sign-in screen must be able to ask "did we just come back from a failed redirect?" whenever
  * they mount, not be told once at a moment nothing is listening.
  */
-export const redirectSignInError: Promise<string | null> = auth
+const redirectSignIn: Promise<string | null> = auth
   ? captureRedirectFailure(getRedirectResult(auth))
   : Promise.resolve(null);
+
+/**
+ * The failed-redirect message, ONCE — later calls resolve null. Consumed rather than exposed
+ * because the promise lives as long as the SPA while the outcome describes a single page load
+ * (see oneShot).
+ */
+export const takeRedirectSignInError = oneShot(redirectSignIn);
 
 const googleProvider = new GoogleAuthProvider();
 
@@ -114,7 +125,7 @@ const notConfigured = (): Promise<never> =>
  * visitor CLOSED must not navigate the page out from under them. The returned promise never
  * settles on that path: the page unloads. Coming back is a FRESH PAGE LOAD, so nothing resolves
  * and no `onAuthed` callback runs — AuthPage has to notice `authenticated` and navigate itself,
- * and `redirectSignInError` above carries the failure the SDK would otherwise swallow.
+ * and `takeRedirectSignInError` above carries the failure the SDK would otherwise swallow.
  */
 export function loginWithGoogle(): Promise<unknown> {
   if (!auth) return notConfigured();
