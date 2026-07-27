@@ -4,8 +4,7 @@
  * the first-grant cliff live in the parent; this renders rows and reports intents (toggle,
  * edit, delete) via callbacks.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Icon, Spinner } from "../../../components";
+import { HScroll, Icon, Spinner } from "../../../components";
 import type { GroupGrant } from "../../../lib/api";
 import {
   MATRIX_VERBS,
@@ -40,68 +39,12 @@ export function GrantMatrixTable({
   onDeleteGrant: (grant: GroupGrant) => void;
   iconBtn: React.CSSProperties;
 }) {
-  /**
-   * SCROLL AFFORDANCE (#708). At 390px this table hides 296px — 47% of every row — behind a
-   * scroller with nothing to say so. Unlike the other tables in that issue it must NOT become
-   * cards: a permission matrix is a grid by nature, and its checkboxes sit ~37px apart
-   * centre-to-centre, so it also must not get a blanket touch-target bump (the expanded areas
-   * would overlap into mis-taps). Horizontal scroll is the right answer here — it just has to be
-   * VISIBLE, which is what #708 asks for and what this adds.
-   *
-   * Edge fades, shown only on the side that actually has more content, so they never imply
-   * hidden columns that aren't there.
-   */
-  const scroller = useRef<HTMLDivElement>(null);
-  const [edges, setEdges] = useState({ left: false, right: false });
-
-  const measure = useCallback(() => {
-    const el = scroller.current;
-    if (!el) return;
-    const max = el.scrollWidth - el.clientWidth;
-    setEdges({
-      left: el.scrollLeft > 1,
-      // 1px slack: sub-pixel layout can leave scrollLeft a hair short of max at the end.
-      right: max > 1 && el.scrollLeft < max - 1,
-    });
-  }, []);
-
-  useEffect(() => {
-    measure();
-    const el = scroller.current;
-    if (!el) return;
-    // ResizeObserver too: a viewport change alters what fits without any scroll event firing.
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    // The TABLE too, not just the viewport: adding a grant can widen the content without the
-    // scroller's own box changing size, and a ResizeObserver on the scroller alone would miss it.
-    const table = el.firstElementChild;
-    if (table) ro.observe(table);
-    return () => ro.disconnect();
-    // `grants` in the deps as well — a re-render with different rows must re-measure even if
-    // neither box resized (e.g. a longer target chip in the same-width column).
-  }, [measure, grants]);
-
   return (
-    <div style={{ position: "relative", marginBottom: 10 }}>
-      {(["left", "right"] as const).map((side) =>
-        edges[side] ? (
-          <div
-            key={side}
-            aria-hidden
-            style={{
-              position: "absolute",
-              top: 0,
-              bottom: 0,
-              [side]: 0,
-              width: 26,
-              pointerEvents: "none",
-              zIndex: 1,
-              background: `linear-gradient(to ${side === "left" ? "right" : "left"}, var(--panel), transparent)`,
-            }}
-          />
-        ) : null,
-      )}
-      <div ref={scroller} onScroll={measure} style={{ overflowX: "auto" }}>
+    /* At 390px this matrix hides 296px — 47% of every row. It must NOT become cards (a
+       permission grid isn't list-shaped) and must not take a blanket touch-target bump (its
+       checkboxes are ~37px apart, so bigger hit areas would overlap into mis-taps), so the fix
+       is to make the scroll VISIBLE — exactly what #708 asks for on this table. */
+    <HScroll style={{ marginBottom: 10 }} deps={grants}>
       <table
         style={{
           minWidth: 560,
@@ -185,8 +128,7 @@ export function GrantMatrixTable({
           ))}
         </tbody>
       </table>
-      </div>
-    </div>
+    </HScroll>
   );
 }
 

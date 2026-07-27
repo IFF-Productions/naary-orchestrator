@@ -10,7 +10,7 @@
 // (and the comp's cliff copy is the inverse of the real additive-only semantics). Those are
 // intentionally NOT rendered here; see the PR notes. We show what actually persists.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Card, Spinner, TextInput } from "../../components";
+import { Button, Card, HScroll, Spinner, TextInput } from "../../components";
 import {
   api,
   type CompanyGroup,
@@ -450,13 +450,17 @@ function GroupDetail({
 
       {/* grant matrix — v1 is a single all-workflows grant */}
       <div style={{ marginTop: 14 }}>
-        <div
+        {/* Same 47%-hidden problem as the Groups matrix (#708) and the same answer: a permission
+            grid can't become cards, so the scroll has to be visible instead. `HScroll` owns the
+            edge fades; this is its second caller, which is why the logic was extracted. */}
+        <HScroll
           style={{
             border: "1px solid var(--line)",
             background: "var(--card)",
             borderRadius: "var(--radius-lg)",
-            overflowX: "auto",
+            overflow: "hidden",
           }}
+          deps={verbs}
         >
           {/* header row */}
           <div
@@ -599,7 +603,7 @@ function GroupDetail({
               Save permissions
             </Button>
           </div>
-        </div>
+        </HScroll>
       </div>
 
       {/* rename */}
