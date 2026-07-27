@@ -17,6 +17,7 @@ export class NotificationChannelResponse {
   type!: "slack" | "teams" | "email";
 
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "#alerts",
     description:
@@ -32,6 +33,7 @@ export class NotificationChannelResponse {
   enabled!: boolean;
 
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "https://hooks.slack.com/services/T000/B000/xxxx",
     description: "Outbound webhook URL for this channel. Null = none set.",

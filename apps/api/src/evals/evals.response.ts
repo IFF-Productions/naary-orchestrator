@@ -49,6 +49,7 @@ export class EvalRunResponse {
   })
   errored!: number;
   @ApiProperty({
+    type: Number,
     nullable: true,
     example: 0.42,
     description: "Summed case cost, including LLM-judge spend.",
@@ -70,12 +71,13 @@ export class EvalCaseResultsResponse {
   @ApiProperty({ example: "pass", description: "pass | fail | error" })
   verdict!: string;
   @ApiProperty({
+    type: Number,
     nullable: true,
     example: 1,
     description: "Mean assertion score, 0–1.",
   })
   score!: number | null;
-  @ApiProperty({ nullable: true }) costUsd!: number | null;
+  @ApiProperty({ type: Number, nullable: true }) costUsd!: number | null;
   @ApiProperty({ nullable: true }) latencyMs!: number | null;
   @ApiProperty({
     type: "array",

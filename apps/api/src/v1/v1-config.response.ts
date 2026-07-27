@@ -126,6 +126,7 @@ export class InsightsByDayResponse extends InsightsBucketResponse {
 
 export class InsightsByEnvironmentResponse extends InsightsBucketResponse {
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "env-prod",
     description: "Environment id; null for spend recorded before env tagging.",
@@ -135,6 +136,7 @@ export class InsightsByEnvironmentResponse extends InsightsBucketResponse {
 
 export class InsightsByWorkflowResponse extends InsightsBucketResponse {
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "support-triage",
     description: "Workflow key; null for runs with no key (pre-migration).",
@@ -146,6 +148,7 @@ export class InsightsRangeResponse {
   // No `format`: these ECHO the caller's ?from/?to verbatim, which may be an ISO date
   // ("2026-07-01") or a full date-time — pinning either format would misdocument the other.
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "2026-07-01",
     description:
@@ -153,6 +156,7 @@ export class InsightsRangeResponse {
   })
   from!: string | null;
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "2026-07-31",
     description:

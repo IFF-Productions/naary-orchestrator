@@ -51,6 +51,7 @@ export class InsightsByDayResponse extends InsightsBucketResponse {
 
 export class InsightsByEnvironmentResponse extends InsightsBucketResponse {
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "env-prod",
     description: "Environment id; null for spend recorded before env tagging.",
@@ -60,6 +61,7 @@ export class InsightsByEnvironmentResponse extends InsightsBucketResponse {
 
 export class InsightsByWorkflowResponse extends InsightsBucketResponse {
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "support-triage",
     description: "Workflow key; null for runs with no key (pre-migration).",
@@ -74,6 +76,7 @@ export class InsightsByModelResponse extends InsightsBucketResponse {
 
 export class InsightsByNodeTypeResponse extends InsightsBucketResponse {
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "agent",
     description:
@@ -110,6 +113,7 @@ export class InsightsRunsByDayResponse {
 
 export class InsightsRunsByWorkflowResponse {
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "support-triage",
     description: "Workflow key; null for runs with no key (pre-migration).",
@@ -137,9 +141,9 @@ export class InsightsFailureKindResponse {
 }
 
 export class InsightsRangeResponse {
-  @ApiProperty({ nullable: true, format: "date-time", example: "2026-07-01" })
+  @ApiProperty({ type: String, nullable: true, format: "date-time", example: "2026-07-01" })
   from!: string | null;
-  @ApiProperty({ nullable: true, format: "date-time", example: "2026-07-31" })
+  @ApiProperty({ type: String, nullable: true, format: "date-time", example: "2026-07-31" })
   to!: string | null;
 }
 

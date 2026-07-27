@@ -19,6 +19,7 @@ export class CompanyViewResponse {
 export class CompanyMemberResponse {
   @ApiProperty({ example: "firebase-uid-1" }) userId!: string;
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "admin@acme.com",
     description:
@@ -94,6 +95,7 @@ export class CompanyBudgetViewResponse {
   })
   mtdSpendUsd!: number;
   @ApiProperty({
+    type: Number,
     nullable: true,
     example: 457.5,
     description:
@@ -116,6 +118,7 @@ export class CompanyUsageBucketResponse {
 
 export class CompanyUsageEnvironmentResponse extends CompanyUsageBucketResponse {
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "env-prod",
     description: "Environment id; null for spend recorded before env tagging.",
@@ -127,6 +130,7 @@ export class CompanyUsageWorkspaceResponse extends CompanyUsageBucketResponse {
   @ApiProperty({ example: "t-acme" })
   tenantId!: string;
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "Acme Production",
     description: "The workspace's display name; null if it has none.",
@@ -150,6 +154,7 @@ export class CompanyUsageRangeResponse {
   // No `format`: these ECHO the caller's ?from/?to verbatim, which may be an ISO date
   // ("2026-07-01") or a full date-time — pinning either format would misdocument the other.
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "2026-07-01",
     description:
@@ -157,6 +162,7 @@ export class CompanyUsageRangeResponse {
   })
   from!: string | null;
   @ApiProperty({
+    type: String,
     nullable: true,
     example: "2026-07-31",
     description:

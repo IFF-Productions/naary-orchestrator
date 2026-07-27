@@ -4,7 +4,7 @@ import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 export class GraphTagResponse {
   @ApiProperty({ example: "9a8b7c6d-…" }) id!: string;
   @ApiProperty({ example: "production" }) name!: string;
-  @ApiProperty({ nullable: true, example: "#6366f1" }) color!: string | null;
+  @ApiProperty({ type: String, nullable: true, example: "#6366f1" }) color!: string | null;
 }
 
 /** One row in the workflows list (latest version per key). */
@@ -188,7 +188,7 @@ export class GraphVersionResponse {
 
 /** A workflow's bound error-handler key (null = none). */
 export class ErrorHandlerResponse {
-  @ApiProperty({ nullable: true, example: "on-failure-alert" })
+  @ApiProperty({ type: String, nullable: true, example: "on-failure-alert" })
   errorWorkflowKey!: string | null;
 }
 

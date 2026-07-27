@@ -35,6 +35,7 @@ export class SetBudgetDto implements SetBudgetInput {
   onBudgetExceeded?: SetBudgetInput["onBudgetExceeded"];
 
   @ApiPropertyOptional({
+    type: Number,
     nullable: true,
     example: 80,
     minimum: 1,
@@ -49,6 +50,7 @@ export class SetBudgetDto implements SetBudgetInput {
   alertThresholdPct?: number | null;
 
   @ApiPropertyOptional({
+    type: String,
     nullable: true,
     example: "claude-3-5-haiku",
     description: "Model to downgrade to when onBudgetExceeded='downgrade'.",
