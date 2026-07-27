@@ -290,6 +290,8 @@ export interface WebhookRow {
   id: string;
   provider: string;
   workflowId: string;
+  /** Optional human name; null/absent when unset — the row then leads with its URL as before. */
+  label?: string | null;
   /** Deliveries received in the last 7 days (#471); count only (no success rate stored). */
   deliveries7d?: number;
   createdAt: string;

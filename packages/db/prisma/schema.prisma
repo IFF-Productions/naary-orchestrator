@@ -382,6 +382,10 @@ model WebhookEndpoint {
   environmentId String
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Restrict)
   provider      String // 'github' | 'atlassian' | 'generic'
+  // Optional human name shown instead of the opaque id — two webhooks on the same workflow (one
+  // per repo, staging vs a partner callback) are otherwise indistinguishable. DISPLAY ONLY: not
+  // unique, not required, and never part of the ingress capability (that stays the opaque id).
+  label         String?
   signingSecret String // plain column per plan §4 (HMAC secret; never logged)
   createdAt     DateTime @default(now())
 

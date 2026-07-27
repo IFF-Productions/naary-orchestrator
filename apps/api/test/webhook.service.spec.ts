@@ -33,7 +33,11 @@ vi.mock("@naary/db", () => ({
   }),
 }));
 
-import { WebhookService } from "../src/webhooks/webhook.service";
+import {
+  WEBHOOK_LABEL_MAX,
+  WebhookService,
+  normalizeLabel,
+} from "../src/webhooks/webhook.service";
 
 // Inject a real encryptor (random key) so createEndpoint can encrypt the secret
 // at rest without depending on a process ENCRYPTION_KEY. It becomes the MASTER
@@ -173,10 +177,13 @@ describe("WebhookService.list", () => {
     const arg = m.findMany.mock.calls[0][0];
     expect(arg.where).toEqual({ tenantId: "t1" });
     expect(arg.orderBy).toEqual({ createdAt: "desc" });
+    // An EXACT select, not a subset: it is what keeps `signingSecret` out of a list response
+    // (Sec#8), so a new column has to be added here deliberately.
     expect(arg.select).toEqual({
       id: true,
       provider: true,
       workflowId: true,
+      label: true,
       createdAt: true,
     });
     expect(arg.select).not.toHaveProperty("signingSecret");
@@ -361,5 +368,31 @@ describe("WebhookService.isDuplicateDelivery", () => {
     await expect(svc.isDuplicateDelivery("ep_1", "d2")).rejects.toMatchObject({
       code: "P1001",
     });
+  });
+});
+
+/**
+ * Webhook LABELS. A row is otherwise identified only by its opaque id plus "POST · provider ·
+ * workflow", so two webhooks on the same workflow — one per GitHub repo, or staging vs a partner's
+ * callback — are indistinguishable in the UI.
+ *
+ * `normalizeLabel` is the whole contract, and it exists so "no label" has exactly ONE
+ * representation in the column. Without it, `""` and NULL would both mean unset and every consumer
+ * would have to test for both.
+ */
+describe("normalizeLabel", () => {
+  it("trims, and treats blank as UNSET (null), not as an empty string", () => {
+    expect(normalizeLabel("  GitHub · acme/api  ")).toBe("GitHub · acme/api");
+    expect(normalizeLabel("")).toBe(null);
+    expect(normalizeLabel("   ")).toBe(null);
+    expect(normalizeLabel(undefined)).toBe(null);
+    expect(normalizeLabel(null)).toBe(null);
+  });
+
+  /** An empty string is also how a user CLEARS a label they'd set — so it must reach the column as
+   *  NULL rather than being dropped as "no change". */
+  it("caps the length so a pasted paragraph can't break a list row", () => {
+    const long = "x".repeat(WEBHOOK_LABEL_MAX + 50);
+    expect(normalizeLabel(long)).toHaveLength(WEBHOOK_LABEL_MAX);
   });
 });

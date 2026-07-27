@@ -54,6 +54,7 @@ export class WebhooksController {
       envId,
       body.workflowId,
       body.provider,
+      body.label,
     );
   }
 

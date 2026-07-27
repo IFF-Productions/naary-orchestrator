@@ -23,6 +23,13 @@ export class WebhookEndpointResponse {
   provider!: string;
   @ApiProperty({ example: "support-triage" }) workflowId!: string;
   @ApiProperty({
+    nullable: true,
+    example: "GitHub · acme/api",
+    description:
+      "Optional human name; null when unset (consumers fall back to provider·workflow).",
+  })
+  label!: string | null;
+  @ApiProperty({
     example: 42,
     description:
       "Deliveries received in the last 7 days (#471). Count only — there is no stored " +
