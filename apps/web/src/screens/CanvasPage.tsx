@@ -40,6 +40,7 @@ import {
   type ExecutionState,
   type GraphSummary,
   type TestNodeResult,
+  UnauthorizedError,
   type WebhookRow,
 } from "../lib/api";
 import { isTerminal } from "../lib/run-status";
@@ -93,6 +94,7 @@ import { useAiBuilder } from "./canvas/useAiBuilder";
 import { useCanvasDerivations } from "./canvas/useCanvasDerivations";
 import { useCanvasToasts } from "./canvas/useCanvasToasts";
 import { useDockDerivations } from "./canvas/useDockDerivations";
+import { useDryRun } from "./canvas/useDryRun";
 import { useWorkflowActions } from "./canvas/useWorkflowActions";
 
 export function CanvasPage() {
@@ -617,12 +619,15 @@ export function CanvasPage() {
           // nextNodePosition's `entry` option (node-placement.ts). Uses compile-graph's
           // isEntryType — the same list the compiler uses to pick startNodeId, so the canvas and
           // the compiler can't disagree about what a trigger is.
-          position: nextNodePosition(ns.map((n) => n.position), {
-            entry: isEntryType(kind),
-            entries: ns
-              .filter((n) => isEntryType(n.data.kind))
-              .map((n) => n.position),
-          }),
+          position: nextNodePosition(
+            ns.map((n) => n.position),
+            {
+              entry: isEntryType(kind),
+              entries: ns
+                .filter((n) => isEntryType(n.data.kind))
+                .map((n) => n.position),
+            },
+          ),
           data: { kind, config },
           // Appear animation: scale(.85)+translateY(6px)→1 + a brief ember glow
           // (canvas.css). Mount-once — React Flow keys nodes by id.
@@ -757,27 +762,78 @@ export function CanvasPage() {
 
   // Workflow persistence + file IO (export / import / save / run / save-only). Plain
   // handlers closing over the state above — no hooks, so call position is free.
-  const { exportGraph, importFromFile, run, saveOnly } = useWorkflowActions({
-    graph,
-    error,
-    name,
-    activeKey,
-    showInput,
-    runInput,
-    keyParam,
-    templateParam,
-    returnTo,
-    setNodes,
-    setEdges,
-    setName,
-    setWorkflowKey,
-    setVersion,
-    setStatus,
-    setBusy,
-    setWorkflows,
-    setSearchParams,
-    navigate,
+  const { exportGraph, importFromFile, run, save, saveOnly } =
+    useWorkflowActions({
+      graph,
+      error,
+      name,
+      activeKey,
+      showInput,
+      runInput,
+      keyParam,
+      templateParam,
+      returnTo,
+      setNodes,
+      setEdges,
+      setName,
+      setWorkflowKey,
+      setVersion,
+      setStatus,
+      setBusy,
+      setWorkflows,
+      setSearchParams,
+      navigate,
+    });
+
+  // DRY RUN (#832) — "Check flow": save, then answer "will this run?" without running it.
+  // Saving first is the point: the endpoint checks the SAVED graph, so a check on unsaved edits
+  // would describe a version that isn't the one on screen.
+  const {
+    checking,
+    summary: dryRun,
+    check: checkFlow,
+    clear: clearDryRun,
+  } = useDryRun({
+    save: async () => {
+      setBusy(true);
+      setStatus(null);
+      try {
+        return await save();
+      } catch (e) {
+        if (e instanceof UnauthorizedError) {
+          navigate("/auth");
+          return null;
+        }
+        setStatus(e instanceof Error ? e.message : "Save failed.");
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    onOpenIssues: () => setShowIssues(true),
   });
+
+  // A verdict describes the graph it was computed on. Once the graph changes it is no longer an
+  // answer about what's on screen, so it is dropped rather than left to look current.
+  //
+  // Keyed on the COMPILED graph's content, not on `graph`'s identity: selecting a node rebuilds
+  // that object without changing the flow, and discarding a good verdict because someone clicked
+  // a node would be its own small annoyance.
+  const graphSignature = useMemo(
+    () => (graph ? JSON.stringify(graph) : ""),
+    [graph],
+  );
+  useEffect(() => {
+    clearDryRun();
+  }, [graphSignature, clearDryRun]);
+
+  // Dry-run failures join the lint/resource rows in ONE list. They are the same kind of thing to
+  // the user — "something here is wrong, click to go fix it" — and a second panel would make them
+  // hunt in two places.
+  const panelIssues = useMemo(
+    () => (dryRun ? [...allIssues, ...dryRun.issues] : allIssues),
+    [allIssues, dryRun],
+  );
 
   /* ---------------- dock derivations ---------------- */
 
@@ -873,8 +929,10 @@ export function CanvasPage() {
         generating={generating}
         graphValid={!!graph}
         graphError={error}
-        issuesCount={generating ? 0 : allIssues.length}
-        issuesSevere={resourceWarnings.length > 0}
+        issuesCount={generating ? 0 : panelIssues.length}
+        issuesSevere={
+          resourceWarnings.length > 0 || (dryRun?.issues.length ?? 0) > 0
+        }
         showIssues={showIssues}
         onToggleIssues={() => setShowIssues((s) => !s)}
         env={envChip}
@@ -894,6 +952,8 @@ export function CanvasPage() {
         onOpenWorkflow={openWorkflow}
         onNewWorkflow={newWorkflow}
         onSave={() => void saveOnly()}
+        onCheck={() => void checkFlow()}
+        checking={checking}
         onRun={() => void run()}
       />
 
@@ -906,8 +966,14 @@ export function CanvasPage() {
         onChange={importFromFile}
       />
 
-      {showIssues && allIssues.length > 0 && (
-        <CanvasIssuesPanel issues={allIssues} onSelectNode={selectNode} />
+      {/* Rendered when there is EITHER a row or a dry-run summary: a clean check still owes the
+          user an answer, and "nothing appeared" is the failure mode #831 already fixed once. */}
+      {showIssues && (panelIssues.length > 0 || dryRun) && (
+        <CanvasIssuesPanel
+          issues={panelIssues}
+          note={dryRun?.message}
+          onSelectNode={selectNode}
+        />
       )}
 
       {showAi && (

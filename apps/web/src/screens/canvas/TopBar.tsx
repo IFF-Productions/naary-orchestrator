@@ -102,6 +102,8 @@ export function CanvasTopBar({
   onOpenWorkflow,
   onNewWorkflow,
   onSave,
+  onCheck,
+  checking,
   onRun,
 }: {
   name: string;
@@ -139,6 +141,9 @@ export function CanvasTopBar({
   onOpenWorkflow: (key: string) => void;
   onNewWorkflow: () => void;
   onSave: () => void;
+  /** Dry run (#832): save, then check config/request/credentials WITHOUT executing a node. */
+  onCheck: () => void;
+  checking: boolean;
   onRun: () => void;
 }) {
   const navigate = useNavigate();
@@ -635,9 +640,23 @@ export function CanvasTopBar({
         >
           Save
         </Button>
+        {/* Sits before "Save & run" because it is the cheap answer to the same question, and it
+            is the one to reach for FIRST on a flow with real side effects. */}
+        <Button
+          variant="secondary"
+          disabled={busy || checking || !graphValid || !maySave}
+          title={
+            maySave
+              ? "Saves, then checks every integration node's config, request and connection — without running anything"
+              : saveDeniedTitle
+          }
+          onClick={onCheck}
+        >
+          {checking ? "Checking…" : "Check flow"}
+        </Button>
         <Button
           variant="primary"
-          disabled={busy || !graphValid || !maySave}
+          disabled={busy || checking || !graphValid || !maySave}
           title={maySave ? undefined : saveDeniedTitle}
           onClick={onRun}
         >

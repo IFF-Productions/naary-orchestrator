@@ -15,6 +15,7 @@ import {
   UnauthorizedError,
 } from "./http";
 import type {
+  DryRunResult,
   GraphSummary,
   GraphVersion,
   N8nImportResult,
@@ -310,6 +311,15 @@ export const graphsApi = {
     return http("/graphs", {
       method: "POST",
       body: JSON.stringify({ workflowKey, name, graph }),
+    });
+  },
+  // DRY RUN (#832): "will this flow run?" without running it. Validates every integration node's
+  // config and request shape, then probes each DISTINCT connection with the provider's cheapest
+  // read-only action. Executes no node. Note it checks the SAVED graph, which is why the canvas
+  // saves first — otherwise the verdict would describe a version that isn't on screen.
+  dryRunGraph(workflowKey: string): Promise<DryRunResult> {
+    return http(`/graphs/${encodeURIComponent(workflowKey)}/dry-run`, {
+      method: "POST",
     });
   },
   // Every stored version of a workflow (newest first) — powers the "re-run at version" picker.

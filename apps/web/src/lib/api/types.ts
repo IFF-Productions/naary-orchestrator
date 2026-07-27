@@ -2,11 +2,7 @@
  * Every shared type of the API client — the view models the SPA renders. All of
  * these remain importable from the ../api barrel (`import type { X } from "../lib/api"`).
  */
-import type {
-  FormBrandingConfig,
-  GraphDef,
-  TemplateBlock,
-} from "@naary/dsl";
+import type { FormBrandingConfig, GraphDef, TemplateBlock } from "@naary/dsl";
 
 export type ExecutionStatus =
   | "running"
@@ -159,6 +155,33 @@ export type TestNodeResult =
       costUsd?: number | null;
     }
   | { pure: false; message: string };
+
+/**
+ * DRY RUN (#832) — the result of checking a flow WITHOUT executing it.
+ *
+ * `probed` counts only connections we actually called out to. `unprobeable` counts the ones the
+ * provider gives us no zero-argument read for (GitHub, Slack, Jira and others — #835): their
+ * credentials were NOT verified, and the UI has to say so rather than let "0 problems" imply
+ * "everything checked".
+ */
+export interface DryRunCheck {
+  kind: "config" | "request" | "credential";
+  ok: boolean;
+  message?: string;
+  /** The check couldn't run. NOT a failure — and not a pass either. */
+  skipped?: boolean;
+}
+export interface DryRunNodeResult {
+  nodeId: string;
+  type: string;
+  checks: DryRunCheck[];
+}
+export interface DryRunResult {
+  ok: boolean;
+  probed: number;
+  unprobeable: number;
+  nodes: DryRunNodeResult[];
+}
 
 /** A recurring schedule (mirrors the API's ScheduleView). */
 export interface ScheduleRow {
@@ -346,8 +369,7 @@ export interface FormFieldView {
  * (it attests OUR Firebase project, which is also why it is the weaker of the two).
  */
 export type BotGate =
-  | { provider: "turnstile"; siteKey: string }
-  | { provider: "app_check" };
+  { provider: "turnstile"; siteKey: string } | { provider: "app_check" };
 
 /** Public form definition served to an anonymous browser — carries NO tenant/workflow ids. */
 export interface FormDefinition {
