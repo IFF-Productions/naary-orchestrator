@@ -31,7 +31,7 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { type NodeType } from "@naary/dsl";
+import { type GraphDef, type NodeType, renameNode } from "@naary/dsl";
 import {
   api,
   type BudgetView,
@@ -277,6 +277,96 @@ export function CanvasPage() {
       });
     },
     [workflowKey],
+  );
+
+  /**
+   * RENAME A NODE'S ID (#833) — "can we have the ability to actually rename the node slug".
+   *
+   * The rewrite itself lives in `@naary/dsl`'s pure `renameNode`, which is tested against every
+   * reference kind (expressions, bindings, edge conditions, handoff targets…). This function is
+   * only the canvas's half: feed it a GraphDef-shaped view of canvas state, then map the result
+   * back onto the React Flow nodes that carry the positions.
+   *
+   * Mapping back BY INDEX is safe because `renameNode` maps over `nodes`/`edges` and so preserves
+   * order — a contract the DSL side documents. Recompiling and decompiling instead would round-trip
+   * away every node's position.
+   *
+   * Returns an error string to show inline, or null on success.
+   */
+  const renameNodeId = useCallback(
+    (oldId: string, newId: string): string | null => {
+      const result = renameNode(
+        {
+          startNodeId: "",
+          nodes: nodes.map((n) => ({
+            id: n.id,
+            type: n.data.kind,
+            config: n.data.config,
+          })),
+          edges: edges.map((e) => ({
+            from: e.source,
+            to: e.target,
+            ...(e.data?.condition?.path ? { condition: e.data.condition } : {}),
+          })),
+        } as GraphDef,
+        oldId,
+        newId,
+      );
+      if (!result.ok) return result.error;
+      if (result.rewritten === 0) return null;
+
+      const renamed = result.graph;
+      setNodes((ns) =>
+        ns.map((n, i) => ({
+          ...n,
+          id: renamed.nodes[i].id,
+          // Keep the rename selected: it is the node the user is working on, and losing the
+          // selection would close the dock they just typed in.
+          selected: n.id === oldId ? true : n.selected,
+          data: { ...n.data, config: renamed.nodes[i].config },
+        })),
+      );
+      setEdges((es) =>
+        es.map((e, i) => ({
+          ...e,
+          source: renamed.edges[i].from,
+          target: renamed.edges[i].to,
+          ...(e.data?.condition
+            ? {
+                data: {
+                  ...e.data,
+                  condition: renamed.edges[i].condition as EdgeConditionDraft,
+                },
+              }
+            : {}),
+        })),
+      );
+
+      // Canvas-local state keyed by node id follows, or the node loses its pin and its last test
+      // result the moment it is renamed.
+      const remap = <T,>(m: Record<string, T>): Record<string, T> =>
+        oldId in m
+          ? Object.fromEntries(
+              Object.entries(m).map(([k, v]) => [k === oldId ? newId : k, v]),
+            )
+          : m;
+      setPins(remap);
+      setNodeRuns(remap);
+
+      // The SERVER's pin is keyed by node id too. Move it, best-effort: a failure here leaves an
+      // orphaned pin, which is recoverable, and must not undo a rename the canvas already applied.
+      const pinned = pins[oldId];
+      if (workflowKey && pinned !== undefined) {
+        void api
+          .pinNode(workflowKey, newId, pinned)
+          .then(() => api.unpinNode(workflowKey, oldId))
+          .catch(() => {
+            /* the local remap already stands; the stale pin is cleaned up on next save */
+          });
+      }
+      return null;
+    },
+    [nodes, edges, pins, workflowKey],
   );
 
   // Single-node test runner — the ONE path the dock's "Test step", the config panel's
@@ -909,6 +999,7 @@ export function CanvasPage() {
       runNodeTest={runNodeTest}
       updateConfig={updateConfig}
       deleteNode={deleteNode}
+      renameNodeId={renameNodeId}
       updateEdgeCondition={updateEdgeCondition}
       clearEdgeCondition={clearEdgeCondition}
       deleteEdge={deleteEdge}
