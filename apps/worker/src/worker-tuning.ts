@@ -5,12 +5,18 @@
 import { hostname } from "node:os";
 import type { WorkerOptions } from "@temporalio/worker";
 import { TASK_QUEUE } from "@naary/contracts";
+import {
+  positiveIntEnv,
+  workerShutdownGrace,
+  workerTaskQueue,
+  workerVersion,
+} from "./config";
 
 /** The task queue THIS worker process polls (Queue-mode §3.3). Default `orchestrator`; a heavy
  *  worker sets WORKER_TASK_QUEUE=orchestrator-heavy. ONE queue per process keeps the heartbeat
  *  identity (workerIdentity) 1:1 with a queue and the process-global slot gauge accurate. */
 export function resolveTaskQueue(env: NodeJS.ProcessEnv = process.env): string {
-  return env.WORKER_TASK_QUEUE?.trim() || TASK_QUEUE;
+  return workerTaskQueue(env) ?? TASK_QUEUE;
 }
 
 /** Temporal's Duration, derived from WorkerOptions rather than imported from
@@ -29,9 +35,9 @@ function parseDuration(v: string | undefined): Duration | undefined {
     : undefined;
 }
 
-/** The deployed version — the tag the deploy stamps (SENTRY_RELEASE), else a dev marker. */
-export const WORKER_VERSION =
-  process.env.SENTRY_RELEASE ?? process.env.APP_VERSION ?? "dev";
+/** The deployed version — the tag the deploy stamps (SENTRY_RELEASE), else a dev marker.
+ *  A getter, not a const: an import-time read would freeze before dotenv (env.ts) has run. */
+export const WORKER_VERSION = (): string => workerVersion();
 
 /** A stable, human-readable identity for THIS worker replica, surfaced on every Temporal poller
  *  (and reused by the fleet registry): `<host>/<pid>/<version>`. Lets the fleet be told apart. */
@@ -44,10 +50,7 @@ export function envInt(
   name: string,
   env: NodeJS.ProcessEnv = process.env,
 ): number | undefined {
-  const raw = env[name];
-  if (raw === undefined || raw.trim() === "") return undefined;
-  const n = Number(raw);
-  return Number.isInteger(n) && n > 0 ? n : undefined;
+  return positiveIntEnv(name, env);
 }
 
 export interface WorkerTuning {
@@ -67,7 +70,7 @@ export interface WorkerTuning {
 export function workerTuning(
   env: NodeJS.ProcessEnv = process.env,
 ): WorkerTuning {
-  const grace = parseDuration(env.WORKER_SHUTDOWN_GRACE);
+  const grace = parseDuration(workerShutdownGrace(env));
   const activities = envInt("WORKER_MAX_ACTIVITIES", env);
   const workflowTasks = envInt("WORKER_MAX_WORKFLOW_TASKS", env);
   const cached = envInt("WORKER_MAX_CACHED_WORKFLOWS", env);

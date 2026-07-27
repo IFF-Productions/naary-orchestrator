@@ -13,6 +13,7 @@ import { getPrisma } from "@naary/db";
 import type { Logger } from "@naary/logging";
 import { activeActivities } from "./temporal/activity-gauge";
 import { WORKER_VERSION, workerIdentity } from "./worker-tuning";
+import { heartbeatEnabled } from "./config";
 
 export const HEARTBEAT_INTERVAL_MS = 15_000;
 
@@ -28,7 +29,7 @@ export function heartbeatRow(info: HeartbeatInfo, now: Date) {
   return {
     identity: workerIdentity(),
     taskQueue: info.taskQueue,
-    version: WORKER_VERSION,
+    version: WORKER_VERSION(),
     host: info.host,
     activeActivities: activeActivities(),
     maxActivities: info.maxActivities,
@@ -58,7 +59,7 @@ export function startHeartbeat(
   log: Pick<Logger, "warn">,
   env: NodeJS.ProcessEnv = process.env,
 ): { stop: () => Promise<void> } {
-  if (env.WORKER_HEARTBEAT === "off") return { stop: async () => {} };
+  if (!heartbeatEnabled(env)) return { stop: async () => {} };
 
   const tick = () => {
     void beat(info).catch((err) => {

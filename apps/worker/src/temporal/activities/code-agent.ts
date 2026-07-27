@@ -19,6 +19,7 @@ import {
 } from "../code-agent-drivers";
 import { codeAgentWriteEnv, runCodeAgentWrite } from "../code-agent-write";
 import { type AgentMeta, estimateTokens, getCredentials } from "./shared";
+import { subprocessBaseEnv } from "../../config";
 
 // Activities run in the worker PROCESS (a side-effect zone), so structured
 // logging is fine here — unlike workflows.ts, which must stay deterministic.
@@ -227,8 +228,7 @@ export async function callCodeAgent(
       // PATH/HOME + the driver's chosen auth var (exactly one). Never the git token.
       const r = await __codeAgentDeps.exec(driver.binary, args, {
         env: {
-          PATH: process.env.PATH,
-          HOME: process.env.HOME,
+          ...subprocessBaseEnv(),
           ...driver.authEnv(apiKey),
         },
         timeoutMs: cfg.timeoutMs,
