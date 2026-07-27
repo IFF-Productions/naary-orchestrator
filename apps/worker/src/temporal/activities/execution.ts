@@ -83,7 +83,6 @@ export async function loadTemplate(
   return { subject: row.subject, blocks: row.blocks as TemplateBlock[] };
 }
 
-/** Statuses that end a run — the terminal push also stamps `finishedAt` (Slice 2). */
 /** Failure classification derivable from the terminal STATUS itself (returned-status
  *  terminals). Thrown failures carry an explicit `failureKind` classified in the
  *  workflow from the recorded error instead. circuit_open/invalid_graph get none —

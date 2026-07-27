@@ -21,7 +21,8 @@ const EMBED_RE = /\\\{\{|\{\{\s*([^{}]+?)\s*\}\}/g;
  * interleave into each other's scan position. (`String.replace` is safe — it resets — which is why
  * the local uses below keep using EMBED_RE directly.)
  */
-export const embedRe = (): RegExp => new RegExp(EMBED_RE.source, "g");
+export const embedRe = (): RegExp =>
+  new RegExp(EMBED_RE.source, EMBED_RE.flags);
 
 /** A `{{ $secrets.NAME }}` reference. Secret VALUES must never enter the graph/ctx/Temporal history
  *  (CLAUDE.md Tier-1 §4), so — unlike every other token — the workflow does NOT resolve these. They
