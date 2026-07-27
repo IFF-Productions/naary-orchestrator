@@ -26,9 +26,11 @@ const TENANT = process.env.E2E_TENANT ?? "t-demo";
  * "Command ts-node not found" — CI never noticed because it sets `E2E_API_TOKEN` and skips this
  * branch entirely. Found by running the suite locally for the first time in a while.
  *
- * Returns undefined when the DB can't be reached, so the caller's error names the real problem.
+ * Throws with the underlying cause when the DB can't be reached — an earlier version returned a
+ * silent undefined that surfaced as the caller's generic "could not obtain an API token", which
+ * names nothing. The real cause is right here; carry it.
  */
-function mintToken(): string | undefined {
+function mintToken(): string {
   const url =
     process.env.DATABASE_URL ??
     `postgresql://${process.env.POSTGRES_USER ?? "naary"}:${
@@ -61,25 +63,24 @@ function mintToken(): string | undefined {
       encoding: "utf8",
     }).trim();
   } catch (e) {
-    // Say WHY. A silent undefined here surfaces as the caller's generic "could not obtain an API
-    // token", which is the least useful sentence available — the real cause is right here.
     const detail =
       e && typeof e === "object" && "stderr" in e
         ? String((e as { stderr?: unknown }).stderr).trim()
         : e instanceof Error
           ? e.message
           : String(e);
-    console.error(`E2E setup: could not mint a token — ${detail}`);
-    return undefined;
+    throw new Error(
+      `E2E setup: could not mint an API token against the DB — ${detail}\n` +
+        "Is the stack up (docker compose up -d) and POSTGRES_PASSWORD/DATABASE_URL set?",
+    );
   }
 }
 
 async function globalSetup(_config: FullConfig): Promise<void> {
   const cwd = process.cwd();
 
-  let token = process.env.E2E_API_TOKEN;
-  if (!token) token = mintToken();
-  if (!token) throw new Error("E2E setup: could not obtain an API token");
+  // mintToken throws WITH the cause; no generic fallback message to flatten it into.
+  const token = process.env.E2E_API_TOKEN || mintToken();
 
   // Seed a workflow (ignore 'already exists' / offline — tests handle empty too).
   await fetch(`${API_BASE}/graphs`, {

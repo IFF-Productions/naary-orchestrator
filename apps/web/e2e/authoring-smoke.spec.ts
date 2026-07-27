@@ -71,10 +71,17 @@ test("authoring: the caret is visible and `{{` opens the reference list", async 
     // accidentally right on a dark UI and plainly wrong on a light one. Walk up to whatever
     // actually paints behind the caret.
     const painted = (el: HTMLElement | null): string => {
+      // Alpha exists ONLY in the 4-component form. Sniffing "the last comma-separated number"
+      // reads the BLUE channel of `rgb(0, 0, 0)` as alpha=0 and skips a solid black background —
+      // walking past the very surface being measured.
+      const opaque = (bg: string): boolean => {
+        if (!bg || bg === "transparent") return false;
+        const parts = /\(([^)]*)\)/.exec(bg)?.[1].split(",") ?? [];
+        return parts.length < 4 || Number(parts[3]) > 0;
+      };
       for (let n: HTMLElement | null = el; n; n = n.parentElement) {
         const bg = getComputedStyle(n).backgroundColor;
-        const alpha = /rgba?\([^)]*,\s*([\d.]+)\s*\)/.exec(bg);
-        if (bg && bg !== "transparent" && (!alpha || Number(alpha[1]) > 0)) return bg;
+        if (opaque(bg)) return bg;
       }
       return getComputedStyle(document.body).backgroundColor;
     };
