@@ -11,6 +11,7 @@ import {
   HttpError,
   UnauthorizedError,
 } from "../../../lib/api";
+import { PHONE_QUERY, useMediaQuery } from "../../../lib/useMediaQuery";
 import { envScoped } from "./env-scoped";
 import { ErrorLine, panelStyle, SectionHeader, SectionIntro } from "./shared";
 
@@ -63,6 +64,11 @@ export function VariablesSection({ envs }: { envs: Environment[] }) {
   }, [envs]);
 
   const keys = useMemo(() => Object.keys(matrix).sort(), [matrix]);
+  // PHONE (#708): at 390px this matrix hid 200px — 36% of the row — behind a scroller with no
+  // affordance, so with three environments the `prod` column (the one that matters most) was
+  // off-canvas. Unlike the grant matrices this row IS list-shaped: one key with a handful of
+  // per-env values, which stacks into a card without losing the grid's meaning.
+  const phone = useMediaQuery(PHONE_QUERY);
   const gridColumns = `minmax(140px, 1.35fr) ${envs
     .map(() => "minmax(90px, 1fr)")
     .join(" ")} 34px`;
@@ -213,8 +219,13 @@ export function VariablesSection({ envs }: { envs: Environment[] }) {
 
       {error && <ErrorLine>{error}</ErrorLine>}
 
-      <div style={{ ...panelStyle, overflowX: "auto" }}>
-        <div style={{ minWidth: envs.length > 2 ? 560 : 380 }}>
+      <div style={{ ...panelStyle, overflowX: phone ? undefined : "auto" }}>
+        <div
+          style={{
+            minWidth: phone ? undefined : envs.length > 2 ? 560 : 380,
+          }}
+        >
+          {!phone && (
           <div
             style={{
               display: "grid",
@@ -234,6 +245,7 @@ export function VariablesSection({ envs }: { envs: Environment[] }) {
             ))}
             <span />
           </div>
+          )}
 
           {adding && (
             <div
@@ -332,18 +344,37 @@ export function VariablesSection({ envs }: { envs: Environment[] }) {
             <div
               key={key}
               className="naary-set-row"
-              style={{
-                display: "grid",
-                gridTemplateColumns: gridColumns,
-                gap: 10,
-                alignItems: "center",
-                padding: "8px 18px",
-                borderBottom: "1px solid var(--line)",
-              }}
+              style={
+                phone
+                  ? {
+                      // Card: the key and its delete on one line, then one LABELLED input per
+                      // environment. The env name has to travel with the input here — the column
+                      // header is gone, and an unlabelled box would be a value with no home.
+                      // A 2-col grid: the key and its delete sit on the first line together
+                      // (the trash alone on a line below reads as orphaned), then each labelled
+                      // env input spans both columns. `order` does the placing, so the JSX below
+                      // stays one shape for both layouts.
+                      display: "grid",
+                      gridTemplateColumns: "1fr auto",
+                      gap: 8,
+                      alignItems: "center",
+                      padding: "12px 16px",
+                      borderBottom: "1px solid var(--line)",
+                    }
+                  : {
+                      display: "grid",
+                      gridTemplateColumns: gridColumns,
+                      gap: 10,
+                      alignItems: "center",
+                      padding: "8px 18px",
+                      borderBottom: "1px solid var(--line)",
+                    }
+              }
             >
               <span
                 className="mono"
                 style={{
+                  ...(phone ? { order: 0 } : {}),
                   fontSize: 12,
                   fontWeight: "var(--weight-semibold)",
                   color: "var(--ink)",
@@ -358,7 +389,7 @@ export function VariablesSection({ envs }: { envs: Environment[] }) {
               {envs.map((env) => {
                 const cellKey = `${key}\0${env.id}`;
                 const value = edits[cellKey] ?? matrix[key]?.[env.id] ?? "";
-                return (
+                const cell = (
                   <input
                     key={env.id}
                     className="mono naary-var-cell"
@@ -381,12 +412,31 @@ export function VariablesSection({ envs }: { envs: Environment[] }) {
                     }}
                   />
                 );
+                if (!phone) return cell;
+                return (
+                  <label
+                    key={env.id}
+                    style={{
+                      order: 2,
+                      gridColumn: "1 / -1",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      fontSize: "var(--text-xs)",
+                      color: "var(--ink-3)",
+                    }}
+                  >
+                    <span style={{ width: 62, flex: "none" }}>{env.name}</span>
+                    {cell}
+                  </label>
+                );
               })}
               <Button
                 variant="ghost"
                 size="sm"
                 icon="trash"
                 iconOnly
+                style={phone ? { order: 1 } : undefined}
                 aria-label={`Delete ${key} from every environment`}
                 title="Delete this key from every environment"
                 disabled={busy}
