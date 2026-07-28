@@ -149,7 +149,13 @@ let attestationFailed = false;
  *
  * False while the probe is still in flight. That is fine here — the probe starts at module load
  * and a visitor cannot click sign-in inside that window — and it is the right way to be wrong:
- * silence rather than a guess.
+ * silence rather than a guess. Also false when the startup probe SUCCEEDED and a later refresh
+ * failed; same conservative direction.
+ *
+ * Unlike `mintBotGateToken`, this is safe to import directly rather than through ./firebase: it
+ * reports a flag rather than using the App Check instance, so an importer that never triggered
+ * `initAppCheck` reads "no failure observed" instead of silently getting null forever. The
+ * sign-in screen is under AuthProvider → ./firebase anyway, so the probe has always run.
  */
 export function appCheckAttestationFailed(): boolean {
   return attestationFailed;
