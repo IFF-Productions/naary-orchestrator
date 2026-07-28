@@ -389,9 +389,22 @@ export function CanvasPage() {
   // prefer the SERVER's measurement (Slice 2 — interpreter-stamped for activity nodes,
   // server-measured for pure ones); fall back to client wall-clock only when the API
   // predates it. Cost: the run's real metered spend (fail-safe billed) when returned.
+  // `save` is created by useWorkflowActions further down, so it can't be closed over here.
+  // A ref, filled in below, lets Test reach it without inverting the hook order.
+  const saveRef = useRef<(() => Promise<string | null>) | null>(null);
+
   const runNodeTest = useCallback(
     async (nodeId: string, autofill?: boolean): Promise<TestNodeResult> => {
-      if (!workflowKey) {
+      // SAVE FIRST. The endpoint takes only (workflowKey, nodeId) and reads the node out of
+      // the latest SAVED graph — whatever is on the canvas never leaves the browser. The old
+      // guard only caught a workflow that had NEVER been saved, so an edited-but-unsaved node
+      // tested its previous config and reported on a version the user couldn't see: type a
+      // value, press Test, get told the field is empty. Saving makes the thing tested the
+      // thing on screen, which is the only reading of this button that isn't a lie.
+      // The key the save RETURNED, not the state variable: on a first save `setWorkflowKey`
+      // won't have re-rendered yet, so reading state here would test under the empty key.
+      const key = (await saveRef.current?.()) || workflowKey;
+      if (!key) {
         setStatus(
           "Save the workflow first — node tests run against the saved graph.",
         );
@@ -403,12 +416,7 @@ export function CanvasPage() {
         [nodeId]: { status: "running", startedAt: Date.now() },
       }));
       try {
-        const res = await api.testNode(
-          workflowKey,
-          nodeId,
-          undefined,
-          autofill,
-        );
+        const res = await api.testNode(key, nodeId, undefined, autofill);
         const clientMs = Math.round(performance.now() - t0);
         setNodeRuns((r) => {
           const next = { ...r };
@@ -907,10 +915,16 @@ export function CanvasPage() {
       setSearchParams,
       navigate,
     });
+  // Hand `save` back to runNodeTest, which is declared above it (it feeds callbacks defined
+  // earlier) and so can't close over it. Assigned every render, so the ref never holds a
+  // handler closed over stale state.
+  saveRef.current = save;
 
   // DRY RUN (#832) — "Check flow": save, then answer "will this run?" without running it.
   // Saving first is the point: the endpoint checks the SAVED graph, so a check on unsaved edits
-  // would describe a version that isn't the one on screen.
+  // would describe a version that isn't the one on screen. A single-node Test now does the
+  // same, for the same reason — it used to test the last saved config and report on a version
+  // the user couldn't see.
   const {
     checking,
     summary: dryRun,
