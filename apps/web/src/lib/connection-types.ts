@@ -42,3 +42,46 @@ export const APP_CONNECTION_TYPES: ConnectionType[] = [
 export function integrationsTabFor(type: ConnectionType): "apps" | "providers" {
   return APP_CONNECTION_TYPES.includes(type) ? "apps" : "providers";
 }
+
+/** Human name per connection type — so an error can say "a GitHub connection", not "github". */
+const TYPE_LABEL: Record<ConnectionType, string> = {
+  github: "GitHub",
+  atlassian: "Atlassian",
+  custom: "custom MCP server",
+  postgres: "Postgres",
+  mssql: "SQL Server",
+  mysql: "MySQL",
+  signing: "signing-key",
+  smtp: "SMTP",
+};
+
+/** "GitHub" / "Postgres, SQL Server or MySQL" — the acceptable types, read out loud. */
+export function connectionTypeLabel(types: readonly ConnectionType[]): string {
+  const names = types.map((t) => TYPE_LABEL[t] ?? t);
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`;
+}
+
+/**
+ * The connection types a node MUST have configured, or null when it needs none.
+ *
+ * `codeAgent` is the reason this is a function rather than a lookup. Its `connectionId` is
+ * OPTIONAL and only used in write mode — read mode (the DEFAULT) runs in-worker with no repo and
+ * no clone, so it needs no connection at all. The canvas used to demand one from every codeAgent,
+ * which put an author in a dead end: the inspector only renders the connection picker under
+ * `mode === "write"`, so the error told them to pick a connection in a control the UI was
+ * deliberately hiding. Reported from a real graph whose codeAgent had no `mode` set.
+ *
+ * `httpRequest`'s is optional for the plainer reason that a public API needs no auth.
+ */
+export function requiredConnectionTypes(node: {
+  type: string;
+  config?: Record<string, unknown> | null;
+}): ConnectionType[] | null {
+  const types = CONNECTION_TYPES[node.type];
+  if (!types) return null;
+  if (node.type === "httpRequest") return null;
+  if (node.type === "codeAgent")
+    return node.config?.mode === "write" ? types : null;
+  return types;
+}
