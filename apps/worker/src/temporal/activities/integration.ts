@@ -20,6 +20,7 @@ import {
 } from "@naary/connections";
 import { getObjectStore, maybeOffload } from "@naary/storage";
 import { activityDuration, activityRuns, secondsSince } from "../../metrics";
+import { describeApiError, hasFromHeader } from "./api-error";
 import { type AgentMeta, toSanitizedRetryable } from "./shared";
 import { DEFAULT_HTTP_TIMEOUT_MS, __httpDeps } from "./http";
 
@@ -162,16 +163,22 @@ export async function callIntegration(
     // a GitHub-specific hint: GitHub returns 404/403 when a token can't see a PRIVATE repo — the
     // most common cause of a "correct endpoint but 404" write.
     if (action?.write && !res.ok) {
-      const detail =
-        body && typeof body === "object" && "message" in body
-          ? String((body as { message: unknown }).message)
-          : typeof body === "string" && body.length > 0
-            ? body.slice(0, 200)
-            : res.statusText;
+      // The provider almost always says WHY. Reading only a top-level `message` dropped that
+      // for every provider that nests it (PagerDuty, Google, Stripe, OpenAI, Jira…) and showed
+      // the bare reason phrase instead — see describeApiError.
+      const detail = describeApiError(body, res.statusText);
       const hint =
         cfg.provider === "github" && (res.status === 404 || res.status === 403)
           ? " — GitHub returns 404/403 when the connection's token lacks access to a (private) repo; check the token has repo / issues:write scope on this repository, or verify the resolved owner/repo/number."
-          : "";
+          : // PagerDuty rejects EVERY write without a `From` header unless the API key is
+            // user-scoped, and the field is optional in the catalog precisely because we can't
+            // tell which kind of key a connection holds. So we can't gate the save on it — but
+            // once a 400 comes back with no From sent, the cause is nearly always this.
+            cfg.provider === "pagerduty" &&
+              res.status === 400 &&
+              !hasFromHeader(req.headers)
+            ? " — PagerDuty rejects write actions sent without a `From` header unless the API key is user-scoped. Set the node's 'From (user email)' field to the login email of a PagerDuty user."
+            : "";
       throw ApplicationFailure.nonRetryable(
         `integration '${cfg.provider}.${cfg.action}' failed: ${res.status} ${detail} [${req.method} ${req.path}]${hint}`,
         "INTEGRATION_WRITE_FAILED",
