@@ -37,9 +37,22 @@ function loadTurnstile(): Promise<void> {
     const existing = document.getElementById(
       SCRIPT_ID,
     ) as HTMLScriptElement | null;
+    // Reject with an ERROR that names the script, never bare `reject()` or the DOM event.
+    // A rejection whose reason is `undefined` or an `Event` reaches Sentry with no message and no
+    // stack — that is #793, filed as literally "<unknown>". `nameEventRejection` recovers the
+    // target for THIRD-PARTY scripts we don't control; for our own call sites the fix is simply to
+    // say what failed.
+    const failed = () =>
+      reject(
+        new Error(
+          `Turnstile script failed to load (${SCRIPT_SRC}). A blocked or offline ` +
+            `request, or a CSP script-src that doesn't allow it.`,
+        ),
+      );
+
     if (existing) {
       existing.addEventListener("load", () => resolve());
-      existing.addEventListener("error", () => reject());
+      existing.addEventListener("error", failed);
       return;
     }
     const s = document.createElement("script");
@@ -48,7 +61,7 @@ function loadTurnstile(): Promise<void> {
     s.async = true;
     s.defer = true;
     s.onload = () => resolve();
-    s.onerror = () => reject();
+    s.onerror = failed;
     document.head.appendChild(s);
   });
 }
