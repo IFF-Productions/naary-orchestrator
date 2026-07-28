@@ -1,6 +1,7 @@
 // agent node — the AI-SDK model call (BYOK, budget reservation, billing).
 import { createLogger } from "@naary/logging";
 import { ApplicationFailure } from "@temporalio/activity";
+import { assertStructuredOutputSize } from "./structured-output-size";
 import { getDefaultEnvironmentId } from "@naary/db";
 import {
   AuthConfigError,
@@ -857,6 +858,11 @@ export async function runAgent(
       model, // the model that actually ran (post-downgrade)
       usage,
     });
+
+    // #827: reject an oversized structured output HERE — after recordUsage, deliberately. The
+    // model has already run and been billed; throwing before the ledger write would lose that
+    // spend, which is exactly what "billing must fail safe" exists to prevent.
+    if (wantStructured) assertStructuredOutputSize(nodeOutput, meta.nodeId);
 
     // The same token cost recordUsage computed (derived inside the GenAI span above) — returned so
     // the workflow can accumulate it deterministically (no DB read in workflow code). For a tooled
