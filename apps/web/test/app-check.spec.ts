@@ -162,12 +162,27 @@ describe("explainAppCheckFailure", () => {
    * the cheapest available (two curls, no browser, no release), so it must come FIRST or
    * the message sends people down the same wrong path we went down.
    */
-  it("leads with the does-the-key-resolve check, ahead of the provider swap", () => {
+  /**
+   * Order changed on 2026-07-28, deliberately: the CHEAPEST check is not the most decisive one.
+   *
+   * `render=` is neither domain- nor provider-checked — it returns 200 for a live key even with a
+   * bogus Referer (measured). Leading with it invites "200 on both ⇒ score-based ⇒ it must be the
+   * provider", which is exactly the wrong turn I took: I recommended flipping to v3, and the v3
+   * `clr` endpoint 400d the same as Enterprise's had. Which `clr` fails is the signal that
+   * actually separates the causes, so it goes first.
+   */
+  it("leads with the which-clr-fails check, ahead of both the resolve curl and the provider swap", () => {
     const msg = explainAppCheckFailure(V3, recaptchaErr);
+    const clr = msg.indexOf("WHICH `clr` 400s");
     const resolve = msg.indexOf("DOES THE KEY RESOLVE");
-    const swap = msg.indexOf("WRONG PROVIDER");
-    expect(resolve).toBeGreaterThan(-1);
+    // The step-2 HEADING, not the cross-reference to it inside step 0 — a bare
+    // indexOf("WRONG PROVIDER") matches "⇒ WRONG PROVIDER, go to 2" and reads as out of order.
+    const swap = msg.indexOf("2. WRONG PROVIDER");
+    expect(clr).toBeGreaterThan(-1);
+    expect(resolve).toBeGreaterThan(clr);
     expect(swap).toBeGreaterThan(resolve);
+    // And it must say what BOTH failing means, or the reader repeats my mistake.
+    expect(msg).toMatch(/BOTH 400.*provider is/s);
     // Copy-pasteable, with the real key substituted in — both endpoints, since a 400 on
     // both is what distinguishes "dead key" from "wrong provider".
     expect(msg).toContain("recaptcha/api.js?render=6Lsite");
@@ -224,5 +239,36 @@ describe("explainAppCheckFailure", () => {
 
   it("survives an error with no code at all", () => {
     expect(explainAppCheckFailure(V3, undefined)).toContain("unknown error");
+  });
+});
+
+describe("explainAppCheckFailure — the exchange 403 (appCheck/initial-throttle)", () => {
+  const plan = { kind: "recaptcha-v3", siteKey: "6LfKEY" } as const;
+  const text = () =>
+    explainAppCheckFailure(plan, { code: "appCheck/initial-throttle" });
+
+  it("sends the reader to the App Check registration, NOT back to the reCAPTCHA checks", () => {
+    // Measured on prod 2026-07-28: /recaptcha/api2/clr returned 200 and the NEXT call,
+    // :exchangeRecaptchaV3Token, returned 403 "App attestation failed." Re-running the
+    // reCAPTCHA-side checks at that point can only waste time — they all pass.
+    const t = text();
+    expect(t).toContain("App Check → Apps");
+    expect(t).toContain("Do NOT re-run the");
+  });
+
+  it("says the backoff is a DAY, because a quiet console reads as a fix", () => {
+    // The SDK throttles hard on a 403: later attempts fail locally with no network call, so
+    // the errors stop appearing while nothing is actually fixed.
+    expect(text()).toMatch(/ONE DAY|one day/i);
+    expect(text()).toContain("Silence here is NOT evidence of a fix");
+  });
+
+  it("keeps the not-a-misconfiguration cause on the list", () => {
+    // A low reCAPTCHA score produces the same 403 and needs no console change at all.
+    expect(text()).toContain("score below the threshold");
+  });
+
+  it("still names the enforcement escape hatch", () => {
+    expect(text()).toContain("enforcement is ON");
   });
 });

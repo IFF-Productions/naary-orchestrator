@@ -4,6 +4,7 @@ import {
   captureRedirectFailure,
   oneShot,
   shouldRetryWithRedirect,
+  withAppCheckHint,
 } from "../src/lib/auth-errors";
 
 /**
@@ -152,5 +153,27 @@ describe("shouldRetryWithRedirect", () => {
     );
     expect(shouldRetryWithRedirect(new Error("boom"))).toBe(false);
     expect(shouldRetryWithRedirect(undefined)).toBe(false);
+  });
+});
+
+describe("withAppCheckHint", () => {
+  it("leaves the message alone when attestation is fine", () => {
+    expect(withAppCheckHint("That didn’t work.", false)).toBe(
+      "That didn’t work.",
+    );
+  });
+
+  it("names App Check when this page already knows it can't attest", () => {
+    // The measured outage (#792): Google refused sign-in with a 401 the SDK never surfaces, so
+    // the only code reaching the screen described a closed window. The cause has to be added.
+    const text = withAppCheckHint("The window closed.", true);
+    expect(text).toContain("The window closed.");
+    expect(text).toContain("App Check");
+  });
+
+  it("hedges, because the client cannot see whether enforcement is on", () => {
+    // A broken attestation with enforcement OFF changes nothing — stating it as fact would
+    // send someone to the wrong console page.
+    expect(withAppCheckHint("x", true)).toContain("may be why");
   });
 });
