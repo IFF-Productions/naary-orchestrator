@@ -58,7 +58,8 @@ export function CodeAgentCredentialCard({
         borderRadius: "var(--radius-lg)",
         boxShadow: "var(--shadow-card)",
         padding: 16,
-        maxWidth: 560,
+        // No maxWidth: these sit in the SAME list as the connection rows, which are full width.
+        // Capping only these made the tab read as "some rows half width, some full" (#673).
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
