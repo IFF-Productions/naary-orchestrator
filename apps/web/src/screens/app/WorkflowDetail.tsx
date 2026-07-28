@@ -39,6 +39,7 @@ import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import { usePermissions } from "../../lib/usePermissions";
 import { DiffModal, type DiffPreset } from "./workflows/DiffModal";
 import { EnvironmentsCard } from "./workflows/EnvironmentsCard";
+import { EvalsCard } from "./workflows/EvalsCard";
 import { RecentRunsCard, VersionHistoryCard } from "./workflows/HistoryCards";
 import { envRank, triggerInfo, useEnvOverview } from "./workflows/model";
 import { PromoteConfirmDialog } from "./workflows/PromoteConfirmDialog";
@@ -476,6 +477,10 @@ export function WorkflowDetail() {
             </ReactFlow>
           )}
         </Card>
+
+        {/* Evals (#575) — the backend has had golden datasets and version-snapshotted scores all
+            along; this is the first place the product shows them. */}
+        <EvalsCard workflowKey={key} />
 
         <Card style={{ padding: 18 }}>
           <div

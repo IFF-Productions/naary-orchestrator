@@ -189,6 +189,41 @@ export interface DryRunResult {
   nodes: DryRunNodeResult[];
 }
 
+/**
+ * One batch eval run (#575). `graphVersion` + `graphContentHash` are the SNAPSHOT the batch
+ * measured — the key that lets a promote screen say "v9 passed 18/20 vs v8's 20/20".
+ */
+export interface EvalRun {
+  id: string;
+  datasetId: string;
+  datasetName: string;
+  workflowId: string;
+  graphVersion: number;
+  graphContentHash: string;
+  status: string;
+  totalCases: number;
+  passed: number;
+  failed: number;
+  errored: number;
+  costUsd: number | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+/**
+ * One case inside a run. Verdicts, scores and assertion LABELS only — never prompt or completion
+ * text, which is a deliberate property of the API (the ledger privacy rule extends here).
+ */
+export interface EvalCaseResult {
+  caseName: string;
+  executionId: string | null;
+  verdict: string;
+  score: number | null;
+  costUsd: number | null;
+  latencyMs: number | null;
+  assertions: unknown;
+}
+
 /** A recurring schedule (mirrors the API's ScheduleView). */
 export interface ScheduleRow {
   id: string;
