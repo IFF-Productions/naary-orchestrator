@@ -13,6 +13,7 @@ import {
 } from "./fields";
 import { RowHead } from "./PinSection";
 import { TemplateSelect } from "./TemplateSelect";
+import { WorkflowSelect } from "./WorkflowSelect";
 
 export function renderControlSections(c: ConfigSectionCtx) {
   const {
@@ -157,12 +158,10 @@ export function renderControlSections(c: ConfigSectionCtx) {
 
       {kind === "executeSubWorkflow" && (
         <>
-          <Labeled label="Sub-workflow key">
-            <input
+          <Labeled label="Sub-workflow">
+            <WorkflowSelect
               value={str("workflowKey")}
-              onChange={(e) => onChange({ workflowKey: e.target.value })}
-              style={inputStyle}
-              placeholder="my-saved-workflow"
+              onChange={(workflowKey) => onChange({ workflowKey })}
             />
           </Labeled>
           <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
@@ -200,12 +199,10 @@ export function renderControlSections(c: ConfigSectionCtx) {
 
       {kind === "forEach" && (
         <>
-          <Labeled label="Sub-workflow key (run per item)">
-            <input
+          <Labeled label="Sub-workflow (run per item)">
+            <WorkflowSelect
               value={str("workflowKey")}
-              onChange={(e) => onChange({ workflowKey: e.target.value })}
-              style={inputStyle}
-              placeholder="process-one-item"
+              onChange={(workflowKey) => onChange({ workflowKey })}
             />
           </Labeled>
           <Labeled label="Array source node id">
