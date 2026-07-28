@@ -1,6 +1,6 @@
 {
   "name": "@naary/connections",
-  "version": "0.0.43",
+  "version": "0.0.44",
   "private": true,
   "description": "External MCP connections: model + service + auth resolution (PAT/OAuth). Consumed by worker activities + api — NEVER by workflow code.",
   "main": "dist/index.js",
