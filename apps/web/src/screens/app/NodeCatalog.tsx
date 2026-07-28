@@ -14,7 +14,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HScroll } from "../../components";
-import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
+import {
+  BELOW_DRAWER_QUERY,
+  PHONE_QUERY,
+  useMediaQuery,
+} from "../../lib/useMediaQuery";
 import type { CatalogEntry, CategoryId } from "./catalog/catalog-data";
 import {
   addToCanvasUrl,
@@ -72,6 +76,12 @@ function loadRecents(): string[] {
 export function NodeCatalog() {
   const navigate = useNavigate();
   const phone = useMediaQuery(PHONE_QUERY);
+  /**
+   * Touch sizing goes to <= 1024, not just phone: a tablet is a finger too, and #511 sets the
+   * threshold there. Kept separate from `phone` (<= 640), which switches LAYOUT — this only
+   * changes a hit area.
+   */
+  const touch = useMediaQuery(BELOW_DRAWER_QUERY);
 
 
   const [q, setQ] = useState("");
@@ -622,6 +632,21 @@ export function NodeCatalog() {
                             cursor: "pointer",
                             padding: "3px 5px",
                             borderRadius: 6,
+                            // 40x20 on a touch screen, sitting INSIDE a tile whose own tap opens
+                            // the detail drawer — so a near-miss silently does the wrong thing
+                            // (#511). The hit area grows; the label does not, so the tile looks
+                            // the same. Safe here because the measured nearest neighbour is >= 44px
+                            // away; elsewhere in the app it isn't, which is why this is per-surface
+                            // rather than the blanket rule the issue originally proposed.
+                            ...(touch
+                              ? {
+                                  minWidth: 44,
+                                  minHeight: 44,
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                }
+                              : {}),
                           }}
                         >
                           + Add
