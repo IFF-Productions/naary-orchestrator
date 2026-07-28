@@ -30,9 +30,22 @@ test("start a run, approve it, and see it complete", async ({ page }) => {
   // "Insights & logs" nav link otherwise substring-matches. The panel heading is
   // "Execution log" (RunDetail restructure, #525).
   await expect(page.getByText("Execution log", { exact: true })).toBeVisible();
-  await expect(page.getByText("Run started")).toBeVisible();
-  await expect(page.getByText("Run completed")).toBeVisible();
-  await expect(page.getByText("Signal: approval")).toBeVisible();
+
+  // SCOPED to the log card. "Run completed" appears TWICE on this page — once as the hero's
+  // status and once as a log event — so an unscoped `getByText` is a strict-mode violation the
+  // moment both are rendered. The assertion above already used `.first()` for the hero, which
+  // means the ambiguity was known; this one was missed and failed intermittently in CI.
+  //
+  // Scoping says what the assertion actually means (the LOG lists these events) instead of
+  // silencing the error with another `.first()`, which would have passed on the hero and stopped
+  // checking the log at all.
+  const log = page
+    .locator(".card")
+    .filter({ has: page.getByText("Execution log", { exact: true }) })
+    .last();
+  await expect(log.getByText("Run started")).toBeVisible();
+  await expect(log.getByText("Run completed")).toBeVisible();
+  await expect(log.getByText("Signal: approval")).toBeVisible();
 });
 
 test("re-run a completed run inline from the Runs list", async ({ page }) => {
