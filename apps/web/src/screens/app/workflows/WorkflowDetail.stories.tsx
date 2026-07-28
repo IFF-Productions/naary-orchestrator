@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { http, HttpResponse } from "msw";
 import { ModeProvider } from "../../../mode";
 import { WorkflowDetail } from "../WorkflowDetail";
 import { EnvironmentsCard } from "./EnvironmentsCard";
@@ -97,4 +98,21 @@ export const VersionHistoryStory: Story = {
       />
     </div>
   ),
+};
+
+/**
+ * No eval runs yet. The card must explain what evals ARE rather than render an empty box — and it
+ * must look different from the error state, which is the distinction that makes a blank screen
+ * diagnosable (#830).
+ */
+export const NoEvalRuns: Story = {
+  render: () => <WorkflowDetail />,
+  parameters: {
+    msw: {
+      handlers: [
+        http.get("*/api/graphs/:key/evals/runs", () => HttpResponse.json([])),
+        ...workflowHandlers,
+      ],
+    },
+  },
 };

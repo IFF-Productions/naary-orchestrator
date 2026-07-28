@@ -283,7 +283,62 @@ const envOf = (request: Request): string =>
   request.headers.get("x-environment-id") ?? "e-sb";
 
 /** The full handler set both screens need (env-header-aware where it matters). */
+/**
+ * Eval runs for the story (#575). Two versions so the comparison line has something honest to say,
+ * and a deliberately IMPERFECT latest run — a card that only ever shows 20/20 hides how the
+ * failure state reads.
+ */
+const evalRuns = [
+  {
+    id: "er-2",
+    datasetId: "d1",
+    datasetName: "golden",
+    workflowId: "refund-triage",
+    graphVersion: 9,
+    graphContentHash: "9f2c…",
+    status: "completed",
+    totalCases: 20,
+    passed: 18,
+    failed: 2,
+    errored: 0,
+    costUsd: 0.1842,
+    startedAt: "2026-07-27T09:00:00Z",
+    finishedAt: "2026-07-27T09:04:00Z",
+  },
+  {
+    id: "er-1",
+    datasetId: "d1",
+    datasetName: "golden",
+    workflowId: "refund-triage",
+    graphVersion: 8,
+    graphContentHash: "3a71…",
+    status: "completed",
+    totalCases: 20,
+    passed: 20,
+    failed: 0,
+    errored: 0,
+    costUsd: 0.1731,
+    startedAt: "2026-07-26T09:00:00Z",
+    finishedAt: "2026-07-26T09:04:00Z",
+  },
+];
+
+const evalCases = [
+  { caseName: "refund under threshold auto-approves", executionId: "wh-1", verdict: "pass", score: 1, costUsd: 0.0091, latencyMs: 1840 },
+  { caseName: "refund over threshold routes to human", executionId: "wh-2", verdict: "pass", score: 1, costUsd: 0.0102, latencyMs: 2110 },
+  // The two that make v9 an 18/20 — the card has to render a failure legibly, not just a tick.
+  { caseName: "duplicate request is de-duplicated", executionId: "wh-3", verdict: "fail", score: 0, costUsd: 0.0088, latencyMs: 1990 },
+  { caseName: "missing amount is rejected", executionId: "wh-4", verdict: "fail", score: 0, costUsd: null, latencyMs: null },
+];
+
 export const workflowHandlers = [
+  http.get("*/api/graphs/:key/evals/runs", () => HttpResponse.json(evalRuns)),
+  http.get("*/api/evals/runs/:id", ({ params }) =>
+    HttpResponse.json({
+      ...(evalRuns.find((r) => r.id === params.id) ?? evalRuns[0]),
+      cases: evalCases,
+    }),
+  ),
   http.get("*/api/me", () =>
     HttpResponse.json({ userId: "u1", email: "a@b.co", tenantId: "t1" }),
   ),

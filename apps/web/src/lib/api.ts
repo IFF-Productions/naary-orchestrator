@@ -21,6 +21,7 @@
  */
 import { companiesApi } from "./api/companies";
 import { configApi } from "./api/config";
+import { evalsApi } from "./api/evals";
 import { graphsApi } from "./api/graphs";
 import { integrationsApi } from "./api/integrations";
 import { notificationsApi } from "./api/notifications";
@@ -44,6 +45,7 @@ export * from "./api/types";
 export type { WorkerRow } from "./api/workers";
 
 export const api = {
+  ...evalsApi,
   ...graphsApi,
   ...runsApi,
   ...workspacesApi,
