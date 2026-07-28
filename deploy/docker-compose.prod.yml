@@ -80,11 +80,18 @@ services:
       # codeAgent sandbox wiring (see the sandbox-runner service below). Set on BOTH worker
       # pools: codeAgent statically routes to `orchestrator-heavy`, but the default queue
       # still serves runs whose history predates that route (workflow.patched) and
-      # single-node executions. The write path stays OFF regardless —
-      # CODE_AGENT_WRITE_ENABLED is deliberately not set here.
+      # single-node executions.
       SANDBOX_RUNNER_URL: "${SANDBOX_RUNNER_URL:-http://sandbox-runner:8099}"
       SANDBOX_RUNNER_TOKEN: "${SANDBOX_RUNNER_TOKEN:-}"
       CODE_AGENT_RUNS_DIR: "${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}"
+      # Write mode stays OFF unless this is explicitly "true" (the activity fails closed on
+      # anything else). DECLARED here rather than omitted: compose passes ONLY the variables a
+      # service names, so with no entry at all, setting CODE_AGENT_WRITE_ENABLED=true in
+      # /opt/naary/.env reaches nothing — the operator sees the flag set and the node still
+      # fails CODE_AGENT_WRITE_DISABLED, with the .env as the last place anyone would look.
+      # The default is empty, so the posture is unchanged until someone sets it deliberately,
+      # AFTER deploy/sandbox/egress-test.sh passes on this host.
+      CODE_AGENT_WRITE_ENABLED: "${CODE_AGENT_WRITE_ENABLED:-}"
     volumes:
       # The shared working-tree dir: the worker clones into it, the runner mounts it into
       # the sandbox. It MUST be the same path inside both containers as on the host — the
@@ -110,10 +117,12 @@ services:
       SENTRY_ENVIRONMENT: production
       # Same as `worker` — deep-link base for notifications this queue may emit.
       APP_BASE_URL: "${APP_BASE_URL:-https://${PUBLIC_HOSTNAME:-naar-y.com}}"
-      # This is the pool codeAgent actually routes to — same sandbox wiring as `worker`.
+      # This is the pool codeAgent actually routes to — same sandbox wiring as `worker`,
+      # including the write gate (see that block for why it is declared rather than omitted).
       SANDBOX_RUNNER_URL: "${SANDBOX_RUNNER_URL:-http://sandbox-runner:8099}"
       SANDBOX_RUNNER_TOKEN: "${SANDBOX_RUNNER_TOKEN:-}"
       CODE_AGENT_RUNS_DIR: "${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}"
+      CODE_AGENT_WRITE_ENABLED: "${CODE_AGENT_WRITE_ENABLED:-}"
     volumes:
       - "${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}:${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}"
     ports: !override []
