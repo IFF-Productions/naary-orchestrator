@@ -4,6 +4,10 @@ import { INTEGRATION_PROVIDERS } from "@naary/dsl";
 import { Button } from "../../../components";
 import { api } from "../../../lib/api";
 import { ConnectionTestControl } from "./ConnectionTestControl";
+import {
+  catalogConnectPrefill,
+  connectableProviders,
+} from "./catalog-connect-prefill";
 import { fieldLabel, fieldStyle, introStyle } from "./shared";
 
 /**
@@ -430,6 +434,15 @@ export function ConnectForm({
   const [msg, setMsg] = useState<string | null>(null);
   /** Id of the connection just saved, so its Test control can be offered inline (#701). */
   const [tested, setTested] = useState<string | null>(null);
+  /**
+   * The catalog provider this connection is FOR ("" = custom/manual).
+   *
+   * Picking one fills in the endpoint and states the exact auth header, instead of leaving the
+   * author to know that PagerDuty means Type=Custom, `https://api.pagerduty.com`, and a raw token
+   * sent as `Authorization: Token token=…` — three facts the catalog already holds (#815).
+   */
+  const [providerKey, setProviderKey] = useState("");
+  const picked = providerKey ? catalogConnectPrefill(providerKey) : undefined;
 
   async function submit() {
     setBusy(true);
@@ -494,6 +507,59 @@ export function ConnectForm({
         // descriptions are attacker-authorable, so this is never rendered as HTML.
         <div style={{ ...introStyle, marginBottom: 10 }}>{prefill.note}</div>
       )}
+      {/* Provider-first: pick the service and the rest fills itself in. Everything below comes
+          from the integration catalog, which already knows the endpoint, the header and the
+          prefix — it just was not reachable from the form where you need it (#815). */}
+      <div style={{ marginBottom: 10 }}>
+        <span style={fieldLabel}>Service</span>
+        <select
+          style={fieldStyle}
+          value={providerKey}
+          onChange={(e) => {
+            const key = e.target.value;
+            setProviderKey(key);
+            const p = catalogConnectPrefill(key);
+            if (!p) return;
+            // Only fill an EMPTY label — never overwrite something already typed.
+            setLabel((cur) => cur || p.label);
+            setServerUrl(p.serverUrl);
+            setType(p.type);
+            setAuthMode(p.authMode);
+          }}
+        >
+          <option value="">Custom / other…</option>
+          {connectableProviders().map((p) => (
+            <option key={p.key} value={p.key}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {picked && (
+        <div
+          style={{
+            marginBottom: 10,
+            padding: "8px 10px",
+            border: "1px solid var(--line-2)",
+            borderRadius: "var(--radius-sm)",
+            background: "var(--card)",
+            fontSize: "var(--text-xs)",
+            color: "var(--ink-2)",
+            lineHeight: 1.5,
+          }}
+        >
+          {/* The EXACT header, not "api_token" — which is true of nearly every provider and so
+              tells you nothing about whether the value you pasted is the right shape. */}
+          <div>
+            Sent as <code className="mono">{picked.authHeader}</code>
+          </div>
+          <div style={{ marginTop: 4, color: "var(--ink-3)" }}>
+            {picked.authNote}
+          </div>
+        </div>
+      )}
+
       <div style={{ marginBottom: 10 }}>
         <span style={fieldLabel}>Label</span>
         <input
@@ -509,8 +575,28 @@ export function ConnectForm({
           style={fieldStyle}
           value={serverUrl}
           onChange={(e) => setServerUrl(e.target.value)}
-          placeholder="https://mcp.example.com"
+          placeholder={
+            picked?.hostFromConnection
+              ? "https://your-site.atlassian.net"
+              : "https://mcp.example.com"
+          }
         />
+        {picked && (
+          // The distinction that breaks people: for most providers this field is cosmetic (the
+          // catalog's baseUrl wins), but for a per-tenant host it IS the address every call goes
+          // to. Same sentence can't serve both, so the catalog decides which one you get.
+          <div
+            style={{
+              marginTop: 4,
+              fontSize: "var(--text-xs)",
+              color: picked.hostFromConnection
+                ? "var(--ink-2)"
+                : "var(--ink-3)",
+            }}
+          >
+            {picked.serverUrlHint}
+          </div>
+        )}
       </div>
       <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
         <div style={{ flex: 1 }}>
@@ -556,7 +642,10 @@ export function ConnectForm({
               how the code behaves, stated where the mistake is made rather than discovered on a
               run: the auth scheme's prefix is applied by `buildIntegrationRequest`, and a catalog
               provider ignores this Server URL in favour of the catalog's own baseUrl. */}
-          {type === "custom" && (
+          {/* Only when NO service was picked. With one picked, the precise header + endpoint are
+              already stated above, and repeating the generic "for per-tenant hosts (Mattermost,
+              DeepL, …)" list here just makes the reader work out which clause applies to them. */}
+          {type === "custom" && !picked && (
             <div
               style={{
                 marginTop: 5,
