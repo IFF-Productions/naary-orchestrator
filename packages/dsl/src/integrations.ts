@@ -12,7 +12,11 @@
  * both the interpreter and the web app can import it.
  */
 import type { ArgBinding, IntegrationNodeConfig } from "./types";
-import { getByPath, hasForbiddenPathSegment } from "./mcp-args";
+import {
+  bindingNamesSource,
+  getByPath,
+  hasForbiddenPathSegment,
+} from "./mcp-args";
 
 /** `header` = a per-REQUEST header whose wire name IS the field key (mirroring how `query`
  *  uses the key as the param name) — for APIs that require a caller-supplied header on a
@@ -4447,6 +4451,9 @@ export function resolveIntegrationFields(
   const out: Record<string, unknown> = { ...(config.fields ?? {}) };
   for (const [name, binding] of Object.entries(config.fieldBindings ?? {})) {
     if (hasForbiddenPathSegment(name)) continue; // #591: never assign prototype-chain keys
+    // A row that names no source is an unfinished edit, not "blank this field" — see
+    // bindingNamesSource. Without this, a typed-in value is silently replaced by undefined.
+    if (!bindingNamesSource(binding)) continue;
     const b = binding as ArgBinding;
     out[name] = getByPath(ctx[b.from], b.path);
   }
@@ -4642,8 +4649,14 @@ export function validateIntegrationConfig(
   // A present-but-empty static value ("" / null / [] ) counts as MISSING — otherwise it would
   // pass the gate but be dropped by buildIntegrationRequest (which omits empties), sending a
   // malformed path/body instead of failing fast here.
+  // Only a binding that NAMES A SOURCE counts as supplying the field. An unfinished row used
+  // to satisfy this gate and then blank the value at run time — the save said fine, the run
+  // said "empty". Now an unfinished row leaves the field to its static value, and if there
+  // isn't one the save fails here, naming the field, instead of the run failing later.
   const hasBinding = (key: string): boolean =>
-    config.fieldBindings != null && key in config.fieldBindings;
+    config.fieldBindings != null &&
+    key in config.fieldBindings &&
+    bindingNamesSource(config.fieldBindings[key]);
   const hasStaticValue = (key: string): boolean =>
     config.fields != null &&
     key in config.fields &&

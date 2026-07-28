@@ -1860,3 +1860,74 @@ describe("buildIntegrationRequest — an empty path value never becomes a URL", 
     expect(req.path).toBe("/incidents/PT4KHLK");
   });
 });
+
+// ---------------------------------------------------------------------------
+// An UNFINISHED binding row (no `from`) must not blank a typed-in value. Three
+// places disagreed about what counts as bound: both resolvers and the save gate
+// took any key in the map, the canvas panel required a non-empty `from`. So a
+// value could pass the gate, render as an ordinary manual field, and arrive
+// empty — "I'm setting the ID manually and it's still not picked up".
+// ---------------------------------------------------------------------------
+describe("bindings that name no source", () => {
+  const cfg = (fieldBindings: Record<string, unknown>) => ({
+    provider: "pagerduty",
+    action: "acknowledge_incident",
+    connectionId: "c1",
+    fields: { id: "PINC123", From: "me@example.com" },
+    fieldBindings,
+  });
+
+  it("keeps the static value when the binding has no `from`", () => {
+    const out = resolveIntegrationFields(
+      cfg({ id: { path: "incident.id" } }) as never,
+      { upstream: { incident: { id: "FROM_UPSTREAM" } } },
+    );
+    expect(out.id).toBe("PINC123");
+  });
+
+  it("keeps it for a blank/whitespace `from` too — an editor leaves those behind", () => {
+    for (const from of ["", "   "]) {
+      const out = resolveIntegrationFields(cfg({ id: { from, path: "x" } }) as never, {});
+      expect(out.id).toBe("PINC123");
+    }
+  });
+
+  it("a COMPLETE binding still wins over the static value — that's the feature", () => {
+    const out = resolveIntegrationFields(
+      cfg({ id: { from: "upstream", path: "incident.id" } }) as never,
+      { upstream: { incident: { id: "FROM_UPSTREAM" } } },
+    );
+    expect(out.id).toBe("FROM_UPSTREAM");
+  });
+
+  it("a complete binding resolving to nothing still blanks it — the run must fail, not send a stale id", () => {
+    const out = resolveIntegrationFields(
+      cfg({ id: { from: "upstream", path: "nope.missing" } }) as never,
+      { upstream: {} },
+    );
+    expect(out.id).toBeUndefined();
+  });
+
+  it("the save gate no longer accepts an unfinished row as supplying a required field", () => {
+    const err = validateIntegrationConfig({
+      provider: "pagerduty",
+      action: "acknowledge_incident",
+      connectionId: "c1",
+      fields: {},
+      fieldBindings: { id: { path: "incident.id" } },
+    } as never);
+    expect(err).toMatch(/missing required field 'id'/);
+  });
+
+  it("…and still accepts a complete one (no static value needed)", () => {
+    expect(
+      validateIntegrationConfig({
+        provider: "pagerduty",
+        action: "acknowledge_incident",
+        connectionId: "c1",
+        fields: {},
+        fieldBindings: { id: { from: "upstream", path: "incident.id" } },
+      } as never),
+    ).toBeNull();
+  });
+});
