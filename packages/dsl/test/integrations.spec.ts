@@ -1821,3 +1821,42 @@ describe("integration catalog — self-consistency (can't drift)", () => {
     });
   }
 });
+
+describe("buildIntegrationRequest — an empty path value never becomes a URL", () => {
+  it("throws instead of collapsing the segment", () => {
+    // Reported from a real run: `PUT /incidents/` reached PagerDuty and came back
+    // "400 Bad Request", which names neither the field nor the node. We knew the request was
+    // malformed before sending it.
+    expect(() =>
+      buildIntegrationRequest("pagerduty", "acknowledge_incident", {
+        id: "",
+        From: "oncall@example.com",
+      }),
+    ).toThrow(/path field 'id' is empty/);
+  });
+
+  it("names the binding as the thing to check", () => {
+    // Save-time validation accepts a field as supplied when a BINDING exists for it, so this
+    // failure mode is reachable ONLY through a binding that resolved to nothing — which is
+    // where the author has to look.
+    expect(() =>
+      buildIntegrationRequest("pagerduty", "acknowledge_incident", { id: "" }),
+    ).toThrow(/binding/);
+  });
+
+  it("treats undefined and null the same as empty", () => {
+    for (const id of [undefined, null]) {
+      expect(() =>
+        buildIntegrationRequest("pagerduty", "acknowledge_incident", { id }),
+      ).toThrow(/path field 'id' is empty/);
+    }
+  });
+
+  it("still builds the request when the path field IS supplied", () => {
+    // The guard must not fire on the happy path.
+    const req = buildIntegrationRequest("pagerduty", "acknowledge_incident", {
+      id: "PT4KHLK",
+    });
+    expect(req.path).toBe("/incidents/PT4KHLK");
+  });
+});
