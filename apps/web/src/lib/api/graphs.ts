@@ -161,13 +161,22 @@ export const graphsApi = {
   // AI workflow builder: describe a workflow → a validated DRAFT graph (unsaved).
   // `provider` (optional) picks the model provider; omitted ⇒ the server auto-selects
   // the tenant's first configured+valid one.
+  // `previous` ⇒ edit that graph rather than invent one (see generateGraphStream). Against an
+  // API old enough to predate the field this 400s naming `previous` — the ValidationPipe runs
+  // forbidNonWhitelisted — rather than quietly dropping it and generating a replacement, which
+  // is the failure this whole path exists to stop.
   generateGraph(
     prompt: string,
     provider?: string,
+    previous?: GraphDef,
   ): Promise<{ name: string; graph: GraphDef }> {
     return http("/graphs/generate", {
       method: "POST",
-      body: JSON.stringify(provider ? { prompt, provider } : { prompt }),
+      body: JSON.stringify({
+        prompt,
+        ...(provider ? { provider } : {}),
+        ...(previous ? { previous } : {}),
+      }),
     });
   },
   // SSE variant of generateGraph: the server streams `: ping` heartbeats while the
@@ -181,6 +190,10 @@ export const graphsApi = {
   // is always the authoritative validated graph (the `result` frame); reconcile to it. On
   // the 404/non-SSE fallback paths the hooks simply don't fire (the whole graph arrives at
   // once) — callers must handle that too.
+  //
+  // `previous` turns the call into an EDIT: `prompt` is then a change to apply to that graph
+  // and the result is the whole updated graph. Without it the model invents a workflow from
+  // scratch — which is what a "change this" request used to get.
   async generateGraphStream(
     prompt: string,
     provider?: string,
@@ -189,6 +202,7 @@ export const graphsApi = {
       onNode?: (node: unknown) => void;
       onEdge?: (edge: unknown) => void;
     },
+    previous?: GraphDef,
   ): Promise<{ name: string; graph: GraphDef }> {
     const token = await getBearerToken();
     const activeWorkspaceId = getActiveWorkspace();
@@ -203,10 +217,15 @@ export const graphsApi = {
           ? { "x-environment-id": activeEnvironmentId }
           : {}),
       },
-      body: JSON.stringify(provider ? { prompt, provider } : { prompt }),
+      body: JSON.stringify({
+        prompt,
+        ...(provider ? { provider } : {}),
+        ...(previous ? { previous } : {}),
+      }),
     });
     // Deploy skew: an older API has no /stream route → use the legacy JSON one.
-    if (res.status === 404) return graphsApi.generateGraph(prompt, provider);
+    if (res.status === 404)
+      return graphsApi.generateGraph(prompt, provider, previous);
     if (res.status === 401) throw new UnauthorizedError();
     if (!res.ok) {
       // Pre-stream failures (validation 400, guards 403) are plain JSON — mirror

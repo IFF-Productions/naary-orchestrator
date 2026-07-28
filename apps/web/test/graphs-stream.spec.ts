@@ -106,3 +106,77 @@ describe("graphsApi.generateGraphStream (live frames)", () => {
     expect(onNode).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// `previous` — the flag that turns generation into an EDIT. Its absence is the
+// whole bug: the canvas asked for a change, sent only the description, and got
+// a replacement workflow back.
+// ---------------------------------------------------------------------------
+describe("graphsApi.generateGraphStream (`previous` ⇒ edit)", () => {
+  const GRAPH = {
+    startNodeId: "s",
+    nodes: [{ id: "s", type: "start" }],
+    edges: [],
+  };
+  const RESULT =
+    ": connected\n\n" +
+    `event: result\ndata: ${JSON.stringify({ name: "Flow", graph: GRAPH })}\n\n`;
+
+  function bodyOf(fetchMock: ReturnType<typeof vi.fn>) {
+    return JSON.parse(fetchMock.mock.calls[0][1].body as string) as Record<
+      string,
+      unknown
+    >;
+  }
+
+  it("puts the graph in the request body when given one", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse(RESULT));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await graphsApi.generateGraphStream("no open incidents ⇒ end", "anthropic", undefined, GRAPH);
+
+    expect(bodyOf(fetchMock)).toEqual({
+      prompt: "no open incidents ⇒ end",
+      provider: "anthropic",
+      previous: GRAPH,
+    });
+  });
+
+  it("omits `previous` entirely when there's nothing to edit — a create must stay a create", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse(RESULT));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await graphsApi.generateGraphStream("build me a flow");
+
+    const body = bodyOf(fetchMock);
+    expect(body).toEqual({ prompt: "build me a flow" });
+    expect("previous" in body).toBe(false);
+  });
+
+  it("carries `previous` onto the legacy JSON route when the API has no /stream", async () => {
+    // Deploy skew must not silently downgrade an edit into a create — the exact failure.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 404,
+        ok: false,
+        headers: { get: () => null },
+        json: async () => ({}),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        headers: { get: () => "application/json" },
+        json: async () => ({ name: "Flow", graph: GRAPH }),
+      } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const out = await graphsApi.generateGraphStream("add a branch", undefined, undefined, GRAPH);
+
+    expect(out.name).toBe("Flow");
+    const fallback = JSON.parse(
+      fetchMock.mock.calls[1][1].body as string,
+    ) as Record<string, unknown>;
+    expect(fallback).toEqual({ prompt: "add a branch", previous: GRAPH });
+  });
+});

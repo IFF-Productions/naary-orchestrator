@@ -23,9 +23,15 @@ import {
   toFlowEdges,
   toFlowNodes,
 } from "./flow";
+import { makeStreamPositions } from "./stream-positions";
+
+/** What the panel does with what's already on the canvas: change it, or replace it. */
+export type AiMode = "edit" | "create";
 
 export function useAiBuilder({
   nodes,
+  graph,
+  graphError,
   rfRef,
   keyParam,
   templateParam,
@@ -38,6 +44,10 @@ export function useAiBuilder({
   setSearchParams,
 }: {
   nodes: Node<NaaryData>[];
+  /** The live-compiled canvas, or undefined while it doesn't compile. What an edit sends. */
+  graph: GraphDef | undefined;
+  /** Why it doesn't compile — shown instead of silently generating a replacement. */
+  graphError: string | undefined;
   rfRef: RefObject<ReactFlowInstance<Node<NaaryData>, FlowEdge> | null>;
   keyParam: string | null;
   templateParam: string | null;
@@ -54,6 +64,19 @@ export function useAiBuilder({
   const [aiPrompt, setAiPrompt] = useState("");
   // "" = let the server auto-pick the tenant's configured provider.
   const [genProvider, setGenProvider] = useState("");
+  // "edit" CHANGES what's on the canvas; "create" replaces it with a new draft. Chosen by the
+  // user, never inferred from "the canvas has nodes" — starting over on a populated canvas is a
+  // real thing to want, and guessing wrong either destroys work or refuses to.
+  const [aiMode, setAiMode] = useState<AiMode>("create");
+  // Editing needs something to edit. Offer it the moment the canvas compiles, and fall back
+  // when it stops (deleting the last trigger mid-session must not leave a dead button).
+  const canEdit = Boolean(graph);
+  const mode: AiMode = canEdit ? aiMode : "create";
+  useEffect(() => {
+    // Default to editing on a canvas that already holds a workflow — the overwhelmingly more
+    // common intent once something is there.
+    if (canEdit) setAiMode("edit");
+  }, [canEdit]);
   const [generating, setGenerating] = useState(false);
   // Playful rotating status while streaming, + how many nodes have landed on the canvas.
   const [genMessage, setGenMessage] = useState<string>(PROGRESS_MESSAGES[0]);
@@ -82,13 +105,25 @@ export function useAiBuilder({
     return () => clearTimeout(id);
   }, [nodes, generating, rfRef]);
 
-  // Generate a draft graph from the description and load it onto the canvas as a
-  // NEW unsaved draft (same as forking a template — Save persists it). The API-model
-  // path STREAMS: each node/edge is drawn live as it's generated (with a fade/scale-in),
-  // then the whole canvas is reconciled to the authoritative validated graph on `result`.
+  // Run the panel: in "create" mode, draft a workflow from the description and load it as a
+  // NEW unsaved draft (same as forking a template — Save persists it); in "edit" mode, apply
+  // the description as a CHANGE to what's on the canvas, keeping the workflow's identity so
+  // Save writes the next version of it rather than forking a copy. The API-model path STREAMS:
+  // each node/edge is drawn live as it's generated (with a fade/scale-in), then the whole canvas
+  // is reconciled to the authoritative validated graph on `result`.
   async function generateFromPrompt() {
     const prompt = aiPrompt.trim();
     if (!prompt || generating) return;
+    // An edit needs a compilable canvas to send. Refuse with the compile error rather than
+    // fall through to a create — silently generating a replacement for someone who asked for
+    // a change is precisely the behaviour being fixed here.
+    if (mode === "edit" && !graph) {
+      setStatus(
+        `Can't change this workflow until the canvas is valid — ${graphError ?? "it doesn't compile yet"}`,
+      );
+      return;
+    }
+    const editing = mode === "edit" && graph !== undefined;
     setGenerating(true);
     setGenNodeCount(0);
     setStatus(null);
@@ -103,9 +138,16 @@ export function useAiBuilder({
     type RawEdge = GraphDef["edges"][number];
     const rawNodes: RawNode[] = [];
     const rawEdges: RawEdge[] = [];
-    // Keep already-placed node positions STABLE so siblings don't jump as new nodes
-    // arrive (the authoritative re-layout happens once, on `result`).
-    const placed = new Map<string, { x: number; y: number }>();
+    // Position bookkeeping (see stream-positions.ts): `place` holds nodes still mid-stream,
+    // `settle` sends pre-existing nodes home at the end. Seeded from the canvas on an EDIT so
+    // untouched nodes don't move — GraphDef carries no positions, so without this a faithful
+    // edit re-lays-out the whole canvas and is indistinguishable from a rewrite. Empty on a
+    // create: there's nothing to preserve.
+    const positions = makeStreamPositions(
+      editing
+        ? nodes.map((n) => [n.id, { ...n.position }] as const)
+        : undefined,
+    );
     let startId: string | undefined;
 
     const relayout = () => {
@@ -117,11 +159,7 @@ export function useAiBuilder({
         edges: rawEdges.filter((e) => known.has(e.from) && known.has(e.to)),
       };
       const { nodes: cn, edges: ce } = decompileGraph(partial);
-      const stable = cn.map((n) => {
-        const pos = placed.get(n.id) ?? n.position;
-        placed.set(n.id, pos);
-        return { ...n, position: pos };
-      });
+      const stable = positions.place(cn);
       // `naary-node-enter` animates each node once on mount (React Flow keys by id, so
       // already-mounted nodes don't replay).
       setNodes(
@@ -164,17 +202,32 @@ export function useAiBuilder({
             relayout();
           },
         },
+        editing ? graph : undefined,
       );
       // Reconcile to the authoritative validated graph — final positions + wiring, no
-      // enter-animation className (the nodes are already mounted).
+      // enter-animation className (the nodes are already mounted). `settle` puts surviving
+      // nodes back where they were — an edit must not relocate what it didn't change — while
+      // anything NEW takes this layout, computed over the whole finished graph.
       const { nodes: cn, edges: ce } = decompileGraph(gen);
-      setNodes(toFlowNodes(cn));
+      setNodes(toFlowNodes(positions.settle(cn)));
       setEdges(toFlowEdges(ce));
       setName(genName);
-      setWorkflowKey(""); // now a NEW unsaved draft (only after a successful generation)
-      setVersion(null);
-      if (keyParam || templateParam) setSearchParams({}, { replace: true });
-      setStatus("Generated — review, edit, and Save to keep it.");
+      if (editing) {
+        // Keep workflowKey + version: this is the SAME workflow, so Save writes its next
+        // version. Blanking them (what the create path does) forks a copy and orphans the
+        // original — the run history, schedules and webhook URLs all stay behind on it.
+        setStatus("Updated — review the changes and Save to keep them.");
+      } else {
+        setWorkflowKey(""); // now a NEW unsaved draft (only after a successful generation)
+        setVersion(null);
+        if (keyParam || templateParam) setSearchParams({}, { replace: true });
+        setStatus("Generated — review, edit, and Save to keep it.");
+        // The canvas was already compilable before this, so the canEdit effect won't refire
+        // and the mode would stay "create" — making the natural follow-up ("now add an
+        // approval step") replace the thing just generated. Generate-then-refine is the
+        // common path; hand it back in edit mode.
+        setAiMode("edit");
+      }
       // The generating effect stops refitting once `generating` flips false (same render
       // as this reconcile), so fit to the final graph explicitly.
       setTimeout(
@@ -183,7 +236,11 @@ export function useAiBuilder({
       );
     } catch (e) {
       setStatus(
-        e instanceof Error ? e.message : "Couldn't generate a workflow.",
+        e instanceof Error
+          ? e.message
+          : editing
+            ? "Couldn't apply that change."
+            : "Couldn't generate a workflow.",
       );
     } finally {
       setGenerating(false);
@@ -198,6 +255,9 @@ export function useAiBuilder({
     setAiPrompt,
     genProvider,
     setGenProvider,
+    aiMode: mode,
+    setAiMode,
+    canEdit,
     generating,
     genMessage,
     genNodeCount,

@@ -142,6 +142,18 @@ export class GraphsController {
   ): Promise<{ name: string; graph: GraphDef }> {
     // Generate against the ACTIVE env's provider key + connections (Slice 5).
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    // `previous` ⇒ CHANGE that graph instead of inventing one. editStream also meters the
+    // call, but this route has never ledgered generation spend (nor gated it on budget) —
+    // so the meter is dropped here exactly as the create path drops it.
+    if (body.previous) {
+      const { name, graph } = await this.generator.editStream(
+        tenantId,
+        envId,
+        { previous: toGraphDef(body.previous), instruction: body.prompt },
+        body.provider,
+      );
+      return { name, graph };
+    }
     return this.generator.generate(tenantId, envId, body.prompt, body.provider);
   }
 
@@ -238,30 +250,47 @@ export class GraphsController {
       // Live frames as the model streams (API-model path): `meta` (name), then a `node`
       // per node and an `edge` per edge as each completes. Old clients that only handle
       // `result`/`error` ignore these. The claude-code path emits none — just the result.
-      const result = await this.generator.generateStream(
-        tenantId,
-        envId,
-        body.prompt,
-        body.provider,
-        {
-          timeoutMs: STREAM_GENERATE_TIMEOUT_MS,
-          onMeta: (name) => {
-            if (canWrite())
-              res.write(`event: meta\ndata: ${JSON.stringify({ name })}\n\n`);
-          },
-          onNode: (node) => {
-            if (canWrite())
-              res.write(`event: node\ndata: ${JSON.stringify(node)}\n\n`);
-          },
-          onEdge: (edge) => {
-            if (canWrite())
-              res.write(`event: edge\ndata: ${JSON.stringify(edge)}\n\n`);
-          },
+      const opts = {
+        timeoutMs: STREAM_GENERATE_TIMEOUT_MS,
+        onMeta: (name: string) => {
+          if (canWrite())
+            res.write(`event: meta\ndata: ${JSON.stringify({ name })}\n\n`);
         },
-      );
+        onNode: (node: unknown) => {
+          if (canWrite())
+            res.write(`event: node\ndata: ${JSON.stringify(node)}\n\n`);
+        },
+        onEdge: (edge: unknown) => {
+          if (canWrite())
+            res.write(`event: edge\ndata: ${JSON.stringify(edge)}\n\n`);
+        },
+      };
+      // `previous` ⇒ CHANGE that graph rather than invent one — the canvas's "change this
+      // workflow" mode. Stateless on purpose: a builder session seeds from the SAVED row,
+      // so routing the canvas through one would edit a graph the user can't see and throw
+      // away whatever they'd changed on the canvas but not yet saved.
+      const result = body.previous
+        ? await this.generator.editStream(
+            tenantId,
+            envId,
+            { previous: toGraphDef(body.previous), instruction: body.prompt },
+            body.provider,
+            opts,
+          )
+        : await this.generator.generateStream(
+            tenantId,
+            envId,
+            body.prompt,
+            body.provider,
+            opts,
+          );
       // Authoritative terminal frame — the client reconciles its live canvas to this.
+      // Narrowed to {name, graph}: editStream also returns a `meter`, which is the builder's
+      // per-turn billing detail and has no business in this route's public frame.
       if (canWrite())
-        res.write(`event: result\ndata: ${JSON.stringify(result)}\n\n`);
+        res.write(
+          `event: result\ndata: ${JSON.stringify({ name: result.name, graph: result.graph })}\n\n`,
+        );
     } catch (e) {
       if (canWrite())
         res.write(`event: error\ndata: ${JSON.stringify(toErrorFrame(e))}\n\n`);

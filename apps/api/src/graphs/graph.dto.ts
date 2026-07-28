@@ -10,19 +10,37 @@ import {
 } from "class-validator";
 
 /** Generate a draft graph from a plain-English description (AI workflow builder).
- *  Bounded length keeps the model prompt sane and blocks abuse. */
+ *  Bounded length keeps the model prompt sane and blocks abuse.
+ *
+ *  With `previous` the SAME route becomes an EDIT: `prompt` is then a change to apply to
+ *  that graph rather than a description of a workflow to invent. The canvas needs this
+ *  because a builder session (the other edit path) seeds from the SAVED row and would
+ *  silently discard unsaved canvas work. */
 export class GenerateGraphDto {
   @ApiProperty({
     minLength: 3,
     maxLength: 2000,
     example:
       "When a webhook arrives, have an agent summarize it, wait for my approval, then email the summary.",
-    description: "Plain-English description of the workflow to build.",
+    description:
+      "Plain-English description of the workflow to build — or, with `previous`, the change to apply to it.",
   })
   @IsString()
   @MinLength(3)
   @MaxLength(2000)
   prompt!: string;
+
+  @ApiPropertyOptional({
+    type: "object",
+    additionalProperties: true,
+    description:
+      "The graph to CHANGE. Present ⇒ `prompt` is an edit instruction and the response is the " +
+      "full updated graph with everything the change didn't touch left as-is. Absent ⇒ a new " +
+      "workflow is invented from `prompt`. Must be a valid graph (400 otherwise).",
+  })
+  @IsOptional()
+  @IsObject()
+  previous?: Record<string, unknown>;
 
   @ApiPropertyOptional({
     enum: ["anthropic", "openai", "google", "claude-code"],
