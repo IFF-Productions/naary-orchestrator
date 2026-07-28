@@ -4546,11 +4546,22 @@ export function buildIntegrationRequest(
       headers ??= {};
       headers[field.key] = raw;
     } else if (field.in === "path") {
-      // A required path field is validated at save time; at runtime substitute what we have.
-      path = path.replace(
-        `{${field.key}}`,
-        encodeURIComponent(missing ? "" : String(value)),
-      );
+      // An empty path value is NEVER substitutable: it collapses the segment and sends a
+      // malformed URL. `PUT /incidents/` reached PagerDuty and came back "400 Bad Request",
+      // which names neither the field nor the node — the author is left guessing from a
+      // provider error about a request we knew was broken before we sent it.
+      //
+      // Save-time validation can't catch this. It accepts a field as supplied when a BINDING
+      // exists for it, and a binding's value isn't known until the run — so a binding pointing
+      // at a path that yields nothing passes the gate and fails here. (Every path field in the
+      // catalog is required, all 133 of them, so there is no optional-segment case to preserve.)
+      if (missing) {
+        throw new Error(
+          `Integration ${provider}/${action}: path field '${field.key}' is empty — ` +
+            `check the binding that supplies it (it resolved to nothing at run time).`,
+        );
+      }
+      path = path.replace(`{${field.key}}`, encodeURIComponent(String(value)));
     } else if (field.in === "query") {
       if (!missing) {
         queryParts.push(
