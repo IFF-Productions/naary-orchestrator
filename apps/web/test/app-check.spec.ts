@@ -162,12 +162,27 @@ describe("explainAppCheckFailure", () => {
    * the cheapest available (two curls, no browser, no release), so it must come FIRST or
    * the message sends people down the same wrong path we went down.
    */
-  it("leads with the does-the-key-resolve check, ahead of the provider swap", () => {
+  /**
+   * Order changed on 2026-07-28, deliberately: the CHEAPEST check is not the most decisive one.
+   *
+   * `render=` is neither domain- nor provider-checked — it returns 200 for a live key even with a
+   * bogus Referer (measured). Leading with it invites "200 on both ⇒ score-based ⇒ it must be the
+   * provider", which is exactly the wrong turn I took: I recommended flipping to v3, and the v3
+   * `clr` endpoint 400d the same as Enterprise's had. Which `clr` fails is the signal that
+   * actually separates the causes, so it goes first.
+   */
+  it("leads with the which-clr-fails check, ahead of both the resolve curl and the provider swap", () => {
     const msg = explainAppCheckFailure(V3, recaptchaErr);
+    const clr = msg.indexOf("WHICH `clr` 400s");
     const resolve = msg.indexOf("DOES THE KEY RESOLVE");
-    const swap = msg.indexOf("WRONG PROVIDER");
-    expect(resolve).toBeGreaterThan(-1);
+    // The step-2 HEADING, not the cross-reference to it inside step 0 — a bare
+    // indexOf("WRONG PROVIDER") matches "⇒ WRONG PROVIDER, go to 2" and reads as out of order.
+    const swap = msg.indexOf("2. WRONG PROVIDER");
+    expect(clr).toBeGreaterThan(-1);
+    expect(resolve).toBeGreaterThan(clr);
     expect(swap).toBeGreaterThan(resolve);
+    // And it must say what BOTH failing means, or the reader repeats my mistake.
+    expect(msg).toMatch(/BOTH 400.*provider is/s);
     // Copy-pasteable, with the real key substituted in — both endpoints, since a 400 on
     // both is what distinguishes "dead key" from "wrong provider".
     expect(msg).toContain("recaptcha/api.js?render=6Lsite");
