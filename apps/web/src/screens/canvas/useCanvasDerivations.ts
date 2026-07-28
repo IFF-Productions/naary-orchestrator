@@ -13,7 +13,11 @@ import type { ConnectionRow, ExecutionState } from "../../lib/api";
 import { compileGraph } from "../../lib/compile-graph";
 import { type CanvasNode } from "../../lib/graph-model";
 import type { NodeTestRun } from "./canvas-types";
-import { CONNECTION_TYPES } from "./fields";
+import {
+  connectionTypeLabel,
+  integrationsTabFor,
+  requiredConnectionTypes,
+} from "../../lib/connection-types";
 import { type FlowEdge, isEntryKind, type NaaryData } from "./flow";
 import { type EdgeRunState } from "./NaaryEdge";
 import type { NodeRunState } from "./NodeCard";
@@ -99,17 +103,25 @@ export function useCanvasDerivations({
           cfg as unknown as Parameters<typeof validateIntegrationConfig>[0],
         );
         if (err) out.push({ nodeId: node.id, message: err });
-      } else if (
-        !cid &&
-        node.type in CONNECTION_TYPES &&
-        node.type !== "httpRequest"
-      ) {
-        // A non-integration node that needs a connection but has none (httpRequest's is optional).
-        out.push({
-          nodeId: node.id,
-          message:
-            "needs a connection — create one in Integrations and pick it",
-        });
+      } else if (!cid) {
+        // A non-integration node that needs a connection but has none. Which types are
+        // acceptable — and whether one is needed AT ALL — is `requiredConnectionTypes`:
+        // httpRequest's is optional, and codeAgent's only applies in write mode.
+        //
+        // The message NAMES the type and the tab. "needs a connection" alone left an author
+        // guessing which of eight kinds to create, on a screen with two tabs — and for a
+        // read-mode codeAgent it demanded one the inspector doesn't even offer.
+        const required = requiredConnectionTypes(node);
+        if (required?.length) {
+          const tab =
+            integrationsTabFor(required[0]) === "apps"
+              ? "Apps & agents"
+              : "Providers";
+          out.push({
+            nodeId: node.id,
+            message: `needs a ${connectionTypeLabel(required)} connection — create one in Integrations → ${tab} and pick it`,
+          });
+        }
       }
     }
     return out;
