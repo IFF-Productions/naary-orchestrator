@@ -12,11 +12,18 @@ on:
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+    # Skip Dependabot. GitHub does NOT expose repository secrets to workflows triggered by
+    # Dependabot (they live in a separate Dependabot secret store), so
+    # `secrets.CLAUDE_CODE_OAUTH_TOKEN` arrives EMPTY and the action fails — visible in the run log
+    # as `"claude_code_oauth_token": ""`.
+    #
+    # That made every Dependabot PR permanently red on this check: #787 sat failing for two days
+    # with a red X that had nothing to do with its contents. A check that can only ever fail is
+    # worse than no check, because it teaches people to merge past red.
+    #
+    # If a bot review of version bumps is wanted later, the fix is to add the token under
+    # Settings → Secrets → Dependabot, not to remove this guard.
+    if: github.actor != 'dependabot[bot]'
 
     runs-on: ubuntu-latest
     permissions:
