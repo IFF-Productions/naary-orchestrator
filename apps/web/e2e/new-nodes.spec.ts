@@ -25,8 +25,12 @@ const NEW_NODES = [
   { label: "Stop & Error", field: "Error message" },
   { label: "Respond", field: "Status code" },
   { label: "Code", field: "JavaScript" },
-  { label: "Sub-workflow", field: "Sub-workflow key" },
-  { label: "For Each", field: "Sub-workflow key (run per item)" },
+  // Both lost the "key" from their label when the field became a picker: you choose a
+  // workflow now, you don't type its key. Sub-workflow asserts a DIFFERENT field, because
+  // its label is now exactly its own node name — getByText would match the node title and
+  // pass whether or not the config rendered, which is worse than no test.
+  { label: "Sub-workflow", field: "Static input (JSON)" },
+  { label: "For Each", field: "Sub-workflow (run per item)" },
   { label: "HMAC", field: "Algorithm" },
   { label: "JWT", field: "Expires in (seconds, optional)" },
   { label: "TOTP", field: "Period (seconds)" },
