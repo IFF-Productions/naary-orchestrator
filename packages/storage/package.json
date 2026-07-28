@@ -1,6 +1,6 @@
 {
   "name": "@naary/storage",
-  "version": "0.0.41",
+  "version": "0.0.42",
   "private": true,
   "description": "Provider-agnostic object storage + claim-check for large payloads. AWS S3 now; the ObjectStore interface is the GCP swap point. Used by worker activities — NEVER by workflow code.",
   "main": "dist/index.js",
