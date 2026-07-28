@@ -6,6 +6,7 @@ import { getDefaultEnvironmentId } from "@naary/db";
 import { MissingCredentialError } from "@naary/secrets";
 import { type ClaimCheck, getObjectStore, maybeOffload } from "@naary/storage";
 import { computeCost, recordUsage } from "@naary/usage";
+import { assertStructuredOutputSize } from "./structured-output-size";
 import {
   activityDuration,
   activityRuns,
@@ -297,6 +298,12 @@ export async function callCodeAgent(
       model,
       usage,
     });
+    // #827: same guard and the same placement as the agent node — AFTER recordUsage, because the
+    // CLI has already run and been billed by now. A guard on one node and not the other would just
+    // make the pair inconsistent, which is why the issue asked for both in one change.
+    if (envlp.structured)
+      assertStructuredOutputSize(envlp.structured, meta.nodeId);
+
     // Cost the workflow accumulates: the CLI's own total_cost_usd is authoritative for a
     // subprocess; else derive from tokens (guarded — an unknown model must not throw); else
     // the node's manual fallback. The ledger already recorded non-zero tokens regardless.
