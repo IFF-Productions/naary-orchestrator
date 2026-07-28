@@ -325,7 +325,18 @@ export function CanvasTopBar({
             <span
               className="mono"
               style={{ ...monoLabel, fontSize: 11, whiteSpace: "nowrap" }}
-              title="workflow key · saved version"
+              // The old title just restated the two labels. It sits inches from a live-editable
+              // name and does NOT follow it, which reads as a bug unless something says why —
+              // so say why, and only for a SAVED workflow, since on a draft the key does track
+              // the name and claiming otherwise would be the opposite lie.
+              title={
+                version != null
+                  ? `Workflow key: ${activeKey} — permanent.\n\n` +
+                    "Renaming the workflow deliberately does NOT change it. Schedules, webhook " +
+                    "URLs, sub-workflow references and API/CLI callers all address this workflow " +
+                    "by its key; changing it would break them silently."
+                  : "Workflow key · saved version. The key comes from the name and is fixed when you first save — after that, renaming won't change it."
+              }
             >
               {activeKey} · {version != null ? `v${version}` : "draft"}
             </span>
