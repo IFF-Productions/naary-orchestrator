@@ -29,7 +29,7 @@ export {
   formToDbGraph,
   escalationGraph,
 } from "./templates-advanced";
-export { getByPath, resolveMcpArguments } from "./mcp-args";
+export { bindingNamesSource, getByPath, resolveMcpArguments } from "./mcp-args";
 export {
   INTEGRATION_CATALOG,
   INTEGRATION_PROVIDERS,

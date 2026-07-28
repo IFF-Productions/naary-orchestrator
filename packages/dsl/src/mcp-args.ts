@@ -115,6 +115,27 @@ export function getByPath(value: unknown, path?: string): unknown {
  * graph-traversal work (CLAUDE.md: the workflow decides from prior outputs), so
  * it runs in the interpreter and the activity receives a plain arguments object.
  */
+/**
+ * Does this binding actually NAME a source node?
+ *
+ * A binding row with no `from` is an unfinished edit, not an instruction to blank the field.
+ * Applying it overwrites whatever the user typed with `undefined` — silently, because
+ * `getByPath(ctx[undefined], …)` is just undefined rather than an error. The user then sees a
+ * field they filled in arrive empty, with nothing on the canvas suggesting why: the config
+ * panel's own "· bound" hint requires a non-empty `from`, so it renders the field as an
+ * ordinary manual one.
+ *
+ * Exported because three places have to agree on this and didn't: the runtime resolvers here,
+ * `validateIntegrationConfig`'s save gate (which counted a bare `key in fieldBindings` as
+ * "supplied"), and the canvas panel. Two of them said bound, one said not — so a value could
+ * pass the gate, show as unbound, and vanish at run time.
+ */
+export function bindingNamesSource(binding: unknown): boolean {
+  if (typeof binding !== "object" || binding === null) return false;
+  const from = (binding as { from?: unknown }).from;
+  return typeof from === "string" && from.trim() !== "";
+}
+
 export function resolveMcpArguments(
   config: McpToolNodeConfig,
   ctx: Record<string, unknown>,
@@ -122,6 +143,7 @@ export function resolveMcpArguments(
   const args: Record<string, unknown> = { ...(config.arguments ?? {}) };
   for (const [name, binding] of Object.entries(config.argumentBindings ?? {})) {
     if (hasForbiddenPathSegment(name)) continue; // #591: never assign prototype-chain keys
+    if (!bindingNamesSource(binding)) continue; // an unfinished row must not blank the value
     args[name] = getByPath(ctx[binding.from], binding.path);
   }
   return args;

@@ -1,7 +1,7 @@
 // Agent / code-agent / MCP tool / integration config sections of the node inspector (extracted verbatim from CanvasPage).
 import type { ConfigSectionCtx } from "./ConfigPanel";
 import type { ConnectionRow } from "../../lib/api";
-import { getIntegrationProvider } from "@naary/dsl";
+import { bindingNamesSource, getIntegrationProvider } from "@naary/dsl";
 import { ExpressionField } from "../../components/ExpressionField";
 import type { JsonSchemaObject } from "../../lib/schema-fields";
 import { SchemaEditor } from "./SchemaFieldEditor";
@@ -927,9 +927,14 @@ export function renderAgentSections(c: ConfigSectionCtx) {
             string,
             BindingRow
           >;
+          // Same predicate the runtime resolver and the save gate use (@naary/dsl), not a
+          // second hand-rolled `!b?.from`. They disagreed: those two counted any key in
+          // fieldBindings as bound, this counted only a row naming a source — so an
+          // unfinished row rendered as a plain manual field, accepted what you typed, and
+          // had it replaced by undefined at run time.
           const boundFrom = (key: string): string | null => {
             const b = fieldBindings[key];
-            if (!b?.from) return null;
+            if (!bindingNamesSource(b)) return null;
             return b.path ? `${b.from}.${b.path}` : b.from;
           };
           // Coerce the typed-in string to the catalog field's type, so a static value is stored
