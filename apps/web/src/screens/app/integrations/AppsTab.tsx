@@ -151,7 +151,11 @@ export function AppsTab({
               setDialog("mcp");
             }}
           >
-            Connect MCP server
+            {/* Not "Connect MCP server" any more: this form now offers all 38 catalog providers
+                (PagerDuty, Stripe, …) as well as a raw MCP endpoint. Someone adding PagerDuty
+                would never click a button labelled MCP — which is the discoverability problem
+                #815 was filed about. */}
+            Connect a service
           </Button>
           <Button variant="primary" onClick={() => setDialog("github")}>
             Install GitHub App
@@ -365,7 +369,7 @@ export function AppsTab({
               ? "Install GitHub App"
               : dialog === "mcp-registry"
                 ? "Browse MCP servers"
-                : "Connect MCP server"
+                : "Connect a service"
           }
         >
           {dialog === "github" && <GithubAppForm tenant={tenant} />}
