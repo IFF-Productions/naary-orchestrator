@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Icon, type IconName } from "../../../components";
+import { HScroll, Icon, type IconName } from "../../../components";
 
 export const monoLabel: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
@@ -374,11 +374,17 @@ export function ScrollList({
   children: ReactNode;
 }) {
   return (
-    <div style={{ ...cardShell, marginBottom }}>
-      <div style={{ overflowX: "auto" }}>
-        <div style={{ minWidth }}>{children}</div>
-      </div>
-    </div>
+    // #848 measured 160px hidden per row at 390px — a hook URL plus its Copy/Active controls,
+    // with nothing to indicate more was there. The min-width scroll is the RIGHT call (see the
+    // note above: these rows would ellipsize to nothing), so this adds the missing affordance
+    // rather than reversing it. `HScroll` fades to --card, the shell's own background.
+    <HScroll
+      style={{ ...cardShell, marginBottom }}
+      fade="var(--card)"
+      deps={children}
+    >
+      <div style={{ minWidth }}>{children}</div>
+    </HScroll>
   );
 }
 
