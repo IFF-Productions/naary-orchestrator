@@ -135,6 +135,25 @@ export function initAppCheck(
  */
 let appCheck: AppCheck | undefined;
 let activePlan: ActivePlan | undefined;
+let attestationFailed = false;
+
+/**
+ * Whether this page has already PROVEN it cannot attest — the startup probe asked for a token
+ * and was refused.
+ *
+ * Exists so a failed sign-in can name the likely reason instead of leaving the visitor with a
+ * generic message. It is deliberately NOT surfaced before an attempt: when App Check enforcement
+ * is OFF (the correct state while a key is being fixed) a broken attestation changes nothing and
+ * sign-in works, so a warning on arrival would be a false alarm. After a failure it is the single
+ * most likely cause, and worth saying.
+ *
+ * False while the probe is still in flight. That is fine here — the probe starts at module load
+ * and a visitor cannot click sign-in inside that window — and it is the right way to be wrong:
+ * silence rather than a guess.
+ */
+export function appCheckAttestationFailed(): boolean {
+  return attestationFailed;
+}
 
 /**
  * Mint a **limited-use** App Check token for one public form/chat submission — the tenant
@@ -198,6 +217,7 @@ async function probeAppCheckToken(
   try {
     await getToken(appCheck);
   } catch (err) {
+    attestationFailed = true;
     console.error(explainAppCheckFailure(plan, err, isDev));
   }
 }
@@ -254,11 +274,11 @@ export function explainAppCheckFailure(
       `       curl -s -o /dev/null -w '%{http_code}\\n' "https://www.google.com/recaptcha/enterprise.js?render=${plan.siteKey}"`,
       "     MEASURED, both directions (2026-07-28, two real keys in the same project):",
       "       400/400 DOES mean checkbox — a challenge key returns 400 from both `render=`",
-      "         endpoints, and is the one used as a <div class=\"g-recaptcha\"> for reCAPTCHA",
+      '         endpoints, and is the one used as a <div class="g-recaptcha"> for reCAPTCHA',
       "         fraud-defence/WAF. App Check can never use it. This test is sound for TYPE.",
       "       200/200 means score-based AND NOTHING ELSE. `render=` does not check the domain —",
       "         it returns 200 even with a bogus Referer — and does not tell you the provider.",
-      "         Reading 200/200 as \"so it must be the provider\" is the trap; it cost a wrong",
+      '         Reading 200/200 as "so it must be the provider" is the trap; it cost a wrong',
       "         fix on 2026-07-28 when both `clr` endpoints then failed identically.",
       "     ALSO: two keys in one project share their first ~13 chars. Compare the WHOLE string",
       "     before concluding the console and the bundle hold the same key — they did not.",
@@ -275,7 +295,7 @@ export function explainAppCheckFailure(
       `     "${plan.kind === "recaptcha-v3" ? "v3" : "enterprise"}"; if the console says the other one, set`,
       `     VITE_FIREBASE_APPCHECK_PROVIDER=${other} and rebuild the web image — VITE_* is inlined at`,
       `     BUILD time, so changing it on the server has no effect.`,
-      "     Only conclude \"wrong provider\" when the OTHER `clr` endpoint actually works — see 0.",
+      '     Only conclude "wrong provider" when the OTHER `clr` endpoint actually works — see 0.',
       "  3. DOMAIN NOT REGISTERED — the likeliest cause when BOTH `clr` endpoints 400 while",
       "     `render=` returns 200, because `render=` never checks the domain and `clr` does.",
       `     Add ${typeof location === "undefined" ? "this host" : location.host} to the key's allowed domains`,
@@ -288,10 +308,39 @@ export function explainAppCheckFailure(
       "  token — usually this app is not registered with this provider in the Firebase",
       "  console (App Check → Apps), or the key belongs to a different project.",
     );
+  } else if (code.endsWith("/initial-throttle")) {
+    // MEASURED on prod, 2026-07-28 (#792). reCAPTCHA itself was healthy — /recaptcha/api2/clr
+    // and /reload both 200 for this key on this host — and the failure was one step LATER:
+    //   POST content-firebaseappcheck.googleapis.com/v1/projects/<p>/apps/<a>:exchangeRecaptchaV3Token
+    //   → 403 {"message":"App attestation failed.","status":"PERMISSION_DENIED"}
+    // So none of the reCAPTCHA-side checks in the recaptcha-error branch above apply here:
+    // the key resolves, the host is allowed, the provider matches the key type. What is wrong
+    // is the REGISTRATION on the App Check side.
+    lines.push(
+      "  reCAPTCHA worked; Google then REFUSED to exchange its token for an App Check token",
+      '  (403 "App attestation failed." on :exchangeRecaptcha…Token). Do NOT re-run the',
+      "  reCAPTCHA-side checks — a 403 here means the key resolved and the host was accepted.",
+      "  Causes, in likelihood order:",
+      "  1. The key registered in Firebase console → App Check → Apps for THIS web app is not",
+      `     this one. Compare the WHOLE string against ${plan.siteKey} — two keys in one project`,
+      "     share their first ~13 chars, so a glance at the prefix proves nothing.",
+      `  2. That app is registered under the OTHER provider. We are sending ${plan.kind}; if the`,
+      `     console registered ${other}, set VITE_FIREBASE_APPCHECK_PROVIDER=${other} and REBUILD the`,
+      "     web image (VITE_* is inlined at build time; a server .env edit does nothing).",
+      "  3. The app is not registered with App Check at all.",
+      "  4. A reCAPTCHA score below the threshold — expected for automation/headless, and the",
+      "     one cause that is not a misconfiguration. Rule it out by reproducing in a normal",
+      "     browser before changing any registration.",
+      "  THE BACKOFF IS ONE DAY, NOT SECONDS. The SDK throttles hard on a 403 and every later",
+      "  attempt fails locally as appCheck/throttled without another network call — so the",
+      "  console goes QUIET and a reload does not retry. Silence here is NOT evidence of a fix;",
+      "  verify with the Network tab (the exchange request must return 200) or a fresh profile.",
+    );
   } else if (code.endsWith("/throttled")) {
     lines.push(
       "  Throttled after repeated failures — fix the underlying error above and reload;",
-      "  the backoff clears on its own.",
+      "  the backoff clears on its own. NB a 403 sets a ONE-DAY backoff, so this can persist",
+      "  long after the real cause is fixed; check in a fresh browser profile.",
     );
   }
 

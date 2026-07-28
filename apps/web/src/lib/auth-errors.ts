@@ -63,6 +63,26 @@ export function authErrorMessage(err: unknown): string {
 }
 
 /**
+ * Append the App Check cause to a sign-in failure when this page already knows it cannot attest.
+ *
+ * WHY: with App Check enforcement ON and a token we can't mint, Google refuses sign-in one layer
+ * BELOW the SDK — measured on prod 2026-07-28 (#792), `createAuthUri` came back
+ * `401 "Firebase App Check token is invalid."` from inside the popup's own handler page. Our SDK
+ * never sees that 401: the popup simply never hands a credential back, and the visitor is left
+ * with whatever generic thing the popup poll eventually says (usually "the window closed"). The
+ * true cause was already known at page load and went unsaid — which is exactly how this became a
+ * multi-day outage that read as "I click sign in and nothing happens".
+ *
+ * Hedged wording on purpose ("may"): the client cannot see whether enforcement is on, so a failed
+ * attestation is a strong suspicion, never a certainty. Naming a cause we can't confirm as fact
+ * would send someone to the wrong console page.
+ */
+export function withAppCheckHint(message: string, failed: boolean): string {
+  if (!failed) return message;
+  return `${message} This app also couldn’t complete its bot check (App Check), which may be why sign-in was refused — see the browser console for details.`;
+}
+
+/**
  * Turn the `signInWithRedirect` return leg into a message to show, or null when it succeeded
  * (or never ran). NEVER rejects — this wraps a promise created at module load, and an unhandled
  * rejection there would be an unattributed console error on every visit to the sign-in screen.

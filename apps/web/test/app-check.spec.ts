@@ -241,3 +241,34 @@ describe("explainAppCheckFailure", () => {
     expect(explainAppCheckFailure(V3, undefined)).toContain("unknown error");
   });
 });
+
+describe("explainAppCheckFailure — the exchange 403 (appCheck/initial-throttle)", () => {
+  const plan = { kind: "recaptcha-v3", siteKey: "6LfKEY" } as const;
+  const text = () =>
+    explainAppCheckFailure(plan, { code: "appCheck/initial-throttle" });
+
+  it("sends the reader to the App Check registration, NOT back to the reCAPTCHA checks", () => {
+    // Measured on prod 2026-07-28: /recaptcha/api2/clr returned 200 and the NEXT call,
+    // :exchangeRecaptchaV3Token, returned 403 "App attestation failed." Re-running the
+    // reCAPTCHA-side checks at that point can only waste time — they all pass.
+    const t = text();
+    expect(t).toContain("App Check → Apps");
+    expect(t).toContain("Do NOT re-run the");
+  });
+
+  it("says the backoff is a DAY, because a quiet console reads as a fix", () => {
+    // The SDK throttles hard on a 403: later attempts fail locally with no network call, so
+    // the errors stop appearing while nothing is actually fixed.
+    expect(text()).toMatch(/ONE DAY|one day/i);
+    expect(text()).toContain("Silence here is NOT evidence of a fix");
+  });
+
+  it("keeps the not-a-misconfiguration cause on the list", () => {
+    // A low reCAPTCHA score produces the same 403 and needs no console change at all.
+    expect(text()).toContain("score below the threshold");
+  });
+
+  it("still names the enforcement escape hatch", () => {
+    expect(text()).toContain("enforcement is ON");
+  });
+});

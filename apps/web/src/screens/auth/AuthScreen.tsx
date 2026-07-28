@@ -22,7 +22,8 @@ import {
 import { Logo } from "../../components";
 import "./auth.css";
 import { WorkflowSimulation } from "./WorkflowSimulation";
-import { authErrorMessage } from "../../lib/auth-errors";
+import { authErrorMessage, withAppCheckHint } from "../../lib/auth-errors";
+import { appCheckAttestationFailed } from "../../lib/app-check";
 import {
   type AuthMode,
   type FocusField,
@@ -195,7 +196,13 @@ export function AuthScreen({
     setStage("failed");
     // Never the raw `e.message`: Firebase's is `Firebase: Error (auth/popup-blocked).`, which
     // reads like a crash and says nothing actionable. See ./auth-errors.
-    setError(authErrorMessage(e));
+    //
+    // The App Check hint rides along because Google refuses sign-in BELOW the SDK — the popup
+    // gets a 401 and simply never returns a credential, so the code that reaches us describes
+    // the symptom (a window that closed) and not the cause we already measured at page load.
+    setError(
+      withAppCheckHint(authErrorMessage(e), appCheckAttestationFailed()),
+    );
   }
 
   function submit(): void {
