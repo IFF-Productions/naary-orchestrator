@@ -92,7 +92,10 @@ import type { NodeRunState } from "./canvas/NodeCard";
 import { RunInputPanel } from "./canvas/RunInputPanel";
 import { CanvasTopBar } from "./canvas/TopBar";
 import { useAiBuilder } from "./canvas/useAiBuilder";
-import { useCanvasDerivations } from "./canvas/useCanvasDerivations";
+import {
+  useCanvasDerivations,
+  useCompiledCanvas,
+} from "./canvas/useCanvasDerivations";
 import { useCanvasToasts } from "./canvas/useCanvasToasts";
 import { useDockDerivations } from "./canvas/useDockDerivations";
 import { useDryRun } from "./canvas/useDryRun";
@@ -185,7 +188,12 @@ export function CanvasPage() {
   const runId = searchParams.get("runId");
   const watching = Boolean(runId);
 
-  // AI workflow builder: describe a flow → stream a draft onto the canvas.
+  // The live-compiled canvas. Compiled HERE, above both consumers: the AI panel sends it as
+  // the graph to change, and the derivations layer lints and overlays it.
+  const { graph, error } = useCompiledCanvas(nodes, edges);
+
+  // AI workflow builder: describe a flow → stream a draft onto the canvas, or describe a
+  // change → stream it applied to what's already there.
   const {
     showAi,
     setShowAi,
@@ -193,12 +201,17 @@ export function CanvasPage() {
     setAiPrompt,
     genProvider,
     setGenProvider,
+    aiMode,
+    setAiMode,
+    canEdit,
     generating,
     genMessage,
     genNodeCount,
     generateFromPrompt,
   } = useAiBuilder({
     nodes,
+    graph,
+    graphError: error,
     rfRef,
     keyParam,
     templateParam,
@@ -610,8 +623,6 @@ export function CanvasPage() {
   // Live-compiled graph, watched-run overlay, lint/resource issues, and the per-node/
   // per-edge display state that feeds React Flow.
   const {
-    graph,
-    error,
     resourceWarnings,
     allIssues,
     issuesByNode,
@@ -621,6 +632,7 @@ export function CanvasPage() {
   } = useCanvasDerivations({
     nodes,
     edges,
+    graph,
     connections,
     pins,
     nodeRuns,
@@ -1096,6 +1108,9 @@ export function CanvasPage() {
           onPromptChange={setAiPrompt}
           genProvider={genProvider}
           onProviderChange={setGenProvider}
+          aiMode={aiMode}
+          onModeChange={setAiMode}
+          canEdit={canEdit}
           generating={generating}
           onGenerate={() => void generateFromPrompt()}
         />

@@ -203,13 +203,11 @@ describe("GraphsController POST /graphs/:key/dry-run", () => {
 
   it("resolves the env, reads the saved graph, and delegates to DryRunService", async () => {
     const result = { ok: true, probed: 1, unprobeable: 0, nodes: [] };
-    const getLatestNamed = vi
-      .fn()
-      .mockResolvedValue({
-        workflowKey: "canvas",
-        version: 2,
-        graph: validGraph,
-      });
+    const getLatestNamed = vi.fn().mockResolvedValue({
+      workflowKey: "canvas",
+      version: 2,
+      graph: validGraph,
+    });
     const dry = dryStub(result);
     const controller = new GraphsController(
       { getLatestNamed } as unknown as GraphsService,
@@ -294,14 +292,20 @@ function fakeRes() {
   return res;
 }
 
-function genDto(prompt: string): GenerateGraphDto {
-  return Object.assign(new GenerateGraphDto(), { prompt });
+function genDto(prompt: string, previous?: unknown): GenerateGraphDto {
+  return Object.assign(new GenerateGraphDto(), {
+    prompt,
+    ...(previous ? { previous } : {}),
+  });
 }
 
-function streamController(generateStream: (...args: unknown[]) => unknown) {
+function streamController(
+  generateStream: (...args: unknown[]) => unknown,
+  editStream?: (...args: unknown[]) => unknown,
+) {
   return new GraphsController(
     {} as unknown as GraphsService,
-    { generateStream } as unknown as GraphGeneratorService,
+    { generateStream, editStream } as unknown as GraphGeneratorService,
     lifecycleStub,
     envStub,
     {} as unknown as DryRunService,
@@ -492,6 +496,117 @@ describe("GraphsController POST /graphs/generate/stream", () => {
 
     expect(res.chunks.filter((c) => c === ": ping\n\n")).toHaveLength(0);
     expect(res.chunks.some((c) => c.startsWith("event: result"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `previous` makes the SAME generate routes an EDIT. Without this, the canvas's
+// "change this workflow" ask reached the model as a bare description and came back
+// as a brand-new workflow — the user's graph replaced rather than amended.
+// ---------------------------------------------------------------------------
+describe("GraphsController generate with `previous` (edit)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const meteredEdit = {
+    name: "Flow",
+    graph: validGraph,
+    meter: { provider: "anthropic", model: "claude-opus-4-8", tokens: null },
+  };
+
+  it("streams via editStream, threading the graph as `previous` and the prompt as the instruction", async () => {
+    const generate = vi.fn();
+    const edit = vi.fn().mockResolvedValue(meteredEdit);
+    const res = fakeRes();
+
+    await streamController(generate, edit).generateStream(
+      "t-1",
+      genDto("end cleanly when there are no open incidents", validGraph),
+      res as unknown as ServerResponse,
+    );
+
+    expect(generate).not.toHaveBeenCalled();
+    expect(edit).toHaveBeenCalledWith(
+      "t-1",
+      "e1",
+      {
+        previous: validGraph,
+        instruction: "end cleanly when there are no open incidents",
+      },
+      undefined,
+      expect.objectContaining({ timeoutMs: 300_000 }),
+    );
+  });
+
+  it("keeps `meter` OUT of the result frame — it's the builder's billing detail, not this route's contract", async () => {
+    const res = fakeRes();
+
+    await streamController(
+      vi.fn(),
+      vi.fn().mockResolvedValue(meteredEdit),
+    ).generateStream(
+      "t-1",
+      genDto("add a branch", validGraph),
+      res as unknown as ServerResponse,
+    );
+
+    const result = res.chunks[res.chunks.length - 1];
+    expect(result).toBe(
+      `event: result\ndata: ${JSON.stringify({ name: "Flow", graph: validGraph })}\n\n`,
+    );
+    expect(result).not.toContain("meter");
+  });
+
+  it("rejects a `previous` that isn't a graph — a 400 naming the shape, not a 500 inside the model call", async () => {
+    const edit = vi.fn();
+    const res = fakeRes();
+
+    await streamController(vi.fn(), edit).generateStream(
+      "t-1",
+      genDto("add a branch", { nodes: "not-an-array" }),
+      res as unknown as ServerResponse,
+    );
+
+    expect(edit).not.toHaveBeenCalled();
+    const last = res.chunks[res.chunks.length - 1];
+    expect(last).toContain("event: error");
+    expect(last).toContain("nodes");
+  });
+
+  it("without `previous` the route still CREATES — the existing behaviour is untouched", async () => {
+    const generate = vi
+      .fn()
+      .mockResolvedValue({ name: "Flow", graph: validGraph });
+    const edit = vi.fn();
+
+    await streamController(generate, edit).generateStream(
+      "t-1",
+      genDto("email me a digest"),
+      fakeRes() as unknown as ServerResponse,
+    );
+
+    expect(edit).not.toHaveBeenCalled();
+    expect(generate).toHaveBeenCalled();
+  });
+
+  it("the non-streaming JSON route branches the same way, and returns {name, graph} only", async () => {
+    const generate = vi.fn();
+    const edit = vi.fn().mockResolvedValue(meteredEdit);
+    const controller = new GraphsController(
+      {} as unknown as GraphsService,
+      { generate, editStream: edit } as unknown as GraphGeneratorService,
+      lifecycleStub,
+      envStub,
+      {} as unknown as DryRunService,
+    );
+
+    const out = await controller.generate(
+      "t-1",
+      genDto("add a branch", validGraph),
+    );
+
+    expect(generate).not.toHaveBeenCalled();
+    expect(out).toEqual({ name: "Flow", graph: validGraph });
   });
 });
 

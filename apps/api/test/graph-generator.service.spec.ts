@@ -122,6 +122,24 @@ describe("GraphGeneratorService", () => {
       expect(res.graph.nodes).toHaveLength(2);
     });
 
+    it("tells the model to PRESERVE what the change doesn't touch", async () => {
+      // "Return the COMPLETE graph" alone reads as "write the whole graph", and a model
+      // obliges: same intent, new ids, reworded prompts, a new name — an edit the user
+      // can't distinguish from a rewrite, with their hand-tuning on untouched nodes gone.
+      generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
+
+      await makeService().editStream("t-1", "e-1", {
+        previous: previousGraph,
+        instruction: "end cleanly when there are no open incidents",
+      });
+
+      const prompt = generateText.mock.calls[0][0].prompt as string;
+      expect(prompt).toContain("PRESERVE");
+      expect(prompt).toContain("BYTE-FOR-BYTE");
+      expect(prompt).toMatch(/Keep the workflow's "name"/);
+      expect(prompt).toMatch(/ADD only the nodes\/edges the change needs/);
+    });
+
     it("with no `previous` it's a plain create (no edit framing)", async () => {
       generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
 
@@ -438,26 +456,26 @@ describe("GraphGeneratorService (claude-code source)", () => {
       .spyOn(Logger.prototype, "warn")
       .mockImplementation(() => undefined);
     try {
-    execMock.mockResolvedValue({
-      stdout: JSON.stringify({
-        type: "result",
-        subtype: "error_max_turns",
-        is_error: true,
-        result: "",
-        // The fields that distinguish the failure modes which look identical from outside. A
-        // turn-capped run could NOT be reproduced locally, so prod has to name its own cause.
-        num_turns: 4,
-        stop_reason: "max_turns",
-        api_error_status: 429,
-        permission_denials: [{ tool_name: "Read" }, { tool_name: "Glob" }],
-        duration_ms: 12345,
-        modelUsage: { "claude-opus-4-8": {} },
-      }),
-      exitCode: 1,
-    });
-    // The message must NOT tell the user to shorten a perfectly reasonable description — that was
-    // the old copy, and it blamed the user for a model-side hiccup. It now says "transient, retry"
-    // and points at the streaming providers, which have no turn budget at all.
+      execMock.mockResolvedValue({
+        stdout: JSON.stringify({
+          type: "result",
+          subtype: "error_max_turns",
+          is_error: true,
+          result: "",
+          // The fields that distinguish the failure modes which look identical from outside. A
+          // turn-capped run could NOT be reproduced locally, so prod has to name its own cause.
+          num_turns: 4,
+          stop_reason: "max_turns",
+          api_error_status: 429,
+          permission_denials: [{ tool_name: "Read" }, { tool_name: "Glob" }],
+          duration_ms: 12345,
+          modelUsage: { "claude-opus-4-8": {} },
+        }),
+        exitCode: 1,
+      });
+      // The message must NOT tell the user to shorten a perfectly reasonable description — that was
+      // the old copy, and it blamed the user for a model-side hiccup. It now says "transient, retry"
+      // and points at the streaming providers, which have no turn budget at all.
       // ONE call. `await expect(p).rejects…` twice against the same SETTLED promise would also
       // work — my earlier comment claimed otherwise and was wrong — but catching once lets the
       // exception TYPE and the message be asserted together without re-running the mocks.
@@ -816,7 +834,12 @@ describe("generate — invented connectionIds are blanked", () => {
 
   it("blanks an id the tenant does not have", async () => {
     listConnections.mockResolvedValue([
-      { id: "conn_real", type: "github", label: "GitHub", serverUrl: "https://api.github.com" },
+      {
+        id: "conn_real",
+        type: "github",
+        label: "GitHub",
+        serverUrl: "https://api.github.com",
+      },
     ]);
     generateText.mockResolvedValue({
       text: JSON.stringify(graphWith("conn_invented_by_the_model")),
@@ -834,28 +857,43 @@ describe("generate — invented connectionIds are blanked", () => {
 
   it("leaves a REAL id alone", async () => {
     listConnections.mockResolvedValue([
-      { id: "conn_real", type: "github", label: "GitHub", serverUrl: "https://api.github.com" },
+      {
+        id: "conn_real",
+        type: "github",
+        label: "GitHub",
+        serverUrl: "https://api.github.com",
+      },
     ]);
-    generateText.mockResolvedValue({ text: JSON.stringify(graphWith("conn_real")) });
+    generateText.mockResolvedValue({
+      text: JSON.stringify(graphWith("conn_real")),
+    });
 
     const res = await makeService().generate("t-1", "e-1", "file an issue");
 
     expect(
-      (res.graph.nodes.find((n) => n.id === "gh")?.config as { connectionId?: string })
-        .connectionId,
+      (
+        res.graph.nodes.find((n) => n.id === "gh")?.config as {
+          connectionId?: string;
+        }
+      ).connectionId,
     ).toBe("conn_real");
   });
 
   /** With no connections configured at all, EVERY id is invented by definition. */
   it("blanks everything when the tenant has no connections", async () => {
     listConnections.mockResolvedValue([]);
-    generateText.mockResolvedValue({ text: JSON.stringify(graphWith("conn_anything")) });
+    generateText.mockResolvedValue({
+      text: JSON.stringify(graphWith("conn_anything")),
+    });
 
     const res = await makeService().generate("t-1", "e-1", "file an issue");
 
     expect(
-      (res.graph.nodes.find((n) => n.id === "gh")?.config as { connectionId?: string })
-        .connectionId,
+      (
+        res.graph.nodes.find((n) => n.id === "gh")?.config as {
+          connectionId?: string;
+        }
+      ).connectionId,
     ).toBe("");
   });
 });
@@ -868,7 +906,12 @@ describe("generate — invented connectionIds are blanked", () => {
 describe("editStream — invented connectionIds are blanked too", () => {
   it("blanks an invented id on an edit turn", async () => {
     listConnections.mockResolvedValue([
-      { id: "conn_real", type: "github", label: "GitHub", serverUrl: "https://api.github.com" },
+      {
+        id: "conn_real",
+        type: "github",
+        label: "GitHub",
+        serverUrl: "https://api.github.com",
+      },
     ]);
     generateText.mockResolvedValue({
       text: JSON.stringify({
@@ -899,9 +942,11 @@ describe("editStream — invented connectionIds are blanked too", () => {
     });
 
     expect(
-      (res.graph.nodes.find((n) => n.id === "gh")?.config as {
-        connectionId?: string;
-      }).connectionId,
+      (
+        res.graph.nodes.find((n) => n.id === "gh")?.config as {
+          connectionId?: string;
+        }
+      ).connectionId,
     ).toBe("");
   });
 });
@@ -954,7 +999,9 @@ describe("generate — self-repairs its own catalog mistakes", () => {
     listConnections.mockResolvedValue(conns);
     generateText
       .mockResolvedValueOnce({ text: JSON.stringify(graphWithFields({})) })
-      .mockResolvedValueOnce({ text: JSON.stringify(graphWithFields(COMPLETE)) });
+      .mockResolvedValueOnce({
+        text: JSON.stringify(graphWithFields(COMPLETE)),
+      });
 
     const res = await makeService().generate("t-1", "e-1", "file an issue");
 
@@ -975,7 +1022,9 @@ describe("generate — self-repairs its own catalog mistakes", () => {
   it("keeps the ORIGINAL when the repair doesn't improve matters", async () => {
     listConnections.mockResolvedValue(conns);
     generateText
-      .mockResolvedValueOnce({ text: JSON.stringify(graphWithFields({ owner: "acme" })) })
+      .mockResolvedValueOnce({
+        text: JSON.stringify(graphWithFields({ owner: "acme" })),
+      })
       // Still incomplete — and now it lost the one field it had.
       .mockResolvedValueOnce({ text: JSON.stringify(graphWithFields({})) });
 

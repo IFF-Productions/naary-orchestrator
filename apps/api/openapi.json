@@ -17312,7 +17312,12 @@
             "minLength": 3,
             "maxLength": 2000,
             "example": "When a webhook arrives, have an agent summarize it, wait for my approval, then email the summary.",
-            "description": "Plain-English description of the workflow to build."
+            "description": "Plain-English description of the workflow to build — or, with `previous`, the change to apply to it."
+          },
+          "previous": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The graph to CHANGE. Present ⇒ `prompt` is an edit instruction and the response is the full updated graph with everything the change didn't touch left as-is. Absent ⇒ a new workflow is invented from `prompt`. Must be a valid graph (400 otherwise)."
           },
           "provider": {
             "type": "string",

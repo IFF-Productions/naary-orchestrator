@@ -19,27 +19,19 @@ import { type EdgeRunState } from "./NaaryEdge";
 import type { NodeRunState } from "./NodeCard";
 import { computeCanvasRunStates } from "./run-watch";
 
-export function useCanvasDerivations({
-  nodes,
-  edges,
-  connections,
-  pins,
-  nodeRuns,
-  generating,
-  watching,
-  watchState,
-}: {
-  nodes: Node<NaaryData>[];
-  edges: FlowEdge[];
-  connections: ConnectionRow[];
-  pins: Record<string, unknown>;
-  nodeRuns: Record<string, NodeTestRun>;
-  generating: boolean;
-  watching: boolean;
-  watchState: ExecutionState | null;
-}) {
-  // Compile live so the status line mirrors what the API would accept.
-  const { graph, error } = useMemo(() => {
+/**
+ * Compile the canvas live, so the status line mirrors what the API would accept.
+ *
+ * Its own hook rather than a step inside useCanvasDerivations because the AI panel needs the
+ * same graph to send as the thing to change, and useAiBuilder runs FIRST (derivations consume
+ * its `generating` flag). Computing it here lets the page compile once and hand the result to
+ * both, instead of either duplicating the work or inverting the hook order.
+ */
+export function useCompiledCanvas(
+  nodes: Node<NaaryData>[],
+  edges: FlowEdge[],
+): { graph?: GraphDef; error?: string } {
+  return useMemo(() => {
     const canvasNodes: CanvasNode[] = nodes.map((n) => ({
       id: n.id,
       type: n.data.kind,
@@ -54,7 +46,30 @@ export function useCanvasDerivations({
     }));
     return compileGraph(canvasNodes, canvasEdges);
   }, [nodes, edges]);
+}
 
+export function useCanvasDerivations({
+  nodes,
+  edges,
+  graph,
+  connections,
+  pins,
+  nodeRuns,
+  generating,
+  watching,
+  watchState,
+}: {
+  nodes: Node<NaaryData>[];
+  edges: FlowEdge[];
+  /** From {@link useCompiledCanvas} — undefined while the canvas doesn't compile. */
+  graph: GraphDef | undefined;
+  connections: ConnectionRow[];
+  pins: Record<string, unknown>;
+  nodeRuns: Record<string, NodeTestRun>;
+  generating: boolean;
+  watching: boolean;
+  watchState: ExecutionState | null;
+}) {
   // #490 — per-node live run state (done/running/error/waiting/queued/skipped) for the
   // watched run, keyed by node id. Derived PURELY from the compiled graph + polled state
   // via the shared run-view-model logic (RunDetail and the canvas agree exactly). Null
@@ -239,8 +254,6 @@ export function useCanvasDerivations({
   );
 
   return {
-    graph,
-    error,
     watchRunStates,
     templateWarnings,
     resourceWarnings,

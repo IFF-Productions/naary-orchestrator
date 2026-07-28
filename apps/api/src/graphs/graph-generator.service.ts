@@ -294,11 +294,19 @@ export class GraphGeneratorService {
       environmentId,
       provider,
     );
-    const { text: resources, connectionIds } =
-      await this.buildResourceContext(tenantId, environmentId);
+    const { text: resources, connectionIds } = await this.buildResourceContext(
+      tenantId,
+      environmentId,
+    );
     // The instruction block: an EDIT framing when there's a draft to change, else a plain create.
+    //
+    // The preservation rules are load-bearing, not politeness. "Return the COMPLETE graph" on its
+    // own reads to a model as "write the whole graph", and it obliges — same intent, fresh ids,
+    // reworded prompts, a new name. The user then can't tell an edit from a rewrite, and any
+    // hand-tuning they'd done on untouched nodes is gone. Naming what must survive turns the
+    // full-graph requirement into a transcription of the input plus the change.
     const userPrompt = edit.previous
-      ? `You are EDITING an existing workflow. Here is the current graph (JSON):\n${JSON.stringify(edit.previous)}\n\nApply this change and return the COMPLETE updated workflow graph (the full graph, not a diff or a partial):\n${instruction}`
+      ? `You are EDITING an existing workflow. Here is the current graph (JSON):\n${JSON.stringify(edit.previous)}\n\nApply this change and return the COMPLETE updated workflow graph (the full graph, not a diff or a partial):\n${instruction}\n\nPRESERVE everything the change does not require altering:\n- Keep the workflow's "name" exactly as it is unless the change is about the name.\n- Keep every existing node's id, type and config BYTE-FOR-BYTE unless that node is what the change is about. Do not rename ids, reword systemPrompts, reformat values, or "improve" anything you were not asked to touch.\n- Keep every existing edge (and its condition) unless the change requires rewiring it.\n- ADD only the nodes/edges the change needs, and REMOVE only what it makes obsolete.\nA node you leave alone must come back identical to how it arrived.`
       : instruction;
 
     // First attempt (streamed for API models + hooks; claude-code + one-shot don't stream).
@@ -427,8 +435,10 @@ export class GraphGeneratorService {
     );
 
     // Ground the model in this env's real connections + the integration action catalog.
-    const { text: resources, connectionIds } =
-      await this.buildResourceContext(tenantId, environmentId);
+    const { text: resources, connectionIds } = await this.buildResourceContext(
+      tenantId,
+      environmentId,
+    );
 
     // First attempt (streamed when hooks are present AND the provider is an API model).
     let out = await this.firstDraft(
@@ -526,7 +536,6 @@ export class GraphGeneratorService {
       timeoutMs,
     );
   }
-
 
   /**
    * Catalog problems the MODEL can fix on a second pass — an unknown provider/action, or a missing
