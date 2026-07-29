@@ -32,7 +32,11 @@ export interface GraphDiff {
   startNodeChanged: boolean;
 }
 
-const NODE_FIELDS = ["type", "config", "onError", "retry"] as const;
+// `name` is DISPLAY-only (nothing executes off it), but it is still part of the saved node: a
+// diff that reports "no changes" after a node was retitled describes a version that isn't the
+// one on screen, and the canvas's unsaved-changes guard (which asks graphsEqual whether there
+// is work to lose) would let a rename be discarded silently.
+const NODE_FIELDS = ["type", "name", "config", "onError", "retry"] as const;
 
 /** Stable identity for an edge: source→target plus its (order-independent) condition. */
 function edgeKey(e: EdgeDef): string {

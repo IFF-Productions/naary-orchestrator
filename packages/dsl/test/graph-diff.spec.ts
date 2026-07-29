@@ -68,6 +68,16 @@ describe("diffGraphs", () => {
     expect(d.nodesChanged[0].fields.sort()).toEqual(["config", "retry"]);
   });
 
+  it("counts a display RENAME as a change (nothing executes off `name`, but a save keeps it)", () => {
+    const to = structuredClone(base);
+    const classify = to.nodes.find((n) => n.id === "classify");
+    if (classify) classify.name = "Triage the ticket";
+    const d = diffGraphs(base, to);
+    expect(d.nodesChanged.map((c) => c.id)).toEqual(["classify"]);
+    expect(d.nodesChanged[0].fields).toEqual(["name"]);
+    expect(graphsEqual(base, to)).toBe(false);
+  });
+
   it("is NODE-order independent (nodes are matched by id)", () => {
     const reordered: GraphDef = { ...base, nodes: [...base.nodes].reverse() };
     expect(graphsEqual(base, reordered)).toBe(true);

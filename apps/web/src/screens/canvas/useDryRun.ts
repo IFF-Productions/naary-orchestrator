@@ -5,10 +5,11 @@
  * that?" The option is this button; the point is that a flow's problems stop being discoverable
  * only by running it, one failure per run.
  *
- * IT SAVES FIRST, deliberately. The endpoint checks the SAVED graph, so checking without saving
- * would report a verdict about a version that is not the one on screen — the single most
- * confusing thing this feature could do. Saving first makes "what I checked" and "what I see"
- * the same graph, and mirrors what "Save & run" already does.
+ * IT NEEDS A SAVED GRAPH: the endpoint checks the SAVED workflow, so checking with unsaved edits
+ * on the canvas would report a verdict about a version that is not the one on screen — the single
+ * most confusing thing this feature could do. This hook does not decide what to do about that.
+ * The injected `save` does, and on the canvas it ASKS the user (the canvas never auto-saves) and
+ * resolves null when they decline — so a "no" here is simply "no check", not a failure.
  */
 import { useCallback, useState } from "react";
 import { api } from "../../lib/api";
@@ -18,7 +19,11 @@ export function useDryRun({
   save,
   onOpenIssues,
 }: {
-  /** Persists the canvas and resolves the key the dry run should check; null if the save failed. */
+  /**
+   * Resolves the key the dry run should check: persisting the canvas first if it has to (and if
+   * the user agrees to that). Null when there is nothing to check against — a failed save, or a
+   * user who declined to save — in which case it has already explained why.
+   */
   save: () => Promise<string | null>;
   onOpenIssues: () => void;
 }) {
@@ -29,7 +34,8 @@ export function useDryRun({
     setChecking(true);
     try {
       const key = await save();
-      // The save reports its own failure; adding a second message here would just be noise.
+      // No key ⇒ nothing to check: the save failed, or the user declined to save. Either way it
+      // has already said so on the status line; a second message here would just be noise.
       if (!key) return;
       const result = await api.dryRunGraph(key);
       const next = summarizeDryRun(result);

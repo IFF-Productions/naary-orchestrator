@@ -8,6 +8,7 @@ import { type GraphDef } from "@naary/dsl";
 import { api, type GraphSummary, UnauthorizedError } from "../../lib/api";
 import { withReturn } from "../../lib/canvas-return";
 import { decompileGraph } from "../../lib/decompile-graph";
+import { type CanvasBaseline, savedWorkflowName } from "./canvas-dirty";
 import {
   type FlowEdge,
   type NaaryData,
@@ -36,6 +37,8 @@ export function useWorkflowActions({
   setWorkflows,
   setSearchParams,
   navigate,
+  onSaved,
+  onGraphReplaced,
 }: {
   graph: GraphDef | undefined;
   error: string | undefined;
@@ -57,6 +60,14 @@ export function useWorkflowActions({
   setWorkflows: Dispatch<SetStateAction<GraphSummary[]>>;
   setSearchParams: SetURLSearchParams;
   navigate: NavigateFunction;
+  /**
+   * A save landed: this exact graph + name is now what's persisted, and so the new baseline for
+   * the unsaved-changes guard. Handed the saved values rather than letting the guard re-derive
+   * them, so "what we sent" and "what we compare against" cannot drift.
+   */
+  onSaved: (saved: CanvasBaseline) => void;
+  /** A different graph was PRESENTED (imported) — drop the baseline, don't diff against it. */
+  onGraphReplaced: () => void;
 }) {
   // Export the current (valid) graph as a portable JSON file — the same GraphDef the API
   // stores, wrapped with the display name so an import round-trips. Invalid graphs can't be
@@ -147,6 +158,9 @@ export function useWorkflowActions({
       setName(appliedName);
       setWorkflowKey("");
       setVersion(null);
+      // The imported graph is what's now on screen, not an edit of what was there — re-baseline
+      // the unsaved-changes guard so an untouched import doesn't read as work in progress.
+      onGraphReplaced();
       // Clearing ?key=/?template= must NOT clear the canvas's return target — a fresh params
       // object would drop it and strand the user's "back" on /app (see lib/canvas-return).
       if (keyParam || templateParam)
@@ -162,13 +176,13 @@ export function useWorkflowActions({
       return null;
     }
     const key = activeKey;
-    const saved = await api.saveGraph(
-      key,
-      name.trim() || "Untitled workflow",
-      graph,
-    );
+    // Resolved ONCE: the name we persist is also the name the unsaved-changes guard baselines
+    // against, so a blank title can't come back as "renamed" the moment it's saved.
+    const savedAs = savedWorkflowName(name);
+    const saved = await api.saveGraph(key, savedAs, graph);
     setWorkflowKey(key);
     setVersion(saved.version);
+    onSaved({ graph, name: savedAs });
     api
       .listGraphs()
       .then(setWorkflows)
