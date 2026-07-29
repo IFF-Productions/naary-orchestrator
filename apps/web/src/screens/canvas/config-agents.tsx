@@ -2,6 +2,7 @@
 import type { ConfigSectionCtx } from "./ConfigPanel";
 import type { ConnectionRow } from "../../lib/api";
 import { bindingNamesSource, getIntegrationProvider } from "@naary/dsl";
+import { integrationBindingOptions } from "./binding-name-model";
 import { ExpressionField } from "../../components/ExpressionField";
 import type { JsonSchemaObject } from "../../lib/schema-fields";
 import { SchemaEditor } from "./SchemaFieldEditor";
@@ -1097,12 +1098,16 @@ export function renderAgentSections(c: ConfigSectionCtx) {
                     </div>
                   );
                 })}
+              {/* The catalog knows exactly which arguments this action takes, so offer them
+                  instead of asking the author to retype a key — a typo here binds a field the
+                  action doesn't have, which fails at RUN time, not at save. */}
               <BindingsEditor
                 bindings={
                   obj("fieldBindings") as Record<string, BindingRow> | undefined
                 }
                 upstreamIds={upstreamIds}
                 onChange={(v) => onChange({ fieldBindings: v })}
+                options={integrationBindingOptions(action?.fields ?? [])}
               />
             </>
           );

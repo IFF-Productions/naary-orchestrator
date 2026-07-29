@@ -8,6 +8,12 @@ import {
   VALUELESS_OPS,
 } from "../../lib/graph-model";
 import { RowHead } from "./PinSection";
+import {
+  type BindingOption,
+  bindingNameChoice,
+  bindingNameView,
+  CUSTOM_OPTION,
+} from "./binding-name-model";
 
 /** Provider/model options the runtime actually supports today. Must stay in sync with the
  *  worker's buildModel() (the providers it can construct) + MODEL_PRICING (so runs are billed) —
@@ -380,16 +386,89 @@ export function JsonArrayField({
   );
 }
 
+/**
+ * The argument-NAME control for one binding row.
+ *
+ * A plain text box where the set of names is knowable means retyping something the catalog
+ * already knows, and a typo binds to a field that doesn't exist — which fails at run time, not
+ * at save. So offer the names when we have them, and keep free text for when we don't.
+ *
+ * The unknown-name option is the load-bearing part: an integration's `fieldBindings` outlive a
+ * change of action, so a row can legitimately hold a name this action never had. It stays
+ * visible, stays selected, and says why.
+ */
+function BindingNameField({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: BindingOption[];
+  onChange: (name: string) => void;
+}) {
+  // Free-text mode is entered explicitly ("Custom argument…") and is sticky for the row, so
+  // typing a name that happens not to be listed doesn't yank the control away mid-edit.
+  const [custom, setCustom] = useState(false);
+  const { unknownValue, placeholder } = bindingNameView(value, options);
+
+  if (custom || options.length === 0) {
+    return (
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ ...inputStyle, flex: 1 }}
+        placeholder="argument name"
+        aria-label="Argument name"
+      />
+    );
+  }
+  return (
+    <select
+      value={value}
+      aria-label="Argument name"
+      onChange={(e) => {
+        const choice = bindingNameChoice(e.target.value);
+        if ("custom" in choice) {
+          setCustom(true);
+          return; // keep the current name — the input takes over with it in place
+        }
+        onChange(choice.name);
+      }}
+      style={{ ...inputStyle, flex: 1 }}
+    >
+      <option value="">{placeholder}</option>
+      {unknownValue && (
+        // Carries the REAL name, so an unlisted binding neither disappears nor silently
+        // re-points at whatever the first option happens to be.
+        <option value={value}>{value} (not an argument of this action)</option>
+      )}
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+          {o.required ? " *" : ""}
+        </option>
+      ))}
+      <option value={CUSTOM_OPTION}>Custom argument…</option>
+    </select>
+  );
+}
+
 /** Editor for mcpTool argumentBindings: argName → { from: nodeId, path? }. This is
- *  how data threads between nodes (an arg bound to an upstream node's output). */
+ *  how data threads between nodes (an arg bound to an upstream node's output).
+ *
+ *  `options` (optional) are the argument names this node can actually take — the integration
+ *  catalog knows them, an arbitrary MCP tool doesn't. Omitted ⇒ the name stays free text, which
+ *  is the behaviour every other caller keeps. */
 export function BindingsEditor({
   bindings,
   upstreamIds,
   onChange,
+  options = [],
 }: {
   bindings: Record<string, BindingRow> | undefined;
   upstreamIds: string[];
   onChange: (v: Record<string, BindingRow> | undefined) => void;
+  options?: BindingOption[];
 }) {
   const entries = Object.entries(bindings ?? {});
 
@@ -429,11 +508,10 @@ export function BindingsEditor({
             }}
           >
             <div style={{ display: "flex", gap: 6 }}>
-              <input
+              <BindingNameField
                 value={name}
-                onChange={(e) => setEntry(name, e.target.value, row)}
-                style={{ ...inputStyle, flex: 1 }}
-                placeholder="arg name"
+                options={options}
+                onChange={(next) => setEntry(name, next, row)}
               />
               <button
                 type="button"
