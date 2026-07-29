@@ -740,6 +740,7 @@ function RunView({ id }: { id: string }) {
                 runId={id}
                 onResumed={(newId) => navigate(`/app/runs/${newId}`)}
                 onError={setError}
+                stacked={stacked}
               />
             )}
             {status && isTerminal(status) && mayRerun && (
