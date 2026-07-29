@@ -481,23 +481,30 @@ describe("prod deploy: every setting the code reads must reach the container", (
     });
   }
 
-  it("web: every VITE_* the SPA reads is passed as a build arg", () => {
+  it("web: every VITE_* the SPA reads survives the whole build-arg chain", () => {
     // The SPA has no runtime env — Vite INLINES import.meta.env at build time, so the
-    // reachability question is about build args, in compose AND in the CI image build.
+    // reachability question is about build args. All FOUR links have to hold, and only the
+    // last one actually puts the value in the bundle:
+    //   compose `build.args`  →  deploy.yml `build-args:` (the CI image is what prod runs)
+    //   →  `ARG` in the Dockerfile's BUILD stage (docker SILENTLY DROPS a --build-arg the
+    //      Dockerfile never declares, and ARG does not cross stage boundaries)
+    //   →  `ENV` in that same stage, which is what `vite build` reads.
+    // Checking only the first two would let a new VITE_* look wired and bake in `undefined`.
     const declared = new Set(receives.get("web:build")!);
     const ciBuildArgs = readFileSync(
       join(REPO, ".github/workflows/deploy.yml"),
       "utf8",
     );
-    const read = new Set<string>();
-    for (const abs of walk(join(REPO, "apps/web/src"))) {
-      const src = stripComments(readFileSync(abs, "utf8"));
-      for (const m of src.matchAll(/import\.meta\.env\.(VITE_[A-Z0-9_]+)/g)) {
-        read.add(m[1]!);
-      }
-    }
-    expect(read.size).toBeGreaterThan(5);
-    for (const name of [...read].sort()) {
+    const dockerfile = readFileSync(join(REPO, "apps/web/Dockerfile"), "utf8");
+    // Uses the SAME matcher as the backend scan, NOT a `import\.meta\.env\.VITE_` regex: the SPA
+    // also reads through an injected env object (`env.VITE_FIREBASE_APPCHECK_SITE_KEY` in
+    // lib/app-check.ts, the same test seam the server code uses), and a literal-only regex missed
+    // App Check entirely — verified by deleting its ARG line and watching this test stay green.
+    const read = [...readsIn("apps/web").keys()].filter((n) =>
+      n.startsWith("VITE_"),
+    );
+    expect(read.length).toBeGreaterThan(10);
+    for (const name of read.sort()) {
       expect(
         declared.has(name),
         `${name} is read by the SPA but is not a build arg of \`web\``,
@@ -505,6 +512,18 @@ describe("prod deploy: every setting the code reads must reach the container", (
       expect(
         ciBuildArgs.includes(`${name}=`),
         `${name} is read by the SPA but deploy.yml never passes it — the CI-built image (the one prod runs) would bake in undefined`,
+      ).toBe(true);
+      expect(
+        new RegExp(`^ARG ${name}\\s*$`, "m").test(dockerfile),
+        `${name} is passed as a build arg but apps/web/Dockerfile has no matching \`ARG ${name}\` — docker DISCARDS a --build-arg the Dockerfile does not declare, silently`,
+      ).toBe(true);
+      expect(
+        // matches both the `ENV NAME=$NAME \` head and the indented continuation lines
+        new RegExp(
+          `^\\s*(?:ENV\\s+)?${name}=\\$${name}\\s*\\\\?\\s*$`,
+          "m",
+        ).test(dockerfile),
+        `${name} has an ARG but is never promoted to ENV in the build stage, so \`vite build\` cannot see it`,
       ).toBe(true);
     }
   });
