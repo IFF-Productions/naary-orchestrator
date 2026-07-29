@@ -8,7 +8,7 @@
  * in-flight run re-evaluates. This package is CJS with `"main": "dist/index.js"` and no
  * `"exports"` map, so `export *` in the barrel compiles to `__exportStar` and NOTHING
  * tree-shakes — importing a single symbol from `@naary/dsl` executes all ~50 modules,
- * including the 161KB integration catalog (down to its UI hint strings) and zod. The
+ * including the 161KB integration catalog (down to its UI hint strings) and zod (#926). The
  * IMPORT PATH is therefore the only lever: moving code between modules changes nothing
  * unless the importer changes too.
  *
@@ -23,10 +23,10 @@
  *    `bundleWorkflowCode` output — if a catalog string reappears in the bundle, it fails.
  *  - Types are erased at compile time, so a type-only import from the barrel costs
  *    nothing; they are re-exported here purely so workflow files can use one path.
- *
- * KNOWN REMAINING WEIGHT (follow-up, deliberately not fixed here): `./template-blocks`
- * carries `zod` for its `templateBlockSchema`, so `renderEmailHtml` still pulls zod into
- * the bundle. That predates this change and is a separate split.
+ *  - A module listed here must not `require` a validation/parsing library. #926 closed the
+ *    last one: `./template-blocks` imported zod for `templateBlockSchema`, so exporting the
+ *    pure `renderEmailHtml` dragged ALL of zod in. The schemas moved to
+ *    `./template-blocks-schema`; the same bundle spec now fails if zod reappears.
  */
 
 // ── Pure value helpers the interpreter calls ────────────────────────────────────────────

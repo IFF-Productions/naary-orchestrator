@@ -21,6 +21,18 @@
  * `description`/`hint` in `INTEGRATION_CATALOG` must be absent from the bundle. Bare provider
  * names like "pagerduty" are deliberately NOT probed — `integration-write.ts` legitimately holds
  * 84 short `"provider/action"` keys (~3KB), which is the point of the change.
+ *
+ * #926 — ZOD. `#910` left one item on the table: `template-blocks.ts` imported zod for
+ * `templateBlockSchema`, and it also exports `renderEmailHtml`, which the `sendEmail` node handler
+ * calls in workflow code. Same `__exportStar` mechanics, same result: ALL of zod in the bundle
+ * (691 KB of module code, and with its share of the inline source map, 1813 KB of the 4389).
+ * Splitting the schemas into `template-blocks-schema.ts` took the bundle to 2576 KB.
+ *
+ * NOTE ON PROBING FOR ZOD: the bundle is UNMINIFIED with comments intact, and several workflow
+ * files legitimately say "zod" in prose (`eval-run.ts`, `guardrails.ts`, `workflow.ts` itself —
+ * mostly explaining why zod is kept OUT). So the bare substring "zod" is `true` in a perfectly
+ * clean bundle and asserting on it would be wrong in both directions. Probe for what only the
+ * zod PACKAGE emits: its runtime identifiers and its module paths.
  */
 import path from "node:path";
 import { bundleWorkflowCode } from "@temporalio/worker";
@@ -30,11 +42,13 @@ import { INTEGRATION_CATALOG } from "@naary/dsl";
 const WORKFLOWS_PATH = path.join(__dirname, "../src/temporal/workflows.ts");
 
 /**
- * Ceiling, in KB. Measured 5338 before #910, 4389 after. Set with headroom above the measured
- * value so ordinary feature work doesn't trip it, but far below the pre-fix number so a
- * re-introduced barrel import is caught. Raise it deliberately, with a measurement in the PR.
+ * Ceiling, in KB. Measured 5338 before #910, 4389 after; 2576 after #926 dropped zod. Set with
+ * headroom above the measured value so ordinary feature work doesn't trip it, but far below the
+ * previous number so a re-introduced barrel import is caught. Leaving it at 4700 would have left
+ * #926's entire win unguarded — so it moves DOWN with each win, and either direction is a
+ * deliberate change with a measurement in the PR.
  */
-const MAX_BUNDLE_KB = 4700;
+const MAX_BUNDLE_KB = 2900;
 
 let code = "";
 
@@ -107,6 +121,23 @@ describe("deterministic workflow bundle (#910)", () => {
     ]) {
       expect(`${marker}: ${code.includes(marker)}`).toBe(`${marker}: false`);
     }
+  });
+
+  it("does not carry zod (#926)", () => {
+    // Runtime identifiers zod itself emits. `ZodError` was the issue's own probe; the `$Zod*`
+    // names come from zod v4's core, which a v3-style dependency would not emit — probing both
+    // keeps this honest across a zod major.
+    for (const marker of ["ZodError", "$ZodError", "ZodRealError", "_zod"]) {
+      expect(`${marker}: ${code.includes(marker)}`).toBe(`${marker}: false`);
+    }
+    // The structural proof, independent of any identifier zod might rename: webpack stamps each
+    // module's resolved path into the bundle, so if any zod file were reachable from a workflow
+    // module its path would appear here. This is what makes the assertion non-vacuous — it fails
+    // for ANY route into zod, including one through a package we don't own.
+    const zodModulePaths = [
+      ...code.matchAll(/node_modules\/(?:\.pnpm\/)?[^"'\s]*zod[^"'\s]*/g),
+    ].map((m) => m[0]);
+    expect([...new Set(zodModulePaths)]).toEqual([]);
   });
 
   it("stays under the size ceiling", () => {

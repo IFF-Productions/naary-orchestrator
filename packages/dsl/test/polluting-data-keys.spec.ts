@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isPollutingKey, hasForbiddenPathSegment } from "../src/mcp-args";
 import { nodeConfigSchema } from "../src/registry";
-import { templateBlocksSchema } from "../src/template-blocks";
+import { templateBlocksSchema } from "../src/template-blocks-schema";
 
 /**
  * Save-gate for LITERAL data keys that a node writes into a plain object (issue #761).
