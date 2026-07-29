@@ -86,6 +86,11 @@ export function buildExpressionRefs(
       if (val && typeof val === "object" && !Array.isArray(val)) {
         return Object.keys(val);
       }
+      // An array: offer the FIRST index only — `{{ n.incidents.` → `0`, and from there `0.`
+      // completes the element's keys (`navigate` already walks a numeric segment). Matching
+      // the References chips (see `flattenOutput`): a 500-element array must not become 500
+      // completions, and elements are homogeneous, so index 1..n only repeats index 0's shape.
+      if (Array.isArray(val)) return val.length > 0 ? ["0"] : [];
       // No pinned value: at the FIRST level, fall back to the node kind's known output keys.
       if (rest.length === 0 && pins[nodeId] === undefined) {
         return NODE_OUTPUT_KEYS[nodeKinds[nodeId]] ?? [];

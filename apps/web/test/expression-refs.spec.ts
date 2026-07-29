@@ -54,6 +54,24 @@ describe("buildExpressionRefs", () => {
     expect(refs.keysAt("__input")).toEqual([]); // reserved, unpinned
   });
 
+  it("keysAt offers index 0 for an array, then the element's keys", () => {
+    // Same rule the References chips use: an array completes to `0` only (a 500-element
+    // array must not become 500 completions), and `0.` continues into the element.
+    const arrPins = {
+      hook: { body: { incidents: [{ id: "PABC123" }, { id: "PDEF456" }] } },
+    };
+    const refs = buildExpressionRefs("comment", edges, arrPins);
+    expect(refs.keysAt("hook.body.incidents")).toEqual(["0"]);
+    expect(refs.keysAt("hook.body.incidents.0")).toEqual(["id"]);
+  });
+
+  it("keysAt offers nothing for an empty array", () => {
+    const refs = buildExpressionRefs("comment", edges, {
+      hook: { body: { incidents: [] } },
+    });
+    expect(refs.keysAt("hook.body.incidents")).toEqual([]);
+  });
+
   it("falls back to the node kind's known output keys when unpinned", () => {
     // No pin for `hook`, but we know its kind → offer the static output shape.
     const refs = buildExpressionRefs(

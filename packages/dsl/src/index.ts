@@ -29,7 +29,12 @@ export {
   formToDbGraph,
   escalationGraph,
 } from "./templates-advanced";
-export { bindingNamesSource, getByPath, resolveMcpArguments } from "./mcp-args";
+export {
+  bindingNamesSource,
+  getByPath,
+  isPollutingKey,
+  resolveMcpArguments,
+} from "./mcp-args";
 // `resolveIntegrationFields` names its true home: it is catalog-free and the interpreter calls it
 // on every integration node, so it lives in ./integration-fields (#910). Public surface unchanged.
 export { resolveIntegrationFields } from "./integration-fields";
