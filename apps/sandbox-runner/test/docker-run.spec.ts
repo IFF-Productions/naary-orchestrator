@@ -39,6 +39,18 @@ describe("buildSandboxDockerArgs", () => {
     expect(args[args.indexOf("--memory") + 1]).toBe("2048m");
   });
 
+  it("gives the CLIs a writable tmpfs HOME — with mode=1777, or it is useless", () => {
+    // Every image runs as the unprivileged `sandbox` user whose home is on the read-only root, and
+    // these CLIs all write there at startup. Proven by deploy/sandbox/smoke-test.sh: without the
+    // mount copilot/gemini die with ENOENT, and with a bare `--tmpfs` (root-owned 0755) they die
+    // with EACCES instead — so the mode is load-bearing, not decoration.
+    const tmpfs = args.filter((_, i) => args[i - 1] === "--tmpfs");
+    expect(tmpfs).toContain("/home/sandbox:size=64m,mode=1777");
+    expect(tmpfs).toContain("/tmp:size=256m");
+    // It must stay a tmpfs (ephemeral RAM), never a bind mount of a host path.
+    expect(args).not.toContain("/home/sandbox");
+  });
+
   it("routes egress through the allowlist proxy", () => {
     expect(joined).toContain("HTTPS_PROXY=http://naary-sandbox-proxy:3128");
   });

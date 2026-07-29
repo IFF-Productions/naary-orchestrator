@@ -64,7 +64,13 @@ services:
       SANDBOX_RUNS_DIR: /var/lib/naary/sandbox-runs
       SANDBOX_NETWORK: naary-sandbox-internal
       SANDBOX_PROXY_URL: http://naary-sandbox-proxy:3128
-      SANDBOX_IMAGE: naary-claude-sandbox:latest
+      # Per-TOOL images (#680): the runner maps the request's `tool` to one of these — a request
+      # can never name an image (the runner holds the Docker socket). Each default is DISTINCT;
+      # `SANDBOX_IMAGE` remains a claude-only alias for pre-#680 deploys. Pin by digest in prod.
+      SANDBOX_IMAGE_CLAUDE: "${SANDBOX_IMAGE_CLAUDE:-naary-claude-sandbox:latest}"
+      SANDBOX_IMAGE_CURSOR: "${SANDBOX_IMAGE_CURSOR:-naary-cursor-sandbox:latest}"
+      SANDBOX_IMAGE_COPILOT: "${SANDBOX_IMAGE_COPILOT:-naary-copilot-sandbox:latest}"
+      SANDBOX_IMAGE_GEMINI: "${SANDBOX_IMAGE_GEMINI:-naary-gemini-sandbox:latest}"
     volumes:
       # Docker socket — this container's (contained) privilege.
       - /var/run/docker.sock:/var/run/docker.sock

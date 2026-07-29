@@ -33,14 +33,22 @@ RUN apt-get update \
 # failed download fed `bash` an empty stdin and `bash` exited 0 — reporting success with no binary
 # present (fixed for the backend image in #933). The `command -v` also catches an installer that
 # exits 0 without placing the binary.
+# The installer puts the real binary under the INSTALLING user's ~/.local/share/cursor-agent/
+# versions/<ver>/ and leaves a SYMLINK in ~/.local/bin. Copying just that symlink produces a
+# DANGLING link once we drop to the unprivileged user (verified: "executable file not found in
+# $PATH"), so relocate the whole versioned tree to /opt and link to the resolved binary.
+#
+# The closing `--version` is a real functional check, not a `command -v`: it proves the binary
+# actually executes as installed, which is exactly what the naive copy failed to do.
 RUN curl -fsSL https://cursor.com/install -o /tmp/cursor-install.sh \
   && bash /tmp/cursor-install.sh \
   && rm -f /tmp/cursor-install.sh \
-  && PATH="/root/.local/bin:$PATH" command -v cursor-agent >/dev/null \
-  # The installer drops the binary in the INSTALLING user's ~/.local/bin (root's). Move it
-  # somewhere the unprivileged runtime user can execute — the sandbox never runs as root.
-  && cp -a /root/.local/bin/cursor-agent /usr/local/bin/cursor-agent \
-  && chmod 0755 /usr/local/bin/cursor-agent
+  && test -d /root/.local/share/cursor-agent \
+  && mv /root/.local/share/cursor-agent /opt/cursor-agent \
+  && ln -s "$(find /opt/cursor-agent/versions -maxdepth 2 -name cursor-agent -type f | head -1)" \
+       /usr/local/bin/cursor-agent \
+  && chmod -R a+rX /opt/cursor-agent \
+  && cursor-agent --version
 
 # Non-root: the model's tools run as an unprivileged user (defense in depth alongside the
 # runner's --cap-drop ALL / no-new-privileges / read-only root).

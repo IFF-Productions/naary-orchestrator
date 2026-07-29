@@ -41,19 +41,46 @@ endpoint all **blocked**. Prints `✅ EGRESS OK …` or fails non-zero.
 > dials them by name — so run the test when the sandbox stack is **not** already up (that
 > now includes the prod stack's `sandbox` profile), or it will reuse/conflict on those names.
 
-**codeAgent write/Bash mode stays disabled until this passes on the deploy host.** Slice 1's
-read-only path (in-worker, capability-clamped) is unaffected.
+**codeAgent write/Bash mode stays disabled until this passes on the deploy host.**
 
-## Build the sandbox image
+> Since #680 there is no un-sandboxed path left: codeAgent READ (and the api's `claude-code`
+> "Build with AI" source) now REQUIRE this stack. Without it they fail loudly with
+> `CODE_AGENT_SANDBOX_UNCONFIGURED` / a 503 naming the settings to add — deliberately, so a
+> missing sandbox can never silently degrade into running a CLI inside the api/worker process.
+
+## Build the sandbox images — one per tool
+
+Each coding CLI gets its **own** image whose `ENTRYPOINT` is that CLI's binary. That is what makes
+"the argv reached the wrong CLI" structurally impossible: the runner maps `tool` → image from its
+own config, and a request can only name a tool from a closed set, never an image. (Before #680 a
+single claude-entrypoint image was pinned for all tools — see #933.)
 
 ```bash
-docker build -t naary-claude-sandbox:latest deploy/sandbox
+docker build -t naary-claude-sandbox:latest  deploy/sandbox
+docker build -t naary-cursor-sandbox:latest  -f deploy/sandbox/cursor.Dockerfile  deploy/sandbox
+docker build -t naary-copilot-sandbox:latest -f deploy/sandbox/copilot.Dockerfile deploy/sandbox
+docker build -t naary-gemini-sandbox:latest  -f deploy/sandbox/gemini.Dockerfile  deploy/sandbox
 ```
 
-Node + `@anthropic-ai/claude-code` + git, non-root, read-only root at run time. Launched only
-by the runner (`@naary/sandbox-runner`), which **pins this image** and constructs a hardened
-`docker run` (`--rm`, `--cap-drop ALL`, `no-new-privileges`, cpu/mem/pids caps, key forwarded
-by name — never inline). The git token never enters the sandbox.
+Build only the tools you actually offer — and trim `squid-allowlist.conf` to match, since every
+host listed there is somewhere a hijacked run could post a key. Override any image with
+`SANDBOX_IMAGE_{CLAUDE,CURSOR,COPILOT,GEMINI}` (pin by digest in production).
+
+Each is Node + that CLI + git, non-root, read-only root at run time. Launched only by the runner
+(`@naary/sandbox-runner`), which **pins the image** and constructs a hardened `docker run`
+(`--rm`, `--cap-drop ALL`, `no-new-privileges`, cpu/mem/pids caps, tmpfs `/tmp` + HOME, key
+forwarded by name — never inline). The git token never enters the sandbox.
+
+### Smoke-test them
+
+```bash
+deploy/sandbox/smoke-test.sh            # all four, or name the ones you built
+```
+
+`egress-test.sh` proves the network containment; this proves each image can actually *start* under
+those isolation flags with an empty workdir. Worth running after any CLI version bump — all four
+images failed it on the first attempt for four different reasons (unwritable HOME, a dangling
+symlink, a `noexec` native addon), and none of those are visible to the unit tests.
 
 ## In production
 
@@ -64,9 +91,13 @@ host `deploy/sandbox/` is shipped to `/opt/naary/deploy/sandbox` (the prod overl
 bind-mounts the squid allowlist from there), and enabling the runner is three steps:
 
 ```bash
-docker build -t naary-claude-sandbox:latest /opt/naary/deploy/sandbox   # 1. sandbox image
-/opt/naary/deploy/sandbox/egress-test.sh                                # 2. the gate above
-# 3. add SANDBOX_RUNNER_TOKEN=<random> + COMPOSE_PROFILES=sandbox to /opt/naary/.env
+cd /opt/naary                                                # 1. the tool images you offer
+docker build -t naary-claude-sandbox:latest deploy/sandbox
+#   …plus cursor/copilot/gemini with -f, as above
+/opt/naary/deploy/sandbox/egress-test.sh                     # 2. the egress gate
+/opt/naary/deploy/sandbox/smoke-test.sh                      # 3. each image starts
+# 4. add SANDBOX_RUNNER_TOKEN=<random> + COMPOSE_PROFILES=sandbox to /opt/naary/.env
+#    (the api reads the same two vars — it dispatches "Build with AI" runs here too)
 ```
 
 The runner image itself is built + pushed by CI (`naary-sandbox-runner`, per release tag),
