@@ -111,6 +111,83 @@ describe("runGraph interpreter — per-run debug flag (ctx.__debug)", () => {
       expect((await off.query(stateQuery)).ctx.__debug).toBeUndefined();
     });
   });
+
+  /**
+   * Resume-from-failed-node must keep debug on: that is the moment someone turned it on FOR.
+   * #924 shipped `if (runCtx.debug && !resume)` and flagged the gap itself.
+   *
+   * Both halves are asserted because only one of them was actually broken:
+   *   (a) the snapshot ctx is the primary carrier — the failed run's ctx is stored verbatim, so
+   *       `resume.ctx` brings `__debug` back in on its own (this passed before the fix too);
+   *   (b) a resume whose runCtx opted in but whose snapshot ctx has no `__debug` — the half the
+   *       `!resume` guard dropped on the floor.
+   * The recorded history is then replayed against this code: the flag is plain ctx state, so it
+   * must issue no command (CLAUDE.md Tier-1 rule 2).
+   */
+  it("a RESUME keeps debug — carried in the snapshot ctx, re-seeded from runCtx — and its history replays", async () => {
+    const graph: GraphDef = {
+      startNodeId: "trigger",
+      nodes: [
+        { id: "trigger", type: "webhookTrigger" },
+        { id: "mid", type: "set", config: { fields: { ok: true } } },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "trigger", to: "mid" },
+        { from: "mid", to: "end" },
+      ],
+    };
+    /** The API's arg 4, seeded at the node that died. */
+    const resumeState = (ctx: Record<string, unknown>) => ({
+      ctx,
+      startNodeId: "mid",
+      costUsd: 0,
+      stepCount: 0,
+      reseedVars: true,
+    });
+
+    const worker = await makeWorker(env);
+    const history = await worker.runUntil(async () => {
+      // (a) carried: the run that failed had stamped __debug, and the snapshot kept it.
+      const carried = await env.client.workflow.execute(runGraph, {
+        args: [
+          graph,
+          {},
+          { tenantId: "t-dbg" },
+          resumeState({ __debug: true }),
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-debug-resume-carried",
+      });
+      expect(carried.status).toBe("completed");
+      expect(carried.ctx.__debug).toBe(true);
+
+      // (b) re-seeded: runCtx opted in, the snapshot ctx predates the flag.
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          graph,
+          {},
+          { tenantId: "t-dbg", debug: true },
+          resumeState({ trigger: { seen: true } }),
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-debug-resume-reseeded",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(result.ctx.__debug).toBe(true);
+      return handle.fetchHistory();
+    });
+
+    // No command was issued for the flag (a plain ctx write) — the history replays against this code.
+    await expect(
+      Worker.runReplayHistory(
+        { workflowsPath: WORKFLOWS_PATH },
+        history,
+        "e2e-debug-resume-reseeded",
+      ),
+    ).resolves.toBeUndefined();
+  });
 });
 
 describe("runGraph interpreter — Claude Code as an Agent provider", () => {

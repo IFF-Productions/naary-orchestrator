@@ -181,6 +181,29 @@ describe("resume", () => {
     expect(resume.reseedVars).toBe(true);
   });
 
+  /**
+   * A debug run must RESUME as a debug run — resuming the node that died is exactly when the
+   * verbose logs and the per-node debug rows are wanted. The snapshot's own `__debug` marker (the
+   * interpreter stamps it into ctx, and the ctx is snapshotted verbatim) is what carries it.
+   */
+  it("inherits the original run's debug flag from the snapshot", async () => {
+    findUnique.mockResolvedValue(failedRow());
+    resolveClaimChecks.mockResolvedValue({
+      email: { status: "ok" },
+      __debug: true,
+    });
+    await makeService().resume("run-1", "t-1");
+    expect(start.mock.calls[0][1].args[2]).toMatchObject({ debug: true });
+  });
+
+  /** …and an ordinary resume's workflow args stay byte-identical — nobody gets verbose logging
+   *  by accident (the same rule the start/re-run paths follow). */
+  it("does not add the flag when the original run wasn't a debug run", async () => {
+    findUnique.mockResolvedValue(failedRow());
+    await makeService().resume("run-1", "t-1");
+    expect(start.mock.calls[0][1].args[2]).not.toHaveProperty("debug");
+  });
+
   it("records lineage on the new run", async () => {
     findUnique.mockResolvedValue(failedRow());
     await makeService().resume("run-1", "t-1");
