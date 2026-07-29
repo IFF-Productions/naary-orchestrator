@@ -42,6 +42,7 @@ export function useAiBuilder({
   setVersion,
   setStatus,
   setSearchParams,
+  onGraphPresented,
 }: {
   nodes: Node<NaaryData>[];
   /** The live-compiled canvas, or undefined while it doesn't compile. What an edit sends. */
@@ -58,6 +59,12 @@ export function useAiBuilder({
   setVersion: Dispatch<SetStateAction<number | null>>;
   setStatus: Dispatch<SetStateAction<string | null>>;
   setSearchParams: SetURLSearchParams;
+  /**
+   * A generation LANDED, so the graph now on the canvas is what was presented, not an edit of
+   * it — the unsaved-changes guard re-baselines from it. Called only on success (see the call
+   * site for why a failed stream must NOT re-baseline).
+   */
+  onGraphPresented: () => void;
 }) {
   // AI workflow builder: describe a flow → generate a draft onto the canvas.
   const [showAi, setShowAi] = useState(false);
@@ -212,6 +219,12 @@ export function useAiBuilder({
       setNodes(toFlowNodes(positions.settle(cn)));
       setEdges(toFlowEdges(ce));
       setName(genName);
+      // A completed generation PRESENTS a graph rather than editing one, so it becomes the
+      // unsaved-changes guard's new baseline. Here — on the SUCCESS path, after the reconcile —
+      // and not on the falling edge of `generating`: a generation that dies mid-stream leaves a
+      // half-drawn graph on the canvas, and baselining THAT would mark the user's real unsaved
+      // edits clean and let them be discarded without a prompt.
+      onGraphPresented();
       if (editing) {
         // Keep workflowKey + version: this is the SAME workflow, so Save writes its next
         // version. Blanking them (what the create path does) forks a copy and orphans the

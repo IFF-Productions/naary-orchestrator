@@ -66,9 +66,11 @@ import {
   type EdgeConditionDraft,
   NODE_KINDS,
 } from "../lib/graph-model";
+import { useConfirm } from "../components";
 import { envAccent } from "../workspace/EnvironmentSwitcher";
 import { CATALOG, type CatalogEntry } from "./app/catalog/catalog-data";
 import { AiPromptPanel } from "./canvas/AiPromptPanel";
+import { UNTITLED_WORKFLOW } from "./canvas/canvas-dirty";
 import { CanvasInspectorDock } from "./canvas/CanvasInspectorDock";
 import { CanvasIssuesPanel } from "./canvas/CanvasIssuesPanel";
 import { CanvasStage } from "./canvas/CanvasStage";
@@ -99,6 +101,7 @@ import {
 import { useCanvasToasts } from "./canvas/useCanvasToasts";
 import { useDockDerivations } from "./canvas/useDockDerivations";
 import { useDryRun } from "./canvas/useDryRun";
+import { useUnsavedChanges } from "./canvas/useUnsavedChanges";
 import { useWorkflowActions } from "./canvas/useWorkflowActions";
 
 export function CanvasPage() {
@@ -192,6 +195,16 @@ export function CanvasPage() {
   // the graph to change, and the derivations layer lints and overlays it.
   const { graph, error } = useCompiledCanvas(nodes, edges);
 
+  // Unsaved-changes guard (#909 follow-up): the canvas never auto-saves, so it owes the user a
+  // warning before anything discards their work. `dirty` also gates the "save before I test /
+  // check this?" questions further down — the two must agree on what "unsaved" means, so they
+  // read it from the same place.
+  const { dirty, markSaved, resetBaseline } = useUnsavedChanges({
+    graph,
+    name,
+  });
+  const confirm = useConfirm();
+
   // AI workflow builder: describe a flow → stream a draft onto the canvas, or describe a
   // change → stream it applied to what's already there.
   const {
@@ -222,6 +235,7 @@ export function CanvasPage() {
     setVersion,
     setStatus,
     setSearchParams,
+    onGraphPresented: resetBaseline,
   });
 
   const [watchState, setWatchState] = useState<ExecutionState | null>(null);
@@ -383,6 +397,23 @@ export function CanvasPage() {
     [nodes, edges, pins, workflowKey],
   );
 
+  /** The key to save/run under: an opened workflow's key, else slug(name). */
+  const activeKey = workflowKey || slugify(name);
+
+  // Affordance gating (RBAC-GROUPS G2): saving an EXISTING key needs `edit` on it, a NEW
+  // key needs `create`. Disabled-not-hidden (with a tooltip) so the state is explainable;
+  // the API enforces regardless — a forced request still 403s.
+  //
+  // Declared UP HERE, above its main consumers, because the "save before I test / check this?"
+  // dialogs have to know it: offering "Save and test" to someone whose save can only 403 asks
+  // them to authorize something that cannot happen.
+  const perms = usePermissions();
+  const keyExists = workflows.some((w) => w.workflowKey === activeKey);
+  const maySave = canSaveWorkflow(perms, activeKey, keyExists);
+  const saveDeniedTitle = keyExists
+    ? "You don't have edit permission on this workflow"
+    : "You don't have permission to create workflows in this environment";
+
   // Single-node test runner — the ONE path the dock's "Test step", the config panel's
   // "Test node" and the per-node ▶ all use, so card state / measured duration / the
   // dock's output stay in sync. Wraps the existing api.testNode machinery. Duration:
@@ -395,20 +426,43 @@ export function CanvasPage() {
 
   const runNodeTest = useCallback(
     async (nodeId: string, autofill?: boolean): Promise<TestNodeResult> => {
-      // SAVE FIRST. The endpoint takes only (workflowKey, nodeId) and reads the node out of
-      // the latest SAVED graph — whatever is on the canvas never leaves the browser. The old
-      // guard only caught a workflow that had NEVER been saved, so an edited-but-unsaved node
-      // tested its previous config and reported on a version the user couldn't see: type a
-      // value, press Test, get told the field is empty. Saving makes the thing tested the
-      // thing on screen, which is the only reading of this button that isn't a lie.
-      // The key the save RETURNED, not the state variable: on a first save `setWorkflowKey`
-      // won't have re-rendered yet, so reading state here would test under the empty key.
-      const key = (await saveRef.current?.()) || workflowKey;
-      if (!key) {
-        setStatus(
-          "Save the workflow first — node tests run against the saved graph.",
-        );
-        throw new Error("Workflow not saved yet.");
+      // ASK, DON'T AUTO-SAVE. The endpoint takes only (workflowKey, nodeId) and reads the node
+      // out of the latest SAVED graph — what's on the canvas never leaves the browser. So an
+      // edited-but-unsaved node used to be tested in its PREVIOUS config and reported on a
+      // version the user couldn't see: type a value, press Test, get told the field is empty.
+      // Saving first fixes that, but saving on the user's behalf takes the decision to write a
+      // version away from them, and this canvas does not auto-save. Hence the dialog — and a
+      // "no" means the test doesn't run, rather than quietly answering a question about a graph
+      // they can't see (which is the confusion the dialog exists to end).
+      let key = workflowKey;
+      if (!key || dirty) {
+        // Don't offer a save this user isn't allowed to make — the same explanation the Save
+        // button's tooltip gives, instead of a dialog that leads to a 403.
+        if (!maySave) {
+          setStatus(saveDeniedTitle);
+          throw new Error(saveDeniedTitle);
+        }
+        const ok = await confirm({
+          title: "Test the saved version?",
+          body: "Node tests run against the saved workflow, so the unsaved edits on this canvas wouldn't be part of the test. Saving first makes the thing tested the thing on screen.",
+          confirmLabel: "Save and test",
+          cancelLabel: "Don't test",
+        });
+        if (!ok) {
+          setStatus(
+            "Test cancelled — node tests run against the saved workflow.",
+          );
+          throw new Error("Test cancelled — the canvas has unsaved changes.");
+        }
+        // The key the save RETURNED, not the state variable: on a first save `setWorkflowKey`
+        // won't have re-rendered yet, so reading state here would test under the empty key.
+        // A null means the save didn't happen (an uncompilable graph) and said why — testing
+        // the previous version anyway is exactly the lie above.
+        const savedKey = await saveRef.current?.();
+        if (!savedKey) {
+          throw new Error("Not saved — a node test needs a saved workflow.");
+        }
+        key = savedKey;
       }
       const t0 = performance.now();
       setNodeRuns((r) => ({
@@ -429,10 +483,12 @@ export function CanvasPage() {
           return next;
         });
         if (!res.pure) setStatus(res.message);
-        // Autofill pins upstream nodes server-side — refresh so they show.
+        // Autofill pins upstream nodes server-side — refresh so they show. Under `key`, not the
+        // state variable: on a FIRST save the re-render hasn't landed, so `workflowKey` is still
+        // empty here and the refresh would list nothing.
         if (autofill) {
           api
-            .listPins(workflowKey)
+            .listPins(key)
             .then(setPins)
             .catch(() => undefined);
         }
@@ -449,7 +505,7 @@ export function CanvasPage() {
         throw e;
       }
     },
-    [workflowKey],
+    [workflowKey, dirty, confirm, maySave, saveDeniedTitle],
   );
 
   // The per-node ▶ (node card): run the test and select the node so its output
@@ -534,6 +590,9 @@ export function CanvasPage() {
           setWorkflowKey("");
           setVersion(null);
           setStatus(`Forked from template "${t.name}" — Save to keep it.`);
+          // A freshly PRESENTED graph, not an edit of what was here: re-baseline the
+          // unsaved-changes guard so the fork doesn't read as work in progress.
+          resetBaseline();
           // The initial fitView ran before the graph landed — refit to it.
           setTimeout(
             () => rfRef.current?.fitView({ duration: 250, padding: 0.2 }),
@@ -555,6 +614,8 @@ export function CanvasPage() {
           setWorkflowKey(g.workflowKey);
           setVersion(g.version);
           setStatus(null);
+          // Same as the template branch: this graph is what's saved, so it is the new baseline.
+          resetBaseline();
           // The initial fitView ran before the graph landed — refit to it.
           setTimeout(
             () => rfRef.current?.fitView({ duration: 250, padding: 0.2 }),
@@ -568,7 +629,7 @@ export function CanvasPage() {
     return () => {
       live = false;
     };
-  }, [keyParam, templateParam]);
+  }, [keyParam, templateParam, resetBaseline]);
 
   // #490 — poll the watched run's real state every 1.5s (same cadence + api call
   // as RunDetail), stopping the moment it's terminal and on unmount. Reuses the
@@ -863,32 +924,37 @@ export function CanvasPage() {
     );
   }
 
-  /** The key to save/run under: an opened workflow's key, else slug(name). */
-  const activeKey = workflowKey || slugify(name);
-
-  // Affordance gating (RBAC-GROUPS G2): saving an EXISTING key needs `edit` on it, a NEW
-  // key needs `create`. Disabled-not-hidden (with a tooltip) so the state is explainable;
-  // the API enforces regardless — a forced request still 403s.
-  const perms = usePermissions();
-  const keyExists = workflows.some((w) => w.workflowKey === activeKey);
-  const maySave = canSaveWorkflow(perms, activeKey, keyExists);
-  const saveDeniedTitle = keyExists
-    ? "You don't have edit permission on this workflow"
-    : "You don't have permission to create workflows in this environment";
-
-  function newWorkflow() {
+  // "New" replaces the canvas HERE, in state, and only then rewrites the URL — so the route
+  // blocker can't cover it (by the time the navigation is blocked the work is already gone).
+  // It asks for itself, before touching anything.
+  async function newWorkflow() {
+    if (dirty) {
+      const ok = await confirm({
+        title: "Start a new workflow?",
+        body: "This canvas has changes that haven't been saved. Starting a new one discards them.",
+        confirmLabel: "Discard and start new",
+        cancelLabel: "Keep editing",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     setNodes(SEED_NODES);
     setEdges(SEED_EDGES);
-    setName("Untitled workflow");
+    setName(UNTITLED_WORKFLOW);
     setWorkflowKey("");
     setVersion(null);
     setStatus(null);
+    // Before the param rewrite below, so the blocker doesn't ask a second time about work the
+    // user just agreed to discard.
+    resetBaseline();
     if (keyParam) setSearchParams(keepReturn(), { replace: true });
   }
 
   function openWorkflow(key: string) {
+    // Opening a DIFFERENT workflow re-loads the canvas from the server, but it does so through a
+    // ?key= navigation — which the blocker sees and asks about, so there's no second prompt here.
     if (key) setSearchParams(keepReturn({ key }), { replace: true });
-    else newWorkflow();
+    else void newWorkflow();
   }
 
   // Workflow persistence + file IO (export / import / save / run / save-only). Plain
@@ -914,17 +980,22 @@ export function CanvasPage() {
       setWorkflows,
       setSearchParams,
       navigate,
+      onSaved: markSaved,
+      onGraphReplaced: resetBaseline,
     });
   // Hand `save` back to runNodeTest, which is declared above it (it feeds callbacks defined
   // earlier) and so can't close over it. Assigned every render, so the ref never holds a
   // handler closed over stale state.
   saveRef.current = save;
 
-  // DRY RUN (#832) — "Check flow": save, then answer "will this run?" without running it.
-  // Saving first is the point: the endpoint checks the SAVED graph, so a check on unsaved edits
-  // would describe a version that isn't the one on screen. A single-node Test now does the
-  // same, for the same reason — it used to test the last saved config and report on a version
-  // the user couldn't see.
+  // DRY RUN (#832) — "Check flow": answer "will this run?" without running it.
+  //
+  // The endpoint checks the SAVED graph, the same seam a single-node Test sits on, so a check
+  // with unsaved edits on the canvas would describe a version that isn't the one on screen. It
+  // used to save first to close that gap; it now ASKS, because the canvas doesn't save on the
+  // user's behalf. A "no" means no check at all rather than a verdict about a hidden version.
+  // Nothing to save (clean canvas, already saved) ⇒ no question and no needless new version:
+  // the saved graph IS what's on screen.
   const {
     checking,
     summary: dryRun,
@@ -932,6 +1003,26 @@ export function CanvasPage() {
     clear: clearDryRun,
   } = useDryRun({
     save: async () => {
+      // Nothing to save — the saved workflow already IS what's on screen. Check it as it
+      // stands, with no question and no gratuitous new version.
+      if (workflowKey && !dirty) return workflowKey;
+      // As in a node test: don't offer a save this user can't make.
+      if (!maySave) {
+        setStatus(saveDeniedTitle);
+        return null;
+      }
+      // Asked BEFORE `busy`, so the top bar isn't stuck showing work in progress behind a
+      // modal that hasn't been answered yet.
+      const ok = await confirm({
+        title: "Check the saved version?",
+        body: "Check flow inspects the saved workflow, so the unsaved edits on this canvas wouldn't be part of the check. Saving first makes the checked flow the one on screen.",
+        confirmLabel: "Save and check",
+        cancelLabel: "Don't check",
+      });
+      if (!ok) {
+        setStatus("Check cancelled — Check flow inspects the saved workflow.");
+        return null;
+      }
       setBusy(true);
       setStatus(null);
       try {
@@ -1090,7 +1181,7 @@ export function CanvasPage() {
         workflows={workflows}
         currentKeyParam={keyParam}
         onOpenWorkflow={openWorkflow}
-        onNewWorkflow={newWorkflow}
+        onNewWorkflow={() => void newWorkflow()}
         onSave={() => void saveOnly()}
         onCheck={() => void checkFlow()}
         checking={checking}

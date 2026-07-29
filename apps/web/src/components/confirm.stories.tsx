@@ -120,6 +120,45 @@ export const AmbiguousCancel: Story = {
   },
 };
 
+/**
+ * The canvas's "save before I test this?" question (#909 follow-up). A node test runs against the
+ * SAVED workflow, so unsaved edits aren't part of it — but the canvas doesn't save on the user's
+ * behalf to paper over that, it asks. Not `danger`: saving isn't destructive, and the common
+ * answer is yes, so focus starts on "Save and test". Declining means the test doesn't run —
+ * hence "Don't test" rather than "Cancel", which would leave the outcome ambiguous.
+ */
+export const SaveBeforeTest: Story = {
+  args: {
+    label: "Test step",
+    opts: {
+      title: "Test the saved version?",
+      body: "Node tests run against the saved workflow, so the unsaved edits on this canvas wouldn't be part of the test. Saving first makes the thing tested the thing on screen.",
+      confirmLabel: "Save and test",
+      cancelLabel: "Don't test",
+    },
+  },
+};
+
+/**
+ * The canvas's unsaved-changes guard on an in-app navigation (react-router `useBlocker`). Leaving
+ * discards work, so it IS destructive: red accept, focus on "Stay here".
+ *
+ * Closing the TAB can't use this dialog at all — `beforeunload` only lets a page ask for the
+ * browser's own generic prompt — which is why that one exit looks different from every other.
+ */
+export const LeaveWithUnsavedChanges: Story = {
+  args: {
+    label: "Navigate away",
+    opts: {
+      title: "Leave with unsaved changes?",
+      body: "This canvas has changes that haven't been saved. Leaving now discards them.",
+      confirmLabel: "Discard changes",
+      cancelLabel: "Stay here",
+      danger: true,
+    },
+  },
+};
+
 /** Long, unbroken content (a pasted id/URL) must wrap instead of stretching the panel. */
 export const LongContent: Story = {
   args: {
