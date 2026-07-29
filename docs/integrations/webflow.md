@@ -5,9 +5,10 @@ label: 'Webflow'
 category: 'Marketing'
 authType: bearer
 serverUrlRequired: false
-actionCount: 4
+actionCount: 5
 writeActionCount: 1
-oneClickTestable: false
+oneClickTestable: true
+probeAction: get_authorized_by
 liveVerified: false
 ---
 
@@ -40,9 +41,9 @@ Read and create Webflow CMS collection items from a workflow.
 
 ## Verify it works
 
-**No one-click check:** its read actions all need an id you have to supply, so there is no safe argument-free call to probe with.
+**One-click:** this provider has an argument-free read (`get_authorized_by` → `GET /token/authorized_by`), so a connection test can confirm the credential without touching your data.
 
-Either way, the definitive check is **single-node Test** on the canvas: drop a **Webflow** node, pick this connection, choose a read action and fill its ids, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
+Either way, the definitive check is **single-node Test** on the canvas: drop a **Webflow** node, pick this connection and the *Get token owner* action, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
 
 > **Not yet proven against the real API.** This provider's request shape is typed and unit-tested, but no automated test has ever called the live service. If your first call fails with a 4xx, the fault may be ours — check `docs/integrations/VERIFICATION.md` and open an issue rather than assuming your token is wrong.
 
@@ -54,6 +55,7 @@ Either way, the definitive check is **single-node Test** on the canvas: drop a *
 | List items | `GET` | `/collections/{collectionId}/items` | `collectionId` | `limit`, `offset` |
 | Get item | `GET` | `/collections/{collectionId}/items/{itemId}` | `collectionId`, `itemId` | — |
 | **Create item** (write) | `POST` | `/collections/{collectionId}/items` | `collectionId`, `fieldData` | `isDraft` |
+| Get token owner | `GET` | `/token/authorized_by` | — | — |
 
 Fields can be typed in statically or **bound** to an upstream step's output (`{ from: <nodeId>, path: <dotted.path> }`) — ids and generated text are usually bound.
 

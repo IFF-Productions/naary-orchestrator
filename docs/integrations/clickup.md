@@ -5,9 +5,10 @@ label: 'ClickUp'
 category: 'Productivity'
 authType: custom-header
 serverUrlRequired: false
-actionCount: 5
+actionCount: 6
 writeActionCount: 3
-oneClickTestable: false
+oneClickTestable: true
+probeAction: get_me
 liveVerified: false
 ---
 
@@ -40,9 +41,9 @@ Create, update and comment on ClickUp tasks from a workflow.
 
 ## Verify it works
 
-**No one-click check:** its read actions all need an id you have to supply, so there is no safe argument-free call to probe with.
+**One-click:** this provider has an argument-free read (`get_me` → `GET /user`), so a connection test can confirm the credential without touching your data.
 
-Either way, the definitive check is **single-node Test** on the canvas: drop a **ClickUp** node, pick this connection, choose a read action and fill its ids, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
+Either way, the definitive check is **single-node Test** on the canvas: drop a **ClickUp** node, pick this connection and the *Get authorized user* action, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
 
 > **Not yet proven against the real API.** This provider's request shape is typed and unit-tested, but no automated test has ever called the live service. If your first call fails with a 4xx, the fault may be ours — check `docs/integrations/VERIFICATION.md` and open an issue rather than assuming your token is wrong.
 
@@ -55,6 +56,7 @@ Either way, the definitive check is **single-node Test** on the canvas: drop a *
 | **Update task** (write) | `PUT` | `/task/{taskId}` | `taskId` | `name`, `status`, `priority` |
 | List tasks | `GET` | `/list/{listId}/task` | `listId` | `archived`, `page` |
 | **Create comment** (write) | `POST` | `/task/{taskId}/comment` | `taskId`, `comment_text` | — |
+| Get authorized user | `GET` | `/user` | — | — |
 
 Fields can be typed in statically or **bound** to an upstream step's output (`{ from: <nodeId>, path: <dotted.path> }`) — ids and generated text are usually bound.
 

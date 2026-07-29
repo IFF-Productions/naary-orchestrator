@@ -14,11 +14,12 @@
  *     proves the header scheme, baseUrl and token the node will really use. A drift test
  *     (`apps/worker/test/integration-request.drift.spec.ts`) pins the activity's emitted request to
  *     this same function so the two cannot diverge.
- *  2. **It can only ever issue a non-write, zero-required-field read**, chosen from the catalog's
- *     own `write` flag + `fields[].required` (`pickConnectionTestAction`). There is no override, no
- *     caller-supplied action, and no hand-maintained probe table. A provider with no such action
- *     (Slack: all 3 catalog actions write; GitHub: its cheapest read still needs owner/repo/number)
- *     reports `unknown` with the reason — never a guessed argument, never something that mutates.
+ *  2. **It can only ever issue a non-write, zero-required-field GET**, chosen from the catalog's
+ *     own `write` flag + `method` + `fields[].required` (`pickConnectionTestAction`). There is no
+ *     caller-supplied action and no probe table in this service: a provider that needs a specific
+ *     probe declares it on its catalog ACTION (`probe`), which narrows that choice but can never
+ *     widen it past the gate. A provider with nothing safe to call reports `unknown` with the reason
+ *     — never a guessed argument, never something that mutates.
  *
  * Secrets: the token is resolved here, held in memory for the one call, and never returned, logged
  * or echoed in the response (CLAUDE.md Tier-1 rule 4). Egress goes through the SSRF-hardened
@@ -157,7 +158,14 @@ export class ConnectionTestService {
 
     // What is safe to call? Decided from the catalog BEFORE anything else, so a provider we can't
     // probe never gets as far as resolving a secret or opening a socket.
-    const probe = pickConnectionTestAction(providerKey);
+    //
+    // The connection's `authMode` goes in because one provider can need TWO probes: a GitHub PAT
+    // gets 200 from `/user` and 403 from `/installation/repositories`, and a GitHub App installation
+    // token gets exactly the reverse (verified live, #835). Probing an App connection with `/user`
+    // would report a perfectly good connection as broken — worse than reporting nothing.
+    const probe = pickConnectionTestAction(providerKey, {
+      authMode: conn.authMode,
+    });
     if (probe.kind === "unknown") {
       return unknownResult(null, probe.reason);
     }

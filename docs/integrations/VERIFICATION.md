@@ -213,37 +213,54 @@ reached with a PAT — verify the mode you actually use.
 
 ---
 
-### 2.4 Which providers "Test connection" can actually prove — 14 of 38
+### 2.4 Which providers "Test connection" can actually prove — 31 of 38
 
-This is the honest ceiling of §1.5, machine-derived from the catalog (a non-write action all of whose
-required fields are absent or catalog-`const`). It is smaller than §2's "safest read" column, because
-that column allows an action that needs an id and this one does not.
+This is the honest ceiling of §1.5, machine-derived from the catalog: an action that is `write: false`,
+a `GET`, and has no required field the user would have to supply. It is smaller than §2's "safest read"
+column, because that column allows an action that needs an id and this one does not.
 
-**Testable with one click (14):** `calendly` · `cloudflare` · `deepl` · `digitalocean` · `front` ·
-`netlify` · `pagerduty` · `pipedrive` · `sendgrid` · `shopify` · `stripe` · `todoist` · `vercel` ·
-`zendesk`
+It used to be **14 of 38**, and the missing half was the popular half — GitHub, Slack, Jira, Linear,
+Notion and GitLab all reported `unknown`, which is where a dead token is most likely to be. #835 fixed
+that in the CATALOG rather than in the route: 17 providers gained a genuine argument-free identity read
+(`GET /user`, `/users/me`, `/meta/whoami`, …), each declared with `probe` on the action so the choice is
+pinned. Every candidate endpoint was checked against the real API before it landed (unauthenticated,
+expecting a 401/403 "route exists, credential rejected" — never a 404), and GitHub's two were checked
+with real credentials.
 
-Worth noting how much of the risky surface that covers: of the **9 non-Bearer providers** (§2.2) — the
-ones where a wrong header scheme fails 100% of that provider's calls and no unit test would notice —
-**4 are one-click testable**: `deepl` and `pagerduty` (custom-header form) and `zendesk` (HTTP Basic)
-and `shopify` (`X-Shopify-Access-Token`). So both non-Bearer code paths get real coverage, even
-though `jira`/`twilio`/`discord`/`clickup`/`monday` individually do not. And 3 of the 6
-baseUrl-less providers (§2.3) are testable: `deepl`, `shopify`, `zendesk`.
+**Testable with one click (31):** `airtable` · `asana` · `box` · `calendly` · `clickup` · `cloudflare` ·
+`deepl` · `digitalocean` · `discord` · `front` · `github` · `gitlab` · `intercom` · `jira` ·
+`mailchimp` · `mattermost` · `netlify` · `notion` · `pagerduty` · `pipedrive` · `posthog` · `sendgrid` ·
+`sentry` · `shopify` · `stripe` · `todoist` · `twilio` · `vercel` · `webflow` · `zendesk` · `zoom`
 
-**Reports `unknown` (24)** — use single-node Test (§1.1), where you can supply the id the read needs:
+**8 of the 9 non-Bearer providers** (§2.2) are now covered — the case where a wrong header scheme fails
+100% of that provider's calls and no unit test would notice; only `monday` (GraphQL POST) is still not.
+So are all **6 baseUrl-less providers** (§2.3), where the probe doubles as a check that the Server URL
+points at the right host.
 
-| Reason | Providers |
+**GitHub takes two probes, chosen by the connection's `authMode`.** Verified live against
+api.github.com: a PAT gets `200` from `GET /user` and `403` from `GET /installation/repositories`; a
+GitHub App installation token gets exactly the reverse. One probe for both would report a healthy App
+connection as broken, which is worse than not probing — hence `probe.authModes` on the catalog action.
+
+**Reports `unknown` (7)** — use single-node Test (§1.1). Each says why, in the catalog
+(`unprobeableReason`), and the reason reaches the user:
+
+| Provider | Why it stays unprobed |
 | --- | --- |
-| Every catalog action writes | `slack` |
-| Cheapest read still needs an id | `airtable` `asana` `box` `clickup` `discord` `dropbox` `github` `gitlab` `googlesheets` `hubspot` `intercom` `jira` `linear` `mailchimp` `mattermost` `monday` `msgraph` `notion` `posthog` `sentry` `twilio` `webflow` `zoom` |
+| `slack` | `auth.test` needs no arguments, but the Slack Web API answers **HTTP 200 with `{"ok": false}`** for a dead token. The check verdicts on the HTTP status, so probing it would call every expired token healthy |
+| `linear`, `monday` | GraphQL: `query { viewer { id } }` would prove the key, but every call is a POST carrying a query, and the probe only ever issues a GET |
+| `dropbox` | `/users/get_current_account` is an RPC **POST** |
+| `msgraph` | `/me` answers only for a DELEGATED token; an application (client-credentials) token is rejected by it in a way indistinguishable from a bad credential |
+| `hubspot` | No scope-free identity endpoint. The obvious candidate, listing contacts, is gated on `crm.objects.contacts.read` — a token scoped for deals only would 403 and be reported as a dead credential |
+| `googlesheets` | The Sheets API has no identity endpoint, and Google's token/userinfo endpoints are on a **different host** than the provider's `baseUrl` |
 
-A provider moves between these lists the moment its catalog entry gains a zero-argument read — no
-code change needed. `apps/api/test/connection-test.service.spec.ts` asserts the 14/24 split, so this
-table cannot silently rot.
+A provider moves between these lists the moment its catalog entry gains a safe read — no code change
+needed. `apps/api/test/connection-test.service.spec.ts` asserts the 31/7 split *and* names the seven, and
+`packages/dsl/test/integration-docs.spec.ts` asserts each of them carries a reason, so this table cannot
+silently rot.
 
-**Ordering note:** for `mattermost`, `mailchimp` and `jira` the `unknown` answer comes *before* the
-missing-Server-URL check — telling someone to fill in a Server URL for a provider we can't probe at
-all would send them to fix the wrong thing.
+**Ordering note:** an `unknown` answer comes *before* the missing-Server-URL check — telling someone to
+fill in a Server URL for a provider we can't probe at all would send them to fix the wrong thing.
 
 ## 3. Non-catalog product integrations
 
@@ -270,7 +287,7 @@ all would send them to fix the wrong thing.
 | GitHub App | connection (`github-app/install/start` → `/api/github-app/callback`) | App ID + private key + installation | complete the install flow, then a `github` integration read | install itself does | **yes** — `github-app.live.spec.ts` |
 | Atlassian 3LO | connection (`.../atlassian/oauth/start` → `/api/atlassian/oauth/callback`) | OAuth client | complete the flow; connection `status` must be `connected`; then a `jira` read | no | — |
 | Generic OAuth2 connection | `.../oauth/start` → `/api/oauth/callback` | OAuth client | same: `status` → `connected`, then a provider read | no | — |
-| PAT / custom connection | `POST /api/tenants/:id/connections` | token + server URL | §1.5 Test connection (14 of 38 providers — §2.4); otherwise single-node Test | no | — |
+| PAT / custom connection | `POST /api/tenants/:id/connections` | token + server URL | §1.5 Test connection (31 of 38 providers — §2.4); otherwise single-node Test | no | — |
 | Webhook ingress | `POST /api/hooks/:endpointId` | endpoint secret | `curl` a real payload; a run should appear | starts a run | covered by e2e |
 | Hosted forms | `GET/POST /api/forms/:formId`, page at `/f/:id` | none (optional Turnstile) | load `/f/:id` in a browser and submit | starts a run | **yes** — `form-email.live.spec.ts` |
 | Hosted chat | `GET/POST /api/chat/:chatId`, page at `/c/:id` | none (optional Turnstile) | load `/c/:id` and send a message | starts a run | covered by e2e |
@@ -355,10 +372,11 @@ and in-process HTTP/GraphQL servers — no internet, no cost) and `pnpm test` (d
 
 Stated as facts, not as a plan.
 
-1. ~~**No per-connection "Test connection" route.**~~ **Closed by #701** — see §1.5. The
-   remaining gap is narrower and stated in §2.4: only **14 of 38** providers have a non-write,
-   zero-required-field read, so one-click proof is available for 14; the other 24 still need
-   single-node Test with a supplied id (and Slack has no read-only action at all).
+1. ~~**No per-connection "Test connection" route.**~~ **Closed by #701**, widened by **#835** — see
+   §1.5. The remaining gap is narrower and stated in §2.4: **31 of 38** providers have a non-write,
+   zero-required-field GET, so one-click proof is available for 31; the other **7** (`slack`,
+   `linear`, `monday`, `dropbox`, `msgraph`, `hubspot`, `googlesheets`) still need single-node Test,
+   each for a named reason the product shows the user.
 2. **37 of 38 catalog providers have no real-environment proof.** Only GitHub is exercised
    live (plus Slack's webhook notification path, which is not the `integration` node). The
    other 36 are typed, unit-tested, and unproven against the real API.

@@ -4,7 +4,11 @@ import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TASK_QUEUE, stateQuery } from "@naary/contracts";
-import type { GraphDef } from "@naary/dsl";
+import {
+  type GraphDef,
+  pickConnectionTestAction,
+  planIntegrationCall,
+} from "@naary/dsl";
 import { MemoryObjectStore, __setObjectStore } from "@naary/storage";
 import * as activities from "../src/temporal/activities";
 import { runGraph } from "../src/temporal/workflows";
@@ -184,5 +188,84 @@ describe.skipIf(!LIVE)(
         expect(typeof created.body.number).toBe("number");
       });
     });
+  },
+);
+
+/**
+ * LIVE proof for the #835 credential probe, and specifically for why `probe.authModes` exists.
+ *
+ * The dry run's third layer asks GitHub "is this token alive?" without running anything. Which
+ * endpoint is safe to ask depends on the CONNECTION KIND, and the two are mutually exclusive:
+ *
+ *   PAT / OAuth token          → GET /user                     200 … /installation/repositories 403
+ *   App installation token     → GET /installation/repositories 200 … /user                     403
+ *
+ * Probing an App connection with `/user` would therefore report a perfectly good connection as
+ * broken — the one outcome worse than reporting nothing at all. This asserts BOTH directions
+ * against the real api.github.com, so the day GitHub changes its mind we hear it from a test rather
+ * than from a user whose working connection went red.
+ *
+ * Read-only: two GETs, no writes, nothing to clean up. Needs the App vars above plus
+ * GITHUB_TEST_TOKEN for the PAT half.
+ */
+const PAT = process.env.GITHUB_TEST_TOKEN;
+
+describe.skipIf(!LIVE || !PAT)(
+  "LIVE GitHub — the credential probe is the right endpoint per auth mode (#835)",
+  () => {
+    /** The catalog's probe for this auth mode, issued exactly as the connection test issues it. */
+    async function probeStatus(
+      authMode: string,
+      token: string,
+    ): Promise<{ action: string; status: number }> {
+      const probe = pickConnectionTestAction("github", { authMode });
+      if (probe.kind !== "read")
+        throw new Error(`github/${authMode} has no probe: ${probe.reason}`);
+      const plan = planIntegrationCall({
+        provider: "github",
+        action: probe.action,
+        fields: {},
+        baseUrl: "https://api.github.com",
+        authHeaders: { Authorization: `Bearer ${token}` },
+        authMode,
+      });
+      const res = await fetch(plan.url, {
+        method: plan.method,
+        headers: plan.headers,
+      });
+      return { action: probe.action, status: res.status };
+    }
+
+    it("a PAT connection is probed with GET /user, and 200s", async () => {
+      const out = await probeStatus("pat", PAT as string);
+      expect(out.action).toBe("get_authenticated_user");
+      expect(out.status).toBe(200);
+    }, 30_000);
+
+    it("a GitHub App connection is probed with GET /installation/repositories, and 200s", async () => {
+      const out = await probeStatus("github_app", await appToken());
+      expect(out.action).toBe("list_installation_repositories");
+      expect(out.status).toBe(200);
+    }, 60_000);
+
+    it("and the endpoints really are exclusive — each rejects the other's token", async () => {
+      // The load-bearing half: if `/user` ever started answering an installation token, the
+      // authModes split would be dead weight nobody would notice. If it keeps 4xx-ing, a single
+      // shared probe would keep being wrong, which is why this is asserted rather than assumed.
+      const headers = {
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      };
+      const appRes = await fetch("https://api.github.com/user", {
+        headers: { ...headers, Authorization: `Bearer ${await appToken()}` },
+      });
+      expect(appRes.status).toBeGreaterThanOrEqual(400);
+
+      const patRes = await fetch(
+        "https://api.github.com/installation/repositories",
+        { headers: { ...headers, Authorization: `Bearer ${PAT as string}` } },
+      );
+      expect(patRes.status).toBeGreaterThanOrEqual(400);
+    }, 60_000);
   },
 );

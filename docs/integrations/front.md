@@ -8,7 +8,7 @@ serverUrlRequired: false
 actionCount: 4
 writeActionCount: 1
 oneClickTestable: true
-probeAction: list_conversations
+probeAction: list_inboxes
 liveVerified: false
 ---
 
@@ -41,9 +41,9 @@ Read Front conversations and add internal comments from a workflow.
 
 ## Verify it works
 
-**One-click:** this provider has an argument-free read (`list_conversations` → `GET /conversations`), so a connection test can confirm the credential without touching your data.
+**One-click:** this provider has an argument-free read (`list_inboxes` → `GET /inboxes`), so a connection test can confirm the credential without touching your data.
 
-Either way, the definitive check is **single-node Test** on the canvas: drop a **Front** node, pick this connection and the *List conversations* action, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
+Either way, the definitive check is **single-node Test** on the canvas: drop a **Front** node, pick this connection and the *List inboxes* action, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
 
 > **Not yet proven against the real API.** This provider's request shape is typed and unit-tested, but no automated test has ever called the live service. If your first call fails with a 4xx, the fault may be ours — check `docs/integrations/VERIFICATION.md` and open an issue rather than assuming your token is wrong.
 

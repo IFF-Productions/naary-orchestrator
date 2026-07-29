@@ -129,25 +129,61 @@ describe("what the guides claim is derived, not asserted", () => {
    * deliberately. A drop means someone made a read action mutating or added a required field to a
    * probe; a rise means a new argument-free read (good, update the list).
    */
-  it("14 providers are one-click testable, 24 are not", () => {
+  it("31 providers are one-click testable, 7 are not", () => {
+    // 14/24 before #835, when the rule was "any incidentally argument-free read" and it missed
+    // GitHub, Jira, Notion, GitLab and 13 others. The seven that remain are named — each has a
+    // catalog `unprobeableReason` saying why, which is what the user is shown.
     const testable = INTEGRATION_PROVIDERS.filter((p) => probeAction(p));
     expect(testable.map((p) => p.key).sort()).toEqual([
+      "airtable",
+      "asana",
+      "box",
       "calendly",
+      "clickup",
       "cloudflare",
       "deepl",
       "digitalocean",
+      "discord",
       "front",
+      "github",
+      "gitlab",
+      "intercom",
+      "jira",
+      "mailchimp",
+      "mattermost",
       "netlify",
+      "notion",
       "pagerduty",
       "pipedrive",
+      "posthog",
       "sendgrid",
+      "sentry",
       "shopify",
       "stripe",
       "todoist",
+      "twilio",
       "vercel",
+      "webflow",
       "zendesk",
+      "zoom",
     ]);
-    expect(INTEGRATION_PROVIDERS.length - testable.length).toBe(24);
+    const unprobeable = INTEGRATION_PROVIDERS.filter((p) => !probeAction(p));
+    expect(unprobeable.map((p) => p.key).sort()).toEqual([
+      "dropbox",
+      "googlesheets",
+      "hubspot",
+      "linear",
+      "monday",
+      "msgraph",
+      "slack",
+    ]);
+    // …and every one of them says why, in the catalog, where the API and the docs both read it.
+    for (const p of unprobeable) {
+      expect(
+        p.unprobeableReason,
+        `${p.key} has no unprobeableReason`,
+      ).toBeTruthy();
+    }
   });
 
   /** The 6 Server-URL providers are the top setup failure; the guides must say so for exactly them. */

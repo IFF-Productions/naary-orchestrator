@@ -193,6 +193,38 @@
           }
         }
       }
+    },
+    "/2010-04-01/Accounts.json": {
+      "get": {
+        "operationId": "ListAccount",
+        "parameters": [
+          {
+            "name": "FriendlyName",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "Status",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "PageSize",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "Page",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "PageToken",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
     }
   }
 }

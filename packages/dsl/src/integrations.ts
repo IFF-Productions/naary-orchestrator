@@ -91,6 +91,27 @@ export interface IntegrationAction {
    *  e.g. GitHub's `Accept: application/vnd.github.diff` to fetch a PR as a unified diff
    *  instead of JSON. Never carries auth (that's resolved in-activity). */
   headers?: Record<string, string>;
+  /**
+   * Declares this action as the provider's CREDENTIAL PROBE — the call "Test connection" and the
+   * dry run make to ask "is this token alive?" (#835).
+   *
+   * It NARROWS the choice, never widens it: `pickConnectionTestAction` still applies the same hard
+   * gate to a declared probe as to any other candidate (`write: false`, `GET`, no user-supplied
+   * required field), so declaring `probe` on a write is inert, not dangerous. What it buys is
+   *
+   *   1. PINNING — without it the pick is "fewest fields, catalog order wins", so adding an
+   *      unrelated zero-argument list action later would silently move the probe.
+   *   2. AUTH-MODE VARIANTS — `authModes` restricts a probe to connections of that kind. GitHub is
+   *      the reason this exists and it is not hypothetical: verified live, `GET /user` answers 200
+   *      to a PAT and **403** to a GitHub App installation token, while `GET
+   *      /installation/repositories` answers 200 to the App token and 403 to the PAT. One probe for
+   *      both would report a perfectly good connection as broken — worse than not probing at all.
+   *
+   * A probe with `authModes` is preferred for a matching connection; `probe: true` is the fallback
+   * for every other (and for a caller that doesn't know the auth mode, e.g. the UI asking "is this
+   * provider testable at all?").
+   */
+  probe?: true | { authModes: string[] };
   /** One-line description for the config panel + docs. */
   description: string;
 }
@@ -121,6 +142,20 @@ export interface IntegrationProvider {
   description: string;
   /** How a user authenticates (shown in docs). */
   auth: string;
+  /**
+   * Why this provider has NO credential probe — shown verbatim instead of the generated
+   * "no zero-argument read" reason when `pickConnectionTestAction` finds nothing (#835).
+   *
+   * For the handful where the generated sentence would be true but unhelpful, or actively
+   * misleading: Slack HAS a zero-argument identity call (`auth.test`), but it answers **HTTP 200
+   * with `{"ok":false}`** for a dead token, and the probe verdicts on the HTTP status — so probing
+   * it would report every dead Slack token as working. Saying that is the honest answer; silently
+   * reporting "no zero-argument read" is not.
+   *
+   * Only ever read on the `unknown` path. It cannot suppress a probe that the rule would otherwise
+   * select — a provider that gains a safe read starts being probed and this string goes unused.
+   */
+  unprobeableReason?: string;
   actions: IntegrationAction[];
 }
 
@@ -257,6 +292,31 @@ const GITHUB: IntegrationProvider = {
         },
       ],
     },
+    // The two credential probes (#835). GitHub is the provider that forced `probe.authModes` to
+    // exist: verified live against api.github.com, a PAT gets 200 from /user and 403 from
+    // /installation/repositories, and a GitHub App installation token gets exactly the reverse.
+    {
+      key: "get_authenticated_user",
+      label: "Get authenticated user",
+      description:
+        "Return the user this token belongs to. Needs no arguments, so it is the connection check for a PAT or OAuth token.",
+      method: "GET",
+      pathTemplate: "/user",
+      write: false,
+      probe: true,
+      fields: [],
+    },
+    {
+      key: "list_installation_repositories",
+      label: "List installation repositories",
+      description:
+        "List the repositories a GitHub App installation can reach — the connection check for a GitHub App connection, which cannot call /user.",
+      method: "GET",
+      pathTemplate: "/installation/repositories",
+      write: false,
+      probe: { authModes: ["github_app"] },
+      fields: [],
+    },
   ],
 };
 
@@ -373,6 +433,19 @@ const JIRA: IntegrationProvider = {
         },
       ],
     },
+    {
+      key: "get_myself",
+      label: "Get current user",
+      description:
+        "Return the account this token belongs to. Needs no arguments, so it is the connection check.",
+      method: "GET",
+      // `/rest/api/2/` deliberately, matching every other Jira action here: v2 exists on Cloud AND
+      // Server/DC, where the v3 API the issue suggested is Cloud-only.
+      pathTemplate: "/rest/api/2/myself",
+      write: false,
+      probe: true,
+      fields: [],
+    },
   ],
 };
 
@@ -384,6 +457,12 @@ const SLACK: IntegrationProvider = {
   baseUrl: "https://slack.com/api",
   description: "Post to Slack — send a message, reply in a thread, or react.",
   auth: "A custom connection whose token is a Slack bot token (`xoxb-…`) with the needed scopes (e.g. chat:write, reactions:write). The Server URL is unused (base is slack.com).",
+  unprobeableReason:
+    "Slack can't be checked from here, and not because it lacks an endpoint: `auth.test` needs no " +
+    'arguments, but the Slack Web API answers HTTP 200 with `{"ok": false}` for a dead token. ' +
+    "The check reads the HTTP status, so probing it would call every expired Slack token healthy — " +
+    "worse than saying nothing. Test a Slack connection with an integration node on a canvas " +
+    "(single-node Test), which reads the response body.",
   actions: [
     {
       key: "post_message",
@@ -544,6 +623,17 @@ const NOTION: IntegrationProvider = {
         },
       ],
     },
+    {
+      key: "get_me",
+      label: "Get current bot user",
+      description:
+        "Return the bot user this integration token belongs to. Needs no arguments, so it is the connection check.",
+      method: "GET",
+      pathTemplate: "/users/me",
+      write: false,
+      probe: true,
+      fields: [],
+    },
   ],
 };
 
@@ -668,6 +758,17 @@ const GITLAB: IntegrationProvider = {
         { key: "body", label: "Comment", in: "body", required: true },
       ],
     },
+    {
+      key: "get_me",
+      label: "Get current user",
+      description:
+        "Return the user this token belongs to. Needs no arguments, so it is the connection check.",
+      method: "GET",
+      pathTemplate: "/user",
+      write: false,
+      probe: true,
+      fields: [],
+    },
   ],
 };
 
@@ -678,6 +779,11 @@ const HUBSPOT: IntegrationProvider = {
   description:
     "Act on HubSpot CRM — get, create, and update contacts; create deals.",
   auth: "A custom connection whose token is a HubSpot private-app access token.",
+  unprobeableReason:
+    "HubSpot has no identity endpoint a private-app token can call without a scope. The obvious " +
+    "candidate — listing contacts — is gated on `crm.objects.contacts.read`, so a token scoped for " +
+    "deals only would answer 403 and this check would report a perfectly good connection as a dead " +
+    "credential. Test a HubSpot connection with an integration node on a canvas (single-node Test).",
   actions: [
     {
       key: "get_contact",
@@ -957,6 +1063,17 @@ const AIRTABLE: IntegrationProvider = {
         },
       ],
     },
+    {
+      key: "whoami",
+      label: "Who am I",
+      description:
+        "Return the user id this token belongs to. Needs no arguments, so it is the connection check.",
+      method: "GET",
+      pathTemplate: "/meta/whoami",
+      write: false,
+      probe: true,
+      fields: [],
+    },
   ],
 };
 
@@ -1054,6 +1171,17 @@ const ASANA: IntegrationProvider = {
           bodyPath: "data.name",
         },
       ],
+    },
+    {
+      key: "get_me",
+      label: "Get current user",
+      description:
+        "Return the user this token belongs to. Needs no arguments, so it is the connection check.",
+      method: "GET",
+      pathTemplate: "/users/me",
+      write: false,
+      probe: true,
+      fields: [],
     },
   ],
 };
@@ -1314,6 +1442,17 @@ const INTERCOM: IntegrationProvider = {
         },
       ],
     },
+    {
+      key: "get_me",
+      label: "Get current admin",
+      description:
+        "Return the admin this access token belongs to. Needs no arguments, so it is the connection check.",
+      method: "GET",
+      pathTemplate: "/me",
+      write: false,
+      probe: true,
+      fields: [],
+    },
   ],
 };
 
@@ -1414,6 +1553,17 @@ const WEBFLOW: IntegrationProvider = {
         },
       ],
     },
+    {
+      key: "get_authorized_by",
+      label: "Get token owner",
+      description:
+        "Return the user this token was authorized by. Needs no arguments and no site scope, so it is the connection check.",
+      method: "GET",
+      pathTemplate: "/token/authorized_by",
+      write: false,
+      probe: true,
+      fields: [],
+    },
   ],
 };
 
@@ -1510,6 +1660,17 @@ const ZOOM: IntegrationProvider = {
       fields: [
         { key: "meetingId", label: "Meeting id", in: "path", required: true },
       ],
+    },
+    {
+      key: "get_me",
+      label: "Get current user",
+      description:
+        "Return the user this token belongs to. Needs no arguments, so it is the connection check.",
+      method: "GET",
+      pathTemplate: "/users/me",
+      write: false,
+      probe: true,
+      fields: [],
     },
   ],
 };
@@ -1682,6 +1843,17 @@ const SENTRY: IntegrationProvider = {
           required: true,
         },
       ],
+    },
+    {
+      key: "list_organizations",
+      label: "List organizations",
+      description:
+        "List the organizations this token can see. Needs no arguments, so it is the connection check.",
+      method: "GET",
+      pathTemplate: "/organizations/",
+      write: false,
+      probe: true,
+      fields: [],
     },
   ],
 };
@@ -2045,6 +2217,17 @@ const POSTHOG: IntegrationProvider = {
         },
       ],
     },
+    {
+      key: "get_me",
+      label: "Get current user",
+      description:
+        "Return the user this personal API key belongs to. Needs no arguments, so it is the connection check.",
+      method: "GET",
+      pathTemplate: "/api/users/@me/",
+      write: false,
+      probe: true,
+      fields: [],
+    },
   ],
 };
 
@@ -2056,6 +2239,11 @@ const DROPBOX: IntegrationProvider = {
   description:
     "Work with Dropbox files and folders — list, get metadata, create folders, delete.",
   auth: "A custom connection whose token is a Dropbox access token — sent as a Bearer token.",
+  unprobeableReason:
+    "Dropbox has an argument-free identity call (`/users/get_current_account`) but it is an RPC " +
+    "POST, and the credential check only ever issues a GET — a POST probe is one catalog slip away " +
+    "from being a write. Test a Dropbox connection with an integration node on a canvas " +
+    "(single-node Test).",
   actions: [
     {
       key: "list_folder",
@@ -2113,6 +2301,11 @@ const MSGRAPH: IntegrationProvider = {
   description:
     "Work with Microsoft 365 via Graph — read mail, send mail, read and create calendar events.",
   auth: "A custom connection whose token is a Microsoft Graph OAuth access token — sent as a Bearer token.",
+  unprobeableReason:
+    "Microsoft Graph's `/me` answers only for a DELEGATED token; an application (client-credentials) " +
+    "token — which is what the `/users/{id}/…` actions here are built for — is rejected by it in a " +
+    "way indistinguishable from a bad credential. Reporting that as a dead token would be a lie, so " +
+    "Graph is left unchecked: test it with an integration node on a canvas (single-node Test).",
   actions: [
     {
       key: "list_messages",
@@ -2287,6 +2480,17 @@ const BOX: IntegrationProvider = {
       pathTemplate: "/files/{fileId}",
       write: true,
       fields: [{ key: "fileId", label: "File id", in: "path", required: true }],
+    },
+    {
+      key: "get_me",
+      label: "Get current user",
+      description:
+        "Return the user this token belongs to. Needs no arguments, so it is the connection check.",
+      method: "GET",
+      pathTemplate: "/users/me",
+      write: false,
+      probe: true,
+      fields: [],
     },
   ],
 };
@@ -2715,6 +2919,17 @@ const TWILIO: IntegrationProvider = {
         },
       ],
     },
+    {
+      key: "list_accounts",
+      label: "List accounts",
+      description:
+        "List the accounts these credentials can see. Needs no arguments (not even the Account SID), so it is the connection check.",
+      method: "GET",
+      pathTemplate: "/Accounts.json",
+      write: false,
+      probe: true,
+      fields: [],
+    },
   ],
 };
 
@@ -2872,6 +3087,17 @@ const MAILCHIMP: IntegrationProvider = {
         },
       ],
     },
+    {
+      key: "ping",
+      label: "Ping (health check)",
+      description:
+        "Mailchimp's own API health check. Needs no arguments, so it is the connection check — and it also proves the data-centre Server URL is the right one.",
+      method: "GET",
+      pathTemplate: "/ping",
+      write: false,
+      probe: true,
+      fields: [],
+    },
   ],
 };
 
@@ -3002,6 +3228,17 @@ const DISCORD: IntegrationProvider = {
         },
       ],
     },
+    {
+      key: "get_me",
+      label: "Get current bot user",
+      description:
+        "Return the bot user this token belongs to. Needs no arguments, so it is the connection check.",
+      method: "GET",
+      pathTemplate: "/users/@me",
+      write: false,
+      probe: true,
+      fields: [],
+    },
   ],
 };
 
@@ -3013,6 +3250,10 @@ const LINEAR: IntegrationProvider = {
   description:
     "Act on Linear via its GraphQL API — read/create/update issues and comment.",
   auth: "A custom connection whose token is a Linear API key (Settings → API → Personal API keys).",
+  unprobeableReason:
+    "Linear is GraphQL: `query { viewer { id } }` would prove the key, but every call is a POST " +
+    "carrying a query, and the credential check only ever issues an argument-free GET. Test a Linear " +
+    "connection with an integration node on a canvas (single-node Test).",
   actions: [
     {
       key: "create_issue",
@@ -3272,6 +3513,17 @@ const CLICKUP: IntegrationProvider = {
         },
       ],
     },
+    {
+      key: "get_me",
+      label: "Get authorized user",
+      description:
+        "Return the user this token belongs to. Needs no arguments, so it is the connection check.",
+      method: "GET",
+      pathTemplate: "/user",
+      write: false,
+      probe: true,
+      fields: [],
+    },
   ],
 };
 
@@ -3283,6 +3535,10 @@ const MONDAY: IntegrationProvider = {
   description:
     "Act on Monday.com boards via GraphQL — create/read items, post updates, change columns.",
   auth: "A custom connection whose token is a Monday.com API token (Developers → My access tokens), sent in a bare `Authorization` header — no `Bearer ` prefix (#655).",
+  unprobeableReason:
+    "Monday.com is GraphQL: `query { me { id } }` would prove the token, but every call is a POST " +
+    "carrying a query, and the credential check only ever issues an argument-free GET. Test a " +
+    "Monday.com connection with an integration node on a canvas (single-node Test).",
   actions: [
     {
       key: "create_item",
@@ -3837,6 +4093,17 @@ const MATTERMOST: IntegrationProvider = {
         { key: "username", label: "Username", in: "path", required: true },
       ],
     },
+    {
+      key: "get_me",
+      label: "Get current user",
+      description:
+        "Return the user this token belongs to. Needs no arguments, so it is the connection check — and it also proves the Server URL points at a real Mattermost.",
+      method: "GET",
+      pathTemplate: "/api/v4/users/me",
+      write: false,
+      probe: true,
+      fields: [],
+    },
   ],
 };
 
@@ -4132,6 +4399,11 @@ const GOOGLESHEETS: IntegrationProvider = {
   description:
     "Read and write a Google Sheet — append rows, read a range, update or clear values.",
   auth: "A connection holding a Google OAuth access token for the `https://www.googleapis.com/auth/spreadsheets` scope, sent as `Authorization: Bearer <token>`. A Google API key will NOT work (API keys go in a `?key=` query param, which this node never sends).",
+  unprobeableReason:
+    "The Sheets API has no identity endpoint — every call names a spreadsheet. Google's token and " +
+    "userinfo endpoints live on a DIFFERENT host, and the check may only call this provider's own " +
+    "`baseUrl`, so there is nothing here to call blind. Test a Google Sheets connection with an " +
+    "integration node on a canvas (single-node Test), where you can supply a spreadsheet id.",
   actions: [
     {
       key: "get_values",

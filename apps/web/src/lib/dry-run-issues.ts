@@ -8,8 +8,8 @@
  *    real failures under noise;
  *  - but a skipped check is not a pass either, so it is COUNTED and reported in the summary.
  *    "0 problems" must never be allowed to imply "everything was checked" — the credential probe
- *    reaches 14 of 38 providers (#835), and a flow whose only integration is GitHub currently
- *    verifies nothing at all about its token.
+ *    reaches 31 of 38 providers since #835 (GitHub included, PAT and App install alike), and a flow
+ *    whose only integration is one of the remaining seven verifies nothing about its token.
  */
 import type { DryRunResult } from "./api/types";
 import type { CanvasIssue } from "../screens/canvas/CanvasIssuesPanel";

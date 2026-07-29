@@ -6,11 +6,13 @@
  * provider-agnostic by construction and the catalog provider is chosen at the `integration` NODE, so
  * only the person looking at the screen knows which API this token is for.
  *
- * Why the list is short: the probe may only ever issue a NON-WRITE, ZERO-ARGUMENT read, derived from
- * the catalog itself (`pickConnectionTestAction`). Providers whose cheapest read still needs an id
- * (GitHub needs owner/repo/number) or whose every action writes (Slack) are not offered — they are
- * named in the hint instead, pointing at single-node Test, which is where you can supply values.
- * Offering them here just to return "unknown" would be a worse experience than saying so up front.
+ * Why some providers are missing: the probe may only ever issue a NON-WRITE, ZERO-ARGUMENT GET,
+ * derived from the catalog itself (`pickConnectionTestAction`). Since #835 that covers 31 of the 38;
+ * the seven left out have no such call (Slack's argument-free `auth.test` answers HTTP 200 with
+ * `{"ok": false}` for a dead token, Linear/Monday/Dropbox are POST-only, Graph's `/me` is
+ * delegated-token-only, HubSpot's cheapest read is scope-gated, Sheets has no identity endpoint) and
+ * are named in the hint instead, pointing at single-node Test. Offering them here just to return
+ * "unknown" would be worse than saying so up front.
  */
 import { useMemo, useState } from "react";
 import { INTEGRATION_PROVIDERS, pickConnectionTestAction } from "@naary/dsl";
@@ -52,9 +54,9 @@ export function ConnectionTestControl({
 
   const hint = useMemo(
     () =>
-      `${UNTESTABLE_COUNT} of ${INTEGRATION_PROVIDERS.length} providers (e.g. Slack, GitHub, Jira) have no ` +
-      `read-only call that needs no arguments — test those with an integration node on the canvas ` +
-      `using single-node Test.`,
+      `${UNTESTABLE_COUNT} of ${INTEGRATION_PROVIDERS.length} providers (Slack, Linear, Monday.com, ` +
+      `Dropbox, Microsoft Graph, HubSpot, Google Sheets) have no read-only call we can make ` +
+      `without arguments — test those with an integration node on the canvas using single-node Test.`,
     [],
   );
 

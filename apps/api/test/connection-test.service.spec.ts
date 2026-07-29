@@ -203,6 +203,38 @@ describe("ConnectionTestService — a passing probe", () => {
     // The Basic re-wrap is guarded on auth mode — this is the branch that differs per mode.
     expect(captured[0].headers.authorization).toBe("Bearer oauth-access");
   });
+
+  /**
+   * GitHub, the provider the whole of #835 turns on, and the one place where the auth mode changes
+   * WHICH endpoint is safe rather than just how the token is wrapped. Verified against the real
+   * api.github.com before these entries landed: a PAT gets 200 from `/user` and 403 from
+   * `/installation/repositories`; a GitHub App installation token gets exactly the reverse. Probing
+   * an App connection with `/user` would therefore report a working connection as broken — the one
+   * outcome worse than reporting nothing at all.
+   */
+  it("probes a GitHub PAT connection with GET /user", async () => {
+    useLocalProvider();
+    getById.mockResolvedValue({ ...CONN, authMode: "pat" });
+
+    const out = await svc.test("t1", "c1", "github");
+
+    expect(out.ok).toBe(true);
+    expect(out.checkedAction).toBe("github.get_authenticated_user");
+    expect(captured[0].method).toBe("GET");
+    expect(captured[0].url).toBe("/user");
+  });
+
+  it("probes a GitHub APP connection with GET /installation/repositories instead", async () => {
+    useLocalProvider();
+    getById.mockResolvedValue({ ...CONN, authMode: "github_app" });
+
+    const out = await svc.test("t1", "c1", "github");
+
+    expect(out.ok).toBe(true);
+    expect(out.checkedAction).toBe("github.list_installation_repositories");
+    expect(captured[0].method).toBe("GET");
+    expect(captured[0].url).toBe("/installation/repositories");
+  });
 });
 
 describe("ConnectionTestService — a failing probe", () => {
@@ -259,7 +291,11 @@ describe("ConnectionTestService — declines to probe (`unknown`)", () => {
     expect(out.status).toBe("unknown");
     expect(out.ok).toBe(false);
     expect(out.checkedAction).toBeNull();
-    expect(out.message).toMatch(/every slack action/i);
+    // The catalog's own `unprobeableReason` (#835): Slack DOES have an argument-free `auth.test`,
+    // and the reason we still decline is the one thing the user could not guess — it answers 200
+    // with `{"ok": false}` for a dead token, so probing it would report a pass.
+    expect(out.message).toMatch(/HTTP 200/);
+    expect(out.message).toMatch(/single-node Test/);
     // The load-bearing assertion: nothing was sent, so no scratch channel got a message.
     expect(captured).toHaveLength(0);
     // And an `unknown` learned nothing about the token, so it must not overwrite the status.
@@ -267,17 +303,29 @@ describe("ConnectionTestService — declines to probe (`unknown`)", () => {
     expect(out.connectionStatus).toBeNull();
   });
 
-  it("GitHub reports unknown, naming the fields its cheapest read needs", async () => {
-    useLocalProvider();
-    getById.mockResolvedValue(CONN);
+  it.each([
+    "googlesheets",
+    "linear",
+    "monday",
+    "dropbox",
+    "msgraph",
+    "hubspot",
+  ])(
+    "%s reports unknown with the catalog's declared reason, and calls nothing",
+    async (providerKey) => {
+      useLocalProvider();
+      getById.mockResolvedValue(CONN);
 
-    const out = await svc.test("t1", "c1", "github");
+      const out = await svc.test("t1", "c1", providerKey);
 
-    expect(out.status).toBe("unknown");
-    expect(out.message).toContain("owner");
-    expect(out.message).toContain("single-node Test");
-    expect(captured).toHaveLength(0);
-  });
+      expect(out.status).toBe("unknown");
+      expect(out.checkedAction).toBeNull();
+      // A reason a person can act on, not "no zero-argument read action".
+      expect(out.message).toMatch(/single-node Test/);
+      expect(captured).toHaveLength(0);
+      expect(setStatus).not.toHaveBeenCalled();
+    },
+  );
 
   it("an unknown CONNECTION id is a 404, not an `unknown` result", async () => {
     // `unknown` is a verdict about the provider ("nothing safe to call"). A bad id is a bad path —
@@ -305,10 +353,10 @@ describe("ConnectionTestService — declines to probe (`unknown`)", () => {
 });
 
 describe("ConnectionTestService — a baseUrl-less provider with no Server URL", () => {
-  // Six catalog providers have no `baseUrl` and need the connection's Server URL. Only THREE of
-  // them are probeable at all (deepl/shopify/zendesk have a zero-arg read); for mattermost,
-  // mailchimp and jira the "no safe read" answer comes first and dominates — see below.
-  it.each(["deepl", "shopify", "zendesk"])(
+  // Six catalog providers have no `baseUrl` and need the connection's Server URL. Since #835 ALL
+  // SIX are probeable (jira/mailchimp/mattermost gained an identity read), so all six reach this
+  // branch — where three of them used to report "no safe read" before the URL was ever looked at.
+  it.each(["deepl", "shopify", "zendesk", "jira", "mailchimp", "mattermost"])(
     "%s with an empty serverUrl gets a distinct 'set a Server URL' error, not a 404",
     async (providerKey) => {
       useLocalProvider();
@@ -326,22 +374,20 @@ describe("ConnectionTestService — a baseUrl-less provider with no Server URL",
     },
   );
 
-  it.each(["mattermost", "mailchimp", "jira"])(
-    "%s reports `unknown` first — 'no safe read' outranks a missing Server URL",
-    async (providerKey) => {
-      useLocalProvider();
-      getById.mockResolvedValue({ ...CONN, serverUrl: "   " });
+  it("an unprobeable provider still reports `unknown` first, not 'set a Server URL'", async () => {
+    // Deliberate ordering, and it still matters for the providers that stay unprobed: if we can't
+    // probe the provider AT ALL, telling the user to fill in a Server URL sends them to fix
+    // something that wouldn't help. Google Sheets has a fixed baseUrl, so this is asserted with the
+    // ordering that remains observable — nothing is called and no status is written.
+    useLocalProvider();
+    getById.mockResolvedValue({ ...CONN, serverUrl: "   " });
 
-      const out = await svc.test("t1", "c1", providerKey);
+    const out = await svc.test("t1", "c1", "googlesheets");
 
-      // Deliberate ordering: if we can't probe the provider AT ALL, telling the user to fill in a
-      // Server URL would send them to fix something that wouldn't help.
-      expect(out.status).toBe("unknown");
-      expect(out.message).toMatch(/no zero-argument read action/);
-      expect(captured).toHaveLength(0);
-      expect(setStatus).not.toHaveBeenCalled();
-    },
-  );
+    expect(out.status).toBe("unknown");
+    expect(captured).toHaveLength(0);
+    expect(setStatus).not.toHaveBeenCalled();
+  });
 
   it("a Server URL that IS set is used verbatim as the base (zendesk)", async () => {
     useLocalProvider();
@@ -358,22 +404,62 @@ describe("ConnectionTestService — a baseUrl-less provider with no Server URL",
   });
 });
 
+/** Every `Connection.authMode` in the schema, plus "the caller didn't say" — the probe must be safe
+ *  for all of them, not just the default. */
+const AUTH_MODES = [
+  undefined,
+  "api_token",
+  "pat",
+  "oauth",
+  "github_app",
+  "connection_string",
+] as const;
+
 describe("the probe can only ever be a safe read (catalog-derived)", () => {
-  it("every provider's picked action is non-write and needs no user input", () => {
+  it("every provider's picked action, for EVERY auth mode, is a non-write GET needing no user input", () => {
+    // Swept across auth modes since #835: the auth mode now changes WHICH action is picked
+    // (GitHub), so a rule that was safe for the default mode is no longer evidence it is safe for
+    // the others. This is the property that must not regress — a dry run may never fire a write.
     for (const provider of INTEGRATION_PROVIDERS) {
-      const probe = pickConnectionTestAction(provider.key);
-      if (probe.kind === "unknown") {
-        expect(probe.reason.length).toBeGreaterThan(0);
-        continue;
+      for (const authMode of AUTH_MODES) {
+        const where = `${provider.key} (authMode=${authMode ?? "none"})`;
+        const probe = pickConnectionTestAction(provider.key, { authMode });
+        if (probe.kind === "unknown") {
+          expect(probe.reason.length, where).toBeGreaterThan(0);
+          continue;
+        }
+        const action = getIntegrationAction(provider.key, probe.action)!;
+        expect(action, where).toBeDefined();
+        expect(action.write, where).toBe(false);
+        expect(action.method, where).toBe("GET");
+        expect(
+          action.fields.filter((f) => f.required && f.const === undefined),
+          where,
+        ).toEqual([]);
+        // No `{placeholder}` can survive in the path when there are no required path fields.
+        expect(action.pathTemplate, where).not.toMatch(/\{[^}]+\}/);
       }
-      const action = getIntegrationAction(provider.key, probe.action)!;
-      expect(action.write).toBe(false);
-      expect(
-        action.fields.filter((f) => f.required && f.const === undefined),
-      ).toEqual([]);
-      // No `{placeholder}` can survive in the path when there are no required path fields.
-      expect(action.pathTemplate).not.toMatch(/\{[^}]+\}/);
     }
+  });
+
+  it("every action DECLARING itself a probe satisfies the same gate", () => {
+    // The declaration narrows the choice; it must never be a way to smuggle something past the
+    // rule. Asserted on the catalog directly so a `probe: true` on a write fails here even if the
+    // selection code would have filtered it out.
+    const offenders: string[] = [];
+    for (const p of INTEGRATION_PROVIDERS) {
+      for (const a of p.actions) {
+        if (!a.probe) continue;
+        const bad =
+          a.write ||
+          a.method !== "GET" ||
+          a.fields.some((f) => f.required && f.const === undefined) ||
+          /\{[^}]+\}/.test(a.pathTemplate);
+        if (bad)
+          offenders.push(`${p.key}.${a.key} (${a.method} ${a.pathTemplate})`);
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 
   it("no non-GET action is marked write:false unless it is a known POST-style READ", () => {
@@ -413,13 +499,52 @@ describe("the probe can only ever be a safe read (catalog-derived)", () => {
     }
   });
 
-  it("is honest about coverage: 14 of the 38 providers have a zero-arg read", () => {
-    // A tripwire, not a target. If a catalog entry gains or loses a zero-argument read this fails
-    // and the number in docs/integrations/VERIFICATION.md must be updated with it.
+  it("is honest about coverage: 31 of the 38 providers can be probed, and names the other 7", () => {
+    // A tripwire, not a target (it was 14/24 before #835). If a catalog entry gains or loses a
+    // safe probe this fails, and the number in docs/integrations/VERIFICATION.md, the dry-run
+    // service docblock and apps/web must be updated with it.
     const probes = INTEGRATION_PROVIDERS.map((p) =>
       pickConnectionTestAction(p.key),
     );
-    expect(probes.filter((p) => p.kind === "read")).toHaveLength(14);
-    expect(probes.filter((p) => p.kind === "unknown")).toHaveLength(24);
+    expect(probes.filter((p) => p.kind === "read")).toHaveLength(31);
+    // Named rather than counted: each of these is a decision with a reason, and the reason is
+    // shown to the user. A provider joining this list silently is the bug #835 was about.
+    expect(
+      INTEGRATION_PROVIDERS.filter(
+        (p) => pickConnectionTestAction(p.key).kind === "unknown",
+      )
+        .map((p) => p.key)
+        .sort(),
+    ).toEqual([
+      "dropbox", // POST-only RPC
+      "googlesheets", // no identity endpoint on sheets.googleapis.com
+      "hubspot", // no scope-free identity endpoint; a deals-only token would 403
+      "linear", // GraphQL POST
+      "monday", // GraphQL POST
+      "msgraph", // /me is delegated-token-only
+      "slack", // answers 200 {"ok":false} to a dead token
+    ]);
+  });
+
+  it("no PROBEABLE provider carries a leftover 'why we can't probe this' reason", () => {
+    // The converse rot: a provider that gains a safe read keeps its old excuse, which then sits in
+    // the catalog claiming something untrue and reappears the day the read is removed.
+    const stale = INTEGRATION_PROVIDERS.filter(
+      (p) =>
+        p.unprobeableReason !== undefined &&
+        pickConnectionTestAction(p.key).kind === "read",
+    ).map((p) => p.key);
+    expect(stale).toEqual([]);
+  });
+
+  it("every unprobeable provider explains itself in words the user can act on", () => {
+    for (const p of INTEGRATION_PROVIDERS) {
+      const probe = pickConnectionTestAction(p.key);
+      if (probe.kind !== "unknown") continue;
+      // The point of #835: a skipped credential check must SAY it was skipped and why — never
+      // read as a pass, and never be a shrug.
+      expect(probe.reason, p.key).toMatch(/single-node Test/);
+      expect(probe.reason.length, p.key).toBeGreaterThan(60);
+    }
   });
 });

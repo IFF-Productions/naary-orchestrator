@@ -161,6 +161,28 @@
           }
         }
       }
+    },
+    "/user": {
+      "get": {
+        "operationId": "users/get-authenticated"
+      }
+    },
+    "/installation/repositories": {
+      "get": {
+        "operationId": "apps/list-repos-accessible-to-installation",
+        "parameters": [
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
     }
   }
 }

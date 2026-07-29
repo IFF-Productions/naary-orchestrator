@@ -5,9 +5,10 @@ label: 'Notion'
 category: 'Productivity'
 authType: bearer
 serverUrlRequired: false
-actionCount: 4
+actionCount: 5
 writeActionCount: 2
-oneClickTestable: false
+oneClickTestable: true
+probeAction: get_me
 liveVerified: false
 ---
 
@@ -41,9 +42,9 @@ Read, query and create Notion pages and database rows — a common knowledge-bas
 
 ## Verify it works
 
-**No one-click check:** its read actions all need an id you have to supply, so there is no safe argument-free call to probe with.
+**One-click:** this provider has an argument-free read (`get_me` → `GET /users/me`), so a connection test can confirm the credential without touching your data.
 
-Either way, the definitive check is **single-node Test** on the canvas: drop a **Notion** node, pick this connection, choose a read action and fill its ids, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
+Either way, the definitive check is **single-node Test** on the canvas: drop a **Notion** node, pick this connection and the *Get current bot user* action, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
 
 A concrete first run:
 
@@ -61,6 +62,7 @@ A concrete first run:
 | Query database | `POST` | `/databases/{databaseId}/query` | `databaseId` | `filter`, `pageSize` |
 | **Create page** (write) | `POST` | `/pages` | `parent`, `properties` | — |
 | **Append blocks** (write) | `PATCH` | `/blocks/{blockId}/children` | `blockId`, `children` | — |
+| Get current bot user | `GET` | `/users/me` | — | — |
 
 Fields can be typed in statically or **bound** to an upstream step's output (`{ from: <nodeId>, path: <dotted.path> }`) — ids and generated text are usually bound.
 

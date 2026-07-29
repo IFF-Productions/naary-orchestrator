@@ -5,9 +5,10 @@ label: 'Mattermost'
 category: 'Communication'
 authType: bearer
 serverUrlRequired: true
-actionCount: 5
+actionCount: 6
 writeActionCount: 2
-oneClickTestable: false
+oneClickTestable: true
+probeAction: get_me
 liveVerified: false
 ---
 
@@ -41,9 +42,9 @@ Post to Mattermost channels and read recent posts from a workflow.
 
 ## Verify it works
 
-**No one-click check:** its read actions all need an id you have to supply, so there is no safe argument-free call to probe with.
+**One-click:** this provider has an argument-free read (`get_me` → `GET /api/v4/users/me`), so a connection test can confirm the credential without touching your data.
 
-Either way, the definitive check is **single-node Test** on the canvas: drop a **Mattermost** node, pick this connection, choose a read action and fill its ids, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
+Either way, the definitive check is **single-node Test** on the canvas: drop a **Mattermost** node, pick this connection and the *Get current user* action, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
 
 > **Not yet proven against the real API.** This provider's request shape is typed and unit-tested, but no automated test has ever called the live service. If your first call fails with a 4xx, the fault may be ours — check `docs/integrations/VERIFICATION.md` and open an issue rather than assuming your token is wrong.
 
@@ -56,6 +57,7 @@ Either way, the definitive check is **single-node Test** on the canvas: drop a *
 | List channel posts | `GET` | `/api/v4/channels/{channelId}/posts` | `channelId` | `per_page`, `page` |
 | **Add reaction** (write) | `POST` | `/api/v4/reactions` | `user_id`, `post_id`, `emoji_name` | — |
 | Get user by username | `GET` | `/api/v4/users/username/{username}` | `username` | — |
+| Get current user | `GET` | `/api/v4/users/me` | — | — |
 
 Fields can be typed in statically or **bound** to an upstream step's output (`{ from: <nodeId>, path: <dotted.path> }`) — ids and generated text are usually bound.
 
