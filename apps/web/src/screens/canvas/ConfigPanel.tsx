@@ -17,7 +17,8 @@ import {
   Labeled,
   RETRYABLE_KINDS,
 } from "./fields";
-import { CopyButton, leafPaths, PinSection, WebhookInfo } from "./PinSection";
+import { CopyButton, PinSection, WebhookInfo } from "./PinSection";
+import { leafPaths } from "./output-fields";
 import { renderAgentSections } from "./config-agents";
 import { renderTriggerSections } from "./config-triggers";
 import { renderHttpRequestSection } from "./config-http";
@@ -231,9 +232,11 @@ export function ConfigPanel({
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {upstreamIds.flatMap((uid) => {
-              const pin = pins[uid];
-              const paths =
-                pin && typeof pin === "object" ? leafPaths(pin) : [];
+              // `leafPaths` is total (any value → dotted paths, [] when there are
+              // none) and is the SAME walk the INPUT DATA rows use, so a chip
+              // exists for every path that panel displays — arrays included
+              // (`body.incidents`, `body.incidents.0`, `body.incidents.0.id`).
+              const paths = leafPaths(pins[uid]);
               if (paths.length === 0) {
                 return [
                   <CopyButton

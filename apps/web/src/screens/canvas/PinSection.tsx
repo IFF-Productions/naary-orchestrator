@@ -3,37 +3,12 @@ import { useState } from "react";
 import { Button } from "../../components";
 import type { TestNodeResult } from "../../lib/api";
 
-/** A small copy-to-clipboard button with brief "Copied ✓" feedback. */
 /**
  * Data pinning (design SINGLE-NODE-EXECUTION.md slice 1): pin a sample output for this node so you
  * can build downstream nodes against it without re-running upstream. Authoring-only — the
  * interpreter never reads pins. Source in slice 1 is a manual JSON paste (single-node "Test" that
  * fills it is slice 2).
  */
-/** Dotted paths to the leaves of a pinned output — powers the reference picker's suggestions.
- *  Capped in depth + count so a big object doesn't explode the chip list. Arrays are leaves
- *  (the user indexes them). */
-export function leafPaths(
-  value: unknown,
-  prefix = "",
-  depth = 0,
-  out: string[] = [],
-): string[] {
-  if (out.length >= 24 || depth > 3) return out;
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (out.length >= 24) break;
-      const path = prefix ? `${prefix}.${k}` : k;
-      if (v && typeof v === "object" && !Array.isArray(v) && depth < 3) {
-        leafPaths(v, path, depth + 1, out);
-      } else {
-        out.push(path);
-      }
-    }
-  }
-  return out;
-}
-
 export function PinSection({
   canPin,
   isPinned,
@@ -293,6 +268,7 @@ export function PinSection({
   );
 }
 
+/** A small copy-to-clipboard button with brief "Copied ✓" feedback. */
 export function CopyButton({
   text,
   label = "Copy",

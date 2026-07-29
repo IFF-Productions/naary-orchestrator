@@ -4,6 +4,7 @@ import { ConfigPanel } from "./ConfigPanel";
 import { EdgeInspector } from "./EdgeInspector";
 import type { NaaryData } from "./flow";
 import { InspectorDock } from "./InspectorDock";
+import { flattenOutput } from "./output-fields";
 
 /**
  * The inspector dock (Canvas Authoring Loop): the persistent 492px right column.
@@ -154,6 +155,49 @@ const parametersClaudeCode = (
   />
 );
 
+// A pinned upstream response whose payload is an ARRAY of objects — the shape the reference
+// chips used to stop at (the reported PagerDuty `list_incidents` → `acknowledge_incident` wiring).
+const PAGERDUTY_PIN = {
+  status: 200,
+  body: {
+    incidents: [
+      { id: "PABC123", title: "API latency", status: "triggered" },
+      { id: "PDEF456", title: "Disk pressure", status: "triggered" },
+    ],
+    limit: 25,
+  },
+};
+
+const ACK_NODE: Node<NaaryData> = {
+  id: "ack",
+  type: "naary",
+  position: { x: 0, y: 0 },
+  data: {
+    kind: "integration",
+    config: { app: "pagerduty", operation: "acknowledge_incident" },
+  },
+};
+
+const parametersPagerDuty = (
+  <ConfigPanel
+    node={ACK_NODE}
+    hideHeader
+    upstreamIds={["pagerduty"]}
+    edges={[{ source: "pagerduty", target: "ack" }]}
+    nodeKinds={{ pagerduty: "integration", ack: "integration" }}
+    hookUrls={[]}
+    connections={[]}
+    pins={{ pagerduty: PAGERDUTY_PIN }}
+    canPin
+    pinnedOutput={undefined}
+    isPinned={false}
+    onPin={async () => {}}
+    onUnpin={async () => {}}
+    onTest={async () => ({ pure: true, output: {} })}
+    onChange={() => {}}
+  />
+);
+
 /** A selected agent node with real parameters, upstream INPUT DATA rows and a
  *  finished test output (draggable green rows + measured wall-clock). */
 export const SelectedWithOutput: Story = {
@@ -262,6 +306,33 @@ export const SwitchRouting: Story = {
     routingNote:
       "The first matching rule sets route.matched to its name; outgoing edges branch on it (matched eq <name>).",
     inputRows: INPUT_ROWS,
+    onTest: () => {},
+    onDelete: () => {},
+  },
+};
+
+/**
+ * Array paths: INPUT DATA and the PARAMETERS "References" chips are built from the SAME
+ * pinned sample (a PagerDuty `list_incidents` response) by the SAME enumerator, so the chip
+ * the author needs — `{{ pagerduty.body.incidents.0.id }}` — exists next to the row that
+ * displays it. Before the fix the chips stopped at `{{ pagerduty.body.incidents }}` and the
+ * indexed path had to be hand-written. Both panels are visible in one screenshot on purpose.
+ */
+export const ArrayReferencePaths: Story = {
+  args: {
+    nodeId: "ack",
+    kind: "integration",
+    title: "Acknowledge incident",
+    state: "idle",
+    canPin: true,
+    inputRows: flattenOutput(PAGERDUTY_PIN, "", 0, [], 8).map((f) => ({
+      key: `pagerduty.${f.path}`,
+      token: `{{ pagerduty.${f.path} }}`,
+      path: f.path,
+      preview: f.preview,
+      tag: "pinned",
+    })),
+    parameters: parametersPagerDuty,
     onTest: () => {},
     onDelete: () => {},
   },
