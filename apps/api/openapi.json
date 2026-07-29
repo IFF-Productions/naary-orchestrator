@@ -3149,6 +3149,104 @@
         ]
       }
     },
+    "/tenants/{id}/connections/{connectionId}/mcp/tools": {
+      "get": {
+        "description": "Opens one MCP session to the connection's server with its stored credential and returns `tools/list`. The credential is used in-memory and never returned. Names, descriptions and schemas are sanitized and capped — they are authored by whoever runs that server. 400 if the connection is not an MCP kind, has no Server URL, or needs (re)authorization.",
+        "operationId": "ConnectionsController_listMcpTools",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "connectionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/McpToolResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List an MCP connection's tools",
+        "tags": [
+          "Connections"
+        ]
+      }
+    },
     "/tenants/{id}/connections/{connectionId}": {
       "delete": {
         "description": "Removes the connection and its stored secret (204 No Content).",
@@ -18087,6 +18185,44 @@
           "checkedAction",
           "connectionStatus",
           "message"
+        ]
+      },
+      "McpToolResponse": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "create_issue",
+            "description": "The tool's id — what goes in the mcpTool node's `tool` field."
+          },
+          "description": {
+            "type": "string",
+            "example": "Create a new issue in a repository.",
+            "description": "Plain-text description, or empty when the server sent none. Never HTML."
+          },
+          "inputSchema": {
+            "type": "object",
+            "example": {
+              "type": "object",
+              "properties": {
+                "owner": {
+                  "type": "string"
+                },
+                "repo": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "owner",
+                "repo"
+              ]
+            },
+            "description": "JSON Schema for the tool's arguments — the canvas offers its `properties` as binding names. Absent when the server sent none, or when the schema was too large to relay."
+          }
+        },
+        "required": [
+          "name",
+          "description"
         ]
       },
       "OAuthStartResponse": {

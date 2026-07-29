@@ -197,3 +197,23 @@ export function parseIntrospection(data: unknown): GraphQLSchemaSummary {
     types,
   };
 }
+
+// ---- MCP tools/list -----------------------------------------------------------------------------
+
+/**
+ * One tool an MCP server advertises, as the API returns it to the canvas.
+ *
+ * Lives here for the same reason `OpenApiSummary` does: it is a wire shape shared by the API (which
+ * produces it) and the web app (which consumes it), and neither app should import the other. It is
+ * already SANITIZED by the API — see `apps/api/src/connections/mcp-tools.service.ts`.
+ */
+export interface McpToolSummary {
+  name: string;
+  /** Plain TEXT, never HTML — the UI must render it as text. "" when the server sent none. */
+  description: string;
+  /**
+   * The tool's JSON Schema for its arguments, or undefined when the server sent none / one too
+   * large to relay. Untrusted remote JSON — read it defensively.
+   */
+  inputSchema?: Record<string, unknown>;
+}

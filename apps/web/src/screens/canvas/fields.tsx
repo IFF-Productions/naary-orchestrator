@@ -9,9 +9,11 @@ import {
 } from "../../lib/graph-model";
 import { RowHead } from "./PinSection";
 import {
+  ARGUMENT_COPY,
   type BindingOption,
   bindingNameChoice,
   bindingNameView,
+  type ChoiceCopy,
   CUSTOM_OPTION,
 } from "./binding-name-model";
 
@@ -387,29 +389,36 @@ export function JsonArrayField({
 }
 
 /**
- * The argument-NAME control for one binding row.
+ * Pick a name from a known list, or type one that isn't on it.
  *
- * A plain text box where the set of names is knowable means retyping something the catalog
- * already knows, and a typo binds to a field that doesn't exist — which fails at run time, not
- * at save. So offer the names when we have them, and keep free text for when we don't.
+ * A plain text box where the set of names is knowable means retyping something we already know,
+ * and a typo names something that doesn't exist — which fails at RUN time, not at save. So offer
+ * the names when we have them, and keep free text for when we don't.
  *
- * The unknown-name option is the load-bearing part: an integration's `fieldBindings` outlive a
- * change of action, so a row can legitimately hold a name this action never had. It stays
- * visible, stays selected, and says why.
+ * The unlisted-value option is the load-bearing part. A stored name outlives the list it came
+ * from — an integration's `fieldBindings` survive a change of action, an mcpTool's `tool` survives
+ * a change of connection — and a `<select>` whose `value` matches no `<option>` renders its FIRST
+ * one, so without this the panel would claim a value the graph doesn't hold and the next edit
+ * would make that true. It stays visible, stays selected, and says why.
+ *
+ * Two things it names so far — an argument (`ARGUMENT_COPY`, the default) and an MCP tool
+ * (`MCP_TOOL_COPY`) — which is all `copy` varies.
  */
-function BindingNameField({
+export function PickOrTypeField({
   value,
   options,
   onChange,
+  copy = ARGUMENT_COPY,
 }: {
   value: string;
   options: BindingOption[];
   onChange: (name: string) => void;
+  copy?: ChoiceCopy;
 }) {
   // Free-text mode is entered explicitly ("Custom argument…") and is sticky for the row, so
   // typing a name that happens not to be listed doesn't yank the control away mid-edit.
   const [custom, setCustom] = useState(false);
-  const { unknownValue, placeholder } = bindingNameView(value, options);
+  const { unknownValue, placeholder } = bindingNameView(value, options, copy);
 
   if (custom || options.length === 0) {
     return (
@@ -417,15 +426,15 @@ function BindingNameField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         style={{ ...inputStyle, flex: 1 }}
-        placeholder="argument name"
-        aria-label="Argument name"
+        placeholder={copy.inputPlaceholder}
+        aria-label={copy.ariaLabel}
       />
     );
   }
   return (
     <select
       value={value}
-      aria-label="Argument name"
+      aria-label={copy.ariaLabel}
       onChange={(e) => {
         const choice = bindingNameChoice(e.target.value);
         if ("custom" in choice) {
@@ -438,9 +447,9 @@ function BindingNameField({
     >
       <option value="">{placeholder}</option>
       {unknownValue && (
-        // Carries the REAL name, so an unlisted binding neither disappears nor silently
+        // Carries the REAL name, so an unlisted value neither disappears nor silently
         // re-points at whatever the first option happens to be.
-        <option value={value}>{value} (not an argument of this action)</option>
+        <option value={value}>{copy.unlisted(value)}</option>
       )}
       {options.map((o) => (
         <option key={o.value} value={o.value}>
@@ -448,7 +457,7 @@ function BindingNameField({
           {o.required ? " *" : ""}
         </option>
       ))}
-      <option value={CUSTOM_OPTION}>Custom argument…</option>
+      <option value={CUSTOM_OPTION}>{copy.custom}</option>
     </select>
   );
 }
@@ -456,9 +465,10 @@ function BindingNameField({
 /** Editor for mcpTool argumentBindings: argName → { from: nodeId, path? }. This is
  *  how data threads between nodes (an arg bound to an upstream node's output).
  *
- *  `options` (optional) are the argument names this node can actually take — the integration
- *  catalog knows them, an arbitrary MCP tool doesn't. Omitted ⇒ the name stays free text, which
- *  is the behaviour every other caller keeps. */
+ *  `options` (optional) are the argument names this node can actually take: the integration
+ *  catalog declares them, and an MCP tool's server advertises them in its `inputSchema`. Omitted
+ *  (or empty — an unreachable server, a tool with no schema) ⇒ the name stays free text, which is
+ *  the behaviour every other caller keeps. */
 export function BindingsEditor({
   bindings,
   upstreamIds,
@@ -508,7 +518,7 @@ export function BindingsEditor({
             }}
           >
             <div style={{ display: "flex", gap: 6 }}>
-              <BindingNameField
+              <PickOrTypeField
                 value={name}
                 options={options}
                 onChange={(next) => setEntry(name, next, row)}
