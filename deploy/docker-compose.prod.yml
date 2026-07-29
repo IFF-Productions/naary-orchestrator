@@ -296,6 +296,16 @@ services:
       # OFF by default (a dev/local host builds `:latest` images). CD exports =1 when the sandbox
       # profile is active, so prod fails CLOSED if the digest refs ever go missing.
       SANDBOX_REQUIRE_DIGEST: "${SANDBOX_REQUIRE_DIGEST:-}"
+      # The per-sandbox CONTAINMENT limits and the wall-clock cap, all read by the runner and
+      # forwarded by nothing until now: the code's defaults (1 CPU / 2048MB / 256 pids / 15min)
+      # were the only values prod could ever have. The defaults are the safe end, so this was an
+      # inert knob rather than an unbounded sandbox — but an operator could neither TIGHTEN the
+      # limits on a shared box nor raise the timeout for a long codeAgent run. Blank ⇒ the same
+      # defaults as before (posInt treats blank as unset), so nothing changes until someone sets one.
+      SANDBOX_CPUS: "${SANDBOX_CPUS:-}"
+      SANDBOX_MEMORY_MB: "${SANDBOX_MEMORY_MB:-}"
+      SANDBOX_PIDS: "${SANDBOX_PIDS:-}"
+      SANDBOX_TIMEOUT_MS: "${SANDBOX_TIMEOUT_MS:-}"
     volumes:
       # Docker socket — this container's (contained) privilege.
       - /var/run/docker.sock:/var/run/docker.sock

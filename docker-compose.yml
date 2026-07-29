@@ -20,6 +20,11 @@ x-backend-env: &backend-env
   VAULT_KV_MOUNT: ${VAULT_KV_MOUNT:-}
   VAULT_PATH_PREFIX: ${VAULT_PATH_PREFIX:-}
   VAULT_NAMESPACE: ${VAULT_NAMESPACE:-}
+  # Per-request timeout against Vault (ms; default 5000). The one VAULT_* the code reads that
+  # this list didn't forward — an operator raising it for a slow/remote Vault would have seen
+  # no effect. A bad value THROWS at construction rather than degrading silently, which is
+  # exactly why it must be settable.
+  VAULT_TIMEOUT_MS: ${VAULT_TIMEOUT_MS:-}
   # Defaults to the in-stack dev server. Point at Temporal Cloud by overriding
   # TEMPORAL_ADDRESS + setting TEMPORAL_NAMESPACE and an auth method in .env
   # (TEMPORAL_API_KEY, or the mTLS cert/key paths). See @naary/temporal-config.
@@ -41,6 +46,20 @@ x-backend-env: &backend-env
   GITHUB_APP_ID: ${GITHUB_APP_ID:-}
   GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
   GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+  # Atlassian 3LO (native Jira/Confluence connections without a per-user API token). The
+  # PLATFORM app's credentials — one Atlassian app per deployment, shared by every tenant —
+  # which is why they are env and not a tenant setting. Both the api (authorize/callback) and
+  # the worker (token refresh inside the integration activities) read them via
+  # @naary/connections, hence this shared anchor rather than a per-service entry.
+  #
+  # These were read by the code and named in NO compose file, so `ATLASSIAN_OAUTH_CLIENT_ID=…`
+  # in /opt/naary/.env reached nothing and the whole 3LO connection type was unreachable in
+  # production — the #862 failure mode. Unset ⇒ Atlassian OAuth stays off (PAT-style
+  # connections are unaffected), which is the same posture as before, but now reachable.
+  # SCOPES is an override; empty ⇒ the code's DEFAULT_SCOPES.
+  ATLASSIAN_OAUTH_CLIENT_ID: ${ATLASSIAN_OAUTH_CLIENT_ID:-}
+  ATLASSIAN_OAUTH_CLIENT_SECRET: ${ATLASSIAN_OAUTH_CLIENT_SECRET:-}
+  ATLASSIAN_OAUTH_SCOPES: ${ATLASSIAN_OAUTH_SCOPES:-}
   # Platform transactional email (#468 — invitation emails). OPT-IN: unset ⇒ the API's mailer
   # is a no-op (invitations still work via accept-on-login, just no email is sent). SMTP_URL is a
   # nodemailer connection URI (smtp://user:pass@host:port); MAIL_FROM is the sender. This is the
@@ -89,6 +108,12 @@ x-backend-env: &backend-env
   # Prometheus /metrics — the worker serves it on this port; the api serves it on
   # its main port (3000). Set to 0 to disable the worker metrics server.
   METRICS_PORT: ${METRICS_PORT:-9091}
+  # Resume-from-failed-node snapshots (#799). Default ON in code; `off` disables them. Both
+  # sides need it: the WORKER writes the snapshot and the API decides whether to offer resume,
+  # so a value that reached only one of them would make the UI and the runtime disagree.
+  # deploy/.env.prod.example has documented this switch since it shipped — it was declared in
+  # no compose file, so `RESUME_SNAPSHOTS=off` there was inert.
+  RESUME_SNAPSHOTS: ${RESUME_SNAPSHOTS:-}
 
 services:
   postgres:
@@ -193,7 +218,19 @@ services:
       # still work). See firebase-verifier.ts.
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
       FIREBASE_SERVICE_ACCOUNT_JSON: ${FIREBASE_SERVICE_ACCOUNT_JSON:-}
+      # The ADC alternative the comment above has always named — a PATH, inside the container,
+      # to a mounted service-account file. It was never forwarded, so the documented "or a
+      # mounted file" route silently did nothing. NOTE it needs a volume mount too: putting a
+      # host path here without mounting it leaves the Admin SDK opening a file that isn't there.
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
       FIREBASE_TENANT_CLAIM: ${FIREBASE_TENANT_CLAIM:-tenant}
+      # OAuth consent return URLs. Both must match EXACTLY what was registered with the
+      # provider, so they are explicit env and never derived from a (spoofable) request Host.
+      # Their code defaults are `http://localhost:3000/...`, which is right for `pnpm start` and
+      # useless in prod — and with neither declared, an operator could not correct them: the
+      # generic MCP OAuth flow and the Atlassian 3LO callback both sent users to localhost.
+      OAUTH_REDIRECT_URI: ${OAUTH_REDIRECT_URI:-}
+      ATLASSIAN_OAUTH_REDIRECT_URI: ${ATLASSIAN_OAUTH_REDIRECT_URI:-}
       # Early-access allowlist (comma-separated emails). Unset ⇒ open sign-up. See
       # deploy/.env.prod.example. Gates Firebase user logins only; nry_ tokens + public
       # ingress are unaffected.
@@ -265,6 +302,10 @@ services:
       WORKER_MAX_WORKFLOW_TASKS: ${WORKER_MAX_WORKFLOW_TASKS:-}
       WORKER_MAX_CACHED_WORKFLOWS: ${WORKER_MAX_CACHED_WORKFLOWS:-}
       WORKER_SHUTDOWN_GRACE: ${WORKER_SHUTDOWN_GRACE:-} # e.g. "30s" — drain in-flight activities on deploy
+      # `off` stops this replica emitting fleet heartbeats (it then reads as offline in the
+      # Workers view, same as a crash). On by default. The opt-out the code documents was
+      # unreachable — no compose file forwarded it.
+      WORKER_HEARTBEAT: ${WORKER_HEARTBEAT:-}
     ports:
       - '9091:9091' # Prometheus /metrics scrape
     depends_on:
@@ -310,6 +351,7 @@ services:
       WORKER_MAX_WORKFLOW_TASKS: ${WORKER_MAX_WORKFLOW_TASKS:-}
       WORKER_MAX_CACHED_WORKFLOWS: ${WORKER_MAX_CACHED_WORKFLOWS:-}
       WORKER_SHUTDOWN_GRACE: ${WORKER_SHUTDOWN_GRACE:-}
+      WORKER_HEARTBEAT: ${WORKER_HEARTBEAT:-} # see `worker` above
     ports:
       - '9092:9091' # distinct host port; container still serves /metrics on 9091
     depends_on:
