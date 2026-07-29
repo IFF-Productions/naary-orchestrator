@@ -582,7 +582,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
     environmentId: string,
     workflowKey: string,
-    /** Per-run verbose logging — only the manual `start()` path forwards true; triggers omit it. */
+    /** Per-run verbose logging — the manual `start()` path forwards it, and `resume()` inherits it
+     *  from the failed run's snapshot; triggers omit it. */
     debug = false,
     /**
      * Resume-from-failed-node (docs/design/RESUME-FROM-FAILED-NODE.md §4). Present ONLY for that
@@ -1292,7 +1293,15 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       tenantId,
       envId,
       row.workflowKey,
-      false,
+      // Debug is INHERITED here, unlike a re-run: a re-run is a fresh start you opt into, while a
+      // resume continues the run you were already trying to understand — turning the verbose worker
+      // logs and the per-node debug rows off at the resume is the opposite of what's wanted.
+      // The snapshot's own `__debug` marker is the carrier: it was written by the very run whose
+      // flag this asks about, it is already in hand (no third fetchHistory), and it can't drift from
+      // the ctx the resumed run is seeded with. The one case it misses — a run started with `debug`
+      // before #924 taught the interpreter to stamp `__debug` — could only come from a hand-rolled
+      // API call, since nothing in the product sent the flag until then.
+      ctx.__debug === true,
       {
         resume: {
           ctx,

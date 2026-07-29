@@ -68,7 +68,21 @@ export async function runGraph(
   // command), replay-safe like __unresolved/__regionTrace; only set when the run opted in, so a
   // normal run's ctx is byte-identical. The rich per-node detail the UI shows is derived from the
   // node OUTPUTS already in ctx (model/tokens/cost/httpStatus) — nothing sensitive is added here.
-  if (runCtx.debug && !resume) ctx.__debug = true;
+  //
+  // A RESUME gets it too. #924 shipped this as `runCtx.debug && !resume` and flagged the gap in its
+  // own PR body ("resume-from-failed-node never carries __debug, even when the original run had
+  // it") — incidental, not a determinism guard, and resuming a failed node is exactly when someone
+  // wants the debug view. Dropping the guard is replay-safe: this writes plain workflow STATE,
+  // issues no command, and NOTHING derives a decision from the key — every ctx consumer either
+  // skips `__`-prefixed keys (code/approval snapshots, planCtxOffload) or filters by graph node id
+  // (executedNodeIds, which feeds resume eligibility). It is also idempotent on the continueAsNew
+  // path, whose carried ctx already holds the flag.
+  //
+  // The resume SNAPSHOT is the primary carrier — the failed run's ctx is stored verbatim, so
+  // `resume.ctx` above already brings `__debug` back in, and the API re-derives the run's `debug`
+  // from that same marker. This line covers the other half: a resumed run that opted in via runCtx
+  // but whose snapshot predates the flag.
+  if (runCtx.debug) ctx.__debug = true;
 
   // Fan-in join state (Slice N5). `mergeParents` maps a merge node id → its inbound
   // parents' ids in DECLARED edge order (its length is the expected in-degree);

@@ -14,6 +14,12 @@ test("workflow detail renders the diagram and how-it-runs", async ({
   await expect(page).toHaveURL(/\/app\/workflows\/[^/]+$/);
 
   // The graph renders (read-only react-flow nodes) + the explainer + actions.
+  //
+  // `toBeVisible` is the right condition and stays: react-flow keeps an unmeasured node at
+  // `visibility: hidden`, so "present" genuinely isn't "rendered". What used to flake was the
+  // PRODUCT — this screen rebuilt its nodes array on every render, which resets react-flow's
+  // measurement and blinks every node out until the next frame, once per late-landing fetch. The
+  // array is memoized now (see WorkflowDetail's `flow`, and react-flow-nodes-stable.spec.ts).
   await expect(page.locator(".react-flow__node").first()).toBeVisible();
   await expect(page.getByText("How it runs")).toBeVisible();
   await expect(page.getByRole("button", { name: "Run now" })).toBeVisible();
