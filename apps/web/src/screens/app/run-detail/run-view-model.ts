@@ -5,7 +5,7 @@
  */
 import type { EdgeCondition, GraphDef, NodeType } from "@naary/dsl";
 import type { IconName } from "../../../components";
-import type { RunEvent } from "../../../lib/api";
+import type { HttpFailure, RunEvent } from "../../../lib/api";
 import { isFailure, isTerminal } from "../../../lib/run-status";
 
 /* ---------------- Step states ---------------- */
@@ -197,9 +197,15 @@ export function historyTimes(events: RunEvent[] | null): {
   startedAt: string | null;
   lastAt: string | null;
   errorDetail: string | null;
+  errorHttp: HttpFailure | null;
 } {
   if (!events || events.length === 0)
-    return { startedAt: null, lastAt: null, errorDetail: null };
+    return {
+      startedAt: null,
+      lastAt: null,
+      errorDetail: null,
+      errorHttp: null,
+    };
   const startedAt =
     events.find((e) => e.kind === "started" && e.at)?.at ?? null;
   let lastAt: string | null = null;
@@ -208,9 +214,16 @@ export function historyTimes(events: RunEvent[] | null): {
   // activityTaskFailed ("Missing or invalid provider credential") BEFORE the generic
   // workflowExecutionFailed wrapper ("Activity task failed"); taking the last would surface
   // the wrapper. For a workflow-level failure (stopAndError) the first error IS that message.
-  const errorDetail =
-    events.find((e) => e.kind === "error" && e.detail)?.detail ?? null;
-  return { startedAt, lastAt, errorDetail };
+  // Take the message AND the captured call off the SAME event: a run can record an
+  // activityTaskFailed and a workflowExecutionFailed, and pairing one event's message with
+  // another's request/response would show a call that isn't the one the message describes.
+  const errorEvent = events.find((e) => e.kind === "error" && e.detail);
+  return {
+    startedAt,
+    lastAt,
+    errorDetail: errorEvent?.detail ?? null,
+    errorHttp: errorEvent?.http ?? null,
+  };
 }
 
 /** "Tue Jul 15, 14:31" (the design's timestamp form), in the viewer's locale. */

@@ -34,6 +34,39 @@ export interface ExecutionState {
   perExecutionCapUsd?: number | null;
 }
 
+/** A captured body — already redacted and truncated by the WORKER, at the point of failure. */
+export interface HttpFailureBody {
+  text: string;
+  truncated: boolean;
+  /** Size of the ORIGINAL body on the wire, not the length of `text` (redaction shrinks it). */
+  bytes: number;
+}
+
+/**
+ * The redacted request/response an `integration` / `httpRequest` / `graphQL` node captured when it
+ * FAILED (#916) — mirrors the API's `RunHttpFailureResponse`.
+ *
+ * Present on error events only. Header VALUES survive for a short allowlist of non-credential
+ * headers; everything else arrives as `[REDACTED]` and is rendered as such — the web never
+ * un-redacts and never has anything to un-redact.
+ */
+export interface HttpFailure {
+  request: {
+    method: string;
+    url: string;
+    headers: Record<string, string>;
+    body?: HttpFailureBody;
+    /** Why the body wasn't captured (a resolved `$secret` rode in it). */
+    bodyWithheld?: string;
+  };
+  response?: {
+    status: number;
+    statusText?: string;
+    headers: Record<string, string>;
+    body?: HttpFailureBody;
+  };
+}
+
 /** One entry in a run's execution log (mirrors the API's RunEvent). */
 export interface RunEvent {
   id: number;
@@ -48,6 +81,8 @@ export interface RunEvent {
   label: string;
   at: string | null;
   detail?: string;
+  /** Error events from an HTTP-ish node carry the failing call; absent everywhere else. */
+  http?: HttpFailure;
 }
 
 export interface GraphSummary {

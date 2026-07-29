@@ -4,19 +4,31 @@ import type { IntegrationNodeConfig } from "@naary/dsl";
 
 const META = { tenantId: "t1", executionId: "exec-1", nodeId: "integ" };
 
-/** Minimal Response-like stub (status/ok/headers/text) — what callIntegration reads. */
+/**
+ * Minimal Response-like stub (status/statusText/headers/text) — what callIntegration reads.
+ *
+ * `headers` exposes BOTH `get` and `entries`: the failure capture (#916) iterates the response
+ * headers, and a stub with only `get` would let the capture silently record `{}` while the test
+ * still passed — proving nothing about the allowlist.
+ */
 function res(
   status: number,
   body: unknown,
   contentType = "application/json",
+  extraHeaders: Record<string, string> = {},
 ): Response {
   const text = typeof body === "string" ? body : JSON.stringify(body);
+  const all: Record<string, string> = {
+    "content-type": contentType,
+    ...extraHeaders,
+  };
   return {
     status,
+    statusText: status === 404 ? "Not Found" : "",
     ok: status >= 200 && status < 300,
     headers: {
-      get: (k: string) =>
-        k.toLowerCase() === "content-type" ? contentType : null,
+      get: (k: string) => all[k.toLowerCase()] ?? null,
+      entries: () => Object.entries(all),
     },
     text: async () => text,
   } as unknown as Response;
@@ -270,6 +282,53 @@ describe("callIntegration activity", () => {
       /comment_issue' failed: 404 Not Found.*\/repos\/o\/r\/issues\/9\/comments.*private/s,
     );
     expect(fetchMock).toHaveBeenCalledOnce(); // at-most-once: not retried
+  });
+
+  it("a failed WRITE carries the redacted request/response in its failure details (#916)", async () => {
+    // Throwing means nothing reaches ctx, so the step card used to say "No output was recorded
+    // for this step" at the one moment the user most needs the data. It rides `details` now.
+    fetchMock.mockResolvedValue(
+      res(404, { message: "Not Found" }, "application/json", {
+        "x-ratelimit-remaining": "4999",
+        "set-cookie": "sid=supersecretsession",
+      }),
+    );
+    const cfg: IntegrationNodeConfig = {
+      provider: "github",
+      action: "comment_issue",
+      connectionId: "gh",
+      fields: { owner: "o", repo: "r", issueNumber: 9, body: "hi" },
+    };
+
+    const err = await callIntegration(cfg, cfg.fields!, META).catch((e) => e);
+    const http = (err.details?.[0] as Record<string, unknown>)?.http as {
+      request: {
+        method: string;
+        url: string;
+        headers: Record<string, string>;
+        body?: { text: string };
+      };
+      response: {
+        status: number;
+        headers: Record<string, string>;
+        body?: { text: string };
+      };
+    };
+
+    expect(err.type).toBe("INTEGRATION_WRITE_FAILED");
+    expect(http.request.method).toBe("POST");
+    expect(http.request.url).toBe(
+      "https://api.github.com/repos/o/r/issues/9/comments",
+    );
+    expect(http.request.body?.text).toBe('{"body":"hi"}');
+    expect(http.response.status).toBe(404);
+    expect(http.response.body?.text).toBe('{"message":"Not Found"}');
+    // The rate-limit header survives (diagnostic); the credential ones do not.
+    expect(http.response.headers["x-ratelimit-remaining"]).toBe("4999");
+    expect(http.response.headers["set-cookie"]).toBe("[REDACTED]");
+    expect(http.request.headers.authorization).toBe("[REDACTED]");
+    // The resolved connection token is what must never reach Temporal history.
+    expect(JSON.stringify(err.details)).not.toContain("tok-123");
   });
 
   it("get_pull_request → sends the diff media type + returns the raw diff text", async () => {

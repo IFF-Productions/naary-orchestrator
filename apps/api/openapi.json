@@ -19137,6 +19137,109 @@
           "perExecutionCapUsd"
         ]
       },
+      "RunHttpBodyResponse": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "example": "{\"message\":\"Not Found\"}",
+            "description": "The body, secret-scrubbed and capped at ~2KB. When truncated it ends with an explicit marker."
+          },
+          "truncated": {
+            "type": "boolean",
+            "example": false
+          },
+          "bytes": {
+            "type": "number",
+            "example": 23,
+            "description": "Size of the ORIGINAL body on the wire — not the length of `text`, which redaction can shrink."
+          }
+        },
+        "required": [
+          "text",
+          "truncated",
+          "bytes"
+        ]
+      },
+      "RunHttpRequestResponse": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "example": "POST"
+          },
+          "url": {
+            "type": "string",
+            "example": "https://api.github.com/repos/acme/app/issues",
+            "description": "Absolute URL including query string, with credentials redacted."
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "example": {
+              "authorization": "[REDACTED]",
+              "content-type": "application/json"
+            },
+            "description": "Lowercase header names. Values survive ONLY for a small allowlist of provably non-credential headers (content-type, retry-after, x-ratelimit-*, …); everything else reads [REDACTED]."
+          },
+          "body": {
+            "$ref": "#/components/schemas/RunHttpBodyResponse"
+          },
+          "bodyWithheld": {
+            "type": "string",
+            "example": "withheld — this request body carried a resolved $secret",
+            "description": "Why the body was not captured. Set when a `{{ $secrets.NAME }}` was resolved into it: the substituted value is opaque, so no scrubber can find it and Tier-1 §4 forbids it entering history."
+          }
+        },
+        "required": [
+          "method",
+          "url",
+          "headers"
+        ]
+      },
+      "RunHttpResponseResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "number",
+            "example": 404
+          },
+          "statusText": {
+            "type": "string",
+            "example": "Not Found"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Same allowlist treatment as the request headers."
+          },
+          "body": {
+            "$ref": "#/components/schemas/RunHttpBodyResponse"
+          }
+        },
+        "required": [
+          "status",
+          "headers"
+        ]
+      },
+      "RunHttpFailureResponse": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "$ref": "#/components/schemas/RunHttpRequestResponse"
+          },
+          "response": {
+            "$ref": "#/components/schemas/RunHttpResponseResponse"
+          }
+        },
+        "required": [
+          "request"
+        ]
+      },
       "RunEventResponse": {
         "type": "object",
         "properties": {
@@ -19171,6 +19274,14 @@
           "detail": {
             "type": "string",
             "example": "Provider returned 429"
+          },
+          "http": {
+            "description": "On an error event from an HTTP-ish node: the redacted, truncated request/response it captured. Absent for every other event, and for a failure that made no HTTP call.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RunHttpFailureResponse"
+              }
+            ]
           }
         },
         "required": [

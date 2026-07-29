@@ -21,6 +21,7 @@ import {
 import { getObjectStore, maybeOffload } from "@naary/storage";
 import { activityDuration, activityRuns, secondsSince } from "../../metrics";
 import { describeApiError, hasFromHeader } from "./api-error";
+import { captureHttpFailure } from "./http-failure-capture";
 import { type AgentMeta, toSanitizedRetryable } from "./shared";
 import { DEFAULT_HTTP_TIMEOUT_MS, __httpDeps } from "./http";
 
@@ -179,10 +180,28 @@ export async function callIntegration(
               !hasFromHeader(req.headers)
             ? " — PagerDuty rejects write actions sent without a `From` header unless the API key is user-scoped. Set the node's 'From (user email)' field to the login email of a PagerDuty user."
             : "";
+      // Throwing means nothing reaches ctx, so the most diagnostic moment in the run used to
+      // produce the least data ("No output was recorded for this step" — #916). Attach the
+      // redacted, truncated request/response to the failure DETAILS so it rides the existing
+      // failure path. Failures only: a successful write captures nothing.
       throw ApplicationFailure.nonRetryable(
         `integration '${cfg.provider}.${cfg.action}' failed: ${res.status} ${detail} [${req.method} ${req.path}]${hint}`,
         "INTEGRATION_WRITE_FAILED",
-        { httpStatus: res.status },
+        {
+          httpStatus: res.status,
+          http: captureHttpFailure({
+            method: plan.method,
+            url: plan.url,
+            requestHeaders: plan.headers,
+            requestBody: plan.body,
+            status: res.status,
+            statusText: res.statusText,
+            responseHeaders: res.headers,
+            // The RAW text, not the parsed body: `body` is still live here (describeApiError
+            // reads it just above), and the capture must not touch anything it doesn't own.
+            responseBody: raw,
+          }),
+        },
       );
     }
     // Offload a large response so it can't blow Temporal's ~2MB payload cap (like httpRequest);

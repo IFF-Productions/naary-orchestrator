@@ -395,7 +395,7 @@ function RunView({ id }: { id: string }) {
     [graph],
   );
 
-  const { startedAt, lastAt, errorDetail } = historyTimes(events);
+  const { startedAt, lastAt, errorDetail, errorHttp } = historyTimes(events);
   // "Suspended since": the moment the history went idle (its last recorded event).
   const sinceIso =
     awaiting || awaitingWebhook || awaitingBudget ? lastAt : null;
@@ -511,8 +511,19 @@ function RunView({ id }: { id: string }) {
       // The failed node carries the run's failure detail (#525): the run died HERE, so this
       // is the node's error. Other nodes have none.
       error: st === "error" ? errorDetail : null,
+      // …and, when it was an HTTP-ish node, the redacted call it captured on the way down (#916).
+      http: st === "error" ? errorHttp : null,
     };
-  }, [state, selectedId, nodeById, states, graph, waitingAge, errorDetail]);
+  }, [
+    state,
+    selectedId,
+    nodeById,
+    states,
+    graph,
+    waitingAge,
+    errorDetail,
+    errorHttp,
+  ]);
 
   const nodeOutputs = state
     ? Object.entries(state.ctx).filter(([k]) => isNodeOutputKey(k))

@@ -38,6 +38,10 @@ import {
   runLog,
   toSanitizedRetryable,
 } from "./shared";
+import {
+  captureHttpFailure,
+  type HttpFailureCapture,
+} from "./http-failure-capture";
 
 // Activities run in the worker PROCESS (a side-effect zone), so structured
 // logging is fine here — unlike workflows.ts, which must stay deterministic.
@@ -292,6 +296,12 @@ export async function callHttpRequest(
       res: Response;
       body: unknown;
       responseHeaders: Record<string, string>;
+      /** The undecoded response text, kept for the failure capture (#916) — the parsed
+       *  `body` may be handed onward, and the capture must not touch what it doesn't own. */
+      rawText: string;
+      /** What actually went out on THIS page (pagination rewrites url/headers/body), so a
+       *  failure can report the real request rather than the configured one. */
+      sent: { url: string; headers: Record<string, string>; body: unknown };
     }> => {
       let rawUrl = reqUrl;
       const qs = new URLSearchParams(reqQuery).toString();
@@ -330,16 +340,52 @@ export async function callHttpRequest(
         if (k.toLowerCase() === "set-cookie") continue;
         responseHeaders[k] = v;
       }
-      return { res, body, responseHeaders };
+      return {
+        res,
+        body,
+        responseHeaders,
+        rawText: raw,
+        sent: { url: url.toString(), headers: useHeaders, body: useBody },
+      };
     };
 
     // `failOnErrorStatus` opts a flow into a hard non-retryable fail on status ≥ 400.
-    const checkStatus = (status: number): void => {
+    // Takes the whole page (not just the status) so the failure can carry the redacted,
+    // truncated request/response — throwing means nothing reaches ctx, and the step card
+    // would otherwise say "No output was recorded for this step" (#916). On a paginated
+    // call this is the FAILING page, which is the one worth showing.
+    const checkStatus = (page: {
+      res: Response;
+      rawText: string;
+      responseHeaders: Record<string, string>;
+      sent: { url: string; headers: Record<string, string>; body: unknown };
+    }): void => {
+      const status = page.res.status;
       if (cfg.failOnErrorStatus && status >= 400) {
         throw ApplicationFailure.nonRetryable(
           `HTTP request returned status ${status}`,
           "HTTP_ERROR_STATUS",
-          { httpStatus: status },
+          {
+            httpStatus: status,
+            http: captureHttpFailure({
+              method: cfg.method,
+              url: page.sent.url,
+              requestHeaders: page.sent.headers,
+              // A body with a `{{ $secrets.NAME }}` resolved into it holds an OPAQUE
+              // credential — no scrubber can find it — and Tier-1 §4 forbids a secret in
+              // history. Withhold it and say so.
+              ...(bodyHasSecret
+                ? {
+                    requestBodyWithheld:
+                      "withheld — this request body carried a resolved $secret",
+                  }
+                : { requestBody: page.sent.body }),
+              status,
+              statusText: page.res.statusText,
+              responseHeaders: page.responseHeaders,
+              responseBody: page.rawText,
+            }),
+          },
         );
       }
     };
@@ -383,11 +429,9 @@ export async function callHttpRequest(
 
     const pg = cfg.pagination;
     if (!pg) {
-      const { res, body, responseHeaders } = await fetchPage(
-        cfg.url,
-        cfg.query ?? {},
-      );
-      checkStatus(res.status);
+      const page = await fetchPage(cfg.url, cfg.query ?? {});
+      const { res, body, responseHeaders } = page;
+      checkStatus(page);
       // Offload a large body so it can't blow Temporal's ~2MB payload cap (Arch§4.6).
       const offloaded = await maybeOffload(body, store, {
         keyPrefix: `http/${meta.tenantId}`,
@@ -433,14 +477,10 @@ export async function callHttpRequest(
           reqQuery[pg.cursorParam ?? "cursor"] = String(cursor);
       }
 
-      const { res, body, responseHeaders } = await fetchPage(
-        reqUrl,
-        reqQuery,
-        reqHeaders,
-        reqBody,
-      );
+      const fetched = await fetchPage(reqUrl, reqQuery, reqHeaders, reqBody);
+      const { res, body, responseHeaders } = fetched;
       pages++; // count every fetch performed (drives the page count + per-page cost)
-      checkStatus(res.status);
+      checkStatus(fetched);
       lastStatus = res.status;
       lastHeaders = responseHeaders;
 
@@ -543,8 +583,11 @@ export async function callGraphQL(
     // Resolve `{{ $secrets.NAME }}` in headers AND variables in-memory (Tier-1 §4 — the workflow left
     // them literal). Reuse the httpRequest resolver (headers flat + variables deep); GraphQL has no
     // pagination, so its cross-origin tracking fields are unused.
-    const { headers: secretHeaders, body: resolvedVariables } =
-      await resolveHttpSecrets(cfg.headers ?? {}, cfg.variables ?? {}, meta);
+    const {
+      headers: secretHeaders,
+      body: resolvedVariables,
+      bodyHasSecret,
+    } = await resolveHttpSecrets(cfg.headers ?? {}, cfg.variables ?? {}, meta);
     const headers: Record<string, string> = {
       "content-type": "application/json",
       accept: "application/json",
@@ -574,16 +617,39 @@ export async function callGraphQL(
       clearTimeout(timer);
     }
     const raw = await res.text();
+    // Both GraphQL failures below THROW, so nothing reaches ctx and the step card would
+    // otherwise show no request/response at all (#916). Built lazily — a successful call
+    // never captures anything.
+    const capture = (): HttpFailureCapture =>
+      captureHttpFailure({
+        method: "POST",
+        url: url.toString(),
+        requestHeaders: headers,
+        // The GraphQL body is `{query, variables}`, and variables are exactly where a
+        // `{{ $secrets.NAME }}` gets resolved — withhold the whole body when one was
+        // (Tier-1 §4). Losing the query text is the cost of not leaking the credential.
+        ...(bodyHasSecret
+          ? {
+              requestBodyWithheld:
+                "withheld — this request's variables carried a resolved $secret",
+            }
+          : { requestBody: body }),
+        status: res.status,
+        statusText: res.statusText,
+        responseHeaders: res.headers,
+        responseBody: raw,
+      });
     let parsed: { data?: unknown; errors?: unknown };
     try {
       parsed = raw.length > 0 ? JSON.parse(raw) : {};
     } catch {
       // A GraphQL endpoint always speaks JSON — non-JSON (an HTML proxy/error page) is a
-      // misconfiguration, not a transient blip, so don't burn retries.
+      // misconfiguration, not a transient blip, so don't burn retries. The captured body is
+      // what makes this diagnosable: the HTML page names the proxy that answered.
       throw ApplicationFailure.nonRetryable(
         `GraphQL endpoint returned a non-JSON response (status ${res.status})`,
         "GRAPHQL_BAD_RESPONSE",
-        { httpStatus: res.status },
+        { httpStatus: res.status, http: capture() },
       );
     }
     const errors = parsed.errors ?? null;
@@ -591,7 +657,7 @@ export async function callGraphQL(
       throw ApplicationFailure.nonRetryable(
         `GraphQL returned ${errors.length} error(s)`,
         "GRAPHQL_ERROR",
-        { httpStatus: res.status },
+        { httpStatus: res.status, http: capture() },
       );
     }
     // Offload large `data` to object storage (claim-check) so it can't blow the ~2MB history cap.

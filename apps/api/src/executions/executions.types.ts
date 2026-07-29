@@ -162,6 +162,48 @@ export interface RunEvent {
   label: string;
   at: string | null;
   detail?: string;
+  /** Redacted request/response captured by the node that failed (#916); absent otherwise. */
+  http?: HttpFailureView;
+}
+
+/** A captured body — already redacted and truncated by the WORKER, at the point of failure. */
+export interface HttpFailureBodyView {
+  text: string;
+  truncated: boolean;
+  bytes: number;
+}
+
+/** The failing node's request/response, as it survives into the run detail. Mirrors the worker's
+ *  `HttpFailureCapture` — restated here rather than imported so the API keeps no worker dependency,
+ *  and so the validator below has an explicit shape to check the decoded payload against. */
+export interface HttpFailureView {
+  request: {
+    method: string;
+    url: string;
+    headers: Record<string, string>;
+    body?: HttpFailureBodyView;
+    bodyWithheld?: string;
+  };
+  response?: {
+    status: number;
+    statusText?: string;
+    headers: Record<string, string>;
+    body?: HttpFailureBodyView;
+  };
+}
+
+/**
+ * A Temporal `Failure` as it appears in raw history — enough of it to walk the cause chain to the
+ * `ApplicationFailure` an activity threw and read its `details` payloads. `details` is a Payloads
+ * message (base64 `data` + `metadata`), so it needs the payload converter, not a property read.
+ */
+export interface RawFailure {
+  message?: string;
+  cause?: RawFailure;
+  applicationFailureInfo?: {
+    type?: string;
+    details?: { payloads?: unknown[] };
+  };
 }
 
 /** The subset of Temporal history-event fields we read (one attrs object is set). */
@@ -174,12 +216,12 @@ export interface RawHistoryEvent {
   workflowExecutionStartedEventAttributes?: unknown;
   activityTaskScheduledEventAttributes?: { activityType?: { name?: string } };
   activityTaskCompletedEventAttributes?: unknown;
-  activityTaskFailedEventAttributes?: { failure?: { message?: string } };
+  activityTaskFailedEventAttributes?: { failure?: RawFailure };
   workflowExecutionSignaledEventAttributes?: { signalName?: string };
   timerStartedEventAttributes?: unknown;
   timerFiredEventAttributes?: unknown;
   workflowExecutionCompletedEventAttributes?: unknown;
-  workflowExecutionFailedEventAttributes?: { failure?: { message?: string } };
+  workflowExecutionFailedEventAttributes?: { failure?: RawFailure };
   workflowExecutionContinuedAsNewEventAttributes?: unknown;
 }
 
