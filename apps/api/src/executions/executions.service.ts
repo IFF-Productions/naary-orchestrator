@@ -582,7 +582,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
     environmentId: string,
     workflowKey: string,
-    /** Per-run verbose logging — only the manual `start()` path forwards true; triggers omit it. */
+    /** Per-run verbose logging — the manual `start()` path forwards it, and `resume()` inherits it
+     *  from the failed run's snapshot; triggers omit it. */
     debug = false,
     /**
      * Resume-from-failed-node (docs/design/RESUME-FROM-FAILED-NODE.md §4). Present ONLY for that
